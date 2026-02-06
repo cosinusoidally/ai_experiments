@@ -1,0 +1,39 @@
+name: Test Spidermonkey Hello World
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libmozjs-dev build-essential pkg-config
+
+    - name: Make build script executable
+      run: chmod +x build.sh
+
+    - name: Build
+      run: ./build.sh
+
+    - name: Run hello_world
+      run: ./hello_world
+
+    - name: Verify output
+      run: |
+        OUTPUT=$(./hello_world)
+        echo "Output: $OUTPUT"
+        if echo "$OUTPUT" | grep -q "Hello, World"; then
+          echo "✓ Test passed: Output contains 'Hello, World'"
+        else
+          echo "✗ Test failed: Output does not contain 'Hello, World'"
+          exit 1
+        fi
