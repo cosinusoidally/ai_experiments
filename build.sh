@@ -8,6 +8,8 @@
 #   FIREFOX_BIN_TARBALL - Path to firefox-1.0.8.tar.gz (binary)
 #   FIREFOX_SRC_TARBALL - Path to firefox-1.0.8-source.tar.bz2 (source)
 
+./mk_clean
+
 set -xe  # Exit on error
 
 echo "Building hello_world.c with official Firefox 1.0.8 Spidermonkey..."
@@ -17,10 +19,6 @@ if ! command -v gcc &> /dev/null; then
     echo "Error: gcc is not installed"
     exit 1
 fi
-
-# Get absolute paths (expand ~ if needed)
-FIREFOX_BIN_TARBALL="${FIREFOX_BIN_TARBALL/#\~/$HOME}"
-FIREFOX_SRC_TARBALL="${FIREFOX_SRC_TARBALL/#\~/$HOME}"
 
 # Verify environment variables are set
 if [ -z "$FIREFOX_BIN_TARBALL" ] || [ -z "$FIREFOX_SRC_TARBALL" ]; then
@@ -41,7 +39,6 @@ fi
 
 # Create build directory
 BUILD_DIR=$(mktemp -d)
-trap "rm -rf $BUILD_DIR" EXIT
 
 echo "Working in temporary directory: $BUILD_DIR"
 
