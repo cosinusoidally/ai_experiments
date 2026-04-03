@@ -23,7 +23,7 @@ jobs:
       id: cache-firefox
       with:
         path: |
-          ~/firefox-bin.tar.gz
+          ~/firefox-1.0.8.tar.gz
         key: firefox-1.0.8-en-GB-tarball-${{ runner.os }}
         restore-keys: |
           firefox-1.0.8-en-GB-tarball-
@@ -33,16 +33,16 @@ jobs:
       run: |
         cd ~
         # Firefox 1.0.8 en-GB binary from archive.mozilla.org
-        wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/linux-i686/en-GB/firefox-1.0.8.tar.gz" -O firefox-bin.tar.gz || {
+        wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/linux-i686/en-GB/firefox-1.0.8.tar.gz" || {
           echo "Failed to download Firefox"
           exit 1
         }
-        ls -lh firefox-bin.tar.gz
+        ls -lh firefox-1.0.8.tar.gz
 
     - name: Verify Firefox sha256sum
       run: |
         EXPECTED_SHA256="a3b158d887f93aecab010832de8275256096173f7c21694091f9feaeedc74e78"
-        ACTUAL_SHA256=$(sha256sum ~/firefox-bin.tar.gz | awk '{print $1}')
+        ACTUAL_SHA256=$(sha256sum ~/firefox-1.0.8.tar.gz | awk '{print $1}')
         echo "Expected: $EXPECTED_SHA256"
         echo "Actual:   $ACTUAL_SHA256"
         if [ "$EXPECTED_SHA256" != "$ACTUAL_SHA256" ]; then
@@ -51,34 +51,12 @@ jobs:
         fi
         echo "✓ Firefox sha256sum verified"
 
-    - name: Cache Spidermonkey source
-      uses: actions/cache@v3
-      id: cache-spidermonkey
-      with:
-        path: |
-          ~/spidermonkey-src.tar.gz
-        key: spidermonkey-1.8.5-${{ runner.os }}
-        restore-keys: |
-          spidermonkey-1.8.5-
-
-    - name: Download Spidermonkey source
-      if: steps.cache-spidermonkey.outputs.cache-hit != 'true'
-      run: |
-        cd ~
-        # Using js185 (Spidermonkey 1.8.5) which is compatible with Firefox 1.x API
-        wget --no-verbose "https://archive.mozilla.org/pub/js/js185-1.0.0.tar.gz" -O spidermonkey-src.tar.gz || {
-          echo "Failed to download Spidermonkey source"
-          exit 1
-        }
-        ls -lh spidermonkey-src.tar.gz
-
     - name: Make build script executable
       run: chmod +x build.sh
 
-    - name: Build with official Spidermonkey
+    - name: Build with official Firefox 1.0.8 Spidermonkey
       env:
-        FIREFOX_TARBALL: ~/firefox-bin.tar.gz
-        SPIDERMONKEY_TARBALL: ~/spidermonkey-src.tar.gz
+        FIREFOX_TARBALL: ~/firefox-1.0.8.tar.gz
       run: ./build.sh
 
     - name: Run hello_world
