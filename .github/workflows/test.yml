@@ -92,6 +92,8 @@ jobs:
       run: ./build.sh
 
     - name: Run hello_world
+      env:
+        LD_LIBRARY_PATH: ${{ github.workspace }}/firefox-1.0.8/lib
       run: |
         ldd ./hello_world || true
         ./hello_world
@@ -101,4 +103,8 @@ jobs:
         OUTPUT=$(./hello_world)
         echo "Output: $OUTPUT"
         if echo "$OUTPUT" | grep -q "Hello, World"; then
-          echo "](#)
+          echo "✓ Test passed: Output contains 'Hello, World'"
+        else
+          echo "✗ Test failed: Output does not contain 'Hello, World'"
+          exit 1
+        fi
