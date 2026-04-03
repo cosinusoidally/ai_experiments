@@ -117,27 +117,17 @@ echo "Headers found:"
 ls -1 "$INCLUDE_DIR" | head -10
 
 # Compile with extracted headers and libraries
-echo "Compiling hello_world.c..."
+echo "Compiling hello_world.c with XP_UNIX platform define..."
 
 gcc -I"$INCLUDE_DIR" \
     -L"$LIB_DIR" \
+    -DXP_UNIX \
     hello_world.c \
     -o hello_world \
     -Wl,-rpath,"$LIB_DIR" \
-    -ljs 2>/dev/null || {
-    # Fallback: try alternative library name
-    echo "Trying alternative library name (libmozjs)..."
-    gcc -I"$INCLUDE_DIR" \
-        -L"$LIB_DIR" \
-        hello_world.c \
-        -o hello_world \
-        -Wl,-rpath,"$LIB_DIR" \
-        -lmozjs || {
-        echo "Error: Compilation failed with both -ljs and -lmozjs"
-        echo "Available libraries in $LIB_DIR:"
-        ls -1 "$LIB_DIR" | grep -E "libjs|libmozjs" || echo "  (none found)"
-        exit 1
-    }
+    -lmozjs || {
+    echo "Error: Compilation failed"
+    exit 1
 }
 
 echo "Build successful! Executable: ./hello_world"
