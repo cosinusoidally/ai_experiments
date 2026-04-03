@@ -18,47 +18,56 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential pkg-config wget
 
-    - name: Cache Firefox 1.0 tarball
+    - name: Cache Firefox tarball
       uses: actions/cache@v3
       id: cache-firefox
       with:
         path: |
-          ~/firefox-1.0.tar.gz
-        key: firefox-1.0-i386-linux-${{ runner.os }}
+          ~/firefox-bin.tar.gz
+        key: firefox-1.0-tarball-${{ runner.os }}
         restore-keys: |
-          firefox-1.0-i386-linux-
+          firefox-1.0-tarball-
 
-    - name: Download Firefox 1.0 tarball
+    - name: Download Firefox binary
       if: steps.cache-firefox.outputs.cache-hit != 'true'
       run: |
         cd ~
-        wget -q "https://archive.mozilla.org/pub/firefox/releases/1.0/firefox-1.0.tar.gz"
-        ls -lh firefox-1.0.tar.gz
+        # Firefox 1.0.1 final binary from archive.mozilla.org
+        wget -q "https://ftp.mozilla.org/pub/firefox/releases/1.0.1/linux-i686/en-US/firefox-1.0.1.tar.gz" -O firefox-bin.tar.gz || \
+        wget -q "https://archive.mozilla.org/pub/firefox/releases/1.0.1/firefox-1.0.1.tar.gz" -O firefox-bin.tar.gz || {
+          echo "Failed to download Firefox, trying alternative..."
+          exit 1
+        }
+        ls -lh firefox-bin.tar.gz
 
-    - name: Cache Spidermonkey 1.x source
+    - name: Cache Spidermonkey source
       uses: actions/cache@v3
       id: cache-spidermonkey
       with:
         path: |
-          ~/js185-1.0.0.tar.gz
-        key: spidermonkey-1.8.5-source-${{ runner.os }}
+          ~/spidermonkey-src.tar.gz
+        key: spidermonkey-1.8.5-${{ runner.os }}
         restore-keys: |
-          spidermonkey-1.8.5-source-
+          spidermonkey-1.8.5-
 
-    - name: Download Spidermonkey 1.x source
+    - name: Download Spidermonkey source
       if: steps.cache-spidermonkey.outputs.cache-hit != 'true'
       run: |
         cd ~
-        wget -q "https://archive.mozilla.org/pub/js/js185-1.0.0.tar.gz"
-        ls -lh js185-1.0.0.tar.gz
+        # Using js185 (Spidermonkey 1.8.5) which is compatible with Firefox 1.x API
+        wget -q "https://archive.mozilla.org/pub/js/js185-1.0.0.tar.gz" -O spidermonkey-src.tar.gz || {
+          echo "Failed to download Spidermonkey source"
+          exit 1
+        }
+        ls -lh spidermonkey-src.tar.gz
 
     - name: Make build script executable
       run: chmod +x build.sh
 
     - name: Build with official Spidermonkey
       env:
-        FIREFOX_TARBALL: ~/firefox-1.0.tar.gz
-        SPIDERMONKEY_TARBALL: ~/js185-1.0.0.tar.gz
+        FIREFOX_TARBALL: ~/firefox-bin.tar.gz
+        SPIDERMONKEY_TARBALL: ~/spidermonkey-src.tar.gz
       run: ./build.sh
 
     - name: Run hello_world
