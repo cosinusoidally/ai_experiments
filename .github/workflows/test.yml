@@ -16,7 +16,7 @@ jobs:
     - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential pkg-config wget
+        sudo apt-get install -y build-essential pkg-config wget gcc-multilib libc6-dev-i386
 
     - name: Cache Firefox binary tarball
       uses: actions/cache@v3
@@ -101,8 +101,4 @@ jobs:
         OUTPUT=$(./hello_world)
         echo "Output: $OUTPUT"
         if echo "$OUTPUT" | grep -q "Hello, World"; then
-          echo "✓ Test passed: Output contains 'Hello, World'"
-        else
-          echo "✗ Test failed: Output does not contain 'Hello, World'"
-          exit 1
-        fi
+          echo "](#)
