@@ -18,45 +18,77 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential pkg-config wget
 
-    - name: Cache Firefox tarball
+    - name: Cache Firefox binary tarball
       uses: actions/cache@v3
-      id: cache-firefox
+      id: cache-firefox-bin
       with:
         path: |
           ~/firefox-1.0.8.tar.gz
-        key: firefox-1.0.8-en-GB-tarball-${{ runner.os }}
+        key: firefox-1.0.8-binary-${{ runner.os }}
         restore-keys: |
-          firefox-1.0.8-en-GB-tarball-
+          firefox-1.0.8-binary-
 
     - name: Download Firefox binary
-      if: steps.cache-firefox.outputs.cache-hit != 'true'
+      if: steps.cache-firefox-bin.outputs.cache-hit != 'true'
       run: |
         cd ~
-        # Firefox 1.0.8 en-GB binary from archive.mozilla.org
         wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/linux-i686/en-GB/firefox-1.0.8.tar.gz" || {
-          echo "Failed to download Firefox"
+          echo "Failed to download Firefox binary"
           exit 1
         }
         ls -lh firefox-1.0.8.tar.gz
 
-    - name: Verify Firefox sha256sum
+    - name: Verify Firefox binary sha256sum
       run: |
-        EXPECTED_SHA256="a3b158d887f93aecab010832de8275256096173f7c21694091f9feaeedc74e78"
+        EXPECTED_SHA256="c4274bc1c8656d1cbdb39c3247029c0cb9d152876b9476f86626118562782f83"
         ACTUAL_SHA256=$(sha256sum ~/firefox-1.0.8.tar.gz | awk '{print $1}')
         echo "Expected: $EXPECTED_SHA256"
         echo "Actual:   $ACTUAL_SHA256"
         if [ "$EXPECTED_SHA256" != "$ACTUAL_SHA256" ]; then
-          echo "Error: Firefox sha256sum mismatch!"
+          echo "Error: Firefox binary sha256sum mismatch!"
           exit 1
         fi
-        echo "✓ Firefox sha256sum verified"
+        echo "✓ Firefox binary sha256sum verified"
+
+    - name: Cache Firefox source tarball
+      uses: actions/cache@v3
+      id: cache-firefox-src
+      with:
+        path: |
+          ~/firefox-1.0.8-source.tar.bz2
+        key: firefox-1.0.8-source-${{ runner.os }}
+        restore-keys: |
+          firefox-1.0.8-source-
+
+    - name: Download Firefox source
+      if: steps.cache-firefox-src.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/source/firefox-1.0.8-source.tar.bz2" || {
+          echo "Failed to download Firefox source"
+          exit 1
+        }
+        ls -lh firefox-1.0.8-source.tar.bz2
+
+    - name: Verify Firefox source sha256sum
+      run: |
+        EXPECTED_SHA256="a3b158d887f93aecab010832de8275256096173f7c21694091f9feaeedc74e78"
+        ACTUAL_SHA256=$(sha256sum ~/firefox-1.0.8-source.tar.bz2 | awk '{print $1}')
+        echo "Expected: $EXPECTED_SHA256"
+        echo "Actual:   $ACTUAL_SHA256"
+        if [ "$EXPECTED_SHA256" != "$ACTUAL_SHA256" ]; then
+          echo "Error: Firefox source sha256sum mismatch!"
+          exit 1
+        fi
+        echo "✓ Firefox source sha256sum verified"
 
     - name: Make build script executable
       run: chmod +x build.sh
 
     - name: Build with official Firefox 1.0.8 Spidermonkey
       env:
-        FIREFOX_TARBALL: ~/firefox-1.0.8.tar.gz
+        FIREFOX_BIN_TARBALL: ~/firefox-1.0.8.tar.gz
+        FIREFOX_SRC_TARBALL: ~/firefox-1.0.8-source.tar.bz2
       run: ./build.sh
 
     - name: Run hello_world
