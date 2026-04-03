@@ -135,4 +135,4 @@ echo "Build successful! Executable: ./hello_world"
 # Run hello_world with LD_LIBRARY_PATH set
 echo ""
 echo "Running hello_world..."
-LD_LIBRARY_PATH="$LIB_DIR" ./hello_world
+./hello_world
