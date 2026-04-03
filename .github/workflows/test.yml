@@ -23,7 +23,7 @@ jobs:
       id: cache-firefox-bin
       with:
         path: |
-          ~/firefox-1.0.8.tar.gz
+          /home/runner/firefox-1.0.8.tar.gz
         key: firefox-1.0.8-binary-${{ runner.os }}
         restore-keys: |
           firefox-1.0.8-binary-
@@ -31,7 +31,7 @@ jobs:
     - name: Download Firefox binary
       if: steps.cache-firefox-bin.outputs.cache-hit != 'true'
       run: |
-        cd ~
+        cd /home/runner/
         wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/linux-i686/en-GB/firefox-1.0.8.tar.gz" || {
           echo "Failed to download Firefox binary"
           exit 1
@@ -41,7 +41,7 @@ jobs:
     - name: Verify Firefox binary sha256sum
       run: |
         EXPECTED_SHA256="c4274bc1c8656d1cbdb39c3247029c0cb9d152876b9476f86626118562782f83"
-        ACTUAL_SHA256=$(sha256sum ~/firefox-1.0.8.tar.gz | awk '{print $1}')
+        ACTUAL_SHA256=$(sha256sum /home/runner/firefox-1.0.8.tar.gz | awk '{print $1}')
         echo "Expected: $EXPECTED_SHA256"
         echo "Actual:   $ACTUAL_SHA256"
         if [ "$EXPECTED_SHA256" != "$ACTUAL_SHA256" ]; then
@@ -55,7 +55,7 @@ jobs:
       id: cache-firefox-src
       with:
         path: |
-          ~/firefox-1.0.8-source.tar.bz2
+          /home/runner/firefox-1.0.8-source.tar.bz2
         key: firefox-1.0.8-source-${{ runner.os }}
         restore-keys: |
           firefox-1.0.8-source-
@@ -63,7 +63,7 @@ jobs:
     - name: Download Firefox source
       if: steps.cache-firefox-src.outputs.cache-hit != 'true'
       run: |
-        cd ~
+        cd /home/runner/
         wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/source/firefox-1.0.8-source.tar.bz2" || {
           echo "Failed to download Firefox source"
           exit 1
@@ -73,7 +73,7 @@ jobs:
     - name: Verify Firefox source sha256sum
       run: |
         EXPECTED_SHA256="a3b158d887f93aecab010832de8275256096173f7c21694091f9feaeedc74e78"
-        ACTUAL_SHA256=$(sha256sum ~/firefox-1.0.8-source.tar.bz2 | awk '{print $1}')
+        ACTUAL_SHA256=$(sha256sum /home/runner/firefox-1.0.8-source.tar.bz2 | awk '{print $1}')
         echo "Expected: $EXPECTED_SHA256"
         echo "Actual:   $ACTUAL_SHA256"
         if [ "$EXPECTED_SHA256" != "$ACTUAL_SHA256" ]; then
@@ -87,8 +87,8 @@ jobs:
 
     - name: Build and run with official Firefox 1.0.8 Spidermonkey
       env:
-        FIREFOX_BIN_TARBALL: ~/firefox-1.0.8.tar.gz
-        FIREFOX_SRC_TARBALL: ~/firefox-1.0.8-source.tar.bz2
+        FIREFOX_BIN_TARBALL: /home/runner/firefox-1.0.8.tar.gz
+        FIREFOX_SRC_TARBALL: /home/runner/firefox-1.0.8-source.tar.bz2
       run: ./build.sh
 
     - name: Verify output

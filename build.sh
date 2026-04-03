@@ -95,6 +95,7 @@ echo "Found Spidermonkey headers in: $INCLUDE_DIR"
 
 # Look for library directory in binary
 LIB_DIR="$FIREFOX_BIN_DIR/lib"
+
 if [ ! -d "$LIB_DIR" ]; then
     echo "Attempting to locate Spidermonkey libraries..."
     LIB_DIR=$(find "$FIREFOX_BIN_DIR" -name "libjs.so*" -o -name "libmozjs.so*" | xargs dirname | head -1 2>/dev/null)
@@ -108,6 +109,9 @@ fi
 echo "Found library directory: $LIB_DIR"
 echo "Available libraries:"
 ls -1 "$LIB_DIR" | grep -E "libjs|libmozjs" || echo "  (none found)"
+
+# export LD_LIBRARY_PATH as it's needed later
+export LD_LIBRARY_PATH=$LIB_DIR
 
 # List extracted headers
 echo "Headers found:"
