@@ -119,7 +119,7 @@ ls -1 "$INCLUDE_DIR" | head -10
 # Compile with extracted headers and libraries
 echo "Compiling hello_world.c with XP_UNIX platform define..."
 
-gcc -I"$INCLUDE_DIR" \
+gcc -I. -I"$INCLUDE_DIR" \
     -L"$LIB_DIR" \
     -DXP_UNIX \
     hello_world.c \
