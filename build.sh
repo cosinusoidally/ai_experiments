@@ -8,7 +8,7 @@
 #   FIREFOX_BIN_TARBALL - Path to firefox-1.0.8.tar.gz (binary)
 #   FIREFOX_SRC_TARBALL - Path to firefox-1.0.8-source.tar.bz2 (source)
 
-set -e  # Exit on error
+set -xe  # Exit on error
 
 echo "Building hello_world.c with official Firefox 1.0.8 Spidermonkey..."
 
