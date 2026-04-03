@@ -38,7 +38,7 @@ if [ ! -f "$FIREFOX_SRC_TARBALL" ]; then
 fi
 
 # Create build directory
-BUILD_DIR=$(mktemp -d)
+BUILD_DIR=artifacts/
 
 echo "Working in temporary directory: $BUILD_DIR"
 
