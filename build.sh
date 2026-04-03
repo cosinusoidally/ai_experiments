@@ -8,7 +8,7 @@
 #   FIREFOX_BIN_TARBALL - Path to firefox-1.0.8.tar.gz (binary)
 #   FIREFOX_SRC_TARBALL - Path to firefox-1.0.8-source.tar.bz2 (source)
 
-set -e  # Exit on error
+set -xe  # Exit on error
 
 echo "Building hello_world.c with official Firefox 1.0.8 Spidermonkey..."
 
@@ -117,9 +117,9 @@ echo "Headers found:"
 ls -1 "$INCLUDE_DIR" | head -10
 
 # Compile with extracted headers and libraries
-echo "Compiling hello_world.c with XP_UNIX platform define..."
+echo "Compiling hello_world.c with XP_UNIX platform define (32-bit)..."
 
-gcc -I. -I"$INCLUDE_DIR" \
+gcc -m32 -I. -I"$INCLUDE_DIR" \
     -L"$LIB_DIR" \
     -DXP_UNIX \
     hello_world.c \
