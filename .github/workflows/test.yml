@@ -1,4 +1,4 @@
-name: Test Spidermonkey Hello World
+name: Test Spidermonkey Hello World with Official Firefox 1
 
 on:
   push:
@@ -13,19 +13,58 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies
+    - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libmozjs-dev build-essential pkg-config
+        sudo apt-get install -y build-essential pkg-config wget
+
+    - name: Cache Firefox 1.0 tarball
+      uses: actions/cache@v3
+      id: cache-firefox
+      with:
+        path: |
+          ~/firefox-1.0.tar.gz
+        key: firefox-1.0-i386-linux-${{ runner.os }}
+        restore-keys: |
+          firefox-1.0-i386-linux-
+
+    - name: Download Firefox 1.0 tarball
+      if: steps.cache-firefox.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        wget -q "https://archive.mozilla.org/pub/firefox/releases/1.0/firefox-1.0.tar.gz"
+        ls -lh firefox-1.0.tar.gz
+
+    - name: Cache Spidermonkey 1.x source
+      uses: actions/cache@v3
+      id: cache-spidermonkey
+      with:
+        path: |
+          ~/js185-1.0.0.tar.gz
+        key: spidermonkey-1.8.5-source-${{ runner.os }}
+        restore-keys: |
+          spidermonkey-1.8.5-source-
+
+    - name: Download Spidermonkey 1.x source
+      if: steps.cache-spidermonkey.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        wget -q "https://archive.mozilla.org/pub/js/js185-1.0.0.tar.gz"
+        ls -lh js185-1.0.0.tar.gz
 
     - name: Make build script executable
       run: chmod +x build.sh
 
-    - name: Build
+    - name: Build with official Spidermonkey
+      env:
+        FIREFOX_TARBALL: ~/firefox-1.0.tar.gz
+        SPIDERMONKEY_TARBALL: ~/js185-1.0.0.tar.gz
       run: ./build.sh
 
     - name: Run hello_world
-      run: ./hello_world
+      run: |
+        ldd ./hello_world
+        ./hello_world
 
     - name: Verify output
       run: |
