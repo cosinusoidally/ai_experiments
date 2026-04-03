@@ -8,6 +8,8 @@
 #   FIREFOX_BIN_TARBALL - Path to firefox-1.0.8.tar.gz (binary)
 #   FIREFOX_SRC_TARBALL - Path to firefox-1.0.8-source.tar.bz2 (source)
 
+./mk_clean
+
 set -xe  # Exit on error
 
 echo "Building hello_world.c with official Firefox 1.0.8 Spidermonkey..."
@@ -17,10 +19,6 @@ if ! command -v gcc &> /dev/null; then
     echo "Error: gcc is not installed"
     exit 1
 fi
-
-# Get absolute paths (expand ~ if needed)
-FIREFOX_BIN_TARBALL="${FIREFOX_BIN_TARBALL/#\~/$HOME}"
-FIREFOX_SRC_TARBALL="${FIREFOX_SRC_TARBALL/#\~/$HOME}"
 
 # Verify environment variables are set
 if [ -z "$FIREFOX_BIN_TARBALL" ] || [ -z "$FIREFOX_SRC_TARBALL" ]; then
@@ -40,8 +38,7 @@ if [ ! -f "$FIREFOX_SRC_TARBALL" ]; then
 fi
 
 # Create build directory
-BUILD_DIR=$(mktemp -d)
-trap "rm -rf $BUILD_DIR" EXIT
+BUILD_DIR=artifacts/
 
 echo "Working in temporary directory: $BUILD_DIR"
 
@@ -98,6 +95,7 @@ echo "Found Spidermonkey headers in: $INCLUDE_DIR"
 
 # Look for library directory in binary
 LIB_DIR="$FIREFOX_BIN_DIR/lib"
+
 if [ ! -d "$LIB_DIR" ]; then
     echo "Attempting to locate Spidermonkey libraries..."
     LIB_DIR=$(find "$FIREFOX_BIN_DIR" -name "libjs.so*" -o -name "libmozjs.so*" | xargs dirname | head -1 2>/dev/null)
@@ -112,6 +110,9 @@ echo "Found library directory: $LIB_DIR"
 echo "Available libraries:"
 ls -1 "$LIB_DIR" | grep -E "libjs|libmozjs" || echo "  (none found)"
 
+# export LD_LIBRARY_PATH as it's needed later
+export LD_LIBRARY_PATH=$LIB_DIR
+
 # List extracted headers
 echo "Headers found:"
 ls -1 "$INCLUDE_DIR" | head -10
@@ -124,10 +125,14 @@ gcc -m32 -I. -I"$INCLUDE_DIR" \
     -DXP_UNIX \
     hello_world.c \
     -o hello_world \
-    -Wl,-rpath,"$LIB_DIR" \
     -lmozjs || {
     echo "Error: Compilation failed"
     exit 1
 }
 
 echo "Build successful! Executable: ./hello_world"
+
+# Run hello_world with LD_LIBRARY_PATH set
+echo ""
+echo "Running hello_world..."
+./hello_world
