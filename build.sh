@@ -8,7 +8,7 @@
 #   FIREFOX_BIN_TARBALL - Path to firefox-1.0.8.tar.gz (binary)
 #   FIREFOX_SRC_TARBALL - Path to firefox-1.0.8-source.tar.bz2 (source)
 
-set -xe  # Exit on error
+set -e  # Exit on error
 
 echo "Building hello_world.c with official Firefox 1.0.8 Spidermonkey..."
 
@@ -124,10 +124,14 @@ gcc -m32 -I. -I"$INCLUDE_DIR" \
     -DXP_UNIX \
     hello_world.c \
     -o hello_world \
-    -Wl,-rpath,"$LIB_DIR" \
     -lmozjs || {
     echo "Error: Compilation failed"
     exit 1
 }
 
 echo "Build successful! Executable: ./hello_world"
+
+# Run hello_world with LD_LIBRARY_PATH set
+echo ""
+echo "Running hello_world..."
+LD_LIBRARY_PATH="$LIB_DIR" ./hello_world
