@@ -85,18 +85,11 @@ jobs:
     - name: Make build script executable
       run: chmod +x build.sh
 
-    - name: Build with official Firefox 1.0.8 Spidermonkey
+    - name: Build and run with official Firefox 1.0.8 Spidermonkey
       env:
         FIREFOX_BIN_TARBALL: ~/firefox-1.0.8.tar.gz
         FIREFOX_SRC_TARBALL: ~/firefox-1.0.8-source.tar.bz2
       run: ./build.sh
-
-    - name: Run hello_world
-      env:
-        LD_LIBRARY_PATH: ${{ github.workspace }}/firefox-1.0.8/lib
-      run: |
-        ldd ./hello_world || true
-        ./hello_world
 
     - name: Verify output
       run: |
