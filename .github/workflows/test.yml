@@ -24,21 +24,32 @@ jobs:
       with:
         path: |
           ~/firefox-bin.tar.gz
-        key: firefox-1.0-tarball-${{ runner.os }}
+        key: firefox-1.0.8-en-GB-tarball-${{ runner.os }}
         restore-keys: |
-          firefox-1.0-tarball-
+          firefox-1.0.8-en-GB-tarball-
 
     - name: Download Firefox binary
       if: steps.cache-firefox.outputs.cache-hit != 'true'
       run: |
         cd ~
-        # Firefox 1.0.1 final binary from archive.mozilla.org
-        wget -q "https://ftp.mozilla.org/pub/firefox/releases/1.0.1/linux-i686/en-US/firefox-1.0.1.tar.gz" -O firefox-bin.tar.gz || \
-        wget -q "https://archive.mozilla.org/pub/firefox/releases/1.0.1/firefox-1.0.1.tar.gz" -O firefox-bin.tar.gz || {
-          echo "Failed to download Firefox, trying alternative..."
+        # Firefox 1.0.8 en-GB binary from archive.mozilla.org
+        wget --no-verbose "https://archive.mozilla.org/pub/firefox/releases/1.0.8/linux-i686/en-GB/firefox-1.0.8.tar.gz" -O firefox-bin.tar.gz || {
+          echo "Failed to download Firefox"
           exit 1
         }
         ls -lh firefox-bin.tar.gz
+
+    - name: Verify Firefox sha256sum
+      run: |
+        EXPECTED_SHA256="a3b158d887f93aecab010832de8275256096173f7c21694091f9feaeedc74e78"
+        ACTUAL_SHA256=$(sha256sum ~/firefox-bin.tar.gz | awk '{print $1}')
+        echo "Expected: $EXPECTED_SHA256"
+        echo "Actual:   $ACTUAL_SHA256"
+        if [ "$EXPECTED_SHA256" != "$ACTUAL_SHA256" ]; then
+          echo "Error: Firefox sha256sum mismatch!"
+          exit 1
+        fi
+        echo "✓ Firefox sha256sum verified"
 
     - name: Cache Spidermonkey source
       uses: actions/cache@v3
@@ -55,7 +66,7 @@ jobs:
       run: |
         cd ~
         # Using js185 (Spidermonkey 1.8.5) which is compatible with Firefox 1.x API
-        wget -q "https://archive.mozilla.org/pub/js/js185-1.0.0.tar.gz" -O spidermonkey-src.tar.gz || {
+        wget --no-verbose "https://archive.mozilla.org/pub/js/js185-1.0.0.tar.gz" -O spidermonkey-src.tar.gz || {
           echo "Failed to download Spidermonkey source"
           exit 1
         }
@@ -72,7 +83,7 @@ jobs:
 
     - name: Run hello_world
       run: |
-        ldd ./hello_world
+        ldd ./hello_world || true
         ./hello_world
 
     - name: Verify output
