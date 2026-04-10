@@ -37,6 +37,8 @@ Current implemented scope:
   numeric file descriptors plus NUL-terminated path buffers in memory
 - `mks("...")` materializes a NUL-terminated string and returns its
   address
+- `_start` now calls `main(argc, argv)` using C-style process startup
+  arguments
 
 Current non-goals:
 

@@ -31,6 +31,15 @@ Execution Model
 - Calling convention: compiler-defined stack-based convention using
   `call`, `ret`, and an `ebp` frame
 
+Startup arguments:
+
+- `_start` calls `main(argc, argv)`
+- `argc` is the process argument count
+- `argv` is a pointer to the first element of the argument-vector array
+- `argv` therefore behaves like a pointer to an array of 32-bit pointers
+- the address of `argv[i]` is `add(argv, mul(i, 4))`
+- the pointer value of `argv[i]` is `ri32(add(argv, mul(i, 4)))`
+
 
 Translation Unit Structure
 --------------------------

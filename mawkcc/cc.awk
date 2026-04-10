@@ -630,6 +630,10 @@ function emit_push_eax() {
     emit1(80)
 }
 
+function emit_push_ebx() {
+    emit1(83)
+}
+
 function emit_pop_ebx() {
     emit1(91)
 }
@@ -697,9 +701,15 @@ function emit_test_eax_eax() {
 }
 
 function emit_start() {
+    emit_mov_eax_esp()
+    emit_mov_ebx_ptr_esp()
+    emit_add_eax_imm32(4)
+    emit_push_ebx()
+    emit_push_eax()
     emit1(232)
     start_call_patch = code_len + 1
     emit4(0)
+    emit_add_esp_imm32(8)
     emit1(137)
     emit1(195)
     emit1(184)
@@ -712,6 +722,17 @@ function emit_add_esp_imm32(v) {
     emit1(129)
     emit1(196)
     emit4(v)
+}
+
+function emit_mov_eax_esp() {
+    emit1(137)
+    emit1(224)
+}
+
+function emit_mov_ebx_ptr_esp() {
+    emit1(139)
+    emit1(28)
+    emit1(36)
 }
 
 function emit_je_placeholder(    pos) {
