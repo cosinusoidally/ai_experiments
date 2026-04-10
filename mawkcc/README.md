@@ -31,6 +31,10 @@ Current implemented scope:
   `lt(x, y)`
 - memory builtins are available for unsigned 8-bit and signed 32-bit
   reads and writes
+- `brk(n)` allocates `n` bytes from the process break and returns the
+  base address of the allocated block
+- file I/O builtins map directly to Linux i386 syscalls and operate on
+  numeric file descriptors plus NUL-terminated path buffers in memory
 
 Current non-goals:
 
@@ -65,6 +69,12 @@ Builtin set:
 - comparisons: `eq`, `ne`, `lt`, `le`, `gt`, `ge`
 - logic/bitwise: `and`, `or`, `xor`, `not`
 - memory: `ri32`, `wi32`, `ri8`, `wi8`
+- heap allocation: `brk`
+- file I/O: `open`, `read`, `write`, `close`
+
+Memory builtins operate on absolute addresses. Globals compile to fixed
+absolute addresses in the writable data region, and `brk` returns
+absolute addresses in the process heap.
 
 Example source:
 

@@ -2,6 +2,8 @@ BEGIN {
     RS = "\n"
     ORS = ""
     DATA_BASE = 134516736
+    BRK_CUR_OFFSET = 0
+    RUNTIME_BYTES = 4
 }
 
 {
@@ -369,14 +371,27 @@ function parse_builtin_call(name, argc) {
         expect(",")
         parse_expr()
         emit_pop_ebx()
+    } else if (argc == 3) {
+        parse_expr()
+        emit_push_eax()
+        expect(",")
+        parse_expr()
+        emit_push_eax()
+        expect(",")
+        parse_expr()
+        emit_mov_edx_eax()
+        emit_pop_ecx()
+        emit_pop_ebx()
     } else {
         fail("unsupported builtin arity")
     }
     expect(")")
     if (argc == 1)
         emit_builtin1(name)
-    else
+    else if (argc == 2)
         emit_builtin2(name)
+    else
+        emit_builtin3(name)
 }
 
 function parse_user_call_args(    argc) {
@@ -399,13 +414,16 @@ function parse_user_call_args(    argc) {
 }
 
 function builtin_arity(name) {
-    if (name == "neg" || name == "not" || name == "ri32" || name == "ri8")
+    if (name == "neg" || name == "not" || name == "ri32" || name == "ri8" || \
+        name == "brk" || name == "close")
         return 1
     if (name == "add" || name == "sub" || name == "mul" || name == "div" || \
         name == "eq" || name == "ne" || name == "lt" || name == "le" || \
         name == "gt" || name == "ge" || name == "and" || name == "or" || \
         name == "xor" || name == "wi32" || name == "wi8")
         return 2
+    if (name == "open" || name == "read" || name == "write")
+        return 3
     return 0
 }
 
@@ -429,6 +447,10 @@ function emit_builtin1(name) {
         emit_read_i32()
     else if (name == "ri8")
         emit_read_u8()
+    else if (name == "brk")
+        emit_brk_alloc()
+    else if (name == "close")
+        emit_sys_close()
     else
         fail("unknown unary builtin `" name "`")
 }
@@ -468,6 +490,17 @@ function emit_builtin2(name) {
         fail("unknown binary builtin `" name "`")
 }
 
+function emit_builtin3(name) {
+    if (name == "open")
+        emit_sys_open()
+    else if (name == "read")
+        emit_sys_read()
+    else if (name == "write")
+        emit_sys_write()
+    else
+        fail("unknown ternary builtin `" name "`")
+}
+
 function patch_calls(    i, name, argc, addr, rel) {
     for (i = 1; i <= call_count; i++) {
         name = call_target[i]
@@ -486,7 +519,7 @@ function code_reset() {
     code_len = 0
     call_count = 0
     function_count = 0
-    global_bytes = 0
+    global_bytes = RUNTIME_BYTES
     loop_depth = 0
     next_loop_id = 0
     current_function = ""
@@ -533,6 +566,10 @@ function emit_push_eax() {
 
 function emit_pop_ebx() {
     emit1(91)
+}
+
+function emit_pop_ecx() {
+    emit1(89)
 }
 
 function emit_load_param(offset) {
@@ -595,6 +632,14 @@ function emit_je_placeholder(    pos) {
     return pos
 }
 
+function emit_jne_placeholder(    pos) {
+    emit1(15)
+    emit1(133)
+    pos = code_len + 1
+    emit4(0)
+    return pos
+}
+
 function emit_jmp_placeholder(    pos) {
     emit1(233)
     pos = code_len + 1
@@ -621,6 +666,73 @@ function emit_add_ebx_imm32(v) {
     emit1(129)
     emit1(195)
     emit4(v)
+}
+
+function emit_mov_ebx_eax() {
+    emit1(137)
+    emit1(195)
+}
+
+function emit_mov_edx_eax() {
+    emit1(137)
+    emit1(194)
+}
+
+function emit_mov_ebx_ecx() {
+    emit1(137)
+    emit1(203)
+}
+
+function emit_mov_eax_ecx() {
+    emit1(137)
+    emit1(200)
+}
+
+function emit_xor_ebx_ebx() {
+    emit1(49)
+    emit1(219)
+}
+
+function emit_xor_eax_eax() {
+    emit1(49)
+    emit1(192)
+}
+
+function emit_add_ebx_edx() {
+    emit1(1)
+    emit1(211)
+}
+
+function emit_cmp_eax_ebx() {
+    emit1(57)
+    emit1(216)
+}
+
+function emit_mov_eax_abs(addr) {
+    emit1(161)
+    emit4(addr)
+}
+
+function emit_mov_ecx_abs(addr) {
+    emit1(139)
+    emit1(13)
+    emit4(addr)
+}
+
+function emit_mov_abs_eax(addr) {
+    emit1(163)
+    emit4(addr)
+}
+
+function emit_mov_abs_ebx(addr) {
+    emit1(137)
+    emit1(29)
+    emit4(addr)
+}
+
+function emit_int_80() {
+    emit1(205)
+    emit1(128)
 }
 
 function emit_add_eax_ebx() {
@@ -696,31 +808,80 @@ function emit_not_eax() {
 }
 
 function emit_read_i32() {
-    emit_add_eax_imm32(DATA_BASE)
     emit1(139)
     emit1(0)
 }
 
 function emit_read_u8() {
-    emit_add_eax_imm32(DATA_BASE)
     emit1(15)
     emit1(182)
     emit1(0)
 }
 
 function emit_write_i32() {
-    emit_add_ebx_imm32(DATA_BASE)
     emit1(137)
     emit1(3)
 }
 
 function emit_write_u8() {
-    emit_add_ebx_imm32(DATA_BASE)
     emit1(136)
     emit1(3)
     emit1(15)
     emit1(182)
     emit1(192)
+}
+
+function emit_brk_alloc(    cur_addr, init_skip, fail_patch, done_patch) {
+    cur_addr = DATA_BASE + BRK_CUR_OFFSET
+
+    emit_mov_edx_eax()
+    emit_mov_eax_abs(cur_addr)
+    emit_test_eax_eax()
+    init_skip = emit_jne_placeholder()
+
+    emit_mov_eax_imm32(45)
+    emit_xor_ebx_ebx()
+    emit_int_80()
+    emit_mov_abs_eax(cur_addr)
+
+    patch_rel32(init_skip, code_len + 1)
+
+    emit_mov_ecx_abs(cur_addr)
+    emit_mov_ebx_ecx()
+    emit_add_ebx_edx()
+    emit_mov_eax_imm32(45)
+    emit_int_80()
+    emit_cmp_eax_ebx()
+    fail_patch = emit_jne_placeholder()
+
+    emit_mov_abs_ebx(cur_addr)
+    emit_mov_eax_ecx()
+    done_patch = emit_jmp_placeholder()
+
+    patch_rel32(fail_patch, code_len + 1)
+    emit_xor_eax_eax()
+    patch_rel32(done_patch, code_len + 1)
+}
+
+function emit_sys_open() {
+    emit_mov_eax_imm32(5)
+    emit_int_80()
+}
+
+function emit_sys_read() {
+    emit_mov_eax_imm32(3)
+    emit_int_80()
+}
+
+function emit_sys_write() {
+    emit_mov_eax_imm32(4)
+    emit_int_80()
+}
+
+function emit_sys_close() {
+    emit_mov_ebx_eax()
+    emit_mov_eax_imm32(6)
+    emit_int_80()
 }
 
 function bin_reset() {
