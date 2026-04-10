@@ -574,6 +574,7 @@ static void parse_global(void)
 
 static int parse_params(void)
 {
+    int i;
     int count;
     char *param_names[MAX_PARAMS];
     count = 0;
