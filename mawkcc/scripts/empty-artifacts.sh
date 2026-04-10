@@ -6,3 +6,4 @@ ARTIFACTS=$ROOT/artifacts
 
 mkdir -p "$ARTIFACTS"
 rm -f "$ARTIFACTS"/*
+touch "$ARTIFACTS"/placeholder

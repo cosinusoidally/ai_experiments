@@ -93,7 +93,8 @@ function next_tok(    ch, start, word, num) {
             idx++
         word = substr(src, start, idx - start)
         tok_text = word
-        if (word == "return" || word == "function")
+        if (word == "return" || word == "function" || word == "var" || \
+            word == "if" || word == "else" || word == "while" || word == "break")
             tok = word
         else
             tok = "IDENT"
@@ -112,7 +113,7 @@ function next_tok(    ch, start, word, num) {
         return
     }
 
-    if (index("(){};,", ch) > 0) {
+    if (index("(){};,=", ch) > 0) {
         tok = ch
         tok_text = ch
         idx++
@@ -129,10 +130,32 @@ function expect(want) {
 }
 
 function parse_program() {
-    while (tok != "EOF")
-        parse_function()
+    while (tok != "EOF") {
+        if (tok == "var")
+            parse_global()
+        else
+            parse_function()
+    }
     if (!function_seen["main"])
         fail("missing `main` function")
+}
+
+function parse_global(    name) {
+    expect("var")
+    if (tok != "IDENT")
+        fail("expected global name")
+    name = tok_text
+    next_tok()
+    if (tok == "=")
+        fail("global `" name "` cannot be initialized at declaration time")
+    expect(";")
+    if (function_count > 0)
+        fail("global `" name "` must be declared before functions")
+    if (global_seen[name] || function_seen[name])
+        fail("duplicate global `" name "`")
+    global_seen[name] = 1
+    global_offset[name] = global_bytes
+    global_bytes += 4
 }
 
 function parse_function(    name, param_count) {
@@ -149,6 +172,7 @@ function parse_function(    name, param_count) {
     function_seen[name] = 1
     function_arity[name] = param_count
     function_addr[name] = code_len + 1
+    function_count++
     emit_prologue()
     enter_function(name, param_count)
     expect("{")
@@ -204,6 +228,10 @@ function leave_function(    p) {
 }
 
 function parse_stmt() {
+    if (tok == "{") {
+        parse_block()
+        return
+    }
     if (tok == "return") {
         next_tok()
         parse_expr()
@@ -212,37 +240,112 @@ function parse_stmt() {
         current_returned = 1
         return
     }
+    if (tok == "if") {
+        parse_if()
+        return
+    }
+    if (tok == "while") {
+        parse_while()
+        return
+    }
+    if (tok == "break") {
+        parse_break()
+        return
+    }
     parse_expr()
     expect(";")
 }
 
+function parse_block() {
+    expect("{")
+    while (tok != "}" && tok != "EOF")
+        parse_stmt()
+    expect("}")
+}
+
+function parse_if(    false_patch, end_patch, after_then) {
+    expect("if")
+    expect("(")
+    parse_expr()
+    expect(")")
+    emit_test_eax_eax()
+    false_patch = emit_je_placeholder()
+    parse_stmt()
+    if (tok == "else") {
+        end_patch = emit_jmp_placeholder()
+        after_then = code_len + 1
+        patch_rel32(false_patch, after_then)
+        next_tok()
+        parse_stmt()
+        patch_rel32(end_patch, code_len + 1)
+    } else {
+        patch_rel32(false_patch, code_len + 1)
+    }
+}
+
+function parse_while(    loop_start, exit_patch, loop_id) {
+    expect("while")
+    expect("(")
+    loop_start = code_len + 1
+    parse_expr()
+    expect(")")
+    emit_test_eax_eax()
+    exit_patch = emit_je_placeholder()
+    loop_id = push_loop(exit_patch)
+    parse_stmt()
+    emit_jmp(loop_start)
+    patch_rel32(exit_patch, code_len + 1)
+    patch_breaks(loop_id, code_len + 1)
+    pop_loop()
+}
+
+function parse_break() {
+    if (loop_depth < 1)
+        fail("`break` used outside of a loop")
+    expect("break")
+    expect(";")
+    record_break(loop_stack[loop_depth], emit_jmp_placeholder())
+}
+
 function parse_expr() {
+    if (tok == "IDENT")
+        return parse_assign_or_primary()
     parse_primary()
+}
+
+function parse_assign_or_primary(    name) {
+    name = tok_text
+    next_tok()
+    if (tok == "=") {
+        if (!(name in global_seen))
+            fail("assignment target `" name "` is not a global")
+        next_tok()
+        parse_expr()
+        emit_store_global(name)
+        return
+    }
+    if (tok == "(") {
+        if (builtin_arity(name) > 0)
+            parse_builtin_call(name, builtin_arity(name))
+        else
+            emit_user_call(name, parse_user_call_args())
+        return
+    }
+    if (name in current_param_offset) {
+        emit_load_param(current_param_offset[name])
+        return
+    }
+    if (name in global_seen) {
+        emit_load_global(name)
+        return
+    }
+    fail("unknown identifier `" name "`")
 }
 
 function parse_primary(    name, argc) {
     if (tok == "NUM") {
         emit_mov_eax_imm32(tok_num)
         next_tok()
-        return
-    }
-
-    if (tok == "IDENT") {
-        name = tok_text
-        next_tok()
-        if (tok == "(") {
-            argc = builtin_arity(name)
-            if (argc > 0)
-                parse_builtin_call(name, argc)
-            else {
-                argc = parse_user_call_args()
-                emit_user_call(name, argc)
-            }
-            return
-        }
-        if (!(name in current_param_offset))
-            fail("unknown identifier `" name "`")
-        emit_load_param(current_param_offset[name])
         return
     }
 
@@ -382,6 +485,10 @@ function patch_calls(    i, name, argc, addr, rel) {
 function code_reset() {
     code_len = 0
     call_count = 0
+    function_count = 0
+    global_bytes = 0
+    loop_depth = 0
+    next_loop_id = 0
     current_function = ""
     current_param_count = 0
     current_returned = 0
@@ -434,6 +541,16 @@ function emit_load_param(offset) {
     emit1(offset)
 }
 
+function emit_load_global(name) {
+    emit1(161)
+    emit4(DATA_BASE + global_offset[name])
+}
+
+function emit_store_global(name) {
+    emit1(163)
+    emit4(DATA_BASE + global_offset[name])
+}
+
 function emit_prologue() {
     emit1(85)
     emit1(137)
@@ -445,6 +562,11 @@ function emit_epilogue() {
     emit1(236)
     emit1(93)
     emit1(195)
+}
+
+function emit_test_eax_eax() {
+    emit1(133)
+    emit1(192)
 }
 
 function emit_start() {
@@ -463,6 +585,31 @@ function emit_add_esp_imm32(v) {
     emit1(129)
     emit1(196)
     emit4(v)
+}
+
+function emit_je_placeholder(    pos) {
+    emit1(15)
+    emit1(132)
+    pos = code_len + 1
+    emit4(0)
+    return pos
+}
+
+function emit_jmp_placeholder(    pos) {
+    emit1(233)
+    pos = code_len + 1
+    emit4(0)
+    return pos
+}
+
+function emit_jmp(target,    pos) {
+    pos = emit_jmp_placeholder()
+    patch_rel32(pos, target)
+}
+
+function patch_rel32(pos, target,    rel) {
+    rel = target - (pos + 4)
+    patch4(pos, rel)
 }
 
 function emit_add_eax_imm32(v) {
@@ -650,4 +797,26 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
 function emit_binary(    i) {
     for (i = 1; i <= bin_len; i++)
         printf "%c", bin[i]
+}
+
+function push_loop(exit_patch,    id) {
+    id = ++next_loop_id
+    loop_stack[++loop_depth] = id
+    loop_exit_patch[id] = exit_patch
+    break_count[id] = 0
+    return id
+}
+
+function pop_loop() {
+    delete loop_exit_patch[loop_stack[loop_depth]]
+    loop_depth--
+}
+
+function record_break(loop_id, patch_pos) {
+    break_patch[loop_id, ++break_count[loop_id]] = patch_pos
+}
+
+function patch_breaks(loop_id, target,    i) {
+    for (i = 1; i <= break_count[loop_id]; i++)
+        patch_rel32(break_patch[loop_id, i], target)
 }

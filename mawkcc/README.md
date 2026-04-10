@@ -17,9 +17,13 @@ Current implemented scope:
 - input program shape: a list of function definitions
 - function syntax: `function name(arg1, arg2) { ... }`
 - all function arguments are implicit 32-bit integers
-- accepted statements: expression statements and `return expr;`
+- global syntax: `var name;`
+- global declarations are file-scope only and cannot have initializers
+- accepted statements: blocks, expression statements, `return expr;`,
+  `if` / `else if` / `else`, `while`, and `break;`
 - accepted expressions: decimal integer literals, parameter references,
-  grouping, builtin calls, and user-function calls
+  global references, grouping, builtin calls, user-function calls, and
+  assignment to globals
 - source style: the accepted function bodies are chosen to be valid
   inside C, JavaScript, and `awk` with `function` treated as a C type
   name
@@ -33,7 +37,7 @@ Current non-goals:
 - full ISO C support
 - preprocessing
 - variables
-- control flow
+- `continue`
 - native toolchain integration
 
 Files:
@@ -65,13 +69,15 @@ Builtin set:
 Example source:
 
 ```c
+var answer;
+
 function times(a, b) {
     return mul(a, b);
 }
 
 function main() {
-    wi32(0, times(6, 7));
-    return ri32(0);
+    answer = times(6, 7);
+    return answer;
 }
 ```
 
