@@ -86,7 +86,13 @@ Reserved words:
 - `while`
 - `break`
 
-There are no string literals and no character literals.
+String literals:
+
+- double-quoted only
+- currently supported escapes:
+  `\"`, `\\`, `\n`, `\t`, `\r`, `\0`
+
+There are no character literals.
 
 
 Globals
@@ -183,6 +189,7 @@ Supported expression forms:
 - builtin function call
 - user-defined function call
 - assignment to a global
+- `mks("...")` string materialization
 
 Examples:
 
@@ -253,6 +260,7 @@ Unary builtins:
 - `ri8(addr)`
 - `brk(n)`
 - `close(fd)`
+- `mks("...")`
 
 Binary builtins:
 
@@ -418,7 +426,28 @@ The language does not provide:
 - buffered streams
 
 Therefore paths and buffers must be built manually in memory, usually
-with `brk` plus `wi8`.
+with `brk` plus `wi8`, or with `mks("...")` for static NUL-terminated
+strings.
+
+
+Strings
+-------
+
+Strings are introduced through `mks("...")`.
+
+Semantics:
+
+- the argument must be a string literal
+- the compiler materializes a NUL-terminated byte string in the program
+  data area
+- the expression evaluates to the absolute address of that string
+
+Example:
+
+    path = mks("artifacts/io42.dat");
+
+In the current native compiler implementation, `mks` returns the
+address of compiler-emitted static string data.
 
 
 Name Resolution

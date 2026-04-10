@@ -35,6 +35,8 @@ Current implemented scope:
   base address of the allocated block
 - file I/O builtins map directly to Linux i386 syscalls and operate on
   numeric file descriptors plus NUL-terminated path buffers in memory
+- `mks("...")` materializes a NUL-terminated string and returns its
+  address
 
 Current non-goals:
 
@@ -71,6 +73,7 @@ Builtin set:
 - memory: `ri32`, `wi32`, `ri8`, `wi8`
 - heap allocation: `brk`
 - file I/O: `open`, `read`, `write`, `close`
+- strings: `mks`
 
 Memory builtins operate on absolute addresses. Globals compile to fixed
 absolute addresses in the writable data region, and `brk` returns

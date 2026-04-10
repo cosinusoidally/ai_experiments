@@ -4,6 +4,7 @@ BEGIN {
     DATA_BASE = 134516736
     BRK_CUR_OFFSET = 0
     RUNTIME_BYTES = 4
+    init_ord_map()
 }
 
 {
@@ -32,6 +33,11 @@ function fail(msg,    near) {
 function init_lexer() {
     src_len = length(src)
     idx = 1
+}
+
+function init_ord_map(    i) {
+    for (i = 0; i < 256; i++)
+        ord_map[sprintf("%c", i)] = i
 }
 
 function is_space(ch) {
@@ -115,6 +121,11 @@ function next_tok(    ch, start, word, num) {
         return
     }
 
+    if (ch == "\"") {
+        read_string_token()
+        return
+    }
+
     if (index("(){};,=", ch) > 0) {
         tok = ch
         tok_text = ch
@@ -123,6 +134,45 @@ function next_tok(    ch, start, word, num) {
     }
 
     fail("unexpected character `" ch "`")
+}
+
+function read_string_token(    out, ch, esc) {
+    idx++
+    out = ""
+    while (idx <= src_len) {
+        ch = substr(src, idx, 1)
+        if (ch == "\"") {
+            idx++
+            tok = "STR"
+            tok_text = out
+            return
+        }
+        if (ch == "\\") {
+            idx++
+            if (idx > src_len)
+                fail("unterminated string escape")
+            esc = substr(src, idx, 1)
+            if (esc == "n")
+                out = out sprintf("%c", 10)
+            else if (esc == "t")
+                out = out sprintf("%c", 9)
+            else if (esc == "r")
+                out = out sprintf("%c", 13)
+            else if (esc == "\"")
+                out = out "\""
+            else if (esc == "\\")
+                out = out "\\"
+            else if (esc == "0")
+                out = out sprintf("%c", 0)
+            else
+                fail("unsupported string escape `\\" esc "`")
+            idx++
+            continue
+        }
+        out = out ch
+        idx++
+    }
+    fail("unterminated string literal")
 }
 
 function expect(want) {
@@ -158,6 +208,10 @@ function parse_global(    name) {
     global_seen[name] = 1
     global_offset[name] = global_bytes
     global_bytes += 4
+    if (next_data_offset < global_bytes)
+        next_data_offset = global_bytes
+    if (data_used < global_bytes)
+        data_used = global_bytes
 }
 
 function parse_function(    name, param_count) {
@@ -363,7 +417,14 @@ function parse_primary(    name, argc) {
 
 function parse_builtin_call(name, argc) {
     expect("(")
-    if (argc == 1) {
+    if (name == "mks") {
+        if (tok != "STR")
+            fail("`mks` expects a string literal")
+        emit_mks_literal(tok_text)
+        next_tok()
+        expect(")")
+        return
+    } else if (argc == 1) {
         parse_expr()
     } else if (argc == 2) {
         parse_expr()
@@ -415,7 +476,7 @@ function parse_user_call_args(    argc) {
 
 function builtin_arity(name) {
     if (name == "neg" || name == "not" || name == "ri32" || name == "ri8" || \
-        name == "brk" || name == "close")
+        name == "brk" || name == "close" || name == "mks")
         return 1
     if (name == "add" || name == "sub" || name == "mul" || name == "div" || \
         name == "eq" || name == "ne" || name == "lt" || name == "le" || \
@@ -520,6 +581,8 @@ function code_reset() {
     call_count = 0
     function_count = 0
     global_bytes = RUNTIME_BYTES
+    next_data_offset = RUNTIME_BYTES
+    data_used = RUNTIME_BYTES
     loop_depth = 0
     next_loop_id = 0
     current_function = ""
@@ -586,6 +649,24 @@ function emit_load_global(name) {
 function emit_store_global(name) {
     emit1(163)
     emit4(DATA_BASE + global_offset[name])
+}
+
+function emit_mks_literal(text,    addr) {
+    addr = register_string(text)
+    emit_mov_eax_imm32(addr)
+}
+
+function register_string(text,    start, i, ch) {
+    start = next_data_offset
+    for (i = 1; i <= length(text); i++) {
+        ch = substr(text, i, 1)
+        data_byte[start + i - 1] = ord_map[ch]
+    }
+    data_byte[start + length(text)] = 0
+    next_data_offset = start + length(text) + 1
+    if (data_used < next_data_offset)
+        data_used = next_data_offset
+    return DATA_BASE + start
 }
 
 function emit_prologue() {
@@ -911,12 +992,14 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
     phsize = 32
     headers = ehsize + phsize
     entry = base + headers
-    filesz = headers + code_len
+    filesz = 4096 + data_used
     memsz = 8192
     flags = 7
 
-    if (filesz > 4096)
+    if (headers + code_len > 4096)
         fail("program too large for fixed code page")
+    if (data_used > 4096)
+        fail("program data too large for fixed data page")
 
     rel = function_addr["main"] - (start_call_patch + 4)
     patch4(start_call_patch, rel)
@@ -953,6 +1036,16 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
 
     for (i = 1; i <= code_len; i++)
         bout1(code[i])
+
+    while (bin_len < 4096)
+        bout1(0)
+
+    for (i = 0; i < data_used; i++) {
+        if ((i in data_byte))
+            bout1(data_byte[i])
+        else
+            bout1(0)
+    }
 }
 
 function emit_binary(    i) {
