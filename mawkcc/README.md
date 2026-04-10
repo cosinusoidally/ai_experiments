@@ -23,7 +23,7 @@ Current implemented scope:
   `if` / `else if` / `else`, `while`, and `break;`
 - accepted expressions: decimal integer literals, parameter references,
   global references, grouping, builtin calls, user-function calls, and
-  assignment to globals
+  assignment to globals and parameters
 - source style: the accepted function bodies are chosen to be valid
   inside C, JavaScript, and `awk` with `function` treated as a C type
   name
@@ -45,6 +45,31 @@ Current non-goals:
 - variables
 - `continue`
 - native toolchain integration
+
+Local-variable convention:
+
+- the compiler still does not implement true locals
+- to simulate locals, write an internal worker function whose parameter
+  list includes both real arguments and extra slots for locals
+- expose a wrapper that supplies zero values for those extra slots
+
+Example:
+
+```c
+function foo_(a, b, tmp1, tmp2) {
+    tmp1 = add(a, b);
+    tmp2 = mul(tmp1, 2);
+    return tmp2;
+}
+
+function foo(a, b) {
+    return foo_(a, b, 0, 0);
+}
+```
+
+This is a coding convention for bootstrap-oriented source. The compiler
+still does not implement true local declarations, but parameter
+assignment makes the convention usable.
 
 Files:
 

@@ -189,6 +189,7 @@ Supported expression forms:
 - builtin function call
 - user-defined function call
 - assignment to a global
+- assignment to a parameter
 - `mks("...")` string materialization
 
 Examples:
@@ -202,7 +203,7 @@ Examples:
 
 Assignment:
 
-- only globals may appear on the left-hand side
+- only globals and parameters may appear on the left-hand side
 - assignment is an expression statement in practice
 - assignment leaves the assigned value in `eax` as part of codegen, but
   the language should not rely on chaining behavior
@@ -534,6 +535,45 @@ Source is also intentionally restricted in style:
 - no infix operators in expressions
 - no declarations inside blocks
 - no implicit coercion model beyond raw machine behavior
+
+
+Simulating Locals
+-----------------
+
+The compiler does not implement true local variables, but bootstrap
+source may simulate them using extra parameters.
+
+Convention:
+
+1. if a logical function `foo` needs locals, implement its body in a
+   worker function named `foo_`
+2. `foo_` takes:
+   real parameters first, then one parameter slot for each simulated
+   local
+3. the public wrapper `foo(...)` calls `foo_(..., 0, 0, ...)`
+4. inside `foo_`, those extra parameters are treated as mutable local
+   slots by source convention
+
+Example with two simulated locals:
+
+    function foo_(a, b, tmp1, tmp2) {
+        return add(tmp1, tmp2);
+    }
+
+    function foo(a, b) {
+        return foo_(a, b, 0, 0);
+    }
+
+Important limitation:
+
+- this is only a source-level convention
+- true local declarations still do not exist
+- the convention reuses mutable parameter slots rather than introducing
+  a separate local storage class
+
+In practice, this convention is useful for structuring bootstrap code
+around helper parameters and wrapper functions, but full local-variable
+behavior still requires explicit declaration support.
 
 
 Portability Notes

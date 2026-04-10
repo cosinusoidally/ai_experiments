@@ -373,11 +373,14 @@ function parse_assign_or_primary(    name) {
     name = tok_text
     next_tok()
     if (tok == "=") {
-        if (!(name in global_seen))
-            fail("assignment target `" name "` is not a global")
         next_tok()
         parse_expr()
-        emit_store_global(name)
+        if (name in current_param_offset)
+            emit_store_param(current_param_offset[name])
+        else if (name in global_seen)
+            emit_store_global(name)
+        else
+            fail("assignment target `" name "` is not a global or parameter")
         return
     }
     if (tok == "(") {
@@ -637,6 +640,12 @@ function emit_pop_ecx() {
 
 function emit_load_param(offset) {
     emit1(139)
+    emit1(69)
+    emit1(offset)
+}
+
+function emit_store_param(offset) {
+    emit1(137)
     emit1(69)
     emit1(offset)
 }
