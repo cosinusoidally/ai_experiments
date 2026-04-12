@@ -7,6 +7,24 @@ var idx_pos;
 var tok_pos;
 var src_len;
 var tok;
+var TOK_EOF;
+var TOK_IDENT;
+var TOK_NUM;
+var TOK_STR;
+var TOK_RETURN;
+var TOK_FUNCTION;
+var TOK_VAR;
+var TOK_IF;
+var TOK_ELSE;
+var TOK_WHILE;
+var TOK_BREAK;
+var TOK_LPAREN;
+var TOK_RPAREN;
+var TOK_LBRACE;
+var TOK_RBRACE;
+var TOK_SEMI;
+var TOK_COMMA;
+var TOK_ASSIGN;
 var start_call_patch;
 var loop_depth;
 var next_loop_id;
@@ -46,6 +64,24 @@ var binbuf_p;
 function init_globals() {
     tok_text = 0;
     tok_text_cap = 0;
+    TOK_EOF = 0;
+    TOK_IDENT = 1;
+    TOK_NUM = 2;
+    TOK_STR = 3;
+    TOK_RETURN = 4;
+    TOK_FUNCTION = 5;
+    TOK_VAR = 6;
+    TOK_IF = 7;
+    TOK_ELSE = 8;
+    TOK_WHILE = 9;
+    TOK_BREAK = 10;
+    TOK_LPAREN = 11;
+    TOK_RPAREN = 12;
+    TOK_LBRACE = 13;
+    TOK_RBRACE = 14;
+    TOK_SEMI = 15;
+    TOK_COMMA = 16;
+    TOK_ASSIGN = 17;
     if (eq(code_p, 0)) {
         code_p = xmalloc(262144);
     }
@@ -238,7 +274,7 @@ function read_string_token_(buf, cap, len, ch) {
             idx_pos = add(idx_pos, 1);
             set_tok_text_len(buf, len);
             free(buf);
-            tok = 3;
+            tok = TOK_STR;
             return 0;
         }
         if (eq(ch, 92)) {
@@ -290,21 +326,21 @@ function next_tok_ident_(start) {
     }
     set_tok_text_len(add(src, start), sub(idx_pos, start));
     if (eq(strcmp(tok_text, mks("return")), 0)) {
-        tok = 4;
+        tok = TOK_RETURN;
     } else if (eq(strcmp(tok_text, mks("function")), 0)) {
-        tok = 5;
+        tok = TOK_FUNCTION;
     } else if (eq(strcmp(tok_text, mks("var")), 0)) {
-        tok = 6;
+        tok = TOK_VAR;
     } else if (eq(strcmp(tok_text, mks("if")), 0)) {
-        tok = 7;
+        tok = TOK_IF;
     } else if (eq(strcmp(tok_text, mks("else")), 0)) {
-        tok = 8;
+        tok = TOK_ELSE;
     } else if (eq(strcmp(tok_text, mks("while")), 0)) {
-        tok = 9;
+        tok = TOK_WHILE;
     } else if (eq(strcmp(tok_text, mks("break")), 0)) {
-        tok = 10;
+        tok = TOK_BREAK;
     } else {
-        tok = 1;
+        tok = TOK_IDENT;
     }
     return 0;
 }
@@ -317,31 +353,31 @@ function next_tok_num_(start) {
     }
     set_tok_text_len(add(src, start), sub(idx_pos, start));
     tok_num = strtoul(tok_text, 0, 10);
-    tok = 2;
+    tok = TOK_NUM;
     return 0;
 }
 
 function next_tok_punc_(ch) {
     if (eq(ch, 40)) {
-        tok = 11; set_tok_text_cstr(mks("(")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_LPAREN; set_tok_text_cstr(mks("(")); idx_pos = add(idx_pos, 1); return 1;
     }
     if (eq(ch, 41)) {
-        tok = 12; set_tok_text_cstr(mks(")")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_RPAREN; set_tok_text_cstr(mks(")")); idx_pos = add(idx_pos, 1); return 1;
     }
     if (eq(ch, 123)) {
-        tok = 13; set_tok_text_cstr(mks("{")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_LBRACE; set_tok_text_cstr(mks("{")); idx_pos = add(idx_pos, 1); return 1;
     }
     if (eq(ch, 125)) {
-        tok = 14; set_tok_text_cstr(mks("}")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_RBRACE; set_tok_text_cstr(mks("}")); idx_pos = add(idx_pos, 1); return 1;
     }
     if (eq(ch, 59)) {
-        tok = 15; set_tok_text_cstr(mks(";")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_SEMI; set_tok_text_cstr(mks(";")); idx_pos = add(idx_pos, 1); return 1;
     }
     if (eq(ch, 44)) {
-        tok = 16; set_tok_text_cstr(mks(",")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_COMMA; set_tok_text_cstr(mks(",")); idx_pos = add(idx_pos, 1); return 1;
     }
     if (eq(ch, 61)) {
-        tok = 17; set_tok_text_cstr(mks("=")); idx_pos = add(idx_pos, 1); return 1;
+        tok = TOK_ASSIGN; set_tok_text_cstr(mks("=")); idx_pos = add(idx_pos, 1); return 1;
     }
     return 0;
 }
@@ -350,7 +386,7 @@ function next_tok_(ch) {
     skip_ws_and_comments();
     tok_pos = idx_pos;
     if (ge(idx_pos, src_len)) {
-        tok = 0;
+        tok = TOK_EOF;
         set_tok_text_cstr(mks(""));
         return 0;
     }
@@ -766,30 +802,30 @@ function emit_builtin3(name) {
 }
 
 function parse_builtin_call(name, argc) {
-    expect(11);
+    expect(TOK_LPAREN);
     if (streq3(name, 109, 107, 115)) {
-        if (not(eq(tok, 3))) {
+        if (not(eq(tok, TOK_STR))) {
             fail_code(9, 0);
         }
         emit_mks_literal(tok_text);
         next_tok();
-        expect(12);
+        expect(TOK_RPAREN);
         return 0;
     } else if (eq(argc, 1)) {
         parse_expr();
     } else if (eq(argc, 2)) {
         parse_expr();
         emit_push_eax();
-        expect(16);
+        expect(TOK_COMMA);
         parse_expr();
         emit_pop_ebx();
     } else if (eq(argc, 3)) {
         parse_expr();
         emit_push_eax();
-        expect(16);
+        expect(TOK_COMMA);
         parse_expr();
         emit_push_eax();
-        expect(16);
+        expect(TOK_COMMA);
         parse_expr();
         emit_mov_edx_eax();
         emit_pop_ecx();
@@ -797,7 +833,7 @@ function parse_builtin_call(name, argc) {
     } else {
         fail_code(10, 0);
     }
-    expect(12);
+    expect(TOK_RPAREN);
     if (eq(argc, 1)) {
         emit_builtin1(name);
     } else if (eq(argc, 2)) {
@@ -810,8 +846,8 @@ function parse_builtin_call(name, argc) {
 
 function parse_user_call_args_(argc) {
     argc = 0;
-    expect(11);
-    if (eq(tok, 12)) {
+    expect(TOK_LPAREN);
+    if (eq(tok, TOK_RPAREN)) {
         next_tok();
         return 0;
     }
@@ -819,12 +855,12 @@ function parse_user_call_args_(argc) {
         parse_expr();
         emit_push_eax();
         argc = add(argc, 1);
-        if (not(eq(tok, 16))) {
+        if (not(eq(tok, TOK_COMMA))) {
             break;
         }
         next_tok();
     }
-    expect(12);
+    expect(TOK_RPAREN);
     emit_reverse_args(argc);
     return argc;
 }
@@ -916,8 +952,8 @@ function record_reloc(offset, name, type) {
 }
 
 function parse_program() {
-    while (not(eq(tok, 0))) {
-        if (eq(tok, 6)) {
+    while (not(eq(tok, TOK_EOF))) {
+        if (eq(tok, TOK_VAR)) {
             parse_global();
         } else {
             parse_function();
@@ -934,16 +970,16 @@ function has_main_function() {
 }
 
 function parse_global_(name, entry) {
-    expect(6);
-    if (not(eq(tok, 1))) {
+    expect(TOK_VAR);
+    if (not(eq(tok, TOK_IDENT))) {
         fail_code(18, 0);
     }
     name = xstrdup(tok_text);
     next_tok();
-    if (eq(tok, 17)) {
+    if (eq(tok, TOK_ASSIGN)) {
         fail_code(19, name);
     }
-    expect(15);
+    expect(TOK_SEMI);
     if (gt(function_count, 0)) {
         fail_code(20, name);
     }
@@ -984,9 +1020,9 @@ function param_set_name(param_names, i, name) {
 
 function parse_function_params_(param_names, param_count, i) {
     param_count = 0;
-    if (not(eq(tok, 12))) {
+    if (not(eq(tok, TOK_RPAREN))) {
         while (1) {
-            if (not(eq(tok, 1))) {
+            if (not(eq(tok, TOK_IDENT))) {
                 fail_code(26, 0);
             }
             i = 0;
@@ -999,7 +1035,7 @@ function parse_function_params_(param_names, param_count, i) {
             param_set_name(param_names, param_count, xstrdup(tok_text));
             param_count = add(param_count, 1);
             next_tok();
-            if (not(eq(tok, 16))) {
+            if (not(eq(tok, TOK_COMMA))) {
                 return param_count;
             }
             next_tok();
@@ -1051,15 +1087,15 @@ function parse_function_free_params_(param_names, param_count, i) {
 
 function parse_function_(name, param_count, param_names, entry) {
     param_names = xmalloc(4096);
-    expect(5);
-    if (not(eq(tok, 1))) {
+    expect(TOK_FUNCTION);
+    if (not(eq(tok, TOK_IDENT))) {
         fail_code(25, 0);
     }
     name = xstrdup(tok_text);
     next_tok();
-    expect(11);
+    expect(TOK_LPAREN);
     param_count = parse_function_params_(param_names, 0, 0);
-    expect(12);
+    expect(TOK_RPAREN);
 
     if (ge(find_symbol(functions_p, function_count, name), 0)) {
         fail_code(28, name);
@@ -1074,11 +1110,11 @@ function parse_function_(name, param_count, param_names, entry) {
 
     emit_prologue();
     enter_function(name, param_count, param_names);
-    expect(13);
-    while (and(not(eq(tok, 14)), not(eq(tok, 0)))) {
+    expect(TOK_LBRACE);
+    while (and(not(eq(tok, TOK_RBRACE)), not(eq(tok, TOK_EOF)))) {
         parse_stmt();
     }
-    expect(14);
+    expect(TOK_RBRACE);
     if (not(current_returned)) {
         emit_mov_eax_imm32(0);
         emit_epilogue();
@@ -1093,53 +1129,53 @@ function parse_function() {
 }
 
 function parse_stmt() {
-    if (eq(tok, 13)) {
+    if (eq(tok, TOK_LBRACE)) {
         parse_block();
         return 0;
     }
-    if (eq(tok, 4)) {
+    if (eq(tok, TOK_RETURN)) {
         next_tok();
         parse_expr();
-        expect(15);
+        expect(TOK_SEMI);
         emit_epilogue();
         current_returned = 1;
         return 0;
     }
-    if (eq(tok, 7)) {
+    if (eq(tok, TOK_IF)) {
         parse_if();
         return 0;
     }
-    if (eq(tok, 9)) {
+    if (eq(tok, TOK_WHILE)) {
         parse_while();
         return 0;
     }
-    if (eq(tok, 10)) {
+    if (eq(tok, TOK_BREAK)) {
         parse_break();
         return 0;
     }
     parse_expr();
-    expect(15);
+    expect(TOK_SEMI);
     return 0;
 }
 
 function parse_block() {
-    expect(13);
-    while (and(not(eq(tok, 14)), not(eq(tok, 0)))) {
+    expect(TOK_LBRACE);
+    while (and(not(eq(tok, TOK_RBRACE)), not(eq(tok, TOK_EOF)))) {
         parse_stmt();
     }
-    expect(14);
+    expect(TOK_RBRACE);
     return 0;
 }
 
 function parse_if_(false_patch, end_patch, after_then) {
-    expect(7);
-    expect(11);
+    expect(TOK_IF);
+    expect(TOK_LPAREN);
     parse_expr();
-    expect(12);
+    expect(TOK_RPAREN);
     emit_test_eax_eax();
     false_patch = emit_je_placeholder();
     parse_stmt();
-    if (eq(tok, 8)) {
+    if (eq(tok, TOK_ELSE)) {
         end_patch = emit_jmp_placeholder();
         after_then = code_len;
         patch_rel32(false_patch, after_then);
@@ -1157,11 +1193,11 @@ function parse_if() {
 }
 
 function parse_while_(loop_start, exit_patch, loop_id) {
-    expect(9);
-    expect(11);
+    expect(TOK_WHILE);
+    expect(TOK_LPAREN);
     loop_start = code_len;
     parse_expr();
-    expect(12);
+    expect(TOK_RPAREN);
     emit_test_eax_eax();
     exit_patch = emit_je_placeholder();
     loop_id = push_loop();
@@ -1182,14 +1218,14 @@ function parse_break() {
     if (lt(loop_depth, 1)) {
         fail_code(5, 0);
     }
-    expect(10);
-    expect(15);
+    expect(TOK_BREAK);
+    expect(TOK_SEMI);
     record_break(ri32(add(loop_stack_p, mul(sub(loop_depth, 1), 4))), emit_jmp_placeholder());
     return 0;
 }
 
 function parse_expr() {
-    if (eq(tok, 1)) {
+    if (eq(tok, TOK_IDENT)) {
         parse_assign_or_primary();
         return 0;
     }
@@ -1224,7 +1260,7 @@ function parse_assign_load_param_(name, i) {
 function parse_assign_or_primary_(name, arity) {
     name = xstrdup(tok_text);
     next_tok();
-    if (eq(tok, 17)) {
+    if (eq(tok, TOK_ASSIGN)) {
         next_tok();
         parse_expr();
         if (parse_assign_store_param_(name, 0)) {
@@ -1237,7 +1273,7 @@ function parse_assign_or_primary_(name, arity) {
         }
         fail_code(13, name);
     }
-    if (eq(tok, 11)) {
+    if (eq(tok, TOK_LPAREN)) {
         arity = builtin_arity(name);
         if (gt(arity, 0)) {
             parse_builtin_call(name, arity);
@@ -1264,15 +1300,15 @@ function parse_assign_or_primary() {
 }
 
 function parse_primary() {
-    if (eq(tok, 2)) {
+    if (eq(tok, TOK_NUM)) {
         emit_mov_eax_imm32(tok_num);
         next_tok();
         return 0;
     }
-    if (eq(tok, 11)) {
+    if (eq(tok, TOK_LPAREN)) {
         next_tok();
         parse_expr();
-        expect(12);
+        expect(TOK_RPAREN);
         return 0;
     }
     fail_code(15, 0);
@@ -1663,7 +1699,7 @@ function compile(source_path) {
         emit_start();
     }
     parse_program();
-    expect(0);
+    expect(TOK_EOF);
     patch_calls();
     if (output_object) {
         build_object();

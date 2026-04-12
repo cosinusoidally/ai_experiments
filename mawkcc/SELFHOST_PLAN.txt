@@ -135,6 +135,9 @@ Intent:
 
 - `mawkcc_self.c` stays within the restricted dialect subset and must be
   compilable both by GCC and by `mawkcc`
+- `mawkcc_self.c` must remain human-readable and auditable; when the
+  restricted dialect lacks constants or enums, use initialized global
+  variables such as `TOK_IDENT` instead of unexplained magic numbers
 - `mawkcc_ansi.c` contains the remaining implementation that still needs
   full ANSI C features
 
@@ -328,6 +331,9 @@ For `mawkcc_self.c`:
 - document helper acronyms and conventions externally
 - use short helper names consistently
 - prefer explicit wrapper functions for memory/table access
+- preserve readability and auditability; important symbolic values should
+  have names in `mawkcc_self.c` even if they are implemented as initialized
+  globals rather than C enums or preprocessor constants
 
 For `mawkcc_ansi.c`:
 
