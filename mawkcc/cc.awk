@@ -1,7 +1,9 @@
 BEGIN {
     RS = "\n"
     ORS = ""
-    DATA_BASE = 134516736
+    if (code_page == "")
+        code_page = 4096
+    DATA_BASE = 134512640 + code_page
     BRK_CUR_OFFSET = 0
     RUNTIME_BYTES = 4
     if (format == "")
@@ -1132,11 +1134,11 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
     phsize = 32
     headers = ehsize + phsize
     entry = base + headers
-    filesz = 4096 + data_used
-    memsz = 8192
+    filesz = code_page + data_used
+    memsz = code_page + 4096
     flags = 7
 
-    if (headers + code_len > 4096)
+    if (headers + code_len > code_page)
         fail("program too large for fixed code page")
     if (data_used > 4096)
         fail("program data too large for fixed data page")
@@ -1177,7 +1179,7 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
     for (i = 1; i <= code_len; i++)
         bout1(code[i])
 
-    while (bin_len < 4096)
+    while (bin_len < code_page)
         bout1(0)
 
     for (i = 0; i < data_used; i++) {

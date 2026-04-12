@@ -10,7 +10,7 @@ source-file reading, final binary emission, low-level code/binary
 emission, binary reset, and self-owned state-array/buffer work have
 already been completed.
 
-No currently listed simple porting steps remain. `mawkcc_ansi.c` is empty;
-the remaining work is no longer ANSI-side porting but reducing external
-libc/toolchain dependencies from `mawkcc_self.c` so the compiler can be
-linked without GCC.
+No currently listed simple porting steps remain. `mawkcc_ansi.c` is empty,
+and `mawkcc_self.c` now builds into a runnable compiler executable without
+GCC linking. Remaining work is native self-linking/toolchain cleanup rather
+than ANSI-side porting.

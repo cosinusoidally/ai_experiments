@@ -118,7 +118,6 @@ Rules:
 - globals must be declared before any function definition
 - each global occupies 4 bytes
 - globals are stored in the writable static data area
-- in object output, `var name;` defines a 32-bit common object symbol
 
 Example:
 
@@ -369,7 +368,6 @@ Static writable data area:
 - globals are placed at fixed absolute addresses in the ELF image
 - runtime bookkeeping such as the current heap break is also stored
   there
-- object output represents `var` globals as ELF common symbols
 
 Heap:
 

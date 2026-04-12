@@ -144,8 +144,7 @@ function init_globals() {
 
 function fail_msg(s, n) {
     write(2, s, n);
-    exit(1);
-    return 0;
+    return 1;
 }
 
 function fail_code(code, arg) {
@@ -158,7 +157,7 @@ function usage(program) {
 }
 
 function xmalloc_(n, p) {
-    p = malloc(n);
+    p = brk(n);
     if (eq(p, 0)) {
         fail_msg(mks("out of memory\n"), 14);
     }
@@ -169,12 +168,23 @@ function xmalloc(n) {
     return xmalloc_(n, 0);
 }
 
+function xrealloc_copy_(p, q, i, n) {
+    while (lt(i, n)) {
+        wi8(add(q, i), ri8(add(p, i)));
+        i = add(i, 1);
+    }
+    return q;
+}
+
 function xrealloc_(p, n, q) {
-    q = realloc(p, n);
+    q = xmalloc(n);
     if (eq(q, 0)) {
         fail_msg(mks("out of memory\n"), 14);
     }
-    return q;
+    if (eq(p, 0)) {
+        return q;
+    }
+    return xrealloc_copy_(p, q, 0, n);
 }
 
 function xrealloc(p, n) {
@@ -195,6 +205,58 @@ function u32_byte(v, shift) {
         shift = sub(shift, 8);
     }
     return v;
+}
+
+function free(p) {
+    return 0;
+}
+
+function strlen_(s, n) {
+    while (ri8(add(s, n))) {
+        n = add(n, 1);
+    }
+    return n;
+}
+
+function strlen(s) {
+    return strlen_(s, 0);
+}
+
+function strcmp_(a, b, i, ca, cb) {
+    while (1) {
+        ca = ri8(add(a, i));
+        cb = ri8(add(b, i));
+        if (ne(ca, cb)) {
+            return sub(ca, cb);
+        }
+        if (eq(ca, 0)) {
+            return 0;
+        }
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function strcmp(a, b) {
+    return strcmp_(a, b, 0, 0, 0);
+}
+
+function strtoul_(s, value, i, ch) {
+    value = 0;
+    i = 0;
+    while (1) {
+        ch = ri8(add(s, i));
+        if (or(lt(ch, 48), gt(ch, 57))) {
+            return value;
+        }
+        value = add(mul(value, 10), sub(ch, 48));
+        i = add(i, 1);
+    }
+    return value;
+}
+
+function strtoul(s, endptr, base) {
+    return strtoul_(s, 0, 0, 0);
 }
 
 function sym_name(sym) {
@@ -556,7 +618,7 @@ function emit_sys_close() { emit_mov_ebx_eax(); emit_mov_eax_imm32(6); emit_int_
 
 function emit1(b) {
     if (ge(code_len, 262144)) {
-        exit(1);
+        fail_msg(mks("code buffer overflow\n"), 21);
     }
     wi8(add(code_p, code_len), b);
     code_len = add(code_len, 1);
@@ -1389,7 +1451,7 @@ function pad_to(n) {
 
 function bout1(b) {
     if (ge(bin_len, 524288)) {
-        exit(1);
+        fail_msg(mks("binary buffer overflow\n"), 23);
     }
     wi8(add(binbuf_p, bin_len), b);
     bin_len = add(bin_len, 1);
@@ -1425,7 +1487,7 @@ function bin_reset() {
 
 function emit_binary() {
     if (ne(write(1, binbuf_p, bin_len), bin_len)) {
-        exit(1);
+        fail_msg(mks("write failed\n"), 13);
     }
     return 0;
 }
@@ -1748,30 +1810,21 @@ function build_object() {
     return build_object_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
-function read_source_(path, fp, len, buf, got) {
-    fp = fopen(path, mks("rb"));
-    if (eq(fp, 0)) {
-        exit(1);
+function read_source_(path, fd, len, buf, got) {
+    fd = open(path, 0, 0);
+    if (lt(fd, 0)) {
+        return 0;
     }
-    if (ne(fseek(fp, 0, 2), 0)) {
-        exit(1);
-    }
-    len = ftell(fp);
-    if (lt(len, 0)) {
-        exit(1);
-    }
-    if (ne(fseek(fp, 0, 0), 0)) {
-        exit(1);
-    }
+    len = 1048576;
     buf = xmalloc(add(len, 2));
-    got = fread(buf, 1, len, fp);
-    if (ne(got, len)) {
-        exit(1);
+    got = read(fd, buf, len);
+    close(fd);
+    if (lt(got, 0)) {
+        return 0;
     }
-    fclose(fp);
-    wi8(add(buf, len), 10);
-    wi8(add(add(buf, len), 1), 0);
-    src_len = add(len, 1);
+    wi8(add(buf, got), 10);
+    wi8(add(add(buf, got), 1), 0);
+    src_len = add(got, 1);
     return buf;
 }
 

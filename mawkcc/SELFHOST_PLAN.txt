@@ -147,11 +147,9 @@ At this stage, the combined executable should still behave exactly like
 Link model:
 
 1. compile `mawkcc_self.c` with `mawkcc` to produce `mawkcc_self.o`
-2. compile `mawkcc_self.c` with GCC as a cross-check
-3. compile the empty `mawkcc_ansi.c` with GCC to produce a placeholder
-   `mawkcc_ansi.o`
-4. link `mawkcc_self.o` and the placeholder `mawkcc_ansi.o` into
-   `mawkcc.exe`
+2. emit `mawkcc.exe` directly from `mawkcc_self.c` with `cc.awk`, using a
+   larger code page for the compiler binary
+3. compile `mawkcc_self.c` with GCC only as a cross-check
 
 Important constraint:
 
@@ -248,10 +246,9 @@ chain without parity loss.
 Milestones:
 
 1. `mawkcc` compiles `mawkcc_self.c` into `mawkcc_self.o`
-2. GCC compiles empty `mawkcc_ansi.c` into placeholder `mawkcc_ansi.o`
-3. link both into `mawkcc.exe`
-4. `mawkcc.exe` compiles the example corpus bit-identically
-5. `mawkcc.exe` compiles `mawkcc_self.c` bit-identically to the earlier
+2. `cc.awk` emits `mawkcc.exe` directly from `mawkcc_self.c`
+3. `mawkcc.exe` compiles the example corpus bit-identically
+4. `mawkcc.exe` compiles `mawkcc_self.c` bit-identically to the earlier
    stage
 
 At that point the self side is participating in its own build.
@@ -311,11 +308,10 @@ Target flow for routine verification:
 1. build `mawkcc_orig.c` with GCC
 2. run parity tests against `cc.awk`
 3. compile `mawkcc_self.c` with `mawkcc` to `mawkcc_self.o`
-4. compile `mawkcc_ansi.c` with GCC to `mawkcc_ansi.o`
-5. link `mawkcc.exe`
-6. run parity tests for `mawkcc.exe`
-7. compile `mawkcc_self.c` with `mawkcc.exe`
-8. compare resulting object or final executable artifacts against the
+4. emit `mawkcc.exe` directly from `mawkcc_self.c`
+5. run parity tests for `mawkcc.exe`
+6. compile `mawkcc_self.c` with `mawkcc.exe`
+7. compare resulting object or final executable artifacts against the
    previous stage
 
 
@@ -358,7 +354,7 @@ The plan succeeds when all of the following are true:
 
 - `mawkcc_orig.c` matches `cc.awk` bit-for-bit on the corpus
 - `mawkcc_self.c` is compilable by both GCC and `mawkcc`
-- `mawkcc.exe` built from `mawkcc_self.o` and `mawkcc_ansi.o` matches
-  reference outputs bit-for-bit
+- `mawkcc.exe` emitted directly from `mawkcc_self.c` matches reference
+  outputs bit-for-bit
 - `mawkcc_self.c` can participate in building the compiler
 - `mawkcc_ansi.c` has been reduced to nothing or near-nothing

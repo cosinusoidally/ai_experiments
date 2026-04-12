@@ -116,6 +116,18 @@ relocations. Function arguments are pushed right-to-left and read at
 standard cdecl stack offsets, so mawkcc-generated objects can call and be
 called by GCC-built i386 code.
 
+Self compiler executable:
+
+```sh
+mawk -v code_page=262144 -f cc.awk mawkcc_self.c > artifacts/mawkcc.exe
+chmod +x artifacts/mawkcc.exe
+artifacts/mawkcc.exe -c mawkcc_self.c > artifacts/mawkcc_self.self.o
+```
+
+The larger `code_page` is only needed for large executables such as the
+compiler itself. The default remains 4096 bytes so the small regression
+examples keep their historical byte-identical output.
+
 The C reference implementation must also be built as a 32-bit ANSI C
 program:
 

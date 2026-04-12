@@ -44,17 +44,15 @@ if ! cmp -s "$SELF_OBJ" "$SELF_ORIG_OBJ"; then
     exit 1
 fi
 
-log_cmd "cc -ansi -m32 -Dfunction=int -Dvar=int -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c \"$ROOT/mawkcc_self.c\" -o \"$SELF_GCC_OBJ\""
-cc -ansi -m32 -Dfunction=int -Dvar=int -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
+log_cmd "cc -ansi -m32 -fno-builtin -Dfunction=int -Dvar=int -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c \"$ROOT/mawkcc_self.c\" -o \"$SELF_GCC_OBJ\""
+cc -ansi -m32 -fno-builtin -Dfunction=int -Dvar=int -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
 
 log_cmd "cc -ansi -m32 -fno-builtin -g -O0 -c \"$ROOT/mawkcc_gcc_support.c\" -o \"$GCC_SUPPORT_OBJ\""
 cc -ansi -m32 -fno-builtin -g -O0 -c "$ROOT/mawkcc_gcc_support.c" -o "$GCC_SUPPORT_OBJ"
 
-log_cmd "cc -ansi -m32 -g -O0 -c \"$ROOT/mawkcc_ansi.c\" -o \"$ANSI_OBJ\""
-cc -ansi -m32 -g -O0 -c "$ROOT/mawkcc_ansi.c" -o "$ANSI_OBJ"
-
-log_cmd "cc -m32 -no-pie \"$SELF_OBJ\" \"$ANSI_OBJ\" -o \"$SELF_BIN\""
-cc -m32 -no-pie "$SELF_OBJ" "$ANSI_OBJ" -o "$SELF_BIN"
+log_cmd "mawk -v code_page=262144 -f \"$ROOT/cc.awk\" \"$ROOT/mawkcc_self.c\" > \"$SELF_BIN\""
+mawk -v code_page=262144 -f "$ROOT/cc.awk" "$ROOT/mawkcc_self.c" > "$SELF_BIN"
+chmod +x "$SELF_BIN"
 
 log_cmd "\"$SELF_BIN\" -c \"$ROOT/mawkcc_self.c\" > \"$SELF_REBUILT_OBJ\""
 "$SELF_BIN" -c "$ROOT/mawkcc_self.c" > "$SELF_REBUILT_OBJ"
@@ -66,8 +64,8 @@ if ! cmp -s "$SELF_OBJ" "$SELF_REBUILT_OBJ"; then
     exit 1
 fi
 
-log_cmd "cc -m32 -no-pie \"$SELF_GCC_OBJ\" \"$GCC_SUPPORT_OBJ\" \"$ANSI_OBJ\" -o \"$SELF_GCC_BIN\""
-cc -m32 -no-pie "$SELF_GCC_OBJ" "$GCC_SUPPORT_OBJ" "$ANSI_OBJ" -o "$SELF_GCC_BIN"
+log_cmd "cc -m32 -no-pie \"$SELF_GCC_OBJ\" \"$GCC_SUPPORT_OBJ\" -o \"$SELF_GCC_BIN\""
+cc -m32 -no-pie "$SELF_GCC_OBJ" "$GCC_SUPPORT_OBJ" -o "$SELF_GCC_BIN"
 
 log_cmd "\"$SELF_GCC_BIN\" -c \"$ROOT/mawkcc_self.c\" > \"$SELF_GCC_REBUILT_OBJ\""
 "$SELF_GCC_BIN" -c "$ROOT/mawkcc_self.c" > "$SELF_GCC_REBUILT_OBJ"
