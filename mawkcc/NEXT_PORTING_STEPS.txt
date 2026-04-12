@@ -5,38 +5,12 @@ Remove a step from this file after it is completed.
 
 Line counts are estimates of implementation lines that can be removed
 from mawkcc_ansi.c when the step is completed. The major parser, lexer,
-object builder, executable builder, string registration, code_reset, and
-most self-owned state-array work have already been completed.
+object builder, executable builder, string registration, code_reset,
+source-file reading, final binary emission, low-level code/binary
+emission, binary reset, and self-owned state-array/buffer work have
+already been completed.
 
-1. Port final binary emission.
-   Estimated mawkcc_ansi.c reduction: 7 lines.
-   Notes: emit_binary is small, but it depends on stdout/fwrite/failure
-   handling. It can stay as an ANSI-side system boundary, or be moved only
-   by adding a small C wrapper that self code calls.
-
-2. Port source-file reading.
-   Estimated mawkcc_ansi.c reduction: 40 lines.
-   Notes: read_file and read_source are stdio-heavy. This is a system
-   boundary and is not a high-value self-hosting target unless file I/O
-   wrappers are added or reused.
-
-3. Consolidate or reduce ANSI-side diagnostic wrappers.
-   Estimated mawkcc_ansi.c reduction: 80 lines.
-   Notes: Many fail_* wrappers now exist so self-side code can avoid C
-   varargs. These can be reduced only after deciding whether diagnostics
-   remain an ANSI boundary or whether a self-side reporting strategy is
-   acceptable. This may affect error text.
-
-4. Port low-level byte emitters emit1, emit4, and patch4.
-   Estimated mawkcc_ansi.c reduction: 25 lines.
-   Notes: This requires moving code[] backing storage to self-owned or
-   self-addressable memory and preserving exact 32-bit unsigned byte
-   packing for negative relocations. The current dialect has no modulo or
-   unsigned shift operations, so this likely needs a support wrapper or a
-   deliberate dialect/runtime addition.
-
-5. Move the final large backing buffers to self-owned storage.
-   Estimated mawkcc_ansi.c reduction: 10 declaration lines.
-   Notes: Most metadata arrays have moved. The main remaining buffers are
-   code[] and binbuf[]. Moving code[] is tied to porting emit1/emit4/patch4.
-   Moving binbuf[] is tied to porting bout1/bout2/bout4/pad_to/emit_binary.
+No currently listed simple porting steps remain. The remaining ANSI-side
+code is mostly process/libc/error-reporting support: allocation wrappers,
+`failf`/`fail_code`, `u32_byte`, `usage`, and global state definitions used
+by the split and pure-GCC builds.
