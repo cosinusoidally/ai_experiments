@@ -259,6 +259,8 @@ void fail_global_initialized(const char *name);
 void fail_global_after_function(const char *name);
 void fail_duplicate_global(const char *name);
 void fail_unknown_relocation_symbol(const char *name);
+void fail_code_page_overflow(void);
+void fail_data_page_overflow(void);
 
 static void failf(const char *fmt, ...)
 {
@@ -649,6 +651,16 @@ void fail_unknown_relocation_symbol(const char *name)
     failf("relocation references unknown symbol `%s`", name);
 }
 
+void fail_code_page_overflow(void)
+{
+    failf("program too large for fixed code page");
+}
+
+void fail_data_page_overflow(void)
+{
+    failf("program data too large for fixed data page");
+}
+
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
 {
     int i;
@@ -877,63 +889,6 @@ void pad_to(unsigned long n)
 static unsigned long align4(unsigned long n)
 {
     return ((n + 3UL) / 4UL) * 4UL;
-}
-
-void build_binary(void)
-{
-    unsigned long base;
-    unsigned long ehsize;
-    unsigned long phsize;
-    unsigned long headers;
-    unsigned long entry;
-    unsigned long filesz;
-    unsigned long memsz;
-    unsigned long flags;
-    long rel;
-    long i;
-    int main_index;
-
-    base = 134512640UL;
-    ehsize = 52UL;
-    phsize = 32UL;
-    headers = ehsize + phsize;
-    entry = base + headers;
-    filesz = 4096UL + data_used;
-    memsz = 8192UL;
-    flags = 7UL;
-
-    if (headers + (unsigned long)code_len > 4096UL) {
-        failf("program too large for fixed code page");
-    }
-    if (data_used > 4096UL) {
-        failf("program data too large for fixed data page");
-    }
-
-    main_index = find_symbol(functions, function_count, "main");
-    if (main_index < 0) {
-        failf("missing `main` function");
-    }
-    rel = functions[main_index].value - (start_call_patch + 4);
-    patch4(start_call_patch, rel);
-
-    bin_reset();
-    bout1(127); bout1(69); bout1(76); bout1(70);
-    bout1(1); bout1(1); bout1(1); bout1(0);
-    bout1(0); bout1(0); bout1(0); bout1(0);
-    bout1(0); bout1(0); bout1(0); bout1(0);
-    bout2(2); bout2(3); bout4(1); bout4((long)entry); bout4((long)ehsize); bout4(0); bout4(0);
-    bout2(ehsize); bout2(phsize); bout2(1); bout2(0); bout2(0); bout2(0);
-    bout4(1); bout4(0); bout4((long)base); bout4((long)base); bout4((long)filesz); bout4((long)memsz); bout4((long)flags); bout4(4096);
-
-    for (i = 0; i < code_len; i++) {
-        bout1(code[i]);
-    }
-    while (bin_len < 4096) {
-        bout1(0);
-    }
-    for (i = 0; i < (long)data_used; i++) {
-        bout1(data_byte[i]);
-    }
 }
 
 void emit_binary(void)

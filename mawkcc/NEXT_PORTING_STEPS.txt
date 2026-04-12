@@ -45,39 +45,32 @@ that may still be needed while other C-side code remains.
    strtoul, keyword recognition, and diagnostics. It is probably easiest
    after token text helpers are moved.
 
-6. Port executable ELF build helpers and build_binary.
-   Estimated mawkcc_ansi.c reduction: 105 lines.
-   Notes: This includes bin_reset, bout1, bout2, bout4, boutstr, pad_to,
-   align4, and build_binary. It needs binbuf/bin_len/code/data_byte access
-   from self-side code. It is medium risk because the generated executable
-   bytes must remain bit-identical.
-
-7. Port final binary emission.
+6. Port final binary emission.
    Estimated mawkcc_ansi.c reduction: 7 lines.
    Notes: emit_binary is small, but it depends on stdout/fwrite/failure
    handling. It can either stay as an ANSI-side system boundary or be moved
    with a small C wrapper.
 
-8. Port source-file reading.
+7. Port source-file reading.
    Estimated mawkcc_ansi.c reduction: 40 lines.
    Notes: read_file and read_source are mostly C stdio. This is a system
    boundary and not a high-value self-hosting target unless file I/O
    wrappers are added or reused.
 
-9. Consolidate or reduce ANSI-side diagnostic wrappers.
+8. Consolidate or reduce ANSI-side diagnostic wrappers.
    Estimated mawkcc_ansi.c reduction: 80 lines.
    Notes: Many small fail_* wrappers now exist so self-side code can avoid
    C varargs. These can be reduced only after deciding whether diagnostics
    remain an ANSI boundary or whether a self-side reporting strategy is
    acceptable. This is not a pure porting step and may affect error text.
 
-10. Port low-level byte emitters emit1, emit4, and patch4.
+9. Port low-level byte emitters emit1, emit4, and patch4.
     Estimated mawkcc_ansi.c reduction: 25 lines.
     Notes: This requires moving code[] backing storage to self-owned or
     self-addressable memory, plus preserving bounds checks and exact byte
     writes. It is best grouped with binary/object builder work.
 
-11. Move remaining large global arrays to self-owned storage.
+10. Move remaining large global arrays to self-owned storage.
     Estimated mawkcc_ansi.c reduction: 40 declaration lines.
     Notes: Candidate arrays include globals, functions, function_arities,
     externals, external_types, current_params, current_param_offsets,

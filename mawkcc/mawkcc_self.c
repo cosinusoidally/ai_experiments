@@ -861,6 +861,49 @@ function build_object_emit_data_(i) {
     return 0;
 }
 
+function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flags, main_index, rel) {
+    base = 134512640;
+    ehsize = 52;
+    phsize = 32;
+    headers = add(ehsize, phsize);
+    entry = add(base, headers);
+    filesz = add(4096, data_used);
+    memsz = 8192;
+    flags = 7;
+
+    if (gt(add(headers, code_len), 4096)) {
+        fail_code_page_overflow();
+    }
+    if (gt(data_used, 4096)) {
+        fail_data_page_overflow();
+    }
+
+    main_index = find_symbol(functions_p, function_count, mks("main"));
+    if (lt(main_index, 0)) {
+        fail_missing_main();
+    }
+    rel = sub(sym_val(add(functions_p, mul(main_index, 8))), add(start_call_patch, 4));
+    patch4(start_call_patch, rel);
+
+    bin_reset();
+    bout1(127); bout1(69); bout1(76); bout1(70);
+    bout1(1); bout1(1); bout1(1); bout1(0);
+    bout1(0); bout1(0); bout1(0); bout1(0);
+    bout1(0); bout1(0); bout1(0); bout1(0);
+    bout2(2); bout2(3); bout4(1); bout4(entry); bout4(ehsize); bout4(0); bout4(0);
+    bout2(ehsize); bout2(phsize); bout2(1); bout2(0); bout2(0); bout2(0);
+    bout4(1); bout4(0); bout4(base); bout4(base); bout4(filesz); bout4(memsz); bout4(flags); bout4(4096);
+
+    build_object_emit_code_(0);
+    pad_to(4096);
+    build_object_emit_data_(0);
+    return 0;
+}
+
+function build_binary() {
+    return build_binary_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+}
+
 function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {
     while (lt(ri, reloc_count)) {
         name = ri32(add(reloc_names_p, mul(ri, 4)));
