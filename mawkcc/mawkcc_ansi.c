@@ -95,6 +95,7 @@ static int break_patch_count;
 static unsigned long global_bytes;
 static long start_call_patch;
 int output_object;
+char *dash_c;
 
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
@@ -214,7 +215,7 @@ static int push_loop(void);
 static void pop_loop(void);
 static void record_break(int loop_id, long patch_pos);
 static void patch_breaks(int loop_id, long target);
-static int find_symbol(struct Symbol *arr, int count, const char *name);
+int find_symbol(struct Symbol *arr, int count, const char *name);
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind);
 static char *read_file(const char *path, long *len_out);
 char *read_source(const char *path);
@@ -524,17 +525,6 @@ void expect(int want)
         failf("expected token %d, got `%s`", want, tok_text);
     }
     next_tok();
-}
-
-static int find_symbol(struct Symbol *arr, int count, const char *name)
-{
-    int i;
-    for (i = 0; i < count; i++) {
-        if (strcmp(arr[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return -1;
 }
 
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
@@ -1173,8 +1163,8 @@ static void emit_mks_literal(const char *text)
     emit_mov_eax_imm32((long)register_string(text));
 }
 
-static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); }
-static void emit_epilogue(void) { emit1(137); emit1(236); emit1(93); emit1(195); }
+static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); emit_push_ebx(); }
+static void emit_epilogue(void) { emit1(139); emit1(93); emit1(252); emit1(137); emit1(236); emit1(93); emit1(195); }
 static void emit_test_eax_eax(void) { emit1(133); emit1(192); }
 
 void emit_start(void)
@@ -1652,6 +1642,12 @@ static char *read_file(const char *path, long *len_out)
 char *read_source(const char *path)
 {
     return read_file(path, &src_len);
+}
+
+char *dash_c_string(void)
+{
+    static char s[] = "-c";
+    return s;
 }
 
 int usage(const char *program)

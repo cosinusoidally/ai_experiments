@@ -19,7 +19,7 @@ rm -f "$CC_BIN" "$SELF_OBJ" "$SELF_GCC_OBJ" "$ANSI_OBJ" "$SELF_BIN" \
 
 cc -ansi -m32 -g -O0 "$ROOT/mawkcc_orig.c" -o "$CC_BIN"
 mawk -v format=obj -f "$ROOT/cc.awk" "$ROOT/mawkcc_self.c" > "$SELF_OBJ"
-cc -ansi -m32 -Dfunction=int -Dvar=extern -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
+cc -ansi -m32 -Dfunction=int -Dvar=extern -Wno-int-conversion -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
 cc -ansi -m32 -g -O0 -c "$ROOT/mawkcc_ansi.c" -o "$ANSI_OBJ"
 cc -m32 -no-pie "$SELF_OBJ" "$ANSI_OBJ" -o "$SELF_BIN"
 

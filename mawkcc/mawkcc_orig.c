@@ -1172,8 +1172,8 @@ static void emit_mks_literal(const char *text)
     emit_mov_eax_imm32((long)register_string(text));
 }
 
-static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); }
-static void emit_epilogue(void) { emit1(137); emit1(236); emit1(93); emit1(195); }
+static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); emit_push_ebx(); }
+static void emit_epilogue(void) { emit1(139); emit1(93); emit1(252); emit1(137); emit1(236); emit1(93); emit1(195); }
 static void emit_test_eax_eax(void) { emit1(133); emit1(192); }
 
 static void emit_start(void)

@@ -746,9 +746,13 @@ function emit_prologue() {
     emit1(85)
     emit1(137)
     emit1(229)
+    emit_push_ebx()
 }
 
 function emit_epilogue() {
+    emit1(139)
+    emit1(93)
+    emit1(252)
     emit1(137)
     emit1(236)
     emit1(93)
