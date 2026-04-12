@@ -1,4 +1,29 @@
 var output_object;
+var src;
+var tok_text;
+var tok_text_cap;
+
+function compile(source_path) {
+    tok_text = 0;
+    tok_text_cap = 0;
+    src = read_source(source_path);
+    init_lexer();
+    code_reset();
+    next_tok();
+    if (not(output_object)) {
+        emit_start();
+    }
+    parse_program();
+    expect(0);
+    patch_calls();
+    if (output_object) {
+        build_object();
+    } else {
+        build_binary();
+    }
+    emit_binary();
+    return 0;
+}
 
 function main_(argc, argv, arg1) {
     if (eq(argc, 2)) {

@@ -43,13 +43,13 @@ struct Symbol {
     long value;
 };
 
-static char *src;
+char *src;
 static long src_len;
 static long idx_pos;
 static long tok_pos;
 static int tok;
-static char *tok_text;
-static long tok_text_cap;
+char *tok_text;
+long tok_text_cap;
 static unsigned long tok_num;
 
 static unsigned char code[MAX_CODE];
@@ -103,16 +103,16 @@ static char *xstrdup(const char *s);
 static void set_tok_text_len(const char *s, size_t n);
 static void set_tok_text_cstr(const char *s);
 static unsigned long u32(long v);
-static void init_lexer(void);
-static void next_tok(void);
+void init_lexer(void);
+void next_tok(void);
 static void read_string_token(void);
 static int is_space_char(int ch);
 static int is_digit_char(int ch);
 static int is_alpha_char(int ch);
 static int is_alnum_char(int ch);
 static void skip_ws_and_comments(void);
-static void expect(int want);
-static void parse_program(void);
+void expect(int want);
+void parse_program(void);
 static void parse_global(void);
 static void parse_function(void);
 static void enter_function(const char *name, int param_count, char **param_names);
@@ -132,10 +132,10 @@ static void emit_user_call(const char *name, int argc);
 static void emit_builtin1(const char *name);
 static void emit_builtin2(const char *name);
 static void emit_builtin3(const char *name);
-static void patch_calls(void);
+void patch_calls(void);
 static void record_external(const char *name, int type);
 static void record_reloc(long offset, const char *name, long type);
-static void code_reset(void);
+void code_reset(void);
 static void emit1(unsigned long b);
 static void emit4(long v);
 static void patch4(long pos, long v);
@@ -153,7 +153,7 @@ static unsigned long register_string(const char *text);
 static void emit_prologue(void);
 static void emit_epilogue(void);
 static void emit_test_eax_eax(void);
-static void emit_start(void);
+void emit_start(void);
 static void emit_add_esp_imm32(long v);
 static void emit_mov_eax_esp(void);
 static void emit_mov_ebx_ptr_esp(void);
@@ -207,9 +207,9 @@ static void bout4(long v);
 static void boutstr(const char *s);
 static void pad_to(unsigned long n);
 static unsigned long align4(unsigned long n);
-static void build_binary(void);
-static void build_object(void);
-static void emit_binary(void);
+void build_binary(void);
+void build_object(void);
+void emit_binary(void);
 static int push_loop(void);
 static void pop_loop(void);
 static void record_break(int loop_id, long patch_pos);
@@ -217,6 +217,7 @@ static void patch_breaks(int loop_id, long target);
 static int find_symbol(struct Symbol *arr, int count, const char *name);
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind);
 static char *read_file(const char *path, long *len_out);
+char *read_source(const char *path);
 
 static void failf(const char *fmt, ...)
 {
@@ -328,7 +329,7 @@ static int is_alnum_char(int ch)
     return is_alpha_char(ch) || is_digit_char(ch);
 }
 
-static void init_lexer(void)
+void init_lexer(void)
 {
     idx_pos = 0;
 }
@@ -420,7 +421,7 @@ static void read_string_token(void)
     failf("unterminated string literal");
 }
 
-static void next_tok(void)
+void next_tok(void)
 {
     long start;
     skip_ws_and_comments();
@@ -517,7 +518,7 @@ static void next_tok(void)
     failf("unexpected character `%c`", src[idx_pos]);
 }
 
-static void expect(int want)
+void expect(int want)
 {
     if (tok != want) {
         failf("expected token %d, got `%s`", want, tok_text);
@@ -546,7 +547,7 @@ static long must_find_symbol_value(struct Symbol *arr, int count, const char *na
     return arr[i].value;
 }
 
-static void parse_program(void)
+void parse_program(void)
 {
     while (tok != TOK_EOF) {
         if (tok == TOK_VAR) {
@@ -1004,7 +1005,7 @@ static void emit_builtin3(const char *name)
     else failf("unknown ternary builtin `%s`", name);
 }
 
-static void patch_calls(void)
+void patch_calls(void)
 {
     int i;
     for (i = 0; i < call_count; i++) {
@@ -1063,7 +1064,7 @@ static void record_reloc(long offset, const char *name, long type)
     reloc_count++;
 }
 
-static void code_reset(void)
+void code_reset(void)
 {
     memset(code, 0, sizeof(code));
     memset(data_byte, 0, sizeof(data_byte));
@@ -1176,7 +1177,7 @@ static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); }
 static void emit_epilogue(void) { emit1(137); emit1(236); emit1(93); emit1(195); }
 static void emit_test_eax_eax(void) { emit1(133); emit1(192); }
 
-static void emit_start(void)
+void emit_start(void)
 {
     emit_mov_eax_esp();
     emit_mov_ebx_ptr_esp();
@@ -1365,7 +1366,7 @@ static unsigned long align4(unsigned long n)
     return ((n + 3UL) / 4UL) * 4UL;
 }
 
-static void build_binary(void)
+void build_binary(void)
 {
     unsigned long base;
     unsigned long ehsize;
@@ -1422,7 +1423,7 @@ static void build_binary(void)
     }
 }
 
-static void build_object(void)
+void build_object(void)
 {
     unsigned long ehsize;
     unsigned long shentsize;
@@ -1571,7 +1572,7 @@ static void build_object(void)
     bout4(44); bout4(3); bout4(0); bout4(0); bout4((long)shstrtab_off); bout4((long)shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
 }
 
-static void emit_binary(void)
+void emit_binary(void)
 {
     if (fwrite(binbuf, 1, (size_t)bin_len, stdout) != (size_t)bin_len) {
         fprintf(stderr, "write failed\n");
@@ -1648,31 +1649,13 @@ static char *read_file(const char *path, long *len_out)
     return buf;
 }
 
+char *read_source(const char *path)
+{
+    return read_file(path, &src_len);
+}
+
 int usage(const char *program)
 {
     fprintf(stderr, "usage: %s [-c] source\n", program);
     return 1;
-}
-
-int compile(const char *source_path)
-{
-    tok_text = 0;
-    tok_text_cap = 0;
-    src = read_file(source_path, &src_len);
-    init_lexer();
-    code_reset();
-    next_tok();
-    if (!output_object) {
-        emit_start();
-    }
-    parse_program();
-    expect(TOK_EOF);
-    patch_calls();
-    if (output_object) {
-        build_object();
-    } else {
-        build_binary();
-    }
-    emit_binary();
-    return 0;
 }
