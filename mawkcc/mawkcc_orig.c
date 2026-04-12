@@ -157,6 +157,11 @@ static void emit_start(void);
 static void emit_add_esp_imm32(long v);
 static void emit_mov_eax_esp(void);
 static void emit_mov_ebx_ptr_esp(void);
+static void emit_mov_eax_stack_disp32(long disp);
+static void emit_mov_ebx_stack_disp32(long disp);
+static void emit_mov_stack_disp32_ebx(long disp);
+static void emit_mov_stack_disp32_eax(long disp);
+static void emit_reverse_args(int argc);
 static long emit_je_placeholder(void);
 static long emit_jne_placeholder(void);
 static long emit_jmp_placeholder(void);
@@ -599,7 +604,7 @@ static void enter_function(const char *name, int param_count, char **param_names
     current_returned = 0;
     for (i = 0; i < param_count; i++) {
         current_params[i] = xstrdup(param_names[i]);
-        current_param_offsets[i] = 8 + 4 * (param_count - (i + 1));
+        current_param_offsets[i] = 8 + 4 * i;
     }
 }
 
@@ -910,6 +915,7 @@ static int parse_user_call_args(void)
         next_tok();
     }
     expect(TOK_RPAREN);
+    emit_reverse_args(argc);
     return argc;
 }
 
@@ -1175,8 +1181,8 @@ static void emit_start(void)
     emit_mov_eax_esp();
     emit_mov_ebx_ptr_esp();
     emit_add_eax_imm32(4);
-    emit_push_ebx();
     emit_push_eax();
+    emit_push_ebx();
     emit1(232);
     start_call_patch = code_len;
     emit4(0);
@@ -1192,6 +1198,25 @@ static void emit_start(void)
 static void emit_add_esp_imm32(long v) { emit1(129); emit1(196); emit4(v); }
 static void emit_mov_eax_esp(void) { emit1(137); emit1(224); }
 static void emit_mov_ebx_ptr_esp(void) { emit1(139); emit1(28); emit1(36); }
+static void emit_mov_eax_stack_disp32(long disp) { emit1(139); emit1(132); emit1(36); emit4(disp); }
+static void emit_mov_ebx_stack_disp32(long disp) { emit1(139); emit1(156); emit1(36); emit4(disp); }
+static void emit_mov_stack_disp32_ebx(long disp) { emit1(137); emit1(156); emit1(36); emit4(disp); }
+static void emit_mov_stack_disp32_eax(long disp) { emit1(137); emit1(132); emit1(36); emit4(disp); }
+
+static void emit_reverse_args(int argc)
+{
+    int i;
+    for (i = 0; i < argc / 2; i++) {
+        long lo;
+        long hi;
+        lo = 4 * i;
+        hi = 4 * (argc - 1 - i);
+        emit_mov_eax_stack_disp32(lo);
+        emit_mov_ebx_stack_disp32(hi);
+        emit_mov_stack_disp32_ebx(lo);
+        emit_mov_stack_disp32_eax(hi);
+    }
+}
 static long emit_je_placeholder(void) { emit1(15); emit1(132); { long p = code_len; emit4(0); return p; } }
 static long emit_jne_placeholder(void) { emit1(15); emit1(133); { long p = code_len; emit4(0); return p; } }
 static long emit_jmp_placeholder(void) { emit1(233); { long p = code_len; emit4(0); return p; } }

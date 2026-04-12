@@ -280,7 +280,7 @@ function enter_function(name, param_count,    i, p) {
     delete current_param_offset
     for (i = 1; i <= param_count; i++) {
         p = param_name[i]
-        current_param_offset[p] = 8 + 4 * (param_count - i)
+        current_param_offset[p] = 8 + 4 * (i - 1)
         delete param_index[p]
         delete param_name[i]
     }
@@ -485,6 +485,7 @@ function parse_user_call_args(    argc) {
         next_tok()
     }
     expect(")")
+    emit_reverse_args(argc)
     return argc
 }
 
@@ -511,6 +512,17 @@ function emit_user_call(name, argc,    call_site) {
     call_target[++call_count] = name
     call_pos[call_count] = call_site + 1
     call_argc[call_count] = argc
+}
+
+function emit_reverse_args(argc,    i, lo, hi) {
+    for (i = 0; i < int(argc / 2); i++) {
+        lo = 4 * i
+        hi = 4 * (argc - 1 - i)
+        emit_mov_eax_stack_disp32(lo)
+        emit_mov_ebx_stack_disp32(hi)
+        emit_mov_stack_disp32_ebx(lo)
+        emit_mov_stack_disp32_eax(hi)
+    }
 }
 
 function emit_builtin1(name) {
@@ -752,8 +764,8 @@ function emit_start() {
     emit_mov_eax_esp()
     emit_mov_ebx_ptr_esp()
     emit_add_eax_imm32(4)
-    emit_push_ebx()
     emit_push_eax()
+    emit_push_ebx()
     emit1(232)
     start_call_patch = code_len + 1
     emit4(0)
@@ -781,6 +793,34 @@ function emit_mov_ebx_ptr_esp() {
     emit1(139)
     emit1(28)
     emit1(36)
+}
+
+function emit_mov_eax_stack_disp32(disp) {
+    emit1(139)
+    emit1(132)
+    emit1(36)
+    emit4(disp)
+}
+
+function emit_mov_ebx_stack_disp32(disp) {
+    emit1(139)
+    emit1(156)
+    emit1(36)
+    emit4(disp)
+}
+
+function emit_mov_stack_disp32_ebx(disp) {
+    emit1(137)
+    emit1(156)
+    emit1(36)
+    emit4(disp)
+}
+
+function emit_mov_stack_disp32_eax(disp) {
+    emit1(137)
+    emit1(132)
+    emit1(36)
+    emit4(disp)
 }
 
 function emit_je_placeholder(    pos) {

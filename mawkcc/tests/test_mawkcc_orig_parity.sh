@@ -8,9 +8,14 @@ SELF_OBJ=$ARTIFACTS/mawkcc_self.o
 SELF_GCC_OBJ=$ARTIFACTS/mawkcc_self.gcc.o
 ANSI_OBJ=$ARTIFACTS/mawkcc_ansi.o
 SELF_BIN=$ARTIFACTS/mawkcc.exe
+OBJ_SRC=$ARTIFACTS/parity_obj.c
+AWK_OBJ_OUT=$ARTIFACTS/parity_obj.awk.o
+C_OBJ_OUT=$ARTIFACTS/parity_obj.c.o
+SELF_OBJ_OUT=$ARTIFACTS/parity_obj.self.o
 
 mkdir -p "$ARTIFACTS"
-rm -f "$CC_BIN" "$SELF_OBJ" "$SELF_GCC_OBJ" "$ANSI_OBJ" "$SELF_BIN"
+rm -f "$CC_BIN" "$SELF_OBJ" "$SELF_GCC_OBJ" "$ANSI_OBJ" "$SELF_BIN" \
+    "$OBJ_SRC" "$AWK_OBJ_OUT" "$C_OBJ_OUT" "$SELF_OBJ_OUT"
 
 cc -ansi -m32 -g -O0 "$ROOT/mawkcc_orig.c" -o "$CC_BIN"
 mawk -v format=obj -f "$ROOT/cc.awk" "$ROOT/mawkcc_self.c" > "$SELF_OBJ"
@@ -41,4 +46,25 @@ for src in "$ROOT"/examples/*.c; do
     fi
 done
 
-echo "ok: cc.awk, mawkcc_orig, and split mawkcc emit bit-identical binaries for examples"
+cat > "$OBJ_SRC" <<'EOF'
+function answer() {
+    return 42;
+}
+EOF
+
+mawk -v format=obj -f "$ROOT/cc.awk" "$OBJ_SRC" > "$AWK_OBJ_OUT"
+"$CC_BIN" -c "$OBJ_SRC" > "$C_OBJ_OUT"
+"$SELF_BIN" -c "$OBJ_SRC" > "$SELF_OBJ_OUT"
+
+if ! cmp -s "$AWK_OBJ_OUT" "$C_OBJ_OUT"; then
+    echo "mawkcc_orig object output differs from cc.awk for $OBJ_SRC" >&2
+    cmp -l "$AWK_OBJ_OUT" "$C_OBJ_OUT" | sed -n '1,20p' >&2
+    exit 1
+fi
+if ! cmp -s "$AWK_OBJ_OUT" "$SELF_OBJ_OUT"; then
+    echo "split mawkcc object output differs from cc.awk for $OBJ_SRC" >&2
+    cmp -l "$AWK_OBJ_OUT" "$SELF_OBJ_OUT" | sed -n '1,20p' >&2
+    exit 1
+fi
+
+echo "ok: cc.awk, mawkcc_orig, and split mawkcc emit bit-identical executable and object outputs"

@@ -45,6 +45,7 @@ Current implemented scope:
 - object output can call functions supplied by other object files and
   can read/write external 32-bit integer variables declared with
   `var name;`
+- generated function calls use the i386 System V cdecl argument order
 
 Current non-goals:
 
@@ -112,7 +113,9 @@ cc -m32 -no-pie driver.o source.o -o linked-program
 In object mode, `var name;` declares an external 32-bit integer symbol
 rather than allocating compiler-owned storage. Undefined function calls
 are emitted as external `R_386_PC32` relocations, and external integer
-loads/stores are emitted as `R_386_32` relocations.
+loads/stores are emitted as `R_386_32` relocations. Function arguments
+are pushed right-to-left and read at standard cdecl stack offsets, so
+mawkcc-generated objects can call and be called by GCC-built i386 code.
 
 The C reference implementation must also be built as a 32-bit ANSI C
 program:
