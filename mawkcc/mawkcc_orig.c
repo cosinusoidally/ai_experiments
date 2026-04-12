@@ -15,6 +15,7 @@
 #define MAX_PARAMS 1024
 #define MAX_BREAKS 8192
 #define MAX_LOOPS 1024
+#define MAX_RELOCS 8192
 
 enum {
     TOK_EOF = 0,
@@ -64,6 +65,9 @@ static int global_count;
 static struct Symbol functions[MAX_SYMS];
 static struct Symbol function_arities[MAX_SYMS];
 static int function_count;
+static struct Symbol externals[MAX_SYMS];
+static int external_types[MAX_SYMS];
+static int external_count;
 
 static char *current_params[MAX_PARAMS];
 static long current_param_offsets[MAX_PARAMS];
@@ -75,6 +79,11 @@ static char *call_target[MAX_CALLS];
 static long call_pos[MAX_CALLS];
 static long call_argc[MAX_CALLS];
 static int call_count;
+
+static long reloc_offsets[MAX_RELOCS];
+static char *reloc_names[MAX_RELOCS];
+static long reloc_types[MAX_RELOCS];
+static int reloc_count;
 
 static int loop_stack[MAX_LOOPS];
 static int loop_depth;
@@ -124,6 +133,8 @@ static void emit_builtin1(const char *name);
 static void emit_builtin2(const char *name);
 static void emit_builtin3(const char *name);
 static void patch_calls(void);
+static void record_external(const char *name, int type);
+static void record_reloc(long offset, const char *name, long type);
 static void code_reset(void);
 static void emit1(unsigned long b);
 static void emit4(long v);
@@ -564,6 +575,11 @@ static void parse_global(void)
         failf("duplicate global `%s`", name);
     }
     globals[global_count].name = name;
+    if (output_object) {
+        globals[global_count].value = 0;
+        global_count++;
+        return;
+    }
     globals[global_count].value = (long)global_bytes;
     global_count++;
     global_bytes += 4;
@@ -992,6 +1008,12 @@ static void patch_calls(void)
         long rel;
         fi = find_symbol(functions, function_count, call_target[i]);
         if (fi < 0) {
+            if (output_object) {
+                patch4(call_pos[i], -4);
+                record_external(call_target[i], 18);
+                record_reloc(call_pos[i], call_target[i], 2);
+                continue;
+            }
             failf("call to undefined function `%s`", call_target[i]);
         }
         addr = functions[fi].value;
@@ -1004,6 +1026,37 @@ static void patch_calls(void)
     }
 }
 
+static void record_external(const char *name, int type)
+{
+    int i;
+    if (find_symbol(functions, function_count, name) >= 0) {
+        return;
+    }
+    for (i = 0; i < external_count; i++) {
+        if (strcmp(externals[i].name, name) == 0) {
+            return;
+        }
+    }
+    if (external_count >= MAX_SYMS) {
+        failf("external symbol overflow");
+    }
+    externals[external_count].name = xstrdup(name);
+    externals[external_count].value = external_count;
+    external_types[external_count] = type;
+    external_count++;
+}
+
+static void record_reloc(long offset, const char *name, long type)
+{
+    if (reloc_count >= MAX_RELOCS) {
+        failf("relocation overflow");
+    }
+    reloc_offsets[reloc_count] = offset;
+    reloc_names[reloc_count] = xstrdup(name);
+    reloc_types[reloc_count] = type;
+    reloc_count++;
+}
+
 static void code_reset(void)
 {
     memset(code, 0, sizeof(code));
@@ -1012,6 +1065,8 @@ static void code_reset(void)
     call_count = 0;
     global_count = 0;
     function_count = 0;
+    external_count = 0;
+    reloc_count = 0;
     global_bytes = RUNTIME_BYTES;
     next_data_offset = RUNTIME_BYTES;
     data_used = RUNTIME_BYTES;
@@ -1062,6 +1117,12 @@ static void emit_load_global(const char *name)
     long off;
     off = must_find_symbol_value(globals, global_count, name, "global");
     emit1(161);
+    if (output_object) {
+        record_external(name, 17);
+        record_reloc(code_len, name, 1);
+        emit4(0);
+        return;
+    }
     emit4((long)(DATA_BASE + (unsigned long)off));
 }
 
@@ -1070,6 +1131,12 @@ static void emit_store_global(const char *name)
     long off;
     off = must_find_symbol_value(globals, global_count, name, "global");
     emit1(163);
+    if (output_object) {
+        record_external(name, 17);
+        record_reloc(code_len, name, 1);
+        emit4(0);
+        return;
+    }
     emit4((long)(DATA_BASE + (unsigned long)off));
 }
 
@@ -1337,6 +1404,7 @@ static void build_object(void)
     unsigned long shnum;
     unsigned long shstrndx;
     unsigned long text_off;
+    unsigned long rel_off;
     unsigned long symtab_off;
     unsigned long strtab_off;
     unsigned long shstrtab_off;
@@ -1345,31 +1413,43 @@ static void build_object(void)
     unsigned long shstrtab_size;
     unsigned long sym_count;
     unsigned long symtab_size;
+    unsigned long rel_size;
     unsigned long sym_name_off[MAX_SYMS];
+    unsigned long sym_index[MAX_SYMS];
     long start;
     long next_start;
     long size;
     int i;
+    int ri;
+    int si;
 
-    if (global_bytes != RUNTIME_BYTES || data_used != RUNTIME_BYTES) {
-        failf("object output does not support globals or string data yet");
+    if (data_used != RUNTIME_BYTES) {
+        failf("object output does not support string data yet");
     }
 
     ehsize = 52UL;
     shentsize = 40UL;
-    shnum = 5UL;
-    shstrndx = 4UL;
+    shnum = 8UL;
+    shstrndx = 7UL;
     strtab_size = 1UL;
     for (i = 0; i < function_count; i++) {
+        sym_index[i] = (unsigned long)i + 1UL;
         sym_name_off[i] = strtab_size;
         strtab_size += (unsigned long)strlen(functions[i].name) + 1UL;
     }
-    shstrtab_size = 33UL;
-    sym_count = (unsigned long)function_count + 1UL;
+    for (i = 0; i < external_count; i++) {
+        sym_index[function_count + i] = (unsigned long)function_count + (unsigned long)i + 1UL;
+        sym_name_off[function_count + i] = strtab_size;
+        strtab_size += (unsigned long)strlen(externals[i].name) + 1UL;
+    }
+    shstrtab_size = 54UL;
+    sym_count = (unsigned long)function_count + (unsigned long)external_count + 1UL;
     symtab_size = sym_count * 16UL;
+    rel_size = (unsigned long)reloc_count * 8UL;
 
     text_off = ehsize;
-    symtab_off = align4(text_off + (unsigned long)code_len);
+    rel_off = align4(text_off + (unsigned long)code_len);
+    symtab_off = rel_off + rel_size;
     strtab_off = symtab_off + symtab_size;
     shstrtab_off = strtab_off + strtab_size;
     shoff = align4(shstrtab_off + shstrtab_size);
@@ -1385,6 +1465,22 @@ static void build_object(void)
 
     for (i = 0; i < code_len; i++) {
         bout1(code[i]);
+    }
+
+    pad_to(rel_off);
+    for (ri = 0; ri < reloc_count; ri++) {
+        si = find_symbol(functions, function_count, reloc_names[ri]);
+        if (si >= 0) {
+            bout4(reloc_offsets[ri]);
+            bout4((long)(sym_index[si] * 256UL + (unsigned long)reloc_types[ri]));
+            continue;
+        }
+        si = find_symbol(externals, external_count, reloc_names[ri]);
+        if (si < 0) {
+            failf("relocation references unknown symbol `%s`", reloc_names[ri]);
+        }
+        bout4(reloc_offsets[ri]);
+        bout4((long)(sym_index[function_count + si] * 256UL + (unsigned long)reloc_types[ri]));
     }
 
     pad_to(symtab_off);
@@ -1407,15 +1503,30 @@ static void build_object(void)
         bout1(0);
         bout2(1);
     }
+    for (i = 0; i < external_count; i++) {
+        bout4((long)sym_name_off[function_count + i]);
+        bout4(0);
+        bout4(0);
+        bout1((unsigned long)external_types[i]);
+        bout1(0);
+        bout2(0);
+    }
 
     bout1(0);
     for (i = 0; i < function_count; i++) {
         boutstr(functions[i].name);
         bout1(0);
     }
+    for (i = 0; i < external_count; i++) {
+        boutstr(externals[i].name);
+        bout1(0);
+    }
 
     bout1(0);
     boutstr(".text"); bout1(0);
+    boutstr(".rel.text"); bout1(0);
+    boutstr(".data"); bout1(0);
+    boutstr(".bss"); bout1(0);
     boutstr(".symtab"); bout1(0);
     boutstr(".strtab"); bout1(0);
     boutstr(".shstrtab"); bout1(0);
@@ -1427,9 +1538,12 @@ static void build_object(void)
     }
 
     bout4(1); bout4(1); bout4(6); bout4(0); bout4((long)text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(7); bout4(2); bout4(0); bout4(0); bout4((long)symtab_off); bout4((long)symtab_size); bout4(3); bout4(1); bout4(4); bout4(16);
-    bout4(15); bout4(3); bout4(0); bout4(0); bout4((long)strtab_off); bout4((long)strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(23); bout4(3); bout4(0); bout4(0); bout4((long)shstrtab_off); bout4((long)shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(7); bout4(9); bout4(64); bout4(0); bout4((long)rel_off); bout4((long)rel_size); bout4(5); bout4(1); bout4(4); bout4(8);
+    bout4(17); bout4(1); bout4(3); bout4(0); bout4((long)(text_off + (unsigned long)code_len)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(23); bout4(8); bout4(3); bout4(0); bout4((long)(text_off + (unsigned long)code_len)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(28); bout4(2); bout4(0); bout4(0); bout4((long)symtab_off); bout4((long)symtab_size); bout4(6); bout4(1); bout4(4); bout4(16);
+    bout4(36); bout4(3); bout4(0); bout4(0); bout4((long)strtab_off); bout4((long)strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(44); bout4(3); bout4(0); bout4(0); bout4((long)shstrtab_off); bout4((long)shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
 }
 
 static void emit_binary(void)

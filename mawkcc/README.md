@@ -42,6 +42,9 @@ Current implemented scope:
   arguments
 - object output exports generated functions as i386 ELF symbols that can
   be linked with GCC-built 32-bit objects
+- object output can call functions supplied by other object files and
+  can read/write external 32-bit integer variables declared with
+  `var name;`
 
 Current non-goals:
 
@@ -52,7 +55,7 @@ Current non-goals:
 - full native toolchain integration beyond the current simple object
   output mode
 - relocatable object support for globals, string data, and external
-  function references
+  data definitions
 
 Local-variable convention:
 
@@ -103,8 +106,13 @@ Object output:
 ```sh
 mawk -v format=obj -f cc.awk source.c > source.o
 cc -m32 -c driver.c -o driver.o
-cc -m32 driver.o source.o -o linked-program
+cc -m32 -no-pie driver.o source.o -o linked-program
 ```
+
+In object mode, `var name;` declares an external 32-bit integer symbol
+rather than allocating compiler-owned storage. Undefined function calls
+are emitted as external `R_386_PC32` relocations, and external integer
+loads/stores are emitted as `R_386_32` relocations.
 
 The C reference implementation must also be built as a 32-bit ANSI C
 program:

@@ -212,6 +212,10 @@ function parse_global(    name) {
     if (global_seen[name] || function_seen[name])
         fail("duplicate global `" name "`")
     global_seen[name] = 1
+    if (format == "obj") {
+        global_external[name] = 1
+        return
+    }
     global_offset[name] = global_bytes
     global_bytes += 4
     if (next_data_offset < global_bytes)
@@ -576,8 +580,15 @@ function patch_calls(    i, name, argc, addr, rel) {
     for (i = 1; i <= call_count; i++) {
         name = call_target[i]
         argc = call_argc[i]
-        if (!function_seen[name])
+        if (!function_seen[name]) {
+            if (format == "obj") {
+                patch4(call_pos[i], -4)
+                record_external(name, "func")
+                record_reloc(call_pos[i] - 1, name, 2)
+                continue
+            }
             fail("call to undefined function `" name "`")
+        }
         if (function_arity[name] != argc)
             fail("function `" name "` called with wrong arity")
         addr = function_addr[name]
@@ -586,9 +597,27 @@ function patch_calls(    i, name, argc, addr, rel) {
     }
 }
 
+function record_external(name, type) {
+    if (function_seen[name])
+        return
+    if (!(name in external_seen)) {
+        external_seen[name] = 1
+        external_name[++external_count] = name
+        external_type[name] = type
+    }
+}
+
+function record_reloc(offset, name, type) {
+    reloc_offset[++reloc_count] = offset
+    reloc_name[reloc_count] = name
+    reloc_type[reloc_count] = type
+}
+
 function code_reset() {
     code_len = 0
     call_count = 0
+    reloc_count = 0
+    external_count = 0
     function_count = 0
     global_bytes = RUNTIME_BYTES
     next_data_offset = RUNTIME_BYTES
@@ -663,11 +692,23 @@ function emit_store_param(offset) {
 
 function emit_load_global(name) {
     emit1(161)
+    if (format == "obj" && global_external[name]) {
+        record_external(name, "object")
+        record_reloc(code_len, name, 1)
+        emit4(0)
+        return
+    }
     emit4(DATA_BASE + global_offset[name])
 }
 
 function emit_store_global(name) {
     emit1(163)
+    if (format == "obj" && global_external[name]) {
+        record_external(name, "object")
+        record_reloc(code_len, name, 1)
+        emit4(0)
+        return
+    }
     emit4(DATA_BASE + global_offset[name])
 }
 
@@ -1099,26 +1140,35 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
     }
 }
 
-function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, symtab_off, strtab_off, shstrtab_off, shoff, strtab_size, shstrtab_size, sym_count, symtab_size, name, start, next_start, size) {
-    if (global_bytes != RUNTIME_BYTES || data_used != RUNTIME_BYTES)
-        fail("object output does not support globals or string data yet")
+function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, rel_off, symtab_off, strtab_off, shstrtab_off, shoff, strtab_size, shstrtab_size, sym_count, symtab_size, rel_size, name, start, next_start, size, sym_index, type_info) {
+    if (data_used != RUNTIME_BYTES)
+        fail("object output does not support string data yet")
 
     ehsize = 52
     shentsize = 40
-    shnum = 5
-    shstrndx = 4
+    shnum = 8
+    shstrndx = 7
     strtab_size = 1
     for (i = 1; i <= function_count; i++) {
         name = function_name[i]
+        sym_index[name] = i
         sym_name_off[i] = strtab_size
         strtab_size += length(name) + 1
     }
-    shstrtab_size = 33
-    sym_count = function_count + 1
+    for (i = 1; i <= external_count; i++) {
+        name = external_name[i]
+        sym_index[name] = function_count + i
+        sym_name_off[function_count + i] = strtab_size
+        strtab_size += length(name) + 1
+    }
+    shstrtab_size = 54
+    sym_count = function_count + external_count + 1
     symtab_size = sym_count * 16
+    rel_size = reloc_count * 8
 
     text_off = ehsize
-    symtab_off = align4(text_off + code_len)
+    rel_off = align4(text_off + code_len)
+    symtab_off = rel_off + rel_size
     strtab_off = symtab_off + symtab_size
     shstrtab_off = strtab_off + strtab_size
     shoff = align4(shstrtab_off + shstrtab_size)
@@ -1147,6 +1197,13 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, symta
     for (i = 1; i <= code_len; i++)
         bout1(code[i])
 
+    pad_to(rel_off)
+    for (i = 1; i <= reloc_count; i++) {
+        name = reloc_name[i]
+        bout4(reloc_offset[i])
+        bout4(sym_index[name] * 256 + reloc_type[i])
+    }
+
     pad_to(symtab_off)
 
     for (i = 0; i < 16; i++)
@@ -1166,15 +1223,34 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, symta
         bout1(0)
         bout2(1)
     }
+    for (i = 1; i <= external_count; i++) {
+        name = external_name[i]
+        type_info = 18
+        if (external_type[name] == "object")
+            type_info = 17
+        bout4(sym_name_off[function_count + i])
+        bout4(0)
+        bout4(0)
+        bout1(type_info)
+        bout1(0)
+        bout2(0)
+    }
 
     bout1(0)
     for (i = 1; i <= function_count; i++) {
         boutstr(function_name[i])
         bout1(0)
     }
+    for (i = 1; i <= external_count; i++) {
+        boutstr(external_name[i])
+        bout1(0)
+    }
 
     bout1(0)
     boutstr(".text"); bout1(0)
+    boutstr(".rel.text"); bout1(0)
+    boutstr(".data"); bout1(0)
+    boutstr(".bss"); bout1(0)
     boutstr(".symtab"); bout1(0)
     boutstr(".strtab"); bout1(0)
     boutstr(".shstrtab"); bout1(0)
@@ -1185,9 +1261,12 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, symta
         bout1(0)
 
     bout4(1); bout4(1); bout4(6); bout4(0); bout4(text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0)
-    bout4(7); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(3); bout4(1); bout4(4); bout4(16)
-    bout4(15); bout4(3); bout4(0); bout4(0); bout4(strtab_off); bout4(strtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
-    bout4(23); bout4(3); bout4(0); bout4(0); bout4(shstrtab_off); bout4(shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(7); bout4(9); bout4(64); bout4(0); bout4(rel_off); bout4(rel_size); bout4(5); bout4(1); bout4(4); bout4(8)
+    bout4(17); bout4(1); bout4(3); bout4(0); bout4(text_off + code_len); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(23); bout4(8); bout4(3); bout4(0); bout4(text_off + code_len); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(28); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(6); bout4(1); bout4(4); bout4(16)
+    bout4(36); bout4(3); bout4(0); bout4(0); bout4(strtab_off); bout4(strtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(44); bout4(3); bout4(0); bout4(0); bout4(shstrtab_off); bout4(shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
 }
 
 function emit_binary(    i) {
