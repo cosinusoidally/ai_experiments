@@ -1,0 +1,176 @@
+mawkcc self-hosting session summary, 2026-04-12
+
+Goal
+----
+Continue moving mawkcc implementation code from mawkcc_ansi.c into
+mawkcc_self.c without extending the mawkcc dialect, while preserving
+bit-identical output across the AWK compiler, the original C compiler,
+the split self/ANSI compiler, and a pure-GCC split build.
+
+Build and test harness changes
+------------------------------
+The parity test in tests/test_mawkcc_orig_parity.sh now records its key
+build commands to:
+
+    artifacts/mawkcc_build_commands.log
+
+The log shows exactly how mawkcc_self.o is built and linked. The test now
+checks these paths:
+
+    mawk -v format=obj -f cc.awk mawkcc_self.c > artifacts/mawkcc_self.o
+    artifacts/mawkcc_orig -c mawkcc_self.c > artifacts/mawkcc_self.orig.o
+    cmp artifacts/mawkcc_self.o artifacts/mawkcc_self.orig.o
+    cc -m32 -no-pie artifacts/mawkcc_self.o artifacts/mawkcc_ansi.o -o artifacts/mawkcc.exe
+    artifacts/mawkcc.exe -c mawkcc_self.c > artifacts/mawkcc_self.self.o
+    cmp artifacts/mawkcc_self.o artifacts/mawkcc_self.self.o
+
+An additional pure-GCC split build path was added. It compiles
+mawkcc_self.c as C, compiles mawkcc_ansi.c as C, links them with a small
+support object, then checks that the resulting binary emits the same
+mawkcc_self.o:
+
+    cc -ansi -m32 -Dfunction=int -Dvar=extern -Wno-int-conversion \
+        -Wno-builtin-declaration-mismatch -g -O0 \
+        -c mawkcc_self.c -o artifacts/mawkcc_self.gcc.o
+    cc -ansi -m32 -fno-builtin -g -O0 \
+        -c mawkcc_gcc_support.c -o artifacts/mawkcc_gcc_support.o
+    cc -ansi -m32 -g -O0 \
+        -c mawkcc_ansi.c -o artifacts/mawkcc_ansi.o
+    cc -m32 -no-pie artifacts/mawkcc_self.gcc.o \
+        artifacts/mawkcc_gcc_support.o artifacts/mawkcc_ansi.o \
+        -o artifacts/mawkcc.gcc.exe
+    artifacts/mawkcc.gcc.exe -c mawkcc_self.c \
+        > artifacts/mawkcc_self.gcc-self.o
+    cmp artifacts/mawkcc_self.o artifacts/mawkcc_self.gcc-self.o
+
+The support file added for this is:
+
+    mawkcc_gcc_support.c
+
+It implements the mawkcc dialect builtins as real ANSI C functions for
+the pure-GCC build path. This replaced the previous long macro-based GCC
+compile command.
+
+Code moved into mawkcc_self.c
+-----------------------------
+The following categories were ported from mawkcc_ansi.c into
+mawkcc_self.c:
+
+    main/compile orchestration
+    find_symbol and Symbol field accessors
+    lexer character predicates and init_lexer
+    expect
+    low-level instruction emitter helpers
+    _start emission
+    brk allocation emission
+    syscall emitter helpers
+    loop/break bookkeeping
+    parser control flow:
+        parse_program
+        parse_stmt
+        parse_block
+        parse_if
+        parse_while
+        parse_break
+    builtin recognition and dispatch:
+        builtin_arity
+        emit_builtin1
+        emit_builtin2
+        emit_builtin3
+    call argument parsing and call metadata:
+        parse_builtin_call
+        parse_user_call_args
+        emit_user_call
+        patch_calls
+    expression parsing:
+        parse_expr
+        parse_assign_or_primary
+        parse_primary
+    global load/store emitters:
+        emit_load_global
+        emit_store_global
+    object metadata recorders:
+        record_external
+        record_reloc
+    global declaration parsing:
+        parse_global
+
+Implementation notes
+--------------------
+The mawkcc dialect was not extended. Where self-side code needed access
+to C arrays, mawkcc_ansi.c exposes pointer globals such as:
+
+    globals_p
+    functions_p
+    function_arities_p
+    current_params_p
+    current_param_offsets_p
+    call_target_p
+    call_pos_p
+    call_argc_p
+    loop_stack_p
+    break_patch_loop_p
+    break_patch_pos_p
+    externals_p
+    external_types_p
+    reloc_offsets_p
+    reloc_names_p
+    reloc_types_p
+
+This was necessary because exported C array names cannot be treated as
+address-valued scalar globals in the current dialect; scalar global reads
+load contents.
+
+Small ANSI-side diagnostic wrappers were added so self-side code can keep
+using simple calls rather than varargs formatting. Examples include:
+
+    fail_expected_token
+    fail_missing_main
+    fail_break_outside_loop
+    fail_unknown_identifier
+    fail_assignment_target
+    fail_external_symbol_overflow
+    fail_relocation_overflow
+
+Known remaining ANSI-side areas
+-------------------------------
+The main remaining implementation still in mawkcc_ansi.c includes:
+
+    failf and formatted diagnostics
+    allocation wrappers and token text management
+    source reading
+    lexer token scanning
+    function declaration parsing and parameter setup/teardown
+    string literal registration
+    binary/object image construction
+    final binary emission
+
+Current verification status
+---------------------------
+The full test suite is run through:
+
+    scripts/run-tests.sh
+
+This is required because the generated 32-bit code needs to execute
+outside the sandbox.
+
+At the end of the session, scripts/run-tests.sh passed. The passing tests
+covered:
+
+    argv runtime behavior
+    brk runtime behavior
+    file I/O runtime behavior
+    cc.awk / mawkcc_orig / split mawkcc bit-identical executable output
+    cc.awk / mawkcc_orig / split mawkcc bit-identical object output
+    mawkcc object linking with gcc object
+    mawkcc object calling C functions and accessing C integer globals
+    parameter assignment behavior
+    return-42 baseline
+    mawkcc_self.o identity across cc.awk, mawkcc_orig, split mawkcc,
+        and the pure-GCC split build
+
+Other notes
+-----------
+The untracked .codex file was not intentionally created as part of the
+work and should be ignored unless explicitly needed. The untracked
+../mawkcc.tar was also ignored.
