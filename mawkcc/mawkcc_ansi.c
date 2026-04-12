@@ -64,7 +64,9 @@ static struct Symbol globals[MAX_SYMS];
 static int global_count;
 static struct Symbol functions[MAX_SYMS];
 static struct Symbol function_arities[MAX_SYMS];
-static int function_count;
+int function_count;
+struct Symbol *functions_p = functions;
+struct Symbol *function_arities_p = function_arities;
 static struct Symbol externals[MAX_SYMS];
 static int external_types[MAX_SYMS];
 static int external_count;
@@ -73,12 +75,15 @@ static char *current_params[MAX_PARAMS];
 static long current_param_offsets[MAX_PARAMS];
 static int current_param_count;
 static char *current_function;
-static int current_returned;
+int current_returned;
 
 static char *call_target[MAX_CALLS];
 static long call_pos[MAX_CALLS];
 static long call_argc[MAX_CALLS];
-static int call_count;
+int call_count;
+char **call_target_p = call_target;
+long *call_pos_p = call_pos;
+long *call_argc_p = call_argc;
 
 static long reloc_offsets[MAX_RELOCS];
 static char *reloc_names[MAX_RELOCS];
@@ -103,7 +108,7 @@ char *dash_c;
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
 static void *xrealloc(void *p, size_t n);
-static char *xstrdup(const char *s);
+char *xstrdup(const char *s);
 static void set_tok_text_len(const char *s, size_t n);
 static void set_tok_text_cstr(const char *s);
 static unsigned long u32(long v);
@@ -117,28 +122,28 @@ int is_alnum_char(int ch);
 static void skip_ws_and_comments(void);
 void expect(int want);
 void parse_program(void);
-static void parse_global(void);
-static void parse_function(void);
+void parse_global(void);
+void parse_function(void);
 static void enter_function(const char *name, int param_count, char **param_names);
 static void leave_function(void);
-static void parse_stmt(void);
-static void parse_block(void);
-static void parse_if(void);
-static void parse_while(void);
-static void parse_break(void);
-static void parse_expr(void);
+void parse_stmt(void);
+void parse_block(void);
+void parse_if(void);
+void parse_while(void);
+void parse_break(void);
+void parse_expr(void);
 static void parse_assign_or_primary(void);
 static void parse_primary(void);
-static void parse_builtin_call(const char *name, int argc);
-static int parse_user_call_args(void);
-static int builtin_arity(const char *name);
-static void emit_user_call(const char *name, int argc);
-static void emit_builtin1(const char *name);
-static void emit_builtin2(const char *name);
-static void emit_builtin3(const char *name);
+void parse_builtin_call(const char *name, int argc);
+int parse_user_call_args(void);
+int builtin_arity(const char *name);
+void emit_user_call(const char *name, int argc);
+void emit_builtin1(const char *name);
+void emit_builtin2(const char *name);
+void emit_builtin3(const char *name);
 void patch_calls(void);
-static void record_external(const char *name, int type);
-static void record_reloc(long offset, const char *name, long type);
+void record_external(const char *name, int type);
+void record_reloc(long offset, const char *name, long type);
 void code_reset(void);
 void emit1(unsigned long b);
 void emit4(long v);
@@ -152,7 +157,7 @@ void emit_load_param(long offset);
 void emit_store_param(long offset);
 static void emit_load_global(const char *name);
 static void emit_store_global(const char *name);
-static void emit_mks_literal(const char *text);
+void emit_mks_literal(const char *text);
 static unsigned long register_string(const char *text);
 void emit_prologue(void);
 void emit_epilogue(void);
@@ -225,6 +230,16 @@ char *read_source(const char *path);
 void fail_expected_token(int want);
 void fail_loop_stack_overflow(void);
 void fail_break_patch_overflow(void);
+void fail_missing_main(void);
+void fail_break_outside_loop(void);
+int has_main_function(void);
+void fail_unknown_unary_builtin(const char *name);
+void fail_unknown_binary_builtin(const char *name);
+void fail_unknown_ternary_builtin(const char *name);
+void fail_mks_expects_string(void);
+void fail_unsupported_builtin_arity(void);
+void fail_undefined_function(const char *name);
+void fail_wrong_arity(const char *name);
 
 static void failf(const char *fmt, ...)
 {
@@ -286,7 +301,7 @@ static void *xrealloc(void *p, size_t n)
     return q;
 }
 
-static char *xstrdup(const char *s)
+char *xstrdup(const char *s)
 {
     size_t n;
     char *p;
@@ -515,6 +530,56 @@ void fail_break_patch_overflow(void)
     failf("break patch overflow");
 }
 
+void fail_missing_main(void)
+{
+    failf("missing `main` function");
+}
+
+void fail_break_outside_loop(void)
+{
+    failf("`break` used outside of a loop");
+}
+
+int has_main_function(void)
+{
+    return find_symbol(functions, function_count, "main") >= 0;
+}
+
+void fail_unknown_unary_builtin(const char *name)
+{
+    failf("unknown unary builtin `%s`", name);
+}
+
+void fail_unknown_binary_builtin(const char *name)
+{
+    failf("unknown binary builtin `%s`", name);
+}
+
+void fail_unknown_ternary_builtin(const char *name)
+{
+    failf("unknown ternary builtin `%s`", name);
+}
+
+void fail_mks_expects_string(void)
+{
+    failf("`mks` expects a string literal");
+}
+
+void fail_unsupported_builtin_arity(void)
+{
+    failf("unsupported builtin arity");
+}
+
+void fail_undefined_function(const char *name)
+{
+    failf("call to undefined function `%s`", name);
+}
+
+void fail_wrong_arity(const char *name)
+{
+    failf("function `%s` called with wrong arity", name);
+}
+
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
 {
     int i;
@@ -525,21 +590,7 @@ static long must_find_symbol_value(struct Symbol *arr, int count, const char *na
     return arr[i].value;
 }
 
-void parse_program(void)
-{
-    while (tok != TOK_EOF) {
-        if (tok == TOK_VAR) {
-            parse_global();
-        } else {
-            parse_function();
-        }
-    }
-    if (!output_object && find_symbol(functions, function_count, "main") < 0) {
-        failf("missing `main` function");
-    }
-}
-
-static void parse_global(void)
+void parse_global(void)
 {
     char *name;
     expect(TOK_VAR);
@@ -600,7 +651,7 @@ static void leave_function(void)
     current_returned = 0;
 }
 
-static void parse_function(void)
+void parse_function(void)
 {
     char *name;
     int param_count;
@@ -666,101 +717,7 @@ static void parse_function(void)
     }
 }
 
-static void parse_stmt(void)
-{
-    if (tok == TOK_LBRACE) {
-        parse_block();
-        return;
-    }
-    if (tok == TOK_RETURN) {
-        next_tok();
-        parse_expr();
-        expect(TOK_SEMI);
-        emit_epilogue();
-        current_returned = 1;
-        return;
-    }
-    if (tok == TOK_IF) {
-        parse_if();
-        return;
-    }
-    if (tok == TOK_WHILE) {
-        parse_while();
-        return;
-    }
-    if (tok == TOK_BREAK) {
-        parse_break();
-        return;
-    }
-    parse_expr();
-    expect(TOK_SEMI);
-}
-
-static void parse_block(void)
-{
-    expect(TOK_LBRACE);
-    while (tok != TOK_RBRACE && tok != TOK_EOF) {
-        parse_stmt();
-    }
-    expect(TOK_RBRACE);
-}
-
-static void parse_if(void)
-{
-    long false_patch;
-    long end_patch;
-    long after_then;
-    expect(TOK_IF);
-    expect(TOK_LPAREN);
-    parse_expr();
-    expect(TOK_RPAREN);
-    emit_test_eax_eax();
-    false_patch = emit_je_placeholder();
-    parse_stmt();
-    if (tok == TOK_ELSE) {
-        end_patch = emit_jmp_placeholder();
-        after_then = code_len;
-        patch_rel32(false_patch, after_then);
-        next_tok();
-        parse_stmt();
-        patch_rel32(end_patch, code_len);
-    } else {
-        patch_rel32(false_patch, code_len);
-    }
-}
-
-static void parse_while(void)
-{
-    long loop_start;
-    long exit_patch;
-    int loop_id;
-    expect(TOK_WHILE);
-    expect(TOK_LPAREN);
-    loop_start = code_len;
-    parse_expr();
-    expect(TOK_RPAREN);
-    emit_test_eax_eax();
-    exit_patch = emit_je_placeholder();
-    loop_id = push_loop();
-    record_break(loop_id, exit_patch);
-    parse_stmt();
-    emit_jmp(loop_start);
-    patch_rel32(exit_patch, code_len);
-    patch_breaks(loop_id, code_len);
-    pop_loop();
-}
-
-static void parse_break(void)
-{
-    if (loop_depth < 1) {
-        failf("`break` used outside of a loop");
-    }
-    expect(TOK_BREAK);
-    expect(TOK_SEMI);
-    record_break(loop_stack[loop_depth - 1], emit_jmp_placeholder());
-}
-
-static void parse_expr(void)
+void parse_expr(void)
 {
     if (tok == TOK_IDENT) {
         parse_assign_or_primary();
@@ -832,186 +789,7 @@ static void parse_primary(void)
     failf("expected expression");
 }
 
-static void parse_builtin_call(const char *name, int argc)
-{
-    expect(TOK_LPAREN);
-    if (strcmp(name, "mks") == 0) {
-        if (tok != TOK_STR) {
-            failf("`mks` expects a string literal");
-        }
-        emit_mks_literal(tok_text);
-        next_tok();
-        expect(TOK_RPAREN);
-        return;
-    } else if (argc == 1) {
-        parse_expr();
-    } else if (argc == 2) {
-        parse_expr();
-        emit_push_eax();
-        expect(TOK_COMMA);
-        parse_expr();
-        emit_pop_ebx();
-    } else if (argc == 3) {
-        parse_expr();
-        emit_push_eax();
-        expect(TOK_COMMA);
-        parse_expr();
-        emit_push_eax();
-        expect(TOK_COMMA);
-        parse_expr();
-        emit_mov_edx_eax();
-        emit_pop_ecx();
-        emit_pop_ebx();
-    } else {
-        failf("unsupported builtin arity");
-    }
-    expect(TOK_RPAREN);
-    if (argc == 1) {
-        emit_builtin1(name);
-    } else if (argc == 2) {
-        emit_builtin2(name);
-    } else {
-        emit_builtin3(name);
-    }
-}
-
-static int parse_user_call_args(void)
-{
-    int argc;
-    argc = 0;
-    expect(TOK_LPAREN);
-    if (tok == TOK_RPAREN) {
-        next_tok();
-        return 0;
-    }
-    while (1) {
-        parse_expr();
-        emit_push_eax();
-        argc++;
-        if (tok != TOK_COMMA) {
-            break;
-        }
-        next_tok();
-    }
-    expect(TOK_RPAREN);
-    emit_reverse_args(argc);
-    return argc;
-}
-
-static int builtin_arity(const char *name)
-{
-    if (strcmp(name, "neg") == 0 || strcmp(name, "not") == 0 ||
-        strcmp(name, "ri32") == 0 || strcmp(name, "ri8") == 0 ||
-        strcmp(name, "brk") == 0 || strcmp(name, "close") == 0 ||
-        strcmp(name, "mks") == 0) {
-        return 1;
-    }
-    if (strcmp(name, "add") == 0 || strcmp(name, "sub") == 0 ||
-        strcmp(name, "mul") == 0 || strcmp(name, "div") == 0 ||
-        strcmp(name, "eq") == 0 || strcmp(name, "ne") == 0 ||
-        strcmp(name, "lt") == 0 || strcmp(name, "le") == 0 ||
-        strcmp(name, "gt") == 0 || strcmp(name, "ge") == 0 ||
-        strcmp(name, "and") == 0 || strcmp(name, "or") == 0 ||
-        strcmp(name, "xor") == 0 || strcmp(name, "wi32") == 0 ||
-        strcmp(name, "wi8") == 0) {
-        return 2;
-    }
-    if (strcmp(name, "open") == 0 || strcmp(name, "read") == 0 ||
-        strcmp(name, "write") == 0) {
-        return 3;
-    }
-    return 0;
-}
-
-static void emit_user_call(const char *name, int argc)
-{
-    emit1(232);
-    call_target[call_count] = xstrdup(name);
-    call_pos[call_count] = code_len;
-    emit4(0);
-    if (argc > 0) {
-        emit_add_esp_imm32(4 * argc);
-    }
-    call_argc[call_count] = argc;
-    call_count++;
-}
-
-static void emit_builtin1(const char *name)
-{
-    if (strcmp(name, "neg") == 0) {
-        emit_neg_eax();
-    } else if (strcmp(name, "not") == 0) {
-        emit_not_eax();
-    } else if (strcmp(name, "ri32") == 0) {
-        emit_read_i32();
-    } else if (strcmp(name, "ri8") == 0) {
-        emit_read_u8();
-    } else if (strcmp(name, "brk") == 0) {
-        emit_brk_alloc();
-    } else if (strcmp(name, "close") == 0) {
-        emit_sys_close();
-    } else {
-        failf("unknown unary builtin `%s`", name);
-    }
-}
-
-static void emit_builtin2(const char *name)
-{
-    if (strcmp(name, "add") == 0) emit_add_eax_ebx();
-    else if (strcmp(name, "sub") == 0) emit_sub_from_stack_top();
-    else if (strcmp(name, "mul") == 0) emit_imul_eax_ebx();
-    else if (strcmp(name, "div") == 0) emit_div_stack_top_by_eax();
-    else if (strcmp(name, "eq") == 0) emit_cmp_set(148);
-    else if (strcmp(name, "ne") == 0) emit_cmp_set(149);
-    else if (strcmp(name, "lt") == 0) emit_cmp_set(156);
-    else if (strcmp(name, "le") == 0) emit_cmp_set(158);
-    else if (strcmp(name, "gt") == 0) emit_cmp_set(159);
-    else if (strcmp(name, "ge") == 0) emit_cmp_set(157);
-    else if (strcmp(name, "and") == 0) emit_and_eax_ebx();
-    else if (strcmp(name, "or") == 0) emit_or_eax_ebx();
-    else if (strcmp(name, "xor") == 0) emit_xor_eax_ebx();
-    else if (strcmp(name, "wi32") == 0) emit_write_i32();
-    else if (strcmp(name, "wi8") == 0) emit_write_u8();
-    else failf("unknown binary builtin `%s`", name);
-}
-
-static void emit_builtin3(const char *name)
-{
-    if (strcmp(name, "open") == 0) emit_sys_open();
-    else if (strcmp(name, "read") == 0) emit_sys_read();
-    else if (strcmp(name, "write") == 0) emit_sys_write();
-    else failf("unknown ternary builtin `%s`", name);
-}
-
-void patch_calls(void)
-{
-    int i;
-    for (i = 0; i < call_count; i++) {
-        int fi;
-        long addr;
-        long arity;
-        long rel;
-        fi = find_symbol(functions, function_count, call_target[i]);
-        if (fi < 0) {
-            if (output_object) {
-                patch4(call_pos[i], -4);
-                record_external(call_target[i], 18);
-                record_reloc(call_pos[i], call_target[i], 2);
-                continue;
-            }
-            failf("call to undefined function `%s`", call_target[i]);
-        }
-        addr = functions[fi].value;
-        arity = function_arities[fi].value;
-        if (arity != call_argc[i]) {
-            failf("function `%s` called with wrong arity", call_target[i]);
-        }
-        rel = addr - (call_pos[i] + 4);
-        patch4(call_pos[i], rel);
-    }
-}
-
-static void record_external(const char *name, int type)
+void record_external(const char *name, int type)
 {
     int i;
     if (find_symbol(functions, function_count, name) >= 0) {
@@ -1031,7 +809,7 @@ static void record_external(const char *name, int type)
     external_count++;
 }
 
-static void record_reloc(long offset, const char *name, long type)
+void record_reloc(long offset, const char *name, long type)
 {
     if (reloc_count >= MAX_RELOCS) {
         failf("relocation overflow");
@@ -1138,7 +916,7 @@ static unsigned long register_string(const char *text)
     return DATA_BASE + start;
 }
 
-static void emit_mks_literal(const char *text)
+void emit_mks_literal(const char *text)
 {
     emit_mov_eax_imm32((long)register_string(text));
 }

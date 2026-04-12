@@ -13,6 +13,14 @@ var break_patch_count;
 var loop_stack_p;
 var break_patch_loop_p;
 var break_patch_pos_p;
+var current_returned;
+var call_count;
+var call_target_p;
+var call_pos_p;
+var call_argc_p;
+var function_count;
+var functions_p;
+var function_arities_p;
 
 function init_globals() {
     tok_text = 0;
@@ -254,6 +262,335 @@ function patch_breaks_(loop_id, target, i) {
 
 function patch_breaks(loop_id, target) {
     return patch_breaks_(loop_id, target, 0);
+}
+
+function streq2(s, c0, c1) {
+    return and(and(eq(ri8(s), c0), eq(ri8(add(s, 1)), c1)), eq(ri8(add(s, 2)), 0));
+}
+
+function streq3(s, c0, c1, c2) {
+    return and(and(eq(ri8(s), c0), eq(ri8(add(s, 1)), c1)), and(eq(ri8(add(s, 2)), c2), eq(ri8(add(s, 3)), 0)));
+}
+
+function streq4(s, c0, c1, c2, c3) {
+    return and(and(streq3_prefix(s, c0, c1, c2), eq(ri8(add(s, 3)), c3)), eq(ri8(add(s, 4)), 0));
+}
+
+function streq5(s, c0, c1, c2, c3, c4) {
+    return and(and(streq4_prefix(s, c0, c1, c2, c3), eq(ri8(add(s, 4)), c4)), eq(ri8(add(s, 5)), 0));
+}
+
+function streq3_prefix(s, c0, c1, c2) {
+    return and(and(eq(ri8(s), c0), eq(ri8(add(s, 1)), c1)), eq(ri8(add(s, 2)), c2));
+}
+
+function streq4_prefix(s, c0, c1, c2, c3) {
+    return and(streq3_prefix(s, c0, c1, c2), eq(ri8(add(s, 3)), c3));
+}
+
+function builtin_arity(name) {
+    if (or(or(or(streq3(name, 110, 101, 103), streq3(name, 110, 111, 116)), or(streq4(name, 114, 105, 51, 50), streq3(name, 114, 105, 56))), or(or(streq3(name, 98, 114, 107), streq5(name, 99, 108, 111, 115, 101)), streq3(name, 109, 107, 115)))) {
+        return 1;
+    }
+    if (or(or(or(or(streq3(name, 97, 100, 100), streq3(name, 115, 117, 98)), or(streq3(name, 109, 117, 108), streq3(name, 100, 105, 118))), or(or(streq2(name, 101, 113), streq2(name, 110, 101)), or(streq2(name, 108, 116), streq2(name, 108, 101)))), or(or(or(streq2(name, 103, 116), streq2(name, 103, 101)), or(streq3(name, 97, 110, 100), streq2(name, 111, 114))), or(or(streq3(name, 120, 111, 114), streq4(name, 119, 105, 51, 50)), streq3(name, 119, 105, 56))))) {
+        return 2;
+    }
+    if (or(or(streq4(name, 111, 112, 101, 110), streq4(name, 114, 101, 97, 100)), streq5(name, 119, 114, 105, 116, 101))) {
+        return 3;
+    }
+    return 0;
+}
+
+function emit_builtin1(name) {
+    if (streq3(name, 110, 101, 103)) {
+        emit_neg_eax();
+    } else if (streq3(name, 110, 111, 116)) {
+        emit_not_eax();
+    } else if (streq4(name, 114, 105, 51, 50)) {
+        emit_read_i32();
+    } else if (streq3(name, 114, 105, 56)) {
+        emit_read_u8();
+    } else if (streq3(name, 98, 114, 107)) {
+        emit_brk_alloc();
+    } else if (streq5(name, 99, 108, 111, 115, 101)) {
+        emit_sys_close();
+    } else {
+        fail_unknown_unary_builtin(name);
+    }
+    return 0;
+}
+
+function emit_builtin2(name) {
+    if (streq3(name, 97, 100, 100)) {
+        emit_add_eax_ebx();
+    } else if (streq3(name, 115, 117, 98)) {
+        emit_sub_from_stack_top();
+    } else if (streq3(name, 109, 117, 108)) {
+        emit_imul_eax_ebx();
+    } else if (streq3(name, 100, 105, 118)) {
+        emit_div_stack_top_by_eax();
+    } else if (streq2(name, 101, 113)) {
+        emit_cmp_set(148);
+    } else if (streq2(name, 110, 101)) {
+        emit_cmp_set(149);
+    } else if (streq2(name, 108, 116)) {
+        emit_cmp_set(156);
+    } else if (streq2(name, 108, 101)) {
+        emit_cmp_set(158);
+    } else if (streq2(name, 103, 116)) {
+        emit_cmp_set(159);
+    } else if (streq2(name, 103, 101)) {
+        emit_cmp_set(157);
+    } else if (streq3(name, 97, 110, 100)) {
+        emit_and_eax_ebx();
+    } else if (streq2(name, 111, 114)) {
+        emit_or_eax_ebx();
+    } else if (streq3(name, 120, 111, 114)) {
+        emit_xor_eax_ebx();
+    } else if (streq4(name, 119, 105, 51, 50)) {
+        emit_write_i32();
+    } else if (streq3(name, 119, 105, 56)) {
+        emit_write_u8();
+    } else {
+        fail_unknown_binary_builtin(name);
+    }
+    return 0;
+}
+
+function emit_builtin3(name) {
+    if (streq4(name, 111, 112, 101, 110)) {
+        emit_sys_open();
+    } else if (streq4(name, 114, 101, 97, 100)) {
+        emit_sys_read();
+    } else if (streq5(name, 119, 114, 105, 116, 101)) {
+        emit_sys_write();
+    } else {
+        fail_unknown_ternary_builtin(name);
+    }
+    return 0;
+}
+
+function parse_builtin_call(name, argc) {
+    expect(11);
+    if (streq3(name, 109, 107, 115)) {
+        if (not(eq(tok, 3))) {
+            fail_mks_expects_string();
+        }
+        emit_mks_literal(tok_text);
+        next_tok();
+        expect(12);
+        return 0;
+    } else if (eq(argc, 1)) {
+        parse_expr();
+    } else if (eq(argc, 2)) {
+        parse_expr();
+        emit_push_eax();
+        expect(16);
+        parse_expr();
+        emit_pop_ebx();
+    } else if (eq(argc, 3)) {
+        parse_expr();
+        emit_push_eax();
+        expect(16);
+        parse_expr();
+        emit_push_eax();
+        expect(16);
+        parse_expr();
+        emit_mov_edx_eax();
+        emit_pop_ecx();
+        emit_pop_ebx();
+    } else {
+        fail_unsupported_builtin_arity();
+    }
+    expect(12);
+    if (eq(argc, 1)) {
+        emit_builtin1(name);
+    } else if (eq(argc, 2)) {
+        emit_builtin2(name);
+    } else {
+        emit_builtin3(name);
+    }
+    return 0;
+}
+
+function parse_user_call_args_(argc) {
+    argc = 0;
+    expect(11);
+    if (eq(tok, 12)) {
+        next_tok();
+        return 0;
+    }
+    while (1) {
+        parse_expr();
+        emit_push_eax();
+        argc = add(argc, 1);
+        if (not(eq(tok, 16))) {
+            break;
+        }
+        next_tok();
+    }
+    expect(12);
+    emit_reverse_args(argc);
+    return argc;
+}
+
+function parse_user_call_args() {
+    return parse_user_call_args_(0);
+}
+
+function emit_user_call(name, argc) {
+    emit1(232);
+    wi32(add(call_target_p, mul(call_count, 4)), xstrdup(name));
+    wi32(add(call_pos_p, mul(call_count, 4)), code_len);
+    emit4(0);
+    if (gt(argc, 0)) {
+        emit_add_esp_imm32(mul(4, argc));
+    }
+    wi32(add(call_argc_p, mul(call_count, 4)), argc);
+    call_count = add(call_count, 1);
+    return 0;
+}
+
+function patch_calls_(i, fi, name, pos, argc, addr, arity, rel) {
+    while (lt(i, call_count)) {
+        name = ri32(add(call_target_p, mul(i, 4)));
+        pos = ri32(add(call_pos_p, mul(i, 4)));
+        argc = ri32(add(call_argc_p, mul(i, 4)));
+        fi = find_symbol(functions_p, function_count, name);
+        if (lt(fi, 0)) {
+            if (output_object) {
+                patch4(pos, neg(4));
+                record_external(name, 18);
+                record_reloc(pos, name, 2);
+            } else {
+                fail_undefined_function(name);
+            }
+        } else {
+            addr = sym_val(add(functions_p, mul(fi, 8)));
+            arity = sym_val(add(function_arities_p, mul(fi, 8)));
+            if (not(eq(arity, argc))) {
+                fail_wrong_arity(name);
+            }
+            rel = sub(addr, add(pos, 4));
+            patch4(pos, rel);
+        }
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function patch_calls() {
+    return patch_calls_(0, 0, 0, 0, 0, 0, 0, 0);
+}
+
+function parse_program() {
+    while (not(eq(tok, 0))) {
+        if (eq(tok, 6)) {
+            parse_global();
+        } else {
+            parse_function();
+        }
+    }
+    if (and(not(output_object), not(has_main_function()))) {
+        fail_missing_main();
+    }
+    return 0;
+}
+
+function parse_stmt() {
+    if (eq(tok, 13)) {
+        parse_block();
+        return 0;
+    }
+    if (eq(tok, 4)) {
+        next_tok();
+        parse_expr();
+        expect(15);
+        emit_epilogue();
+        current_returned = 1;
+        return 0;
+    }
+    if (eq(tok, 7)) {
+        parse_if();
+        return 0;
+    }
+    if (eq(tok, 9)) {
+        parse_while();
+        return 0;
+    }
+    if (eq(tok, 10)) {
+        parse_break();
+        return 0;
+    }
+    parse_expr();
+    expect(15);
+    return 0;
+}
+
+function parse_block() {
+    expect(13);
+    while (and(not(eq(tok, 14)), not(eq(tok, 0)))) {
+        parse_stmt();
+    }
+    expect(14);
+    return 0;
+}
+
+function parse_if_(false_patch, end_patch, after_then) {
+    expect(7);
+    expect(11);
+    parse_expr();
+    expect(12);
+    emit_test_eax_eax();
+    false_patch = emit_je_placeholder();
+    parse_stmt();
+    if (eq(tok, 8)) {
+        end_patch = emit_jmp_placeholder();
+        after_then = code_len;
+        patch_rel32(false_patch, after_then);
+        next_tok();
+        parse_stmt();
+        patch_rel32(end_patch, code_len);
+    } else {
+        patch_rel32(false_patch, code_len);
+    }
+    return 0;
+}
+
+function parse_if() {
+    return parse_if_(0, 0, 0);
+}
+
+function parse_while_(loop_start, exit_patch, loop_id) {
+    expect(9);
+    expect(11);
+    loop_start = code_len;
+    parse_expr();
+    expect(12);
+    emit_test_eax_eax();
+    exit_patch = emit_je_placeholder();
+    loop_id = push_loop();
+    record_break(loop_id, exit_patch);
+    parse_stmt();
+    emit_jmp(loop_start);
+    patch_rel32(exit_patch, code_len);
+    patch_breaks(loop_id, code_len);
+    pop_loop();
+    return 0;
+}
+
+function parse_while() {
+    return parse_while_(0, 0, 0);
+}
+
+function parse_break() {
+    if (lt(loop_depth, 1)) {
+        fail_break_outside_loop();
+    }
+    expect(10);
+    expect(15);
+    record_break(ri32(add(loop_stack_p, mul(sub(loop_depth, 1), 4))), emit_jmp_placeholder());
+    return 0;
 }
 
 function compile(source_path) {
