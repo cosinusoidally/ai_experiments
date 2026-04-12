@@ -94,7 +94,7 @@ static int break_patch_count;
 
 static unsigned long global_bytes;
 static long start_call_patch;
-static int output_object;
+int output_object;
 
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
@@ -1648,21 +1648,14 @@ static char *read_file(const char *path, long *len_out)
     return buf;
 }
 
-int main(int argc, char **argv)
+int usage(const char *program)
 {
-    const char *source_path;
+    fprintf(stderr, "usage: %s [-c] source\n", program);
+    return 1;
+}
 
-    output_object = 0;
-    if (argc == 3 && strcmp(argv[1], "-c") == 0) {
-        output_object = 1;
-        source_path = argv[2];
-    } else if (argc == 2) {
-        source_path = argv[1];
-    } else {
-        fprintf(stderr, "usage: %s [-c] source\n", argv[0]);
-        return 1;
-    }
-
+int compile(const char *source_path)
+{
     tok_text = 0;
     tok_text_cap = 0;
     src = read_file(source_path, &src_len);
