@@ -21,6 +21,22 @@ var call_argc_p;
 var function_count;
 var functions_p;
 var function_arities_p;
+var tok_num;
+var global_count;
+var globals_p;
+var current_param_count;
+var current_params_p;
+var current_param_offsets_p;
+var external_count;
+var externals_p;
+var external_types_p;
+var reloc_count;
+var reloc_offsets_p;
+var reloc_names_p;
+var reloc_types_p;
+var global_bytes;
+var next_data_offset;
+var data_used;
 
 function init_globals() {
     tok_text = 0;
@@ -167,6 +183,42 @@ function emit_sys_open() { emit_mov_eax_imm32(5); emit_int_80(); }
 function emit_sys_read() { emit_mov_eax_imm32(3); emit_int_80(); }
 function emit_sys_write() { emit_mov_eax_imm32(4); emit_int_80(); }
 function emit_sys_close() { emit_mov_ebx_eax(); emit_mov_eax_imm32(6); emit_int_80(); }
+
+function emit_load_global_(name, idx, off) {
+    idx = find_symbol(globals_p, global_count, name);
+    off = sym_val(add(globals_p, mul(idx, 8)));
+    emit1(161);
+    if (output_object) {
+        record_external(name, 17);
+        record_reloc(code_len, name, 1);
+        emit4(0);
+        return 0;
+    }
+    emit4(add(134516736, off));
+    return 0;
+}
+
+function emit_load_global(name) {
+    return emit_load_global_(name, 0, 0);
+}
+
+function emit_store_global_(name, idx, off) {
+    idx = find_symbol(globals_p, global_count, name);
+    off = sym_val(add(globals_p, mul(idx, 8)));
+    emit1(163);
+    if (output_object) {
+        record_external(name, 17);
+        record_reloc(code_len, name, 1);
+        emit4(0);
+        return 0;
+    }
+    emit4(add(134516736, off));
+    return 0;
+}
+
+function emit_store_global(name) {
+    return emit_store_global_(name, 0, 0);
+}
 
 function emit_start() {
     emit_mov_eax_esp();
@@ -483,6 +535,43 @@ function patch_calls() {
     return patch_calls_(0, 0, 0, 0, 0, 0, 0, 0);
 }
 
+function record_external_(name, type, i, entry) {
+    if (ge(find_symbol(functions_p, function_count, name), 0)) {
+        return 0;
+    }
+    while (lt(i, external_count)) {
+        entry = add(externals_p, mul(i, 8));
+        if (eq(strcmp(sym_name(entry), name), 0)) {
+            return 0;
+        }
+        i = add(i, 1);
+    }
+    if (ge(external_count, 4096)) {
+        fail_external_symbol_overflow();
+    }
+    entry = add(externals_p, mul(external_count, 8));
+    sym_set_name(entry, xstrdup(name));
+    sym_set_val(entry, external_count);
+    wi32(add(external_types_p, mul(external_count, 4)), type);
+    external_count = add(external_count, 1);
+    return 0;
+}
+
+function record_external(name, type) {
+    return record_external_(name, type, 0, 0);
+}
+
+function record_reloc(offset, name, type) {
+    if (ge(reloc_count, 8192)) {
+        fail_relocation_overflow();
+    }
+    wi32(add(reloc_offsets_p, mul(reloc_count, 4)), offset);
+    wi32(add(reloc_names_p, mul(reloc_count, 4)), xstrdup(name));
+    wi32(add(reloc_types_p, mul(reloc_count, 4)), type);
+    reloc_count = add(reloc_count, 1);
+    return 0;
+}
+
 function parse_program() {
     while (not(eq(tok, 0))) {
         if (eq(tok, 6)) {
@@ -495,6 +584,46 @@ function parse_program() {
         fail_missing_main();
     }
     return 0;
+}
+
+function parse_global_(name, entry) {
+    expect(6);
+    if (not(eq(tok, 1))) {
+        fail_expected_global_name();
+    }
+    name = xstrdup(tok_text);
+    next_tok();
+    if (eq(tok, 17)) {
+        fail_global_initialized(name);
+    }
+    expect(15);
+    if (gt(function_count, 0)) {
+        fail_global_after_function(name);
+    }
+    if (or(ge(find_symbol(globals_p, global_count, name), 0), ge(find_symbol(functions_p, function_count, name), 0))) {
+        fail_duplicate_global(name);
+    }
+    entry = add(globals_p, mul(global_count, 8));
+    sym_set_name(entry, name);
+    if (output_object) {
+        sym_set_val(entry, 0);
+        global_count = add(global_count, 1);
+        return 0;
+    }
+    sym_set_val(entry, global_bytes);
+    global_count = add(global_count, 1);
+    global_bytes = add(global_bytes, 4);
+    if (lt(next_data_offset, global_bytes)) {
+        next_data_offset = global_bytes;
+    }
+    if (lt(data_used, global_bytes)) {
+        data_used = global_bytes;
+    }
+    return 0;
+}
+
+function parse_global() {
+    return parse_global_(0, 0);
 }
 
 function parse_stmt() {
@@ -590,6 +719,97 @@ function parse_break() {
     expect(10);
     expect(15);
     record_break(ri32(add(loop_stack_p, mul(sub(loop_depth, 1), 4))), emit_jmp_placeholder());
+    return 0;
+}
+
+function parse_expr() {
+    if (eq(tok, 1)) {
+        parse_assign_or_primary();
+        return 0;
+    }
+    parse_primary();
+    return 0;
+}
+
+function parse_assign_store_param_(name, i) {
+    while (lt(i, current_param_count)) {
+        if (eq(strcmp(ri32(add(current_params_p, mul(i, 4))), name), 0)) {
+            emit_store_param(ri32(add(current_param_offsets_p, mul(i, 4))));
+            free(name);
+            return 1;
+        }
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function parse_assign_load_param_(name, i) {
+    while (lt(i, current_param_count)) {
+        if (eq(strcmp(ri32(add(current_params_p, mul(i, 4))), name), 0)) {
+            emit_load_param(ri32(add(current_param_offsets_p, mul(i, 4))));
+            free(name);
+            return 1;
+        }
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function parse_assign_or_primary_(name, arity) {
+    name = xstrdup(tok_text);
+    next_tok();
+    if (eq(tok, 17)) {
+        next_tok();
+        parse_expr();
+        if (parse_assign_store_param_(name, 0)) {
+            return 0;
+        }
+        if (ge(find_symbol(globals_p, global_count, name), 0)) {
+            emit_store_global(name);
+            free(name);
+            return 0;
+        }
+        fail_assignment_target(name);
+    }
+    if (eq(tok, 11)) {
+        arity = builtin_arity(name);
+        if (gt(arity, 0)) {
+            parse_builtin_call(name, arity);
+        } else {
+            emit_user_call(name, parse_user_call_args());
+        }
+        free(name);
+        return 0;
+    }
+    if (parse_assign_load_param_(name, 0)) {
+        return 0;
+    }
+    if (ge(find_symbol(globals_p, global_count, name), 0)) {
+        emit_load_global(name);
+        free(name);
+        return 0;
+    }
+    fail_unknown_identifier(name);
+    return 0;
+}
+
+function parse_assign_or_primary() {
+    return parse_assign_or_primary_(0, 0);
+}
+
+function parse_primary() {
+    if (eq(tok, 2)) {
+        emit_mov_eax_imm32(tok_num);
+        next_tok();
+        return 0;
+    }
+    if (eq(tok, 11)) {
+        next_tok();
+        parse_expr();
+        expect(12);
+        return 0;
+    }
+    fail_expected_expression();
     return 0;
 }
 

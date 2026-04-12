@@ -50,18 +50,19 @@ static long tok_pos;
 int tok;
 char *tok_text;
 long tok_text_cap;
-static unsigned long tok_num;
+unsigned long tok_num;
 
 static unsigned char code[MAX_CODE];
 long code_len;
 static unsigned char binbuf[MAX_BIN];
 static long bin_len;
 static unsigned char data_byte[MAX_DATA];
-static unsigned long data_used;
-static unsigned long next_data_offset;
+unsigned long data_used;
+unsigned long next_data_offset;
 
 static struct Symbol globals[MAX_SYMS];
-static int global_count;
+int global_count;
+struct Symbol *globals_p = globals;
 static struct Symbol functions[MAX_SYMS];
 static struct Symbol function_arities[MAX_SYMS];
 int function_count;
@@ -69,11 +70,15 @@ struct Symbol *functions_p = functions;
 struct Symbol *function_arities_p = function_arities;
 static struct Symbol externals[MAX_SYMS];
 static int external_types[MAX_SYMS];
-static int external_count;
+int external_count;
+struct Symbol *externals_p = externals;
+int *external_types_p = external_types;
 
 static char *current_params[MAX_PARAMS];
 static long current_param_offsets[MAX_PARAMS];
-static int current_param_count;
+int current_param_count;
+char **current_params_p = current_params;
+long *current_param_offsets_p = current_param_offsets;
 static char *current_function;
 int current_returned;
 
@@ -88,7 +93,10 @@ long *call_argc_p = call_argc;
 static long reloc_offsets[MAX_RELOCS];
 static char *reloc_names[MAX_RELOCS];
 static long reloc_types[MAX_RELOCS];
-static int reloc_count;
+int reloc_count;
+long *reloc_offsets_p = reloc_offsets;
+char **reloc_names_p = reloc_names;
+long *reloc_types_p = reloc_types;
 
 int loop_stack[MAX_LOOPS];
 int loop_depth;
@@ -100,7 +108,7 @@ int *loop_stack_p = loop_stack;
 int *break_patch_loop_p = break_patch_loop;
 long *break_patch_pos_p = break_patch_pos;
 
-static unsigned long global_bytes;
+unsigned long global_bytes;
 long start_call_patch;
 int output_object;
 char *dash_c;
@@ -132,8 +140,8 @@ void parse_if(void);
 void parse_while(void);
 void parse_break(void);
 void parse_expr(void);
-static void parse_assign_or_primary(void);
-static void parse_primary(void);
+void parse_assign_or_primary(void);
+void parse_primary(void);
 void parse_builtin_call(const char *name, int argc);
 int parse_user_call_args(void);
 int builtin_arity(const char *name);
@@ -155,8 +163,8 @@ void emit_pop_ebx(void);
 void emit_pop_ecx(void);
 void emit_load_param(long offset);
 void emit_store_param(long offset);
-static void emit_load_global(const char *name);
-static void emit_store_global(const char *name);
+void emit_load_global(const char *name);
+void emit_store_global(const char *name);
 void emit_mks_literal(const char *text);
 static unsigned long register_string(const char *text);
 void emit_prologue(void);
@@ -240,6 +248,15 @@ void fail_mks_expects_string(void);
 void fail_unsupported_builtin_arity(void);
 void fail_undefined_function(const char *name);
 void fail_wrong_arity(const char *name);
+void fail_assignment_target(const char *name);
+void fail_unknown_identifier(const char *name);
+void fail_expected_expression(void);
+void fail_external_symbol_overflow(void);
+void fail_relocation_overflow(void);
+void fail_expected_global_name(void);
+void fail_global_initialized(const char *name);
+void fail_global_after_function(const char *name);
+void fail_duplicate_global(const char *name);
 
 static void failf(const char *fmt, ...)
 {
@@ -580,6 +597,51 @@ void fail_wrong_arity(const char *name)
     failf("function `%s` called with wrong arity", name);
 }
 
+void fail_assignment_target(const char *name)
+{
+    failf("assignment target `%s` is not a global or parameter", name);
+}
+
+void fail_unknown_identifier(const char *name)
+{
+    failf("unknown identifier `%s`", name);
+}
+
+void fail_expected_expression(void)
+{
+    failf("expected expression");
+}
+
+void fail_external_symbol_overflow(void)
+{
+    failf("external symbol overflow");
+}
+
+void fail_relocation_overflow(void)
+{
+    failf("relocation overflow");
+}
+
+void fail_expected_global_name(void)
+{
+    failf("expected global name");
+}
+
+void fail_global_initialized(const char *name)
+{
+    failf("global `%s` cannot be initialized at declaration time", name);
+}
+
+void fail_global_after_function(const char *name)
+{
+    failf("global `%s` must be declared before functions", name);
+}
+
+void fail_duplicate_global(const char *name)
+{
+    failf("duplicate global `%s`", name);
+}
+
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
 {
     int i;
@@ -588,42 +650,6 @@ static long must_find_symbol_value(struct Symbol *arr, int count, const char *na
         failf("unknown %s `%s`", kind, name);
     }
     return arr[i].value;
-}
-
-void parse_global(void)
-{
-    char *name;
-    expect(TOK_VAR);
-    if (tok != TOK_IDENT) {
-        failf("expected global name");
-    }
-    name = xstrdup(tok_text);
-    next_tok();
-    if (tok == TOK_ASSIGN) {
-        failf("global `%s` cannot be initialized at declaration time", name);
-    }
-    expect(TOK_SEMI);
-    if (function_count > 0) {
-        failf("global `%s` must be declared before functions", name);
-    }
-    if (find_symbol(globals, global_count, name) >= 0 || find_symbol(functions, function_count, name) >= 0) {
-        failf("duplicate global `%s`", name);
-    }
-    globals[global_count].name = name;
-    if (output_object) {
-        globals[global_count].value = 0;
-        global_count++;
-        return;
-    }
-    globals[global_count].value = (long)global_bytes;
-    global_count++;
-    global_bytes += 4;
-    if (next_data_offset < global_bytes) {
-        next_data_offset = global_bytes;
-    }
-    if (data_used < global_bytes) {
-        data_used = global_bytes;
-    }
 }
 
 static void enter_function(const char *name, int param_count, char **param_names)
@@ -717,109 +743,6 @@ void parse_function(void)
     }
 }
 
-void parse_expr(void)
-{
-    if (tok == TOK_IDENT) {
-        parse_assign_or_primary();
-        return;
-    }
-    parse_primary();
-}
-
-static void parse_assign_or_primary(void)
-{
-    char *name;
-    int i;
-    name = xstrdup(tok_text);
-    next_tok();
-    if (tok == TOK_ASSIGN) {
-        next_tok();
-        parse_expr();
-        for (i = 0; i < current_param_count; i++) {
-            if (strcmp(current_params[i], name) == 0) {
-                emit_store_param(current_param_offsets[i]);
-                free(name);
-                return;
-            }
-        }
-        if (find_symbol(globals, global_count, name) >= 0) {
-            emit_store_global(name);
-            free(name);
-            return;
-        }
-        failf("assignment target `%s` is not a global or parameter", name);
-    }
-    if (tok == TOK_LPAREN) {
-        if (builtin_arity(name) > 0) {
-            parse_builtin_call(name, builtin_arity(name));
-        } else {
-            emit_user_call(name, parse_user_call_args());
-        }
-        free(name);
-        return;
-    }
-    for (i = 0; i < current_param_count; i++) {
-        if (strcmp(current_params[i], name) == 0) {
-            emit_load_param(current_param_offsets[i]);
-            free(name);
-            return;
-        }
-    }
-    if (find_symbol(globals, global_count, name) >= 0) {
-        emit_load_global(name);
-        free(name);
-        return;
-    }
-    failf("unknown identifier `%s`", name);
-}
-
-static void parse_primary(void)
-{
-    if (tok == TOK_NUM) {
-        emit_mov_eax_imm32((long)tok_num);
-        next_tok();
-        return;
-    }
-    if (tok == TOK_LPAREN) {
-        next_tok();
-        parse_expr();
-        expect(TOK_RPAREN);
-        return;
-    }
-    failf("expected expression");
-}
-
-void record_external(const char *name, int type)
-{
-    int i;
-    if (find_symbol(functions, function_count, name) >= 0) {
-        return;
-    }
-    for (i = 0; i < external_count; i++) {
-        if (strcmp(externals[i].name, name) == 0) {
-            return;
-        }
-    }
-    if (external_count >= MAX_SYMS) {
-        failf("external symbol overflow");
-    }
-    externals[external_count].name = xstrdup(name);
-    externals[external_count].value = external_count;
-    external_types[external_count] = type;
-    external_count++;
-}
-
-void record_reloc(long offset, const char *name, long type)
-{
-    if (reloc_count >= MAX_RELOCS) {
-        failf("relocation overflow");
-    }
-    reloc_offsets[reloc_count] = offset;
-    reloc_names[reloc_count] = xstrdup(name);
-    reloc_types[reloc_count] = type;
-    reloc_count++;
-}
-
 void code_reset(void)
 {
     memset(code, 0, sizeof(code));
@@ -865,34 +788,6 @@ void patch4(long pos, long v)
     code[pos + 1] = (unsigned char)((n >> 8) & 255U);
     code[pos + 2] = (unsigned char)((n >> 16) & 255U);
     code[pos + 3] = (unsigned char)((n >> 24) & 255U);
-}
-
-static void emit_load_global(const char *name)
-{
-    long off;
-    off = must_find_symbol_value(globals, global_count, name, "global");
-    emit1(161);
-    if (output_object) {
-        record_external(name, 17);
-        record_reloc(code_len, name, 1);
-        emit4(0);
-        return;
-    }
-    emit4((long)(DATA_BASE + (unsigned long)off));
-}
-
-static void emit_store_global(const char *name)
-{
-    long off;
-    off = must_find_symbol_value(globals, global_count, name, "global");
-    emit1(163);
-    if (output_object) {
-        record_external(name, 17);
-        record_reloc(code_len, name, 1);
-        emit4(0);
-        return;
-    }
-    emit4((long)(DATA_BASE + (unsigned long)off));
 }
 
 static unsigned long register_string(const char *text)
