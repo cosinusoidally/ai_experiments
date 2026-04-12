@@ -45,15 +45,15 @@ struct Symbol {
 
 char *src;
 static long src_len;
-static long idx_pos;
+long idx_pos;
 static long tok_pos;
-static int tok;
+int tok;
 char *tok_text;
 long tok_text_cap;
 static unsigned long tok_num;
 
 static unsigned char code[MAX_CODE];
-static long code_len;
+long code_len;
 static unsigned char binbuf[MAX_BIN];
 static long bin_len;
 static unsigned char data_byte[MAX_DATA];
@@ -85,15 +85,18 @@ static char *reloc_names[MAX_RELOCS];
 static long reloc_types[MAX_RELOCS];
 static int reloc_count;
 
-static int loop_stack[MAX_LOOPS];
-static int loop_depth;
-static int next_loop_id;
-static int break_patch_loop[MAX_BREAKS];
-static long break_patch_pos[MAX_BREAKS];
-static int break_patch_count;
+int loop_stack[MAX_LOOPS];
+int loop_depth;
+int next_loop_id;
+int break_patch_loop[MAX_BREAKS];
+long break_patch_pos[MAX_BREAKS];
+int break_patch_count;
+int *loop_stack_p = loop_stack;
+int *break_patch_loop_p = break_patch_loop;
+long *break_patch_pos_p = break_patch_pos;
 
 static unsigned long global_bytes;
-static long start_call_patch;
+long start_call_patch;
 int output_object;
 char *dash_c;
 
@@ -107,10 +110,10 @@ static unsigned long u32(long v);
 void init_lexer(void);
 void next_tok(void);
 static void read_string_token(void);
-static int is_space_char(int ch);
-static int is_digit_char(int ch);
-static int is_alpha_char(int ch);
-static int is_alnum_char(int ch);
+int is_space_char(int ch);
+int is_digit_char(int ch);
+int is_alpha_char(int ch);
+int is_alnum_char(int ch);
 static void skip_ws_and_comments(void);
 void expect(int want);
 void parse_program(void);
@@ -137,70 +140,70 @@ void patch_calls(void);
 static void record_external(const char *name, int type);
 static void record_reloc(long offset, const char *name, long type);
 void code_reset(void);
-static void emit1(unsigned long b);
-static void emit4(long v);
-static void patch4(long pos, long v);
-static void emit_mov_eax_imm32(long v);
-static void emit_push_eax(void);
-static void emit_push_ebx(void);
-static void emit_pop_ebx(void);
-static void emit_pop_ecx(void);
-static void emit_load_param(long offset);
-static void emit_store_param(long offset);
+void emit1(unsigned long b);
+void emit4(long v);
+void patch4(long pos, long v);
+void emit_mov_eax_imm32(long v);
+void emit_push_eax(void);
+void emit_push_ebx(void);
+void emit_pop_ebx(void);
+void emit_pop_ecx(void);
+void emit_load_param(long offset);
+void emit_store_param(long offset);
 static void emit_load_global(const char *name);
 static void emit_store_global(const char *name);
 static void emit_mks_literal(const char *text);
 static unsigned long register_string(const char *text);
-static void emit_prologue(void);
-static void emit_epilogue(void);
-static void emit_test_eax_eax(void);
+void emit_prologue(void);
+void emit_epilogue(void);
+void emit_test_eax_eax(void);
 void emit_start(void);
-static void emit_add_esp_imm32(long v);
-static void emit_mov_eax_esp(void);
-static void emit_mov_ebx_ptr_esp(void);
-static void emit_mov_eax_stack_disp32(long disp);
-static void emit_mov_ebx_stack_disp32(long disp);
-static void emit_mov_stack_disp32_ebx(long disp);
-static void emit_mov_stack_disp32_eax(long disp);
-static void emit_reverse_args(int argc);
-static long emit_je_placeholder(void);
-static long emit_jne_placeholder(void);
-static long emit_jmp_placeholder(void);
-static void emit_jmp(long target);
-static void patch_rel32(long pos, long target);
-static void emit_add_eax_imm32(long v);
-static void emit_mov_ebx_eax(void);
-static void emit_mov_edx_eax(void);
-static void emit_mov_ebx_ecx(void);
-static void emit_mov_eax_ecx(void);
-static void emit_xor_ebx_ebx(void);
-static void emit_xor_eax_eax(void);
-static void emit_add_ebx_edx(void);
-static void emit_cmp_eax_ebx(void);
-static void emit_mov_eax_abs(unsigned long addr);
-static void emit_mov_ecx_abs(unsigned long addr);
-static void emit_mov_abs_eax(unsigned long addr);
-static void emit_mov_abs_ebx(unsigned long addr);
-static void emit_int_80(void);
-static void emit_add_eax_ebx(void);
-static void emit_and_eax_ebx(void);
-static void emit_or_eax_ebx(void);
-static void emit_xor_eax_ebx(void);
-static void emit_sub_from_stack_top(void);
-static void emit_imul_eax_ebx(void);
-static void emit_div_stack_top_by_eax(void);
-static void emit_cmp_set(int opcode);
-static void emit_neg_eax(void);
-static void emit_not_eax(void);
-static void emit_read_i32(void);
-static void emit_read_u8(void);
-static void emit_write_i32(void);
-static void emit_write_u8(void);
-static void emit_brk_alloc(void);
-static void emit_sys_open(void);
-static void emit_sys_read(void);
-static void emit_sys_write(void);
-static void emit_sys_close(void);
+void emit_add_esp_imm32(long v);
+void emit_mov_eax_esp(void);
+void emit_mov_ebx_ptr_esp(void);
+void emit_mov_eax_stack_disp32(long disp);
+void emit_mov_ebx_stack_disp32(long disp);
+void emit_mov_stack_disp32_ebx(long disp);
+void emit_mov_stack_disp32_eax(long disp);
+void emit_reverse_args(int argc);
+long emit_je_placeholder(void);
+long emit_jne_placeholder(void);
+long emit_jmp_placeholder(void);
+void emit_jmp(long target);
+void patch_rel32(long pos, long target);
+void emit_add_eax_imm32(long v);
+void emit_mov_ebx_eax(void);
+void emit_mov_edx_eax(void);
+void emit_mov_ebx_ecx(void);
+void emit_mov_eax_ecx(void);
+void emit_xor_ebx_ebx(void);
+void emit_xor_eax_eax(void);
+void emit_add_ebx_edx(void);
+void emit_cmp_eax_ebx(void);
+void emit_mov_eax_abs(unsigned long addr);
+void emit_mov_ecx_abs(unsigned long addr);
+void emit_mov_abs_eax(unsigned long addr);
+void emit_mov_abs_ebx(unsigned long addr);
+void emit_int_80(void);
+void emit_add_eax_ebx(void);
+void emit_and_eax_ebx(void);
+void emit_or_eax_ebx(void);
+void emit_xor_eax_ebx(void);
+void emit_sub_from_stack_top(void);
+void emit_imul_eax_ebx(void);
+void emit_div_stack_top_by_eax(void);
+void emit_cmp_set(int opcode);
+void emit_neg_eax(void);
+void emit_not_eax(void);
+void emit_read_i32(void);
+void emit_read_u8(void);
+void emit_write_i32(void);
+void emit_write_u8(void);
+void emit_brk_alloc(void);
+void emit_sys_open(void);
+void emit_sys_read(void);
+void emit_sys_write(void);
+void emit_sys_close(void);
 static void bin_reset(void);
 static void bout1(unsigned long b);
 static void bout2(unsigned long v);
@@ -211,14 +214,17 @@ static unsigned long align4(unsigned long n);
 void build_binary(void);
 void build_object(void);
 void emit_binary(void);
-static int push_loop(void);
-static void pop_loop(void);
-static void record_break(int loop_id, long patch_pos);
-static void patch_breaks(int loop_id, long target);
+int push_loop(void);
+void pop_loop(void);
+void record_break(int loop_id, long patch_pos);
+void patch_breaks(int loop_id, long target);
 int find_symbol(struct Symbol *arr, int count, const char *name);
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind);
 static char *read_file(const char *path, long *len_out);
 char *read_source(const char *path);
+void fail_expected_token(int want);
+void fail_loop_stack_overflow(void);
+void fail_break_patch_overflow(void);
 
 static void failf(const char *fmt, ...)
 {
@@ -308,31 +314,6 @@ static void set_tok_text_cstr(const char *s)
 static unsigned long u32(long v)
 {
     return ((unsigned long)v) & 0xffffffffUL;
-}
-
-static int is_space_char(int ch)
-{
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
-}
-
-static int is_digit_char(int ch)
-{
-    return ch >= '0' && ch <= '9';
-}
-
-static int is_alpha_char(int ch)
-{
-    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
-}
-
-static int is_alnum_char(int ch)
-{
-    return is_alpha_char(ch) || is_digit_char(ch);
-}
-
-void init_lexer(void)
-{
-    idx_pos = 0;
 }
 
 static void skip_ws_and_comments(void)
@@ -519,12 +500,19 @@ void next_tok(void)
     failf("unexpected character `%c`", src[idx_pos]);
 }
 
-void expect(int want)
+void fail_expected_token(int want)
 {
-    if (tok != want) {
-        failf("expected token %d, got `%s`", want, tok_text);
-    }
-    next_tok();
+    failf("expected token %d, got `%s`", want, tok_text);
+}
+
+void fail_loop_stack_overflow(void)
+{
+    failf("loop stack overflow");
+}
+
+void fail_break_patch_overflow(void)
+{
+    failf("break patch overflow");
 }
 
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
@@ -1075,13 +1063,13 @@ void code_reset(void)
     current_returned = 0;
 }
 
-static void emit1(unsigned long b)
+void emit1(unsigned long b)
 {
     if (code_len >= MAX_CODE) failf("code buffer overflow");
     code[code_len++] = (unsigned char)(u32((long)b) & 255U);
 }
 
-static void emit4(long v)
+void emit4(long v)
 {
     unsigned long n;
     n = u32(v);
@@ -1091,7 +1079,7 @@ static void emit4(long v)
     emit1((n >> 24) & 255U);
 }
 
-static void patch4(long pos, long v)
+void patch4(long pos, long v)
 {
     unsigned long n;
     n = u32(v);
@@ -1100,14 +1088,6 @@ static void patch4(long pos, long v)
     code[pos + 2] = (unsigned char)((n >> 16) & 255U);
     code[pos + 3] = (unsigned char)((n >> 24) & 255U);
 }
-
-static void emit_mov_eax_imm32(long v) { emit1(184); emit4(v); }
-static void emit_push_eax(void) { emit1(80); }
-static void emit_push_ebx(void) { emit1(83); }
-static void emit_pop_ebx(void) { emit1(91); }
-static void emit_pop_ecx(void) { emit1(89); }
-static void emit_load_param(long offset) { emit1(139); emit1(69); emit1(offset); }
-static void emit_store_param(long offset) { emit1(137); emit1(69); emit1(offset); }
 
 static void emit_load_global(const char *name)
 {
@@ -1161,151 +1141,6 @@ static unsigned long register_string(const char *text)
 static void emit_mks_literal(const char *text)
 {
     emit_mov_eax_imm32((long)register_string(text));
-}
-
-static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); emit_push_ebx(); }
-static void emit_epilogue(void) { emit1(139); emit1(93); emit1(252); emit1(137); emit1(236); emit1(93); emit1(195); }
-static void emit_test_eax_eax(void) { emit1(133); emit1(192); }
-
-void emit_start(void)
-{
-    emit_mov_eax_esp();
-    emit_mov_ebx_ptr_esp();
-    emit_add_eax_imm32(4);
-    emit_push_eax();
-    emit_push_ebx();
-    emit1(232);
-    start_call_patch = code_len;
-    emit4(0);
-    emit_add_esp_imm32(8);
-    emit1(137);
-    emit1(195);
-    emit1(184);
-    emit4(1);
-    emit1(205);
-    emit1(128);
-}
-
-static void emit_add_esp_imm32(long v) { emit1(129); emit1(196); emit4(v); }
-static void emit_mov_eax_esp(void) { emit1(137); emit1(224); }
-static void emit_mov_ebx_ptr_esp(void) { emit1(139); emit1(28); emit1(36); }
-static void emit_mov_eax_stack_disp32(long disp) { emit1(139); emit1(132); emit1(36); emit4(disp); }
-static void emit_mov_ebx_stack_disp32(long disp) { emit1(139); emit1(156); emit1(36); emit4(disp); }
-static void emit_mov_stack_disp32_ebx(long disp) { emit1(137); emit1(156); emit1(36); emit4(disp); }
-static void emit_mov_stack_disp32_eax(long disp) { emit1(137); emit1(132); emit1(36); emit4(disp); }
-
-static void emit_reverse_args(int argc)
-{
-    int i;
-    for (i = 0; i < argc / 2; i++) {
-        long lo;
-        long hi;
-        lo = 4 * i;
-        hi = 4 * (argc - 1 - i);
-        emit_mov_eax_stack_disp32(lo);
-        emit_mov_ebx_stack_disp32(hi);
-        emit_mov_stack_disp32_ebx(lo);
-        emit_mov_stack_disp32_eax(hi);
-    }
-}
-static long emit_je_placeholder(void) { emit1(15); emit1(132); { long p = code_len; emit4(0); return p; } }
-static long emit_jne_placeholder(void) { emit1(15); emit1(133); { long p = code_len; emit4(0); return p; } }
-static long emit_jmp_placeholder(void) { emit1(233); { long p = code_len; emit4(0); return p; } }
-static void emit_jmp(long target) { long p = emit_jmp_placeholder(); patch_rel32(p, target); }
-static void patch_rel32(long pos, long target) { patch4(pos, target - (pos + 4)); }
-static void emit_add_eax_imm32(long v) { emit1(5); emit4(v); }
-static void emit_mov_ebx_eax(void) { emit1(137); emit1(195); }
-static void emit_mov_edx_eax(void) { emit1(137); emit1(194); }
-static void emit_mov_ebx_ecx(void) { emit1(137); emit1(203); }
-static void emit_mov_eax_ecx(void) { emit1(137); emit1(200); }
-static void emit_xor_ebx_ebx(void) { emit1(49); emit1(219); }
-static void emit_xor_eax_eax(void) { emit1(49); emit1(192); }
-static void emit_add_ebx_edx(void) { emit1(1); emit1(211); }
-static void emit_cmp_eax_ebx(void) { emit1(57); emit1(216); }
-static void emit_mov_eax_abs(unsigned long addr) { emit1(161); emit4((long)addr); }
-static void emit_mov_ecx_abs(unsigned long addr) { emit1(139); emit1(13); emit4((long)addr); }
-static void emit_mov_abs_eax(unsigned long addr) { emit1(163); emit4((long)addr); }
-static void emit_mov_abs_ebx(unsigned long addr) { emit1(137); emit1(29); emit4((long)addr); }
-static void emit_int_80(void) { emit1(205); emit1(128); }
-static void emit_add_eax_ebx(void) { emit1(1); emit1(216); }
-static void emit_and_eax_ebx(void) { emit1(33); emit1(216); }
-static void emit_or_eax_ebx(void) { emit1(9); emit1(216); }
-static void emit_xor_eax_ebx(void) { emit1(49); emit1(216); }
-
-static void emit_sub_from_stack_top(void)
-{
-    emit1(137); emit1(193); emit1(137); emit1(216); emit1(41); emit1(200);
-}
-
-static void emit_imul_eax_ebx(void) { emit1(15); emit1(175); emit1(195); }
-
-static void emit_div_stack_top_by_eax(void)
-{
-    emit1(137); emit1(193); emit1(137); emit1(216); emit1(153); emit1(247); emit1(249);
-}
-
-static void emit_cmp_set(int opcode)
-{
-    emit1(57); emit1(195); emit1(15); emit1((unsigned long)opcode); emit1(192); emit1(15); emit1(182); emit1(192);
-}
-
-static void emit_neg_eax(void) { emit1(247); emit1(216); }
-
-static void emit_not_eax(void)
-{
-    emit1(133); emit1(192); emit1(15); emit1(148); emit1(192); emit1(15); emit1(182); emit1(192);
-}
-
-static void emit_read_i32(void) { emit1(139); emit1(0); }
-static void emit_read_u8(void) { emit1(15); emit1(182); emit1(0); }
-static void emit_write_i32(void) { emit1(137); emit1(3); }
-
-static void emit_write_u8(void)
-{
-    emit1(136); emit1(3); emit1(15); emit1(182); emit1(192);
-}
-
-static void emit_brk_alloc(void)
-{
-    unsigned long cur_addr;
-    long init_skip;
-    long fail_patch;
-    long done_patch;
-
-    cur_addr = DATA_BASE + BRK_CUR_OFFSET;
-    emit_mov_edx_eax();
-    emit_mov_eax_abs(cur_addr);
-    emit_test_eax_eax();
-    init_skip = emit_jne_placeholder();
-    emit_mov_eax_imm32(45);
-    emit_xor_ebx_ebx();
-    emit_int_80();
-    emit_mov_abs_eax(cur_addr);
-    patch_rel32(init_skip, code_len);
-    emit_mov_ecx_abs(cur_addr);
-    emit_mov_ebx_ecx();
-    emit_add_ebx_edx();
-    emit_mov_eax_imm32(45);
-    emit_int_80();
-    emit_cmp_eax_ebx();
-    fail_patch = emit_jne_placeholder();
-    emit_mov_abs_ebx(cur_addr);
-    emit_mov_eax_ecx();
-    done_patch = emit_jmp_placeholder();
-    patch_rel32(fail_patch, code_len);
-    emit_xor_eax_eax();
-    patch_rel32(done_patch, code_len);
-}
-
-static void emit_sys_open(void) { emit_mov_eax_imm32(5); emit_int_80(); }
-static void emit_sys_read(void) { emit_mov_eax_imm32(3); emit_int_80(); }
-static void emit_sys_write(void) { emit_mov_eax_imm32(4); emit_int_80(); }
-
-static void emit_sys_close(void)
-{
-    emit_mov_ebx_eax();
-    emit_mov_eax_imm32(6);
-    emit_int_80();
 }
 
 static void bin_reset(void)
@@ -1567,38 +1402,6 @@ void emit_binary(void)
     if (fwrite(binbuf, 1, (size_t)bin_len, stdout) != (size_t)bin_len) {
         fprintf(stderr, "write failed\n");
         exit(1);
-    }
-}
-
-static int push_loop(void)
-{
-    int id;
-    id = ++next_loop_id;
-    if (loop_depth >= MAX_LOOPS) failf("loop stack overflow");
-    loop_stack[loop_depth++] = id;
-    return id;
-}
-
-static void pop_loop(void)
-{
-    if (loop_depth > 0) loop_depth--;
-}
-
-static void record_break(int loop_id, long patch_pos)
-{
-    if (break_patch_count >= MAX_BREAKS) failf("break patch overflow");
-    break_patch_loop[break_patch_count] = loop_id;
-    break_patch_pos[break_patch_count] = patch_pos;
-    break_patch_count++;
-}
-
-static void patch_breaks(int loop_id, long target)
-{
-    int i;
-    for (i = 0; i < break_patch_count; i++) {
-        if (break_patch_loop[i] == loop_id) {
-            patch_rel32(break_patch_pos[i], target);
-        }
     }
 }
 
