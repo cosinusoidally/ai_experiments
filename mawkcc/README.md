@@ -43,8 +43,7 @@ Current implemented scope:
 - object output exports generated functions as i386 ELF symbols that can
   be linked with GCC-built 32-bit objects
 - object output can call functions supplied by other object files and
-  can read/write external 32-bit integer variables declared with
-  `var name;`
+  can read/write 32-bit integer variables declared with `var name;`
 - generated function calls use the i386 System V cdecl argument order
 
 Current non-goals:
@@ -55,8 +54,6 @@ Current non-goals:
 - `continue`
 - full native toolchain integration beyond the current simple object
   output mode
-- relocatable object support for globals, string data, and external
-  data definitions
 
 Local-variable convention:
 
@@ -110,12 +107,14 @@ cc -m32 -c driver.c -o driver.o
 cc -m32 -no-pie driver.o source.o -o linked-program
 ```
 
-In object mode, `var name;` declares an external 32-bit integer symbol
-rather than allocating compiler-owned storage. Undefined function calls
-are emitted as external `R_386_PC32` relocations, and external integer
-loads/stores are emitted as `R_386_32` relocations. Function arguments
-are pushed right-to-left and read at standard cdecl stack offsets, so
-mawkcc-generated objects can call and be called by GCC-built i386 code.
+In object mode, `var name;` emits a 32-bit common object symbol. This
+lets generated objects provide their own global storage while still
+allowing a strong definition from another object file to satisfy the same
+symbol at link time. Undefined function calls are emitted as external
+`R_386_PC32` relocations, and integer loads/stores use `R_386_32`
+relocations. Function arguments are pushed right-to-left and read at
+standard cdecl stack offsets, so mawkcc-generated objects can call and be
+called by GCC-built i386 code.
 
 The C reference implementation must also be built as a 32-bit ANSI C
 program:

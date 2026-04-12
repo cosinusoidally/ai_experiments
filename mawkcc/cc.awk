@@ -212,10 +212,9 @@ function parse_global(    name) {
     if (global_seen[name] || function_seen[name])
         fail("duplicate global `" name "`")
     global_seen[name] = 1
-    if (format == "obj") {
-        global_external[name] = 1
+    global_name[++global_count] = name
+    if (format == "obj")
         return
-    }
     global_offset[name] = global_bytes
     global_bytes += 4
     if (next_data_offset < global_bytes)
@@ -631,6 +630,7 @@ function code_reset() {
     reloc_count = 0
     external_count = 0
     function_count = 0
+    global_count = 0
     global_bytes = RUNTIME_BYTES
     next_data_offset = RUNTIME_BYTES
     data_used = RUNTIME_BYTES
@@ -704,8 +704,7 @@ function emit_store_param(offset) {
 
 function emit_load_global(name) {
     emit1(161)
-    if (format == "obj" && global_external[name]) {
-        record_external(name, "object")
+    if (format == "obj") {
         record_reloc(code_len, name, 1)
         emit4(0)
         return
@@ -715,8 +714,7 @@ function emit_load_global(name) {
 
 function emit_store_global(name) {
     emit1(163)
-    if (format == "obj" && global_external[name]) {
-        record_external(name, "object")
+    if (format == "obj") {
         record_reloc(code_len, name, 1)
         emit4(0)
         return
@@ -1202,14 +1200,20 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, data_
         sym_name_off[i] = strtab_size
         strtab_size += length(name) + 1
     }
-    for (i = 1; i <= external_count; i++) {
-        name = external_name[i]
+    for (i = 1; i <= global_count; i++) {
+        name = global_name[i]
         sym_index[name] = function_count + i + 1
         sym_name_off[function_count + i] = strtab_size
         strtab_size += length(name) + 1
     }
+    for (i = 1; i <= external_count; i++) {
+        name = external_name[i]
+        sym_index[name] = function_count + global_count + i + 1
+        sym_name_off[function_count + global_count + i] = strtab_size
+        strtab_size += length(name) + 1
+    }
     shstrtab_size = 54
-    sym_count = function_count + external_count + 2
+    sym_count = function_count + global_count + external_count + 2
     symtab_size = sym_count * 16
     rel_size = reloc_count * 8
 
@@ -1288,12 +1292,21 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, data_
         bout1(0)
         bout2(1)
     }
+    for (i = 1; i <= global_count; i++) {
+        name = global_name[i]
+        bout4(sym_name_off[function_count + i])
+        bout4(4)
+        bout4(4)
+        bout1(17)
+        bout1(0)
+        bout2(65522)
+    }
     for (i = 1; i <= external_count; i++) {
         name = external_name[i]
         type_info = 18
         if (external_type[name] == "object")
             type_info = 17
-        bout4(sym_name_off[function_count + i])
+        bout4(sym_name_off[function_count + global_count + i])
         bout4(0)
         bout4(0)
         bout1(type_info)
@@ -1304,6 +1317,10 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, data_
     bout1(0)
     for (i = 1; i <= function_count; i++) {
         boutstr(function_name[i])
+        bout1(0)
+    }
+    for (i = 1; i <= global_count; i++) {
+        boutstr(global_name[i])
         bout1(0)
     }
     for (i = 1; i <= external_count; i++) {

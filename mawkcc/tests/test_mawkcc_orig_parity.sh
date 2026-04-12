@@ -44,8 +44,8 @@ if ! cmp -s "$SELF_OBJ" "$SELF_ORIG_OBJ"; then
     exit 1
 fi
 
-log_cmd "cc -ansi -m32 -Dfunction=int -Dvar=extern -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c \"$ROOT/mawkcc_self.c\" -o \"$SELF_GCC_OBJ\""
-cc -ansi -m32 -Dfunction=int -Dvar=extern -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
+log_cmd "cc -ansi -m32 -Dfunction=int -Dvar=int -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c \"$ROOT/mawkcc_self.c\" -o \"$SELF_GCC_OBJ\""
+cc -ansi -m32 -Dfunction=int -Dvar=int -Wno-int-conversion -Wno-builtin-declaration-mismatch -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
 
 log_cmd "cc -ansi -m32 -fno-builtin -g -O0 -c \"$ROOT/mawkcc_gcc_support.c\" -o \"$GCC_SUPPORT_OBJ\""
 cc -ansi -m32 -fno-builtin -g -O0 -c "$ROOT/mawkcc_gcc_support.c" -o "$GCC_SUPPORT_OBJ"

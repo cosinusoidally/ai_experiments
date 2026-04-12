@@ -142,6 +142,61 @@ function init_globals() {
     return 0;
 }
 
+function fail_msg(s, n) {
+    write(2, s, n);
+    exit(1);
+    return 0;
+}
+
+function fail_code(code, arg) {
+    return fail_msg(mks("mawkcc error\n"), 13);
+}
+
+function usage(program) {
+    write(2, mks("usage: mawkcc [-c] source\n"), 26);
+    return 1;
+}
+
+function xmalloc_(n, p) {
+    p = malloc(n);
+    if (eq(p, 0)) {
+        fail_msg(mks("out of memory\n"), 14);
+    }
+    return p;
+}
+
+function xmalloc(n) {
+    return xmalloc_(n, 0);
+}
+
+function xrealloc_(p, n, q) {
+    q = realloc(p, n);
+    if (eq(q, 0)) {
+        fail_msg(mks("out of memory\n"), 14);
+    }
+    return q;
+}
+
+function xrealloc(p, n) {
+    return xrealloc_(p, n, 0);
+}
+
+function div_floor256(v, q) {
+    q = div(v, 256);
+    if (and(lt(v, 0), ne(mul(q, 256), v))) {
+        q = sub(q, 1);
+    }
+    return q;
+}
+
+function u32_byte(v, shift) {
+    while (gt(shift, 0)) {
+        v = div_floor256(v, 0);
+        shift = sub(shift, 8);
+    }
+    return v;
+}
+
 function sym_name(sym) {
     return ri32(sym);
 }
@@ -568,7 +623,6 @@ function emit_load_global_(name, idx, off) {
     off = sym_val(add(globals_p, mul(idx, 8)));
     emit1(161);
     if (output_object) {
-        record_external(name, 17);
         record_reloc(code_len, name, 1);
         emit4(0);
         return 0;
@@ -586,7 +640,6 @@ function emit_store_global_(name, idx, off) {
     off = sym_val(add(globals_p, mul(idx, 8)));
     emit1(163);
     if (output_object) {
-        record_external(name, 17);
         record_reloc(code_len, name, 1);
         emit4(0);
         return 0;
@@ -1389,11 +1442,20 @@ function build_object_init_symbols_(sym_name_off, sym_index, i, pos, entry, name
         i = add(i, 1);
     }
     i = 0;
-    while (lt(i, external_count)) {
-        entry = add(externals_p, mul(i, 8));
+    while (lt(i, global_count)) {
+        entry = add(globals_p, mul(i, 8));
         name = sym_name(entry);
         wi32(add(sym_index, mul(add(function_count, i), 4)), add(add(function_count, i), 2));
         wi32(add(sym_name_off, mul(add(function_count, i), 4)), pos);
+        pos = add(add(pos, strlen(name)), 1);
+        i = add(i, 1);
+    }
+    i = 0;
+    while (lt(i, external_count)) {
+        entry = add(externals_p, mul(i, 8));
+        name = sym_name(entry);
+        wi32(add(sym_index, mul(add(add(function_count, global_count), i), 4)), add(add(add(function_count, global_count), i), 2));
+        wi32(add(sym_name_off, mul(add(add(function_count, global_count), i), 4)), pos);
         pos = add(add(pos, strlen(name)), 1);
         i = add(i, 1);
     }
@@ -1500,13 +1562,19 @@ function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {
                 bout4(off);
                 bout4(add(mul(ri32(add(sym_index, mul(si, 4))), 256), typ));
             } else {
-                si = find_symbol(externals_p, external_count, name);
-                if (lt(si, 0)) {
-                    fail_code(22, name);
+                si = find_symbol(globals_p, global_count, name);
+                if (ge(si, 0)) {
+                    bout4(off);
+                    bout4(add(mul(ri32(add(sym_index, mul(add(function_count, si), 4))), 256), typ));
+                } else {
+                    si = find_symbol(externals_p, external_count, name);
+                    if (lt(si, 0)) {
+                        fail_code(22, name);
+                    }
+                    sympos = add(add(function_count, global_count), si);
+                    bout4(off);
+                    bout4(add(mul(ri32(add(sym_index, mul(sympos, 4))), 256), typ));
                 }
-                sympos = add(function_count, si);
-                bout4(off);
-                bout4(add(mul(ri32(add(sym_index, mul(sympos, 4))), 256), typ));
             }
         }
         ri = add(ri, 1);
@@ -1535,9 +1603,23 @@ function build_object_emit_functions_(sym_name_off, i, start, next_start, size, 
     return 0;
 }
 
+function build_object_emit_globals_(sym_name_off, i, entry) {
+    while (lt(i, global_count)) {
+        entry = add(globals_p, mul(i, 8));
+        bout4(ri32(add(sym_name_off, mul(add(function_count, i), 4))));
+        bout4(4);
+        bout4(4);
+        bout1(17);
+        bout1(0);
+        bout2(65522);
+        i = add(i, 1);
+    }
+    return 0;
+}
+
 function build_object_emit_externals_(sym_name_off, i, sympos) {
     while (lt(i, external_count)) {
-        sympos = add(function_count, i);
+        sympos = add(add(function_count, global_count), i);
         bout4(ri32(add(sym_name_off, mul(sympos, 4))));
         bout4(0);
         bout4(0);
@@ -1554,6 +1636,13 @@ function build_object_emit_strtab_(i, entry) {
     i = 0;
     while (lt(i, function_count)) {
         entry = add(functions_p, mul(i, 8));
+        boutstr(sym_name(entry));
+        bout1(0);
+        i = add(i, 1);
+    }
+    i = 0;
+    while (lt(i, global_count)) {
+        entry = add(globals_p, mul(i, 8));
         boutstr(sym_name(entry));
         bout1(0);
         i = add(i, 1);
@@ -1598,7 +1687,7 @@ function build_object_(sym_name_off, sym_index, ehsize, shentsize, shnum, shstrn
     shstrndx = 7;
     strtab_size = build_object_init_symbols_(sym_name_off, sym_index, 0, 0, 0, 0);
     shstrtab_size = 54;
-    sym_count = add(add(function_count, external_count), 2);
+    sym_count = add(add(add(function_count, global_count), external_count), 2);
     symtab_size = mul(sym_count, 16);
     rel_size = mul(reloc_count, 8);
 
@@ -1636,6 +1725,7 @@ function build_object_(sym_name_off, sym_index, ehsize, shentsize, shnum, shstrn
     bout1(0);
     bout2(3);
     build_object_emit_functions_(sym_name_off, 0, 0, 0, 0, 0);
+    build_object_emit_globals_(sym_name_off, 0, 0);
     build_object_emit_externals_(sym_name_off, 0, 0);
 
     build_object_emit_strtab_(0, 0);

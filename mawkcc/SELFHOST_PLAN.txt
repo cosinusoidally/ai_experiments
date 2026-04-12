@@ -138,8 +138,8 @@ Intent:
 - `mawkcc_self.c` must remain human-readable and auditable; when the
   restricted dialect lacks constants or enums, use initialized global
   variables such as `TOK_IDENT` instead of unexplained magic numbers
-- `mawkcc_ansi.c` contains the remaining implementation that still needs
-  full ANSI C features
+- `mawkcc_ansi.c` is retained only as a build-compatible placeholder once
+  its contents have been migrated
 
 At this stage, the combined executable should still behave exactly like
 `mawkcc_orig.c`.
@@ -148,8 +148,10 @@ Link model:
 
 1. compile `mawkcc_self.c` with `mawkcc` to produce `mawkcc_self.o`
 2. compile `mawkcc_self.c` with GCC as a cross-check
-3. compile `mawkcc_ansi.c` with GCC to produce `mawkcc_ansi.o`
-4. link `mawkcc_self.o` and `mawkcc_ansi.o` into `mawkcc.exe`
+3. compile the empty `mawkcc_ansi.c` with GCC to produce a placeholder
+   `mawkcc_ansi.o`
+4. link `mawkcc_self.o` and the placeholder `mawkcc_ansi.o` into
+   `mawkcc.exe`
 
 Important constraint:
 
@@ -177,11 +179,9 @@ Suggested ownership:
 
 `mawkcc_ansi.c`
 
-- host runtime support not yet expressible cleanly in the subset
-- file loading helpers
-- buffer allocation helpers
-- string and table utilities
-- optional debugging or diagnostics helpers
+- empty build placeholder
+- no compiler logic
+- no runtime support
 
 The exact split can evolve, but the ABI should stay small:
 
@@ -248,7 +248,7 @@ chain without parity loss.
 Milestones:
 
 1. `mawkcc` compiles `mawkcc_self.c` into `mawkcc_self.o`
-2. GCC compiles `mawkcc_ansi.c` into `mawkcc_ansi.o`
+2. GCC compiles empty `mawkcc_ansi.c` into placeholder `mawkcc_ansi.o`
 3. link both into `mawkcc.exe`
 4. `mawkcc.exe` compiles the example corpus bit-identically
 5. `mawkcc.exe` compiles `mawkcc_self.c` bit-identically to the earlier
@@ -262,12 +262,11 @@ Stage 8: Empty ansi End State
 
 The final target is:
 
-- `mawkcc_ansi.c` becomes empty or nearly empty
+- `mawkcc_ansi.c` is empty
 
 Acceptable final forms:
 
 - a truly empty file
-- a file containing only the thinnest host glue
 - a file retained only for build compatibility
 
 The transition is complete only when:
@@ -337,10 +336,8 @@ For `mawkcc_self.c`:
 
 For `mawkcc_ansi.c`:
 
-- keep it as a shrinking compatibility layer
-- do not let it become a second full compiler
-- every new helper added there should have a migration plan into
-  `mawkcc_self.c`
+- keep it empty
+- do not add host glue or runtime support back to this file
 
 
 Immediate Next Steps

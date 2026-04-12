@@ -10,7 +10,7 @@ source-file reading, final binary emission, low-level code/binary
 emission, binary reset, and self-owned state-array/buffer work have
 already been completed.
 
-No currently listed simple porting steps remain. The remaining ANSI-side
-code is mostly process/libc/error-reporting support: allocation wrappers,
-`failf`/`fail_code`, `u32_byte`, `usage`, and global state definitions used
-by the split and pure-GCC builds.
+No currently listed simple porting steps remain. `mawkcc_ansi.c` is empty;
+the remaining work is no longer ANSI-side porting but reducing external
+libc/toolchain dependencies from `mawkcc_self.c` so the compiler can be
+linked without GCC.

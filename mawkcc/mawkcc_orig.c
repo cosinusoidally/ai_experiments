@@ -1124,7 +1124,6 @@ static void emit_load_global(const char *name)
     off = must_find_symbol_value(globals, global_count, name, "global");
     emit1(161);
     if (output_object) {
-        record_external(name, 17);
         record_reloc(code_len, name, 1);
         emit4(0);
         return;
@@ -1138,7 +1137,6 @@ static void emit_store_global(const char *name)
     off = must_find_symbol_value(globals, global_count, name, "global");
     emit1(163);
     if (output_object) {
-        record_external(name, 17);
         record_reloc(code_len, name, 1);
         emit4(0);
         return;
@@ -1467,13 +1465,18 @@ static void build_object(void)
         sym_name_off[i] = strtab_size;
         strtab_size += (unsigned long)strlen(functions[i].name) + 1UL;
     }
-    for (i = 0; i < external_count; i++) {
+    for (i = 0; i < global_count; i++) {
         sym_index[function_count + i] = (unsigned long)function_count + (unsigned long)i + 2UL;
         sym_name_off[function_count + i] = strtab_size;
+        strtab_size += (unsigned long)strlen(globals[i].name) + 1UL;
+    }
+    for (i = 0; i < external_count; i++) {
+        sym_index[function_count + global_count + i] = (unsigned long)function_count + (unsigned long)global_count + (unsigned long)i + 2UL;
+        sym_name_off[function_count + global_count + i] = strtab_size;
         strtab_size += (unsigned long)strlen(externals[i].name) + 1UL;
     }
     shstrtab_size = 54UL;
-    sym_count = (unsigned long)function_count + (unsigned long)external_count + 2UL;
+    sym_count = (unsigned long)function_count + (unsigned long)global_count + (unsigned long)external_count + 2UL;
     symtab_size = sym_count * 16UL;
     rel_size = (unsigned long)reloc_count * 8UL;
 
@@ -1516,12 +1519,18 @@ static void build_object(void)
             bout4((long)(sym_index[si] * 256UL + (unsigned long)reloc_types[ri]));
             continue;
         }
+        si = find_symbol(globals, global_count, reloc_names[ri]);
+        if (si >= 0) {
+            bout4(reloc_offsets[ri]);
+            bout4((long)(sym_index[function_count + si] * 256UL + (unsigned long)reloc_types[ri]));
+            continue;
+        }
         si = find_symbol(externals, external_count, reloc_names[ri]);
         if (si < 0) {
             failf("relocation references unknown symbol `%s`", reloc_names[ri]);
         }
         bout4(reloc_offsets[ri]);
-        bout4((long)(sym_index[function_count + si] * 256UL + (unsigned long)reloc_types[ri]));
+        bout4((long)(sym_index[function_count + global_count + si] * 256UL + (unsigned long)reloc_types[ri]));
     }
 
     pad_to(symtab_off);
@@ -1550,8 +1559,16 @@ static void build_object(void)
         bout1(0);
         bout2(1);
     }
-    for (i = 0; i < external_count; i++) {
+    for (i = 0; i < global_count; i++) {
         bout4((long)sym_name_off[function_count + i]);
+        bout4(4);
+        bout4(4);
+        bout1(17);
+        bout1(0);
+        bout2(65522);
+    }
+    for (i = 0; i < external_count; i++) {
+        bout4((long)sym_name_off[function_count + global_count + i]);
         bout4(0);
         bout4(0);
         bout1((unsigned long)external_types[i]);
@@ -1562,6 +1579,10 @@ static void build_object(void)
     bout1(0);
     for (i = 0; i < function_count; i++) {
         boutstr(functions[i].name);
+        bout1(0);
+    }
+    for (i = 0; i < global_count; i++) {
+        boutstr(globals[i].name);
         bout1(0);
     }
     for (i = 0; i < external_count; i++) {
