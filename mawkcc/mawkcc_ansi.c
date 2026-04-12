@@ -44,9 +44,9 @@ struct Symbol {
 };
 
 char *src;
-static long src_len;
+long src_len;
 long idx_pos;
-static long tok_pos;
+long tok_pos;
 int tok;
 char *tok_text;
 long tok_text_cap;
@@ -57,57 +57,40 @@ long code_len;
 unsigned char *code_p = code;
 static unsigned char binbuf[MAX_BIN];
 static long bin_len;
-static unsigned char data_byte[MAX_DATA];
-unsigned char *data_byte_p = data_byte;
+unsigned char *data_byte_p;
 unsigned long data_used;
 unsigned long next_data_offset;
 
-static struct Symbol globals[MAX_SYMS];
+struct Symbol *globals_p;
 int global_count;
-struct Symbol *globals_p = globals;
-static struct Symbol functions[MAX_SYMS];
-static struct Symbol function_arities[MAX_SYMS];
 int function_count;
-struct Symbol *functions_p = functions;
-struct Symbol *function_arities_p = function_arities;
-static struct Symbol externals[MAX_SYMS];
-static int external_types[MAX_SYMS];
+struct Symbol *functions_p;
+struct Symbol *function_arities_p;
+struct Symbol *externals_p;
+int *external_types_p;
 int external_count;
-struct Symbol *externals_p = externals;
-int *external_types_p = external_types;
 
-static char *current_params[MAX_PARAMS];
-static long current_param_offsets[MAX_PARAMS];
 int current_param_count;
-char **current_params_p = current_params;
-long *current_param_offsets_p = current_param_offsets;
-static char *current_function;
+char **current_params_p;
+long *current_param_offsets_p;
 int current_returned;
 
-static char *call_target[MAX_CALLS];
-static long call_pos[MAX_CALLS];
-static long call_argc[MAX_CALLS];
 int call_count;
-char **call_target_p = call_target;
-long *call_pos_p = call_pos;
-long *call_argc_p = call_argc;
+char **call_target_p;
+long *call_pos_p;
+long *call_argc_p;
 
-static long reloc_offsets[MAX_RELOCS];
-static char *reloc_names[MAX_RELOCS];
-static long reloc_types[MAX_RELOCS];
 int reloc_count;
-long *reloc_offsets_p = reloc_offsets;
-char **reloc_names_p = reloc_names;
-long *reloc_types_p = reloc_types;
+long *reloc_offsets_p;
+char **reloc_names_p;
+long *reloc_types_p;
 
 int loop_depth;
 int next_loop_id;
-int break_patch_loop[MAX_BREAKS];
-long break_patch_pos[MAX_BREAKS];
 int break_patch_count;
 int *loop_stack_p;
-int *break_patch_loop_p = break_patch_loop;
-long *break_patch_pos_p = break_patch_pos;
+int *break_patch_loop_p;
+long *break_patch_pos_p;
 
 unsigned long global_bytes;
 long start_call_patch;
@@ -116,25 +99,25 @@ char *dash_c;
 
 static void failf(const char *fmt, ...);
 void *xmalloc(size_t n);
-static void *xrealloc(void *p, size_t n);
+void *xrealloc(void *p, size_t n);
 char *xstrdup(const char *s);
-static void set_tok_text_len(const char *s, size_t n);
-static void set_tok_text_cstr(const char *s);
+void set_tok_text_len(const char *s, size_t n);
+void set_tok_text_cstr(const char *s);
 static unsigned long u32(long v);
 void init_lexer(void);
 void next_tok(void);
-static void read_string_token(void);
+void read_string_token(void);
 int is_space_char(int ch);
 int is_digit_char(int ch);
 int is_alpha_char(int ch);
 int is_alnum_char(int ch);
-static void skip_ws_and_comments(void);
+void skip_ws_and_comments(void);
 void expect(int want);
 void parse_program(void);
 void parse_global(void);
 void parse_function(void);
-static void enter_function(const char *name, int param_count, char **param_names);
-static void leave_function(void);
+void enter_function(const char *name, int param_count, char **param_names);
+void leave_function(void);
 void parse_stmt(void);
 void parse_block(void);
 void parse_if(void);
@@ -167,7 +150,6 @@ void emit_store_param(long offset);
 void emit_load_global(const char *name);
 void emit_store_global(const char *name);
 void emit_mks_literal(const char *text);
-static unsigned long register_string(const char *text);
 void emit_prologue(void);
 void emit_epilogue(void);
 void emit_test_eax_eax(void);
@@ -261,6 +243,15 @@ void fail_duplicate_global(const char *name);
 void fail_unknown_relocation_symbol(const char *name);
 void fail_code_page_overflow(void);
 void fail_data_page_overflow(void);
+void fail_expected_function_name(void);
+void fail_expected_parameter_name(void);
+void fail_duplicate_parameter(const char *name);
+void fail_duplicate_function(const char *name);
+void fail_unterminated_comment(void);
+void fail_unterminated_string_escape(void);
+void fail_unterminated_string_literal(void);
+void fail_unsupported_string_escape(int ch);
+void fail_unexpected_character(int ch);
 
 static void failf(const char *fmt, ...)
 {
@@ -311,7 +302,7 @@ void *xmalloc(size_t n)
     return p;
 }
 
-static void *xrealloc(void *p, size_t n)
+void *xrealloc(void *p, size_t n)
 {
     void *q;
     q = realloc(p, n);
@@ -322,218 +313,9 @@ static void *xrealloc(void *p, size_t n)
     return q;
 }
 
-char *xstrdup(const char *s)
-{
-    size_t n;
-    char *p;
-    n = strlen(s);
-    p = (char *)xmalloc(n + 1);
-    memcpy(p, s, n + 1);
-    return p;
-}
-
-static void set_tok_text_len(const char *s, size_t n)
-{
-    if (tok_text_cap < (long)(n + 1)) {
-        tok_text_cap = (long)(n + 32);
-        tok_text = (char *)xrealloc(tok_text, (size_t)tok_text_cap);
-    }
-    memcpy(tok_text, s, n);
-    tok_text[n] = '\0';
-}
-
-static void set_tok_text_cstr(const char *s)
-{
-    set_tok_text_len(s, strlen(s));
-}
-
 static unsigned long u32(long v)
 {
     return ((unsigned long)v) & 0xffffffffUL;
-}
-
-static void skip_ws_and_comments(void)
-{
-    while (idx_pos < src_len) {
-        char ch;
-        ch = src[idx_pos];
-        if (is_space_char((unsigned char)ch)) {
-            idx_pos++;
-            continue;
-        }
-        if (idx_pos + 1 < src_len && src[idx_pos] == '/' && src[idx_pos + 1] == '*') {
-            idx_pos += 2;
-            while (idx_pos + 1 < src_len && !(src[idx_pos] == '*' && src[idx_pos + 1] == '/')) {
-                idx_pos++;
-            }
-            if (idx_pos + 1 >= src_len) {
-                failf("unterminated comment");
-            }
-            idx_pos += 2;
-            continue;
-        }
-        if (idx_pos + 1 < src_len && src[idx_pos] == '/' && src[idx_pos + 1] == '/') {
-            idx_pos += 2;
-            while (idx_pos < src_len && src[idx_pos] != '\n') {
-                idx_pos++;
-            }
-            continue;
-        }
-        break;
-    }
-}
-
-static void read_string_token(void)
-{
-    char *buf;
-    long cap;
-    long len;
-
-    idx_pos++;
-    cap = 64;
-    len = 0;
-    buf = (char *)xmalloc((size_t)cap);
-
-    while (idx_pos < src_len) {
-        char ch;
-        ch = src[idx_pos];
-        if (ch == '"') {
-            idx_pos++;
-            set_tok_text_len(buf, (size_t)len);
-            free(buf);
-            tok = TOK_STR;
-            return;
-        }
-        if (ch == '\\') {
-            idx_pos++;
-            if (idx_pos >= src_len) {
-                free(buf);
-                failf("unterminated string escape");
-            }
-            ch = src[idx_pos];
-            if (ch == 'n') {
-                ch = '\n';
-            } else if (ch == 't') {
-                ch = '\t';
-            } else if (ch == 'r') {
-                ch = '\r';
-            } else if (ch == '"') {
-                ch = '"';
-            } else if (ch == '\\') {
-                ch = '\\';
-            } else if (ch == '0') {
-                ch = '\0';
-            } else {
-                free(buf);
-                failf("unsupported string escape `\\%c`", ch);
-            }
-        }
-        if (len + 2 >= cap) {
-            cap *= 2;
-            buf = (char *)xrealloc(buf, (size_t)cap);
-        }
-        buf[len++] = ch;
-        idx_pos++;
-    }
-    free(buf);
-    failf("unterminated string literal");
-}
-
-void next_tok(void)
-{
-    long start;
-    skip_ws_and_comments();
-    tok_pos = idx_pos;
-
-    if (idx_pos >= src_len) {
-        tok = TOK_EOF;
-        set_tok_text_cstr("");
-        return;
-    }
-
-    if (is_alpha_char((unsigned char)src[idx_pos])) {
-        start = idx_pos;
-        idx_pos++;
-        while (idx_pos < src_len && is_alnum_char((unsigned char)src[idx_pos])) {
-            idx_pos++;
-        }
-        set_tok_text_len(src + start, (size_t)(idx_pos - start));
-        if (strcmp(tok_text, "return") == 0) {
-            tok = TOK_RETURN;
-        } else if (strcmp(tok_text, "function") == 0) {
-            tok = TOK_FUNCTION;
-        } else if (strcmp(tok_text, "var") == 0) {
-            tok = TOK_VAR;
-        } else if (strcmp(tok_text, "if") == 0) {
-            tok = TOK_IF;
-        } else if (strcmp(tok_text, "else") == 0) {
-            tok = TOK_ELSE;
-        } else if (strcmp(tok_text, "while") == 0) {
-            tok = TOK_WHILE;
-        } else if (strcmp(tok_text, "break") == 0) {
-            tok = TOK_BREAK;
-        } else {
-            tok = TOK_IDENT;
-        }
-        return;
-    }
-
-    if (is_digit_char((unsigned char)src[idx_pos])) {
-        start = idx_pos;
-        idx_pos++;
-        while (idx_pos < src_len && is_digit_char((unsigned char)src[idx_pos])) {
-            idx_pos++;
-        }
-        set_tok_text_len(src + start, (size_t)(idx_pos - start));
-        tok_num = strtoul(tok_text, (char **)0, 10);
-        tok = TOK_NUM;
-        return;
-    }
-
-    if (src[idx_pos] == '"') {
-        read_string_token();
-        return;
-    }
-
-    switch (src[idx_pos]) {
-        case '(':
-            tok = TOK_LPAREN;
-            set_tok_text_cstr("(");
-            idx_pos++;
-            return;
-        case ')':
-            tok = TOK_RPAREN;
-            set_tok_text_cstr(")");
-            idx_pos++;
-            return;
-        case '{':
-            tok = TOK_LBRACE;
-            set_tok_text_cstr("{");
-            idx_pos++;
-            return;
-        case '}':
-            tok = TOK_RBRACE;
-            set_tok_text_cstr("}");
-            idx_pos++;
-            return;
-        case ';':
-            tok = TOK_SEMI;
-            set_tok_text_cstr(";");
-            idx_pos++;
-            return;
-        case ',':
-            tok = TOK_COMMA;
-            set_tok_text_cstr(",");
-            idx_pos++;
-            return;
-        case '=':
-            tok = TOK_ASSIGN;
-            set_tok_text_cstr("=");
-            idx_pos++;
-            return;
-    }
-
-    failf("unexpected character `%c`", src[idx_pos]);
 }
 
 void fail_expected_token(int want)
@@ -559,11 +341,6 @@ void fail_missing_main(void)
 void fail_break_outside_loop(void)
 {
     failf("`break` used outside of a loop");
-}
-
-int has_main_function(void)
-{
-    return find_symbol(functions, function_count, "main") >= 0;
 }
 
 void fail_unknown_unary_builtin(const char *name)
@@ -661,6 +438,51 @@ void fail_data_page_overflow(void)
     failf("program data too large for fixed data page");
 }
 
+void fail_expected_function_name(void)
+{
+    failf("expected function name");
+}
+
+void fail_expected_parameter_name(void)
+{
+    failf("expected parameter name");
+}
+
+void fail_duplicate_parameter(const char *name)
+{
+    failf("duplicate parameter `%s`", name);
+}
+
+void fail_duplicate_function(const char *name)
+{
+    failf("duplicate function `%s`", name);
+}
+
+void fail_unterminated_comment(void)
+{
+    failf("unterminated comment");
+}
+
+void fail_unterminated_string_escape(void)
+{
+    failf("unterminated string escape");
+}
+
+void fail_unterminated_string_literal(void)
+{
+    failf("unterminated string literal");
+}
+
+void fail_unsupported_string_escape(int ch)
+{
+    failf("unsupported string escape `\\%c`", ch);
+}
+
+void fail_unexpected_character(int ch)
+{
+    failf("unexpected character `%c`", ch);
+}
+
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
 {
     int i;
@@ -669,118 +491,6 @@ static long must_find_symbol_value(struct Symbol *arr, int count, const char *na
         failf("unknown %s `%s`", kind, name);
     }
     return arr[i].value;
-}
-
-static void enter_function(const char *name, int param_count, char **param_names)
-{
-    int i;
-    current_function = (char *)name;
-    current_param_count = param_count;
-    current_returned = 0;
-    for (i = 0; i < param_count; i++) {
-        current_params[i] = xstrdup(param_names[i]);
-        current_param_offsets[i] = 8 + 4 * i;
-    }
-}
-
-static void leave_function(void)
-{
-    int i;
-    for (i = 0; i < current_param_count; i++) {
-        free(current_params[i]);
-        current_params[i] = 0;
-        current_param_offsets[i] = 0;
-    }
-    current_param_count = 0;
-    current_function = 0;
-    current_returned = 0;
-}
-
-void parse_function(void)
-{
-    char *name;
-    int param_count;
-    char *param_names[MAX_PARAMS];
-
-    expect(TOK_FUNCTION);
-    if (tok != TOK_IDENT) {
-        failf("expected function name");
-    }
-    name = xstrdup(tok_text);
-    next_tok();
-    expect(TOK_LPAREN);
-
-    param_count = 0;
-    if (tok != TOK_RPAREN) {
-        while (1) {
-            int i;
-            if (tok != TOK_IDENT) {
-                failf("expected parameter name");
-            }
-            for (i = 0; i < param_count; i++) {
-                if (strcmp(param_names[i], tok_text) == 0) {
-                    failf("duplicate parameter `%s`", tok_text);
-                }
-            }
-            param_names[param_count++] = xstrdup(tok_text);
-            next_tok();
-            if (tok != TOK_COMMA) {
-                break;
-            }
-            next_tok();
-        }
-    }
-    expect(TOK_RPAREN);
-
-    if (find_symbol(functions, function_count, name) >= 0) {
-        failf("duplicate function `%s`", name);
-    }
-    functions[function_count].name = name;
-    functions[function_count].value = code_len;
-    function_arities[function_count].name = xstrdup(name);
-    function_arities[function_count].value = param_count;
-    function_count++;
-
-    emit_prologue();
-    enter_function(name, param_count, param_names);
-    expect(TOK_LBRACE);
-    while (tok != TOK_RBRACE && tok != TOK_EOF) {
-        parse_stmt();
-    }
-    expect(TOK_RBRACE);
-    if (!current_returned) {
-        emit_mov_eax_imm32(0);
-        emit_epilogue();
-    }
-    leave_function();
-
-    {
-        int i;
-        for (i = 0; i < param_count; i++) {
-            free(param_names[i]);
-        }
-    }
-}
-
-void code_reset(void)
-{
-    memset(code, 0, sizeof(code));
-    memset(data_byte, 0, sizeof(data_byte));
-    code_len = 0;
-    call_count = 0;
-    global_count = 0;
-    function_count = 0;
-    external_count = 0;
-    reloc_count = 0;
-    global_bytes = RUNTIME_BYTES;
-    next_data_offset = RUNTIME_BYTES;
-    data_used = RUNTIME_BYTES;
-    loop_depth = 0;
-    next_loop_id = 0;
-    break_patch_count = 0;
-    current_function = 0;
-    current_param_count = 0;
-    current_returned = 0;
 }
 
 void emit1(unsigned long b)
@@ -807,40 +517,6 @@ void patch4(long pos, long v)
     code[pos + 1] = (unsigned char)((n >> 8) & 255U);
     code[pos + 2] = (unsigned char)((n >> 16) & 255U);
     code[pos + 3] = (unsigned char)((n >> 24) & 255U);
-}
-
-static unsigned long register_string(const char *text)
-{
-    unsigned long start;
-    size_t len;
-    size_t i;
-    len = strlen(text);
-    start = next_data_offset;
-    if (start + len + 1 > MAX_DATA) {
-        failf("program data too large for fixed data page");
-    }
-    for (i = 0; i < len; i++) {
-        data_byte[start + i] = (unsigned char)text[i];
-    }
-    data_byte[start + len] = 0;
-    next_data_offset = start + (unsigned long)len + 1UL;
-    if (data_used < next_data_offset) {
-        data_used = next_data_offset;
-    }
-    return DATA_BASE + start;
-}
-
-void emit_mks_literal(const char *text)
-{
-    unsigned long addr;
-    addr = register_string(text);
-    emit1(184);
-    if (output_object) {
-        record_reloc(code_len, ".data", 1);
-        emit4((long)(addr - DATA_BASE));
-        return;
-    }
-    emit4((long)addr);
 }
 
 void bin_reset(void)

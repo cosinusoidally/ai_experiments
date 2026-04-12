@@ -5,6 +5,8 @@ var tok_text_cap;
 var dash_c;
 var code_len;
 var idx_pos;
+var tok_pos;
+var src_len;
 var tok;
 var start_call_patch;
 var loop_depth;
@@ -44,8 +46,56 @@ function init_globals() {
     tok_text = 0;
     tok_text_cap = 0;
     dash_c = dash_c_string();
+    if (eq(data_byte_p, 0)) {
+        data_byte_p = xmalloc(4096);
+    }
+    if (eq(globals_p, 0)) {
+        globals_p = xmalloc(32768);
+    }
+    if (eq(functions_p, 0)) {
+        functions_p = xmalloc(32768);
+    }
+    if (eq(function_arities_p, 0)) {
+        function_arities_p = xmalloc(32768);
+    }
+    if (eq(current_params_p, 0)) {
+        current_params_p = xmalloc(4096);
+    }
+    if (eq(current_param_offsets_p, 0)) {
+        current_param_offsets_p = xmalloc(4096);
+    }
+    if (eq(externals_p, 0)) {
+        externals_p = xmalloc(32768);
+    }
+    if (eq(external_types_p, 0)) {
+        external_types_p = xmalloc(16384);
+    }
+    if (eq(call_target_p, 0)) {
+        call_target_p = xmalloc(32768);
+    }
+    if (eq(call_pos_p, 0)) {
+        call_pos_p = xmalloc(32768);
+    }
+    if (eq(call_argc_p, 0)) {
+        call_argc_p = xmalloc(32768);
+    }
+    if (eq(reloc_offsets_p, 0)) {
+        reloc_offsets_p = xmalloc(32768);
+    }
+    if (eq(reloc_names_p, 0)) {
+        reloc_names_p = xmalloc(32768);
+    }
+    if (eq(reloc_types_p, 0)) {
+        reloc_types_p = xmalloc(32768);
+    }
     if (eq(loop_stack_p, 0)) {
         loop_stack_p = xmalloc(4096);
+    }
+    if (eq(break_patch_loop_p, 0)) {
+        break_patch_loop_p = xmalloc(32768);
+    }
+    if (eq(break_patch_pos_p, 0)) {
+        break_patch_pos_p = xmalloc(32768);
     }
     return 0;
 }
@@ -66,6 +116,21 @@ function sym_set_name(sym, name) {
 function sym_set_val(sym, val) {
     wi32(add(sym, 4), val);
     return val;
+}
+
+function xstrdup_(s, n, p, i) {
+    n = strlen(s);
+    p = xmalloc(add(n, 1));
+    i = 0;
+    while (le(i, n)) {
+        wi8(add(p, i), ri8(add(s, i)));
+        i = add(i, 1);
+    }
+    return p;
+}
+
+function xstrdup(s) {
+    return xstrdup_(s, 0, 0, 0);
 }
 
 function find_symbol_(arr, count, name, i, entry) {
@@ -99,9 +164,212 @@ function is_alnum_char(ch) {
     return or(is_alpha_char(ch), is_digit_char(ch));
 }
 
+function set_tok_text_len_(s, n, i) {
+    if (lt(tok_text_cap, add(n, 1))) {
+        tok_text_cap = add(n, 32);
+        tok_text = xrealloc(tok_text, tok_text_cap);
+    }
+    i = 0;
+    while (lt(i, n)) {
+        wi8(add(tok_text, i), ri8(add(s, i)));
+        i = add(i, 1);
+    }
+    wi8(add(tok_text, n), 0);
+    return 0;
+}
+
+function set_tok_text_len(s, n) {
+    return set_tok_text_len_(s, n, 0);
+}
+
+function set_tok_text_cstr(s) {
+    return set_tok_text_len(s, strlen(s));
+}
+
 function init_lexer() {
     idx_pos = 0;
     return 0;
+}
+
+function skip_ws_and_comments_(ch) {
+    while (lt(idx_pos, src_len)) {
+        ch = ri8(add(src, idx_pos));
+        if (is_space_char(ch)) {
+            idx_pos = add(idx_pos, 1);
+        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), 47), eq(ri8(add(src, add(idx_pos, 1))), 42)))) {
+            idx_pos = add(idx_pos, 2);
+            while (and(lt(add(idx_pos, 1), src_len), not(and(eq(ri8(add(src, idx_pos)), 42), eq(ri8(add(src, add(idx_pos, 1))), 47))))) {
+                idx_pos = add(idx_pos, 1);
+            }
+            if (ge(add(idx_pos, 1), src_len)) {
+                fail_unterminated_comment();
+            }
+            idx_pos = add(idx_pos, 2);
+        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), 47), eq(ri8(add(src, add(idx_pos, 1))), 47)))) {
+            idx_pos = add(idx_pos, 2);
+            while (and(lt(idx_pos, src_len), ne(ri8(add(src, idx_pos)), 10))) {
+                idx_pos = add(idx_pos, 1);
+            }
+        } else {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+function skip_ws_and_comments() {
+    return skip_ws_and_comments_(0);
+}
+
+function read_string_token_(buf, cap, len, ch) {
+    idx_pos = add(idx_pos, 1);
+    cap = 64;
+    len = 0;
+    buf = xmalloc(cap);
+    while (lt(idx_pos, src_len)) {
+        ch = ri8(add(src, idx_pos));
+        if (eq(ch, 34)) {
+            idx_pos = add(idx_pos, 1);
+            set_tok_text_len(buf, len);
+            free(buf);
+            tok = 3;
+            return 0;
+        }
+        if (eq(ch, 92)) {
+            idx_pos = add(idx_pos, 1);
+            if (ge(idx_pos, src_len)) {
+                free(buf);
+                fail_unterminated_string_escape();
+            }
+            ch = ri8(add(src, idx_pos));
+            if (eq(ch, 110)) {
+                ch = 10;
+            } else if (eq(ch, 116)) {
+                ch = 9;
+            } else if (eq(ch, 114)) {
+                ch = 13;
+            } else if (eq(ch, 34)) {
+                ch = 34;
+            } else if (eq(ch, 92)) {
+                ch = 92;
+            } else if (eq(ch, 48)) {
+                ch = 0;
+            } else {
+                free(buf);
+                fail_unsupported_string_escape(ch);
+            }
+        }
+        if (ge(add(len, 2), cap)) {
+            cap = mul(cap, 2);
+            buf = xrealloc(buf, cap);
+        }
+        wi8(add(buf, len), ch);
+        len = add(len, 1);
+        idx_pos = add(idx_pos, 1);
+    }
+    free(buf);
+    fail_unterminated_string_literal();
+    return 0;
+}
+
+function read_string_token() {
+    return read_string_token_(0, 0, 0, 0);
+}
+
+function next_tok_ident_(start) {
+    start = idx_pos;
+    idx_pos = add(idx_pos, 1);
+    while (and(lt(idx_pos, src_len), is_alnum_char(ri8(add(src, idx_pos))))) {
+        idx_pos = add(idx_pos, 1);
+    }
+    set_tok_text_len(add(src, start), sub(idx_pos, start));
+    if (eq(strcmp(tok_text, mks("return")), 0)) {
+        tok = 4;
+    } else if (eq(strcmp(tok_text, mks("function")), 0)) {
+        tok = 5;
+    } else if (eq(strcmp(tok_text, mks("var")), 0)) {
+        tok = 6;
+    } else if (eq(strcmp(tok_text, mks("if")), 0)) {
+        tok = 7;
+    } else if (eq(strcmp(tok_text, mks("else")), 0)) {
+        tok = 8;
+    } else if (eq(strcmp(tok_text, mks("while")), 0)) {
+        tok = 9;
+    } else if (eq(strcmp(tok_text, mks("break")), 0)) {
+        tok = 10;
+    } else {
+        tok = 1;
+    }
+    return 0;
+}
+
+function next_tok_num_(start) {
+    start = idx_pos;
+    idx_pos = add(idx_pos, 1);
+    while (and(lt(idx_pos, src_len), is_digit_char(ri8(add(src, idx_pos))))) {
+        idx_pos = add(idx_pos, 1);
+    }
+    set_tok_text_len(add(src, start), sub(idx_pos, start));
+    tok_num = strtoul(tok_text, 0, 10);
+    tok = 2;
+    return 0;
+}
+
+function next_tok_punc_(ch) {
+    if (eq(ch, 40)) {
+        tok = 11; set_tok_text_cstr(mks("(")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    if (eq(ch, 41)) {
+        tok = 12; set_tok_text_cstr(mks(")")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    if (eq(ch, 123)) {
+        tok = 13; set_tok_text_cstr(mks("{")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    if (eq(ch, 125)) {
+        tok = 14; set_tok_text_cstr(mks("}")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    if (eq(ch, 59)) {
+        tok = 15; set_tok_text_cstr(mks(";")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    if (eq(ch, 44)) {
+        tok = 16; set_tok_text_cstr(mks(",")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    if (eq(ch, 61)) {
+        tok = 17; set_tok_text_cstr(mks("=")); idx_pos = add(idx_pos, 1); return 1;
+    }
+    return 0;
+}
+
+function next_tok_(ch) {
+    skip_ws_and_comments();
+    tok_pos = idx_pos;
+    if (ge(idx_pos, src_len)) {
+        tok = 0;
+        set_tok_text_cstr(mks(""));
+        return 0;
+    }
+    ch = ri8(add(src, idx_pos));
+    if (is_alpha_char(ch)) {
+        next_tok_ident_(0);
+        return 0;
+    }
+    if (is_digit_char(ch)) {
+        next_tok_num_(0);
+        return 0;
+    }
+    if (eq(ch, 34)) {
+        read_string_token();
+        return 0;
+    }
+    if (next_tok_punc_(ch)) {
+        return 0;
+    }
+    fail_unexpected_character(ch);
+    return 0;
+}
+
+function next_tok() {
+    return next_tok_(0);
 }
 
 function expect(want) {
@@ -188,6 +456,45 @@ function emit_sys_open() { emit_mov_eax_imm32(5); emit_int_80(); }
 function emit_sys_read() { emit_mov_eax_imm32(3); emit_int_80(); }
 function emit_sys_write() { emit_mov_eax_imm32(4); emit_int_80(); }
 function emit_sys_close() { emit_mov_ebx_eax(); emit_mov_eax_imm32(6); emit_int_80(); }
+
+function register_string_(text, start, len, i) {
+    len = strlen(text);
+    start = next_data_offset;
+    if (gt(add(add(start, len), 1), 4096)) {
+        fail_data_page_overflow();
+    }
+    i = 0;
+    while (lt(i, len)) {
+        wi8(add(data_byte_p, add(start, i)), ri8(add(text, i)));
+        i = add(i, 1);
+    }
+    wi8(add(data_byte_p, add(start, len)), 0);
+    next_data_offset = add(add(start, len), 1);
+    if (lt(data_used, next_data_offset)) {
+        data_used = next_data_offset;
+    }
+    return add(134516736, start);
+}
+
+function register_string(text) {
+    return register_string_(text, 0, 0, 0);
+}
+
+function emit_mks_literal_(text, addr) {
+    addr = register_string(text);
+    emit1(184);
+    if (output_object) {
+        record_reloc(code_len, mks(".data"), 1);
+        emit4(sub(addr, 134516736));
+        return 0;
+    }
+    emit4(addr);
+    return 0;
+}
+
+function emit_mks_literal(text) {
+    return emit_mks_literal_(text, 0);
+}
 
 function emit_load_global_(name, idx, off) {
     idx = find_symbol(globals_p, global_count, name);
@@ -591,6 +898,10 @@ function parse_program() {
     return 0;
 }
 
+function has_main_function() {
+    return ge(find_symbol(functions_p, function_count, mks("main")), 0);
+}
+
 function parse_global_(name, entry) {
     expect(6);
     if (not(eq(tok, 1))) {
@@ -629,6 +940,125 @@ function parse_global_(name, entry) {
 
 function parse_global() {
     return parse_global_(0, 0);
+}
+
+function param_name(param_names, i) {
+    return ri32(add(param_names, mul(i, 4)));
+}
+
+function param_set_name(param_names, i, name) {
+    wi32(add(param_names, mul(i, 4)), name);
+    return name;
+}
+
+function parse_function_params_(param_names, param_count, i) {
+    param_count = 0;
+    if (not(eq(tok, 12))) {
+        while (1) {
+            if (not(eq(tok, 1))) {
+                fail_expected_parameter_name();
+            }
+            i = 0;
+            while (lt(i, param_count)) {
+                if (eq(strcmp(param_name(param_names, i), tok_text), 0)) {
+                    fail_duplicate_parameter(tok_text);
+                }
+                i = add(i, 1);
+            }
+            param_set_name(param_names, param_count, xstrdup(tok_text));
+            param_count = add(param_count, 1);
+            next_tok();
+            if (not(eq(tok, 16))) {
+                return param_count;
+            }
+            next_tok();
+        }
+    }
+    return param_count;
+}
+
+function enter_function_(name, param_count, param_names, i) {
+    current_param_count = param_count;
+    current_returned = 0;
+    i = 0;
+    while (lt(i, param_count)) {
+        wi32(add(current_params_p, mul(i, 4)), xstrdup(param_name(param_names, i)));
+        wi32(add(current_param_offsets_p, mul(i, 4)), add(8, mul(4, i)));
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function enter_function(name, param_count, param_names) {
+    return enter_function_(name, param_count, param_names, 0);
+}
+
+function leave_function_(i) {
+    i = 0;
+    while (lt(i, current_param_count)) {
+        free(ri32(add(current_params_p, mul(i, 4))));
+        wi32(add(current_params_p, mul(i, 4)), 0);
+        wi32(add(current_param_offsets_p, mul(i, 4)), 0);
+        i = add(i, 1);
+    }
+    current_param_count = 0;
+    current_returned = 0;
+    return 0;
+}
+
+function leave_function() {
+    return leave_function_(0);
+}
+
+function parse_function_free_params_(param_names, param_count, i) {
+    while (lt(i, param_count)) {
+        free(param_name(param_names, i));
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function parse_function_(name, param_count, param_names, entry) {
+    param_names = xmalloc(4096);
+    expect(5);
+    if (not(eq(tok, 1))) {
+        fail_expected_function_name();
+    }
+    name = xstrdup(tok_text);
+    next_tok();
+    expect(11);
+    param_count = parse_function_params_(param_names, 0, 0);
+    expect(12);
+
+    if (ge(find_symbol(functions_p, function_count, name), 0)) {
+        fail_duplicate_function(name);
+    }
+    entry = add(functions_p, mul(function_count, 8));
+    sym_set_name(entry, name);
+    sym_set_val(entry, code_len);
+    entry = add(function_arities_p, mul(function_count, 8));
+    sym_set_name(entry, xstrdup(name));
+    sym_set_val(entry, param_count);
+    function_count = add(function_count, 1);
+
+    emit_prologue();
+    enter_function(name, param_count, param_names);
+    expect(13);
+    while (and(not(eq(tok, 14)), not(eq(tok, 0)))) {
+        parse_stmt();
+    }
+    expect(14);
+    if (not(current_returned)) {
+        emit_mov_eax_imm32(0);
+        emit_epilogue();
+    }
+    leave_function();
+    parse_function_free_params_(param_names, param_count, 0);
+    return 0;
+}
+
+function parse_function() {
+    return parse_function_(0, 0, 0, 0);
 }
 
 function parse_stmt() {
@@ -902,6 +1332,33 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
 
 function build_binary() {
     return build_binary_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+}
+
+function code_reset() {
+    code_reset_data_(0);
+    code_len = 0;
+    call_count = 0;
+    global_count = 0;
+    function_count = 0;
+    external_count = 0;
+    reloc_count = 0;
+    global_bytes = 4;
+    next_data_offset = 4;
+    data_used = 4;
+    loop_depth = 0;
+    next_loop_id = 0;
+    break_patch_count = 0;
+    current_param_count = 0;
+    current_returned = 0;
+    return 0;
+}
+
+function code_reset_data_(i) {
+    while (lt(i, 4096)) {
+        wi8(add(data_byte_p, i), 0);
+        i = add(i, 1);
+    }
+    return 0;
 }
 
 function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {

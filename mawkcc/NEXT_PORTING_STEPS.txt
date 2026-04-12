@@ -4,77 +4,39 @@ Next mawkcc_self.c porting steps
 Remove a step from this file after it is completed.
 
 Line counts are estimates of implementation lines that can be removed
-from mawkcc_ansi.c when the step is completed. They do not include small
-temporary prototypes, exported pointer globals, or diagnostic wrappers
-that may still be needed while other C-side code remains.
+from mawkcc_ansi.c when the step is completed. The major parser, lexer,
+object builder, executable builder, string registration, code_reset, and
+most self-owned state-array work have already been completed.
 
-1. Port code_reset and move more backing arrays to self-allocated storage.
-   Estimated mawkcc_ansi.c reduction: 20 lines.
-   Notes: code_reset itself is 20 lines. This is a good place to move
-   more arrays like break_patch_loop, break_patch_pos, call_pos, call_argc,
-   reloc_offsets, and reloc_types to self-side xmalloc-backed storage.
-   This is moderate risk because build_binary/build_object still rely on
-   several of those arrays through C-side pointers.
-
-2. Port function declaration parsing and function-entry bookkeeping.
-   Estimated mawkcc_ansi.c reduction: 90 lines.
-   Notes: This includes parse_function, enter_function, and leave_function.
-   It is one of the more complicated parser steps because it needs local
-   temporary parameter-name storage, duplicate-parameter checks, updates to
-   functions/function_arities/current_params/current_param_offsets, and
-   freeing parameter names. It may require moving current_params and
-   current_param_offsets backing arrays to self-allocated storage first.
-
-3. Port string literal registration and emit_mks_literal.
-   Estimated mawkcc_ansi.c reduction: 25 lines.
-   Notes: register_string is 20 lines and emit_mks_literal is 4 lines.
-   This needs data_byte to become accessible or self-owned. It is tied to
-   data-page management and object-mode restrictions for strings.
-
-4. Port token text helpers and string-token lexing.
-   Estimated mawkcc_ansi.c reduction: 75 lines.
-   Notes: This includes set_tok_text_len, set_tok_text_cstr, and
-   read_string_token. It needs self-side buffer allocation/reallocation
-   through xmalloc/xrealloc and byte writes through wi8. It also needs
-   diagnostic wrappers for string escape errors.
-
-5. Port whitespace/comment skipping and next_tok.
-   Estimated mawkcc_ansi.c reduction: 115 lines.
-   Notes: skip_ws_and_comments is 30 lines and next_tok is 96 lines. This
-   is complicated because it interacts with src_len, tok_pos, tok_text,
-   strtoul, keyword recognition, and diagnostics. It is probably easiest
-   after token text helpers are moved.
-
-6. Port final binary emission.
+1. Port final binary emission.
    Estimated mawkcc_ansi.c reduction: 7 lines.
    Notes: emit_binary is small, but it depends on stdout/fwrite/failure
-   handling. It can either stay as an ANSI-side system boundary or be moved
-   with a small C wrapper.
+   handling. It can stay as an ANSI-side system boundary, or be moved only
+   by adding a small C wrapper that self code calls.
 
-7. Port source-file reading.
+2. Port source-file reading.
    Estimated mawkcc_ansi.c reduction: 40 lines.
-   Notes: read_file and read_source are mostly C stdio. This is a system
-   boundary and not a high-value self-hosting target unless file I/O
+   Notes: read_file and read_source are stdio-heavy. This is a system
+   boundary and is not a high-value self-hosting target unless file I/O
    wrappers are added or reused.
 
-8. Consolidate or reduce ANSI-side diagnostic wrappers.
+3. Consolidate or reduce ANSI-side diagnostic wrappers.
    Estimated mawkcc_ansi.c reduction: 80 lines.
-   Notes: Many small fail_* wrappers now exist so self-side code can avoid
-   C varargs. These can be reduced only after deciding whether diagnostics
+   Notes: Many fail_* wrappers now exist so self-side code can avoid C
+   varargs. These can be reduced only after deciding whether diagnostics
    remain an ANSI boundary or whether a self-side reporting strategy is
-   acceptable. This is not a pure porting step and may affect error text.
+   acceptable. This may affect error text.
 
-9. Port low-level byte emitters emit1, emit4, and patch4.
-    Estimated mawkcc_ansi.c reduction: 25 lines.
-    Notes: This requires moving code[] backing storage to self-owned or
-    self-addressable memory, plus preserving bounds checks and exact byte
-    writes. It is best grouped with binary/object builder work.
+4. Port low-level byte emitters emit1, emit4, and patch4.
+   Estimated mawkcc_ansi.c reduction: 25 lines.
+   Notes: This requires moving code[] backing storage to self-owned or
+   self-addressable memory and preserving exact 32-bit unsigned byte
+   packing for negative relocations. The current dialect has no modulo or
+   unsigned shift operations, so this likely needs a support wrapper or a
+   deliberate dialect/runtime addition.
 
-10. Move remaining large global arrays to self-owned storage.
-    Estimated mawkcc_ansi.c reduction: 40 declaration lines.
-    Notes: Candidate arrays include globals, functions, function_arities,
-    externals, external_types, current_params, current_param_offsets,
-    call_target, reloc_names, break_patch_loop, break_patch_pos, code,
-    binbuf, and data_byte. The line-count reduction is small, but the
-    architectural effect is large. This should be done incrementally so
-    tests isolate failures.
+5. Move the final large backing buffers to self-owned storage.
+   Estimated mawkcc_ansi.c reduction: 10 declaration lines.
+   Notes: Most metadata arrays have moved. The main remaining buffers are
+   code[] and binbuf[]. Moving code[] is tied to porting emit1/emit4/patch4.
+   Moving binbuf[] is tied to porting bout1/bout2/bout4/pad_to/emit_binary.
