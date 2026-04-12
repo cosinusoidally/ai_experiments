@@ -1169,7 +1169,15 @@ static unsigned long register_string(const char *text)
 
 static void emit_mks_literal(const char *text)
 {
-    emit_mov_eax_imm32((long)register_string(text));
+    unsigned long addr;
+    addr = register_string(text);
+    emit1(184);
+    if (output_object) {
+        record_reloc(code_len, ".data", 1);
+        emit4((long)(addr - DATA_BASE));
+        return;
+    }
+    emit4((long)addr);
 }
 
 static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); emit_push_ebx(); }
@@ -1429,6 +1437,7 @@ static void build_object(void)
     unsigned long shnum;
     unsigned long shstrndx;
     unsigned long text_off;
+    unsigned long data_off;
     unsigned long rel_off;
     unsigned long symtab_off;
     unsigned long strtab_off;
@@ -1448,32 +1457,29 @@ static void build_object(void)
     int ri;
     int si;
 
-    if (data_used != RUNTIME_BYTES) {
-        failf("object output does not support string data yet");
-    }
-
     ehsize = 52UL;
     shentsize = 40UL;
     shnum = 8UL;
     shstrndx = 7UL;
     strtab_size = 1UL;
     for (i = 0; i < function_count; i++) {
-        sym_index[i] = (unsigned long)i + 1UL;
+        sym_index[i] = (unsigned long)i + 2UL;
         sym_name_off[i] = strtab_size;
         strtab_size += (unsigned long)strlen(functions[i].name) + 1UL;
     }
     for (i = 0; i < external_count; i++) {
-        sym_index[function_count + i] = (unsigned long)function_count + (unsigned long)i + 1UL;
+        sym_index[function_count + i] = (unsigned long)function_count + (unsigned long)i + 2UL;
         sym_name_off[function_count + i] = strtab_size;
         strtab_size += (unsigned long)strlen(externals[i].name) + 1UL;
     }
     shstrtab_size = 54UL;
-    sym_count = (unsigned long)function_count + (unsigned long)external_count + 1UL;
+    sym_count = (unsigned long)function_count + (unsigned long)external_count + 2UL;
     symtab_size = sym_count * 16UL;
     rel_size = (unsigned long)reloc_count * 8UL;
 
     text_off = ehsize;
-    rel_off = align4(text_off + (unsigned long)code_len);
+    data_off = align4(text_off + (unsigned long)code_len);
+    rel_off = align4(data_off + data_used);
     symtab_off = rel_off + rel_size;
     strtab_off = symtab_off + symtab_size;
     shstrtab_off = strtab_off + strtab_size;
@@ -1492,8 +1498,18 @@ static void build_object(void)
         bout1(code[i]);
     }
 
+    pad_to(data_off);
+    for (i = 0; i < (long)data_used; i++) {
+        bout1(data_byte[i]);
+    }
+
     pad_to(rel_off);
     for (ri = 0; ri < reloc_count; ri++) {
+        if (strcmp(reloc_names[ri], ".data") == 0) {
+            bout4(reloc_offsets[ri]);
+            bout4((long)(1UL * 256UL + (unsigned long)reloc_types[ri]));
+            continue;
+        }
         si = find_symbol(functions, function_count, reloc_names[ri]);
         if (si >= 0) {
             bout4(reloc_offsets[ri]);
@@ -1513,6 +1529,12 @@ static void build_object(void)
     for (i = 0; i < 16; i++) {
         bout1(0);
     }
+    bout4(0);
+    bout4(0);
+    bout4((long)data_used);
+    bout1(3);
+    bout1(0);
+    bout2(3);
     for (i = 0; i < function_count; i++) {
         start = functions[i].value;
         if (i + 1 < function_count) {
@@ -1564,9 +1586,9 @@ static void build_object(void)
 
     bout4(1); bout4(1); bout4(6); bout4(0); bout4((long)text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0);
     bout4(7); bout4(9); bout4(64); bout4(0); bout4((long)rel_off); bout4((long)rel_size); bout4(5); bout4(1); bout4(4); bout4(8);
-    bout4(17); bout4(1); bout4(3); bout4(0); bout4((long)(text_off + (unsigned long)code_len)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(23); bout4(8); bout4(3); bout4(0); bout4((long)(text_off + (unsigned long)code_len)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(28); bout4(2); bout4(0); bout4(0); bout4((long)symtab_off); bout4((long)symtab_size); bout4(6); bout4(1); bout4(4); bout4(16);
+    bout4(17); bout4(1); bout4(3); bout4(0); bout4((long)data_off); bout4((long)data_used); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(23); bout4(8); bout4(3); bout4(0); bout4((long)(data_off + data_used)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(28); bout4(2); bout4(0); bout4(0); bout4((long)symtab_off); bout4((long)symtab_size); bout4(6); bout4(2); bout4(4); bout4(16);
     bout4(36); bout4(3); bout4(0); bout4(0); bout4((long)strtab_off); bout4((long)strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
     bout4(44); bout4(3); bout4(0); bout4(0); bout4((long)shstrtab_off); bout4((long)shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
 }

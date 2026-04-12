@@ -54,9 +54,11 @@ unsigned long tok_num;
 
 static unsigned char code[MAX_CODE];
 long code_len;
+unsigned char *code_p = code;
 static unsigned char binbuf[MAX_BIN];
 static long bin_len;
 static unsigned char data_byte[MAX_DATA];
+unsigned char *data_byte_p = data_byte;
 unsigned long data_used;
 unsigned long next_data_offset;
 
@@ -216,12 +218,12 @@ void emit_sys_open(void);
 void emit_sys_read(void);
 void emit_sys_write(void);
 void emit_sys_close(void);
-static void bin_reset(void);
-static void bout1(unsigned long b);
-static void bout2(unsigned long v);
-static void bout4(long v);
-static void boutstr(const char *s);
-static void pad_to(unsigned long n);
+void bin_reset(void);
+void bout1(unsigned long b);
+void bout2(unsigned long v);
+void bout4(long v);
+void boutstr(const char *s);
+void pad_to(unsigned long n);
 static unsigned long align4(unsigned long n);
 void build_binary(void);
 void build_object(void);
@@ -256,6 +258,7 @@ void fail_expected_global_name(void);
 void fail_global_initialized(const char *name);
 void fail_global_after_function(const char *name);
 void fail_duplicate_global(const char *name);
+void fail_unknown_relocation_symbol(const char *name);
 
 static void failf(const char *fmt, ...)
 {
@@ -641,6 +644,11 @@ void fail_duplicate_global(const char *name)
     failf("duplicate global `%s`", name);
 }
 
+void fail_unknown_relocation_symbol(const char *name)
+{
+    failf("relocation references unknown symbol `%s`", name);
+}
+
 static long must_find_symbol_value(struct Symbol *arr, int count, const char *name, const char *kind)
 {
     int i;
@@ -812,28 +820,36 @@ static unsigned long register_string(const char *text)
 
 void emit_mks_literal(const char *text)
 {
-    emit_mov_eax_imm32((long)register_string(text));
+    unsigned long addr;
+    addr = register_string(text);
+    emit1(184);
+    if (output_object) {
+        record_reloc(code_len, ".data", 1);
+        emit4((long)(addr - DATA_BASE));
+        return;
+    }
+    emit4((long)addr);
 }
 
-static void bin_reset(void)
+void bin_reset(void)
 {
     memset(binbuf, 0, sizeof(binbuf));
     bin_len = 0;
 }
 
-static void bout1(unsigned long b)
+void bout1(unsigned long b)
 {
     if (bin_len >= MAX_BIN) failf("binary buffer overflow");
     binbuf[bin_len++] = (unsigned char)(u32((long)b) & 255U);
 }
 
-static void bout2(unsigned long v)
+void bout2(unsigned long v)
 {
     bout1(v & 255U);
     bout1((v >> 8) & 255U);
 }
 
-static void bout4(long v)
+void bout4(long v)
 {
     unsigned long n;
     n = u32(v);
@@ -843,7 +859,7 @@ static void bout4(long v)
     bout1((n >> 24) & 255U);
 }
 
-static void boutstr(const char *s)
+void boutstr(const char *s)
 {
     while (*s) {
         bout1((unsigned char)*s);
@@ -851,7 +867,7 @@ static void boutstr(const char *s)
     }
 }
 
-static void pad_to(unsigned long n)
+void pad_to(unsigned long n)
 {
     while ((unsigned long)bin_len < n) {
         bout1(0);
@@ -920,155 +936,6 @@ void build_binary(void)
     }
 }
 
-void build_object(void)
-{
-    unsigned long ehsize;
-    unsigned long shentsize;
-    unsigned long shnum;
-    unsigned long shstrndx;
-    unsigned long text_off;
-    unsigned long rel_off;
-    unsigned long symtab_off;
-    unsigned long strtab_off;
-    unsigned long shstrtab_off;
-    unsigned long shoff;
-    unsigned long strtab_size;
-    unsigned long shstrtab_size;
-    unsigned long sym_count;
-    unsigned long symtab_size;
-    unsigned long rel_size;
-    unsigned long sym_name_off[MAX_SYMS];
-    unsigned long sym_index[MAX_SYMS];
-    long start;
-    long next_start;
-    long size;
-    int i;
-    int ri;
-    int si;
-
-    if (data_used != RUNTIME_BYTES) {
-        failf("object output does not support string data yet");
-    }
-
-    ehsize = 52UL;
-    shentsize = 40UL;
-    shnum = 8UL;
-    shstrndx = 7UL;
-    strtab_size = 1UL;
-    for (i = 0; i < function_count; i++) {
-        sym_index[i] = (unsigned long)i + 1UL;
-        sym_name_off[i] = strtab_size;
-        strtab_size += (unsigned long)strlen(functions[i].name) + 1UL;
-    }
-    for (i = 0; i < external_count; i++) {
-        sym_index[function_count + i] = (unsigned long)function_count + (unsigned long)i + 1UL;
-        sym_name_off[function_count + i] = strtab_size;
-        strtab_size += (unsigned long)strlen(externals[i].name) + 1UL;
-    }
-    shstrtab_size = 54UL;
-    sym_count = (unsigned long)function_count + (unsigned long)external_count + 1UL;
-    symtab_size = sym_count * 16UL;
-    rel_size = (unsigned long)reloc_count * 8UL;
-
-    text_off = ehsize;
-    rel_off = align4(text_off + (unsigned long)code_len);
-    symtab_off = rel_off + rel_size;
-    strtab_off = symtab_off + symtab_size;
-    shstrtab_off = strtab_off + strtab_size;
-    shoff = align4(shstrtab_off + shstrtab_size);
-
-    bin_reset();
-
-    bout1(127); bout1(69); bout1(76); bout1(70);
-    bout1(1); bout1(1); bout1(1); bout1(0);
-    bout1(0); bout1(0); bout1(0); bout1(0);
-    bout1(0); bout1(0); bout1(0); bout1(0);
-    bout2(1); bout2(3); bout4(1); bout4(0); bout4(0); bout4((long)shoff); bout4(0);
-    bout2(ehsize); bout2(0); bout2(0); bout2(shentsize); bout2(shnum); bout2(shstrndx);
-
-    for (i = 0; i < code_len; i++) {
-        bout1(code[i]);
-    }
-
-    pad_to(rel_off);
-    for (ri = 0; ri < reloc_count; ri++) {
-        si = find_symbol(functions, function_count, reloc_names[ri]);
-        if (si >= 0) {
-            bout4(reloc_offsets[ri]);
-            bout4((long)(sym_index[si] * 256UL + (unsigned long)reloc_types[ri]));
-            continue;
-        }
-        si = find_symbol(externals, external_count, reloc_names[ri]);
-        if (si < 0) {
-            failf("relocation references unknown symbol `%s`", reloc_names[ri]);
-        }
-        bout4(reloc_offsets[ri]);
-        bout4((long)(sym_index[function_count + si] * 256UL + (unsigned long)reloc_types[ri]));
-    }
-
-    pad_to(symtab_off);
-
-    for (i = 0; i < 16; i++) {
-        bout1(0);
-    }
-    for (i = 0; i < function_count; i++) {
-        start = functions[i].value;
-        if (i + 1 < function_count) {
-            next_start = functions[i + 1].value;
-        } else {
-            next_start = code_len;
-        }
-        size = next_start - start;
-        bout4((long)sym_name_off[i]);
-        bout4(start);
-        bout4(size);
-        bout1(18);
-        bout1(0);
-        bout2(1);
-    }
-    for (i = 0; i < external_count; i++) {
-        bout4((long)sym_name_off[function_count + i]);
-        bout4(0);
-        bout4(0);
-        bout1((unsigned long)external_types[i]);
-        bout1(0);
-        bout2(0);
-    }
-
-    bout1(0);
-    for (i = 0; i < function_count; i++) {
-        boutstr(functions[i].name);
-        bout1(0);
-    }
-    for (i = 0; i < external_count; i++) {
-        boutstr(externals[i].name);
-        bout1(0);
-    }
-
-    bout1(0);
-    boutstr(".text"); bout1(0);
-    boutstr(".rel.text"); bout1(0);
-    boutstr(".data"); bout1(0);
-    boutstr(".bss"); bout1(0);
-    boutstr(".symtab"); bout1(0);
-    boutstr(".strtab"); bout1(0);
-    boutstr(".shstrtab"); bout1(0);
-
-    pad_to(shoff);
-
-    for (i = 0; i < 40; i++) {
-        bout1(0);
-    }
-
-    bout4(1); bout4(1); bout4(6); bout4(0); bout4((long)text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(7); bout4(9); bout4(64); bout4(0); bout4((long)rel_off); bout4((long)rel_size); bout4(5); bout4(1); bout4(4); bout4(8);
-    bout4(17); bout4(1); bout4(3); bout4(0); bout4((long)(text_off + (unsigned long)code_len)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(23); bout4(8); bout4(3); bout4(0); bout4((long)(text_off + (unsigned long)code_len)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(28); bout4(2); bout4(0); bout4(0); bout4((long)symtab_off); bout4((long)symtab_size); bout4(6); bout4(1); bout4(4); bout4(16);
-    bout4(36); bout4(3); bout4(0); bout4(0); bout4((long)strtab_off); bout4((long)strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(44); bout4(3); bout4(0); bout4(0); bout4((long)shstrtab_off); bout4((long)shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
-}
-
 void emit_binary(void)
 {
     if (fwrite(binbuf, 1, (size_t)bin_len, stdout) != (size_t)bin_len) {
@@ -1124,6 +991,7 @@ char *dash_c_string(void)
     static char s[] = "-c";
     return s;
 }
+
 
 int usage(const char *program)
 {

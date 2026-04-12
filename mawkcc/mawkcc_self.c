@@ -37,6 +37,8 @@ var reloc_types_p;
 var global_bytes;
 var next_data_offset;
 var data_used;
+var code_p;
+var data_byte_p;
 
 function init_globals() {
     tok_text = 0;
@@ -814,6 +816,221 @@ function parse_primary() {
     }
     fail_expected_expression();
     return 0;
+}
+
+function align4(n) {
+    return mul(div(add(n, 3), 4), 4);
+}
+
+function build_object_init_symbols_(sym_name_off, sym_index, i, pos, entry, name) {
+    i = 0;
+    pos = 1;
+    while (lt(i, function_count)) {
+        entry = add(functions_p, mul(i, 8));
+        name = sym_name(entry);
+        wi32(add(sym_index, mul(i, 4)), add(i, 2));
+        wi32(add(sym_name_off, mul(i, 4)), pos);
+        pos = add(add(pos, strlen(name)), 1);
+        i = add(i, 1);
+    }
+    i = 0;
+    while (lt(i, external_count)) {
+        entry = add(externals_p, mul(i, 8));
+        name = sym_name(entry);
+        wi32(add(sym_index, mul(add(function_count, i), 4)), add(add(function_count, i), 2));
+        wi32(add(sym_name_off, mul(add(function_count, i), 4)), pos);
+        pos = add(add(pos, strlen(name)), 1);
+        i = add(i, 1);
+    }
+    return pos;
+}
+
+function build_object_emit_code_(i) {
+    while (lt(i, code_len)) {
+        bout1(ri8(add(code_p, i)));
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function build_object_emit_data_(i) {
+    while (lt(i, data_used)) {
+        bout1(ri8(add(data_byte_p, i)));
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {
+    while (lt(ri, reloc_count)) {
+        name = ri32(add(reloc_names_p, mul(ri, 4)));
+        off = ri32(add(reloc_offsets_p, mul(ri, 4)));
+        typ = ri32(add(reloc_types_p, mul(ri, 4)));
+        if (streq5(name, 46, 100, 97, 116, 97)) {
+            bout4(off);
+            bout4(add(256, typ));
+        } else {
+            si = find_symbol(functions_p, function_count, name);
+            if (ge(si, 0)) {
+                bout4(off);
+                bout4(add(mul(ri32(add(sym_index, mul(si, 4))), 256), typ));
+            } else {
+                si = find_symbol(externals_p, external_count, name);
+                if (lt(si, 0)) {
+                    fail_unknown_relocation_symbol(name);
+                }
+                sympos = add(function_count, si);
+                bout4(off);
+                bout4(add(mul(ri32(add(sym_index, mul(sympos, 4))), 256), typ));
+            }
+        }
+        ri = add(ri, 1);
+    }
+    return 0;
+}
+
+function build_object_emit_functions_(sym_name_off, i, start, next_start, size, entry) {
+    while (lt(i, function_count)) {
+        entry = add(functions_p, mul(i, 8));
+        start = sym_val(entry);
+        if (lt(add(i, 1), function_count)) {
+            next_start = sym_val(add(functions_p, mul(add(i, 1), 8)));
+        } else {
+            next_start = code_len;
+        }
+        size = sub(next_start, start);
+        bout4(ri32(add(sym_name_off, mul(i, 4))));
+        bout4(start);
+        bout4(size);
+        bout1(18);
+        bout1(0);
+        bout2(1);
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function build_object_emit_externals_(sym_name_off, i, sympos) {
+    while (lt(i, external_count)) {
+        sympos = add(function_count, i);
+        bout4(ri32(add(sym_name_off, mul(sympos, 4))));
+        bout4(0);
+        bout4(0);
+        bout1(ri32(add(external_types_p, mul(i, 4))));
+        bout1(0);
+        bout2(0);
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function build_object_emit_strtab_(i, entry) {
+    bout1(0);
+    i = 0;
+    while (lt(i, function_count)) {
+        entry = add(functions_p, mul(i, 8));
+        boutstr(sym_name(entry));
+        bout1(0);
+        i = add(i, 1);
+    }
+    i = 0;
+    while (lt(i, external_count)) {
+        entry = add(externals_p, mul(i, 8));
+        boutstr(sym_name(entry));
+        bout1(0);
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function build_object_emit_shstrtab() {
+    bout1(0);
+    boutstr(mks(".text")); bout1(0);
+    boutstr(mks(".rel.text")); bout1(0);
+    boutstr(mks(".data")); bout1(0);
+    boutstr(mks(".bss")); bout1(0);
+    boutstr(mks(".symtab")); bout1(0);
+    boutstr(mks(".strtab")); bout1(0);
+    boutstr(mks(".shstrtab")); bout1(0);
+    return 0;
+}
+
+function build_object_emit_zeroes_(count, i) {
+    while (lt(i, count)) {
+        bout1(0);
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function build_object_(sym_name_off, sym_index, ehsize, shentsize, shnum, shstrndx, text_off, data_off, rel_off, symtab_off, strtab_off, shstrtab_off, shoff, strtab_size, shstrtab_size, sym_count, symtab_size, rel_size) {
+    sym_name_off = xmalloc(16384);
+    sym_index = xmalloc(16384);
+
+    ehsize = 52;
+    shentsize = 40;
+    shnum = 8;
+    shstrndx = 7;
+    strtab_size = build_object_init_symbols_(sym_name_off, sym_index, 0, 0, 0, 0);
+    shstrtab_size = 54;
+    sym_count = add(add(function_count, external_count), 2);
+    symtab_size = mul(sym_count, 16);
+    rel_size = mul(reloc_count, 8);
+
+    text_off = ehsize;
+    data_off = align4(add(text_off, code_len));
+    rel_off = align4(add(data_off, data_used));
+    symtab_off = add(rel_off, rel_size);
+    strtab_off = add(symtab_off, symtab_size);
+    shstrtab_off = add(strtab_off, strtab_size);
+    shoff = align4(add(shstrtab_off, shstrtab_size));
+
+    bin_reset();
+
+    bout1(127); bout1(69); bout1(76); bout1(70);
+    bout1(1); bout1(1); bout1(1); bout1(0);
+    bout1(0); bout1(0); bout1(0); bout1(0);
+    bout1(0); bout1(0); bout1(0); bout1(0);
+    bout2(1); bout2(3); bout4(1); bout4(0); bout4(0); bout4(shoff); bout4(0);
+    bout2(ehsize); bout2(0); bout2(0); bout2(shentsize); bout2(shnum); bout2(shstrndx);
+
+    build_object_emit_code_(0);
+
+    pad_to(data_off);
+    build_object_emit_data_(0);
+
+    pad_to(rel_off);
+    build_object_emit_relocs_(sym_index, 0, 0, 0, 0, 0, 0);
+
+    pad_to(symtab_off);
+    build_object_emit_zeroes_(16, 0);
+    bout4(0);
+    bout4(0);
+    bout4(data_used);
+    bout1(3);
+    bout1(0);
+    bout2(3);
+    build_object_emit_functions_(sym_name_off, 0, 0, 0, 0, 0);
+    build_object_emit_externals_(sym_name_off, 0, 0);
+
+    build_object_emit_strtab_(0, 0);
+    build_object_emit_shstrtab();
+
+    pad_to(shoff);
+    build_object_emit_zeroes_(40, 0);
+
+    bout4(1); bout4(1); bout4(6); bout4(0); bout4(text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(7); bout4(9); bout4(64); bout4(0); bout4(rel_off); bout4(rel_size); bout4(5); bout4(1); bout4(4); bout4(8);
+    bout4(17); bout4(1); bout4(3); bout4(0); bout4(data_off); bout4(data_used); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(23); bout4(8); bout4(3); bout4(0); bout4(add(data_off, data_used)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(28); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(6); bout4(2); bout4(4); bout4(16);
+    bout4(36); bout4(3); bout4(0); bout4(0); bout4(strtab_off); bout4(strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(44); bout4(3); bout4(0); bout4(0); bout4(shstrtab_off); bout4(shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
+    return 0;
+}
+
+function build_object() {
+    return build_object_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 function compile(source_path) {

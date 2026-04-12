@@ -726,7 +726,13 @@ function emit_store_global(name) {
 
 function emit_mks_literal(text,    addr) {
     addr = register_string(text)
-    emit_mov_eax_imm32(addr)
+    emit1(184)
+    if (format == "obj") {
+        record_reloc(code_len, ".data", 1)
+        emit4(addr - DATA_BASE)
+    } else {
+        emit4(addr)
+    }
 }
 
 function register_string(text,    start, i, ch) {
@@ -1184,10 +1190,7 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
     }
 }
 
-function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, rel_off, symtab_off, strtab_off, shstrtab_off, shoff, strtab_size, shstrtab_size, sym_count, symtab_size, rel_size, name, start, next_start, size, sym_index, type_info) {
-    if (data_used != RUNTIME_BYTES)
-        fail("object output does not support string data yet")
-
+function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, data_off, rel_off, symtab_off, strtab_off, shstrtab_off, shoff, strtab_size, shstrtab_size, sym_count, symtab_size, rel_size, name, start, next_start, size, sym_index, type_info) {
     ehsize = 52
     shentsize = 40
     shnum = 8
@@ -1195,23 +1198,24 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, rel_o
     strtab_size = 1
     for (i = 1; i <= function_count; i++) {
         name = function_name[i]
-        sym_index[name] = i
+        sym_index[name] = i + 1
         sym_name_off[i] = strtab_size
         strtab_size += length(name) + 1
     }
     for (i = 1; i <= external_count; i++) {
         name = external_name[i]
-        sym_index[name] = function_count + i
+        sym_index[name] = function_count + i + 1
         sym_name_off[function_count + i] = strtab_size
         strtab_size += length(name) + 1
     }
     shstrtab_size = 54
-    sym_count = function_count + external_count + 1
+    sym_count = function_count + external_count + 2
     symtab_size = sym_count * 16
     rel_size = reloc_count * 8
 
     text_off = ehsize
-    rel_off = align4(text_off + code_len)
+    data_off = align4(text_off + code_len)
+    rel_off = align4(data_off + data_used)
     symtab_off = rel_off + rel_size
     strtab_off = symtab_off + symtab_size
     shstrtab_off = strtab_off + strtab_size
@@ -1241,17 +1245,34 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, rel_o
     for (i = 1; i <= code_len; i++)
         bout1(code[i])
 
+    pad_to(data_off)
+    for (i = 0; i < data_used; i++) {
+        if ((i in data_byte))
+            bout1(data_byte[i])
+        else
+            bout1(0)
+    }
+
     pad_to(rel_off)
     for (i = 1; i <= reloc_count; i++) {
         name = reloc_name[i]
         bout4(reloc_offset[i])
-        bout4(sym_index[name] * 256 + reloc_type[i])
+        if (name == ".data")
+            bout4(1 * 256 + reloc_type[i])
+        else
+            bout4(sym_index[name] * 256 + reloc_type[i])
     }
 
     pad_to(symtab_off)
 
     for (i = 0; i < 16; i++)
         bout1(0)
+    bout4(0)
+    bout4(0)
+    bout4(data_used)
+    bout1(3)
+    bout1(0)
+    bout2(3)
     for (i = 1; i <= function_count; i++) {
         name = function_name[i]
         start = function_addr[name] - 1
@@ -1306,9 +1327,9 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, rel_o
 
     bout4(1); bout4(1); bout4(6); bout4(0); bout4(text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0)
     bout4(7); bout4(9); bout4(64); bout4(0); bout4(rel_off); bout4(rel_size); bout4(5); bout4(1); bout4(4); bout4(8)
-    bout4(17); bout4(1); bout4(3); bout4(0); bout4(text_off + code_len); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0)
-    bout4(23); bout4(8); bout4(3); bout4(0); bout4(text_off + code_len); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0)
-    bout4(28); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(6); bout4(1); bout4(4); bout4(16)
+    bout4(17); bout4(1); bout4(3); bout4(0); bout4(data_off); bout4(data_used); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(23); bout4(8); bout4(3); bout4(0); bout4(data_off + data_used); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(28); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(6); bout4(2); bout4(4); bout4(16)
     bout4(36); bout4(3); bout4(0); bout4(0); bout4(strtab_off); bout4(strtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
     bout4(44); bout4(3); bout4(0); bout4(0); bout4(shstrtab_off); bout4(shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
 }

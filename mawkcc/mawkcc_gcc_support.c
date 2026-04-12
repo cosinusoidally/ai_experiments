@@ -18,3 +18,4 @@ int ri32(int p) { return *(int *)p; }
 int ri8(int p) { return *(unsigned char *)p; }
 int wi32(int p, int v) { *(int *)p = v; return v; }
 int wi8(int p, int v) { *(unsigned char *)p = (unsigned char)v; return v; }
+int mks(int p) { return p; }

@@ -52,40 +52,32 @@ that may still be needed while other C-side code remains.
    from self-side code. It is medium risk because the generated executable
    bytes must remain bit-identical.
 
-7. Port relocatable ELF object builder.
-   Estimated mawkcc_ansi.c reduction: 150 lines.
-   Notes: build_object is about 148 lines. This is currently the most
-   complicated single remaining feature. It has local arrays
-   sym_name_off and sym_index, many offset calculations, relocation
-   symbol lookup, string-table construction, and strict bit-identical ELF
-   layout requirements.
-
-8. Port final binary emission.
+7. Port final binary emission.
    Estimated mawkcc_ansi.c reduction: 7 lines.
    Notes: emit_binary is small, but it depends on stdout/fwrite/failure
    handling. It can either stay as an ANSI-side system boundary or be moved
    with a small C wrapper.
 
-9. Port source-file reading.
+8. Port source-file reading.
    Estimated mawkcc_ansi.c reduction: 40 lines.
    Notes: read_file and read_source are mostly C stdio. This is a system
    boundary and not a high-value self-hosting target unless file I/O
    wrappers are added or reused.
 
-10. Consolidate or reduce ANSI-side diagnostic wrappers.
-    Estimated mawkcc_ansi.c reduction: 80 lines.
-    Notes: Many small fail_* wrappers now exist so self-side code can avoid
-    C varargs. These can be reduced only after deciding whether diagnostics
-    remain an ANSI boundary or whether a self-side reporting strategy is
-    acceptable. This is not a pure porting step and may affect error text.
+9. Consolidate or reduce ANSI-side diagnostic wrappers.
+   Estimated mawkcc_ansi.c reduction: 80 lines.
+   Notes: Many small fail_* wrappers now exist so self-side code can avoid
+   C varargs. These can be reduced only after deciding whether diagnostics
+   remain an ANSI boundary or whether a self-side reporting strategy is
+   acceptable. This is not a pure porting step and may affect error text.
 
-11. Port low-level byte emitters emit1, emit4, and patch4.
+10. Port low-level byte emitters emit1, emit4, and patch4.
     Estimated mawkcc_ansi.c reduction: 25 lines.
     Notes: This requires moving code[] backing storage to self-owned or
     self-addressable memory, plus preserving bounds checks and exact byte
     writes. It is best grouped with binary/object builder work.
 
-12. Move remaining large global arrays to self-owned storage.
+11. Move remaining large global arrays to self-owned storage.
     Estimated mawkcc_ansi.c reduction: 40 declaration lines.
     Notes: Candidate arrays include globals, functions, function_arities,
     externals, external_types, current_params, current_param_offsets,
