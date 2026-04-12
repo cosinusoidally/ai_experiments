@@ -105,7 +105,6 @@ static void expect(int want);
 static void parse_program(void);
 static void parse_global(void);
 static void parse_function(void);
-static int parse_params(void);
 static void enter_function(const char *name, int param_count, char **param_names);
 static void leave_function(void);
 static void parse_stmt(void);
@@ -152,7 +151,6 @@ static long emit_jmp_placeholder(void);
 static void emit_jmp(long target);
 static void patch_rel32(long pos, long target);
 static void emit_add_eax_imm32(long v);
-static void emit_add_ebx_imm32(long v);
 static void emit_mov_ebx_eax(void);
 static void emit_mov_edx_eax(void);
 static void emit_mov_ebx_ecx(void);
@@ -209,7 +207,7 @@ static void failf(const char *fmt, ...)
     long n;
 
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
+    vsprintf(msg, fmt, ap);
     va_end(ap);
 
     start = tok_pos;
@@ -570,40 +568,6 @@ static void parse_global(void)
     if (data_used < global_bytes) {
         data_used = global_bytes;
     }
-}
-
-static int parse_params(void)
-{
-    int i;
-    int count;
-    char *param_names[MAX_PARAMS];
-    count = 0;
-    if (tok == TOK_RPAREN) {
-        return 0;
-    }
-    while (1) {
-        int i;
-        if (tok != TOK_IDENT) {
-            failf("expected parameter name");
-        }
-        for (i = 0; i < count; i++) {
-            if (strcmp(param_names[i], tok_text) == 0) {
-                failf("duplicate parameter `%s`", tok_text);
-            }
-        }
-        param_names[count++] = xstrdup(tok_text);
-        next_tok();
-        if (tok != TOK_COMMA) {
-            break;
-        }
-        next_tok();
-    }
-    enter_function("", count, param_names);
-    leave_function();
-    for (i = 0; i < count; i++) {
-        free(param_names[i]);
-    }
-    return count;
 }
 
 static void enter_function(const char *name, int param_count, char **param_names)
@@ -1162,7 +1126,6 @@ static long emit_jmp_placeholder(void) { emit1(233); { long p = code_len; emit4(
 static void emit_jmp(long target) { long p = emit_jmp_placeholder(); patch_rel32(p, target); }
 static void patch_rel32(long pos, long target) { patch4(pos, target - (pos + 4)); }
 static void emit_add_eax_imm32(long v) { emit1(5); emit4(v); }
-static void emit_add_ebx_imm32(long v) { emit1(129); emit1(195); emit4(v); }
 static void emit_mov_ebx_eax(void) { emit1(137); emit1(195); }
 static void emit_mov_edx_eax(void) { emit1(137); emit1(194); }
 static void emit_mov_ebx_ecx(void) { emit1(137); emit1(203); }
