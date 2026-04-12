@@ -3,13 +3,14 @@
 `mawkcc` is a tiny C compiler written in `awk` and intended to run under
 `mawk`.
 
-This version targets real 32-bit x86 Linux executables. It emits a raw
-ELF32 binary directly, without invoking an assembler or linker.
+This version targets real 32-bit x86 Linux. It can emit a raw ELF32
+executable directly, without invoking an assembler or linker, and can
+also emit a small ELF32 relocatable object for linking with `gcc -m32`.
 
 Repository status:
 
 - stage0 compiler: implemented in `mawk`
-- backend target: ELF32/i386 Linux
+- backend target: ELF32/i386 Linux executables and relocatable objects
 - self-hosting: not reached yet; see `BOOTSTRAP.md`
 
 Current implemented scope:
@@ -39,6 +40,8 @@ Current implemented scope:
   address
 - `_start` now calls `main(argc, argv)` using C-style process startup
   arguments
+- object output exports generated functions as i386 ELF symbols that can
+  be linked with GCC-built 32-bit objects
 
 Current non-goals:
 
@@ -46,7 +49,10 @@ Current non-goals:
 - preprocessing
 - variables
 - `continue`
-- native toolchain integration
+- full native toolchain integration beyond the current simple object
+  output mode
+- relocatable object support for globals, string data, and external
+  function references
 
 Local-variable convention:
 
@@ -90,6 +96,23 @@ Usage:
 mawk -f cc.awk examples/ret42.c > ret42
 chmod +x ret42
 file ret42
+```
+
+Object output:
+
+```sh
+mawk -v format=obj -f cc.awk source.c > source.o
+cc -m32 -c driver.c -o driver.o
+cc -m32 driver.o source.o -o linked-program
+```
+
+The C reference implementation must also be built as a 32-bit ANSI C
+program:
+
+```sh
+cc -ansi -m32 -g -O0 mawkcc_orig.c -o artifacts/mawkcc_orig
+artifacts/mawkcc_orig source.c > source-standalone
+artifacts/mawkcc_orig -c source.c > source.o
 ```
 
 Builtin set:

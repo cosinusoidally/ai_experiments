@@ -85,6 +85,7 @@ static int break_patch_count;
 
 static unsigned long global_bytes;
 static long start_call_patch;
+static int output_object;
 
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
@@ -187,7 +188,11 @@ static void bin_reset(void);
 static void bout1(unsigned long b);
 static void bout2(unsigned long v);
 static void bout4(long v);
+static void boutstr(const char *s);
+static void pad_to(unsigned long n);
+static unsigned long align4(unsigned long n);
 static void build_binary(void);
+static void build_object(void);
 static void emit_binary(void);
 static int push_loop(void);
 static void pop_loop(void);
@@ -534,7 +539,7 @@ static void parse_program(void)
             parse_function();
         }
     }
-    if (find_symbol(functions, function_count, "main") < 0) {
+    if (!output_object && find_symbol(functions, function_count, "main") < 0) {
         failf("missing `main` function");
     }
 }
@@ -1248,6 +1253,26 @@ static void bout4(long v)
     bout1((n >> 24) & 255U);
 }
 
+static void boutstr(const char *s)
+{
+    while (*s) {
+        bout1((unsigned char)*s);
+        s++;
+    }
+}
+
+static void pad_to(unsigned long n)
+{
+    while ((unsigned long)bin_len < n) {
+        bout1(0);
+    }
+}
+
+static unsigned long align4(unsigned long n)
+{
+    return ((n + 3UL) / 4UL) * 4UL;
+}
+
 static void build_binary(void)
 {
     unsigned long base;
@@ -1303,6 +1328,108 @@ static void build_binary(void)
     for (i = 0; i < (long)data_used; i++) {
         bout1(data_byte[i]);
     }
+}
+
+static void build_object(void)
+{
+    unsigned long ehsize;
+    unsigned long shentsize;
+    unsigned long shnum;
+    unsigned long shstrndx;
+    unsigned long text_off;
+    unsigned long symtab_off;
+    unsigned long strtab_off;
+    unsigned long shstrtab_off;
+    unsigned long shoff;
+    unsigned long strtab_size;
+    unsigned long shstrtab_size;
+    unsigned long sym_count;
+    unsigned long symtab_size;
+    unsigned long sym_name_off[MAX_SYMS];
+    long start;
+    long next_start;
+    long size;
+    int i;
+
+    if (global_bytes != RUNTIME_BYTES || data_used != RUNTIME_BYTES) {
+        failf("object output does not support globals or string data yet");
+    }
+
+    ehsize = 52UL;
+    shentsize = 40UL;
+    shnum = 5UL;
+    shstrndx = 4UL;
+    strtab_size = 1UL;
+    for (i = 0; i < function_count; i++) {
+        sym_name_off[i] = strtab_size;
+        strtab_size += (unsigned long)strlen(functions[i].name) + 1UL;
+    }
+    shstrtab_size = 33UL;
+    sym_count = (unsigned long)function_count + 1UL;
+    symtab_size = sym_count * 16UL;
+
+    text_off = ehsize;
+    symtab_off = align4(text_off + (unsigned long)code_len);
+    strtab_off = symtab_off + symtab_size;
+    shstrtab_off = strtab_off + strtab_size;
+    shoff = align4(shstrtab_off + shstrtab_size);
+
+    bin_reset();
+
+    bout1(127); bout1(69); bout1(76); bout1(70);
+    bout1(1); bout1(1); bout1(1); bout1(0);
+    bout1(0); bout1(0); bout1(0); bout1(0);
+    bout1(0); bout1(0); bout1(0); bout1(0);
+    bout2(1); bout2(3); bout4(1); bout4(0); bout4(0); bout4((long)shoff); bout4(0);
+    bout2(ehsize); bout2(0); bout2(0); bout2(shentsize); bout2(shnum); bout2(shstrndx);
+
+    for (i = 0; i < code_len; i++) {
+        bout1(code[i]);
+    }
+
+    pad_to(symtab_off);
+
+    for (i = 0; i < 16; i++) {
+        bout1(0);
+    }
+    for (i = 0; i < function_count; i++) {
+        start = functions[i].value;
+        if (i + 1 < function_count) {
+            next_start = functions[i + 1].value;
+        } else {
+            next_start = code_len;
+        }
+        size = next_start - start;
+        bout4((long)sym_name_off[i]);
+        bout4(start);
+        bout4(size);
+        bout1(18);
+        bout1(0);
+        bout2(1);
+    }
+
+    bout1(0);
+    for (i = 0; i < function_count; i++) {
+        boutstr(functions[i].name);
+        bout1(0);
+    }
+
+    bout1(0);
+    boutstr(".text"); bout1(0);
+    boutstr(".symtab"); bout1(0);
+    boutstr(".strtab"); bout1(0);
+    boutstr(".shstrtab"); bout1(0);
+
+    pad_to(shoff);
+
+    for (i = 0; i < 40; i++) {
+        bout1(0);
+    }
+
+    bout4(1); bout4(1); bout4(6); bout4(0); bout4((long)text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(7); bout4(2); bout4(0); bout4(0); bout4((long)symtab_off); bout4((long)symtab_size); bout4(3); bout4(1); bout4(4); bout4(16);
+    bout4(15); bout4(3); bout4(0); bout4(0); bout4((long)strtab_off); bout4((long)strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(23); bout4(3); bout4(0); bout4(0); bout4((long)shstrtab_off); bout4((long)shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
 }
 
 static void emit_binary(void)
@@ -1384,22 +1511,36 @@ static char *read_file(const char *path, long *len_out)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s source\n", argv[0]);
+    const char *source_path;
+
+    output_object = 0;
+    if (argc == 3 && strcmp(argv[1], "-c") == 0) {
+        output_object = 1;
+        source_path = argv[2];
+    } else if (argc == 2) {
+        source_path = argv[1];
+    } else {
+        fprintf(stderr, "usage: %s [-c] source\n", argv[0]);
         return 1;
     }
 
     tok_text = 0;
     tok_text_cap = 0;
-    src = read_file(argv[1], &src_len);
+    src = read_file(source_path, &src_len);
     init_lexer();
     code_reset();
     next_tok();
-    emit_start();
+    if (!output_object) {
+        emit_start();
+    }
     parse_program();
     expect(TOK_EOF);
     patch_calls();
-    build_binary();
+    if (output_object) {
+        build_object();
+    } else {
+        build_binary();
+    }
     emit_binary();
     return 0;
 }

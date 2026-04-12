@@ -4,6 +4,8 @@ BEGIN {
     DATA_BASE = 134516736
     BRK_CUR_OFFSET = 0
     RUNTIME_BYTES = 4
+    if (format == "")
+        format = "exec"
     init_ord_map()
 }
 
@@ -15,11 +17,15 @@ END {
     init_lexer()
     code_reset()
     next_tok()
-    emit_start()
+    if (format != "obj")
+        emit_start()
     parse_program()
     expect("EOF")
     patch_calls()
-    build_binary()
+    if (format == "obj")
+        build_object()
+    else
+        build_binary()
     emit_binary()
 }
 
@@ -188,7 +194,7 @@ function parse_program() {
         else
             parse_function()
     }
-    if (!function_seen["main"])
+    if (format != "obj" && !function_seen["main"])
         fail("missing `main` function")
 }
 
@@ -229,6 +235,7 @@ function parse_function(    name, param_count) {
     function_arity[name] = param_count
     function_addr[name] = code_len + 1
     function_count++
+    function_name[function_count] = name
     emit_prologue()
     enter_function(name, param_count)
     expect("{")
@@ -1016,6 +1023,20 @@ function bout4(v,    n) {
     bout1(int(n / 16777216) % 256)
 }
 
+function boutstr(s,    i) {
+    for (i = 1; i <= length(s); i++)
+        bout1(ord_map[substr(s, i, 1)])
+}
+
+function pad_to(n) {
+    while (bin_len < n)
+        bout1(0)
+}
+
+function align4(n) {
+    return int((n + 3) / 4) * 4
+}
+
 function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz, flags, rel) {
     base = 134512640
     ehsize = 52
@@ -1076,6 +1097,97 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
         else
             bout1(0)
     }
+}
+
+function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, symtab_off, strtab_off, shstrtab_off, shoff, strtab_size, shstrtab_size, sym_count, symtab_size, name, start, next_start, size) {
+    if (global_bytes != RUNTIME_BYTES || data_used != RUNTIME_BYTES)
+        fail("object output does not support globals or string data yet")
+
+    ehsize = 52
+    shentsize = 40
+    shnum = 5
+    shstrndx = 4
+    strtab_size = 1
+    for (i = 1; i <= function_count; i++) {
+        name = function_name[i]
+        sym_name_off[i] = strtab_size
+        strtab_size += length(name) + 1
+    }
+    shstrtab_size = 33
+    sym_count = function_count + 1
+    symtab_size = sym_count * 16
+
+    text_off = ehsize
+    symtab_off = align4(text_off + code_len)
+    strtab_off = symtab_off + symtab_size
+    shstrtab_off = strtab_off + strtab_size
+    shoff = align4(shstrtab_off + shstrtab_size)
+
+    bin_reset()
+
+    bout1(127); bout1(69); bout1(76); bout1(70)
+    bout1(1); bout1(1); bout1(1); bout1(0)
+    bout1(0); bout1(0); bout1(0); bout1(0)
+    bout1(0); bout1(0); bout1(0); bout1(0)
+
+    bout2(1)
+    bout2(3)
+    bout4(1)
+    bout4(0)
+    bout4(0)
+    bout4(shoff)
+    bout4(0)
+    bout2(ehsize)
+    bout2(0)
+    bout2(0)
+    bout2(shentsize)
+    bout2(shnum)
+    bout2(shstrndx)
+
+    for (i = 1; i <= code_len; i++)
+        bout1(code[i])
+
+    pad_to(symtab_off)
+
+    for (i = 0; i < 16; i++)
+        bout1(0)
+    for (i = 1; i <= function_count; i++) {
+        name = function_name[i]
+        start = function_addr[name] - 1
+        if (i < function_count)
+            next_start = function_addr[function_name[i + 1]] - 1
+        else
+            next_start = code_len
+        size = next_start - start
+        bout4(sym_name_off[i])
+        bout4(start)
+        bout4(size)
+        bout1(18)
+        bout1(0)
+        bout2(1)
+    }
+
+    bout1(0)
+    for (i = 1; i <= function_count; i++) {
+        boutstr(function_name[i])
+        bout1(0)
+    }
+
+    bout1(0)
+    boutstr(".text"); bout1(0)
+    boutstr(".symtab"); bout1(0)
+    boutstr(".strtab"); bout1(0)
+    boutstr(".shstrtab"); bout1(0)
+
+    pad_to(shoff)
+
+    for (i = 0; i < 40; i++)
+        bout1(0)
+
+    bout4(1); bout4(1); bout4(6); bout4(0); bout4(text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(7); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(3); bout4(1); bout4(4); bout4(16)
+    bout4(15); bout4(3); bout4(0); bout4(0); bout4(strtab_off); bout4(strtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
+    bout4(23); bout4(3); bout4(0); bout4(0); bout4(shstrtab_off); bout4(shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0)
 }
 
 function emit_binary(    i) {
