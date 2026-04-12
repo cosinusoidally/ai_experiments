@@ -98,13 +98,12 @@ long *reloc_offsets_p = reloc_offsets;
 char **reloc_names_p = reloc_names;
 long *reloc_types_p = reloc_types;
 
-int loop_stack[MAX_LOOPS];
 int loop_depth;
 int next_loop_id;
 int break_patch_loop[MAX_BREAKS];
 long break_patch_pos[MAX_BREAKS];
 int break_patch_count;
-int *loop_stack_p = loop_stack;
+int *loop_stack_p;
 int *break_patch_loop_p = break_patch_loop;
 long *break_patch_pos_p = break_patch_pos;
 
@@ -114,7 +113,7 @@ int output_object;
 char *dash_c;
 
 static void failf(const char *fmt, ...);
-static void *xmalloc(size_t n);
+void *xmalloc(size_t n);
 static void *xrealloc(void *p, size_t n);
 char *xstrdup(const char *s);
 static void set_tok_text_len(const char *s, size_t n);
@@ -296,7 +295,7 @@ static void failf(const char *fmt, ...)
     exit(1);
 }
 
-static void *xmalloc(size_t n)
+void *xmalloc(size_t n)
 {
     void *p;
     p = malloc(n);

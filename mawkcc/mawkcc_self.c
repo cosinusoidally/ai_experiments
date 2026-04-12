@@ -42,6 +42,9 @@ function init_globals() {
     tok_text = 0;
     tok_text_cap = 0;
     dash_c = dash_c_string();
+    if (eq(loop_stack_p, 0)) {
+        loop_stack_p = xmalloc(4096);
+    }
     return 0;
 }
 
