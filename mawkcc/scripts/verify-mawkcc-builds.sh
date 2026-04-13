@@ -10,6 +10,7 @@ AWK_BIN=$("$ROOT/scripts/build-mawkcc-awk.sh" "$ARTIFACTS/mawkcc.awk.exe")
 SELF_BIN=$("$ROOT/scripts/build-mawkcc-self.sh" "$ARTIFACTS/mawkcc.self.exe")
 REF_C_BIN=$("$ROOT/scripts/build-mawkcc-reference-c.sh" "$ARTIFACTS/mawkcc.reference-c.exe")
 GCC_BIN=$("$ROOT/scripts/build-mawkcc-gcc.sh" "$ARTIFACTS/mawkcc.gcc-output.exe")
+JS_BIN=$("$ROOT/scripts/build-mawkcc-js.sh" "$ARTIFACTS/mawkcc.js.exe")
 
 compare_to_awk() {
     label=$1
@@ -24,8 +25,9 @@ compare_to_awk() {
 compare_to_awk self "$SELF_BIN"
 compare_to_awk reference-c "$REF_C_BIN"
 compare_to_awk gcc "$GCC_BIN"
+compare_to_awk js "$JS_BIN"
 
-for bin in "$AWK_BIN" "$SELF_BIN" "$REF_C_BIN" "$GCC_BIN"; do
+for bin in "$AWK_BIN" "$SELF_BIN" "$REF_C_BIN" "$GCC_BIN" "$JS_BIN"; do
     name=$(basename "$bin" .exe)
     rebuilt=$ARTIFACTS/$name.rebuilt.exe
     "$bin" "$ROOT/mawkcc_self.c" > "$rebuilt"
@@ -37,5 +39,5 @@ for bin in "$AWK_BIN" "$SELF_BIN" "$REF_C_BIN" "$GCC_BIN"; do
     fi
 done
 
-echo "ok: awk, self, reference-c, and gcc build scripts emit identical mawkcc binaries"
+echo "ok: awk, self, reference-c, gcc, and js build scripts emit identical mawkcc binaries"
 echo "ok: each emitted mawkcc binary rebuilds itself identically"

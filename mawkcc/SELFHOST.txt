@@ -36,9 +36,11 @@ The dedicated build scripts are:
 - `scripts/build-mawkcc-reference-c.sh`: builds using `mawkcc_orig.c`
 - `scripts/build-mawkcc-gcc.sh`: builds `mawkcc_self.c` with GCC plus
   `mawkcc_gcc_support.c`, then emits a mawkcc compiler binary
+- `scripts/build-mawkcc-js.sh`: loads `mawkcc_self.c` in the SpiderMonkey `js`
+  shell with a small mawkcc builtin runtime, then emits a mawkcc compiler binary
 
-All four scripts produce a mawkcc executable. The expected result is that all
-four emitted binaries are byte-identical.
+All five scripts produce a mawkcc executable. The expected result is that all
+five emitted binaries are byte-identical.
 
 
 Verification
@@ -72,3 +74,4 @@ Any future change to code generation should preserve byte identity across:
 - `mawkcc_orig.c`
 - `mawkcc_self.c` compiled by mawkcc
 - `mawkcc_self.c` compiled by GCC with `mawkcc_gcc_support.c`
+- `mawkcc_self.c` loaded by SpiderMonkey `js`
