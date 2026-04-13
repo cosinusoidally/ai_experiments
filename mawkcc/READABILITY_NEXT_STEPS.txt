@@ -3,20 +3,7 @@ mawkcc_self.c readability next steps
 
 Remove each item from this file once it has been completed and verified.
 
-1. Split builtin classification into helper predicates.
-
-   `builtin_arity()` currently contains deeply nested `or(or(...))`
-   expressions. Add readable helpers such as:
-
-       is_builtin1(name)
-       is_builtin2(name)
-       is_builtin3(name)
-
-   Then make `builtin_arity()` return 1, 2, 3, or 0 using those helpers.
-   Keep the helper contents aligned with the `strcmp` groups in
-   `mawkcc_orig.c`.
-
-2. Add short accessor helpers for pointer-backed arrays.
+1. Add short accessor helpers for pointer-backed arrays.
 
    Many call, relocation, break, and data-patch arrays are accessed with
    repeated expressions such as:
@@ -33,7 +20,7 @@ Remove each item from this file once it has been completed and verified.
        data_patch_offsets/data_patch_addends
        current_params/current_param_offsets
 
-3. Replace raw allocation byte counts in `init_globals()`.
+2. Replace raw allocation byte counts in `init_globals()`.
 
    The self side currently allocates raw byte counts such as `32768`,
    `16384`, and `4096`. These correspond to fixed capacities and element
@@ -47,7 +34,7 @@ Remove each item from this file once it has been completed and verified.
 
    Do not extend the mawkcc dialect.
 
-4. Add named fail wrappers around `fail_code()`.
+3. Add named fail wrappers around `fail_code()`.
 
    Calls such as `fail_code(17, 0)` are hard to audit. Add small wrappers
    for common cases so the call sites describe intent, while preserving the
@@ -61,7 +48,7 @@ Remove each item from this file once it has been completed and verified.
    Keep the wrappers close in meaning to the corresponding `failf()` calls
    in `mawkcc_orig.c`.
 
-5. Split `build_object_()` into smaller phases.
+4. Split `build_object_()` into smaller phases.
 
    `build_object_()` currently has a large local-variable workaround and is
    difficult to review. Split it into smaller helpers that mirror the
@@ -75,7 +62,7 @@ Remove each item from this file once it has been completed and verified.
    This is higher risk than the previous items and should be done only with
    full byte-identity verification.
 
-6. Normalize dense multi-byte opcode emitters.
+5. Normalize dense multi-byte opcode emitters.
 
    Some emitter helpers are dense one-liners, especially multi-byte
    instruction sequences such as:

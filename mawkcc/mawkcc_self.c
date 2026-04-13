@@ -66,6 +66,12 @@ var bin_cap;
 var data_patch_count;
 var data_patch_offsets_p;
 var data_patch_addends_p;
+var builtin1_names_p;
+var builtin1_count;
+var builtin2_names_p;
+var builtin2_count;
+var builtin3_names_p;
+var builtin3_count;
 
 function init_globals() {
     tok_text = 0;
@@ -112,6 +118,7 @@ function init_globals() {
     break_patch_pos_p = xmalloc(32768);
     data_patch_offsets_p = xmalloc(32768);
     data_patch_addends_p = xmalloc(32768);
+    init_builtin_names();
     return 0;
 }
 
@@ -865,14 +872,91 @@ function name_eq(name, text) {
     return eq(strcmp(name, text), 0);
 }
 
+function name_list_set(list, i, name) {
+    wi32(add(list, mul(i, 4)), name);
+    return name;
+}
+
+function name_list_get(list, i) {
+    return ri32(add(list, mul(i, 4)));
+}
+
+function name_in_list_(name, list, count, i) {
+    while (lt(i, count)) {
+        if (name_eq(name, name_list_get(list, i))) {
+            return 1;
+        }
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function name_in_list(name, list, count) {
+    return name_in_list_(name, list, count, 0);
+}
+
+function init_builtin1_names() {
+    builtin1_count = 8;
+    builtin1_names_p = xmalloc(mul(builtin1_count, 4));
+    name_list_set(builtin1_names_p, 0, mks("neg"));
+    name_list_set(builtin1_names_p, 1, mks("not"));
+    name_list_set(builtin1_names_p, 2, mks("ri32"));
+    name_list_set(builtin1_names_p, 3, mks("ri8"));
+    name_list_set(builtin1_names_p, 4, mks("brk"));
+    name_list_set(builtin1_names_p, 5, mks("close"));
+    name_list_set(builtin1_names_p, 6, mks("exit"));
+    name_list_set(builtin1_names_p, 7, mks("mks"));
+    return 0;
+}
+
+function init_builtin2_names() {
+    builtin2_count = 18;
+    builtin2_names_p = xmalloc(mul(builtin2_count, 4));
+    name_list_set(builtin2_names_p, 0, mks("add"));
+    name_list_set(builtin2_names_p, 1, mks("sub"));
+    name_list_set(builtin2_names_p, 2, mks("mul"));
+    name_list_set(builtin2_names_p, 3, mks("div"));
+    name_list_set(builtin2_names_p, 4, mks("mod"));
+    name_list_set(builtin2_names_p, 5, mks("eq"));
+    name_list_set(builtin2_names_p, 6, mks("ne"));
+    name_list_set(builtin2_names_p, 7, mks("lt"));
+    name_list_set(builtin2_names_p, 8, mks("le"));
+    name_list_set(builtin2_names_p, 9, mks("gt"));
+    name_list_set(builtin2_names_p, 10, mks("ge"));
+    name_list_set(builtin2_names_p, 11, mks("and"));
+    name_list_set(builtin2_names_p, 12, mks("or"));
+    name_list_set(builtin2_names_p, 13, mks("xor"));
+    name_list_set(builtin2_names_p, 14, mks("shl"));
+    name_list_set(builtin2_names_p, 15, mks("shr"));
+    name_list_set(builtin2_names_p, 16, mks("wi32"));
+    name_list_set(builtin2_names_p, 17, mks("wi8"));
+    return 0;
+}
+
+function init_builtin3_names() {
+    builtin3_count = 3;
+    builtin3_names_p = xmalloc(mul(builtin3_count, 4));
+    name_list_set(builtin3_names_p, 0, mks("open"));
+    name_list_set(builtin3_names_p, 1, mks("read"));
+    name_list_set(builtin3_names_p, 2, mks("write"));
+    return 0;
+}
+
+function init_builtin_names() {
+    init_builtin1_names();
+    init_builtin2_names();
+    init_builtin3_names();
+    return 0;
+}
+
 function builtin_arity(name) {
-    if (or(or(or(name_eq(name, mks("neg")), name_eq(name, mks("not"))), or(name_eq(name, mks("ri32")), name_eq(name, mks("ri8")))), or(or(or(name_eq(name, mks("brk")), name_eq(name, mks("close"))), name_eq(name, mks("exit"))), name_eq(name, mks("mks"))))) {
+    if (name_in_list(name, builtin1_names_p, builtin1_count)) {
         return 1;
     }
-    if (or(or(or(or(name_eq(name, mks("add")), name_eq(name, mks("sub"))), or(or(name_eq(name, mks("mul")), name_eq(name, mks("div"))), name_eq(name, mks("mod")))), or(or(name_eq(name, mks("eq")), name_eq(name, mks("ne"))), or(name_eq(name, mks("lt")), name_eq(name, mks("le"))))), or(or(or(name_eq(name, mks("gt")), name_eq(name, mks("ge"))), or(name_eq(name, mks("and")), name_eq(name, mks("or")))), or(or(or(name_eq(name, mks("xor")), name_eq(name, mks("shl"))), or(name_eq(name, mks("shr")), name_eq(name, mks("wi32")))), name_eq(name, mks("wi8")))))) {
+    if (name_in_list(name, builtin2_names_p, builtin2_count)) {
         return 2;
     }
-    if (or(or(name_eq(name, mks("open")), name_eq(name, mks("read"))), name_eq(name, mks("write")))) {
+    if (name_in_list(name, builtin3_names_p, builtin3_count)) {
         return 3;
     }
     return 0;
