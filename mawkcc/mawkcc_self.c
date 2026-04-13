@@ -861,84 +861,37 @@ function patch_breaks(loop_id, target) {
     return patch_breaks_(loop_id, target, 0);
 }
 
-function streq2(s, c0, c1) {
-    if (ne(ri8(s), c0)) {
-        return 0;
-    }
-    if (ne(ri8(add(s, 1)), c1)) {
-        return 0;
-    }
-    return eq(ri8(add(s, 2)), 0);
-}
-
-function streq3(s, c0, c1, c2) {
-    if (not(streq3_prefix(s, c0, c1, c2))) {
-        return 0;
-    }
-    return eq(ri8(add(s, 3)), 0);
-}
-
-function streq4(s, c0, c1, c2, c3) {
-    if (not(streq4_prefix(s, c0, c1, c2, c3))) {
-        return 0;
-    }
-    return eq(ri8(add(s, 4)), 0);
-}
-
-function streq5(s, c0, c1, c2, c3, c4) {
-    if (not(streq4_prefix(s, c0, c1, c2, c3))) {
-        return 0;
-    }
-    if (ne(ri8(add(s, 4)), c4)) {
-        return 0;
-    }
-    return eq(ri8(add(s, 5)), 0);
-}
-
-function streq3_prefix(s, c0, c1, c2) {
-    if (ne(ri8(s), c0)) {
-        return 0;
-    }
-    if (ne(ri8(add(s, 1)), c1)) {
-        return 0;
-    }
-    return eq(ri8(add(s, 2)), c2);
-}
-
-function streq4_prefix(s, c0, c1, c2, c3) {
-    if (not(streq3_prefix(s, c0, c1, c2))) {
-        return 0;
-    }
-    return eq(ri8(add(s, 3)), c3);
+function name_eq(name, text) {
+    return eq(strcmp(name, text), 0);
 }
 
 function builtin_arity(name) {
-    if (or(or(or(streq3(name, 110, 101, 103), streq3(name, 110, 111, 116)), or(streq4(name, 114, 105, 51, 50), streq3(name, 114, 105, 56))), or(or(or(streq3(name, 98, 114, 107), streq5(name, 99, 108, 111, 115, 101)), streq4(name, 101, 120, 105, 116)), streq3(name, 109, 107, 115)))) {
+    if (or(or(or(name_eq(name, mks("neg")), name_eq(name, mks("not"))), or(name_eq(name, mks("ri32")), name_eq(name, mks("ri8")))), or(or(or(name_eq(name, mks("brk")), name_eq(name, mks("close"))), name_eq(name, mks("exit"))), name_eq(name, mks("mks"))))) {
         return 1;
     }
-    if (or(or(or(or(streq3(name, 97, 100, 100), streq3(name, 115, 117, 98)), or(or(streq3(name, 109, 117, 108), streq3(name, 100, 105, 118)), streq3(name, 109, 111, 100))), or(or(streq2(name, 101, 113), streq2(name, 110, 101)), or(streq2(name, 108, 116), streq2(name, 108, 101)))), or(or(or(streq2(name, 103, 116), streq2(name, 103, 101)), or(streq3(name, 97, 110, 100), streq2(name, 111, 114))), or(or(or(streq3(name, 120, 111, 114), streq3(name, 115, 104, 108)), or(streq3(name, 115, 104, 114), streq4(name, 119, 105, 51, 50))), streq3(name, 119, 105, 56))))) {
+    if (or(or(or(or(name_eq(name, mks("add")), name_eq(name, mks("sub"))), or(or(name_eq(name, mks("mul")), name_eq(name, mks("div"))), name_eq(name, mks("mod")))), or(or(name_eq(name, mks("eq")), name_eq(name, mks("ne"))), or(name_eq(name, mks("lt")), name_eq(name, mks("le"))))), or(or(or(name_eq(name, mks("gt")), name_eq(name, mks("ge"))), or(name_eq(name, mks("and")), name_eq(name, mks("or")))), or(or(or(name_eq(name, mks("xor")), name_eq(name, mks("shl"))), or(name_eq(name, mks("shr")), name_eq(name, mks("wi32")))), name_eq(name, mks("wi8")))))) {
         return 2;
     }
-    if (or(or(streq4(name, 111, 112, 101, 110), streq4(name, 114, 101, 97, 100)), streq5(name, 119, 114, 105, 116, 101))) {
+    if (or(or(name_eq(name, mks("open")), name_eq(name, mks("read"))), name_eq(name, mks("write")))) {
         return 3;
     }
     return 0;
 }
 
 function emit_builtin1(name) {
-    if (streq3(name, 110, 101, 103)) {
+    if (name_eq(name, mks("neg"))) {
         emit_neg_eax();
-    } else if (streq3(name, 110, 111, 116)) {
+    } else if (name_eq(name, mks("not"))) {
         emit_not_eax();
-    } else if (streq4(name, 114, 105, 51, 50)) {
+    } else if (name_eq(name, mks("ri32"))) {
         emit_read_i32();
-    } else if (streq3(name, 114, 105, 56)) {
+    } else if (name_eq(name, mks("ri8"))) {
         emit_read_u8();
-    } else if (streq3(name, 98, 114, 107)) {
+    } else if (name_eq(name, mks("brk"))) {
         emit_brk_alloc();
-    } else if (streq5(name, 99, 108, 111, 115, 101)) {
+    } else if (name_eq(name, mks("close"))) {
         emit_sys_close();
-    } else if (streq4(name, 101, 120, 105, 116)) {
+    } else if (name_eq(name, mks("exit"))) {
         emit_sys_exit();
     } else {
         fail_code(6, name);
@@ -947,41 +900,41 @@ function emit_builtin1(name) {
 }
 
 function emit_builtin2(name) {
-    if (streq3(name, 97, 100, 100)) {
+    if (name_eq(name, mks("add"))) {
         emit_add_eax_ebx();
-    } else if (streq3(name, 115, 117, 98)) {
+    } else if (name_eq(name, mks("sub"))) {
         emit_sub_from_stack_top();
-    } else if (streq3(name, 109, 117, 108)) {
+    } else if (name_eq(name, mks("mul"))) {
         emit_imul_eax_ebx();
-    } else if (streq3(name, 100, 105, 118)) {
+    } else if (name_eq(name, mks("div"))) {
         emit_div_stack_top_by_eax();
-    } else if (streq3(name, 109, 111, 100)) {
+    } else if (name_eq(name, mks("mod"))) {
         emit_mod_stack_top_by_eax();
-    } else if (streq2(name, 101, 113)) {
+    } else if (name_eq(name, mks("eq"))) {
         emit_cmp_set(148);
-    } else if (streq2(name, 110, 101)) {
+    } else if (name_eq(name, mks("ne"))) {
         emit_cmp_set(149);
-    } else if (streq2(name, 108, 116)) {
+    } else if (name_eq(name, mks("lt"))) {
         emit_cmp_set(156);
-    } else if (streq2(name, 108, 101)) {
+    } else if (name_eq(name, mks("le"))) {
         emit_cmp_set(158);
-    } else if (streq2(name, 103, 116)) {
+    } else if (name_eq(name, mks("gt"))) {
         emit_cmp_set(159);
-    } else if (streq2(name, 103, 101)) {
+    } else if (name_eq(name, mks("ge"))) {
         emit_cmp_set(157);
-    } else if (streq3(name, 97, 110, 100)) {
+    } else if (name_eq(name, mks("and"))) {
         emit_and_eax_ebx();
-    } else if (streq2(name, 111, 114)) {
+    } else if (name_eq(name, mks("or"))) {
         emit_or_eax_ebx();
-    } else if (streq3(name, 120, 111, 114)) {
+    } else if (name_eq(name, mks("xor"))) {
         emit_xor_eax_ebx();
-    } else if (streq3(name, 115, 104, 108)) {
+    } else if (name_eq(name, mks("shl"))) {
         emit_shl_ebx_by_eax();
-    } else if (streq3(name, 115, 104, 114)) {
+    } else if (name_eq(name, mks("shr"))) {
         emit_shr_ebx_by_eax();
-    } else if (streq4(name, 119, 105, 51, 50)) {
+    } else if (name_eq(name, mks("wi32"))) {
         emit_write_i32();
-    } else if (streq3(name, 119, 105, 56)) {
+    } else if (name_eq(name, mks("wi8"))) {
         emit_write_u8();
     } else {
         fail_code(7, name);
@@ -990,11 +943,11 @@ function emit_builtin2(name) {
 }
 
 function emit_builtin3(name) {
-    if (streq4(name, 111, 112, 101, 110)) {
+    if (name_eq(name, mks("open"))) {
         emit_sys_open();
-    } else if (streq4(name, 114, 101, 97, 100)) {
+    } else if (name_eq(name, mks("read"))) {
         emit_sys_read();
-    } else if (streq5(name, 119, 114, 105, 116, 101)) {
+    } else if (name_eq(name, mks("write"))) {
         emit_sys_write();
     } else {
         fail_code(8, name);
@@ -1004,7 +957,7 @@ function emit_builtin3(name) {
 
 function parse_builtin_call(name, argc) {
     expect(TOK_LPAREN);
-    if (streq3(name, 109, 107, 115)) {
+    if (name_eq(name, mks("mks"))) {
         if (not(eq(tok, TOK_STR))) {
             fail_code(9, 0);
         }
@@ -1720,7 +1673,7 @@ function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {
         name = ri32(add(reloc_names_p, mul(ri, 4)));
         off = ri32(add(reloc_offsets_p, mul(ri, 4)));
         typ = ri32(add(reloc_types_p, mul(ri, 4)));
-        if (streq5(name, 46, 100, 97, 116, 97)) {
+        if (name_eq(name, mks(".data"))) {
             bout4(off);
             bout4(add(256, typ));
         } else {
