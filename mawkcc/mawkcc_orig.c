@@ -191,9 +191,12 @@ static void emit_add_eax_ebx(void);
 static void emit_and_eax_ebx(void);
 static void emit_or_eax_ebx(void);
 static void emit_xor_eax_ebx(void);
+static void emit_shl_ebx_by_eax(void);
+static void emit_shr_ebx_by_eax(void);
 static void emit_sub_from_stack_top(void);
 static void emit_imul_eax_ebx(void);
 static void emit_div_stack_top_by_eax(void);
+static void emit_mod_stack_top_by_eax(void);
 static void emit_cmp_set(int opcode);
 static void emit_neg_eax(void);
 static void emit_not_eax(void);
@@ -206,6 +209,7 @@ static void emit_sys_open(void);
 static void emit_sys_read(void);
 static void emit_sys_write(void);
 static void emit_sys_close(void);
+static void emit_sys_exit(void);
 static void bin_reset(void);
 static void bout1(unsigned long b);
 static void bout2(unsigned long v);
@@ -624,9 +628,6 @@ static void parse_global(void)
         failf("global `%s` cannot be initialized at declaration time", name);
     }
     expect(TOK_SEMI);
-    if (function_count > 0) {
-        failf("global `%s` must be declared before functions", name);
-    }
     if (find_symbol(globals, global_count, name) >= 0 || find_symbol(functions, function_count, name) >= 0) {
         failf("duplicate global `%s`", name);
     }
@@ -896,6 +897,11 @@ static void parse_primary(void)
         next_tok();
         return;
     }
+    if (tok == TOK_STR) {
+        emit_mks_literal(tok_text);
+        next_tok();
+        return;
+    }
     if (tok == TOK_LPAREN) {
         next_tok();
         parse_expr();
@@ -976,16 +982,18 @@ static int builtin_arity(const char *name)
     if (strcmp(name, "neg") == 0 || strcmp(name, "not") == 0 ||
         strcmp(name, "ri32") == 0 || strcmp(name, "ri8") == 0 ||
         strcmp(name, "brk") == 0 || strcmp(name, "close") == 0 ||
-        strcmp(name, "mks") == 0) {
+        strcmp(name, "exit") == 0 || strcmp(name, "mks") == 0) {
         return 1;
     }
     if (strcmp(name, "add") == 0 || strcmp(name, "sub") == 0 ||
         strcmp(name, "mul") == 0 || strcmp(name, "div") == 0 ||
+        strcmp(name, "mod") == 0 ||
         strcmp(name, "eq") == 0 || strcmp(name, "ne") == 0 ||
         strcmp(name, "lt") == 0 || strcmp(name, "le") == 0 ||
         strcmp(name, "gt") == 0 || strcmp(name, "ge") == 0 ||
         strcmp(name, "and") == 0 || strcmp(name, "or") == 0 ||
-        strcmp(name, "xor") == 0 || strcmp(name, "wi32") == 0 ||
+        strcmp(name, "xor") == 0 || strcmp(name, "shl") == 0 ||
+        strcmp(name, "shr") == 0 || strcmp(name, "wi32") == 0 ||
         strcmp(name, "wi8") == 0) {
         return 2;
     }
@@ -1023,6 +1031,8 @@ static void emit_builtin1(const char *name)
         emit_brk_alloc();
     } else if (strcmp(name, "close") == 0) {
         emit_sys_close();
+    } else if (strcmp(name, "exit") == 0) {
+        emit_sys_exit();
     } else {
         failf("unknown unary builtin `%s`", name);
     }
@@ -1034,6 +1044,7 @@ static void emit_builtin2(const char *name)
     else if (strcmp(name, "sub") == 0) emit_sub_from_stack_top();
     else if (strcmp(name, "mul") == 0) emit_imul_eax_ebx();
     else if (strcmp(name, "div") == 0) emit_div_stack_top_by_eax();
+    else if (strcmp(name, "mod") == 0) emit_mod_stack_top_by_eax();
     else if (strcmp(name, "eq") == 0) emit_cmp_set(148);
     else if (strcmp(name, "ne") == 0) emit_cmp_set(149);
     else if (strcmp(name, "lt") == 0) emit_cmp_set(156);
@@ -1043,6 +1054,8 @@ static void emit_builtin2(const char *name)
     else if (strcmp(name, "and") == 0) emit_and_eax_ebx();
     else if (strcmp(name, "or") == 0) emit_or_eax_ebx();
     else if (strcmp(name, "xor") == 0) emit_xor_eax_ebx();
+    else if (strcmp(name, "shl") == 0) emit_shl_ebx_by_eax();
+    else if (strcmp(name, "shr") == 0) emit_shr_ebx_by_eax();
     else if (strcmp(name, "wi32") == 0) emit_write_i32();
     else if (strcmp(name, "wi8") == 0) emit_write_u8();
     else failf("unknown binary builtin `%s`", name);
@@ -1312,6 +1325,8 @@ static void emit_add_eax_ebx(void) { emit1(1); emit1(216); }
 static void emit_and_eax_ebx(void) { emit1(33); emit1(216); }
 static void emit_or_eax_ebx(void) { emit1(9); emit1(216); }
 static void emit_xor_eax_ebx(void) { emit1(49); emit1(216); }
+static void emit_shl_ebx_by_eax(void) { emit1(137); emit1(193); emit1(211); emit1(227); emit1(137); emit1(216); }
+static void emit_shr_ebx_by_eax(void) { emit1(137); emit1(193); emit1(211); emit1(235); emit1(137); emit1(216); }
 
 static void emit_sub_from_stack_top(void)
 {
@@ -1323,6 +1338,11 @@ static void emit_imul_eax_ebx(void) { emit1(15); emit1(175); emit1(195); }
 static void emit_div_stack_top_by_eax(void)
 {
     emit1(137); emit1(193); emit1(137); emit1(216); emit1(153); emit1(247); emit1(249);
+}
+
+static void emit_mod_stack_top_by_eax(void)
+{
+    emit1(137); emit1(193); emit1(137); emit1(216); emit1(153); emit1(247); emit1(249); emit1(137); emit1(208);
 }
 
 static void emit_cmp_set(int opcode)
@@ -1394,6 +1414,13 @@ static void emit_sys_close(void)
 {
     emit_mov_ebx_eax();
     emit_mov_eax_imm32(6);
+    emit_int_80();
+}
+
+static void emit_sys_exit(void)
+{
+    emit_mov_ebx_eax();
+    emit_mov_eax_imm32(1);
     emit_int_80();
 }
 

@@ -640,9 +640,12 @@ function emit_add_eax_ebx() { emit1(1); emit1(216); }
 function emit_and_eax_ebx() { emit1(33); emit1(216); }
 function emit_or_eax_ebx() { emit1(9); emit1(216); }
 function emit_xor_eax_ebx() { emit1(49); emit1(216); }
+function emit_shl_ebx_by_eax() { emit1(137); emit1(193); emit1(211); emit1(227); emit1(137); emit1(216); }
+function emit_shr_ebx_by_eax() { emit1(137); emit1(193); emit1(211); emit1(235); emit1(137); emit1(216); }
 function emit_sub_from_stack_top() { emit1(137); emit1(193); emit1(137); emit1(216); emit1(41); emit1(200); }
 function emit_imul_eax_ebx() { emit1(15); emit1(175); emit1(195); }
 function emit_div_stack_top_by_eax() { emit1(137); emit1(193); emit1(137); emit1(216); emit1(153); emit1(247); emit1(249); }
+function emit_mod_stack_top_by_eax() { emit1(137); emit1(193); emit1(137); emit1(216); emit1(153); emit1(247); emit1(249); emit1(137); emit1(208); }
 function emit_cmp_set(opcode) { emit1(57); emit1(195); emit1(15); emit1(opcode); emit1(192); emit1(15); emit1(182); emit1(192); }
 function emit_neg_eax() { emit1(247); emit1(216); }
 function emit_not_eax() { emit1(133); emit1(192); emit1(15); emit1(148); emit1(192); emit1(15); emit1(182); emit1(192); }
@@ -654,6 +657,7 @@ function emit_sys_open() { emit_mov_eax_imm32(5); emit_int_80(); }
 function emit_sys_read() { emit_mov_eax_imm32(3); emit_int_80(); }
 function emit_sys_write() { emit_mov_eax_imm32(4); emit_int_80(); }
 function emit_sys_close() { emit_mov_ebx_eax(); emit_mov_eax_imm32(6); emit_int_80(); }
+function emit_sys_exit() { emit_mov_ebx_eax(); emit_mov_eax_imm32(1); emit_int_80(); }
 
 function emit1(b) {
     ensure_code_capacity(add(code_len, 1));
@@ -909,10 +913,10 @@ function streq4_prefix(s, c0, c1, c2, c3) {
 }
 
 function builtin_arity(name) {
-    if (or(or(or(streq3(name, 110, 101, 103), streq3(name, 110, 111, 116)), or(streq4(name, 114, 105, 51, 50), streq3(name, 114, 105, 56))), or(or(streq3(name, 98, 114, 107), streq5(name, 99, 108, 111, 115, 101)), streq3(name, 109, 107, 115)))) {
+    if (or(or(or(streq3(name, 110, 101, 103), streq3(name, 110, 111, 116)), or(streq4(name, 114, 105, 51, 50), streq3(name, 114, 105, 56))), or(or(or(streq3(name, 98, 114, 107), streq5(name, 99, 108, 111, 115, 101)), streq4(name, 101, 120, 105, 116)), streq3(name, 109, 107, 115)))) {
         return 1;
     }
-    if (or(or(or(or(streq3(name, 97, 100, 100), streq3(name, 115, 117, 98)), or(streq3(name, 109, 117, 108), streq3(name, 100, 105, 118))), or(or(streq2(name, 101, 113), streq2(name, 110, 101)), or(streq2(name, 108, 116), streq2(name, 108, 101)))), or(or(or(streq2(name, 103, 116), streq2(name, 103, 101)), or(streq3(name, 97, 110, 100), streq2(name, 111, 114))), or(or(streq3(name, 120, 111, 114), streq4(name, 119, 105, 51, 50)), streq3(name, 119, 105, 56))))) {
+    if (or(or(or(or(streq3(name, 97, 100, 100), streq3(name, 115, 117, 98)), or(or(streq3(name, 109, 117, 108), streq3(name, 100, 105, 118)), streq3(name, 109, 111, 100))), or(or(streq2(name, 101, 113), streq2(name, 110, 101)), or(streq2(name, 108, 116), streq2(name, 108, 101)))), or(or(or(streq2(name, 103, 116), streq2(name, 103, 101)), or(streq3(name, 97, 110, 100), streq2(name, 111, 114))), or(or(or(streq3(name, 120, 111, 114), streq3(name, 115, 104, 108)), or(streq3(name, 115, 104, 114), streq4(name, 119, 105, 51, 50))), streq3(name, 119, 105, 56))))) {
         return 2;
     }
     if (or(or(streq4(name, 111, 112, 101, 110), streq4(name, 114, 101, 97, 100)), streq5(name, 119, 114, 105, 116, 101))) {
@@ -934,6 +938,8 @@ function emit_builtin1(name) {
         emit_brk_alloc();
     } else if (streq5(name, 99, 108, 111, 115, 101)) {
         emit_sys_close();
+    } else if (streq4(name, 101, 120, 105, 116)) {
+        emit_sys_exit();
     } else {
         fail_code(6, name);
     }
@@ -949,6 +955,8 @@ function emit_builtin2(name) {
         emit_imul_eax_ebx();
     } else if (streq3(name, 100, 105, 118)) {
         emit_div_stack_top_by_eax();
+    } else if (streq3(name, 109, 111, 100)) {
+        emit_mod_stack_top_by_eax();
     } else if (streq2(name, 101, 113)) {
         emit_cmp_set(148);
     } else if (streq2(name, 110, 101)) {
@@ -967,6 +975,10 @@ function emit_builtin2(name) {
         emit_or_eax_ebx();
     } else if (streq3(name, 120, 111, 114)) {
         emit_xor_eax_ebx();
+    } else if (streq3(name, 115, 104, 108)) {
+        emit_shl_ebx_by_eax();
+    } else if (streq3(name, 115, 104, 114)) {
+        emit_shr_ebx_by_eax();
     } else if (streq4(name, 119, 105, 51, 50)) {
         emit_write_i32();
     } else if (streq3(name, 119, 105, 56)) {
@@ -1179,9 +1191,6 @@ function parse_global_(name, entry) {
         fail_code(19, name);
     }
     expect(TOK_SEMI);
-    if (gt(function_count, 0)) {
-        fail_code(20, name);
-    }
     if (or(ge(find_symbol(globals_p, global_count, name), 0), ge(find_symbol(functions_p, function_count, name), 0))) {
         fail_code(21, name);
     }
@@ -1502,6 +1511,11 @@ function parse_assign_or_primary() {
 function parse_primary() {
     if (eq(tok, TOK_NUM)) {
         emit_mov_eax_imm32(tok_num);
+        next_tok();
+        return 0;
+    }
+    if (eq(tok, TOK_STR)) {
+        emit_mks_literal(tok_text);
         next_tok();
         return 0;
     }

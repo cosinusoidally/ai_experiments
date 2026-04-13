@@ -206,8 +206,6 @@ function parse_global(    name) {
     if (tok == "=")
         fail("global `" name "` cannot be initialized at declaration time")
     expect(";")
-    if (function_count > 0)
-        fail("global `" name "` must be declared before functions")
     if (global_seen[name] || function_seen[name])
         fail("duplicate global `" name "`")
     global_seen[name] = 1
@@ -417,6 +415,12 @@ function parse_primary(    name, argc) {
         return
     }
 
+    if (tok == "STR") {
+        emit_mks_literal(tok_text)
+        next_tok()
+        return
+    }
+
     if (tok == "(") {
         next_tok()
         parse_expr()
@@ -489,12 +493,14 @@ function parse_user_call_args(    argc) {
 
 function builtin_arity(name) {
     if (name == "neg" || name == "not" || name == "ri32" || name == "ri8" || \
-        name == "brk" || name == "close" || name == "mks")
+        name == "brk" || name == "close" || name == "exit" || name == "mks")
         return 1
     if (name == "add" || name == "sub" || name == "mul" || name == "div" || \
+        name == "mod" || \
         name == "eq" || name == "ne" || name == "lt" || name == "le" || \
         name == "gt" || name == "ge" || name == "and" || name == "or" || \
-        name == "xor" || name == "wi32" || name == "wi8")
+        name == "xor" || name == "shl" || name == "shr" || \
+        name == "wi32" || name == "wi8")
         return 2
     if (name == "open" || name == "read" || name == "write")
         return 3
@@ -536,6 +542,8 @@ function emit_builtin1(name) {
         emit_brk_alloc()
     else if (name == "close")
         emit_sys_close()
+    else if (name == "exit")
+        emit_sys_exit()
     else
         fail("unknown unary builtin `" name "`")
 }
@@ -549,6 +557,8 @@ function emit_builtin2(name) {
         emit_imul_eax_ebx()
     else if (name == "div")
         emit_div_stack_top_by_eax()
+    else if (name == "mod")
+        emit_mod_stack_top_by_eax()
     else if (name == "eq")
         emit_cmp_set(148)
     else if (name == "ne")
@@ -567,6 +577,10 @@ function emit_builtin2(name) {
         emit_or_eax_ebx()
     else if (name == "xor")
         emit_xor_eax_ebx()
+    else if (name == "shl")
+        emit_shl_ebx_by_eax()
+    else if (name == "shr")
+        emit_shr_ebx_by_eax()
     else if (name == "wi32")
         emit_write_i32()
     else if (name == "wi8")
@@ -975,6 +989,24 @@ function emit_xor_eax_ebx() {
     emit1(216)
 }
 
+function emit_shl_ebx_by_eax() {
+    emit1(137)
+    emit1(193)
+    emit1(211)
+    emit1(227)
+    emit1(137)
+    emit1(216)
+}
+
+function emit_shr_ebx_by_eax() {
+    emit1(137)
+    emit1(193)
+    emit1(211)
+    emit1(235)
+    emit1(137)
+    emit1(216)
+}
+
 function emit_sub_from_stack_top() {
     emit1(137)
     emit1(193)
@@ -998,6 +1030,18 @@ function emit_div_stack_top_by_eax() {
     emit1(153)
     emit1(247)
     emit1(249)
+}
+
+function emit_mod_stack_top_by_eax() {
+    emit1(137)
+    emit1(193)
+    emit1(137)
+    emit1(216)
+    emit1(153)
+    emit1(247)
+    emit1(249)
+    emit1(137)
+    emit1(208)
 }
 
 function emit_cmp_set(opcode) {
@@ -1105,6 +1149,12 @@ function emit_sys_write() {
 function emit_sys_close() {
     emit_mov_ebx_eax()
     emit_mov_eax_imm32(6)
+    emit_int_80()
+}
+
+function emit_sys_exit() {
+    emit_mov_ebx_eax()
+    emit_mov_eax_imm32(1)
     emit_int_80()
 }
 
