@@ -1868,26 +1868,41 @@ function build_object() {
     return build_object_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
-function read_source_(path, fd, len, buf, got) {
+function read_source_(path, fd, cap, buf, used, got, new_cap, new_buf) {
     fd = open(path, 0, 0);
     if (lt(fd, 0)) {
         return 0;
     }
-    len = 1048576;
-    buf = xmalloc(add(len, 2));
-    got = read(fd, buf, len);
-    close(fd);
-    if (lt(got, 0)) {
-        return 0;
+    cap = 4096;
+    buf = xmalloc(add(cap, 2));
+    used = 0;
+    while (1) {
+        if (ge(used, cap)) {
+            new_cap = mul(cap, 2);
+            new_buf = xmalloc(add(new_cap, 2));
+            copy_bytes_(new_buf, buf, used, 0);
+            buf = new_buf;
+            cap = new_cap;
+        }
+        got = read(fd, add(buf, used), sub(cap, used));
+        if (lt(got, 0)) {
+            close(fd);
+            return 0;
+        }
+        if (eq(got, 0)) {
+            break;
+        }
+        used = add(used, got);
     }
-    wi8(add(buf, got), 10);
-    wi8(add(add(buf, got), 1), 0);
-    src_len = add(got, 1);
+    close(fd);
+    wi8(add(buf, used), 10);
+    wi8(add(add(buf, used), 1), 0);
+    src_len = add(used, 1);
     return buf;
 }
 
 function read_source(path) {
-    return read_source_(path, 0, 0, 0, 0);
+    return read_source_(path, 0, 0, 0, 0, 0, 0, 0);
 }
 
 function compile(source_path) {
