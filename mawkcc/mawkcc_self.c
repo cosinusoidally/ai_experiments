@@ -127,8 +127,15 @@ function fail_msg(s, n) {
     return 1;
 }
 
-function fail_code(code, arg) {
-    return fail_msg(mks("mawkcc error\n"), 13);
+function fail(s) {
+    return fail_msg(s, strlen(s));
+}
+
+function fail_name(s, name) {
+    write(2, s, strlen(s));
+    write(2, name, strlen(name));
+    write(2, mks("\n"), 1);
+    return 1;
 }
 
 function usage(program) {
@@ -407,7 +414,7 @@ function skip_ws_and_comments_(ch) {
                 idx_pos = add(idx_pos, 1);
             }
             if (ge(add(idx_pos, 1), src_len)) {
-                fail_code(29, 0);
+                fail(mks("unterminated block comment\n"));
             }
             idx_pos = add(idx_pos, 2);
         } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), 47), eq(ri8(add(src, add(idx_pos, 1))), 47)))) {
@@ -444,7 +451,7 @@ function read_string_token_(buf, cap, len, ch) {
             idx_pos = add(idx_pos, 1);
             if (ge(idx_pos, src_len)) {
                 free(buf);
-                fail_code(30, 0);
+                fail(mks("unterminated string escape\n"));
             }
             ch = ri8(add(src, idx_pos));
             if (eq(ch, 110)) {
@@ -461,7 +468,7 @@ function read_string_token_(buf, cap, len, ch) {
                 ch = 0;
             } else {
                 free(buf);
-                fail_code(32, ch);
+                fail(mks("unsupported string escape\n"));
             }
         }
         if (ge(add(len, 2), cap)) {
@@ -473,7 +480,7 @@ function read_string_token_(buf, cap, len, ch) {
         idx_pos = add(idx_pos, 1);
     }
     free(buf);
-    fail_code(31, 0);
+    fail(mks("unterminated string literal\n"));
     return 0;
 }
 
@@ -569,7 +576,7 @@ function next_tok_(ch) {
     if (next_tok_punc_(ch)) {
         return 0;
     }
-    fail_code(33, ch);
+    fail(mks("unexpected input character\n"));
     return 0;
 }
 
@@ -579,7 +586,7 @@ function next_tok() {
 
 function expect(want) {
     if (not(eq(tok, want))) {
-        fail_code(1, want);
+        fail(mks("unexpected token\n"));
     }
     next_tok();
     return 0;
@@ -826,7 +833,7 @@ function push_loop_(id) {
     id = add(next_loop_id, 1);
     next_loop_id = id;
     if (ge(loop_depth, 1024)) {
-        fail_code(2, 0);
+        fail(mks("too many nested loops\n"));
     }
     wi32(add(loop_stack_p, mul(loop_depth, 4)), id);
     loop_depth = add(loop_depth, 1);
@@ -846,7 +853,7 @@ function pop_loop() {
 
 function record_break(loop_id, patch_pos) {
     if (ge(break_patch_count, 8192)) {
-        fail_code(3, 0);
+        fail(mks("too many break patches\n"));
     }
     wi32(add(break_patch_loop_p, mul(break_patch_count, 4)), loop_id);
     wi32(add(break_patch_pos_p, mul(break_patch_count, 4)), patch_pos);
@@ -978,7 +985,7 @@ function emit_builtin1(name) {
     } else if (name_eq(name, mks("exit"))) {
         emit_sys_exit();
     } else {
-        fail_code(6, name);
+        fail_name(mks("unknown one-argument builtin: "), name);
     }
     return 0;
 }
@@ -1021,7 +1028,7 @@ function emit_builtin2(name) {
     } else if (name_eq(name, mks("wi8"))) {
         emit_write_u8();
     } else {
-        fail_code(7, name);
+        fail_name(mks("unknown two-argument builtin: "), name);
     }
     return 0;
 }
@@ -1034,7 +1041,7 @@ function emit_builtin3(name) {
     } else if (name_eq(name, mks("write"))) {
         emit_sys_write();
     } else {
-        fail_code(8, name);
+        fail_name(mks("unknown three-argument builtin: "), name);
     }
     return 0;
 }
@@ -1043,7 +1050,7 @@ function parse_builtin_call(name, argc) {
     expect(TOK_LPAREN);
     if (name_eq(name, mks("mks"))) {
         if (not(eq(tok, TOK_STR))) {
-            fail_code(9, 0);
+            fail(mks("mks expects a string literal\n"));
         }
         emit_mks_literal(tok_text);
         next_tok();
@@ -1069,7 +1076,7 @@ function parse_builtin_call(name, argc) {
         emit_pop_ecx();
         emit_pop_ebx();
     } else {
-        fail_code(10, 0);
+        fail(mks("unsupported builtin arity\n"));
     }
     expect(TOK_RPAREN);
     if (eq(argc, 1)) {
@@ -1132,13 +1139,13 @@ function patch_calls_(i, fi, name, pos, argc, addr, arity, rel) {
                 record_external(name, 18);
                 record_reloc(pos, name, 2);
             } else {
-                fail_code(11, name);
+                fail_name(mks("undefined function: "), name);
             }
         } else {
             addr = sym_val(add(functions_p, mul(fi, 8)));
             arity = sym_val(add(function_arities_p, mul(fi, 8)));
             if (not(eq(arity, argc))) {
-                fail_code(12, name);
+                fail_name(mks("wrong argument count: "), name);
             }
             rel = sub(addr, add(pos, 4));
             patch4(pos, rel);
@@ -1164,7 +1171,7 @@ function record_external_(name, type, i, entry) {
         i = add(i, 1);
     }
     if (ge(external_count, 4096)) {
-        fail_code(16, 0);
+        fail(mks("too many external symbols\n"));
     }
     entry = add(externals_p, mul(external_count, 8));
     sym_set_name(entry, xstrdup(name));
@@ -1180,7 +1187,7 @@ function record_external(name, type) {
 
 function record_reloc(offset, name, type) {
     if (ge(reloc_count, 8192)) {
-        fail_code(17, 0);
+        fail(mks("too many relocations\n"));
     }
     wi32(add(reloc_offsets_p, mul(reloc_count, 4)), offset);
     wi32(add(reloc_names_p, mul(reloc_count, 4)), xstrdup(name));
@@ -1191,7 +1198,7 @@ function record_reloc(offset, name, type) {
 
 function record_data_patch(offset, addend) {
     if (ge(data_patch_count, 8192)) {
-        fail_code(17, 0);
+        fail(mks("too many relocations\n"));
     }
     wi32(add(data_patch_offsets_p, mul(data_patch_count, 4)), offset);
     wi32(add(data_patch_addends_p, mul(data_patch_count, 4)), addend);
@@ -1208,7 +1215,7 @@ function parse_program() {
         }
     }
     if (and(not(output_object), not(has_main_function()))) {
-        fail_code(4, 0);
+        fail(mks("missing main function\n"));
     }
     return 0;
 }
@@ -1220,16 +1227,16 @@ function has_main_function() {
 function parse_global_(name, entry) {
     expect(TOK_VAR);
     if (not(eq(tok, TOK_IDENT))) {
-        fail_code(18, 0);
+        fail(mks("expected global name\n"));
     }
     name = xstrdup(tok_text);
     next_tok();
     if (eq(tok, TOK_ASSIGN)) {
-        fail_code(19, name);
+        fail_name(mks("global initializers are unsupported: "), name);
     }
     expect(TOK_SEMI);
     if (or(ge(find_symbol(globals_p, global_count, name), 0), ge(find_symbol(functions_p, function_count, name), 0))) {
-        fail_code(21, name);
+        fail_name(mks("duplicate global: "), name);
     }
     entry = add(globals_p, mul(global_count, 8));
     sym_set_name(entry, name);
@@ -1273,12 +1280,12 @@ function parse_function_params_(param_names, param_count, i) {
     if (not(eq(tok, TOK_RPAREN))) {
         while (1) {
             if (not(eq(tok, TOK_IDENT))) {
-                fail_code(26, 0);
+                fail(mks("expected parameter name\n"));
             }
             i = 0;
             while (lt(i, param_count)) {
                 if (eq(strcmp(param_name(param_names, i), tok_text), 0)) {
-                    fail_code(27, tok_text);
+                    fail_name(mks("duplicate parameter: "), tok_text);
                 }
                 i = add(i, 1);
             }
@@ -1339,7 +1346,7 @@ function parse_function_(name, param_count, param_names, entry) {
     param_names = xmalloc(4096);
     expect(TOK_FUNCTION);
     if (not(eq(tok, TOK_IDENT))) {
-        fail_code(25, 0);
+        fail(mks("expected function name\n"));
     }
     name = xstrdup(tok_text);
     next_tok();
@@ -1348,7 +1355,7 @@ function parse_function_(name, param_count, param_names, entry) {
     expect(TOK_RPAREN);
 
     if (ge(find_symbol(functions_p, function_count, name), 0)) {
-        fail_code(28, name);
+        fail_name(mks("duplicate function: "), name);
     }
     entry = add(functions_p, mul(function_count, 8));
     sym_set_name(entry, name);
@@ -1464,7 +1471,7 @@ function parse_while() {
 
 function parse_break() {
     if (lt(loop_depth, 1)) {
-        fail_code(5, 0);
+        fail(mks("break outside loop\n"));
     }
     expect(TOK_BREAK);
     expect(TOK_SEMI);
@@ -1519,7 +1526,7 @@ function parse_assign_or_primary_(name, arity) {
             free(name);
             return 0;
         }
-        fail_code(13, name);
+        fail_name(mks("assignment to unknown variable: "), name);
     }
     if (eq(tok, TOK_LPAREN)) {
         arity = builtin_arity(name);
@@ -1539,7 +1546,7 @@ function parse_assign_or_primary_(name, arity) {
         free(name);
         return 0;
     }
-    fail_code(14, name);
+    fail_name(mks("unknown identifier: "), name);
     return 0;
 }
 
@@ -1564,7 +1571,7 @@ function parse_primary() {
         expect(TOK_RPAREN);
         return 0;
     }
-    fail_code(15, 0);
+    fail(mks("expected expression\n"));
     return 0;
 }
 
@@ -1701,7 +1708,7 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
 
     main_index = find_symbol(functions_p, function_count, mks("main"));
     if (lt(main_index, 0)) {
-        fail_code(4, 0);
+        fail(mks("missing main function\n"));
     }
     rel = sub(sym_val(add(functions_p, mul(main_index, 8))), add(start_call_patch, 4));
     patch4(start_call_patch, rel);
@@ -1775,7 +1782,7 @@ function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {
                 } else {
                     si = find_symbol(externals_p, external_count, name);
                     if (lt(si, 0)) {
-                        fail_code(22, name);
+                        fail_name(mks("unresolved relocation symbol: "), name);
                     }
                     sympos = add(add(function_count, global_count), si);
                     bout4(off);
