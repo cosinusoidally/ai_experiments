@@ -3,13 +3,9 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define DEFAULT_CODE_PAGE 4096UL
 #define BRK_CUR_OFFSET 0UL
 #define RUNTIME_BYTES 4UL
 
-#define MAX_CODE 262144
-#define MAX_BIN 524288
-#define MAX_DATA 4096
 #define MAX_SYMS 4096
 #define MAX_CALLS 8192
 #define MAX_PARAMS 1024
@@ -52,11 +48,14 @@ static char *tok_text;
 static long tok_text_cap;
 static unsigned long tok_num;
 
-static unsigned char code[MAX_CODE];
+static unsigned char *code;
+static size_t code_cap;
 static long code_len;
-static unsigned char binbuf[MAX_BIN];
+static unsigned char *binbuf;
+static size_t bin_cap;
 static long bin_len;
-static unsigned char data_byte[MAX_DATA];
+static unsigned char *data_byte;
+static size_t data_cap;
 static unsigned long data_used;
 static unsigned long next_data_offset;
 
@@ -84,6 +83,9 @@ static long reloc_offsets[MAX_RELOCS];
 static char *reloc_names[MAX_RELOCS];
 static long reloc_types[MAX_RELOCS];
 static int reloc_count;
+static long data_patch_offsets[MAX_RELOCS];
+static unsigned long data_patch_addends[MAX_RELOCS];
+static int data_patch_count;
 
 static int loop_stack[MAX_LOOPS];
 static int loop_depth;
@@ -95,12 +97,13 @@ static int break_patch_count;
 static unsigned long global_bytes;
 static long start_call_patch;
 static int output_object;
-static unsigned long target_code_page;
-static unsigned long target_data_base;
 
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
 static void *xrealloc(void *p, size_t n);
+static void ensure_code_capacity(size_t needed);
+static void ensure_bin_capacity(size_t needed);
+static void ensure_data_capacity(size_t needed);
 static char *xstrdup(const char *s);
 static void set_tok_text_len(const char *s, size_t n);
 static void set_tok_text_cstr(const char *s);
@@ -137,6 +140,7 @@ static void emit_builtin3(const char *name);
 static void patch_calls(void);
 static void record_external(const char *name, int type);
 static void record_reloc(long offset, const char *name, long type);
+static void record_data_patch(long offset, unsigned long addend);
 static void code_reset(void);
 static void emit1(unsigned long b);
 static void emit4(long v);
@@ -278,6 +282,51 @@ static void *xrealloc(void *p, size_t n)
         exit(1);
     }
     return q;
+}
+
+static void ensure_code_capacity(size_t needed)
+{
+    size_t new_cap;
+    if (code_cap >= needed) {
+        return;
+    }
+    new_cap = code_cap ? code_cap : 4096U;
+    while (new_cap < needed) {
+        new_cap *= 2U;
+    }
+    code = (unsigned char *)xrealloc(code, new_cap);
+    code_cap = new_cap;
+}
+
+static void ensure_bin_capacity(size_t needed)
+{
+    size_t new_cap;
+    if (bin_cap >= needed) {
+        return;
+    }
+    new_cap = bin_cap ? bin_cap : 4096U;
+    while (new_cap < needed) {
+        new_cap *= 2U;
+    }
+    binbuf = (unsigned char *)xrealloc(binbuf, new_cap);
+    bin_cap = new_cap;
+}
+
+static void ensure_data_capacity(size_t needed)
+{
+    size_t old_cap;
+    size_t new_cap;
+    if (data_cap >= needed) {
+        return;
+    }
+    old_cap = data_cap;
+    new_cap = data_cap ? data_cap : 4096U;
+    while (new_cap < needed) {
+        new_cap *= 2U;
+    }
+    data_byte = (unsigned char *)xrealloc(data_byte, new_cap);
+    memset(data_byte + old_cap, 0, new_cap - old_cap);
+    data_cap = new_cap;
 }
 
 static char *xstrdup(const char *s)
@@ -596,6 +645,7 @@ static void parse_global(void)
     if (data_used < global_bytes) {
         data_used = global_bytes;
     }
+    ensure_data_capacity((size_t)data_used);
 }
 
 static void enter_function(const char *name, int param_count, char **param_names)
@@ -1065,16 +1115,29 @@ static void record_reloc(long offset, const char *name, long type)
     reloc_count++;
 }
 
+static void record_data_patch(long offset, unsigned long addend)
+{
+    if (data_patch_count >= MAX_RELOCS) {
+        failf("data relocation overflow");
+    }
+    data_patch_offsets[data_patch_count] = offset;
+    data_patch_addends[data_patch_count] = addend;
+    data_patch_count++;
+}
+
 static void code_reset(void)
 {
-    memset(code, 0, sizeof(code));
-    memset(data_byte, 0, sizeof(data_byte));
+    ensure_code_capacity(4096U);
+    ensure_bin_capacity(4096U);
+    ensure_data_capacity(RUNTIME_BYTES);
+    memset(data_byte, 0, data_cap);
     code_len = 0;
     call_count = 0;
     global_count = 0;
     function_count = 0;
     external_count = 0;
     reloc_count = 0;
+    data_patch_count = 0;
     global_bytes = RUNTIME_BYTES;
     next_data_offset = RUNTIME_BYTES;
     data_used = RUNTIME_BYTES;
@@ -1088,7 +1151,7 @@ static void code_reset(void)
 
 static void emit1(unsigned long b)
 {
-    if (code_len >= MAX_CODE) failf("code buffer overflow");
+    ensure_code_capacity((size_t)code_len + 1U);
     code[code_len++] = (unsigned char)(u32((long)b) & 255U);
 }
 
@@ -1130,7 +1193,8 @@ static void emit_load_global(const char *name)
         emit4(0);
         return;
     }
-    emit4((long)(target_data_base + (unsigned long)off));
+    record_data_patch(code_len, (unsigned long)off);
+    emit4(0);
 }
 
 static void emit_store_global(const char *name)
@@ -1143,7 +1207,8 @@ static void emit_store_global(const char *name)
         emit4(0);
         return;
     }
-    emit4((long)(target_data_base + (unsigned long)off));
+    record_data_patch(code_len, (unsigned long)off);
+    emit4(0);
 }
 
 static unsigned long register_string(const char *text)
@@ -1153,9 +1218,7 @@ static unsigned long register_string(const char *text)
     size_t i;
     len = strlen(text);
     start = next_data_offset;
-    if (start + len + 1 > MAX_DATA) {
-        failf("program data too large for fixed data page");
-    }
+    ensure_data_capacity((size_t)(start + len + 1U));
     for (i = 0; i < len; i++) {
         data_byte[start + i] = (unsigned char)text[i];
     }
@@ -1164,20 +1227,21 @@ static unsigned long register_string(const char *text)
     if (data_used < next_data_offset) {
         data_used = next_data_offset;
     }
-    return target_data_base + start;
+    return start;
 }
 
 static void emit_mks_literal(const char *text)
 {
-    unsigned long addr;
-    addr = register_string(text);
+    unsigned long off;
+    off = register_string(text);
     emit1(184);
     if (output_object) {
         record_reloc(code_len, ".data", 1);
-        emit4((long)(addr - target_data_base));
+        emit4((long)off);
         return;
     }
-    emit4((long)addr);
+    record_data_patch(code_len, off);
+    emit4(0);
 }
 
 static void emit_prologue(void) { emit1(85); emit1(137); emit1(229); emit_push_ebx(); }
@@ -1284,29 +1348,37 @@ static void emit_write_u8(void)
 
 static void emit_brk_alloc(void)
 {
-    unsigned long cur_addr;
     long init_skip;
     long fail_patch;
     long done_patch;
 
-    cur_addr = target_data_base + BRK_CUR_OFFSET;
     emit_mov_edx_eax();
-    emit_mov_eax_abs(cur_addr);
+    emit1(161);
+    record_data_patch(code_len, BRK_CUR_OFFSET);
+    emit4(0);
     emit_test_eax_eax();
     init_skip = emit_jne_placeholder();
     emit_mov_eax_imm32(45);
     emit_xor_ebx_ebx();
     emit_int_80();
-    emit_mov_abs_eax(cur_addr);
+    emit1(163);
+    record_data_patch(code_len, BRK_CUR_OFFSET);
+    emit4(0);
     patch_rel32(init_skip, code_len);
-    emit_mov_ecx_abs(cur_addr);
+    emit1(139);
+    emit1(13);
+    record_data_patch(code_len, BRK_CUR_OFFSET);
+    emit4(0);
     emit_mov_ebx_ecx();
     emit_add_ebx_edx();
     emit_mov_eax_imm32(45);
     emit_int_80();
     emit_cmp_eax_ebx();
     fail_patch = emit_jne_placeholder();
-    emit_mov_abs_ebx(cur_addr);
+    emit1(137);
+    emit1(29);
+    record_data_patch(code_len, BRK_CUR_OFFSET);
+    emit4(0);
     emit_mov_eax_ecx();
     done_patch = emit_jmp_placeholder();
     patch_rel32(fail_patch, code_len);
@@ -1327,13 +1399,13 @@ static void emit_sys_close(void)
 
 static void bin_reset(void)
 {
-    memset(binbuf, 0, sizeof(binbuf));
+    ensure_bin_capacity(4096U);
     bin_len = 0;
 }
 
 static void bout1(unsigned long b)
 {
-    if (bin_len >= MAX_BIN) failf("binary buffer overflow");
+    ensure_bin_capacity((size_t)bin_len + 1U);
     binbuf[bin_len++] = (unsigned char)(u32((long)b) & 255U);
 }
 
@@ -1383,6 +1455,8 @@ static void build_binary(void)
     unsigned long filesz;
     unsigned long memsz;
     unsigned long flags;
+    unsigned long data_off;
+    unsigned long data_base;
     long rel;
     long i;
     int main_index;
@@ -1392,16 +1466,11 @@ static void build_binary(void)
     phsize = 32UL;
     headers = ehsize + phsize;
     entry = base + headers;
-    filesz = target_code_page + data_used;
-    memsz = target_code_page + 4096UL;
+    data_off = align4(headers + (unsigned long)code_len);
+    data_base = base + data_off;
+    filesz = data_off + data_used;
+    memsz = filesz;
     flags = 7UL;
-
-    if (headers + (unsigned long)code_len > target_code_page) {
-        failf("program too large for fixed code page");
-    }
-    if (data_used > 4096UL) {
-        failf("program data too large for fixed data page");
-    }
 
     main_index = find_symbol(functions, function_count, "main");
     if (main_index < 0) {
@@ -1409,6 +1478,9 @@ static void build_binary(void)
     }
     rel = functions[main_index].value - (start_call_patch + 4);
     patch4(start_call_patch, rel);
+    for (i = 0; i < data_patch_count; i++) {
+        patch4(data_patch_offsets[i], (long)(data_base + data_patch_addends[i]));
+    }
 
     bin_reset();
     bout1(127); bout1(69); bout1(76); bout1(70);
@@ -1422,9 +1494,7 @@ static void build_binary(void)
     for (i = 0; i < code_len; i++) {
         bout1(code[i]);
     }
-    while ((unsigned long)bin_len < target_code_page) {
-        bout1(0);
-    }
+    pad_to(data_off);
     for (i = 0; i < (long)data_used; i++) {
         bout1(data_byte[i]);
     }
@@ -1699,21 +1769,14 @@ int main(int argc, char **argv)
     int argi;
 
     output_object = 0;
-    target_code_page = DEFAULT_CODE_PAGE;
-    target_data_base = 134512640UL + target_code_page;
     argi = 1;
-    if (argc >= 4 && strcmp(argv[argi], "-p") == 0) {
-        target_code_page = strtoul(argv[argi + 1], (char **)0, 10);
-        target_data_base = 134512640UL + target_code_page;
-        argi += 2;
-    }
     if (argc - argi == 2 && strcmp(argv[argi], "-c") == 0) {
         output_object = 1;
         source_path = argv[argi + 1];
     } else if (argc - argi == 1) {
         source_path = argv[argi];
     } else {
-        fprintf(stderr, "usage: %s [-p page] [-c] source\n", argv[0]);
+        fprintf(stderr, "usage: %s [-c] source\n", argv[0]);
         return 1;
     }
 

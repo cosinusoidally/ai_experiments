@@ -28,7 +28,7 @@ compare_to_awk gcc "$GCC_BIN"
 for bin in "$AWK_BIN" "$SELF_BIN" "$REF_C_BIN" "$GCC_BIN"; do
     name=$(basename "$bin" .exe)
     rebuilt=$ARTIFACTS/$name.rebuilt.exe
-    "$bin" -p 262144 "$ROOT/mawkcc_self.c" > "$rebuilt"
+    "$bin" "$ROOT/mawkcc_self.c" > "$rebuilt"
     chmod +x "$rebuilt"
     if ! cmp -s "$bin" "$rebuilt"; then
         echo "$bin failed to rebuild itself identically" >&2

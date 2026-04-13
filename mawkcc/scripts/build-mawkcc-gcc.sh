@@ -14,6 +14,6 @@ cc -ansi -m32 -fno-builtin -Dfunction=int -Dvar=int \
     -g -O0 -c "$ROOT/mawkcc_self.c" -o "$SELF_GCC_OBJ"
 cc -ansi -m32 -fno-builtin -g -O0 -c "$ROOT/mawkcc_gcc_support.c" -o "$GCC_SUPPORT_OBJ"
 cc -m32 -no-pie "$SELF_GCC_OBJ" "$GCC_SUPPORT_OBJ" -o "$GCC_BIN"
-"$GCC_BIN" -p 262144 "$ROOT/mawkcc_self.c" > "$OUT"
+"$GCC_BIN" "$ROOT/mawkcc_self.c" > "$OUT"
 chmod +x "$OUT"
 printf '%s\n' "$OUT"

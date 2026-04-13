@@ -1,9 +1,6 @@
 BEGIN {
     RS = "\n"
     ORS = ""
-    if (code_page == "")
-        code_page = 4096
-    DATA_BASE = 134512640 + code_page
     BRK_CUR_OFFSET = 0
     RUNTIME_BYTES = 4
     if (format == "")
@@ -626,10 +623,16 @@ function record_reloc(offset, name, type) {
     reloc_type[reloc_count] = type
 }
 
+function record_data_patch(offset, addend) {
+    data_patch_offset[++data_patch_count] = offset
+    data_patch_addend[data_patch_count] = addend
+}
+
 function code_reset() {
     code_len = 0
     call_count = 0
     reloc_count = 0
+    data_patch_count = 0
     external_count = 0
     function_count = 0
     global_count = 0
@@ -711,7 +714,8 @@ function emit_load_global(name) {
         emit4(0)
         return
     }
-    emit4(DATA_BASE + global_offset[name])
+    record_data_patch(code_len + 1, global_offset[name])
+    emit4(0)
 }
 
 function emit_store_global(name) {
@@ -721,17 +725,19 @@ function emit_store_global(name) {
         emit4(0)
         return
     }
-    emit4(DATA_BASE + global_offset[name])
+    record_data_patch(code_len + 1, global_offset[name])
+    emit4(0)
 }
 
-function emit_mks_literal(text,    addr) {
-    addr = register_string(text)
+function emit_mks_literal(text,    off) {
+    off = register_string(text)
     emit1(184)
     if (format == "obj") {
         record_reloc(code_len, ".data", 1)
-        emit4(addr - DATA_BASE)
+        emit4(off)
     } else {
-        emit4(addr)
+        record_data_patch(code_len + 1, off)
+        emit4(0)
     }
 }
 
@@ -745,7 +751,12 @@ function register_string(text,    start, i, ch) {
     next_data_offset = start + length(text) + 1
     if (data_used < next_data_offset)
         data_used = next_data_offset
-    return DATA_BASE + start
+    return start
+}
+
+function emit4_data_patch(addend) {
+    record_data_patch(code_len + 1, addend)
+    emit4(0)
 }
 
 function emit_prologue() {
@@ -1040,22 +1051,24 @@ function emit_write_u8() {
     emit1(192)
 }
 
-function emit_brk_alloc(    cur_addr, init_skip, fail_patch, done_patch) {
-    cur_addr = DATA_BASE + BRK_CUR_OFFSET
-
+function emit_brk_alloc(    init_skip, fail_patch, done_patch) {
     emit_mov_edx_eax()
-    emit_mov_eax_abs(cur_addr)
+    emit1(161)
+    emit4_data_patch(BRK_CUR_OFFSET)
     emit_test_eax_eax()
     init_skip = emit_jne_placeholder()
 
     emit_mov_eax_imm32(45)
     emit_xor_ebx_ebx()
     emit_int_80()
-    emit_mov_abs_eax(cur_addr)
+    emit1(163)
+    emit4_data_patch(BRK_CUR_OFFSET)
 
     patch_rel32(init_skip, code_len + 1)
 
-    emit_mov_ecx_abs(cur_addr)
+    emit1(139)
+    emit1(13)
+    emit4_data_patch(BRK_CUR_OFFSET)
     emit_mov_ebx_ecx()
     emit_add_ebx_edx()
     emit_mov_eax_imm32(45)
@@ -1063,7 +1076,9 @@ function emit_brk_alloc(    cur_addr, init_skip, fail_patch, done_patch) {
     emit_cmp_eax_ebx()
     fail_patch = emit_jne_placeholder()
 
-    emit_mov_abs_ebx(cur_addr)
+    emit1(137)
+    emit1(29)
+    emit4_data_patch(BRK_CUR_OFFSET)
     emit_mov_eax_ecx()
     done_patch = emit_jmp_placeholder()
 
@@ -1128,23 +1143,22 @@ function align4(n) {
     return int((n + 3) / 4) * 4
 }
 
-function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz, flags, rel) {
+function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz, flags, rel, data_off, data_base) {
     base = 134512640
     ehsize = 52
     phsize = 32
     headers = ehsize + phsize
     entry = base + headers
-    filesz = code_page + data_used
-    memsz = code_page + 4096
+    data_off = align4(headers + code_len)
+    data_base = base + data_off
+    filesz = data_off + data_used
+    memsz = filesz
     flags = 7
-
-    if (headers + code_len > code_page)
-        fail("program too large for fixed code page")
-    if (data_used > 4096)
-        fail("program data too large for fixed data page")
 
     rel = function_addr["main"] - (start_call_patch + 4)
     patch4(start_call_patch, rel)
+    for (i = 1; i <= data_patch_count; i++)
+        patch4(data_patch_offset[i], data_base + data_patch_addend[i])
 
     bin_reset()
 
@@ -1179,8 +1193,7 @@ function build_binary(    i, base, ehsize, phsize, headers, entry, filesz, memsz
     for (i = 1; i <= code_len; i++)
         bout1(code[i])
 
-    while (bin_len < code_page)
-        bout1(0)
+    pad_to(data_off)
 
     for (i = 0; i < data_used; i++) {
         if ((i in data_byte))

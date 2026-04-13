@@ -57,19 +57,19 @@ var global_bytes;
 var next_data_offset;
 var data_used;
 var code_p;
+var code_cap;
 var data_byte_p;
+var data_cap;
 var bin_len;
 var binbuf_p;
-var target_code_page;
-var target_data_base;
+var bin_cap;
+var data_patch_count;
+var data_patch_offsets_p;
+var data_patch_addends_p;
 
 function init_globals() {
     tok_text = 0;
     tok_text_cap = 0;
-    if (eq(target_code_page, 0)) {
-        target_code_page = 4096;
-        target_data_base = 134516736;
-    }
     TOK_EOF = 0;
     TOK_IDENT = 1;
     TOK_NUM = 2;
@@ -89,13 +89,16 @@ function init_globals() {
     TOK_COMMA = 16;
     TOK_ASSIGN = 17;
     if (eq(code_p, 0)) {
-        code_p = xmalloc(262144);
+        code_cap = 262144;
+        code_p = xmalloc(code_cap);
     }
     if (eq(binbuf_p, 0)) {
-        binbuf_p = xmalloc(524288);
+        bin_cap = 524288;
+        binbuf_p = xmalloc(bin_cap);
     }
     if (eq(data_byte_p, 0)) {
-        data_byte_p = xmalloc(4096);
+        data_cap = 4096;
+        data_byte_p = xmalloc(data_cap);
     }
     if (eq(globals_p, 0)) {
         globals_p = xmalloc(32768);
@@ -145,6 +148,12 @@ function init_globals() {
     if (eq(break_patch_pos_p, 0)) {
         break_patch_pos_p = xmalloc(32768);
     }
+    if (eq(data_patch_offsets_p, 0)) {
+        data_patch_offsets_p = xmalloc(32768);
+    }
+    if (eq(data_patch_addends_p, 0)) {
+        data_patch_addends_p = xmalloc(32768);
+    }
     return 0;
 }
 
@@ -158,14 +167,85 @@ function fail_code(code, arg) {
 }
 
 function usage(program) {
-    write(2, mks("usage: mawkcc [-p page] [-c] source\n"), 36);
+    write(2, mks("usage: mawkcc [-c] source\n"), 26);
     return 1;
 }
 
-function set_code_page(page) {
-    target_code_page = page;
-    target_data_base = add(134512640, page);
+function copy_bytes_(dst, src, n, i) {
+    i = 0;
+    while (lt(i, n)) {
+        wi8(add(dst, i), ri8(add(src, i)));
+        i = add(i, 1);
+    }
     return 0;
+}
+
+function zero_bytes_(dst, start, n, i) {
+    i = start;
+    while (lt(i, n)) {
+        wi8(add(dst, i), 0);
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function ensure_code_capacity_(needed, new_cap, new_p) {
+    if (le(needed, code_cap)) {
+        return 0;
+    }
+    new_cap = code_cap;
+    while (lt(new_cap, needed)) {
+        new_cap = mul(new_cap, 2);
+    }
+    new_p = xmalloc(new_cap);
+    copy_bytes_(new_p, code_p, code_len, 0);
+    code_p = new_p;
+    code_cap = new_cap;
+    return 0;
+}
+
+function ensure_code_capacity(needed) {
+    return ensure_code_capacity_(needed, 0, 0);
+}
+
+function ensure_bin_capacity_(needed, new_cap, new_p) {
+    if (le(needed, bin_cap)) {
+        return 0;
+    }
+    new_cap = bin_cap;
+    while (lt(new_cap, needed)) {
+        new_cap = mul(new_cap, 2);
+    }
+    new_p = xmalloc(new_cap);
+    copy_bytes_(new_p, binbuf_p, bin_len, 0);
+    binbuf_p = new_p;
+    bin_cap = new_cap;
+    return 0;
+}
+
+function ensure_bin_capacity(needed) {
+    return ensure_bin_capacity_(needed, 0, 0);
+}
+
+function ensure_data_capacity_(needed, old_cap, new_cap, new_p) {
+    if (le(needed, data_cap)) {
+        return 0;
+    }
+    old_cap = data_cap;
+    new_cap = data_cap;
+    while (lt(new_cap, needed)) {
+        new_cap = mul(new_cap, 2);
+    }
+    new_p = xmalloc(new_cap);
+    copy_bytes_(new_p, data_byte_p, data_used, 0);
+    zero_bytes_(new_p, old_cap, new_cap, 0);
+    data_byte_p = new_p;
+    data_cap = new_cap;
+    return 0;
+}
+
+function ensure_data_capacity(needed) {
+    return ensure_data_capacity_(needed, 0, 0, 0);
 }
 
 function xmalloc_(n, p) {
@@ -618,9 +698,7 @@ function emit_sys_write() { emit_mov_eax_imm32(4); emit_int_80(); }
 function emit_sys_close() { emit_mov_ebx_eax(); emit_mov_eax_imm32(6); emit_int_80(); }
 
 function emit1(b) {
-    if (ge(code_len, 262144)) {
-        fail_msg(mks("code buffer overflow\n"), 21);
-    }
+    ensure_code_capacity(add(code_len, 1));
     wi8(add(code_p, code_len), b);
     code_len = add(code_len, 1);
     return 0;
@@ -645,9 +723,7 @@ function patch4(pos, v) {
 function register_string_(text, start, len, i) {
     len = strlen(text);
     start = next_data_offset;
-    if (gt(add(add(start, len), 1), 4096)) {
-        fail_code(24, 0);
-    }
+    ensure_data_capacity(add(add(start, len), 1));
     i = 0;
     while (lt(i, len)) {
         wi8(add(data_byte_p, add(start, i)), ri8(add(text, i)));
@@ -658,7 +734,7 @@ function register_string_(text, start, len, i) {
     if (lt(data_used, next_data_offset)) {
         data_used = next_data_offset;
     }
-    return add(target_data_base, start);
+    return start;
 }
 
 function register_string(text) {
@@ -670,10 +746,11 @@ function emit_mks_literal_(text, addr) {
     emit1(184);
     if (output_object) {
         record_reloc(code_len, mks(".data"), 1);
-        emit4(sub(addr, target_data_base));
+        emit4(addr);
         return 0;
     }
-    emit4(addr);
+    record_data_patch(code_len, addr);
+    emit4(0);
     return 0;
 }
 
@@ -690,7 +767,8 @@ function emit_load_global_(name, idx, off) {
         emit4(0);
         return 0;
     }
-    emit4(add(target_data_base, off));
+    record_data_patch(code_len, off);
+    emit4(0);
     return 0;
 }
 
@@ -707,7 +785,8 @@ function emit_store_global_(name, idx, off) {
         emit4(0);
         return 0;
     }
-    emit4(add(target_data_base, off));
+    record_data_patch(code_len, off);
+    emit4(0);
     return 0;
 }
 
@@ -735,24 +814,33 @@ function emit_start() {
 }
 
 function emit_brk_alloc_(cur_addr, init_skip, fail_patch, done_patch) {
-    cur_addr = target_data_base;
     emit_mov_edx_eax();
-    emit_mov_eax_abs(cur_addr);
+    emit1(161);
+    record_data_patch(code_len, 0);
+    emit4(0);
     emit_test_eax_eax();
     init_skip = emit_jne_placeholder();
     emit_mov_eax_imm32(45);
     emit_xor_ebx_ebx();
     emit_int_80();
-    emit_mov_abs_eax(cur_addr);
+    emit1(163);
+    record_data_patch(code_len, 0);
+    emit4(0);
     patch_rel32(init_skip, code_len);
-    emit_mov_ecx_abs(cur_addr);
+    emit1(139);
+    emit1(13);
+    record_data_patch(code_len, 0);
+    emit4(0);
     emit_mov_ebx_ecx();
     emit_add_ebx_edx();
     emit_mov_eax_imm32(45);
     emit_int_80();
     emit_cmp_eax_ebx();
     fail_patch = emit_jne_placeholder();
-    emit_mov_abs_ebx(cur_addr);
+    emit1(137);
+    emit1(29);
+    record_data_patch(code_len, 0);
+    emit4(0);
     emit_mov_eax_ecx();
     done_patch = emit_jmp_placeholder();
     patch_rel32(fail_patch, code_len);
@@ -1094,6 +1182,16 @@ function record_reloc(offset, name, type) {
     return 0;
 }
 
+function record_data_patch(offset, addend) {
+    if (ge(data_patch_count, 8192)) {
+        fail_code(17, 0);
+    }
+    wi32(add(data_patch_offsets_p, mul(data_patch_count, 4)), offset);
+    wi32(add(data_patch_addends_p, mul(data_patch_count, 4)), addend);
+    data_patch_count = add(data_patch_count, 1);
+    return 0;
+}
+
 function parse_program() {
     while (not(eq(tok, TOK_EOF))) {
         if (eq(tok, TOK_VAR)) {
@@ -1145,6 +1243,7 @@ function parse_global_(name, entry) {
     if (lt(data_used, global_bytes)) {
         data_used = global_bytes;
     }
+    ensure_data_capacity(data_used);
     return 0;
 }
 
@@ -1478,9 +1577,7 @@ function pad_to(n) {
 }
 
 function bout1(b) {
-    if (ge(bin_len, 524288)) {
-        fail_msg(mks("binary buffer overflow\n"), 23);
-    }
+    ensure_bin_capacity(add(bin_len, 1));
     wi8(add(binbuf_p, bin_len), b);
     bin_len = add(bin_len, 1);
     return 0;
@@ -1501,10 +1598,6 @@ function bout4(v) {
 }
 
 function bin_reset_(i) {
-    while (lt(i, 524288)) {
-        wi8(add(binbuf_p, i), 0);
-        i = add(i, 1);
-    }
     bin_len = 0;
     return 0;
 }
@@ -1568,22 +1661,32 @@ function build_object_emit_data_(i) {
     return 0;
 }
 
-function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flags, main_index, rel) {
+function patch_data_patches_(data_base, i, pos, addend) {
+    i = 0;
+    while (lt(i, data_patch_count)) {
+        pos = ri32(add(data_patch_offsets_p, mul(i, 4)));
+        addend = ri32(add(data_patch_addends_p, mul(i, 4)));
+        patch4(pos, add(data_base, addend));
+        i = add(i, 1);
+    }
+    return 0;
+}
+
+function patch_data_patches(data_base) {
+    return patch_data_patches_(data_base, 0, 0, 0);
+}
+
+function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flags, main_index, rel, data_off, data_base) {
     base = 134512640;
     ehsize = 52;
     phsize = 32;
     headers = add(ehsize, phsize);
     entry = add(base, headers);
-    filesz = add(target_code_page, data_used);
-    memsz = add(target_code_page, 4096);
+    data_off = align4(add(headers, code_len));
+    data_base = add(base, data_off);
+    filesz = add(data_off, data_used);
+    memsz = filesz;
     flags = 7;
-
-    if (gt(add(headers, code_len), target_code_page)) {
-        fail_code(23, 0);
-    }
-    if (gt(data_used, 4096)) {
-        fail_code(24, 0);
-    }
 
     main_index = find_symbol(functions_p, function_count, mks("main"));
     if (lt(main_index, 0)) {
@@ -1591,6 +1694,7 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
     }
     rel = sub(sym_val(add(functions_p, mul(main_index, 8))), add(start_call_patch, 4));
     patch4(start_call_patch, rel);
+    patch_data_patches(data_base);
 
     bin_reset();
     bout1(127); bout1(69); bout1(76); bout1(70);
@@ -1602,13 +1706,13 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
     bout4(1); bout4(0); bout4(base); bout4(base); bout4(filesz); bout4(memsz); bout4(flags); bout4(4096);
 
     build_object_emit_code_(0);
-    pad_to(target_code_page);
+    pad_to(data_off);
     build_object_emit_data_(0);
     return 0;
 }
 
 function build_binary() {
-    return build_binary_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    return build_binary_(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 function code_reset() {
@@ -1619,6 +1723,7 @@ function code_reset() {
     function_count = 0;
     external_count = 0;
     reloc_count = 0;
+    data_patch_count = 0;
     global_bytes = 4;
     next_data_offset = 4;
     data_used = 4;
@@ -1631,7 +1736,7 @@ function code_reset() {
 }
 
 function code_reset_data_(i) {
-    while (lt(i, 4096)) {
+    while (lt(i, data_cap)) {
         wi8(add(data_byte_p, i), 0);
         i = add(i, 1);
     }
@@ -1881,34 +1986,10 @@ function compile(source_path) {
     return 0;
 }
 
-function main_compile_with_page(argc, argv, argi, argc_left, page) {
-    page = strtoul(ri32(add(argv, mul(add(argi, 1), 4))), 0, 10);
-    set_code_page(page);
-    argi = add(argi, 2);
-    argc_left = sub(argc, argi);
-    if (eq(argc_left, 1)) {
-        output_object = 0;
-        return compile(ri32(add(argv, mul(argi, 4))));
-    }
-    if (eq(argc_left, 2)) {
-        if (eq(strcmp(ri32(add(argv, mul(argi, 4))), mks("-c")), 0)) {
-            output_object = 1;
-            return compile(ri32(add(argv, mul(add(argi, 1), 4))));
-        }
-    }
-    return usage(ri32(argv));
-}
-
 function main_(argc, argv, arg1) {
     if (eq(argc, 2)) {
         output_object = 0;
         return compile(ri32(add(argv, 4)));
-    }
-    if (ge(argc, 4)) {
-        arg1 = ri32(add(argv, 4));
-        if (eq(strcmp(arg1, mks("-p")), 0)) {
-            return main_compile_with_page(argc, argv, 1, 0, 0);
-        }
     }
     if (eq(argc, 3)) {
         arg1 = ri32(add(argv, 4));

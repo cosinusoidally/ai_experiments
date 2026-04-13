@@ -119,14 +119,13 @@ called by GCC-built i386 code.
 Self compiler executable:
 
 ```sh
-mawk -v code_page=262144 -f cc.awk mawkcc_self.c > artifacts/mawkcc.exe
+mawk -f cc.awk mawkcc_self.c > artifacts/mawkcc.exe
 chmod +x artifacts/mawkcc.exe
 artifacts/mawkcc.exe -c mawkcc_self.c > artifacts/mawkcc_self.self.o
 ```
 
-The larger `code_page` is only needed for large executables such as the
-compiler itself. The default remains 4096 bytes so the small regression
-examples keep their historical byte-identical output.
+Executable output places its data segment after the final generated code, so
+large compiler executables do not need a manually supplied code-page size.
 
 The C reference implementation must also be built as a 32-bit ANSI C
 program:
