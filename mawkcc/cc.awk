@@ -212,6 +212,10 @@ function parse_global(    name) {
     global_name[++global_count] = name
     if (format == "obj")
         return
+    if (global_bytes < next_data_offset) {
+        global_bytes = align4(next_data_offset)
+        next_data_offset = global_bytes
+    }
     global_offset[name] = global_bytes
     global_bytes += 4
     if (next_data_offset < global_bytes)
@@ -242,10 +246,8 @@ function parse_function(    name, param_count) {
     while (tok != "}" && tok != "EOF")
         parse_stmt()
     expect("}")
-    if (!current_returned) {
-        emit_mov_eax_imm32(0)
-        emit_epilogue()
-    }
+    emit_mov_eax_imm32(0)
+    emit_epilogue()
     leave_function()
 }
 

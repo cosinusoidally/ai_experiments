@@ -1154,6 +1154,10 @@ function parse_global_(name, entry) {
         global_count = add(global_count, 1);
         return 0;
     }
+    if (lt(global_bytes, next_data_offset)) {
+        global_bytes = align4(next_data_offset);
+        next_data_offset = global_bytes;
+    }
     sym_set_val(entry, global_bytes);
     global_count = add(global_count, 1);
     global_bytes = add(global_bytes, 4);
@@ -1277,10 +1281,8 @@ function parse_function_(name, param_count, param_names, entry) {
         parse_stmt();
     }
     expect(TOK_RBRACE);
-    if (not(current_returned)) {
-        emit_mov_eax_imm32(0);
-        emit_epilogue();
-    }
+    emit_mov_eax_imm32(0);
+    emit_epilogue();
     leave_function();
     parse_function_free_params_(param_names, param_count, 0);
     return 0;

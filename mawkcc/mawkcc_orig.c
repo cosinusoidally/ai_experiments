@@ -637,6 +637,10 @@ static void parse_global(void)
         global_count++;
         return;
     }
+    if (global_bytes < next_data_offset) {
+        global_bytes = align4(next_data_offset);
+        next_data_offset = global_bytes;
+    }
     globals[global_count].value = (long)global_bytes;
     global_count++;
     global_bytes += 4;
@@ -726,10 +730,8 @@ static void parse_function(void)
         parse_stmt();
     }
     expect(TOK_RBRACE);
-    if (!current_returned) {
-        emit_mov_eax_imm32(0);
-        emit_epilogue();
-    }
+    emit_mov_eax_imm32(0);
+    emit_epilogue();
     leave_function();
 
     {
