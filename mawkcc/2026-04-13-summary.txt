@@ -1,0 +1,169 @@
+mawkcc self-hosting session summary, 2026-04-13
+
+Goal
+----
+Continue hardening mawkcc as a self-hosted compiler, keep all compiler
+implementations byte-identical, add the cjsawk mawkcc bootstrap route, and
+prove that mawkcc_self.c can also be loaded and run by the SpiderMonkey `js`
+shell.
+
+
+Compiler changes
+----------------
+`mawkcc_self.c` was made more readable by removing the old `streq2`,
+`streq3`, `streq4`, `streq5`, and prefix helpers. Those helpers compared
+identifier names against numeric ASCII byte sequences. They were originally a
+bootstrap workaround from before self-side string construction was reliable.
+They were replaced with:
+
+    name_eq(name, mks("..."))
+
+This keeps the code auditable and matches the current self-hosted style.
+
+`read_source_` in `mawkcc_self.c` no longer has a fixed 1 MiB source read
+limit. It now starts with a 4096-byte buffer and doubles the buffer until
+`read()` returns EOF. The normal self-hosted build already exercises this
+growth path because `mawkcc_self.c` is larger than the initial buffer.
+
+The compiler data layout was fixed so string literals emitted before later
+global declarations do not overlap those globals. The data allocator now
+advances `global_bytes` past `next_data_offset` before assigning storage for a
+new global. This was changed in all three compiler implementations:
+
+    cc.awk
+    mawkcc_orig.c
+    mawkcc_self.c
+
+Function epilogue emission was also fixed. Previously, if any `return`
+appeared inside a function, the compiler skipped the default trailing
+`return 0` epilogue. This was wrong for functions with partial early returns,
+where some paths fall through. The compiler now always emits the default
+function-end epilogue after parsing the body. This was changed in all three
+compiler implementations.
+
+
+New mawkcc regression tests
+---------------------------
+Two focused regression tests were added:
+
+    examples/string_then_global.c
+    tests/test_data_layout.sh
+
+This verifies that a string literal created before a later global declaration
+does not overlap global storage.
+
+    examples/partial_return.c
+    tests/test_partial_return.sh
+
+This verifies that functions with early returns on only some paths still have
+a trailing default epilogue and return 0 on fallthrough.
+
+
+cjsawk mawkcc path
+------------------
+The `../../tcc_simple/experiments/cjsawk/mk_full_mawkcc` route was fixed and
+verified. The script starts from mawk, builds `mawkcc.exe`, uses that to build
+mawkcc-compiled versions of the cjsawk tools, then uses those tools to run the
+full cjsawk bootstrap path.
+
+Two separate mawkcc bugs were exposed by this path:
+
+    1. The support-side string literal `mks("w")` used by `v_fopen()` could be
+       overwritten by a later global variable because of the data-layout bug.
+       That caused output files to be opened read-only.
+
+    2. cjsawk's `primary_expr_variable_` has early returns for local and
+       argument variables, but falls through for global variables. The missing
+       default epilogue made the global-variable path fall into the next
+       function, eventually jumping to address 0.
+
+After the fixes, `mk_full_mawkcc` completes. Its final hashes show that the
+self-built cjsawk, m0, and hex2 outputs rebuild identically:
+
+    cjsawk.exe == cjsawk_2.exe
+    m0.exe == m0_2.exe
+    hex2.exe == hex2_2.exe
+
+
+SpiderMonkey JS build path
+--------------------------
+The local `js` command was checked:
+
+    js --version
+
+It reports:
+
+    JavaScript-C45.8.0
+
+The binary is:
+
+    /home/foo/src/jsshell/js
+
+and `file` reports it as an ELF 32-bit Intel 80386 executable.
+
+`mawkcc_self.c` was verified as valid JavaScript syntax by loading it in the
+SpiderMonkey shell:
+
+    js -e 'load("mawkcc_self.c"); print("ok")'
+
+A new JS build route was added:
+
+    scripts/build-mawkcc-js.sh
+    scripts/mawkcc-js-runner.js
+
+The runner provides a JavaScript implementation of the mawkcc runtime builtins
+needed by `mawkcc_self.c`, including byte-addressable memory, `brk`, file
+input, stdout binary output, integer arithmetic helpers, comparisons, shifts,
+and `mks`.
+
+Important implementation notes for the JS runner:
+
+    - `mks()` caches strings so repeated literal use behaves like the compiled
+      routes and does not allocate unbounded duplicate strings.
+    - file input uses `os.file.readFile(path, "binary")` because defining the
+      mawkcc builtin `read()` shadows the SpiderMonkey shell's global `read`.
+    - binary output is written with `os.file.writeTypedArrayToFile`.
+
+The JS route emits a mawkcc binary byte-identical to the awk route.
+
+
+Build verification
+------------------
+The dedicated build verifier now checks five compiler build routes:
+
+    scripts/build-mawkcc-awk.sh
+    scripts/build-mawkcc-self.sh
+    scripts/build-mawkcc-reference-c.sh
+    scripts/build-mawkcc-gcc.sh
+    scripts/build-mawkcc-js.sh
+
+`scripts/verify-mawkcc-builds.sh` now verifies that all five emitted mawkcc
+binaries are byte-identical. It also verifies that each emitted compiler can
+rebuild itself identically.
+
+`SELFHOST.txt` was updated to document the JS build route and the five-way
+byte-identity expectation.
+
+
+Current verification status
+---------------------------
+The full suite was run through:
+
+    scripts/run-tests.sh
+
+This passed. The first verifier output was:
+
+    ok: awk, self, reference-c, gcc, and js build scripts emit identical mawkcc binaries
+    ok: each emitted mawkcc binary rebuilds itself identically
+
+The full suite also passed the runtime, object, data-layout, partial-return,
+file I/O, argv, brk, exit, parameter assignment, ret42, shift/mod, object link,
+object extern, and compiler parity tests.
+
+
+Sandbox note
+------------
+The local `js` binary and the generated 32-bit mawkcc binaries need to run
+outside the sandbox. The sandbox can inspect these files, but execution of
+i686 binaries is blocked by sandbox syscall restrictions. The working path is
+to run the relevant scripts or commands with explicit escalation.
