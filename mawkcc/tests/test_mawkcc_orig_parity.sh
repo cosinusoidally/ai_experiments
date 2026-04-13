@@ -10,7 +10,6 @@ SELF_ORIG_OBJ=$ARTIFACTS/mawkcc_self.orig.o
 SELF_REBUILT_OBJ=$ARTIFACTS/mawkcc_self.self.o
 SELF_GCC_OBJ=$ARTIFACTS/mawkcc_self.gcc.o
 GCC_SUPPORT_OBJ=$ARTIFACTS/mawkcc_gcc_support.o
-ANSI_OBJ=$ARTIFACTS/mawkcc_ansi.o
 SELF_BIN=$ARTIFACTS/mawkcc.exe
 SELF_GCC_BIN=$ARTIFACTS/mawkcc.gcc.exe
 SELF_GCC_REBUILT_OBJ=$ARTIFACTS/mawkcc_self.gcc-self.o
@@ -21,7 +20,7 @@ SELF_OBJ_OUT=$ARTIFACTS/parity_obj.self.o
 
 mkdir -p "$ARTIFACTS"
 rm -f "$CC_BIN" "$COMMAND_LOG" "$SELF_OBJ" "$SELF_ORIG_OBJ" "$SELF_REBUILT_OBJ" \
-    "$SELF_GCC_OBJ" "$GCC_SUPPORT_OBJ" "$ANSI_OBJ" "$SELF_BIN" "$SELF_GCC_BIN" "$SELF_GCC_REBUILT_OBJ" \
+    "$SELF_GCC_OBJ" "$GCC_SUPPORT_OBJ" "$SELF_BIN" "$SELF_GCC_BIN" "$SELF_GCC_REBUILT_OBJ" \
     "$OBJ_SRC" "$AWK_OBJ_OUT" "$C_OBJ_OUT" "$SELF_OBJ_OUT"
 
 log_cmd() {

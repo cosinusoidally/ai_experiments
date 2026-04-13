@@ -1,0 +1,74 @@
+mawkcc Self-Hosting
+===================
+
+Current State
+-------------
+
+`mawkcc` is now self-hosted through the restricted mawkcc dialect.
+
+The active compiler implementations are:
+
+- `cc.awk`: the original awk implementation and byte-for-byte reference
+- `mawkcc_orig.c`: an ANSI C reference implementation that mirrors `cc.awk`
+- `mawkcc_self.c`: the self-hosted compiler written in the mawkcc dialect
+- `mawkcc_gcc_support.c`: support routines used only when building
+  `mawkcc_self.c` with GCC as a cross-check
+
+`mawkcc_ansi.c` has been removed. It was previously used as an intermediate
+porting target, then reduced to an empty placeholder after all compiler logic
+was moved into `mawkcc_self.c`.
+
+
+Porting Retrospective
+---------------------
+
+See `SELFHOST_PLAN.txt` for a reflection on how the port was carried out and
+which constraints shaped the implementation.
+
+
+Build Scripts
+-------------
+
+The dedicated build scripts are:
+
+- `scripts/build-mawkcc-awk.sh`: builds the compiler executable using `cc.awk`
+- `scripts/build-mawkcc-self.sh`: builds using a mawkcc-built compiler
+- `scripts/build-mawkcc-reference-c.sh`: builds using `mawkcc_orig.c`
+- `scripts/build-mawkcc-gcc.sh`: builds `mawkcc_self.c` with GCC plus
+  `mawkcc_gcc_support.c`, then emits a mawkcc compiler binary
+
+All four scripts produce a mawkcc executable. The expected result is that all
+four emitted binaries are byte-identical.
+
+
+Verification
+------------
+
+Run:
+
+```sh
+scripts/run-tests.sh
+```
+
+`run-tests.sh` first runs `scripts/verify-mawkcc-builds.sh`, which verifies:
+
+- the awk, self-hosted, reference-C, and GCC build routes emit identical
+  mawkcc binaries
+- each emitted mawkcc binary can rebuild itself identically
+
+The remaining tests verify runtime behavior, object generation, linking with
+GCC-built code, calls into C functions, access to external C integer variables,
+and parity across `cc.awk`, `mawkcc_orig.c`, and the self-hosted compiler.
+
+
+Reference Role
+--------------
+
+`mawkcc_orig.c` should remain in the tree. It is not part of the self-hosted
+build path, but it is useful as a readable reference and a regression anchor.
+Any future change to code generation should preserve byte identity across:
+
+- `cc.awk`
+- `mawkcc_orig.c`
+- `mawkcc_self.c` compiled by mawkcc
+- `mawkcc_self.c` compiled by GCC with `mawkcc_gcc_support.c`

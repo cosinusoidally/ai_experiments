@@ -3,14 +3,13 @@ Next mawkcc_self.c porting steps
 
 Remove a step from this file after it is completed.
 
-Line counts are estimates of implementation lines that can be removed
-from mawkcc_ansi.c when the step is completed. The major parser, lexer,
-object builder, executable builder, string registration, code_reset,
-source-file reading, final binary emission, low-level code/binary
-emission, binary reset, and self-owned state-array/buffer work have
-already been completed.
+Line counts were estimates of implementation lines that could be removed
+during the port. The major parser, lexer, object builder, executable builder,
+string registration, code_reset, source-file reading, final binary emission,
+low-level code/binary emission, binary reset, and self-owned state-array/buffer
+work have already been completed.
 
-No currently listed simple porting steps remain. `mawkcc_ansi.c` is empty,
-and `mawkcc_self.c` now builds into a runnable compiler executable without
-GCC linking. Remaining work is native self-linking/toolchain cleanup rather
-than ANSI-side porting.
+No currently listed simple porting steps remain. The ANSI-side placeholder has
+been removed, and `mawkcc_self.c` now builds into a runnable compiler
+executable without GCC linking. Remaining work is native self-linking/toolchain
+cleanup rather than ANSI-side porting.

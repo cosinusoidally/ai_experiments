@@ -1,360 +1,127 @@
-mawkcc Self-Hosting Refactor Plan
-================================
+mawkcc Self-Hosting Porting Retrospective
+=========================================
 
-Goal
-----
-
-Build a staged path from the current `awk` compiler toward a fully
-self-hosted compiler, while preserving a strong parity check at every
-stage.
-
-The proposed path is:
-
-1. write a reference implementation of the compiler in ANSI C
-2. ensure that reference implementation emits bit-identical output to
-   the current `awk` compiler
-3. split the C implementation into:
-   - a restricted-subset file intended to be compiled by `mawkcc`
-   - a conventional ANSI C support file compiled by GCC
-4. link those objects together into a working compiler executable
-5. incrementally migrate functionality from the ANSI C support file into
-   the restricted-subset file until the ANSI side becomes empty
+This file is a reflection on how the self-hosting port was done. For the
+current self-hosted compiler state, build scripts, and verification commands,
+see `SELFHOST.txt`.
 
 
-Artifact Names
+Starting Point
 --------------
 
-Reference compiler source:
+The project began with `cc.awk` as the working compiler. The main risk in
+porting was not semantic behavior alone, but preserving exact output bytes:
+ELF headers, section/program headers, instruction order, string placement,
+data layout, relocation ordering, and patching behavior all had to remain
+stable.
 
+Because of that, the first implementation step was to create
+`mawkcc_orig.c` as a close ANSI C port of `cc.awk`. This was deliberately a
+transliteration rather than a redesign. It gave the project a readable C
+reference implementation while keeping `cc.awk` as the original byte-level
+authority.
+
+
+Parity First
+------------
+
+The port was driven by parity tests. Each meaningful step had to preserve
+bit-identical output between:
+
+- `cc.awk`
 - `mawkcc_orig.c`
+- the split/self-hosted compiler path
+- the GCC-built cross-check path
 
-Split compiler sources:
+This discipline avoided a common self-hosting failure mode: making a compiler
+that appears to work but has silently drifted in output format or ABI details.
 
-- `mawkcc_self.c`
-- `mawkcc_ansi.c`
+The parity harness eventually grew to cover both executable output and ELF
+relocatable object output. It also records build commands in `artifacts` so
+the self-hosted object build path can be audited directly.
 
-Intermediate objects:
 
-- `mawkcc_self.o`
-- `mawkcc_ansi.o`
-
-Linked compiler executable:
-
-- `mawkcc.exe`
-
-
-High-Level Strategy
--------------------
-
-There are two different goals that must not be conflated:
-
-1. semantic equivalence
-2. bit-identical output equivalence
-
-The first milestone is not "self-hosting". The first milestone is:
-
-- produce an ANSI C implementation of the compiler that emits exactly
-  the same bytes as `cc.awk`
-
-Only after that should the compiler be split and partially ported into
-the restricted dialect.
-
-This matters because the bit-identity check must be anchored to a known
-good, readable reference implementation before the porting effort starts
-to distort the structure.
-
-
-Stage 1: Reference ANSI C Compiler
-----------------------------------
-
-Create `mawkcc_orig.c` as a direct ANSI C port of the current
-`cc.awk` implementation.
-
-Requirements:
-
-- compiles under a GCC mode that can target 32-bit x86
-- emits ELF32/i386 binaries with the same layout as `cc.awk`
-- preserves current code generation order, patching behavior, string
-  placement, global layout, syscall handling, and startup convention
-
-Discipline for this stage:
-
-- keep structure close to `cc.awk`
-- do not improve algorithms yet
-- do not refactor for cleanliness yet
-- prefer transliteration over redesign
-
-Outputs to verify:
-
-- compile all example programs with `cc.awk`
-- compile the same examples with `mawkcc_orig.c`
-- compare outputs byte-for-byte
-
-Only when that passes should `mawkcc_orig.c` be treated as the baseline
-for further work.
-
-
-Stage 2: Parity Harness
------------------------
-
-Add a parity test harness that compares compiler outputs across
-implementations.
-
-The harness should:
-
-1. compile each input with `cc.awk`
-2. compile the same input with `mawkcc_orig.c`
-3. compare output binaries byte-for-byte
-4. fail on any mismatch
-
-Inputs must include at least:
-
-- `examples/ret42.c`
-- `examples/brk42.c`
-- `examples/fileio42.c`
-- `examples/param42.c`
-- `examples/argv90.c`
-
-Later it must also include:
-
-- `mawkcc_self.c`
-- any internal regression corpus used for self-hosting
-
-This harness becomes the core safety net for every later refactor.
-
-
-Stage 3: Refactor into Two C Files
-----------------------------------
-
-Split the ANSI C implementation into two files:
-
-- `mawkcc_self.c`
-- `mawkcc_ansi.c`
-
-Intent:
-
-- `mawkcc_self.c` stays within the restricted dialect subset and must be
-  compilable both by GCC and by `mawkcc`
-- `mawkcc_self.c` must remain human-readable and auditable; when the
-  restricted dialect lacks constants or enums, use initialized global
-  variables such as `TOK_IDENT` instead of unexplained magic numbers
-- `mawkcc_ansi.c` is retained only as a build-compatible placeholder once
-  its contents have been migrated
-
-At this stage, the combined executable should still behave exactly like
-`mawkcc_orig.c`.
-
-Link model:
-
-1. compile `mawkcc_self.c` with `mawkcc` to produce `mawkcc_self.o`
-2. emit `mawkcc.exe` directly from `mawkcc_self.c` with `cc.awk`, using a
-   larger code page for the compiler binary
-3. compile `mawkcc_self.c` with GCC only as a cross-check
-
-Important constraint:
-
-- `mawkcc_self.c` must remain valid under GCC even while written to the
-  restricted subset
-
-
-Stage 4: ABI Between self and ansi
-----------------------------------
-
-Define a narrow ABI between the two files before large-scale migration.
-
-The split should be intentional rather than arbitrary.
-
-Suggested ownership:
-
-`mawkcc_self.c`
-
-- tokenization logic expressed in subset style
-- parser state machine
-- symbol bookkeeping through explicit helper wrappers
-- code emission logic
-- patch list logic
-- top-level orchestration
-
-`mawkcc_ansi.c`
-
-- empty build placeholder
-- no compiler logic
-- no runtime support
-
-The exact split can evolve, but the ABI should stay small:
-
-- explicit function calls only
-- explicit integer/pointer arguments
-- no reliance on hidden globals across the boundary unless documented
-
-
-Stage 5: Keep a Frozen Reference
---------------------------------
-
-Do not delete `mawkcc_orig.c`.
-
-Purpose of `mawkcc_orig.c`:
-
-- reference behavior
-- readable comparison target
-- anchor for bit-identical output checks
-- protection against regressions introduced by the split
-
-At every meaningful milestone:
-
-- compile the same corpus with `cc.awk`
-- compile with `mawkcc_orig.c`
-- compile with the split implementation
-- verify all outputs are identical
-
-
-Stage 6: Incremental Migration from ansi to self
-------------------------------------------------
-
-Move functionality from `mawkcc_ansi.c` into `mawkcc_self.c` in small,
-verified slices.
-
-Recommended migration order:
-
-1. integer/string utility wrappers that already map cleanly onto subset
-   helpers
-2. scanner helpers
-3. parser helpers
-4. symbol table operations
-5. code-buffer operations
-6. file/output orchestration
-
-After each migration step:
-
-- rebuild `mawkcc.exe`
-- rerun the parity harness
-- verify that `mawkcc_self.c` is still compilable by both GCC and
-  `mawkcc`
-
-The working rule is:
-
-- `mawkcc_ansi.c` should only shrink when parity stays intact
-
-
-Stage 7: Self-Compilation Milestones
-------------------------------------
-
-The split compiler becomes meaningfully self-hosting only after
-`mawkcc_self.c` can be compiled by `mawkcc` and then used in the tool
-chain without parity loss.
-
-Milestones:
-
-1. `mawkcc` compiles `mawkcc_self.c` into `mawkcc_self.o`
-2. `cc.awk` emits `mawkcc.exe` directly from `mawkcc_self.c`
-3. `mawkcc.exe` compiles the example corpus bit-identically
-4. `mawkcc.exe` compiles `mawkcc_self.c` bit-identically to the earlier
-   stage
-
-At that point the self side is participating in its own build.
-
-
-Stage 8: Empty ansi End State
------------------------------
-
-The final target is:
-
-- `mawkcc_ansi.c` is empty
-
-Acceptable final forms:
-
-- a truly empty file
-- a file retained only for build compatibility
-
-The transition is complete only when:
-
-- all meaningful compiler logic resides in `mawkcc_self.c`
-- `mawkcc_self.c` is compiled by `mawkcc`
-- output remains bit-identical to the reference implementation
-
-
-Bit-Identity Rules
-------------------
-
-Bit-identical output means:
-
-- same ELF header bytes
-- same program header bytes
-- same code bytes
-- same data layout
-- same string placement
-- same patch ordering
-- same padding
-
-Therefore even harmless-looking refactors may break parity.
-
-Rules to preserve parity:
-
-- preserve output order of emitted bytes
-- preserve global/data allocation order
-- preserve function ordering
-- preserve string registration order
-- preserve patch application order
-- preserve startup code sequence
-
-Do not optimize code generation until after self-hosting is established.
-
-
-Build and Verification Flow
----------------------------
-
-Target flow for routine verification:
-
-1. build `mawkcc_orig.c` with GCC
-2. run parity tests against `cc.awk`
-3. compile `mawkcc_self.c` with `mawkcc` to `mawkcc_self.o`
-4. emit `mawkcc.exe` directly from `mawkcc_self.c`
-5. run parity tests for `mawkcc.exe`
-6. compile `mawkcc_self.c` with `mawkcc.exe`
-7. compare resulting object or final executable artifacts against the
-   previous stage
-
-
-Practical Coding Rules
+The Intermediate Split
 ----------------------
 
-For `mawkcc_self.c`:
+The compiler was temporarily split into:
 
-- keep implementation in a single file
-- avoid comments in-source, since the subset must also remain valid for
-  `awk`-style parsing constraints
-- document helper acronyms and conventions externally
-- use short helper names consistently
-- prefer explicit wrapper functions for memory/table access
-- preserve readability and auditability; important symbolic values should
-  have names in `mawkcc_self.c` even if they are implemented as initialized
-  globals rather than C enums or preprocessor constants
+- `mawkcc_self.c`: code intended to fit the restricted mawkcc dialect
+- `mawkcc_ansi.c`: host-side ANSI C code left behind during migration
 
-For `mawkcc_ansi.c`:
+That split made the port incremental. Code could move from the ANSI side into
+the self-hosted dialect in small pieces while the combined compiler continued
+to emit byte-identical output.
 
-- keep it empty
-- do not add host glue or runtime support back to this file
+The important rule during this stage was that `mawkcc_ansi.c` should shrink
+only when parity still passed. It was not acceptable to hide compiler logic in
+new support files just to make the ANSI file empty.
 
 
-Immediate Next Steps
---------------------
+Dialect Constraints
+-------------------
 
-1. create `mawkcc_orig.c` as a close ANSI C port of `cc.awk`
-2. add the parity test harness comparing `cc.awk` and `mawkcc_orig.c`
-3. only after parity passes, split `mawkcc_orig.c` into:
-   - `mawkcc_self.c`
-   - `mawkcc_ansi.c`
-4. establish the self/ansi boundary and begin incremental migration
+The mawkcc dialect was intentionally not extended during the port. That shaped
+several implementation choices:
+
+- token constants became initialized global variables rather than C enums or
+  preprocessor definitions
+- struct-like records are accessed through explicit getter and setter helpers
+- global arrays are represented through allocated pointer-backed tables
+- helper names stay short where the dialect makes verbose code costly
+
+The self-hosted source also had to remain readable and auditable. Avoiding
+magic numbers was more important than making the code look like normal C.
 
 
-Success Criteria
-----------------
+Object Support
+--------------
 
-The plan succeeds when all of the following are true:
+Self-hosting required better object-file support than the original executable
+only path. mawkcc was updated to emit ELF32/i386 relocatable objects that can
+be linked by GCC.
 
-- `mawkcc_orig.c` matches `cc.awk` bit-for-bit on the corpus
-- `mawkcc_self.c` is compilable by both GCC and `mawkcc`
-- `mawkcc.exe` emitted directly from `mawkcc_self.c` matches reference
-  outputs bit-for-bit
-- `mawkcc_self.c` can participate in building the compiler
-- `mawkcc_ansi.c` has been reduced to nothing or near-nothing
+That work included:
+
+- emitting symbols and relocations for mawkcc functions and globals
+- allowing generated object code to call functions defined in C
+- allowing generated object code to access integer variables defined by C
+- keeping `cc.awk`, `mawkcc_orig.c`, and `mawkcc_self.c` object output
+  byte-identical
+
+Those tests were important because self-hosting is not just "can emit an
+executable"; it also needs a trustworthy object/link path.
+
+
+Executable Layout
+-----------------
+
+The early compiler executable path used a fixed code page and a fixed data
+page. That became an arbitrary limit once `mawkcc_self.c` grew large enough to
+build the compiler.
+
+The final executable emitter records absolute data references while generating
+code, then computes the final data address after code size is known. It patches
+those references just before writing the ELF image. This removed the manual
+code-page setting while preserving byte identity across implementations.
+
+
+End State
+---------
+
+After the migration, all compiler logic had moved into `mawkcc_self.c`.
+`mawkcc_ansi.c` became an empty placeholder and was then removed from the
+tree.
+
+The final verification model is:
+
+- `scripts/run-tests.sh` runs the build verifier first
+- the build verifier confirms the awk, self-hosted, reference-C, and GCC
+  build routes emit identical mawkcc binaries
+- each emitted mawkcc binary must rebuild itself identically
+- the normal tests then check runtime behavior, object linking, external C
+  calls, external C integer variables, and parity on example programs
+
+The result is a self-hosted compiler whose active implementation is
+`mawkcc_self.c`, with `cc.awk` and `mawkcc_orig.c` retained as reference and
+regression anchors.
