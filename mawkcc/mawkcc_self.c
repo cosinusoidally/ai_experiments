@@ -60,10 +60,16 @@ var code_p;
 var data_byte_p;
 var bin_len;
 var binbuf_p;
+var target_code_page;
+var target_data_base;
 
 function init_globals() {
     tok_text = 0;
     tok_text_cap = 0;
+    if (eq(target_code_page, 0)) {
+        target_code_page = 4096;
+        target_data_base = 134516736;
+    }
     TOK_EOF = 0;
     TOK_IDENT = 1;
     TOK_NUM = 2;
@@ -152,8 +158,14 @@ function fail_code(code, arg) {
 }
 
 function usage(program) {
-    write(2, mks("usage: mawkcc [-c] source\n"), 26);
+    write(2, mks("usage: mawkcc [-p page] [-c] source\n"), 36);
     return 1;
+}
+
+function set_code_page(page) {
+    target_code_page = page;
+    target_data_base = add(134512640, page);
+    return 0;
 }
 
 function xmalloc_(n, p) {
@@ -168,23 +180,12 @@ function xmalloc(n) {
     return xmalloc_(n, 0);
 }
 
-function xrealloc_copy_(p, q, i, n) {
-    while (lt(i, n)) {
-        wi8(add(q, i), ri8(add(p, i)));
-        i = add(i, 1);
-    }
-    return q;
-}
-
 function xrealloc_(p, n, q) {
     q = xmalloc(n);
     if (eq(q, 0)) {
         fail_msg(mks("out of memory\n"), 14);
     }
-    if (eq(p, 0)) {
-        return q;
-    }
-    return xrealloc_copy_(p, q, 0, n);
+    return q;
 }
 
 function xrealloc(p, n) {
@@ -657,7 +658,7 @@ function register_string_(text, start, len, i) {
     if (lt(data_used, next_data_offset)) {
         data_used = next_data_offset;
     }
-    return add(134516736, start);
+    return add(target_data_base, start);
 }
 
 function register_string(text) {
@@ -669,7 +670,7 @@ function emit_mks_literal_(text, addr) {
     emit1(184);
     if (output_object) {
         record_reloc(code_len, mks(".data"), 1);
-        emit4(sub(addr, 134516736));
+        emit4(sub(addr, target_data_base));
         return 0;
     }
     emit4(addr);
@@ -689,7 +690,7 @@ function emit_load_global_(name, idx, off) {
         emit4(0);
         return 0;
     }
-    emit4(add(134516736, off));
+    emit4(add(target_data_base, off));
     return 0;
 }
 
@@ -706,7 +707,7 @@ function emit_store_global_(name, idx, off) {
         emit4(0);
         return 0;
     }
-    emit4(add(134516736, off));
+    emit4(add(target_data_base, off));
     return 0;
 }
 
@@ -734,7 +735,7 @@ function emit_start() {
 }
 
 function emit_brk_alloc_(cur_addr, init_skip, fail_patch, done_patch) {
-    cur_addr = 134516736;
+    cur_addr = target_data_base;
     emit_mov_edx_eax();
     emit_mov_eax_abs(cur_addr);
     emit_test_eax_eax();
@@ -811,27 +812,54 @@ function patch_breaks(loop_id, target) {
 }
 
 function streq2(s, c0, c1) {
-    return and(and(eq(ri8(s), c0), eq(ri8(add(s, 1)), c1)), eq(ri8(add(s, 2)), 0));
+    if (ne(ri8(s), c0)) {
+        return 0;
+    }
+    if (ne(ri8(add(s, 1)), c1)) {
+        return 0;
+    }
+    return eq(ri8(add(s, 2)), 0);
 }
 
 function streq3(s, c0, c1, c2) {
-    return and(and(eq(ri8(s), c0), eq(ri8(add(s, 1)), c1)), and(eq(ri8(add(s, 2)), c2), eq(ri8(add(s, 3)), 0)));
+    if (not(streq3_prefix(s, c0, c1, c2))) {
+        return 0;
+    }
+    return eq(ri8(add(s, 3)), 0);
 }
 
 function streq4(s, c0, c1, c2, c3) {
-    return and(and(streq3_prefix(s, c0, c1, c2), eq(ri8(add(s, 3)), c3)), eq(ri8(add(s, 4)), 0));
+    if (not(streq4_prefix(s, c0, c1, c2, c3))) {
+        return 0;
+    }
+    return eq(ri8(add(s, 4)), 0);
 }
 
 function streq5(s, c0, c1, c2, c3, c4) {
-    return and(and(streq4_prefix(s, c0, c1, c2, c3), eq(ri8(add(s, 4)), c4)), eq(ri8(add(s, 5)), 0));
+    if (not(streq4_prefix(s, c0, c1, c2, c3))) {
+        return 0;
+    }
+    if (ne(ri8(add(s, 4)), c4)) {
+        return 0;
+    }
+    return eq(ri8(add(s, 5)), 0);
 }
 
 function streq3_prefix(s, c0, c1, c2) {
-    return and(and(eq(ri8(s), c0), eq(ri8(add(s, 1)), c1)), eq(ri8(add(s, 2)), c2));
+    if (ne(ri8(s), c0)) {
+        return 0;
+    }
+    if (ne(ri8(add(s, 1)), c1)) {
+        return 0;
+    }
+    return eq(ri8(add(s, 2)), c2);
 }
 
 function streq4_prefix(s, c0, c1, c2, c3) {
-    return and(streq3_prefix(s, c0, c1, c2), eq(ri8(add(s, 3)), c3));
+    if (not(streq3_prefix(s, c0, c1, c2))) {
+        return 0;
+    }
+    return eq(ri8(add(s, 3)), c3);
 }
 
 function builtin_arity(name) {
@@ -1546,11 +1574,11 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
     phsize = 32;
     headers = add(ehsize, phsize);
     entry = add(base, headers);
-    filesz = add(4096, data_used);
-    memsz = 8192;
+    filesz = add(target_code_page, data_used);
+    memsz = add(target_code_page, 4096);
     flags = 7;
 
-    if (gt(add(headers, code_len), 4096)) {
+    if (gt(add(headers, code_len), target_code_page)) {
         fail_code(23, 0);
     }
     if (gt(data_used, 4096)) {
@@ -1574,7 +1602,7 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
     bout4(1); bout4(0); bout4(base); bout4(base); bout4(filesz); bout4(memsz); bout4(flags); bout4(4096);
 
     build_object_emit_code_(0);
-    pad_to(4096);
+    pad_to(target_code_page);
     build_object_emit_data_(0);
     return 0;
 }
@@ -1853,10 +1881,34 @@ function compile(source_path) {
     return 0;
 }
 
+function main_compile_with_page(argc, argv, argi, argc_left, page) {
+    page = strtoul(ri32(add(argv, mul(add(argi, 1), 4))), 0, 10);
+    set_code_page(page);
+    argi = add(argi, 2);
+    argc_left = sub(argc, argi);
+    if (eq(argc_left, 1)) {
+        output_object = 0;
+        return compile(ri32(add(argv, mul(argi, 4))));
+    }
+    if (eq(argc_left, 2)) {
+        if (eq(strcmp(ri32(add(argv, mul(argi, 4))), mks("-c")), 0)) {
+            output_object = 1;
+            return compile(ri32(add(argv, mul(add(argi, 1), 4))));
+        }
+    }
+    return usage(ri32(argv));
+}
+
 function main_(argc, argv, arg1) {
     if (eq(argc, 2)) {
         output_object = 0;
         return compile(ri32(add(argv, 4)));
+    }
+    if (ge(argc, 4)) {
+        arg1 = ri32(add(argv, 4));
+        if (eq(strcmp(arg1, mks("-p")), 0)) {
+            return main_compile_with_page(argc, argv, 1, 0, 0);
+        }
     }
     if (eq(argc, 3)) {
         arg1 = ri32(add(argv, 4));

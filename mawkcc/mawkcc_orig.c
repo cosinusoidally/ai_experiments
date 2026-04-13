@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define DATA_BASE 134516736UL
+#define DEFAULT_CODE_PAGE 4096UL
 #define BRK_CUR_OFFSET 0UL
 #define RUNTIME_BYTES 4UL
 
@@ -95,6 +95,8 @@ static int break_patch_count;
 static unsigned long global_bytes;
 static long start_call_patch;
 static int output_object;
+static unsigned long target_code_page;
+static unsigned long target_data_base;
 
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
@@ -1128,7 +1130,7 @@ static void emit_load_global(const char *name)
         emit4(0);
         return;
     }
-    emit4((long)(DATA_BASE + (unsigned long)off));
+    emit4((long)(target_data_base + (unsigned long)off));
 }
 
 static void emit_store_global(const char *name)
@@ -1141,7 +1143,7 @@ static void emit_store_global(const char *name)
         emit4(0);
         return;
     }
-    emit4((long)(DATA_BASE + (unsigned long)off));
+    emit4((long)(target_data_base + (unsigned long)off));
 }
 
 static unsigned long register_string(const char *text)
@@ -1162,7 +1164,7 @@ static unsigned long register_string(const char *text)
     if (data_used < next_data_offset) {
         data_used = next_data_offset;
     }
-    return DATA_BASE + start;
+    return target_data_base + start;
 }
 
 static void emit_mks_literal(const char *text)
@@ -1172,7 +1174,7 @@ static void emit_mks_literal(const char *text)
     emit1(184);
     if (output_object) {
         record_reloc(code_len, ".data", 1);
-        emit4((long)(addr - DATA_BASE));
+        emit4((long)(addr - target_data_base));
         return;
     }
     emit4((long)addr);
@@ -1287,7 +1289,7 @@ static void emit_brk_alloc(void)
     long fail_patch;
     long done_patch;
 
-    cur_addr = DATA_BASE + BRK_CUR_OFFSET;
+    cur_addr = target_data_base + BRK_CUR_OFFSET;
     emit_mov_edx_eax();
     emit_mov_eax_abs(cur_addr);
     emit_test_eax_eax();
@@ -1390,11 +1392,11 @@ static void build_binary(void)
     phsize = 32UL;
     headers = ehsize + phsize;
     entry = base + headers;
-    filesz = 4096UL + data_used;
-    memsz = 8192UL;
+    filesz = target_code_page + data_used;
+    memsz = target_code_page + 4096UL;
     flags = 7UL;
 
-    if (headers + (unsigned long)code_len > 4096UL) {
+    if (headers + (unsigned long)code_len > target_code_page) {
         failf("program too large for fixed code page");
     }
     if (data_used > 4096UL) {
@@ -1420,7 +1422,7 @@ static void build_binary(void)
     for (i = 0; i < code_len; i++) {
         bout1(code[i]);
     }
-    while (bin_len < 4096) {
+    while ((unsigned long)bin_len < target_code_page) {
         bout1(0);
     }
     for (i = 0; i < (long)data_used; i++) {
@@ -1694,15 +1696,24 @@ static char *read_file(const char *path, long *len_out)
 int main(int argc, char **argv)
 {
     const char *source_path;
+    int argi;
 
     output_object = 0;
-    if (argc == 3 && strcmp(argv[1], "-c") == 0) {
+    target_code_page = DEFAULT_CODE_PAGE;
+    target_data_base = 134512640UL + target_code_page;
+    argi = 1;
+    if (argc >= 4 && strcmp(argv[argi], "-p") == 0) {
+        target_code_page = strtoul(argv[argi + 1], (char **)0, 10);
+        target_data_base = 134512640UL + target_code_page;
+        argi += 2;
+    }
+    if (argc - argi == 2 && strcmp(argv[argi], "-c") == 0) {
         output_object = 1;
-        source_path = argv[2];
-    } else if (argc == 2) {
-        source_path = argv[1];
+        source_path = argv[argi + 1];
+    } else if (argc - argi == 1) {
+        source_path = argv[argi];
     } else {
-        fprintf(stderr, "usage: %s [-c] source\n", argv[0]);
+        fprintf(stderr, "usage: %s [-p page] [-c] source\n", argv[0]);
         return 1;
     }
 
