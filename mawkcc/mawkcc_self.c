@@ -88,72 +88,30 @@ function init_globals() {
     TOK_SEMI = 15;
     TOK_COMMA = 16;
     TOK_ASSIGN = 17;
-    if (eq(code_p, 0)) {
-        code_cap = 262144;
-        code_p = xmalloc(code_cap);
-    }
-    if (eq(binbuf_p, 0)) {
-        bin_cap = 524288;
-        binbuf_p = xmalloc(bin_cap);
-    }
-    if (eq(data_byte_p, 0)) {
-        data_cap = 4096;
-        data_byte_p = xmalloc(data_cap);
-    }
-    if (eq(globals_p, 0)) {
-        globals_p = xmalloc(32768);
-    }
-    if (eq(functions_p, 0)) {
-        functions_p = xmalloc(32768);
-    }
-    if (eq(function_arities_p, 0)) {
-        function_arities_p = xmalloc(32768);
-    }
-    if (eq(current_params_p, 0)) {
-        current_params_p = xmalloc(4096);
-    }
-    if (eq(current_param_offsets_p, 0)) {
-        current_param_offsets_p = xmalloc(4096);
-    }
-    if (eq(externals_p, 0)) {
-        externals_p = xmalloc(32768);
-    }
-    if (eq(external_types_p, 0)) {
-        external_types_p = xmalloc(16384);
-    }
-    if (eq(call_target_p, 0)) {
-        call_target_p = xmalloc(32768);
-    }
-    if (eq(call_pos_p, 0)) {
-        call_pos_p = xmalloc(32768);
-    }
-    if (eq(call_argc_p, 0)) {
-        call_argc_p = xmalloc(32768);
-    }
-    if (eq(reloc_offsets_p, 0)) {
-        reloc_offsets_p = xmalloc(32768);
-    }
-    if (eq(reloc_names_p, 0)) {
-        reloc_names_p = xmalloc(32768);
-    }
-    if (eq(reloc_types_p, 0)) {
-        reloc_types_p = xmalloc(32768);
-    }
-    if (eq(loop_stack_p, 0)) {
-        loop_stack_p = xmalloc(4096);
-    }
-    if (eq(break_patch_loop_p, 0)) {
-        break_patch_loop_p = xmalloc(32768);
-    }
-    if (eq(break_patch_pos_p, 0)) {
-        break_patch_pos_p = xmalloc(32768);
-    }
-    if (eq(data_patch_offsets_p, 0)) {
-        data_patch_offsets_p = xmalloc(32768);
-    }
-    if (eq(data_patch_addends_p, 0)) {
-        data_patch_addends_p = xmalloc(32768);
-    }
+    code_cap = 262144;
+    code_p = xmalloc(code_cap);
+    bin_cap = 524288;
+    binbuf_p = xmalloc(bin_cap);
+    data_cap = 4096;
+    data_byte_p = xmalloc(data_cap);
+    globals_p = xmalloc(32768);
+    functions_p = xmalloc(32768);
+    function_arities_p = xmalloc(32768);
+    current_params_p = xmalloc(4096);
+    current_param_offsets_p = xmalloc(4096);
+    externals_p = xmalloc(32768);
+    external_types_p = xmalloc(16384);
+    call_target_p = xmalloc(32768);
+    call_pos_p = xmalloc(32768);
+    call_argc_p = xmalloc(32768);
+    reloc_offsets_p = xmalloc(32768);
+    reloc_names_p = xmalloc(32768);
+    reloc_types_p = xmalloc(32768);
+    loop_stack_p = xmalloc(4096);
+    break_patch_loop_p = xmalloc(32768);
+    break_patch_pos_p = xmalloc(32768);
+    data_patch_offsets_p = xmalloc(32768);
+    data_patch_addends_p = xmalloc(32768);
     return 0;
 }
 
@@ -1966,7 +1924,6 @@ function read_source(path) {
 }
 
 function compile(source_path) {
-    init_globals();
     src = read_source(source_path);
     init_lexer();
     code_reset();
