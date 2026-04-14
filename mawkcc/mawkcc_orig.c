@@ -453,6 +453,10 @@ static void read_string_token(void)
                 ch = '\t';
             } else if (ch == 'r') {
                 ch = '\r';
+            } else if (ch == 'f') {
+                ch = '\f';
+            } else if (ch == 'v') {
+                ch = '\v';
             } else if (ch == '"') {
                 ch = '"';
             } else if (ch == '\\') {
@@ -924,6 +928,14 @@ static void parse_builtin_call(const char *name, int argc)
         next_tok();
         expect(TOK_RPAREN);
         return;
+    } else if (strcmp(name, "mkC") == 0) {
+        if (tok != TOK_STR) {
+            failf("`mkC` expects a string literal");
+        }
+        emit_mov_eax_imm32((unsigned char)tok_text[0]);
+        next_tok();
+        expect(TOK_RPAREN);
+        return;
     } else if (argc == 1) {
         parse_expr();
     } else if (argc == 2) {
@@ -984,7 +996,8 @@ static int builtin_arity(const char *name)
     if (strcmp(name, "neg") == 0 || strcmp(name, "not") == 0 ||
         strcmp(name, "ri32") == 0 || strcmp(name, "ri8") == 0 ||
         strcmp(name, "brk") == 0 || strcmp(name, "close") == 0 ||
-        strcmp(name, "exit") == 0 || strcmp(name, "mks") == 0) {
+        strcmp(name, "exit") == 0 || strcmp(name, "mks") == 0 ||
+        strcmp(name, "mkC") == 0) {
         return 1;
     }
     if (strcmp(name, "add") == 0 || strcmp(name, "sub") == 0 ||

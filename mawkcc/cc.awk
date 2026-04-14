@@ -163,6 +163,10 @@ function read_string_token(    out, ch, esc) {
                 out = out sprintf("%c", 9)
             else if (esc == "r")
                 out = out sprintf("%c", 13)
+            else if (esc == "f")
+                out = out sprintf("%c", 12)
+            else if (esc == "v")
+                out = out sprintf("%c", 11)
             else if (esc == "\"")
                 out = out "\""
             else if (esc == "\\")
@@ -442,6 +446,13 @@ function parse_builtin_call(name, argc) {
         next_tok()
         expect(")")
         return
+    } else if (name == "mkC") {
+        if (tok != "STR")
+            fail("`mkC` expects a string literal")
+        emit_mov_eax_imm32(ord_map[substr(tok_text, 1, 1)])
+        next_tok()
+        expect(")")
+        return
     } else if (argc == 1) {
         parse_expr()
     } else if (argc == 2) {
@@ -495,7 +506,8 @@ function parse_user_call_args(    argc) {
 
 function builtin_arity(name) {
     if (name == "neg" || name == "not" || name == "ri32" || name == "ri8" || \
-        name == "brk" || name == "close" || name == "exit" || name == "mks")
+        name == "brk" || name == "close" || name == "exit" || name == "mks" || \
+        name == "mkC")
         return 1
     if (name == "add" || name == "sub" || name == "mul" || name == "div" || \
         name == "mod" || \

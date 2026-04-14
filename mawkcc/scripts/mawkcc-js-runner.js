@@ -88,6 +88,10 @@ function mks(s) {
     return p;
 }
 
+function mkC(s) {
+    return s.charCodeAt(0) | 0;
+}
+
 function open(path, flags, mode) {
     var name = cstr(path);
     trace_msg("open " + name);

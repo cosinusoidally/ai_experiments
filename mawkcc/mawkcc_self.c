@@ -361,15 +361,15 @@ function find_symbol(arr, count, name) {
 }
 
 function is_space_char(ch) {
-    return or(or(or(eq(ch, 32), eq(ch, 9)), or(eq(ch, 10), eq(ch, 13))), or(eq(ch, 12), eq(ch, 11)));
+    return or(or(or(eq(ch, mkC(" ")), eq(ch, mkC("\t"))), or(eq(ch, mkC("\n")), eq(ch, mkC("\r")))), or(eq(ch, mkC("\f")), eq(ch, mkC("\v"))));
 }
 
 function is_digit_char(ch) {
-    return and(ge(ch, 48), le(ch, 57));
+    return and(ge(ch, mkC("0")), le(ch, mkC("9")));
 }
 
 function is_alpha_char(ch) {
-    return or(or(and(ge(ch, 97), le(ch, 122)), and(ge(ch, 65), le(ch, 90))), eq(ch, 95));
+    return or(or(and(ge(ch, mkC("a")), le(ch, mkC("z"))), and(ge(ch, mkC("A")), le(ch, mkC("Z")))), eq(ch, mkC("_")));
 }
 
 function is_alnum_char(ch) {
@@ -408,18 +408,18 @@ function skip_ws_and_comments_(ch) {
         ch = ri8(add(src, idx_pos));
         if (is_space_char(ch)) {
             idx_pos = add(idx_pos, 1);
-        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), 47), eq(ri8(add(src, add(idx_pos, 1))), 42)))) {
+        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), mkC("/")), eq(ri8(add(src, add(idx_pos, 1))), mkC("*"))))) {
             idx_pos = add(idx_pos, 2);
-            while (and(lt(add(idx_pos, 1), src_len), not(and(eq(ri8(add(src, idx_pos)), 42), eq(ri8(add(src, add(idx_pos, 1))), 47))))) {
+            while (and(lt(add(idx_pos, 1), src_len), not(and(eq(ri8(add(src, idx_pos)), mkC("*")), eq(ri8(add(src, add(idx_pos, 1))), mkC("/")))))) {
                 idx_pos = add(idx_pos, 1);
             }
             if (ge(add(idx_pos, 1), src_len)) {
                 fail(mks("unterminated block comment\n"));
             }
             idx_pos = add(idx_pos, 2);
-        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), 47), eq(ri8(add(src, add(idx_pos, 1))), 47)))) {
+        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), mkC("/")), eq(ri8(add(src, add(idx_pos, 1))), mkC("/"))))) {
             idx_pos = add(idx_pos, 2);
-            while (and(lt(idx_pos, src_len), ne(ri8(add(src, idx_pos)), 10))) {
+            while (and(lt(idx_pos, src_len), ne(ri8(add(src, idx_pos)), mkC("\n")))) {
                 idx_pos = add(idx_pos, 1);
             }
         } else {
@@ -440,31 +440,35 @@ function read_string_token_(buf, cap, len, ch) {
     buf = xmalloc(cap);
     while (lt(idx_pos, src_len)) {
         ch = ri8(add(src, idx_pos));
-        if (eq(ch, 34)) {
+        if (eq(ch, mkC("\""))) {
             idx_pos = add(idx_pos, 1);
             set_tok_text_len(buf, len);
             free(buf);
             tok = TOK_STR;
             return 0;
         }
-        if (eq(ch, 92)) {
+        if (eq(ch, mkC("\\"))) {
             idx_pos = add(idx_pos, 1);
             if (ge(idx_pos, src_len)) {
                 free(buf);
                 fail(mks("unterminated string escape\n"));
             }
             ch = ri8(add(src, idx_pos));
-            if (eq(ch, 110)) {
-                ch = 10;
-            } else if (eq(ch, 116)) {
-                ch = 9;
-            } else if (eq(ch, 114)) {
-                ch = 13;
-            } else if (eq(ch, 34)) {
-                ch = 34;
-            } else if (eq(ch, 92)) {
-                ch = 92;
-            } else if (eq(ch, 48)) {
+            if (eq(ch, mkC("n"))) {
+                ch = mkC("\n");
+            } else if (eq(ch, mkC("t"))) {
+                ch = mkC("\t");
+            } else if (eq(ch, mkC("r"))) {
+                ch = mkC("\r");
+            } else if (eq(ch, mkC("f"))) {
+                ch = mkC("\f");
+            } else if (eq(ch, mkC("v"))) {
+                ch = mkC("\v");
+            } else if (eq(ch, mkC("\""))) {
+                ch = mkC("\"");
+            } else if (eq(ch, mkC("\\"))) {
+                ch = mkC("\\");
+            } else if (eq(ch, mkC("0"))) {
                 ch = 0;
             } else {
                 free(buf);
@@ -528,25 +532,25 @@ function next_tok_num_(start) {
 }
 
 function next_tok_punc_(ch) {
-    if (eq(ch, 40)) {
+    if (eq(ch, mkC("("))) {
         tok = TOK_LPAREN; set_tok_text_cstr(mks("(")); idx_pos = add(idx_pos, 1); return 1;
     }
-    if (eq(ch, 41)) {
+    if (eq(ch, mkC(")"))) {
         tok = TOK_RPAREN; set_tok_text_cstr(mks(")")); idx_pos = add(idx_pos, 1); return 1;
     }
-    if (eq(ch, 123)) {
+    if (eq(ch, mkC("{"))) {
         tok = TOK_LBRACE; set_tok_text_cstr(mks("{")); idx_pos = add(idx_pos, 1); return 1;
     }
-    if (eq(ch, 125)) {
+    if (eq(ch, mkC("}"))) {
         tok = TOK_RBRACE; set_tok_text_cstr(mks("}")); idx_pos = add(idx_pos, 1); return 1;
     }
-    if (eq(ch, 59)) {
+    if (eq(ch, mkC(";"))) {
         tok = TOK_SEMI; set_tok_text_cstr(mks(";")); idx_pos = add(idx_pos, 1); return 1;
     }
-    if (eq(ch, 44)) {
+    if (eq(ch, mkC(","))) {
         tok = TOK_COMMA; set_tok_text_cstr(mks(",")); idx_pos = add(idx_pos, 1); return 1;
     }
-    if (eq(ch, 61)) {
+    if (eq(ch, mkC("="))) {
         tok = TOK_ASSIGN; set_tok_text_cstr(mks("=")); idx_pos = add(idx_pos, 1); return 1;
     }
     return 0;
@@ -569,7 +573,7 @@ function next_tok_(ch) {
         next_tok_num_(0);
         return 0;
     }
-    if (eq(ch, 34)) {
+    if (eq(ch, mkC("\""))) {
         read_string_token();
         return 0;
     }
@@ -903,7 +907,7 @@ function name_in_list(name, list, count) {
 }
 
 function init_builtin1_names() {
-    builtin1_count = 8;
+    builtin1_count = 9;
     builtin1_names_p = xmalloc(mul(builtin1_count, 4));
     name_list_set(builtin1_names_p, 0, mks("neg"));
     name_list_set(builtin1_names_p, 1, mks("not"));
@@ -913,6 +917,7 @@ function init_builtin1_names() {
     name_list_set(builtin1_names_p, 5, mks("close"));
     name_list_set(builtin1_names_p, 6, mks("exit"));
     name_list_set(builtin1_names_p, 7, mks("mks"));
+    name_list_set(builtin1_names_p, 8, mks("mkC"));
     return 0;
 }
 
@@ -1053,6 +1058,14 @@ function parse_builtin_call(name, argc) {
             fail(mks("mks expects a string literal\n"));
         }
         emit_mks_literal(tok_text);
+        next_tok();
+        expect(TOK_RPAREN);
+        return 0;
+    } else if (name_eq(name, mks("mkC"))) {
+        if (not(eq(tok, TOK_STR))) {
+            fail(mks("mkC expects a string literal\n"));
+        }
+        emit_mov_eax_imm32(ri8(tok_text));
         next_tok();
         expect(TOK_RPAREN);
         return 0;
@@ -1988,7 +2001,7 @@ function read_source_(path, fd, cap, buf, used, got, new_cap, new_buf) {
         used = add(used, got);
     }
     close(fd);
-    wi8(add(buf, used), 10);
+    wi8(add(buf, used), mkC("\n"));
     wi8(add(add(buf, used), 1), 0);
     src_len = add(used, 1);
     return buf;
