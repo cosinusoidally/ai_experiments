@@ -1,0 +1,440 @@
+mawkcc Maintainer Architecture
+==============================
+
+Purpose
+-------
+
+`mawkcc` is a small compiler for the restricted language described in
+`DIALECT.txt`. It emits ELF32/i386 Linux binaries directly, either as:
+
+- standalone executables
+- relocatable object files that can be linked by `gcc -m32`
+
+The repository deliberately contains several implementations and host paths.
+They are not independent products. They are parity anchors for the same
+compiler behavior.
+
+
+Implementation Files
+--------------------
+
+`cc.awk`
+
+- The original stage0 implementation.
+- Treat this as the byte-for-byte reference output.
+- It is the easiest implementation to change first when prototyping parser
+  or code generation behavior.
+
+`mawkcc_orig.c`
+
+- ANSI C reference implementation of the same compiler.
+- Build it with `cc -ansi -m32`.
+- It mirrors `cc.awk` closely and is useful when debugging with C tools.
+- It is not the self-hosted implementation.
+
+`mawkcc_self.c`
+
+- The self-hosted compiler source.
+- It is written in the restricted bootstrap dialect documented in
+  `BOOTSTRAP_DIALECT.txt`.
+- It must compile with `cc.awk`, with the compiler binary produced by
+  mawkcc itself, and with `mawkcc_orig.c`.
+- It must also run directly under the host runtimes used for cross-checks:
+  C+`mawkcc_gcc_support.c`, SpiderMonkey JS, and mawk.
+
+`mawkcc_gcc_support.c`
+
+- Host runtime used only for the pure GCC build of `mawkcc_self.c`.
+- Provides the bootstrap builtins as C functions when compiling
+  `mawkcc_self.c` with `-Dfunction=int -Dvar=int`.
+- Do not move compiler logic here. It is support glue only.
+
+`scripts/mawkcc-js-runner.js`
+
+- Host runtime that loads `mawkcc_self.c` in the SpiderMonkey `js` shell.
+- Provides memory, arithmetic, file input, and output primitives.
+
+`scripts/mawkcc-awk-runner.awk`
+
+- Host runtime that loads `mawkcc_self.c` in mawk.
+- Provides the same bootstrap primitive layer as the JS runner.
+
+
+Required Invariant
+------------------
+
+All compiler routes must emit byte-identical mawkcc compiler binaries.
+
+The core check is:
+
+```sh
+scripts/run-tests.sh
+```
+
+That script runs `scripts/verify-mawkcc-builds.sh` before the behavioral
+tests. The verification currently compares these routes:
+
+- `scripts/build-mawkcc-reference-awk.sh`: `cc.awk` compiles
+  `mawkcc_self.c`
+- `scripts/build-mawkcc-awk.sh`: mawk runs `mawkcc_self.c` through the awk
+  host runner
+- `scripts/build-mawkcc-self.sh`: a mawkcc-built compiler rebuilds
+  `mawkcc_self.c`
+- `scripts/build-mawkcc-reference-c.sh`: `mawkcc_orig.c` compiles
+  `mawkcc_self.c`
+- `scripts/build-mawkcc-gcc.sh`: GCC compiles `mawkcc_self.c` with
+  `mawkcc_gcc_support.c`, then that binary compiles `mawkcc_self.c`
+- `scripts/build-mawkcc-js.sh`: SpiderMonkey runs `mawkcc_self.c` through
+  the JS host runner
+
+Each emitted compiler binary must also rebuild itself byte-identically.
+
+If a compiler change cannot preserve this invariant, treat that as a bug
+until proven otherwise.
+
+
+Compiler Pipeline
+-----------------
+
+All versions implement the same pipeline:
+
+1. Read source into memory.
+2. Lex tokens.
+3. Parse top-level globals and functions.
+4. Emit x86 machine code into a code buffer while parsing.
+5. Record unresolved calls, data references, external symbols, and
+   relocations.
+6. Patch internal calls after parsing is complete.
+7. Build either an ELF executable or an ELF relocatable object into the
+   output buffer.
+8. Write the output buffer to stdout.
+
+The compiler is single pass over syntax with deferred fixups for references
+that cannot be known immediately.
+
+
+Lexer
+-----
+
+The lexer recognizes:
+
+- identifiers
+- decimal numbers
+- double-quoted strings
+- comments
+- punctuation: `(` `)` `{` `}` `;` `,` `=`
+- reserved words: `function`, `var`, `return`, `if`, `else`, `while`,
+  `break`
+
+Important state:
+
+- `src`, `src_len`: source buffer and length
+- `idx_pos`: current source offset
+- `tok`: current token kind
+- `tok_text`: current token text
+- `tok_num`: numeric value for number tokens
+
+String handling matters because `mks("...")` and `mkC("x")` are special
+builtins handled during parsing. They require the literal text, not a normal
+runtime expression.
+
+
+Parser
+------
+
+The parser is recursive descent.
+
+Top level:
+
+- `parse_program()`
+- `parse_global()`
+- `parse_function()`
+
+Statements:
+
+- `parse_stmt()`
+- `parse_block()`
+- `parse_if()`
+- `parse_while()`
+- `parse_break()`
+
+Expressions:
+
+- `parse_expr()`
+- `parse_assign_or_primary()`
+- `parse_primary()`
+- `parse_builtin_call()`
+- `parse_user_call_args()`
+
+The language has no local declarations. In `mawkcc_self.c`, locals are
+simulated by worker functions whose extra parameters act as local slots. A
+small wrapper calls the worker with zeroes for those extra parameters.
+
+
+Name Resolution
+---------------
+
+Inside a function, identifiers are resolved by syntax and context:
+
+- `name = expr` must assign to a parameter or global.
+- `name(...)` is either a builtin call or a user function call.
+- plain `name` loads a parameter or global.
+
+Function calls can target functions defined later. The compiler emits a
+placeholder call and records:
+
+- target name
+- call-site patch offset
+- argument count
+
+After parsing, `patch_calls()` resolves internal calls or records external
+relocations in object mode.
+
+
+Builtin Dispatch
+----------------
+
+Builtins are classified by arity:
+
+- unary: arithmetic/logical unary operators, memory reads, `brk`, `close`,
+  `exit`, `mks`, `mkC`
+- binary: arithmetic, comparison, bitwise/logical operators, memory writes
+- ternary: `open`, `read`, `write`
+
+Lowercase operator builtins are the public historical spelling. Uppercase
+operator aliases are also accepted and are used in `mawkcc_self.c` so the
+same source can run under awk without colliding with awk builtins such as
+`sub`.
+
+Host-side names such as `open`, `read`, `write`, and `close` are runtime
+primitives when `mawkcc_self.c` is executed directly by JS/awk/GCC support.
+When compiling source to ELF, those names are compiler builtins that emit
+Linux i386 syscalls.
+
+
+Code Generation
+---------------
+
+Code generation emits raw i386 machine-code bytes.
+
+Important buffers:
+
+- code buffer: generated text bytes
+- data buffer: static string and global data bytes
+- binary buffer: final ELF executable or relocatable object
+
+Important emitters:
+
+- `emit1`, `emit4`: append machine-code bytes
+- `patch4`, `patch_rel32`: patch already emitted immediate values
+- `emit_prologue`, `emit_epilogue`: function frame setup/teardown
+- `emit_*`: specific x86 instruction templates
+
+Calling convention:
+
+- Generated functions use i386 System V cdecl argument order.
+- Arguments are pushed right-to-left.
+- Callers clean the stack.
+- Parameters are read from standard `ebp` offsets.
+- `ebx` is preserved by generated function prologues/epilogues because the
+  compiler uses it as a scratch register.
+
+Expression convention:
+
+- Most expression results end in `eax`.
+- Binary builtins usually parse the first argument, push it, parse the second
+  argument, then combine `eax` with the saved value.
+
+
+Data Model
+----------
+
+Executable mode uses absolute addresses.
+
+- String literals produced by `mks` are emitted into the data area.
+- Globals occupy 4 bytes each.
+- The final executable places data after code and patches absolute data
+  addresses after the executable layout is known.
+
+Object mode emits relocations instead of final absolute addresses where
+needed.
+
+The self compiler keeps tables in linear memory. Common table layouts are:
+
+- symbol table entries: name pointer plus value
+- function arities: name pointer plus arity
+- call tables: target name, patch position, argument count
+- relocation tables: offset, name, relocation type
+- data patch tables: code offset plus addend
+
+In `mawkcc_self.c`, accessor helpers should be preferred when they make the
+layout easier to audit.
+
+
+Executable Output
+-----------------
+
+Executable output builds a minimal ELF32/i386 file directly:
+
+- ELF header
+- one loadable program header
+- generated code
+- padded data area
+
+The entry point is compiler-generated `_start`, not a C runtime entry.
+`_start` computes `argc` and `argv`, calls `main(argc, argv)`, and exits via
+the Linux i386 `exit` syscall.
+
+The final executable has no dependency on an assembler, linker, or libc.
+
+
+Object Output
+-------------
+
+Object mode is selected with `-c` in the compiler binaries, or
+`-v format=obj` for `cc.awk`.
+
+Object output builds a relocatable ELF32/i386 object with sections for:
+
+- `.text`
+- `.data`
+- `.rel.text`
+- `.symtab`
+- `.strtab`
+- `.shstrtab`
+
+Generated object files can be linked by:
+
+```sh
+gcc -m32 -no-pie object.o other.o -o program
+```
+
+Object mode supports:
+
+- exported generated functions
+- common 32-bit globals from `var name;`
+- calls to C functions in other objects
+- reads/writes of integer variables defined in other objects
+
+The object-link tests are the best examples of this path.
+
+
+Bootstrap Host Runners
+----------------------
+
+The JS and awk runners execute `mawkcc_self.c` as source code directly,
+rather than compiling it to native code first.
+
+They emulate only the primitive runtime expected by the bootstrap dialect:
+
+- integer operations
+- byte-addressed heap
+- `ri8`, `wi8`, `ri32`, `wi32`
+- `mks` and `mkC`
+- source file input
+- stdout/stderr output
+
+They should not contain compiler logic. If behavior differs between host
+runners, fix the primitive emulation or the self source, not the compiler
+algorithm in a runner.
+
+
+Build Scripts
+-------------
+
+Use dedicated scripts rather than ad hoc commands:
+
+- `scripts/build-mawkcc-reference-awk.sh`
+- `scripts/build-mawkcc-awk.sh`
+- `scripts/build-mawkcc-self.sh`
+- `scripts/build-mawkcc-reference-c.sh`
+- `scripts/build-mawkcc-gcc.sh`
+- `scripts/build-mawkcc-js.sh`
+- `scripts/verify-mawkcc-builds.sh`
+- `scripts/run-tests.sh`
+
+The repo also has `scripts/run-i386.sh`, a small wrapper used to run 32-bit
+tools in environments where direct i386 execution is sandboxed.
+
+Some tests write build commands to `artifacts/mawkcc_build_commands.log` so
+the bootstrap chain can be audited.
+
+
+External cjsawk Path
+--------------------
+
+The sibling cjsawk experiment uses mawkcc through:
+
+```sh
+../../tcc_simple/experiments/cjsawk/mk_full_mawkcc
+```
+
+Run that script after compiler changes that could affect code generation,
+object output, syscall behavior, or bootstrap source compatibility. It is a
+separate end-to-end consumer of the generated compiler and catches failures
+that the local examples may not cover.
+
+
+Maintenance Workflow
+--------------------
+
+For compiler changes:
+
+1. Update `cc.awk` and `mawkcc_orig.c` consistently.
+2. Update `mawkcc_self.c` using the bootstrap dialect.
+3. If direct host execution is affected, update the JS/awk/GCC support
+   runtimes.
+4. Update `DIALECT.txt` and `BOOTSTRAP_DIALECT.txt` if syntax or builtin
+   behavior changes.
+5. Run `scripts/run-tests.sh`.
+6. Run `../../tcc_simple/experiments/cjsawk/mk_full_mawkcc` when codegen or
+   bootstrap behavior changed.
+
+For documentation-only changes, tests are not usually required, but running
+`scripts/run-tests.sh` is still useful before committing broad edits.
+
+
+Common Failure Modes
+--------------------
+
+Byte mismatch between routes:
+
+- Compare against `artifacts/mawkcc_build_commands.log` when present.
+- Use `cmp -l old new | sed -n '1,20p'` to find the first differing byte.
+- Check for changed table ordering, string ordering, relocation ordering, or
+  data-layout padding.
+
+Self route fails but reference awk route works:
+
+- Check whether `mawkcc_self.c` uses a name not recognized as a builtin.
+- Check bootstrap dialect compatibility, especially uppercase operation
+  aliases and host-reserved names.
+
+GCC route fails:
+
+- Check `mawkcc_gcc_support.c` for missing runtime primitive aliases.
+- Remember the GCC build uses `-Dfunction=int -Dvar=int`.
+
+JS or awk route fails:
+
+- Check the corresponding runner's primitive emulation.
+- Do not hide compiler behavior in a runner.
+
+Object link fails:
+
+- Check symbol binding, relocation type, and cdecl argument order.
+- Compare with `tests/test_object_link.sh` and
+  `tests/test_object_externs.sh`.
+
+
+Design Principles
+-----------------
+
+- Keep output byte-identical across all compiler routes.
+- Keep `mawkcc_self.c` auditable as compiler source, not as generated-looking
+  code.
+- Prefer small explicit helpers over clever host-specific workarounds.
+- Do not extend the dialect unless the change is reflected in all compiler
+  implementations and tests.
+- Do not move compiler behavior into support files or host runners.
+

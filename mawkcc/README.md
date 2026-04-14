@@ -11,7 +11,7 @@ Repository status:
 
 - stage0 compiler: implemented in `mawk`
 - backend target: ELF32/i386 Linux executables and relocatable objects
-- self-hosting: not reached yet; see `BOOTSTRAP.md`
+- self-hosting: reached through `mawkcc_self.c`; see `SELFHOST.txt`
 
 Current implemented scope:
 
@@ -83,8 +83,10 @@ assignment makes the convention usable.
 Files:
 
 - `cc.awk`: compiler from a tiny C subset to ELF32/i386 Linux
-- `BOOTSTRAP.md`: definition of self-hosting for this project and the
-  staged path to reach it
+- `ARCHITECTURE.txt`: maintainer-oriented guide to the compiler
+  implementations, pipeline, invariants, and build routes
+- `SELFHOST.txt`: current self-hosting status and build routes
+- `BOOTSTRAP.md`: original staged bootstrap notes
 - `examples/ret42.c`: minimal sample program
 - `tests/test_ret42.sh`: minimal regression test for the first example
 - `artifacts/`: persistent test compilation outputs
