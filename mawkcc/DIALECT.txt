@@ -18,6 +18,10 @@ JavaScript, and `awk`, with these conventions:
 This document describes the language currently implemented by
 `cc.awk`, not a future or intended language.
 
+The self-hosted compiler source also follows the stricter
+C/JavaScript/awk-compatible source shape documented in
+`BOOTSTRAP_DIALECT.txt`.
+
 
 Execution Model
 ---------------
@@ -271,6 +275,7 @@ Unary builtins:
 - `brk(n)`
 - `close(fd)`
 - `mks("...")`
+- `mkC("x")`
 
 Binary builtins:
 
@@ -278,6 +283,7 @@ Binary builtins:
 - `sub(a, b)`
 - `mul(a, b)`
 - `div(a, b)`
+- `mod(a, b)`
 - `eq(a, b)`
 - `ne(a, b)`
 - `lt(a, b)`
@@ -287,6 +293,8 @@ Binary builtins:
 - `and(a, b)`
 - `or(a, b)`
 - `xor(a, b)`
+- `shl(a, b)`
+- `shr(a, b)`
 - `wi32(addr, value)`
 - `wi8(addr, value)`
 
@@ -315,6 +323,11 @@ Arithmetic and Comparison Builtins
 `div(a, b)`
 
 - returns signed `a / b`
+- division by zero is not checked by the language
+
+`mod(a, b)`
+
+- returns signed `a % b`
 - division by zero is not checked by the language
 
 Comparison builtins return:
@@ -346,6 +359,14 @@ Bitwise and Boolean-Like Builtins
 `xor(a, b)`
 
 - bitwise XOR
+
+`shl(a, b)`
+
+- left shift
+
+`shr(a, b)`
+
+- right shift
 
 `neg(x)`
 
@@ -458,6 +479,14 @@ Example:
 
 In the current native compiler implementation, `mks` returns the
 address of compiler-emitted static string data.
+
+Single-byte constants are introduced through `mkC("x")`.
+
+Semantics:
+
+- the argument must be a string literal
+- the expression evaluates to the first byte of that string literal
+- it is intended for readable character constants in the self compiler
 
 
 Name Resolution

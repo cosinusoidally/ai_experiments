@@ -244,10 +244,14 @@ function xrealloc(p, n) {
     return xrealloc_(p, n, 0);
 }
 
+function msub(a, b) {
+    return add(a, neg(b));
+}
+
 function div_floor256(v, q) {
     q = div(v, 256);
     if (and(lt(v, 0), ne(mul(q, 256), v))) {
-        q = sub(q, 1);
+        q = msub(q, 1);
     }
     return q;
 }
@@ -255,7 +259,7 @@ function div_floor256(v, q) {
 function u32_byte(v, shift) {
     while (gt(shift, 0)) {
         v = div_floor256(v, 0);
-        shift = sub(shift, 8);
+        shift = msub(shift, 8);
     }
     return v;
 }
@@ -280,7 +284,7 @@ function strcmp_(a, b, i, ca, cb) {
         ca = ri8(add(a, i));
         cb = ri8(add(b, i));
         if (ne(ca, cb)) {
-            return sub(ca, cb);
+            return msub(ca, cb);
         }
         if (eq(ca, 0)) {
             return 0;
@@ -302,7 +306,7 @@ function strtoul_(s, value, i, ch) {
         if (or(lt(ch, 48), gt(ch, 57))) {
             return value;
         }
-        value = add(mul(value, 10), sub(ch, 48));
+        value = add(mul(value, 10), msub(ch, 48));
         i = add(i, 1);
     }
     return value;
@@ -498,7 +502,7 @@ function next_tok_ident_(start) {
     while (and(lt(idx_pos, src_len), is_alnum_char(ri8(add(src, idx_pos))))) {
         idx_pos = add(idx_pos, 1);
     }
-    set_tok_text_len(add(src, start), sub(idx_pos, start));
+    set_tok_text_len(add(src, start), msub(idx_pos, start));
     if (eq(strcmp(tok_text, mks("return")), 0)) {
         tok = TOK_RETURN;
     } else if (eq(strcmp(tok_text, mks("function")), 0)) {
@@ -525,7 +529,7 @@ function next_tok_num_(start) {
     while (and(lt(idx_pos, src_len), is_digit_char(ri8(add(src, idx_pos))))) {
         idx_pos = add(idx_pos, 1);
     }
-    set_tok_text_len(add(src, start), sub(idx_pos, start));
+    set_tok_text_len(add(src, start), msub(idx_pos, start));
     tok_num = strtoul(tok_text, 0, 10);
     tok = TOK_NUM;
     return 0;
@@ -617,7 +621,7 @@ function emit_mov_stack_disp32_eax(disp) { emit1(137); emit1(132); emit1(36); em
 function emit_reverse_args_(argc, i, lo, hi) {
     while (lt(i, div(argc, 2))) {
         lo = mul(4, i);
-        hi = mul(4, sub(sub(argc, 1), i));
+        hi = mul(4, msub(msub(argc, 1), i));
         emit_mov_eax_stack_disp32(lo);
         emit_mov_ebx_stack_disp32(hi);
         emit_mov_stack_disp32_ebx(lo);
@@ -637,7 +641,7 @@ function emit_jmp_placeholder_(p) { emit1(233); p = code_len; emit4(0); return p
 function emit_je_placeholder() { return emit_je_placeholder_(0); }
 function emit_jne_placeholder() { return emit_jne_placeholder_(0); }
 function emit_jmp_placeholder() { return emit_jmp_placeholder_(0); }
-function patch_rel32(pos, target) { patch4(pos, sub(target, add(pos, 4))); return 0; }
+function patch_rel32(pos, target) { patch4(pos, msub(target, add(pos, 4))); return 0; }
 function emit_jmp_(target, p) { p = emit_jmp_placeholder(); patch_rel32(p, target); return 0; }
 function emit_jmp(target) { return emit_jmp_(target, 0); }
 function emit_add_eax_imm32(v) { emit1(5); emit4(v); }
@@ -850,7 +854,7 @@ function push_loop() {
 
 function pop_loop() {
     if (gt(loop_depth, 0)) {
-        loop_depth = sub(loop_depth, 1);
+        loop_depth = msub(loop_depth, 1);
     }
     return 0;
 }
@@ -1160,7 +1164,7 @@ function patch_calls_(i, fi, name, pos, argc, addr, arity, rel) {
             if (not(eq(arity, argc))) {
                 fail_name(mks("wrong argument count: "), name);
             }
-            rel = sub(addr, add(pos, 4));
+            rel = msub(addr, add(pos, 4));
             patch4(pos, rel);
         }
         i = add(i, 1);
@@ -1488,7 +1492,7 @@ function parse_break() {
     }
     expect(TOK_BREAK);
     expect(TOK_SEMI);
-    record_break(ri32(add(loop_stack_p, mul(sub(loop_depth, 1), 4))), emit_jmp_placeholder());
+    record_break(ri32(add(loop_stack_p, mul(msub(loop_depth, 1), 4))), emit_jmp_placeholder());
     return 0;
 }
 
@@ -1723,7 +1727,7 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
     if (lt(main_index, 0)) {
         fail(mks("missing main function\n"));
     }
-    rel = sub(sym_val(add(functions_p, mul(main_index, 8))), add(start_call_patch, 4));
+    rel = msub(sym_val(add(functions_p, mul(main_index, 8))), add(start_call_patch, 4));
     patch4(start_call_patch, rel);
     patch_data_patches(data_base);
 
@@ -1817,7 +1821,7 @@ function build_object_emit_functions_(sym_name_off, i, start, next_start, size, 
         } else {
             next_start = code_len;
         }
-        size = sub(next_start, start);
+        size = msub(next_start, start);
         bout4(ri32(add(sym_name_off, mul(i, 4))));
         bout4(start);
         bout4(size);
@@ -1990,7 +1994,7 @@ function read_source_(path, fd, cap, buf, used, got, new_cap, new_buf) {
             buf = new_buf;
             cap = new_cap;
         }
-        got = read(fd, add(buf, used), sub(cap, used));
+        got = read(fd, add(buf, used), msub(cap, used));
         if (lt(got, 0)) {
             close(fd);
             return 0;

@@ -31,7 +31,8 @@ Build Scripts
 
 The dedicated build scripts are:
 
-- `scripts/build-mawkcc-awk.sh`: builds the compiler executable using `cc.awk`
+- `scripts/build-mawkcc-reference-awk.sh`: builds the compiler executable using `cc.awk`
+- `scripts/build-mawkcc-awk.sh`: builds the compiler executable by running `mawkcc_self.c` under mawk
 - `scripts/build-mawkcc-self.sh`: builds using a mawkcc-built compiler
 - `scripts/build-mawkcc-reference-c.sh`: builds using `mawkcc_orig.c`
 - `scripts/build-mawkcc-gcc.sh`: builds `mawkcc_self.c` with GCC plus

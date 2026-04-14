@@ -6,6 +6,9 @@ ARTIFACTS=$ROOT/artifacts
 OUT=${1:-$ARTIFACTS/mawkcc.awk.exe}
 
 mkdir -p "$ARTIFACTS"
-mawk -f "$ROOT/cc.awk" "$ROOT/mawkcc_self.c" > "$OUT"
+cd "$ROOT"
+mawk -v SOURCE="$ROOT/mawkcc_self.c" -v OUT="$OUT" \
+    -f "$ROOT/scripts/mawkcc-awk-runner.awk" \
+    -f "$ROOT/mawkcc_self.c"
 chmod +x "$OUT"
 printf '%s\n' "$OUT"

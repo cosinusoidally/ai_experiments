@@ -1,0 +1,54 @@
+Bootstrap C/JavaScript/Awk Dialect
+==================================
+
+This file documents the restricted host dialect used by `mawkcc_self.c`.
+It is a companion to `DIALECT.txt`: `DIALECT.txt` describes the language
+compiled by mawkcc, while this file describes the extra source-shape
+constraints that allow the same compiler source to be loaded by C,
+SpiderMonkey JavaScript, and mawk.
+
+Goals
+-----
+
+- Keep `mawkcc_self.c` readable and auditable as mawkcc source.
+- Keep the source parseable as JavaScript and awk.
+- Do not extend the mawkcc compiler dialect just to satisfy a host.
+- Put host emulation in runner/support files, not in hidden compiler logic.
+
+Allowed Source Shape
+--------------------
+
+- Function definitions use `function name(args) { ... }`.
+- Global storage is declared with `var name;`.
+- All expressions use call syntax rather than infix operators.
+- String literals are limited to escapes accepted by mawkcc and the host
+  readers.
+- Host runners provide the primitive runtime operations used by the source:
+  arithmetic, memory access, `mks`, file input, and output.
+
+Host Name Restrictions
+----------------------
+
+The self source must avoid host-reserved names where a host runner cannot
+define a compatible function.
+
+In particular, mawk reserves `sub` and `close`. The self source should not
+depend on an awk runner defining those names. If the compiler source needs
+subtraction while being executed by awk, use a mawkcc-level helper that is
+valid in all hosts rather than extending the compiler dialect.
+
+Relationship To mawkcc Builtins
+-------------------------------
+
+The compiled language still exposes the mawkcc builtins documented in
+`DIALECT.txt`, including `sub`, `close`, `read`, `write`, and the arithmetic
+operators. This file only constrains the implementation source when that
+source is executed directly by a host runtime during bootstrap.
+
+Current Host Runners
+--------------------
+
+- `scripts/mawkcc-js-runner.js`: SpiderMonkey host runtime.
+- `scripts/mawkcc-awk-runner.awk`: mawk host runtime.
+- `mawkcc_gcc_support.c`: gcc support runtime.
+

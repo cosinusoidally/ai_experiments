@@ -1,0 +1,40 @@
+mawkcc awk bootstrap plan
+=========================
+
+Keep this file current while implementing the awk-hosted bootstrap path.
+
+1. Document the restricted C/JavaScript/awk bootstrap dialect.
+
+   Status: done.
+
+2. Rename the stage0 awk compiler script.
+
+   Status: done.
+
+   `scripts/build-mawkcc-reference-awk.sh` now means "compile with
+   `cc.awk`".
+
+3. Reuse `scripts/build-mawkcc-awk.sh` for the awk-hosted self compiler.
+
+   Status: done.
+
+   The new script should run mawk over an awk runtime shim plus
+   `mawkcc_self.c`, mirroring the JavaScript bootstrap route.
+
+4. Keep `mawkcc_self.c` valid awk.
+
+   Status: done.
+
+   The file parses and runs under mawk with `scripts/mawkcc-awk-runner.awk`.
+   The mawk-reserved `sub` runtime-name issue is handled by the portable
+   `msub(a, b)` helper in `mawkcc_self.c`; the compiled language's `sub`
+   builtin is unchanged.
+
+5. Verify all bootstrap routes.
+
+   Status: done.
+
+   `scripts/run-tests.sh` passes with reference-awk, awk-hosted self,
+   self, reference-C, gcc, and JS routes producing identical compiler
+   binaries and identical self-rebuilds. The cjsawk `mk_full_mawkcc` path
+   also passes.
