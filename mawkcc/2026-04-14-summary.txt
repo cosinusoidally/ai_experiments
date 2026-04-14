@@ -1,0 +1,176 @@
+mawkcc session summary, 2026-04-14
+
+Goal
+----
+Plan a path for bootstrapping a JavaScript VM in the mawkcc bootstrap
+dialect. The initial target is not full ECMAScript; it is a small VM that can
+execute the JavaScript-shaped subset used by `mawkcc_self.c`. From there, the
+VM can be extended gradually toward ECMAScript 5.1.
+
+
+New plan document
+-----------------
+A new plan file was added:
+
+    JS_VM_BOOTSTRAP_PLAN.txt
+
+The plan treats the first VM as a future replacement or peer for the current
+SpiderMonkey-hosted JavaScript route, not as a full JS engine from day one.
+The first milestone is:
+
+    run mawkcc_self.c as JavaScript under a VM written in the mawkcc
+    bootstrap dialect
+
+The existing SpiderMonkey route remains important as an oracle and as a
+diverse bootstrap path. It should stay in the matrix even after the mawkcc VM
+route works.
+
+
+Initial VM scope
+----------------
+The initial VM contract is limited to the source shape already used by
+`mawkcc_self.c`:
+
+    function name(args) { ... }
+    var name;
+    integer literals
+    double-quoted strings needed by the compiler
+    call expressions
+    assignment
+    return
+    if / else
+    while
+    break
+    expression statements
+
+The supported primitive/runtime calls are the bootstrap operators and host
+operations currently provided by `scripts/mawkcc-js-runner.js`:
+
+    ADD SUB MUL DIV MOD NEG NOT
+    EQ NE LT LE GT GE
+    AND OR XOR SHL SHR
+    brk ri8 wi8 ri32 wi32
+    mks mkC
+    open read write close exit
+
+Unsupported JavaScript syntax should fail with clear diagnostics rather than
+being accepted partially.
+
+
+Implementation shape
+--------------------
+The plan recommends adding a new source file, tentatively:
+
+    jsvm_self.c
+
+This file should be written in the same restricted bootstrap dialect as
+`mawkcc_self.c`.
+
+The VM should use memory-backed tables and integer handles, matching the
+style required by mawkcc-compiled programs:
+
+    - one growable byte heap
+    - fixed-width table rows
+    - explicit lengths and capacities
+    - helper accessors where repeated offset arithmetic gets hard to audit
+
+The initial execution model should compile source into compact bytecode and
+interpret that bytecode. This gives a cleaner debugging surface than walking
+an AST directly.
+
+Suggested early bytecode operations include:
+
+    load constant
+    load/store global
+    load/store argument slot
+    call user function
+    call primitive
+    conditional jump
+    unconditional jump
+    return
+    pop
+
+
+Planned phases
+--------------
+The plan is split into phases:
+
+    0. Specify the exact `mawkcc_self.c` JavaScript subset with a mechanical
+       inventory.
+
+    1. Build a disposable host-built prototype to settle parser, bytecode,
+       runtime, and primitive semantics.
+
+    2. Port the VM to the mawkcc bootstrap dialect as `jsvm_self.c`.
+
+    3. Add `scripts/build-mawkcc-jsvm.sh` so the VM can execute
+       `mawkcc_self.c` and emit a mawkcc compiler.
+
+    4. Add the JS VM route to `scripts/verify-mawkcc-builds.sh` only after it
+       emits a byte-identical compiler.
+
+    5. Add an explicit closure check where a VM-produced compiler rebuilds
+       the VM, and the rebuilt VM produces the same mawkcc output.
+
+    6. Grow the implementation toward ECMAScript 5.1 feature by feature.
+
+
+ECMAScript 5.1 growth path
+--------------------------
+The plan recommends a feature matrix, tentatively:
+
+    JS_VM_ES51_MATRIX.txt
+
+The matrix should track parser support, runtime support, tests, and known
+deviations.
+
+The suggested growth order is:
+
+    comments and whitespace
+    infix expression grammar and precedence
+    normal JavaScript statements and ES5 `var` semantics
+    booleans, null, undefined, and truthiness
+    double-precision numbers
+    strings
+    objects and prototypes
+    arrays
+    function objects, closures, this, and arguments
+    constructors and new
+    exceptions
+    eval
+    standard ES5.1 built-ins
+
+Full ECMAScript 5.1 completion is framed as a long conformance project, not
+as a prerequisite for the first bootstrap route.
+
+
+Testing strategy
+----------------
+The plan calls for tests at three levels:
+
+    lexer/parser golden tests
+    tiny VM runtime tests
+    full bootstrap route tests against `mawkcc_self.c`
+
+Useful optional debug modes were identified:
+
+    token trace
+    bytecode dump
+    primitive call trace
+    function call trace with depth limit
+    memory bounds checks
+    deterministic allocation log
+
+Debug output should be opt-in so build output remains byte-identical and
+clean.
+
+
+Current verification status
+---------------------------
+No build or runtime verification was run for this planning-only change.
+
+The only project file added in this session was:
+
+    JS_VM_BOOTSTRAP_PLAN.txt
+
+This summary file was then added for the April 14 notes.
