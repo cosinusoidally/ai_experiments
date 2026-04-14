@@ -145,29 +145,29 @@ function usage(program) {
 
 function copy_bytes_(dst, src, n, i) {
     i = 0;
-    while (lt(i, n)) {
-        wi8(add(dst, i), ri8(add(src, i)));
-        i = add(i, 1);
+    while (LT(i, n)) {
+        wi8(ADD(dst, i), ri8(ADD(src, i)));
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function zero_bytes_(dst, start, n, i) {
     i = start;
-    while (lt(i, n)) {
-        wi8(add(dst, i), 0);
-        i = add(i, 1);
+    while (LT(i, n)) {
+        wi8(ADD(dst, i), 0);
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function ensure_code_capacity_(needed, new_cap, new_p) {
-    if (le(needed, code_cap)) {
+    if (LE(needed, code_cap)) {
         return 0;
     }
     new_cap = code_cap;
-    while (lt(new_cap, needed)) {
-        new_cap = mul(new_cap, 2);
+    while (LT(new_cap, needed)) {
+        new_cap = MUL(new_cap, 2);
     }
     new_p = xmalloc(new_cap);
     copy_bytes_(new_p, code_p, code_len, 0);
@@ -181,12 +181,12 @@ function ensure_code_capacity(needed) {
 }
 
 function ensure_bin_capacity_(needed, new_cap, new_p) {
-    if (le(needed, bin_cap)) {
+    if (LE(needed, bin_cap)) {
         return 0;
     }
     new_cap = bin_cap;
-    while (lt(new_cap, needed)) {
-        new_cap = mul(new_cap, 2);
+    while (LT(new_cap, needed)) {
+        new_cap = MUL(new_cap, 2);
     }
     new_p = xmalloc(new_cap);
     copy_bytes_(new_p, binbuf_p, bin_len, 0);
@@ -200,13 +200,13 @@ function ensure_bin_capacity(needed) {
 }
 
 function ensure_data_capacity_(needed, old_cap, new_cap, new_p) {
-    if (le(needed, data_cap)) {
+    if (LE(needed, data_cap)) {
         return 0;
     }
     old_cap = data_cap;
     new_cap = data_cap;
-    while (lt(new_cap, needed)) {
-        new_cap = mul(new_cap, 2);
+    while (LT(new_cap, needed)) {
+        new_cap = MUL(new_cap, 2);
     }
     new_p = xmalloc(new_cap);
     copy_bytes_(new_p, data_byte_p, data_used, 0);
@@ -222,7 +222,7 @@ function ensure_data_capacity(needed) {
 
 function xmalloc_(n, p) {
     p = brk(n);
-    if (eq(p, 0)) {
+    if (EQ(p, 0)) {
         fail_msg(mks("out of memory\n"), 14);
     }
     return p;
@@ -234,7 +234,7 @@ function xmalloc(n) {
 
 function xrealloc_(p, n, q) {
     q = xmalloc(n);
-    if (eq(q, 0)) {
+    if (EQ(q, 0)) {
         fail_msg(mks("out of memory\n"), 14);
     }
     return q;
@@ -244,22 +244,18 @@ function xrealloc(p, n) {
     return xrealloc_(p, n, 0);
 }
 
-function msub(a, b) {
-    return add(a, neg(b));
-}
-
 function div_floor256(v, q) {
-    q = div(v, 256);
-    if (and(lt(v, 0), ne(mul(q, 256), v))) {
-        q = msub(q, 1);
+    q = DIV(v, 256);
+    if (AND(LT(v, 0), NE(MUL(q, 256), v))) {
+        q = SUB(q, 1);
     }
     return q;
 }
 
 function u32_byte(v, shift) {
-    while (gt(shift, 0)) {
+    while (GT(shift, 0)) {
         v = div_floor256(v, 0);
-        shift = msub(shift, 8);
+        shift = SUB(shift, 8);
     }
     return v;
 }
@@ -269,8 +265,8 @@ function free(p) {
 }
 
 function strlen_(s, n) {
-    while (ri8(add(s, n))) {
-        n = add(n, 1);
+    while (ri8(ADD(s, n))) {
+        n = ADD(n, 1);
     }
     return n;
 }
@@ -281,15 +277,15 @@ function strlen(s) {
 
 function strcmp_(a, b, i, ca, cb) {
     while (1) {
-        ca = ri8(add(a, i));
-        cb = ri8(add(b, i));
-        if (ne(ca, cb)) {
-            return msub(ca, cb);
+        ca = ri8(ADD(a, i));
+        cb = ri8(ADD(b, i));
+        if (NE(ca, cb)) {
+            return SUB(ca, cb);
         }
-        if (eq(ca, 0)) {
+        if (EQ(ca, 0)) {
             return 0;
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -302,12 +298,12 @@ function strtoul_(s, value, i, ch) {
     value = 0;
     i = 0;
     while (1) {
-        ch = ri8(add(s, i));
-        if (or(lt(ch, 48), gt(ch, 57))) {
+        ch = ri8(ADD(s, i));
+        if (OR(LT(ch, 48), GT(ch, 57))) {
             return value;
         }
-        value = add(mul(value, 10), msub(ch, 48));
-        i = add(i, 1);
+        value = ADD(MUL(value, 10), SUB(ch, 48));
+        i = ADD(i, 1);
     }
     return value;
 }
@@ -321,7 +317,7 @@ function sym_name(sym) {
 }
 
 function sym_val(sym) {
-    return ri32(add(sym, 4));
+    return ri32(ADD(sym, 4));
 }
 
 function sym_set_name(sym, name) {
@@ -330,17 +326,17 @@ function sym_set_name(sym, name) {
 }
 
 function sym_set_val(sym, val) {
-    wi32(add(sym, 4), val);
+    wi32(ADD(sym, 4), val);
     return val;
 }
 
 function xstrdup_(s, n, p, i) {
     n = strlen(s);
-    p = xmalloc(add(n, 1));
+    p = xmalloc(ADD(n, 1));
     i = 0;
-    while (le(i, n)) {
-        wi8(add(p, i), ri8(add(s, i)));
-        i = add(i, 1);
+    while (LE(i, n)) {
+        wi8(ADD(p, i), ri8(ADD(s, i)));
+        i = ADD(i, 1);
     }
     return p;
 }
@@ -350,14 +346,14 @@ function xstrdup(s) {
 }
 
 function find_symbol_(arr, count, name, i, entry) {
-    while (lt(i, count)) {
-        entry = add(arr, mul(i, 8));
-        if (eq(strcmp(sym_name(entry), name), 0)) {
+    while (LT(i, count)) {
+        entry = ADD(arr, MUL(i, 8));
+        if (EQ(strcmp(sym_name(entry), name), 0)) {
             return i;
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
-    return neg(1);
+    return NEG(1);
 }
 
 function find_symbol(arr, count, name) {
@@ -365,32 +361,32 @@ function find_symbol(arr, count, name) {
 }
 
 function is_space_char(ch) {
-    return or(or(or(eq(ch, mkC(" ")), eq(ch, mkC("\t"))), or(eq(ch, mkC("\n")), eq(ch, mkC("\r")))), or(eq(ch, mkC("\f")), eq(ch, mkC("\v"))));
+    return OR(OR(OR(EQ(ch, mkC(" ")), EQ(ch, mkC("\t"))), OR(EQ(ch, mkC("\n")), EQ(ch, mkC("\r")))), OR(EQ(ch, mkC("\f")), EQ(ch, mkC("\v"))));
 }
 
 function is_digit_char(ch) {
-    return and(ge(ch, mkC("0")), le(ch, mkC("9")));
+    return AND(GE(ch, mkC("0")), LE(ch, mkC("9")));
 }
 
 function is_alpha_char(ch) {
-    return or(or(and(ge(ch, mkC("a")), le(ch, mkC("z"))), and(ge(ch, mkC("A")), le(ch, mkC("Z")))), eq(ch, mkC("_")));
+    return OR(OR(AND(GE(ch, mkC("a")), LE(ch, mkC("z"))), AND(GE(ch, mkC("A")), LE(ch, mkC("Z")))), EQ(ch, mkC("_")));
 }
 
 function is_alnum_char(ch) {
-    return or(is_alpha_char(ch), is_digit_char(ch));
+    return OR(is_alpha_char(ch), is_digit_char(ch));
 }
 
 function set_tok_text_len_(s, n, i) {
-    if (lt(tok_text_cap, add(n, 1))) {
-        tok_text_cap = add(n, 32);
+    if (LT(tok_text_cap, ADD(n, 1))) {
+        tok_text_cap = ADD(n, 32);
         tok_text = xrealloc(tok_text, tok_text_cap);
     }
     i = 0;
-    while (lt(i, n)) {
-        wi8(add(tok_text, i), ri8(add(s, i)));
-        i = add(i, 1);
+    while (LT(i, n)) {
+        wi8(ADD(tok_text, i), ri8(ADD(s, i)));
+        i = ADD(i, 1);
     }
-    wi8(add(tok_text, n), 0);
+    wi8(ADD(tok_text, n), 0);
     return 0;
 }
 
@@ -408,23 +404,23 @@ function init_lexer() {
 }
 
 function skip_ws_and_comments_(ch) {
-    while (lt(idx_pos, src_len)) {
-        ch = ri8(add(src, idx_pos));
+    while (LT(idx_pos, src_len)) {
+        ch = ri8(ADD(src, idx_pos));
         if (is_space_char(ch)) {
-            idx_pos = add(idx_pos, 1);
-        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), mkC("/")), eq(ri8(add(src, add(idx_pos, 1))), mkC("*"))))) {
-            idx_pos = add(idx_pos, 2);
-            while (and(lt(add(idx_pos, 1), src_len), not(and(eq(ri8(add(src, idx_pos)), mkC("*")), eq(ri8(add(src, add(idx_pos, 1))), mkC("/")))))) {
-                idx_pos = add(idx_pos, 1);
+            idx_pos = ADD(idx_pos, 1);
+        } else if (AND(LT(ADD(idx_pos, 1), src_len), AND(EQ(ri8(ADD(src, idx_pos)), mkC("/")), EQ(ri8(ADD(src, ADD(idx_pos, 1))), mkC("*"))))) {
+            idx_pos = ADD(idx_pos, 2);
+            while (AND(LT(ADD(idx_pos, 1), src_len), NOT(AND(EQ(ri8(ADD(src, idx_pos)), mkC("*")), EQ(ri8(ADD(src, ADD(idx_pos, 1))), mkC("/")))))) {
+                idx_pos = ADD(idx_pos, 1);
             }
-            if (ge(add(idx_pos, 1), src_len)) {
+            if (GE(ADD(idx_pos, 1), src_len)) {
                 fail(mks("unterminated block comment\n"));
             }
-            idx_pos = add(idx_pos, 2);
-        } else if (and(lt(add(idx_pos, 1), src_len), and(eq(ri8(add(src, idx_pos)), mkC("/")), eq(ri8(add(src, add(idx_pos, 1))), mkC("/"))))) {
-            idx_pos = add(idx_pos, 2);
-            while (and(lt(idx_pos, src_len), ne(ri8(add(src, idx_pos)), mkC("\n")))) {
-                idx_pos = add(idx_pos, 1);
+            idx_pos = ADD(idx_pos, 2);
+        } else if (AND(LT(ADD(idx_pos, 1), src_len), AND(EQ(ri8(ADD(src, idx_pos)), mkC("/")), EQ(ri8(ADD(src, ADD(idx_pos, 1))), mkC("/"))))) {
+            idx_pos = ADD(idx_pos, 2);
+            while (AND(LT(idx_pos, src_len), NE(ri8(ADD(src, idx_pos)), mkC("\n")))) {
+                idx_pos = ADD(idx_pos, 1);
             }
         } else {
             return 0;
@@ -438,54 +434,54 @@ function skip_ws_and_comments() {
 }
 
 function read_string_token_(buf, cap, len, ch) {
-    idx_pos = add(idx_pos, 1);
+    idx_pos = ADD(idx_pos, 1);
     cap = 64;
     len = 0;
     buf = xmalloc(cap);
-    while (lt(idx_pos, src_len)) {
-        ch = ri8(add(src, idx_pos));
-        if (eq(ch, mkC("\""))) {
-            idx_pos = add(idx_pos, 1);
+    while (LT(idx_pos, src_len)) {
+        ch = ri8(ADD(src, idx_pos));
+        if (EQ(ch, mkC("\""))) {
+            idx_pos = ADD(idx_pos, 1);
             set_tok_text_len(buf, len);
             free(buf);
             tok = TOK_STR;
             return 0;
         }
-        if (eq(ch, mkC("\\"))) {
-            idx_pos = add(idx_pos, 1);
-            if (ge(idx_pos, src_len)) {
+        if (EQ(ch, mkC("\\"))) {
+            idx_pos = ADD(idx_pos, 1);
+            if (GE(idx_pos, src_len)) {
                 free(buf);
                 fail(mks("unterminated string escape\n"));
             }
-            ch = ri8(add(src, idx_pos));
-            if (eq(ch, mkC("n"))) {
+            ch = ri8(ADD(src, idx_pos));
+            if (EQ(ch, mkC("n"))) {
                 ch = mkC("\n");
-            } else if (eq(ch, mkC("t"))) {
+            } else if (EQ(ch, mkC("t"))) {
                 ch = mkC("\t");
-            } else if (eq(ch, mkC("r"))) {
+            } else if (EQ(ch, mkC("r"))) {
                 ch = mkC("\r");
-            } else if (eq(ch, mkC("f"))) {
+            } else if (EQ(ch, mkC("f"))) {
                 ch = mkC("\f");
-            } else if (eq(ch, mkC("v"))) {
+            } else if (EQ(ch, mkC("v"))) {
                 ch = mkC("\v");
-            } else if (eq(ch, mkC("\""))) {
+            } else if (EQ(ch, mkC("\""))) {
                 ch = mkC("\"");
-            } else if (eq(ch, mkC("\\"))) {
+            } else if (EQ(ch, mkC("\\"))) {
                 ch = mkC("\\");
-            } else if (eq(ch, mkC("0"))) {
+            } else if (EQ(ch, mkC("0"))) {
                 ch = 0;
             } else {
                 free(buf);
                 fail(mks("unsupported string escape\n"));
             }
         }
-        if (ge(add(len, 2), cap)) {
-            cap = mul(cap, 2);
+        if (GE(ADD(len, 2), cap)) {
+            cap = MUL(cap, 2);
             buf = xrealloc(buf, cap);
         }
-        wi8(add(buf, len), ch);
-        len = add(len, 1);
-        idx_pos = add(idx_pos, 1);
+        wi8(ADD(buf, len), ch);
+        len = ADD(len, 1);
+        idx_pos = ADD(idx_pos, 1);
     }
     free(buf);
     fail(mks("unterminated string literal\n"));
@@ -498,24 +494,24 @@ function read_string_token() {
 
 function next_tok_ident_(start) {
     start = idx_pos;
-    idx_pos = add(idx_pos, 1);
-    while (and(lt(idx_pos, src_len), is_alnum_char(ri8(add(src, idx_pos))))) {
-        idx_pos = add(idx_pos, 1);
+    idx_pos = ADD(idx_pos, 1);
+    while (AND(LT(idx_pos, src_len), is_alnum_char(ri8(ADD(src, idx_pos))))) {
+        idx_pos = ADD(idx_pos, 1);
     }
-    set_tok_text_len(add(src, start), msub(idx_pos, start));
-    if (eq(strcmp(tok_text, mks("return")), 0)) {
+    set_tok_text_len(ADD(src, start), SUB(idx_pos, start));
+    if (EQ(strcmp(tok_text, mks("return")), 0)) {
         tok = TOK_RETURN;
-    } else if (eq(strcmp(tok_text, mks("function")), 0)) {
+    } else if (EQ(strcmp(tok_text, mks("function")), 0)) {
         tok = TOK_FUNCTION;
-    } else if (eq(strcmp(tok_text, mks("var")), 0)) {
+    } else if (EQ(strcmp(tok_text, mks("var")), 0)) {
         tok = TOK_VAR;
-    } else if (eq(strcmp(tok_text, mks("if")), 0)) {
+    } else if (EQ(strcmp(tok_text, mks("if")), 0)) {
         tok = TOK_IF;
-    } else if (eq(strcmp(tok_text, mks("else")), 0)) {
+    } else if (EQ(strcmp(tok_text, mks("else")), 0)) {
         tok = TOK_ELSE;
-    } else if (eq(strcmp(tok_text, mks("while")), 0)) {
+    } else if (EQ(strcmp(tok_text, mks("while")), 0)) {
         tok = TOK_WHILE;
-    } else if (eq(strcmp(tok_text, mks("break")), 0)) {
+    } else if (EQ(strcmp(tok_text, mks("break")), 0)) {
         tok = TOK_BREAK;
     } else {
         tok = TOK_IDENT;
@@ -525,37 +521,37 @@ function next_tok_ident_(start) {
 
 function next_tok_num_(start) {
     start = idx_pos;
-    idx_pos = add(idx_pos, 1);
-    while (and(lt(idx_pos, src_len), is_digit_char(ri8(add(src, idx_pos))))) {
-        idx_pos = add(idx_pos, 1);
+    idx_pos = ADD(idx_pos, 1);
+    while (AND(LT(idx_pos, src_len), is_digit_char(ri8(ADD(src, idx_pos))))) {
+        idx_pos = ADD(idx_pos, 1);
     }
-    set_tok_text_len(add(src, start), msub(idx_pos, start));
+    set_tok_text_len(ADD(src, start), SUB(idx_pos, start));
     tok_num = strtoul(tok_text, 0, 10);
     tok = TOK_NUM;
     return 0;
 }
 
 function next_tok_punc_(ch) {
-    if (eq(ch, mkC("("))) {
-        tok = TOK_LPAREN; set_tok_text_cstr(mks("(")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC("("))) {
+        tok = TOK_LPAREN; set_tok_text_cstr(mks("(")); idx_pos = ADD(idx_pos, 1); return 1;
     }
-    if (eq(ch, mkC(")"))) {
-        tok = TOK_RPAREN; set_tok_text_cstr(mks(")")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC(")"))) {
+        tok = TOK_RPAREN; set_tok_text_cstr(mks(")")); idx_pos = ADD(idx_pos, 1); return 1;
     }
-    if (eq(ch, mkC("{"))) {
-        tok = TOK_LBRACE; set_tok_text_cstr(mks("{")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC("{"))) {
+        tok = TOK_LBRACE; set_tok_text_cstr(mks("{")); idx_pos = ADD(idx_pos, 1); return 1;
     }
-    if (eq(ch, mkC("}"))) {
-        tok = TOK_RBRACE; set_tok_text_cstr(mks("}")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC("}"))) {
+        tok = TOK_RBRACE; set_tok_text_cstr(mks("}")); idx_pos = ADD(idx_pos, 1); return 1;
     }
-    if (eq(ch, mkC(";"))) {
-        tok = TOK_SEMI; set_tok_text_cstr(mks(";")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC(";"))) {
+        tok = TOK_SEMI; set_tok_text_cstr(mks(";")); idx_pos = ADD(idx_pos, 1); return 1;
     }
-    if (eq(ch, mkC(","))) {
-        tok = TOK_COMMA; set_tok_text_cstr(mks(",")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC(","))) {
+        tok = TOK_COMMA; set_tok_text_cstr(mks(",")); idx_pos = ADD(idx_pos, 1); return 1;
     }
-    if (eq(ch, mkC("="))) {
-        tok = TOK_ASSIGN; set_tok_text_cstr(mks("=")); idx_pos = add(idx_pos, 1); return 1;
+    if (EQ(ch, mkC("="))) {
+        tok = TOK_ASSIGN; set_tok_text_cstr(mks("=")); idx_pos = ADD(idx_pos, 1); return 1;
     }
     return 0;
 }
@@ -563,12 +559,12 @@ function next_tok_punc_(ch) {
 function next_tok_(ch) {
     skip_ws_and_comments();
     tok_pos = idx_pos;
-    if (ge(idx_pos, src_len)) {
+    if (GE(idx_pos, src_len)) {
         tok = TOK_EOF;
         set_tok_text_cstr(mks(""));
         return 0;
     }
-    ch = ri8(add(src, idx_pos));
+    ch = ri8(ADD(src, idx_pos));
     if (is_alpha_char(ch)) {
         next_tok_ident_(0);
         return 0;
@@ -577,7 +573,7 @@ function next_tok_(ch) {
         next_tok_num_(0);
         return 0;
     }
-    if (eq(ch, mkC("\""))) {
+    if (EQ(ch, mkC("\""))) {
         read_string_token();
         return 0;
     }
@@ -593,7 +589,7 @@ function next_tok() {
 }
 
 function expect(want) {
-    if (not(eq(tok, want))) {
+    if (NOT(EQ(tok, want))) {
         fail(mks("unexpected token\n"));
     }
     next_tok();
@@ -619,14 +615,14 @@ function emit_mov_stack_disp32_ebx(disp) { emit1(137); emit1(156); emit1(36); em
 function emit_mov_stack_disp32_eax(disp) { emit1(137); emit1(132); emit1(36); emit4(disp); }
 
 function emit_reverse_args_(argc, i, lo, hi) {
-    while (lt(i, div(argc, 2))) {
-        lo = mul(4, i);
-        hi = mul(4, msub(msub(argc, 1), i));
+    while (LT(i, DIV(argc, 2))) {
+        lo = MUL(4, i);
+        hi = MUL(4, SUB(SUB(argc, 1), i));
         emit_mov_eax_stack_disp32(lo);
         emit_mov_ebx_stack_disp32(hi);
         emit_mov_stack_disp32_ebx(lo);
         emit_mov_stack_disp32_eax(hi);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -641,7 +637,7 @@ function emit_jmp_placeholder_(p) { emit1(233); p = code_len; emit4(0); return p
 function emit_je_placeholder() { return emit_je_placeholder_(0); }
 function emit_jne_placeholder() { return emit_jne_placeholder_(0); }
 function emit_jmp_placeholder() { return emit_jmp_placeholder_(0); }
-function patch_rel32(pos, target) { patch4(pos, msub(target, add(pos, 4))); return 0; }
+function patch_rel32(pos, target) { patch4(pos, SUB(target, ADD(pos, 4))); return 0; }
 function emit_jmp_(target, p) { p = emit_jmp_placeholder(); patch_rel32(p, target); return 0; }
 function emit_jmp(target) { return emit_jmp_(target, 0); }
 function emit_add_eax_imm32(v) { emit1(5); emit4(v); }
@@ -682,9 +678,9 @@ function emit_sys_close() { emit_mov_ebx_eax(); emit_mov_eax_imm32(6); emit_int_
 function emit_sys_exit() { emit_mov_ebx_eax(); emit_mov_eax_imm32(1); emit_int_80(); }
 
 function emit1(b) {
-    ensure_code_capacity(add(code_len, 1));
-    wi8(add(code_p, code_len), b);
-    code_len = add(code_len, 1);
+    ensure_code_capacity(ADD(code_len, 1));
+    wi8(ADD(code_p, code_len), b);
+    code_len = ADD(code_len, 1);
     return 0;
 }
 
@@ -697,25 +693,25 @@ function emit4(v) {
 }
 
 function patch4(pos, v) {
-    wi8(add(code_p, pos), u32_byte(v, 0));
-    wi8(add(code_p, add(pos, 1)), u32_byte(v, 8));
-    wi8(add(code_p, add(pos, 2)), u32_byte(v, 16));
-    wi8(add(code_p, add(pos, 3)), u32_byte(v, 24));
+    wi8(ADD(code_p, pos), u32_byte(v, 0));
+    wi8(ADD(code_p, ADD(pos, 1)), u32_byte(v, 8));
+    wi8(ADD(code_p, ADD(pos, 2)), u32_byte(v, 16));
+    wi8(ADD(code_p, ADD(pos, 3)), u32_byte(v, 24));
     return 0;
 }
 
 function register_string_(text, start, len, i) {
     len = strlen(text);
     start = next_data_offset;
-    ensure_data_capacity(add(add(start, len), 1));
+    ensure_data_capacity(ADD(ADD(start, len), 1));
     i = 0;
-    while (lt(i, len)) {
-        wi8(add(data_byte_p, add(start, i)), ri8(add(text, i)));
-        i = add(i, 1);
+    while (LT(i, len)) {
+        wi8(ADD(data_byte_p, ADD(start, i)), ri8(ADD(text, i)));
+        i = ADD(i, 1);
     }
-    wi8(add(data_byte_p, add(start, len)), 0);
-    next_data_offset = add(add(start, len), 1);
-    if (lt(data_used, next_data_offset)) {
+    wi8(ADD(data_byte_p, ADD(start, len)), 0);
+    next_data_offset = ADD(ADD(start, len), 1);
+    if (LT(data_used, next_data_offset)) {
         data_used = next_data_offset;
     }
     return start;
@@ -744,7 +740,7 @@ function emit_mks_literal(text) {
 
 function emit_load_global_(name, idx, off) {
     idx = find_symbol(globals_p, global_count, name);
-    off = sym_val(add(globals_p, mul(idx, 8)));
+    off = sym_val(ADD(globals_p, MUL(idx, 8)));
     emit1(161);
     if (output_object) {
         record_reloc(code_len, name, 1);
@@ -762,7 +758,7 @@ function emit_load_global(name) {
 
 function emit_store_global_(name, idx, off) {
     idx = find_symbol(globals_p, global_count, name);
-    off = sym_val(add(globals_p, mul(idx, 8)));
+    off = sym_val(ADD(globals_p, MUL(idx, 8)));
     emit1(163);
     if (output_object) {
         record_reloc(code_len, name, 1);
@@ -838,13 +834,13 @@ function emit_brk_alloc() {
 }
 
 function push_loop_(id) {
-    id = add(next_loop_id, 1);
+    id = ADD(next_loop_id, 1);
     next_loop_id = id;
-    if (ge(loop_depth, 1024)) {
+    if (GE(loop_depth, 1024)) {
         fail(mks("too many nested loops\n"));
     }
-    wi32(add(loop_stack_p, mul(loop_depth, 4)), id);
-    loop_depth = add(loop_depth, 1);
+    wi32(ADD(loop_stack_p, MUL(loop_depth, 4)), id);
+    loop_depth = ADD(loop_depth, 1);
     return id;
 }
 
@@ -853,28 +849,28 @@ function push_loop() {
 }
 
 function pop_loop() {
-    if (gt(loop_depth, 0)) {
-        loop_depth = msub(loop_depth, 1);
+    if (GT(loop_depth, 0)) {
+        loop_depth = SUB(loop_depth, 1);
     }
     return 0;
 }
 
 function record_break(loop_id, patch_pos) {
-    if (ge(break_patch_count, 8192)) {
+    if (GE(break_patch_count, 8192)) {
         fail(mks("too many break patches\n"));
     }
-    wi32(add(break_patch_loop_p, mul(break_patch_count, 4)), loop_id);
-    wi32(add(break_patch_pos_p, mul(break_patch_count, 4)), patch_pos);
-    break_patch_count = add(break_patch_count, 1);
+    wi32(ADD(break_patch_loop_p, MUL(break_patch_count, 4)), loop_id);
+    wi32(ADD(break_patch_pos_p, MUL(break_patch_count, 4)), patch_pos);
+    break_patch_count = ADD(break_patch_count, 1);
     return 0;
 }
 
 function patch_breaks_(loop_id, target, i) {
-    while (lt(i, break_patch_count)) {
-        if (eq(ri32(add(break_patch_loop_p, mul(i, 4))), loop_id)) {
-            patch_rel32(ri32(add(break_patch_pos_p, mul(i, 4))), target);
+    while (LT(i, break_patch_count)) {
+        if (EQ(ri32(ADD(break_patch_loop_p, MUL(i, 4))), loop_id)) {
+            patch_rel32(ri32(ADD(break_patch_pos_p, MUL(i, 4))), target);
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -884,24 +880,28 @@ function patch_breaks(loop_id, target) {
 }
 
 function name_eq(name, text) {
-    return eq(strcmp(name, text), 0);
+    return EQ(strcmp(name, text), 0);
+}
+
+function name_is(name, lower, upper) {
+    return OR(name_eq(name, lower), name_eq(name, upper));
 }
 
 function name_list_set(list, i, name) {
-    wi32(add(list, mul(i, 4)), name);
+    wi32(ADD(list, MUL(i, 4)), name);
     return name;
 }
 
 function name_list_get(list, i) {
-    return ri32(add(list, mul(i, 4)));
+    return ri32(ADD(list, MUL(i, 4)));
 }
 
 function name_in_list_(name, list, count, i) {
-    while (lt(i, count)) {
+    while (LT(i, count)) {
         if (name_eq(name, name_list_get(list, i))) {
             return 1;
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -911,47 +911,65 @@ function name_in_list(name, list, count) {
 }
 
 function init_builtin1_names() {
-    builtin1_count = 9;
-    builtin1_names_p = xmalloc(mul(builtin1_count, 4));
+    builtin1_count = 11;
+    builtin1_names_p = xmalloc(MUL(builtin1_count, 4));
     name_list_set(builtin1_names_p, 0, mks("neg"));
-    name_list_set(builtin1_names_p, 1, mks("not"));
-    name_list_set(builtin1_names_p, 2, mks("ri32"));
-    name_list_set(builtin1_names_p, 3, mks("ri8"));
-    name_list_set(builtin1_names_p, 4, mks("brk"));
-    name_list_set(builtin1_names_p, 5, mks("close"));
-    name_list_set(builtin1_names_p, 6, mks("exit"));
-    name_list_set(builtin1_names_p, 7, mks("mks"));
-    name_list_set(builtin1_names_p, 8, mks("mkC"));
+    name_list_set(builtin1_names_p, 1, mks("NEG"));
+    name_list_set(builtin1_names_p, 2, mks("not"));
+    name_list_set(builtin1_names_p, 3, mks("NOT"));
+    name_list_set(builtin1_names_p, 4, mks("ri32"));
+    name_list_set(builtin1_names_p, 5, mks("ri8"));
+    name_list_set(builtin1_names_p, 6, mks("brk"));
+    name_list_set(builtin1_names_p, 7, mks("close"));
+    name_list_set(builtin1_names_p, 8, mks("exit"));
+    name_list_set(builtin1_names_p, 9, mks("mks"));
+    name_list_set(builtin1_names_p, 10, mks("mkC"));
     return 0;
 }
 
 function init_builtin2_names() {
-    builtin2_count = 18;
-    builtin2_names_p = xmalloc(mul(builtin2_count, 4));
+    builtin2_count = 34;
+    builtin2_names_p = xmalloc(MUL(builtin2_count, 4));
     name_list_set(builtin2_names_p, 0, mks("add"));
-    name_list_set(builtin2_names_p, 1, mks("sub"));
-    name_list_set(builtin2_names_p, 2, mks("mul"));
-    name_list_set(builtin2_names_p, 3, mks("div"));
-    name_list_set(builtin2_names_p, 4, mks("mod"));
-    name_list_set(builtin2_names_p, 5, mks("eq"));
-    name_list_set(builtin2_names_p, 6, mks("ne"));
-    name_list_set(builtin2_names_p, 7, mks("lt"));
-    name_list_set(builtin2_names_p, 8, mks("le"));
-    name_list_set(builtin2_names_p, 9, mks("gt"));
-    name_list_set(builtin2_names_p, 10, mks("ge"));
-    name_list_set(builtin2_names_p, 11, mks("and"));
-    name_list_set(builtin2_names_p, 12, mks("or"));
-    name_list_set(builtin2_names_p, 13, mks("xor"));
-    name_list_set(builtin2_names_p, 14, mks("shl"));
-    name_list_set(builtin2_names_p, 15, mks("shr"));
-    name_list_set(builtin2_names_p, 16, mks("wi32"));
-    name_list_set(builtin2_names_p, 17, mks("wi8"));
+    name_list_set(builtin2_names_p, 1, mks("ADD"));
+    name_list_set(builtin2_names_p, 2, mks("sub"));
+    name_list_set(builtin2_names_p, 3, mks("SUB"));
+    name_list_set(builtin2_names_p, 4, mks("mul"));
+    name_list_set(builtin2_names_p, 5, mks("MUL"));
+    name_list_set(builtin2_names_p, 6, mks("div"));
+    name_list_set(builtin2_names_p, 7, mks("DIV"));
+    name_list_set(builtin2_names_p, 8, mks("mod"));
+    name_list_set(builtin2_names_p, 9, mks("MOD"));
+    name_list_set(builtin2_names_p, 10, mks("eq"));
+    name_list_set(builtin2_names_p, 11, mks("EQ"));
+    name_list_set(builtin2_names_p, 12, mks("ne"));
+    name_list_set(builtin2_names_p, 13, mks("NE"));
+    name_list_set(builtin2_names_p, 14, mks("lt"));
+    name_list_set(builtin2_names_p, 15, mks("LT"));
+    name_list_set(builtin2_names_p, 16, mks("le"));
+    name_list_set(builtin2_names_p, 17, mks("LE"));
+    name_list_set(builtin2_names_p, 18, mks("gt"));
+    name_list_set(builtin2_names_p, 19, mks("GT"));
+    name_list_set(builtin2_names_p, 20, mks("ge"));
+    name_list_set(builtin2_names_p, 21, mks("GE"));
+    name_list_set(builtin2_names_p, 22, mks("and"));
+    name_list_set(builtin2_names_p, 23, mks("AND"));
+    name_list_set(builtin2_names_p, 24, mks("or"));
+    name_list_set(builtin2_names_p, 25, mks("OR"));
+    name_list_set(builtin2_names_p, 26, mks("xor"));
+    name_list_set(builtin2_names_p, 27, mks("XOR"));
+    name_list_set(builtin2_names_p, 28, mks("shl"));
+    name_list_set(builtin2_names_p, 29, mks("SHL"));
+    name_list_set(builtin2_names_p, 30, mks("shr"));
+    name_list_set(builtin2_names_p, 31, mks("SHR"));
+    name_list_set(builtin2_names_p, 32, mks("wi32"));
+    name_list_set(builtin2_names_p, 33, mks("wi8"));
     return 0;
 }
 
 function init_builtin3_names() {
     builtin3_count = 3;
-    builtin3_names_p = xmalloc(mul(builtin3_count, 4));
+    builtin3_names_p = xmalloc(MUL(builtin3_count, 4));
     name_list_set(builtin3_names_p, 0, mks("open"));
     name_list_set(builtin3_names_p, 1, mks("read"));
     name_list_set(builtin3_names_p, 2, mks("write"));
@@ -979,9 +997,9 @@ function builtin_arity(name) {
 }
 
 function emit_builtin1(name) {
-    if (name_eq(name, mks("neg"))) {
+    if (name_is(name, mks("neg"), mks("NEG"))) {
         emit_neg_eax();
-    } else if (name_eq(name, mks("not"))) {
+    } else if (name_is(name, mks("not"), mks("NOT"))) {
         emit_not_eax();
     } else if (name_eq(name, mks("ri32"))) {
         emit_read_i32();
@@ -1000,37 +1018,37 @@ function emit_builtin1(name) {
 }
 
 function emit_builtin2(name) {
-    if (name_eq(name, mks("add"))) {
+    if (name_is(name, mks("add"), mks("ADD"))) {
         emit_add_eax_ebx();
-    } else if (name_eq(name, mks("sub"))) {
+    } else if (name_is(name, mks("sub"), mks("SUB"))) {
         emit_sub_from_stack_top();
-    } else if (name_eq(name, mks("mul"))) {
+    } else if (name_is(name, mks("mul"), mks("MUL"))) {
         emit_imul_eax_ebx();
-    } else if (name_eq(name, mks("div"))) {
+    } else if (name_is(name, mks("div"), mks("DIV"))) {
         emit_div_stack_top_by_eax();
-    } else if (name_eq(name, mks("mod"))) {
+    } else if (name_is(name, mks("mod"), mks("MOD"))) {
         emit_mod_stack_top_by_eax();
-    } else if (name_eq(name, mks("eq"))) {
+    } else if (name_is(name, mks("eq"), mks("EQ"))) {
         emit_cmp_set(148);
-    } else if (name_eq(name, mks("ne"))) {
+    } else if (name_is(name, mks("ne"), mks("NE"))) {
         emit_cmp_set(149);
-    } else if (name_eq(name, mks("lt"))) {
+    } else if (name_is(name, mks("lt"), mks("LT"))) {
         emit_cmp_set(156);
-    } else if (name_eq(name, mks("le"))) {
+    } else if (name_is(name, mks("le"), mks("LE"))) {
         emit_cmp_set(158);
-    } else if (name_eq(name, mks("gt"))) {
+    } else if (name_is(name, mks("gt"), mks("GT"))) {
         emit_cmp_set(159);
-    } else if (name_eq(name, mks("ge"))) {
+    } else if (name_is(name, mks("ge"), mks("GE"))) {
         emit_cmp_set(157);
-    } else if (name_eq(name, mks("and"))) {
+    } else if (name_is(name, mks("and"), mks("AND"))) {
         emit_and_eax_ebx();
-    } else if (name_eq(name, mks("or"))) {
+    } else if (name_is(name, mks("or"), mks("OR"))) {
         emit_or_eax_ebx();
-    } else if (name_eq(name, mks("xor"))) {
+    } else if (name_is(name, mks("xor"), mks("XOR"))) {
         emit_xor_eax_ebx();
-    } else if (name_eq(name, mks("shl"))) {
+    } else if (name_is(name, mks("shl"), mks("SHL"))) {
         emit_shl_ebx_by_eax();
-    } else if (name_eq(name, mks("shr"))) {
+    } else if (name_is(name, mks("shr"), mks("SHR"))) {
         emit_shr_ebx_by_eax();
     } else if (name_eq(name, mks("wi32"))) {
         emit_write_i32();
@@ -1058,7 +1076,7 @@ function emit_builtin3(name) {
 function parse_builtin_call(name, argc) {
     expect(TOK_LPAREN);
     if (name_eq(name, mks("mks"))) {
-        if (not(eq(tok, TOK_STR))) {
+        if (NOT(EQ(tok, TOK_STR))) {
             fail(mks("mks expects a string literal\n"));
         }
         emit_mks_literal(tok_text);
@@ -1066,22 +1084,22 @@ function parse_builtin_call(name, argc) {
         expect(TOK_RPAREN);
         return 0;
     } else if (name_eq(name, mks("mkC"))) {
-        if (not(eq(tok, TOK_STR))) {
+        if (NOT(EQ(tok, TOK_STR))) {
             fail(mks("mkC expects a string literal\n"));
         }
         emit_mov_eax_imm32(ri8(tok_text));
         next_tok();
         expect(TOK_RPAREN);
         return 0;
-    } else if (eq(argc, 1)) {
+    } else if (EQ(argc, 1)) {
         parse_expr();
-    } else if (eq(argc, 2)) {
+    } else if (EQ(argc, 2)) {
         parse_expr();
         emit_push_eax();
         expect(TOK_COMMA);
         parse_expr();
         emit_pop_ebx();
-    } else if (eq(argc, 3)) {
+    } else if (EQ(argc, 3)) {
         parse_expr();
         emit_push_eax();
         expect(TOK_COMMA);
@@ -1096,9 +1114,9 @@ function parse_builtin_call(name, argc) {
         fail(mks("unsupported builtin arity\n"));
     }
     expect(TOK_RPAREN);
-    if (eq(argc, 1)) {
+    if (EQ(argc, 1)) {
         emit_builtin1(name);
-    } else if (eq(argc, 2)) {
+    } else if (EQ(argc, 2)) {
         emit_builtin2(name);
     } else {
         emit_builtin3(name);
@@ -1109,15 +1127,15 @@ function parse_builtin_call(name, argc) {
 function parse_user_call_args_(argc) {
     argc = 0;
     expect(TOK_LPAREN);
-    if (eq(tok, TOK_RPAREN)) {
+    if (EQ(tok, TOK_RPAREN)) {
         next_tok();
         return 0;
     }
     while (1) {
         parse_expr();
         emit_push_eax();
-        argc = add(argc, 1);
-        if (not(eq(tok, TOK_COMMA))) {
+        argc = ADD(argc, 1);
+        if (NOT(EQ(tok, TOK_COMMA))) {
             break;
         }
         next_tok();
@@ -1133,41 +1151,41 @@ function parse_user_call_args() {
 
 function emit_user_call(name, argc) {
     emit1(232);
-    wi32(add(call_target_p, mul(call_count, 4)), xstrdup(name));
-    wi32(add(call_pos_p, mul(call_count, 4)), code_len);
+    wi32(ADD(call_target_p, MUL(call_count, 4)), xstrdup(name));
+    wi32(ADD(call_pos_p, MUL(call_count, 4)), code_len);
     emit4(0);
-    if (gt(argc, 0)) {
-        emit_add_esp_imm32(mul(4, argc));
+    if (GT(argc, 0)) {
+        emit_add_esp_imm32(MUL(4, argc));
     }
-    wi32(add(call_argc_p, mul(call_count, 4)), argc);
-    call_count = add(call_count, 1);
+    wi32(ADD(call_argc_p, MUL(call_count, 4)), argc);
+    call_count = ADD(call_count, 1);
     return 0;
 }
 
 function patch_calls_(i, fi, name, pos, argc, addr, arity, rel) {
-    while (lt(i, call_count)) {
-        name = ri32(add(call_target_p, mul(i, 4)));
-        pos = ri32(add(call_pos_p, mul(i, 4)));
-        argc = ri32(add(call_argc_p, mul(i, 4)));
+    while (LT(i, call_count)) {
+        name = ri32(ADD(call_target_p, MUL(i, 4)));
+        pos = ri32(ADD(call_pos_p, MUL(i, 4)));
+        argc = ri32(ADD(call_argc_p, MUL(i, 4)));
         fi = find_symbol(functions_p, function_count, name);
-        if (lt(fi, 0)) {
+        if (LT(fi, 0)) {
             if (output_object) {
-                patch4(pos, neg(4));
+                patch4(pos, NEG(4));
                 record_external(name, 18);
                 record_reloc(pos, name, 2);
             } else {
                 fail_name(mks("undefined function: "), name);
             }
         } else {
-            addr = sym_val(add(functions_p, mul(fi, 8)));
-            arity = sym_val(add(function_arities_p, mul(fi, 8)));
-            if (not(eq(arity, argc))) {
+            addr = sym_val(ADD(functions_p, MUL(fi, 8)));
+            arity = sym_val(ADD(function_arities_p, MUL(fi, 8)));
+            if (NOT(EQ(arity, argc))) {
                 fail_name(mks("wrong argument count: "), name);
             }
-            rel = msub(addr, add(pos, 4));
+            rel = SUB(addr, ADD(pos, 4));
             patch4(pos, rel);
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1177,24 +1195,24 @@ function patch_calls() {
 }
 
 function record_external_(name, type, i, entry) {
-    if (ge(find_symbol(functions_p, function_count, name), 0)) {
+    if (GE(find_symbol(functions_p, function_count, name), 0)) {
         return 0;
     }
-    while (lt(i, external_count)) {
-        entry = add(externals_p, mul(i, 8));
-        if (eq(strcmp(sym_name(entry), name), 0)) {
+    while (LT(i, external_count)) {
+        entry = ADD(externals_p, MUL(i, 8));
+        if (EQ(strcmp(sym_name(entry), name), 0)) {
             return 0;
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
-    if (ge(external_count, 4096)) {
+    if (GE(external_count, 4096)) {
         fail(mks("too many external symbols\n"));
     }
-    entry = add(externals_p, mul(external_count, 8));
+    entry = ADD(externals_p, MUL(external_count, 8));
     sym_set_name(entry, xstrdup(name));
     sym_set_val(entry, external_count);
-    wi32(add(external_types_p, mul(external_count, 4)), type);
-    external_count = add(external_count, 1);
+    wi32(ADD(external_types_p, MUL(external_count, 4)), type);
+    external_count = ADD(external_count, 1);
     return 0;
 }
 
@@ -1203,76 +1221,76 @@ function record_external(name, type) {
 }
 
 function record_reloc(offset, name, type) {
-    if (ge(reloc_count, 8192)) {
+    if (GE(reloc_count, 8192)) {
         fail(mks("too many relocations\n"));
     }
-    wi32(add(reloc_offsets_p, mul(reloc_count, 4)), offset);
-    wi32(add(reloc_names_p, mul(reloc_count, 4)), xstrdup(name));
-    wi32(add(reloc_types_p, mul(reloc_count, 4)), type);
-    reloc_count = add(reloc_count, 1);
+    wi32(ADD(reloc_offsets_p, MUL(reloc_count, 4)), offset);
+    wi32(ADD(reloc_names_p, MUL(reloc_count, 4)), xstrdup(name));
+    wi32(ADD(reloc_types_p, MUL(reloc_count, 4)), type);
+    reloc_count = ADD(reloc_count, 1);
     return 0;
 }
 
 function record_data_patch(offset, addend) {
-    if (ge(data_patch_count, 8192)) {
+    if (GE(data_patch_count, 8192)) {
         fail(mks("too many relocations\n"));
     }
-    wi32(add(data_patch_offsets_p, mul(data_patch_count, 4)), offset);
-    wi32(add(data_patch_addends_p, mul(data_patch_count, 4)), addend);
-    data_patch_count = add(data_patch_count, 1);
+    wi32(ADD(data_patch_offsets_p, MUL(data_patch_count, 4)), offset);
+    wi32(ADD(data_patch_addends_p, MUL(data_patch_count, 4)), addend);
+    data_patch_count = ADD(data_patch_count, 1);
     return 0;
 }
 
 function parse_program() {
-    while (not(eq(tok, TOK_EOF))) {
-        if (eq(tok, TOK_VAR)) {
+    while (NOT(EQ(tok, TOK_EOF))) {
+        if (EQ(tok, TOK_VAR)) {
             parse_global();
         } else {
             parse_function();
         }
     }
-    if (and(not(output_object), not(has_main_function()))) {
+    if (AND(NOT(output_object), NOT(has_main_function()))) {
         fail(mks("missing main function\n"));
     }
     return 0;
 }
 
 function has_main_function() {
-    return ge(find_symbol(functions_p, function_count, mks("main")), 0);
+    return GE(find_symbol(functions_p, function_count, mks("main")), 0);
 }
 
 function parse_global_(name, entry) {
     expect(TOK_VAR);
-    if (not(eq(tok, TOK_IDENT))) {
+    if (NOT(EQ(tok, TOK_IDENT))) {
         fail(mks("expected global name\n"));
     }
     name = xstrdup(tok_text);
     next_tok();
-    if (eq(tok, TOK_ASSIGN)) {
+    if (EQ(tok, TOK_ASSIGN)) {
         fail_name(mks("global initializers are unsupported: "), name);
     }
     expect(TOK_SEMI);
-    if (or(ge(find_symbol(globals_p, global_count, name), 0), ge(find_symbol(functions_p, function_count, name), 0))) {
+    if (OR(GE(find_symbol(globals_p, global_count, name), 0), GE(find_symbol(functions_p, function_count, name), 0))) {
         fail_name(mks("duplicate global: "), name);
     }
-    entry = add(globals_p, mul(global_count, 8));
+    entry = ADD(globals_p, MUL(global_count, 8));
     sym_set_name(entry, name);
     if (output_object) {
         sym_set_val(entry, 0);
-        global_count = add(global_count, 1);
+        global_count = ADD(global_count, 1);
         return 0;
     }
-    if (lt(global_bytes, next_data_offset)) {
+    if (LT(global_bytes, next_data_offset)) {
         global_bytes = align4(next_data_offset);
         next_data_offset = global_bytes;
     }
     sym_set_val(entry, global_bytes);
-    global_count = add(global_count, 1);
-    global_bytes = add(global_bytes, 4);
-    if (lt(next_data_offset, global_bytes)) {
+    global_count = ADD(global_count, 1);
+    global_bytes = ADD(global_bytes, 4);
+    if (LT(next_data_offset, global_bytes)) {
         next_data_offset = global_bytes;
     }
-    if (lt(data_used, global_bytes)) {
+    if (LT(data_used, global_bytes)) {
         data_used = global_bytes;
     }
     ensure_data_capacity(data_used);
@@ -1284,32 +1302,32 @@ function parse_global() {
 }
 
 function param_name(param_names, i) {
-    return ri32(add(param_names, mul(i, 4)));
+    return ri32(ADD(param_names, MUL(i, 4)));
 }
 
 function param_set_name(param_names, i, name) {
-    wi32(add(param_names, mul(i, 4)), name);
+    wi32(ADD(param_names, MUL(i, 4)), name);
     return name;
 }
 
 function parse_function_params_(param_names, param_count, i) {
     param_count = 0;
-    if (not(eq(tok, TOK_RPAREN))) {
+    if (NOT(EQ(tok, TOK_RPAREN))) {
         while (1) {
-            if (not(eq(tok, TOK_IDENT))) {
+            if (NOT(EQ(tok, TOK_IDENT))) {
                 fail(mks("expected parameter name\n"));
             }
             i = 0;
-            while (lt(i, param_count)) {
-                if (eq(strcmp(param_name(param_names, i), tok_text), 0)) {
+            while (LT(i, param_count)) {
+                if (EQ(strcmp(param_name(param_names, i), tok_text), 0)) {
                     fail_name(mks("duplicate parameter: "), tok_text);
                 }
-                i = add(i, 1);
+                i = ADD(i, 1);
             }
             param_set_name(param_names, param_count, xstrdup(tok_text));
-            param_count = add(param_count, 1);
+            param_count = ADD(param_count, 1);
             next_tok();
-            if (not(eq(tok, TOK_COMMA))) {
+            if (NOT(EQ(tok, TOK_COMMA))) {
                 return param_count;
             }
             next_tok();
@@ -1322,10 +1340,10 @@ function enter_function_(name, param_count, param_names, i) {
     current_param_count = param_count;
     current_returned = 0;
     i = 0;
-    while (lt(i, param_count)) {
-        wi32(add(current_params_p, mul(i, 4)), xstrdup(param_name(param_names, i)));
-        wi32(add(current_param_offsets_p, mul(i, 4)), add(8, mul(4, i)));
-        i = add(i, 1);
+    while (LT(i, param_count)) {
+        wi32(ADD(current_params_p, MUL(i, 4)), xstrdup(param_name(param_names, i)));
+        wi32(ADD(current_param_offsets_p, MUL(i, 4)), ADD(8, MUL(4, i)));
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1336,11 +1354,11 @@ function enter_function(name, param_count, param_names) {
 
 function leave_function_(i) {
     i = 0;
-    while (lt(i, current_param_count)) {
-        free(ri32(add(current_params_p, mul(i, 4))));
-        wi32(add(current_params_p, mul(i, 4)), 0);
-        wi32(add(current_param_offsets_p, mul(i, 4)), 0);
-        i = add(i, 1);
+    while (LT(i, current_param_count)) {
+        free(ri32(ADD(current_params_p, MUL(i, 4))));
+        wi32(ADD(current_params_p, MUL(i, 4)), 0);
+        wi32(ADD(current_param_offsets_p, MUL(i, 4)), 0);
+        i = ADD(i, 1);
     }
     current_param_count = 0;
     current_returned = 0;
@@ -1352,9 +1370,9 @@ function leave_function() {
 }
 
 function parse_function_free_params_(param_names, param_count, i) {
-    while (lt(i, param_count)) {
+    while (LT(i, param_count)) {
         free(param_name(param_names, i));
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1362,7 +1380,7 @@ function parse_function_free_params_(param_names, param_count, i) {
 function parse_function_(name, param_count, param_names, entry) {
     param_names = xmalloc(4096);
     expect(TOK_FUNCTION);
-    if (not(eq(tok, TOK_IDENT))) {
+    if (NOT(EQ(tok, TOK_IDENT))) {
         fail(mks("expected function name\n"));
     }
     name = xstrdup(tok_text);
@@ -1371,21 +1389,21 @@ function parse_function_(name, param_count, param_names, entry) {
     param_count = parse_function_params_(param_names, 0, 0);
     expect(TOK_RPAREN);
 
-    if (ge(find_symbol(functions_p, function_count, name), 0)) {
+    if (GE(find_symbol(functions_p, function_count, name), 0)) {
         fail_name(mks("duplicate function: "), name);
     }
-    entry = add(functions_p, mul(function_count, 8));
+    entry = ADD(functions_p, MUL(function_count, 8));
     sym_set_name(entry, name);
     sym_set_val(entry, code_len);
-    entry = add(function_arities_p, mul(function_count, 8));
+    entry = ADD(function_arities_p, MUL(function_count, 8));
     sym_set_name(entry, xstrdup(name));
     sym_set_val(entry, param_count);
-    function_count = add(function_count, 1);
+    function_count = ADD(function_count, 1);
 
     emit_prologue();
     enter_function(name, param_count, param_names);
     expect(TOK_LBRACE);
-    while (and(not(eq(tok, TOK_RBRACE)), not(eq(tok, TOK_EOF)))) {
+    while (AND(NOT(EQ(tok, TOK_RBRACE)), NOT(EQ(tok, TOK_EOF)))) {
         parse_stmt();
     }
     expect(TOK_RBRACE);
@@ -1401,11 +1419,11 @@ function parse_function() {
 }
 
 function parse_stmt() {
-    if (eq(tok, TOK_LBRACE)) {
+    if (EQ(tok, TOK_LBRACE)) {
         parse_block();
         return 0;
     }
-    if (eq(tok, TOK_RETURN)) {
+    if (EQ(tok, TOK_RETURN)) {
         next_tok();
         parse_expr();
         expect(TOK_SEMI);
@@ -1413,15 +1431,15 @@ function parse_stmt() {
         current_returned = 1;
         return 0;
     }
-    if (eq(tok, TOK_IF)) {
+    if (EQ(tok, TOK_IF)) {
         parse_if();
         return 0;
     }
-    if (eq(tok, TOK_WHILE)) {
+    if (EQ(tok, TOK_WHILE)) {
         parse_while();
         return 0;
     }
-    if (eq(tok, TOK_BREAK)) {
+    if (EQ(tok, TOK_BREAK)) {
         parse_break();
         return 0;
     }
@@ -1432,7 +1450,7 @@ function parse_stmt() {
 
 function parse_block() {
     expect(TOK_LBRACE);
-    while (and(not(eq(tok, TOK_RBRACE)), not(eq(tok, TOK_EOF)))) {
+    while (AND(NOT(EQ(tok, TOK_RBRACE)), NOT(EQ(tok, TOK_EOF)))) {
         parse_stmt();
     }
     expect(TOK_RBRACE);
@@ -1447,7 +1465,7 @@ function parse_if_(false_patch, end_patch, after_then) {
     emit_test_eax_eax();
     false_patch = emit_je_placeholder();
     parse_stmt();
-    if (eq(tok, TOK_ELSE)) {
+    if (EQ(tok, TOK_ELSE)) {
         end_patch = emit_jmp_placeholder();
         after_then = code_len;
         patch_rel32(false_patch, after_then);
@@ -1487,17 +1505,17 @@ function parse_while() {
 }
 
 function parse_break() {
-    if (lt(loop_depth, 1)) {
+    if (LT(loop_depth, 1)) {
         fail(mks("break outside loop\n"));
     }
     expect(TOK_BREAK);
     expect(TOK_SEMI);
-    record_break(ri32(add(loop_stack_p, mul(msub(loop_depth, 1), 4))), emit_jmp_placeholder());
+    record_break(ri32(ADD(loop_stack_p, MUL(SUB(loop_depth, 1), 4))), emit_jmp_placeholder());
     return 0;
 }
 
 function parse_expr() {
-    if (eq(tok, TOK_IDENT)) {
+    if (EQ(tok, TOK_IDENT)) {
         parse_assign_or_primary();
         return 0;
     }
@@ -1506,25 +1524,25 @@ function parse_expr() {
 }
 
 function parse_assign_store_param_(name, i) {
-    while (lt(i, current_param_count)) {
-        if (eq(strcmp(ri32(add(current_params_p, mul(i, 4))), name), 0)) {
-            emit_store_param(ri32(add(current_param_offsets_p, mul(i, 4))));
+    while (LT(i, current_param_count)) {
+        if (EQ(strcmp(ri32(ADD(current_params_p, MUL(i, 4))), name), 0)) {
+            emit_store_param(ri32(ADD(current_param_offsets_p, MUL(i, 4))));
             free(name);
             return 1;
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function parse_assign_load_param_(name, i) {
-    while (lt(i, current_param_count)) {
-        if (eq(strcmp(ri32(add(current_params_p, mul(i, 4))), name), 0)) {
-            emit_load_param(ri32(add(current_param_offsets_p, mul(i, 4))));
+    while (LT(i, current_param_count)) {
+        if (EQ(strcmp(ri32(ADD(current_params_p, MUL(i, 4))), name), 0)) {
+            emit_load_param(ri32(ADD(current_param_offsets_p, MUL(i, 4))));
             free(name);
             return 1;
         }
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1532,22 +1550,22 @@ function parse_assign_load_param_(name, i) {
 function parse_assign_or_primary_(name, arity) {
     name = xstrdup(tok_text);
     next_tok();
-    if (eq(tok, TOK_ASSIGN)) {
+    if (EQ(tok, TOK_ASSIGN)) {
         next_tok();
         parse_expr();
         if (parse_assign_store_param_(name, 0)) {
             return 0;
         }
-        if (ge(find_symbol(globals_p, global_count, name), 0)) {
+        if (GE(find_symbol(globals_p, global_count, name), 0)) {
             emit_store_global(name);
             free(name);
             return 0;
         }
         fail_name(mks("assignment to unknown variable: "), name);
     }
-    if (eq(tok, TOK_LPAREN)) {
+    if (EQ(tok, TOK_LPAREN)) {
         arity = builtin_arity(name);
-        if (gt(arity, 0)) {
+        if (GT(arity, 0)) {
             parse_builtin_call(name, arity);
         } else {
             emit_user_call(name, parse_user_call_args());
@@ -1558,7 +1576,7 @@ function parse_assign_or_primary_(name, arity) {
     if (parse_assign_load_param_(name, 0)) {
         return 0;
     }
-    if (ge(find_symbol(globals_p, global_count, name), 0)) {
+    if (GE(find_symbol(globals_p, global_count, name), 0)) {
         emit_load_global(name);
         free(name);
         return 0;
@@ -1572,17 +1590,17 @@ function parse_assign_or_primary() {
 }
 
 function parse_primary() {
-    if (eq(tok, TOK_NUM)) {
+    if (EQ(tok, TOK_NUM)) {
         emit_mov_eax_imm32(tok_num);
         next_tok();
         return 0;
     }
-    if (eq(tok, TOK_STR)) {
+    if (EQ(tok, TOK_STR)) {
         emit_mks_literal(tok_text);
         next_tok();
         return 0;
     }
-    if (eq(tok, TOK_LPAREN)) {
+    if (EQ(tok, TOK_LPAREN)) {
         next_tok();
         parse_expr();
         expect(TOK_RPAREN);
@@ -1593,42 +1611,42 @@ function parse_primary() {
 }
 
 function align4(n) {
-    return mul(div(add(n, 3), 4), 4);
+    return MUL(DIV(ADD(n, 3), 4), 4);
 }
 
 function boutstr(s) {
     while (ri8(s)) {
         bout1(ri8(s));
-        s = add(s, 1);
+        s = ADD(s, 1);
     }
     return 0;
 }
 
 function pad_to(n) {
-    while (lt(bin_len, n)) {
+    while (LT(bin_len, n)) {
         bout1(0);
     }
     return 0;
 }
 
 function bout1(b) {
-    ensure_bin_capacity(add(bin_len, 1));
-    wi8(add(binbuf_p, bin_len), b);
-    bin_len = add(bin_len, 1);
+    ensure_bin_capacity(ADD(bin_len, 1));
+    wi8(ADD(binbuf_p, bin_len), b);
+    bin_len = ADD(bin_len, 1);
     return 0;
 }
 
 function bout2(v) {
     bout1(v);
-    bout1(div(v, 256));
+    bout1(DIV(v, 256));
     return 0;
 }
 
 function bout4(v) {
     bout1(v);
-    bout1(div(v, 256));
-    bout1(div(v, 65536));
-    bout1(div(v, 16777216));
+    bout1(DIV(v, 256));
+    bout1(DIV(v, 65536));
+    bout1(DIV(v, 16777216));
     return 0;
 }
 
@@ -1642,7 +1660,7 @@ function bin_reset() {
 }
 
 function emit_binary() {
-    if (ne(write(1, binbuf_p, bin_len), bin_len)) {
+    if (NE(write(1, binbuf_p, bin_len), bin_len)) {
         fail_msg(mks("write failed\n"), 13);
     }
     return 0;
@@ -1651,58 +1669,58 @@ function emit_binary() {
 function build_object_init_symbols_(sym_name_off, sym_index, i, pos, entry, name) {
     i = 0;
     pos = 1;
-    while (lt(i, function_count)) {
-        entry = add(functions_p, mul(i, 8));
+    while (LT(i, function_count)) {
+        entry = ADD(functions_p, MUL(i, 8));
         name = sym_name(entry);
-        wi32(add(sym_index, mul(i, 4)), add(i, 2));
-        wi32(add(sym_name_off, mul(i, 4)), pos);
-        pos = add(add(pos, strlen(name)), 1);
-        i = add(i, 1);
+        wi32(ADD(sym_index, MUL(i, 4)), ADD(i, 2));
+        wi32(ADD(sym_name_off, MUL(i, 4)), pos);
+        pos = ADD(ADD(pos, strlen(name)), 1);
+        i = ADD(i, 1);
     }
     i = 0;
-    while (lt(i, global_count)) {
-        entry = add(globals_p, mul(i, 8));
+    while (LT(i, global_count)) {
+        entry = ADD(globals_p, MUL(i, 8));
         name = sym_name(entry);
-        wi32(add(sym_index, mul(add(function_count, i), 4)), add(add(function_count, i), 2));
-        wi32(add(sym_name_off, mul(add(function_count, i), 4)), pos);
-        pos = add(add(pos, strlen(name)), 1);
-        i = add(i, 1);
+        wi32(ADD(sym_index, MUL(ADD(function_count, i), 4)), ADD(ADD(function_count, i), 2));
+        wi32(ADD(sym_name_off, MUL(ADD(function_count, i), 4)), pos);
+        pos = ADD(ADD(pos, strlen(name)), 1);
+        i = ADD(i, 1);
     }
     i = 0;
-    while (lt(i, external_count)) {
-        entry = add(externals_p, mul(i, 8));
+    while (LT(i, external_count)) {
+        entry = ADD(externals_p, MUL(i, 8));
         name = sym_name(entry);
-        wi32(add(sym_index, mul(add(add(function_count, global_count), i), 4)), add(add(add(function_count, global_count), i), 2));
-        wi32(add(sym_name_off, mul(add(add(function_count, global_count), i), 4)), pos);
-        pos = add(add(pos, strlen(name)), 1);
-        i = add(i, 1);
+        wi32(ADD(sym_index, MUL(ADD(ADD(function_count, global_count), i), 4)), ADD(ADD(ADD(function_count, global_count), i), 2));
+        wi32(ADD(sym_name_off, MUL(ADD(ADD(function_count, global_count), i), 4)), pos);
+        pos = ADD(ADD(pos, strlen(name)), 1);
+        i = ADD(i, 1);
     }
     return pos;
 }
 
 function build_object_emit_code_(i) {
-    while (lt(i, code_len)) {
-        bout1(ri8(add(code_p, i)));
-        i = add(i, 1);
+    while (LT(i, code_len)) {
+        bout1(ri8(ADD(code_p, i)));
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function build_object_emit_data_(i) {
-    while (lt(i, data_used)) {
-        bout1(ri8(add(data_byte_p, i)));
-        i = add(i, 1);
+    while (LT(i, data_used)) {
+        bout1(ri8(ADD(data_byte_p, i)));
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function patch_data_patches_(data_base, i, pos, addend) {
     i = 0;
-    while (lt(i, data_patch_count)) {
-        pos = ri32(add(data_patch_offsets_p, mul(i, 4)));
-        addend = ri32(add(data_patch_addends_p, mul(i, 4)));
-        patch4(pos, add(data_base, addend));
-        i = add(i, 1);
+    while (LT(i, data_patch_count)) {
+        pos = ri32(ADD(data_patch_offsets_p, MUL(i, 4)));
+        addend = ri32(ADD(data_patch_addends_p, MUL(i, 4)));
+        patch4(pos, ADD(data_base, addend));
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1715,19 +1733,19 @@ function build_binary_(base, ehsize, phsize, headers, entry, filesz, memsz, flag
     base = 134512640;
     ehsize = 52;
     phsize = 32;
-    headers = add(ehsize, phsize);
-    entry = add(base, headers);
-    data_off = align4(add(headers, code_len));
-    data_base = add(base, data_off);
-    filesz = add(data_off, data_used);
+    headers = ADD(ehsize, phsize);
+    entry = ADD(base, headers);
+    data_off = align4(ADD(headers, code_len));
+    data_base = ADD(base, data_off);
+    filesz = ADD(data_off, data_used);
     memsz = filesz;
     flags = 7;
 
     main_index = find_symbol(functions_p, function_count, mks("main"));
-    if (lt(main_index, 0)) {
+    if (LT(main_index, 0)) {
         fail(mks("missing main function\n"));
     }
-    rel = msub(sym_val(add(functions_p, mul(main_index, 8))), add(start_call_patch, 4));
+    rel = SUB(sym_val(ADD(functions_p, MUL(main_index, 8))), ADD(start_call_patch, 4));
     patch4(start_call_patch, rel);
     patch_data_patches(data_base);
 
@@ -1771,92 +1789,92 @@ function code_reset() {
 }
 
 function code_reset_data_(i) {
-    while (lt(i, data_cap)) {
-        wi8(add(data_byte_p, i), 0);
-        i = add(i, 1);
+    while (LT(i, data_cap)) {
+        wi8(ADD(data_byte_p, i), 0);
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function build_object_emit_relocs_(sym_index, ri, si, name, off, typ, sympos) {
-    while (lt(ri, reloc_count)) {
-        name = ri32(add(reloc_names_p, mul(ri, 4)));
-        off = ri32(add(reloc_offsets_p, mul(ri, 4)));
-        typ = ri32(add(reloc_types_p, mul(ri, 4)));
+    while (LT(ri, reloc_count)) {
+        name = ri32(ADD(reloc_names_p, MUL(ri, 4)));
+        off = ri32(ADD(reloc_offsets_p, MUL(ri, 4)));
+        typ = ri32(ADD(reloc_types_p, MUL(ri, 4)));
         if (name_eq(name, mks(".data"))) {
             bout4(off);
-            bout4(add(256, typ));
+            bout4(ADD(256, typ));
         } else {
             si = find_symbol(functions_p, function_count, name);
-            if (ge(si, 0)) {
+            if (GE(si, 0)) {
                 bout4(off);
-                bout4(add(mul(ri32(add(sym_index, mul(si, 4))), 256), typ));
+                bout4(ADD(MUL(ri32(ADD(sym_index, MUL(si, 4))), 256), typ));
             } else {
                 si = find_symbol(globals_p, global_count, name);
-                if (ge(si, 0)) {
+                if (GE(si, 0)) {
                     bout4(off);
-                    bout4(add(mul(ri32(add(sym_index, mul(add(function_count, si), 4))), 256), typ));
+                    bout4(ADD(MUL(ri32(ADD(sym_index, MUL(ADD(function_count, si), 4))), 256), typ));
                 } else {
                     si = find_symbol(externals_p, external_count, name);
-                    if (lt(si, 0)) {
+                    if (LT(si, 0)) {
                         fail_name(mks("unresolved relocation symbol: "), name);
                     }
-                    sympos = add(add(function_count, global_count), si);
+                    sympos = ADD(ADD(function_count, global_count), si);
                     bout4(off);
-                    bout4(add(mul(ri32(add(sym_index, mul(sympos, 4))), 256), typ));
+                    bout4(ADD(MUL(ri32(ADD(sym_index, MUL(sympos, 4))), 256), typ));
                 }
             }
         }
-        ri = add(ri, 1);
+        ri = ADD(ri, 1);
     }
     return 0;
 }
 
 function build_object_emit_functions_(sym_name_off, i, start, next_start, size, entry) {
-    while (lt(i, function_count)) {
-        entry = add(functions_p, mul(i, 8));
+    while (LT(i, function_count)) {
+        entry = ADD(functions_p, MUL(i, 8));
         start = sym_val(entry);
-        if (lt(add(i, 1), function_count)) {
-            next_start = sym_val(add(functions_p, mul(add(i, 1), 8)));
+        if (LT(ADD(i, 1), function_count)) {
+            next_start = sym_val(ADD(functions_p, MUL(ADD(i, 1), 8)));
         } else {
             next_start = code_len;
         }
-        size = msub(next_start, start);
-        bout4(ri32(add(sym_name_off, mul(i, 4))));
+        size = SUB(next_start, start);
+        bout4(ri32(ADD(sym_name_off, MUL(i, 4))));
         bout4(start);
         bout4(size);
         bout1(18);
         bout1(0);
         bout2(1);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function build_object_emit_globals_(sym_name_off, i, entry) {
-    while (lt(i, global_count)) {
-        entry = add(globals_p, mul(i, 8));
-        bout4(ri32(add(sym_name_off, mul(add(function_count, i), 4))));
+    while (LT(i, global_count)) {
+        entry = ADD(globals_p, MUL(i, 8));
+        bout4(ri32(ADD(sym_name_off, MUL(ADD(function_count, i), 4))));
         bout4(4);
         bout4(4);
         bout1(17);
         bout1(0);
         bout2(65522);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
 
 function build_object_emit_externals_(sym_name_off, i, sympos) {
-    while (lt(i, external_count)) {
-        sympos = add(add(function_count, global_count), i);
-        bout4(ri32(add(sym_name_off, mul(sympos, 4))));
+    while (LT(i, external_count)) {
+        sympos = ADD(ADD(function_count, global_count), i);
+        bout4(ri32(ADD(sym_name_off, MUL(sympos, 4))));
         bout4(0);
         bout4(0);
-        bout1(ri32(add(external_types_p, mul(i, 4))));
+        bout1(ri32(ADD(external_types_p, MUL(i, 4))));
         bout1(0);
         bout2(0);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1864,25 +1882,25 @@ function build_object_emit_externals_(sym_name_off, i, sympos) {
 function build_object_emit_strtab_(i, entry) {
     bout1(0);
     i = 0;
-    while (lt(i, function_count)) {
-        entry = add(functions_p, mul(i, 8));
+    while (LT(i, function_count)) {
+        entry = ADD(functions_p, MUL(i, 8));
         boutstr(sym_name(entry));
         bout1(0);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     i = 0;
-    while (lt(i, global_count)) {
-        entry = add(globals_p, mul(i, 8));
+    while (LT(i, global_count)) {
+        entry = ADD(globals_p, MUL(i, 8));
         boutstr(sym_name(entry));
         bout1(0);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     i = 0;
-    while (lt(i, external_count)) {
-        entry = add(externals_p, mul(i, 8));
+    while (LT(i, external_count)) {
+        entry = ADD(externals_p, MUL(i, 8));
         boutstr(sym_name(entry));
         bout1(0);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1900,9 +1918,9 @@ function build_object_emit_shstrtab() {
 }
 
 function build_object_emit_zeroes_(count, i) {
-    while (lt(i, count)) {
+    while (LT(i, count)) {
         bout1(0);
-        i = add(i, 1);
+        i = ADD(i, 1);
     }
     return 0;
 }
@@ -1917,17 +1935,17 @@ function build_object_(sym_name_off, sym_index, ehsize, shentsize, shnum, shstrn
     shstrndx = 7;
     strtab_size = build_object_init_symbols_(sym_name_off, sym_index, 0, 0, 0, 0);
     shstrtab_size = 54;
-    sym_count = add(add(add(function_count, global_count), external_count), 2);
-    symtab_size = mul(sym_count, 16);
-    rel_size = mul(reloc_count, 8);
+    sym_count = ADD(ADD(ADD(function_count, global_count), external_count), 2);
+    symtab_size = MUL(sym_count, 16);
+    rel_size = MUL(reloc_count, 8);
 
     text_off = ehsize;
-    data_off = align4(add(text_off, code_len));
-    rel_off = align4(add(data_off, data_used));
-    symtab_off = add(rel_off, rel_size);
-    strtab_off = add(symtab_off, symtab_size);
-    shstrtab_off = add(strtab_off, strtab_size);
-    shoff = align4(add(shstrtab_off, shstrtab_size));
+    data_off = align4(ADD(text_off, code_len));
+    rel_off = align4(ADD(data_off, data_used));
+    symtab_off = ADD(rel_off, rel_size);
+    strtab_off = ADD(symtab_off, symtab_size);
+    shstrtab_off = ADD(strtab_off, strtab_size);
+    shoff = align4(ADD(shstrtab_off, shstrtab_size));
 
     bin_reset();
 
@@ -1967,7 +1985,7 @@ function build_object_(sym_name_off, sym_index, ehsize, shentsize, shnum, shstrn
     bout4(1); bout4(1); bout4(6); bout4(0); bout4(text_off); bout4(code_len); bout4(0); bout4(0); bout4(1); bout4(0);
     bout4(7); bout4(9); bout4(64); bout4(0); bout4(rel_off); bout4(rel_size); bout4(5); bout4(1); bout4(4); bout4(8);
     bout4(17); bout4(1); bout4(3); bout4(0); bout4(data_off); bout4(data_used); bout4(0); bout4(0); bout4(1); bout4(0);
-    bout4(23); bout4(8); bout4(3); bout4(0); bout4(add(data_off, data_used)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
+    bout4(23); bout4(8); bout4(3); bout4(0); bout4(ADD(data_off, data_used)); bout4(0); bout4(0); bout4(0); bout4(1); bout4(0);
     bout4(28); bout4(2); bout4(0); bout4(0); bout4(symtab_off); bout4(symtab_size); bout4(6); bout4(2); bout4(4); bout4(16);
     bout4(36); bout4(3); bout4(0); bout4(0); bout4(strtab_off); bout4(strtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
     bout4(44); bout4(3); bout4(0); bout4(0); bout4(shstrtab_off); bout4(shstrtab_size); bout4(0); bout4(0); bout4(1); bout4(0);
@@ -1980,34 +1998,34 @@ function build_object() {
 
 function read_source_(path, fd, cap, buf, used, got, new_cap, new_buf) {
     fd = open(path, 0, 0);
-    if (lt(fd, 0)) {
+    if (LT(fd, 0)) {
         return 0;
     }
     cap = 4096;
-    buf = xmalloc(add(cap, 2));
+    buf = xmalloc(ADD(cap, 2));
     used = 0;
     while (1) {
-        if (ge(used, cap)) {
-            new_cap = mul(cap, 2);
-            new_buf = xmalloc(add(new_cap, 2));
+        if (GE(used, cap)) {
+            new_cap = MUL(cap, 2);
+            new_buf = xmalloc(ADD(new_cap, 2));
             copy_bytes_(new_buf, buf, used, 0);
             buf = new_buf;
             cap = new_cap;
         }
-        got = read(fd, add(buf, used), msub(cap, used));
-        if (lt(got, 0)) {
+        got = read(fd, ADD(buf, used), SUB(cap, used));
+        if (LT(got, 0)) {
             close(fd);
             return 0;
         }
-        if (eq(got, 0)) {
+        if (EQ(got, 0)) {
             break;
         }
-        used = add(used, got);
+        used = ADD(used, got);
     }
     close(fd);
-    wi8(add(buf, used), mkC("\n"));
-    wi8(add(add(buf, used), 1), 0);
-    src_len = add(used, 1);
+    wi8(ADD(buf, used), mkC("\n"));
+    wi8(ADD(ADD(buf, used), 1), 0);
+    src_len = ADD(used, 1);
     return buf;
 }
 
@@ -2020,7 +2038,7 @@ function compile(source_path) {
     init_lexer();
     code_reset();
     next_tok();
-    if (not(output_object)) {
+    if (NOT(output_object)) {
         emit_start();
     }
     parse_program();
@@ -2036,15 +2054,15 @@ function compile(source_path) {
 }
 
 function main_(argc, argv, arg1) {
-    if (eq(argc, 2)) {
+    if (EQ(argc, 2)) {
         output_object = 0;
-        return compile(ri32(add(argv, 4)));
+        return compile(ri32(ADD(argv, 4)));
     }
-    if (eq(argc, 3)) {
-        arg1 = ri32(add(argv, 4));
-        if (eq(strcmp(arg1, mks("-c")), 0)) {
+    if (EQ(argc, 3)) {
+        arg1 = ri32(ADD(argv, 4));
+        if (EQ(strcmp(arg1, mks("-c")), 0)) {
             output_object = 1;
-            return compile(ri32(add(argv, 8)));
+            return compile(ri32(ADD(argv, 8)));
         }
     }
     return usage(ri32(argv));

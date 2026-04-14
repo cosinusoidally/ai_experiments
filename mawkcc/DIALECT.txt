@@ -266,6 +266,11 @@ Builtins
 
 All operators and most runtime services are exposed as builtins.
 
+Arithmetic, comparison, and logical/bitwise builtins accept both lowercase
+and uppercase spellings. Lowercase is the original public spelling;
+uppercase is used by the bootstrap source so the same file can run as C,
+JavaScript, and awk without colliding with awk builtins such as `sub`.
+
 Unary builtins:
 
 - `neg(x)`

@@ -993,22 +993,31 @@ static int parse_user_call_args(void)
 
 static int builtin_arity(const char *name)
 {
-    if (strcmp(name, "neg") == 0 || strcmp(name, "not") == 0 ||
+    if (strcmp(name, "neg") == 0 || strcmp(name, "NEG") == 0 ||
+        strcmp(name, "not") == 0 || strcmp(name, "NOT") == 0 ||
         strcmp(name, "ri32") == 0 || strcmp(name, "ri8") == 0 ||
         strcmp(name, "brk") == 0 || strcmp(name, "close") == 0 ||
         strcmp(name, "exit") == 0 || strcmp(name, "mks") == 0 ||
         strcmp(name, "mkC") == 0) {
         return 1;
     }
-    if (strcmp(name, "add") == 0 || strcmp(name, "sub") == 0 ||
-        strcmp(name, "mul") == 0 || strcmp(name, "div") == 0 ||
-        strcmp(name, "mod") == 0 ||
-        strcmp(name, "eq") == 0 || strcmp(name, "ne") == 0 ||
-        strcmp(name, "lt") == 0 || strcmp(name, "le") == 0 ||
-        strcmp(name, "gt") == 0 || strcmp(name, "ge") == 0 ||
-        strcmp(name, "and") == 0 || strcmp(name, "or") == 0 ||
-        strcmp(name, "xor") == 0 || strcmp(name, "shl") == 0 ||
-        strcmp(name, "shr") == 0 || strcmp(name, "wi32") == 0 ||
+    if (strcmp(name, "add") == 0 || strcmp(name, "ADD") == 0 ||
+        strcmp(name, "sub") == 0 || strcmp(name, "SUB") == 0 ||
+        strcmp(name, "mul") == 0 || strcmp(name, "MUL") == 0 ||
+        strcmp(name, "div") == 0 || strcmp(name, "DIV") == 0 ||
+        strcmp(name, "mod") == 0 || strcmp(name, "MOD") == 0 ||
+        strcmp(name, "eq") == 0 || strcmp(name, "EQ") == 0 ||
+        strcmp(name, "ne") == 0 || strcmp(name, "NE") == 0 ||
+        strcmp(name, "lt") == 0 || strcmp(name, "LT") == 0 ||
+        strcmp(name, "le") == 0 || strcmp(name, "LE") == 0 ||
+        strcmp(name, "gt") == 0 || strcmp(name, "GT") == 0 ||
+        strcmp(name, "ge") == 0 || strcmp(name, "GE") == 0 ||
+        strcmp(name, "and") == 0 || strcmp(name, "AND") == 0 ||
+        strcmp(name, "or") == 0 || strcmp(name, "OR") == 0 ||
+        strcmp(name, "xor") == 0 || strcmp(name, "XOR") == 0 ||
+        strcmp(name, "shl") == 0 || strcmp(name, "SHL") == 0 ||
+        strcmp(name, "shr") == 0 || strcmp(name, "SHR") == 0 ||
+        strcmp(name, "wi32") == 0 ||
         strcmp(name, "wi8") == 0) {
         return 2;
     }
@@ -1034,9 +1043,9 @@ static void emit_user_call(const char *name, int argc)
 
 static void emit_builtin1(const char *name)
 {
-    if (strcmp(name, "neg") == 0) {
+    if (strcmp(name, "neg") == 0 || strcmp(name, "NEG") == 0) {
         emit_neg_eax();
-    } else if (strcmp(name, "not") == 0) {
+    } else if (strcmp(name, "not") == 0 || strcmp(name, "NOT") == 0) {
         emit_not_eax();
     } else if (strcmp(name, "ri32") == 0) {
         emit_read_i32();
@@ -1055,22 +1064,22 @@ static void emit_builtin1(const char *name)
 
 static void emit_builtin2(const char *name)
 {
-    if (strcmp(name, "add") == 0) emit_add_eax_ebx();
-    else if (strcmp(name, "sub") == 0) emit_sub_from_stack_top();
-    else if (strcmp(name, "mul") == 0) emit_imul_eax_ebx();
-    else if (strcmp(name, "div") == 0) emit_div_stack_top_by_eax();
-    else if (strcmp(name, "mod") == 0) emit_mod_stack_top_by_eax();
-    else if (strcmp(name, "eq") == 0) emit_cmp_set(148);
-    else if (strcmp(name, "ne") == 0) emit_cmp_set(149);
-    else if (strcmp(name, "lt") == 0) emit_cmp_set(156);
-    else if (strcmp(name, "le") == 0) emit_cmp_set(158);
-    else if (strcmp(name, "gt") == 0) emit_cmp_set(159);
-    else if (strcmp(name, "ge") == 0) emit_cmp_set(157);
-    else if (strcmp(name, "and") == 0) emit_and_eax_ebx();
-    else if (strcmp(name, "or") == 0) emit_or_eax_ebx();
-    else if (strcmp(name, "xor") == 0) emit_xor_eax_ebx();
-    else if (strcmp(name, "shl") == 0) emit_shl_ebx_by_eax();
-    else if (strcmp(name, "shr") == 0) emit_shr_ebx_by_eax();
+    if (strcmp(name, "add") == 0 || strcmp(name, "ADD") == 0) emit_add_eax_ebx();
+    else if (strcmp(name, "sub") == 0 || strcmp(name, "SUB") == 0) emit_sub_from_stack_top();
+    else if (strcmp(name, "mul") == 0 || strcmp(name, "MUL") == 0) emit_imul_eax_ebx();
+    else if (strcmp(name, "div") == 0 || strcmp(name, "DIV") == 0) emit_div_stack_top_by_eax();
+    else if (strcmp(name, "mod") == 0 || strcmp(name, "MOD") == 0) emit_mod_stack_top_by_eax();
+    else if (strcmp(name, "eq") == 0 || strcmp(name, "EQ") == 0) emit_cmp_set(148);
+    else if (strcmp(name, "ne") == 0 || strcmp(name, "NE") == 0) emit_cmp_set(149);
+    else if (strcmp(name, "lt") == 0 || strcmp(name, "LT") == 0) emit_cmp_set(156);
+    else if (strcmp(name, "le") == 0 || strcmp(name, "LE") == 0) emit_cmp_set(158);
+    else if (strcmp(name, "gt") == 0 || strcmp(name, "GT") == 0) emit_cmp_set(159);
+    else if (strcmp(name, "ge") == 0 || strcmp(name, "GE") == 0) emit_cmp_set(157);
+    else if (strcmp(name, "and") == 0 || strcmp(name, "AND") == 0) emit_and_eax_ebx();
+    else if (strcmp(name, "or") == 0 || strcmp(name, "OR") == 0) emit_or_eax_ebx();
+    else if (strcmp(name, "xor") == 0 || strcmp(name, "XOR") == 0) emit_xor_eax_ebx();
+    else if (strcmp(name, "shl") == 0 || strcmp(name, "SHL") == 0) emit_shl_ebx_by_eax();
+    else if (strcmp(name, "shr") == 0 || strcmp(name, "SHR") == 0) emit_shr_ebx_by_eax();
     else if (strcmp(name, "wi32") == 0) emit_write_i32();
     else if (strcmp(name, "wi8") == 0) emit_write_u8();
     else failf("unknown binary builtin `%s`", name);

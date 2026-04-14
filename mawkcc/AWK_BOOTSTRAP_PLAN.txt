@@ -26,9 +26,9 @@ Keep this file current while implementing the awk-hosted bootstrap path.
    Status: done.
 
    The file parses and runs under mawk with `scripts/mawkcc-awk-runner.awk`.
-   The mawk-reserved `sub` runtime-name issue is handled by the portable
-   `msub(a, b)` helper in `mawkcc_self.c`; the compiled language's `sub`
-   builtin is unchanged.
+   The mawk-reserved `sub` runtime-name issue is handled by uppercase
+   bootstrap operation aliases such as `SUB`; lowercase mawkcc builtins
+   remain accepted.
 
 5. Verify all bootstrap routes.
 

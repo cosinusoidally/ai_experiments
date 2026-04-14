@@ -505,15 +505,19 @@ function parse_user_call_args(    argc) {
 }
 
 function builtin_arity(name) {
-    if (name == "neg" || name == "not" || name == "ri32" || name == "ri8" || \
+    if (name == "neg" || name == "NEG" || name == "not" || name == "NOT" || name == "ri32" || name == "ri8" || \
         name == "brk" || name == "close" || name == "exit" || name == "mks" || \
         name == "mkC")
         return 1
-    if (name == "add" || name == "sub" || name == "mul" || name == "div" || \
-        name == "mod" || \
-        name == "eq" || name == "ne" || name == "lt" || name == "le" || \
-        name == "gt" || name == "ge" || name == "and" || name == "or" || \
-        name == "xor" || name == "shl" || name == "shr" || \
+    if (name == "add" || name == "ADD" || name == "sub" || name == "SUB" || \
+        name == "mul" || name == "MUL" || name == "div" || name == "DIV" || \
+        name == "mod" || name == "MOD" || \
+        name == "eq" || name == "EQ" || name == "ne" || name == "NE" || \
+        name == "lt" || name == "LT" || name == "le" || name == "LE" || \
+        name == "gt" || name == "GT" || name == "ge" || name == "GE" || \
+        name == "and" || name == "AND" || name == "or" || name == "OR" || \
+        name == "xor" || name == "XOR" || name == "shl" || name == "SHL" || \
+        name == "shr" || name == "SHR" || \
         name == "wi32" || name == "wi8")
         return 2
     if (name == "open" || name == "read" || name == "write")
@@ -544,9 +548,9 @@ function emit_reverse_args(argc,    i, lo, hi) {
 }
 
 function emit_builtin1(name) {
-    if (name == "neg")
+    if (name == "neg" || name == "NEG")
         emit_neg_eax()
-    else if (name == "not")
+    else if (name == "not" || name == "NOT")
         emit_not_eax()
     else if (name == "ri32")
         emit_read_i32()
@@ -563,37 +567,37 @@ function emit_builtin1(name) {
 }
 
 function emit_builtin2(name) {
-    if (name == "add")
+    if (name == "add" || name == "ADD")
         emit_add_eax_ebx()
-    else if (name == "sub")
+    else if (name == "sub" || name == "SUB")
         emit_sub_from_stack_top()
-    else if (name == "mul")
+    else if (name == "mul" || name == "MUL")
         emit_imul_eax_ebx()
-    else if (name == "div")
+    else if (name == "div" || name == "DIV")
         emit_div_stack_top_by_eax()
-    else if (name == "mod")
+    else if (name == "mod" || name == "MOD")
         emit_mod_stack_top_by_eax()
-    else if (name == "eq")
+    else if (name == "eq" || name == "EQ")
         emit_cmp_set(148)
-    else if (name == "ne")
+    else if (name == "ne" || name == "NE")
         emit_cmp_set(149)
-    else if (name == "lt")
+    else if (name == "lt" || name == "LT")
         emit_cmp_set(156)
-    else if (name == "le")
+    else if (name == "le" || name == "LE")
         emit_cmp_set(158)
-    else if (name == "gt")
+    else if (name == "gt" || name == "GT")
         emit_cmp_set(159)
-    else if (name == "ge")
+    else if (name == "ge" || name == "GE")
         emit_cmp_set(157)
-    else if (name == "and")
+    else if (name == "and" || name == "AND")
         emit_and_eax_ebx()
-    else if (name == "or")
+    else if (name == "or" || name == "OR")
         emit_or_eax_ebx()
-    else if (name == "xor")
+    else if (name == "xor" || name == "XOR")
         emit_xor_eax_ebx()
-    else if (name == "shl")
+    else if (name == "shl" || name == "SHL")
         emit_shl_ebx_by_eax()
-    else if (name == "shr")
+    else if (name == "shr" || name == "SHR")
         emit_shr_ebx_by_eax()
     else if (name == "wi32")
         emit_write_i32()

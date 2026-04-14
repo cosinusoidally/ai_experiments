@@ -9,7 +9,7 @@ BEGIN {
 
     argv = brk(8)
     wi32(argv, mks("mawkcc-awk"))
-    wi32(add(argv, 4), mks(SOURCE))
+    wi32(ADD(argv, 4), mks(SOURCE))
     status = main(2, argv)
     if (status != 0) {
         exit status
@@ -159,17 +159,30 @@ function write(fd, buf, len, i, s) {
 }
 
 function add(a, b) { return to_i32(a + b) }
+function ADD(a, b) { return to_i32(a + b) }
+function SUB(a, b) { return to_i32(a - b) }
 function mul(a, b) { return to_i32(a * b) }
+function MUL(a, b) { return to_i32(a * b) }
 function div(a, b) { return to_i32(int(a / b)) }
+function DIV(a, b) { return to_i32(int(a / b)) }
 function mod(a, b) { return to_i32(a - (int(a / b) * b)) }
+function MOD(a, b) { return to_i32(a - (int(a / b) * b)) }
 function neg(a) { return to_i32(-a) }
+function NEG(a) { return to_i32(-a) }
 function not(a) { return a ? 0 : 1 }
+function NOT(a) { return a ? 0 : 1 }
 function eq(a, b) { return a == b ? 1 : 0 }
+function EQ(a, b) { return a == b ? 1 : 0 }
 function ne(a, b) { return a != b ? 1 : 0 }
+function NE(a, b) { return a != b ? 1 : 0 }
 function lt(a, b) { return a < b ? 1 : 0 }
+function LT(a, b) { return a < b ? 1 : 0 }
 function le(a, b) { return a <= b ? 1 : 0 }
+function LE(a, b) { return a <= b ? 1 : 0 }
 function gt(a, b) { return a > b ? 1 : 0 }
+function GT(a, b) { return a > b ? 1 : 0 }
 function ge(a, b) { return a >= b ? 1 : 0 }
+function GE(a, b) { return a >= b ? 1 : 0 }
 
 function and(a, b, ua, ub, r, bit) {
     ua = to_u32(a)
@@ -185,6 +198,10 @@ function and(a, b, ua, ub, r, bit) {
         bit = bit * 2
     }
     return to_i32(r)
+}
+
+function AND(a, b) {
+    return and(a, b)
 }
 
 function or(a, b, ua, ub, r, bit) {
@@ -203,6 +220,10 @@ function or(a, b, ua, ub, r, bit) {
     return to_i32(r)
 }
 
+function OR(a, b) {
+    return or(a, b)
+}
+
 function xor(a, b, ua, ub, r, bit) {
     ua = to_u32(a)
     ub = to_u32(b)
@@ -219,6 +240,10 @@ function xor(a, b, ua, ub, r, bit) {
     return to_i32(r)
 }
 
+function XOR(a, b) {
+    return xor(a, b)
+}
+
 function shl(a, b, i, r) {
     b = to_u32(b) % 32
     r = to_u32(a)
@@ -228,6 +253,10 @@ function shl(a, b, i, r) {
     return to_i32(r)
 }
 
+function SHL(a, b) {
+    return shl(a, b)
+}
+
 function shr(a, b, i, r) {
     b = to_u32(b) % 32
     r = to_u32(a)
@@ -235,4 +264,8 @@ function shr(a, b, i, r) {
         r = int(r / 2)
     }
     return to_i32(r)
+}
+
+function SHR(a, b) {
+    return shr(a, b)
 }

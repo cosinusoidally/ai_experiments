@@ -21,6 +21,10 @@ Allowed Source Shape
 - Function definitions use `function name(args) { ... }`.
 - Global storage is declared with `var name;`.
 - All expressions use call syntax rather than infix operators.
+- Arithmetic, comparison, and logical/bitwise operations use uppercase
+  builtin names in bootstrap source: `ADD`, `SUB`, `MUL`, `DIV`, `MOD`,
+  `NEG`, `NOT`, `EQ`, `NE`, `LT`, `LE`, `GT`, `GE`, `AND`, `OR`, `XOR`,
+  `SHL`, and `SHR`.
 - String literals are limited to escapes accepted by mawkcc and the host
   readers.
 - Host runners provide the primitive runtime operations used by the source:
@@ -32,18 +36,18 @@ Host Name Restrictions
 The self source must avoid host-reserved names where a host runner cannot
 define a compatible function.
 
-In particular, mawk reserves `sub` and `close`. The self source should not
-depend on an awk runner defining those names. If the compiler source needs
-subtraction while being executed by awk, use a mawkcc-level helper that is
-valid in all hosts rather than extending the compiler dialect.
+In particular, mawk reserves `sub` and `close`. Bootstrap source therefore
+uses the uppercase operation aliases, such as `SUB`, rather than depending
+on an awk runner defining a lowercase `sub` function.
 
 Relationship To mawkcc Builtins
 -------------------------------
 
-The compiled language still exposes the mawkcc builtins documented in
-`DIALECT.txt`, including `sub`, `close`, `read`, `write`, and the arithmetic
-operators. This file only constrains the implementation source when that
-source is executed directly by a host runtime during bootstrap.
+The compiled language still exposes the lowercase mawkcc builtins
+documented in `DIALECT.txt`, including `sub`, `close`, `read`, and `write`.
+For bootstrap readability and awk compatibility, arithmetic and
+logical/bitwise operators also have uppercase aliases. Existing lowercase
+programs remain valid.
 
 Current Host Runners
 --------------------
@@ -51,4 +55,3 @@ Current Host Runners
 - `scripts/mawkcc-js-runner.js`: SpiderMonkey host runtime.
 - `scripts/mawkcc-awk-runner.awk`: mawk host runtime.
 - `mawkcc_gcc_support.c`: gcc support runtime.
-
