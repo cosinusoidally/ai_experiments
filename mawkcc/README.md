@@ -101,6 +101,22 @@ chmod +x ret42
 file ret42
 ```
 
+The compiler binaries also accept `-o output` instead of shell
+redirection:
+
+```sh
+artifacts/mawkcc.exe -o ret42 examples/ret42.c
+artifacts/mawkcc.exe -c -o source.o source.c
+```
+
+When running the awk reference directly, pass compiler-style flags after
+`--` so mawk does not treat them as awk options:
+
+```sh
+mawk -f cc.awk -- -o ret42 examples/ret42.c
+mawk -f cc.awk -- -c -o source.o source.c
+```
+
 Object output:
 
 ```sh
@@ -136,6 +152,8 @@ program:
 cc -ansi -m32 -g -O0 mawkcc_orig.c -o artifacts/mawkcc_orig
 artifacts/mawkcc_orig source.c > source-standalone
 artifacts/mawkcc_orig -c source.c > source.o
+artifacts/mawkcc_orig -o source-standalone source.c
+artifacts/mawkcc_orig -c -o source.o source.c
 ```
 
 Builtin set:

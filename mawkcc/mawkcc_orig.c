@@ -97,6 +97,7 @@ static int break_patch_count;
 static unsigned long global_bytes;
 static long start_call_patch;
 static int output_object;
+static const char *output_path;
 
 static void failf(const char *fmt, ...);
 static void *xmalloc(size_t n);
@@ -1739,7 +1740,20 @@ static void build_object(void)
 
 static void emit_binary(void)
 {
-    if (fwrite(binbuf, 1, (size_t)bin_len, stdout) != (size_t)bin_len) {
+    FILE *fp;
+    fp = stdout;
+    if (output_path) {
+        fp = fopen(output_path, "wb");
+        if (!fp) {
+            fprintf(stderr, "cannot open output %s\n", output_path);
+            exit(1);
+        }
+    }
+    if (fwrite(binbuf, 1, (size_t)bin_len, fp) != (size_t)bin_len) {
+        fprintf(stderr, "write failed\n");
+        exit(1);
+    }
+    if (output_path && fclose(fp) != 0) {
         fprintf(stderr, "write failed\n");
         exit(1);
     }
@@ -1820,14 +1834,30 @@ int main(int argc, char **argv)
     int argi;
 
     output_object = 0;
+    output_path = 0;
+    source_path = 0;
     argi = 1;
-    if (argc - argi == 2 && strcmp(argv[argi], "-c") == 0) {
-        output_object = 1;
-        source_path = argv[argi + 1];
-    } else if (argc - argi == 1) {
-        source_path = argv[argi];
-    } else {
-        fprintf(stderr, "usage: %s [-c] source\n", argv[0]);
+    while (argi < argc) {
+        if (strcmp(argv[argi], "-c") == 0) {
+            output_object = 1;
+        } else if (strcmp(argv[argi], "-o") == 0) {
+            argi++;
+            if (argi >= argc) {
+                fprintf(stderr, "usage: %s [-c] [-o output] source\n", argv[0]);
+                return 1;
+            }
+            output_path = argv[argi];
+        } else {
+            if (source_path) {
+                fprintf(stderr, "usage: %s [-c] [-o output] source\n", argv[0]);
+                return 1;
+            }
+            source_path = argv[argi];
+        }
+        argi++;
+    }
+    if (!source_path) {
+        fprintf(stderr, "usage: %s [-c] [-o output] source\n", argv[0]);
         return 1;
     }
 

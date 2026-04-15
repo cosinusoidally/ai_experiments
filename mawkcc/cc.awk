@@ -3,6 +3,7 @@ BEGIN {
     ORS = ""
     BRK_CUR_OFFSET = 0
     RUNTIME_BYTES = 4
+    parse_argv()
     if (format == "")
         format = "exec"
     init_ord_map()
@@ -33,6 +34,31 @@ function fail(msg,    near) {
     gsub(/\n/, "\\n", near)
     print "cc.awk: " msg " near `" near "`\n" > "/dev/stderr"
     exit 1
+}
+
+function usage() {
+    print "usage: cc.awk [-c] [-o output] source\n" > "/dev/stderr"
+    exit 1
+}
+
+function parse_argv(    i) {
+    for (i = 1; i < ARGC; i++) {
+        if (ARGV[i] == "--") {
+            delete ARGV[i]
+        } else if (ARGV[i] == "-c") {
+            format = "obj"
+            delete ARGV[i]
+        } else if (ARGV[i] == "-o") {
+            delete ARGV[i]
+            i++
+            if (i >= ARGC)
+                usage()
+            output_path = ARGV[i]
+            delete ARGV[i]
+        } else if (substr(ARGV[i], 1, 1) == "-") {
+            usage()
+        }
+    }
 }
 
 function init_lexer() {
@@ -1435,8 +1461,14 @@ function build_object(    i, ehsize, shentsize, shnum, shstrndx, text_off, data_
 }
 
 function emit_binary(    i) {
-    for (i = 1; i <= bin_len; i++)
-        printf "%c", bin[i]
+    if (output_path != "") {
+        for (i = 1; i <= bin_len; i++)
+            printf "%c", bin[i] > output_path
+        close(output_path)
+    } else {
+        for (i = 1; i <= bin_len; i++)
+            printf "%c", bin[i]
+    }
 }
 
 function push_loop(exit_patch,    id) {

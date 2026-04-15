@@ -1,4 +1,5 @@
 var output_object;
+var output_path;
 var src;
 var tok_text;
 var tok_text_cap;
@@ -139,7 +140,7 @@ function fail_name(s, name) {
 }
 
 function usage(program) {
-    write(2, mks("usage: mawkcc [-c] source\n"), 26);
+    write(2, mks("usage: mawkcc [-c] [-o output] source\n"), 39);
     return 1;
 }
 
@@ -1659,10 +1660,23 @@ function bin_reset() {
     return bin_reset_(0);
 }
 
-function emit_binary() {
-    if (NE(write(1, binbuf_p, bin_len), bin_len)) {
+function emit_binary_(fd) {
+    if (NE(write(fd, binbuf_p, bin_len), bin_len)) {
         fail_msg(mks("write failed\n"), 13);
     }
+    return 0;
+}
+
+function emit_binary(out_fd) {
+    if (EQ(output_path, 0)) {
+        return emit_binary_(1);
+    }
+    out_fd = open(output_path, 577, 438);
+    if (LT(out_fd, 0)) {
+        return fail_name(mks("cannot open output "), output_path);
+    }
+    emit_binary_(out_fd);
+    close(out_fd);
     return 0;
 }
 
@@ -2049,26 +2063,42 @@ function compile(source_path) {
     } else {
         build_binary();
     }
-    emit_binary();
+    emit_binary(0);
     return 0;
 }
 
-function main_(argc, argv, arg1) {
-    if (EQ(argc, 2)) {
-        output_object = 0;
-        return compile(ri32(ADD(argv, 4)));
-    }
-    if (EQ(argc, 3)) {
-        arg1 = ri32(ADD(argv, 4));
-        if (EQ(strcmp(arg1, mks("-c")), 0)) {
+function main_(argc, argv, i, arg, source_path) {
+    output_object = 0;
+    output_path = 0;
+    source_path = 0;
+    i = 1;
+    while (LT(i, argc)) {
+        arg = ri32(ADD(argv, MUL(i, 4)));
+        if (EQ(strcmp(arg, mks("-c")), 0)) {
             output_object = 1;
-            return compile(ri32(ADD(argv, 8)));
+        } else {
+            if (EQ(strcmp(arg, mks("-o")), 0)) {
+                i = ADD(i, 1);
+                if (GE(i, argc)) {
+                    return usage(ri32(argv));
+                }
+                output_path = ri32(ADD(argv, MUL(i, 4)));
+            } else {
+                if (NE(source_path, 0)) {
+                    return usage(ri32(argv));
+                }
+                source_path = arg;
+            }
         }
+        i = ADD(i, 1);
+    }
+    if (NE(source_path, 0)) {
+        return compile(source_path);
     }
     return usage(ri32(argv));
 }
 
 function main(argc, argv) {
     init_globals();
-    return main_(argc, argv, 0);
+    return main_(argc, argv, 0, 0, 0);
 }
