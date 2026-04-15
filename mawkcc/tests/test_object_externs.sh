@@ -16,8 +16,8 @@ rm -f "$CC_BIN" "$AWK_OBJ" "$C_MAWK_OBJ" "$PROVIDER_OBJ" "$BIN"
 
 cc -ansi -m32 -g -O0 "$ROOT/mawkcc_orig.c" -o "$CC_BIN"
 
-mawk -v format=obj -f "$ROOT/cc.awk" "$MAWK_SRC" > "$AWK_OBJ"
-"$CC_BIN" -c "$MAWK_SRC" > "$C_MAWK_OBJ"
+mawk -f "$ROOT/cc.awk" -- -c "$MAWK_SRC" -o "$AWK_OBJ"
+"$CC_BIN" -c "$MAWK_SRC" -o "$C_MAWK_OBJ"
 
 if ! cmp -s "$AWK_OBJ" "$C_MAWK_OBJ"; then
     echo "mawkcc_orig object output differs from cc.awk for $MAWK_SRC" >&2

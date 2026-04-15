@@ -31,8 +31,8 @@ int main(void)
 }
 EOF
 
-mawk -v format=obj -f "$ROOT/cc.awk" "$SRC" > "$AWK_OBJ"
-"$CC_BIN" -c "$SRC" > "$C_OBJ"
+mawk -f "$ROOT/cc.awk" -- -c "$SRC" -o "$AWK_OBJ"
+"$CC_BIN" -c "$SRC" -o "$C_OBJ"
 
 if ! cmp -s "$AWK_OBJ" "$C_OBJ"; then
     echo "mawkcc_orig object output differs from cc.awk for $SRC" >&2

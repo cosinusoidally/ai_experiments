@@ -8,7 +8,7 @@ BIN=$ARTIFACTS/shift42.bin
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/shift42.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/shift42.c" -o "$BIN"
 chmod +x "$BIN"
 
 set +e

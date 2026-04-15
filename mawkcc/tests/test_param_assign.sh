@@ -9,7 +9,7 @@ ERR=$ARTIFACTS/param42.err
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN" "$ERR"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/param42.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/param42.c" -o "$BIN"
 chmod +x "$BIN"
 
 FILE_OUT=$(file "$BIN")

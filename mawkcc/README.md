@@ -105,22 +105,22 @@ The compiler binaries also accept `-o output` instead of shell
 redirection:
 
 ```sh
-artifacts/mawkcc.exe -o ret42 examples/ret42.c
-artifacts/mawkcc.exe -c -o source.o source.c
+artifacts/mawkcc.exe examples/ret42.c -o ret42
+artifacts/mawkcc.exe -c source.c -o source.o
 ```
 
 When running the awk reference directly, pass compiler-style flags after
 `--` so mawk does not treat them as awk options:
 
 ```sh
-mawk -f cc.awk -- -o ret42 examples/ret42.c
-mawk -f cc.awk -- -c -o source.o source.c
+mawk -f cc.awk -- examples/ret42.c -o ret42
+mawk -f cc.awk -- -c source.c -o source.o
 ```
 
 Object output:
 
 ```sh
-mawk -v format=obj -f cc.awk source.c > source.o
+mawk -f cc.awk -- -c source.c -o source.o
 cc -m32 -c driver.c -o driver.o
 cc -m32 -no-pie driver.o source.o -o linked-program
 ```
@@ -152,8 +152,8 @@ program:
 cc -ansi -m32 -g -O0 mawkcc_orig.c -o artifacts/mawkcc_orig
 artifacts/mawkcc_orig source.c > source-standalone
 artifacts/mawkcc_orig -c source.c > source.o
-artifacts/mawkcc_orig -o source-standalone source.c
-artifacts/mawkcc_orig -c -o source.o source.c
+artifacts/mawkcc_orig source.c -o source-standalone
+artifacts/mawkcc_orig -c source.c -o source.o
 ```
 
 Builtin set:

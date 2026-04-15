@@ -8,7 +8,7 @@ BIN=$ARTIFACTS/string_then_global.bin
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/string_then_global.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/string_then_global.c" -o "$BIN"
 chmod +x "$BIN"
 
 set +e

@@ -8,7 +8,7 @@ BIN=$ARTIFACTS/exit33.bin
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/exit33.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/exit33.c" -o "$BIN"
 chmod +x "$BIN"
 
 set +e

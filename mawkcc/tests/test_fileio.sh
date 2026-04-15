@@ -10,7 +10,7 @@ OUTFILE=$ARTIFACTS/io42.dat
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN" "$ERR" "$OUTFILE"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/fileio42.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/fileio42.c" -o "$BIN"
 chmod +x "$BIN"
 
 FILE_OUT=$(file "$BIN")

@@ -9,7 +9,7 @@ ERR=$ARTIFACTS/argv90.err
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN" "$ERR"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/argv90.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/argv90.c" -o "$BIN"
 chmod +x "$BIN"
 
 FILE_OUT=$(file "$BIN")

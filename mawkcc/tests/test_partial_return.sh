@@ -8,7 +8,7 @@ BIN=$ARTIFACTS/partial_return.bin
 mkdir -p "$ARTIFACTS"
 rm -f "$BIN"
 
-mawk -f "$ROOT/cc.awk" "$ROOT/examples/partial_return.c" > "$BIN"
+mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/partial_return.c" -o "$BIN"
 chmod +x "$BIN"
 
 set +e

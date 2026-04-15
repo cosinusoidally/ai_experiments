@@ -25,11 +25,11 @@ rm -f "$CC_BIN" "$AWK_STDOUT" "$AWK_OUT" "$C_STDOUT" "$C_OUT" \
 cc -ansi -m32 -g -O0 "$ROOT/mawkcc_orig.c" -o "$CC_BIN"
 
 mawk -f "$ROOT/cc.awk" "$SRC" > "$AWK_STDOUT"
-mawk -f "$ROOT/cc.awk" -- -o "$AWK_OUT" "$SRC"
+mawk -f "$ROOT/cc.awk" -- "$SRC" -o "$AWK_OUT"
 "$CC_BIN" "$SRC" > "$C_STDOUT"
-"$CC_BIN" -o "$C_OUT" "$SRC"
+"$CC_BIN" "$SRC" -o "$C_OUT"
 "$SELF_BIN" "$SRC" > "$SELF_STDOUT"
-"$SELF_BIN" -o "$SELF_OUT" "$SRC"
+"$SELF_BIN" "$SRC" -o "$SELF_OUT"
 
 cmp -s "$AWK_STDOUT" "$AWK_OUT"
 cmp -s "$AWK_STDOUT" "$C_STDOUT"
@@ -54,9 +54,9 @@ function answer() {
 }
 EOF
 
-mawk -f "$ROOT/cc.awk" -- -c -o "$AWK_OBJ" "$OBJ_SRC"
-"$CC_BIN" -c -o "$C_OBJ" "$OBJ_SRC"
-"$SELF_BIN" -c -o "$SELF_OBJ" "$OBJ_SRC"
+mawk -f "$ROOT/cc.awk" -- -c "$OBJ_SRC" -o "$AWK_OBJ"
+"$CC_BIN" -c "$OBJ_SRC" -o "$C_OBJ"
+"$SELF_BIN" -c "$OBJ_SRC" -o "$SELF_OBJ"
 
 cmp -s "$AWK_OBJ" "$C_OBJ"
 cmp -s "$AWK_OBJ" "$SELF_OBJ"
