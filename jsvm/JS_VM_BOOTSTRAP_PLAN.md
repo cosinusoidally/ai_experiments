@@ -1,33 +1,37 @@
-# mawkcc JavaScript VM Bootstrap Plan
+# JavaScript VM Bootstrap Plan
 
 ## Purpose
 
-Build a JavaScript VM written in the mawkcc bootstrap dialect, starting from
-`../mawkcc/mawkcc_self.c`, then use it as another bootstrap route for
-`../mawkcc/mawkcc_self.c`.
+Build a JavaScript VM written in the mawkcc bootstrap dialect. The VM project
+is independent of the `../mawkcc` project: all VM source, scripts, fixtures,
+tests, artifacts, and documentation live under `jsvm/`. The `../mawkcc` tree
+may be used as a read-only upstream fixture and byte-identity oracle, but
+creating the VM must not require modifying files under `../mawkcc`.
 
 The initial implementation targets the current mawkcc subset: a deliberately
 small language shape that is valid as C, JavaScript, and AWK input. From that
 shared subset, the accepted JavaScript language grows in small audited steps
 until the VM reaches ECMAScript 5.1.
 
-The VM is not only a tree-walking JavaScript interpreter. It is a mixed runtime:
-a C JIT compiler for the mawkcc subset plus a JavaScript VM for the JavaScript
-parts. JavaScript code must be able to call JIT-compiled mawkcc-subset C code,
-and JIT-compiled code must be able to call back into JavaScript through an
-explicit, tested call boundary.
+The VM is a bytecode-first JavaScript interpreter with a later native JIT path
+for the mawkcc subset. JavaScript source is parsed into compact internal
+bytecode, then executed by an explicit bytecode interpreter unless a function
+is selected for mawkcc-subset native compilation. JavaScript code must be able
+to call JIT-compiled mawkcc-subset C code, and JIT-compiled code must be able
+to call back into JavaScript through an explicit, tested call boundary.
 
-The built VM route must also function as a drop-in replacement for mawkcc. It
-should accept the same command-line contract, including `-c`, `-o output`, and
-source input, and emit byte-identical compiler output for the same inputs.
+The built VM route should be able to run `../mawkcc/mawkcc_self.c` and emit the
+same mawkcc compiler output as the existing upstream routes. It should accept
+the same command-line contract, including `-c`, `-o output`, and source input,
+but its build and verification scripts are owned by `jsvm/`.
 
 The guiding invariant is the same as the rest of this repository:
 
 - every accepted bootstrap route must emit a byte-identical mawkcc compiler
   binary
 - every emitted compiler binary must rebuild itself byte-identically
-- the JS VM route must preserve the same bootstrap closure and CLI behavior as
-  the existing mawkcc route
+- the JS VM route must preserve the same bootstrap closure and CLI behavior
+  without editing the upstream `../mawkcc` tree
 - JS-to-JIT and JIT-to-JS calls must be deterministic, testable, and covered
   before being used by bootstrap code
 - new JavaScript behavior must be covered by small tests before being used
@@ -36,29 +40,58 @@ The guiding invariant is the same as the rest of this repository:
 
 ## Target Shape
 
-Add a new source file, tentatively `jsvm_self.c`, derived from
-`../mawkcc/mawkcc_self.c` and written in the same restricted dialect. The
-starting point should preserve the current runtime primitives, command-line
-parser, output modes, diagnostics style, and bootstrap discipline before VM
-behavior is introduced.
+Add a new source file, tentatively `jsvm_self.c`, written in the same
+restricted dialect as `../mawkcc/mawkcc_self.c`. The starting point may be
+mechanically derived from the upstream source, but once copied it is owned by
+`jsvm/` and evolves independently.
 
-Add a new build route:
+Add self-contained VM build and verification scripts under `jsvm/`:
 
 ```sh
-../mawkcc/scripts/build-mawkcc-jsvm.sh
+scripts/build-jsvm.sh
+scripts/run-tests.sh
+scripts/verify-mawkcc-output.sh
 ```
 
-That route should compile `jsvm_self.c`, ask it to execute
-`../mawkcc/mawkcc_self.c`, and write the generated mawkcc executable. The
-resulting executable should also be usable anywhere the current mawkcc
-executable is used. Once stable,
-`../mawkcc/scripts/verify-mawkcc-builds.sh` should compare this route with the
-reference awk, awk-hosted, self-hosted, reference-C, GCC, and SpiderMonkey
-JS routes.
+Those scripts should build `jsvm_self.c`, run local VM fixtures, and optionally
+ask the VM to execute `../mawkcc/mawkcc_self.c` as an integration fixture. The
+resulting mawkcc executable should be compared from inside `jsvm/` against a
+reference output produced by an existing upstream route. Do not add the VM
+route to upstream verification while developing `jsvm`.
+If the early bootstrap build needs an existing mawkcc compiler, pass it to the
+`jsvm` script as a toolchain input; do not modify upstream scripts or write
+artifacts into the upstream tree.
 
 Keep the existing SpiderMonkey route as the oracle while the VM is being
 built. Spidermonkey route will be retained even when we are done to give
 us more diverse bootstrap paths.
+
+## Project Boundary
+
+`jsvm/` is the build root for the JavaScript VM.
+
+Owned by `jsvm/`:
+
+- `jsvm_self.c`
+- VM build scripts
+- VM test scripts
+- source fixtures
+- expected-output fixtures
+- generated artifacts
+- VM bootstrap and architecture notes
+
+Read-only upstream inputs:
+
+- `../mawkcc/mawkcc_self.c`
+- `../mawkcc/BOOTSTRAP_DIALECT.txt`
+- existing upstream mawkcc build scripts used only during verification to
+  produce comparison artifacts
+- existing upstream SpiderMonkey route used only as an oracle
+
+Do not modify `../mawkcc` while implementing `jsvm`. If the VM exposes a
+mawkcc bug or missing upstream feature, record the finding in `jsvm/` and keep
+the VM change blocked until the upstream project is intentionally updated in a
+separate task.
 
 ## Initial VM Contract
 
@@ -80,8 +113,10 @@ The first milestone is "can run `../mawkcc/mawkcc_self.c` as JavaScript". That m
   runner
 - expose the mawkcc-compatible command-line behavior:
   `mawkcc [-c] [-o output] source`
-- JIT compile the mawkcc subset used by `../mawkcc/mawkcc_self.c`
-- run JavaScript bytecode for non-JIT JavaScript functions
+- compile accepted JavaScript functions to internal bytecode
+- run JavaScript bytecode with a deterministic interpreter
+- JIT compile the mawkcc subset used by `../mawkcc/mawkcc_self.c` only after
+  the bytecode path is tested
 - allow explicit calls from JavaScript into JIT-compiled mawkcc-subset C code
 - allow explicit callbacks from JIT-compiled code into JavaScript code
 
@@ -92,8 +127,8 @@ It should not pretend to implement features that are only partially wired.
 ## Representation Choices
 
 Use memory-backed tables, not host arrays or structs. The implementation
-must be compilable by mawkcc, so the VM should follow the storage style used
-by `../mawkcc/mawkcc_self.c`:
+must remain in the mawkcc bootstrap dialect, so the VM should follow the
+storage style used by `../mawkcc/mawkcc_self.c`:
 
 - one growable byte heap for source text, strings, bytecode, objects, and
   runtime memory
@@ -104,12 +139,14 @@ by `../mawkcc/mawkcc_self.c`:
 - helper accessors for table fields once repeated offset arithmetic becomes
   hard to audit
 
-For the initial VM, compile JavaScript functions into compact internal
-bytecode unless they match the mawkcc subset selected for JIT compilation. The
-mawkcc-subset path should emit the same kind of native compiler output that
-mawkcc already emits; the JavaScript path should run through bytecode. The two
-paths share one value representation, one call ABI, and one primitive runtime
-so crossing between JS and JIT-compiled code is explicit and auditable.
+For the initial VM, compile every accepted JavaScript function into compact
+internal bytecode and execute it with the bytecode interpreter. Add the
+mawkcc-subset native compilation path after the bytecode path can run small
+fixtures and has stable dumps for debugging. The mawkcc-subset path should
+emit the same kind of native compiler output that mawkcc already emits, but it
+must share the bytecode VM's value representation, call ABI, and primitive
+runtime so crossing between JS and JIT-compiled code is explicit and
+auditable.
 
 Suggested initial bytecode:
 
@@ -140,7 +177,7 @@ Before changing compiler behavior, mechanically inventory what
    words, punctuation, string escapes, builtin names, maximum arity, maximum
    function arity, and maximum nesting depth
 2. save the result as a checked-in fixture, for example
-   `../mawkcc/tests/jsvm_bootstrap_subset.txt`
+   `fixtures/mawkcc_bootstrap_subset.txt`
 3. document the accepted initial subset in a short companion file or in the
    header of `jsvm_self.c`
 
@@ -151,11 +188,12 @@ Exit criteria:
 - unsupported syntax has a named diagnostic path
 
 
-## Phase 1: Derive `jsvm_self.c` From `../mawkcc/mawkcc_self.c`
+## Phase 1: Create Independent `jsvm_self.c`
 
 There is no prototype implementation in a different dialect. The first working
-VM source is `jsvm_self.c`, built by copying or mechanically deriving from
-`../mawkcc/mawkcc_self.c` and then changing it in small audited steps.
+VM source is `jsvm_self.c`, built under `jsvm/`. It may start by copying or
+mechanically deriving code from `../mawkcc/mawkcc_self.c`, but after that copy
+all changes happen in `jsvm/`.
 
 Preserve these pieces from `../mawkcc/mawkcc_self.c` at the start:
 
@@ -170,18 +208,20 @@ Preserve these pieces from `../mawkcc/mawkcc_self.c` at the start:
 Then replace compiler-specific pieces with mixed VM/JIT pieces in layers:
 
 1. recognizer for the shared C/JS/AWK mawkcc subset
-2. C JIT path for functions that stay inside that subset
-3. JavaScript parser path for functions that need VM bytecode
+2. JavaScript parser and bytecode path for the accepted bootstrap subset
+3. C JIT path for functions that stay inside the mawkcc subset
 4. shared symbol, string, value, and call-frame tables
 5. explicit JS-to-JIT and JIT-to-JS call adapters
 6. primitive call dispatch shared by both execution paths
-7. compatibility path that behaves like mawkcc for existing build scripts
+7. compatibility path that uses the mawkcc CLI shape without changing
+   upstream build scripts
 
 Exit criteria:
 
-- `jsvm_self.c` compiles with `../mawkcc/cc.awk`
+- `jsvm_self.c` builds through `jsvm/scripts/build-jsvm.sh`
 - the derived executable still accepts mawkcc-compatible arguments
 - no host-only implementation or alternate-dialect prototype exists
+- no files under `../mawkcc` are changed
 - every semantic decision is captured in tests or notes before it is used by
   the next layer
 
@@ -200,8 +240,8 @@ Build in layers:
 5. statement parser
 6. expression parser for calls, literals, identifiers, and assignment
 7. bytecode emitter
-8. C JIT emitter for the mawkcc subset
-9. bytecode interpreter
+8. bytecode interpreter
+9. C JIT emitter for the mawkcc subset
 10. JS-to-JIT and JIT-to-JS call adapters
 11. primitive runtime
 12. mawkcc-compatible `main(argc, argv)`
@@ -212,7 +252,7 @@ implementation logic remains in the mawkcc bootstrap dialect.
 
 Exit criteria:
 
-- `jsvm_self.c` compiles with `../mawkcc/cc.awk`
+- `jsvm_self.c` builds through `jsvm/scripts/build-jsvm.sh`
 - the compiled VM can execute small bootstrap-subset programs
 - no host-only data structures, alternate-dialect implementation, or hidden
   JavaScript behavior remain
@@ -220,15 +260,17 @@ Exit criteria:
 
 ## Phase 3: Run `../mawkcc/mawkcc_self.c` Through The VM
 
-Add `../mawkcc/scripts/build-mawkcc-jsvm.sh`.
+Add `jsvm/scripts/verify-mawkcc-output.sh`.
 
 The script should:
 
-1. build `jsvm_self.c` with a known-good mawkcc route
+1. build `jsvm_self.c` through `jsvm/scripts/build-jsvm.sh`
 2. execute the resulting VM with mawkcc-compatible arguments:
    `-o output ../mawkcc/mawkcc_self.c`
 3. chmod the emitted compiler
-4. print the output path, matching the other build scripts
+4. compare the emitted compiler with a reference compiler output generated
+   from an existing upstream route
+5. write all generated files under `jsvm/artifacts/`
 
 The VM runtime should emulate the current JS runner's environment:
 
@@ -244,21 +286,23 @@ The VM runtime should emulate the current JS runner's environment:
 
 Exit criteria:
 
-- `../mawkcc/scripts/build-mawkcc-jsvm.sh` emits a compiler binary
-- that binary matches `../mawkcc/scripts/build-mawkcc-reference-awk.sh`
+- `jsvm/scripts/verify-mawkcc-output.sh` emits a compiler binary under
+  `jsvm/artifacts/`
+- that binary matches a reference output generated from an existing upstream
+  route
 - the emitted binary can rebuild `../mawkcc/mawkcc_self.c` identically
-- the VM-built executable can replace mawkcc in existing build scripts without
-  argument or output changes
+- the VM-built executable can use the same CLI shape as mawkcc without
+  changing any upstream scripts
 
 
-## Phase 4: Promote To A Verified Bootstrap Route
+## Phase 4: Promote Inside The JSVm Verification Matrix
 
-Once the route is stable, update verification:
+Once the route is stable, update `jsvm` verification:
 
-1. add the JS VM build to `../mawkcc/scripts/verify-mawkcc-builds.sh`
-2. add it to `../mawkcc/scripts/run-tests.sh` transitively through verification
-3. document it in `../mawkcc/SELFHOST.txt` and `../mawkcc/ARCHITECTURE.txt`
-4. keep SpiderMonkey JS in the matrix as an independent host reference
+1. add the mawkcc-output check to `jsvm/scripts/run-tests.sh`
+2. document the route in `jsvm/SELFHOST.txt` and `jsvm/ARCHITECTURE.txt`
+3. keep SpiderMonkey JS in the matrix as an independent host reference
+4. continue treating `../mawkcc` as read-only input
 
 Do not weaken byte identity to make the new route pass. Differences should
 be debugged as either VM semantic bugs, runtime primitive bugs, or hidden
@@ -266,17 +310,18 @@ host assumptions in `../mawkcc/mawkcc_self.c`.
 
 Exit criteria:
 
-- `../mawkcc/scripts/run-tests.sh` passes with the new route included
+- `jsvm/scripts/run-tests.sh` passes
 - the route is described as experimental or stable explicitly in docs
 - failures point to a small VM test before relying on the full compiler run
+- no upstream `../mawkcc` files are modified
 
 
 ## Phase 5: Self-Host The VM Route
 
-After `jsvm_self.c` can be built by mawkcc and can run `../mawkcc/mawkcc_self.c`, make
-the VM rebuild path explicit:
+After `jsvm_self.c` can be built through the local `jsvm` build script and can
+run `../mawkcc/mawkcc_self.c`, make the VM rebuild path explicit:
 
-1. build VM with reference awk mawkcc
+1. build VM with `jsvm/scripts/build-jsvm.sh`
 2. use that VM to run `../mawkcc/mawkcc_self.c` and produce a mawkcc compiler
 3. use that compiler to rebuild `jsvm_self.c`
 4. use the rebuilt VM to run `../mawkcc/mawkcc_self.c` again
@@ -292,8 +337,9 @@ Exit criteria:
 - VM rebuild differences are either byte-identical or intentionally
   explained by allowed executable-layout differences
 - the closure check is scripted
-- the rebuilt VM still behaves as a drop-in mawkcc replacement
+- the rebuilt VM still supports the mawkcc-compatible CLI shape
 - JS-to-JIT and JIT-to-JS calls still behave identically after the rebuild
+- all scripts and artifacts remain under `jsvm/`
 
 
 ## Phase 6: Grow Toward Real JavaScript
@@ -387,33 +433,42 @@ The biggest technical risks are:
 - recursive parser/interpreter depth exceeding the tiny bootstrap runtime's
   practical limits
 - JS-to-JIT value, stack, or calling-convention mismatches
-- command-line or output-mode drift that prevents the VM executable from being
-  a drop-in mawkcc replacement
+- command-line or output-mode drift that prevents the VM executable from using
+  the mawkcc-compatible CLI shape
+- accidental coupling to upstream `../mawkcc` scripts or generated artifacts
 - growing ES5.1 objects and closures without first stabilizing a clear object
   representation
 
 Mitigations:
 
-- define bytecode and object layouts before broad feature work
+- define bytecode, call-frame, and object layouts before broad feature work
+- keep bytecode execution as the first semantic implementation path; add JIT
+  only after bytecode fixtures pass
 - keep the bootstrap VM tests independent from the full compiler run
 - compare against the existing SpiderMonkey route until the VM is mature
 - run compatibility checks through the same mawkcc CLI shapes used by the
-  existing scripts
+  existing scripts, but from `jsvm/scripts`
 - keep the JS/JIT call ABI small, documented, and covered by direct tests
 - record every intentional ES5.1 deviation in the feature matrix
 - preserve the existing mawkcc bootstrap invariants at every step
+- keep upstream `../mawkcc` read-only during VM work
 
 
 ## Near-Term Checklist
 
-1. Generate and check in a `../mawkcc/mawkcc_self.c` shared C/JS/AWK subset inventory.
+1. Generate and check in a `../mawkcc/mawkcc_self.c` shared C/JS/AWK subset
+   inventory under `jsvm/fixtures/`.
 2. Decide final filenames for the VM source, tests, and build script.
-3. Derive `jsvm_self.c` from `../mawkcc/mawkcc_self.c`.
+3. Create `jsvm_self.c` under `jsvm/`; it may be mechanically derived from
+   `../mawkcc/mawkcc_self.c`, but all future edits stay under `jsvm/`.
 4. Preserve and test the mawkcc-compatible CLI before changing VM behavior.
-5. Implement the subset recognizer, C JIT path, and bytecode path directly in
-   `jsvm_self.c`.
-6. Add direct JS-to-JIT and JIT-to-JS call fixtures.
-7. Add small VM fixtures before attempting the full compiler run.
-8. Prove `jsvm_self.c` can emit a byte-identical mawkcc compiler.
-9. Add `../mawkcc/scripts/build-mawkcc-jsvm.sh`.
-10. Add the JS VM route to verification only after it is byte-identical.
+5. Implement the subset recognizer, bytecode emitter, and bytecode interpreter
+   directly in `jsvm_self.c`.
+6. Add the mawkcc-subset C JIT path after bytecode fixtures pass.
+7. Add direct JS-to-JIT and JIT-to-JS call fixtures.
+8. Add small VM fixtures before attempting the full compiler run.
+9. Prove `jsvm_self.c` can emit a byte-identical mawkcc compiler.
+10. Add `jsvm/scripts/build-jsvm.sh`.
+11. Add `jsvm/scripts/verify-mawkcc-output.sh`.
+12. Add the JS VM route to `jsvm/scripts/run-tests.sh` only after it is
+    byte-identical.
