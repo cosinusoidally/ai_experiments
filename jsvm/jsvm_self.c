@@ -140,7 +140,7 @@ function fail_name(s, name) {
 }
 
 function usage(program) {
-    write(2, mks("usage: mawkcc [-c] [-o output] source\n"), 39);
+    write(2, mks("usage: jsvm [--js source -- args...] [-c] [-o output] source\n"), 61);
     return 1;
 }
 
@@ -2098,7 +2098,30 @@ function main_(argc, argv, i, arg, source_path) {
     return usage(ri32(argv));
 }
 
+function main_js_(argc, argv, js_source, sep, js_argc, js_argv, i) {
+    if (LT(argc, 4)) {
+        return usage(ri32(argv));
+    }
+    js_source = ri32(ADD(argv, 2));
+    sep = ri32(ADD(argv, MUL(3, 4)));
+    if (NE(strcmp(sep, mks("--")), 0)) {
+        return usage(ri32(argv));
+    }
+    js_argc = SUB(argc, 3);
+    js_argv = xmalloc(MUL(js_argc, 4));
+    wi32(js_argv, js_source);
+    i = 1;
+    while (LT(i, js_argc)) {
+        wi32(ADD(js_argv, MUL(i, 4)), ri32(ADD(argv, MUL(ADD(i, 3), 4))));
+        i = ADD(i, 1);
+    }
+    return main_(js_argc, js_argv, 0, 0, 0);
+}
+
 function main(argc, argv) {
     init_globals();
+    if (AND(GE(argc, 2), EQ(strcmp(ri32(ADD(argv, 4)), mks("--js")), 0))) {
+        return main_js_(argc, argv, 0, 0, 0, 0, 0);
+    }
     return main_(argc, argv, 0, 0, 0);
 }

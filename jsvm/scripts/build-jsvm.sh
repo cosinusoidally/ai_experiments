@@ -20,6 +20,9 @@ case "$ROUTE" in
     js)
         "$ROOT/scripts/build-jsvm-js.sh" "$OUT"
         ;;
+    js-mode)
+        "$ROOT/scripts/build-jsvm-js-mode.sh" "$OUT"
+        ;;
     *)
         echo "unknown JSVM_BUILD_ROUTE: $ROUTE" >&2
         exit 2

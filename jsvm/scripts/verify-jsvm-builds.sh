@@ -12,6 +12,7 @@ AWK_BIN=$("$ROOT/scripts/build-jsvm-awk.sh" "$ARTIFACTS/jsvm.awk.exe")
 SELF_BIN=$("$ROOT/scripts/build-jsvm-self.sh" "$ARTIFACTS/jsvm.self.exe")
 GCC_BIN=$("$ROOT/scripts/build-jsvm-gcc.sh" "$ARTIFACTS/jsvm.gcc-output.exe")
 JS_BIN=$("$ROOT/scripts/build-jsvm-js.sh" "$ARTIFACTS/jsvm.js.exe")
+JS_MODE_BIN=$("$ROOT/scripts/build-jsvm-js-mode.sh" "$ARTIFACTS/jsvm.js-mode.exe")
 MAWKCC_JS_BIN=$("$ROOT/scripts/build-jsvm-mawkcc-js.sh" "$ARTIFACTS/jsvm.mawkcc-js.exe")
 
 compare_to_awk() {
@@ -27,9 +28,10 @@ compare_to_awk() {
 compare_to_awk self "$SELF_BIN"
 compare_to_awk gcc "$GCC_BIN"
 compare_to_awk js "$JS_BIN"
+compare_to_awk js-mode "$JS_MODE_BIN"
 compare_to_awk mawkcc-js "$MAWKCC_JS_BIN"
 
-for bin in "$AWK_BIN" "$SELF_BIN" "$GCC_BIN" "$JS_BIN" "$MAWKCC_JS_BIN"; do
+for bin in "$AWK_BIN" "$SELF_BIN" "$GCC_BIN" "$JS_BIN" "$JS_MODE_BIN" "$MAWKCC_JS_BIN"; do
     name=$(basename "$bin" .exe)
     rebuilt=$ARTIFACTS/$name.rebuilt.exe
     "$RUN_I386" "$bin" "$SOURCE" > "$rebuilt"
@@ -41,5 +43,5 @@ for bin in "$AWK_BIN" "$SELF_BIN" "$GCC_BIN" "$JS_BIN" "$MAWKCC_JS_BIN"; do
     fi
 done
 
-echo "ok: awk, self, gcc, js, and upstream mawkcc-js routes emit identical jsvm binaries"
+echo "ok: awk, self, gcc, js, js-mode, and upstream mawkcc-js routes emit identical jsvm binaries"
 echo "ok: each emitted jsvm binary rebuilds itself identically"
