@@ -370,8 +370,13 @@ External cjsawk Path
 The sibling cjsawk experiment uses mawkcc through:
 
 ```sh
+../../tcc_simple/experiments/cjsawk/mk_full_deps
 ../../tcc_simple/experiments/cjsawk/mk_full_mawkcc
 ```
+
+`mk_full_deps` must be run manually before `mk_full_mawkcc` when the cjsawk
+`artifacts/deps` tree is missing or stale. `mk_full_mawkcc` intentionally does
+not run it automatically, so dependency regeneration remains an explicit step.
 
 Run that script after compiler changes that could affect code generation,
 object output, syscall behavior, or bootstrap source compatibility. It is a
@@ -391,7 +396,9 @@ For compiler changes:
 4. Update `DIALECT.txt` and `BOOTSTRAP_DIALECT.txt` if syntax or builtin
    behavior changes.
 5. Run `scripts/run-tests.sh`.
-6. Run `../../tcc_simple/experiments/cjsawk/mk_full_mawkcc` when codegen or
+6. Run `../../tcc_simple/experiments/cjsawk/mk_full_deps` manually if the
+   cjsawk dependency artifacts are missing or stale.
+7. Run `../../tcc_simple/experiments/cjsawk/mk_full_mawkcc` when codegen or
    bootstrap behavior changed.
 
 For documentation-only changes, tests are not usually required, but running
