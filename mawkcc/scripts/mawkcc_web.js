@@ -4,6 +4,10 @@ function init() {
   document.body.appendChild(support_code);
 }
 
+function quit(c) {
+  console.log("quit, exit code: "+c);
+}
+
 vfs = {};
 
 function getfile(f) {
@@ -45,7 +49,6 @@ function check_ready() {
     setTimeout(check_ready, 100);
   }
 }
-
 
 function start() {
   os = {};
