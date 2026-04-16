@@ -64,9 +64,17 @@ function start() {
       console.log("readFile file not found: "+x);
       throw "error";
     }
-    console.log(f);
+//    console.log(f);
     return f;
   }
+
+  os.file.writeTypedArrayToFile = function(filename, data) {
+    console.log(filename);
+    console.log(filename.length);
+    console.log(data);
+    console.log(data.length);
+  }
+
   scriptArgs = ["mawkcc_self.c","mawkcc.exe"];
   os.getenv = function(x) {
     console.log("os.getenv: "+x);
