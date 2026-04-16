@@ -51,11 +51,12 @@ function start() {
   os = {};
   os.file = {};
   os.file.readFile = function(x) {
+    var f;
     console.log("readFile not impl: "+x);
-    if(x === "mawkcc_self.c") {
+    if(f=vfs[x]) {
       console.log("readFile reading: "+x);
     } else {
-      console.log("readFile is fussy about filenames: "+x);
+      console.log("readFile file not found: "+x);
       throw "error";
     }
     return [0,0,0];
