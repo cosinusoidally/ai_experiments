@@ -55,11 +55,14 @@ function start() {
     console.log("readFile not impl: "+x);
     if(f=vfs[x]) {
       console.log("readFile reading: "+x);
+      f = f.file.split("");
+      f = f.map(function(x){return x.charCodeAt(0)});
     } else {
       console.log("readFile file not found: "+x);
       throw "error";
     }
-    return [0,0,0];
+    console.log(f);
+    return f;
   }
   scriptArgs = ["mawkcc_self.c","mawkcc.exe"];
   os.getenv = function(x) {
