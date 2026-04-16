@@ -4,7 +4,50 @@ function init() {
   document.body.appendChild(support_code);
 }
 
-window.onload = function() {
+vfs = {};
+
+function getfile(f) {
+  var xhttp = new XMLHttpRequest();
+  var fd = {};
+  fd.ready = false;
+  vfs[f] = fd;
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+    // Typical action to be performed when the document is ready:
+    fd.file = xhttp.responseText;
+    fd.ready = true;
+  }
+  };
+  xhttp.open("GET", f, true);
+  xhttp.send();
+}
+
+window.onload=function() {
+  console.log("mawkcc_web");
+  getfile("mawkcc_self.c");
+
+  setTimeout(check_ready, 100);
+
+}
+
+function check_ready() {
+  var ready = true;
+  for(var i in vfs) {
+    if(vfs[i].ready == false){
+      ready=false;
+    }
+  }
+  if(ready) {
+    console.log("ready now");
+    start();
+  } else {
+    console.log("not ready");
+    setTimeout(check_ready, 100);
+  }
+}
+
+
+function start() {
   os = {};
   os.file = {};
   os.file.readFile = function(x) {
