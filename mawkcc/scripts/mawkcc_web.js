@@ -11,6 +11,14 @@ window.onload = function() {
     console.log("readFile not impl: "+x);
     throw "error";
   }
+  scriptArgs = ["mawkcc_self.c","mawkcc.exe"];
+  os.getenv = function(x) {
+    console.log("os.getenv: "+x);
+    return 0;
+  }
+  load = function(x) {
+    console.log("load dummy impl: "+x);
+  }
 
   init();
 }
