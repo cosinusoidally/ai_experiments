@@ -1,1 +1,0 @@
-mawkcc_self.c
