@@ -73,6 +73,12 @@ function start() {
     console.log(filename.length);
     console.log(data);
     console.log(data.length);
+    var l = document.createElement("a");
+    l.textContent="download mawkcc.exe";
+    // FIXME we should aviod typed array toBase64 as it's relatively new
+    l.href="data:application/octet-stream;base64,"+data.toBase64();
+    l.download = "mawkcc.exe";
+    document.body.appendChild(l);
   }
 
   scriptArgs = ["mawkcc_self.c","mawkcc.exe"];
