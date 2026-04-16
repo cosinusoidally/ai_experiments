@@ -3,3 +3,14 @@ function init() {
   support_code.src = "scripts/mawkcc-js-runner.js";
   document.body.appendChild(support_code);
 }
+
+window.onload = function() {
+  os = {};
+  os.file = {};
+  os.file.readFile = function(x) {
+    console.log("readFile not impl: "+x);
+    throw "error";
+  }
+
+  init();
+}
