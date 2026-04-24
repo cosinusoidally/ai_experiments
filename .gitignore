@@ -8,3 +8,5 @@
 !/mawkcc/artifacts/placeholder
 /jsvm/artifacts/*
 !/jsvm/artifacts/placeholder
+/jsapi_test/artifacts/*
+!/jsapi_test/artifacts/placeholder
