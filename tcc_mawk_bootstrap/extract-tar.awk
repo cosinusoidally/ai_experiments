@@ -15,7 +15,7 @@ BEGIN {
 
     run("mkdir -p \"" destdir "\"")
 
-    b64cmd = "base64 \"" tarfile "\""
+    b64cmd = encoder_cmd(tarfile)
     pending = ""
     decoded_len = 0
     decoded_pos = 1
@@ -68,6 +68,30 @@ function is_file(path) {
     return system("[ -f \"" path "\" ]") == 0
 }
 
+function shell_quote(s,    out) {
+    out = s
+    gsub(/'/, "'\"'\"'", out)
+    return "'" out "'"
+}
+
+function base_name(path,    out) {
+    out = path
+    sub(/^.*\//, "", out)
+    return out
+}
+
+function encoder_cmd(path,    mode, name) {
+    mode = ENVIRON["B64ENCODER"]
+    if (mode == "" || mode == "base64") {
+        return "base64 " shell_quote(path)
+    }
+    if (mode == "uuencode") {
+        name = base_name(path)
+        return "uuencode --base64 " shell_quote(path) " " shell_quote(name)
+    }
+    fail("unsupported B64ENCODER: " mode)
+}
+
 function b64val(c) {
     return index("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", c) - 1
 }
@@ -100,7 +124,13 @@ function fill_decoded(    line, q, a, b, c, d) {
         if ((b64cmd | getline line) <= 0) {
             return 0
         }
+        if (line ~ /^begin-base64 / || line == "====") {
+            continue
+        }
         gsub(/[^A-Za-z0-9+\/=]/, "", line)
+        if (line == "") {
+            continue
+        }
         pending = pending line
     }
 }
