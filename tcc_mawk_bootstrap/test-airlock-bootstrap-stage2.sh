@@ -11,8 +11,8 @@ seed_tcc=$seed_bootstrap/stage2/tcc
 seed_tccdir=$seed_bootstrap/common/lib/tcc
 tarball_bz2=$root/tcc-0.9.27.tar.bz2
 musl_tarball=$root/musl-1.1.24.tar.gz
-bootstrappable_h=/home/foo/src/gpt/lb/target/mescc-tools-extra/M2libc/bootstrappable.h
-bootstrappable_c=/home/foo/src/gpt/lb/target/mescc-tools-extra/M2libc/bootstrappable.c
+bootstrappable_h=$root/M2libc/bootstrappable.h
+bootstrappable_c=$root/M2libc/bootstrappable.c
 woody_mawk=/home/foo/src/woody_mawk/mawk
 
 if [ ! -x "$seed_tcc" ] || [ ! -d "$seed_tccdir/include" ]; then
