@@ -1,0 +1,171 @@
+#!/bin/sh
+set -eu
+
+cd /work
+mkdir -p build extracted/tcc extracted/musl bootstrap/common/lib/tcc/include bootstrap/stage0 bootstrap/stage1 bootstrap/stage2
+
+host_common_tccdir='__HOST_COMMON_TCCDIR__'
+host_crt_prefix='__HOST_CRT_PREFIX__'
+host_lib_paths='__HOST_LIB_PATHS__'
+host_libc_so='__HOST_LIBC_SO__'
+
+seed_cflags='-nostdinc -I/work/seed-headers -I/work/src'
+seed_ldflags='-nostdlib -L/lib -L/usr/lib /work/crt.c /lib/libc.so.6'
+
+./tcc-seed -B/work/seed-tccdir $seed_cflags $seed_ldflags /work/src/M2libc/bootstrappable.c /work/src/unbz2.c -o /work/build/unbz2
+./tcc-seed -B/work/seed-tccdir $seed_cflags $seed_ldflags /work/src/M2libc/bootstrappable.c /work/src/untar.c -o /work/build/untar
+
+/work/build/unbz2 --file /work/tcc-0.9.27.tar.bz2 --output /work/extracted/tcc.tar
+( cd /work/extracted/tcc && /work/build/untar --file /work/extracted/tcc.tar )
+
+gzip -dc /work/musl-1.1.24.tar.gz > /work/extracted/musl.tar
+( cd /work/extracted/musl && /work/build/untar --file /work/extracted/musl.tar )
+
+srcdir=/work/extracted/tcc/tcc-0.9.27
+musl_src=/work/extracted/musl/musl-1.1.24
+musl_inc=/work/bootstrap/musl-headers/include
+common=/work/bootstrap/common/lib/tcc
+
+mkdir -p "$musl_inc/bits"
+cp -Rf "$musl_src/include/." "$musl_inc"
+cp -Rf "$musl_src/arch/generic/bits/." "$musl_inc/bits"
+cp -Rf "$musl_src/arch/i386/bits/." "$musl_inc/bits"
+cp -f /work/musl-bits/alltypes.h "$musl_inc/bits/alltypes.h"
+cp -f /work/musl-bits/syscall.h "$musl_inc/bits/syscall.h"
+
+mawk '
+  /typedef va_list __gnuc_va_list;/ {
+    print;
+    print "typedef va_list __isoc_va_list;";
+    print "#define __DEFINED_va_list";
+    print "#define __DEFINED___isoc_va_list";
+    next
+  }
+  { print }
+' "$srcdir/include/stdarg.h" > "$srcdir/include/stdarg.h.new"
+mv "$srcdir/include/stdarg.h.new" "$srcdir/include/stdarg.h"
+
+mawk '
+  /#include <stdio.h>/ {
+    print "#include <stdarg.h>";
+    print;
+    next
+  }
+  /#include <stdarg.h>/ { next }
+  { print }
+' "$srcdir/tcc.h" > "$srcdir/tcc.h.new"
+mv "$srcdir/tcc.h.new" "$srcdir/tcc.h"
+
+mawk '
+  index($0, "sscanf(TCC_VERSION, \"%d.%d.%d\", &a, &b, &c);") {
+    print "        char *p;";
+    print "        a = strtol(TCC_VERSION, &p, 10);";
+    print "        if (*p == '\''.'\'') {";
+    print "            b = strtol(p + 1, &p, 10);";
+    print "            if (*p == '\''.'\'')";
+    print "                c = strtol(p + 1, 0, 10);";
+    print "        }";
+    next
+  }
+  { print }
+' "$srcdir/libtcc.c" > "$srcdir/libtcc.c.new"
+mv "$srcdir/libtcc.c.new" "$srcdir/libtcc.c"
+
+mawk '
+  index($0, "tcc_add_library_err(s1, \"c\");") {
+    print "        tcc_add_file(s1, \"__HOST_LIBC_SO__\");"
+    next
+  }
+  index($0, "return tcc_load_alacarte(s1, fd, size, 4);") {
+    print "                if (0 && s1->alacarte_link) return tcc_load_alacarte(s1, fd, size, 4);"
+    next
+  }
+  index($0, "return tcc_load_alacarte(s1, fd, size, 8);") {
+    print "                if (0 && s1->alacarte_link) return tcc_load_alacarte(s1, fd, size, 8);"
+    next
+  }
+  { print }
+' "$srcdir/tccelf.c" > "$srcdir/tccelf.c.new"
+mv "$srcdir/tccelf.c.new" "$srcdir/tccelf.c"
+
+mawk '
+  index($0, "return tcc_add_file(s1, buf);") {
+    print "    if (!strcmp(filename, TCC_LIBTCC1)) {";
+    print "        snprintf(buf, sizeof(buf), \"%s/libtcc1.o\", s1->tcc_lib_path);";
+    print "        if (tcc_add_file(s1, buf) < 0)";
+    print "            return -1;";
+    print "        snprintf(buf, sizeof(buf), \"%s/alloca86.o\", s1->tcc_lib_path);";
+    print "        if (tcc_add_file(s1, buf) < 0)";
+    print "            return -1;";
+    print "        return 0;";
+    print "    }";
+    print;
+    next
+  }
+  { print }
+' "$srcdir/tccelf.c" > "$srcdir/tccelf.c.new"
+mv "$srcdir/tccelf.c.new" "$srcdir/tccelf.c"
+
+cp -Rf "$srcdir/include/." "$common/include/"
+cp -f "$srcdir/tcclib.h" "$common/include/"
+version=$(sed -n '1p' "$srcdir/VERSION")
+
+tcc_cflags="-m32 -DCONFIG_TCCBOOT -DTCC_TARGET_I386 -DONE_SOURCE=0 -nostdinc -I. -I$srcdir -I$srcdir/include -isystem $musl_inc -isystem $musl_inc/bits"
+tcc_link="-L/lib -L/usr/lib /work/crt.c $common/libtcc1.o $common/alloca86.o /lib/libm.so.6 /lib/libdl.so.2 /lib/libc.so.6 -nostdlib"
+
+write_config() {
+  stage_dir=$1
+  cat > "$stage_dir/config.h" <<CFG
+/* generated inside airlock */
+#ifndef CONFIG_TCCDIR
+# define CONFIG_TCCDIR "$host_common_tccdir"
+#endif
+#ifndef CONFIG_TCC_CRTPREFIX
+# define CONFIG_TCC_CRTPREFIX "$host_crt_prefix"
+#endif
+#ifndef CONFIG_TCC_LIBPATHS
+# define CONFIG_TCC_LIBPATHS "$host_lib_paths"
+#endif
+#undef CONFIG_TCC_BCHECK
+#define TCC_VERSION "$version"
+CFG
+}
+
+build_libtcc1() {
+  cc=$1
+  obj_dir=/work/bootstrap/libtcc1
+  mkdir -p "$obj_dir"
+  rm -f "$obj_dir"/*.o "$common/libtcc1.a"
+
+  ( cd "$obj_dir" && sh -c "$cc -c \"$srcdir/lib/libtcc1.c\" -o libtcc1.o $tcc_cflags" )
+  ( cd "$obj_dir" && sh -c "$cc -c \"$srcdir/lib/alloca86.S\" -o alloca86.o $tcc_cflags" )
+  ( cd "$obj_dir" && sh -c "$cc -c \"$srcdir/lib/alloca86-bt.S\" -o alloca86-bt.o $tcc_cflags" )
+  cp -f "$obj_dir/libtcc1.o" "$common/libtcc1.o"
+  cp -f "$obj_dir/alloca86.o" "$common/alloca86.o"
+  cp -f "$obj_dir/alloca86-bt.o" "$common/alloca86-bt.o"
+  /work/tcc-seed -ar rcs "$common/libtcc1.a" "$obj_dir/libtcc1.o" "$obj_dir/alloca86.o" "$obj_dir/alloca86-bt.o"
+}
+
+build_stage() {
+  stage=$1
+  cc=$2
+  stage_dir=/work/bootstrap/$stage
+  write_config "$stage_dir"
+  objs=
+
+  for src in tcc.c libtcc.c tccpp.c tccgen.c tccelf.c tccasm.c tccrun.c i386-gen.c i386-link.c i386-asm.c; do
+    base=$(basename "$src")
+    obj=${base%.c}.o
+    ( cd "$stage_dir" && sh -c "$cc -c \"$srcdir/$src\" -o \"$obj\" $tcc_cflags" )
+    objs="$objs $stage_dir/$obj"
+  done
+
+  sh -c "$cc $objs -o \"$stage_dir/tcc\" $tcc_link"
+}
+
+build_libtcc1 '"/work/tcc-seed" -B/work/seed-tccdir'
+build_stage stage0 '"/work/tcc-seed" -B/work/seed-tccdir'
+build_stage stage1 '"/work/bootstrap/stage0/tcc" -B/work/bootstrap/common/lib/tcc'
+build_stage stage2 '"/work/bootstrap/stage1/tcc" -B/work/bootstrap/common/lib/tcc'
+
+/work/bootstrap/stage2/tcc -v
