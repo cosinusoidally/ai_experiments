@@ -22,6 +22,7 @@ BEGIN {
     if (run_wrapper == "" && is_file(root "/run-i386.sh")) {
         run_wrapper = root "/run-i386.sh"
     }
+    use_awk_extract = ENVIRON["USE_AWK_EXTRACT"]
     jobs = ENVIRON["JOBS"]
     if (jobs == "") {
         jobs = 1
@@ -29,9 +30,13 @@ BEGIN {
     bootstrap_cflags = "-m32 -DCONFIG_TCCBOOT -DTCC_TARGET_I386 -DONE_SOURCE=0"
     gcc_cflags = bootstrap_cflags " -I. -I\"" source_dir "\" -Wdeclaration-after-statement -fno-strict-aliasing -Wno-pointer-sign -Wno-sign-compare -Wno-unused-result"
     tcc_cflags = bootstrap_cflags " -I. -I\"" source_dir "\""
-    link_libs = "-lm -ldl -m32"
     i386_crt_prefix = "/usr/lib32:/lib32"
     i386_lib_paths = "/usr/lib32:/lib32:/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu"
+    i386_libdl = first_existing("/lib32/libdl.so.2 /usr/lib32/libdl.so.2 /lib/i386-linux-gnu/libdl.so.2 /usr/lib/i386-linux-gnu/libdl.so.2")
+    if (i386_libdl == "") {
+        fail("could not find 32-bit libdl.so.2")
+    }
+    link_libs = "-lm \"" i386_libdl "\" -m32"
 
     compiler_sources = "tcc.c libtcc.c tccpp.c tccgen.c tccelf.c tccasm.c tccrun.c i386-gen.c i386-link.c i386-asm.c"
     compiler_count = split(compiler_sources, compiler_list, " ")
@@ -41,11 +46,14 @@ BEGIN {
     require_cmd("cmp")
     require_cmd("mawk")
     require_cmd("base64")
-    if (!is_file(bz2_script)) {
-        fail("missing bz2 extractor script: " bz2_script)
-    }
-    if (!is_file(extract_script)) {
-        fail("missing extractor script: " extract_script)
+    require_cmd("tar")
+    if (use_awk_extract == "1") {
+        if (!is_file(bz2_script)) {
+            fail("missing bz2 extractor script: " bz2_script)
+        }
+        if (!is_file(extract_script)) {
+            fail("missing extractor script: " extract_script)
+        }
     }
     if (run_wrapper != "") {
         require_cmd(run_wrapper)
@@ -56,7 +64,13 @@ BEGIN {
     }
 
     run("rm -rf \"" build_root "\"")
-    run("mawk -f \"" extract_script "\" \"" tarball "\" \"" source_root "\"")
+    if (use_awk_extract == "1") {
+        run("mawk -f \"" extract_script "\" \"" tarball "\" \"" source_root "\"")
+    } else {
+        run("mkdir -p \"" source_root "\"")
+        run("tar -xjf \"" tarball "\" -C \"" source_root "\"")
+    }
+    patch_libtcc_version_parse()
     version = read_first_line(source_dir "/VERSION")
     run("mkdir -p \"" common_include "\"")
     run("cp -f \"" source_dir "/include\"/*.h \"" common_include "\"")
@@ -122,6 +136,34 @@ function base_no_ext(name, out) {
     sub(/^.*\//, "", out)
     sub(/\.[^.]+$/, "", out)
     return out
+}
+
+function first_existing(list,    n, items, i) {
+    n = split(list, items, " ")
+    for (i = 1; i <= n; ++i) {
+        if (is_file(items[i])) {
+            return items[i]
+        }
+    }
+    return ""
+}
+
+function patch_libtcc_version_parse(    src, tmp, cmd) {
+    src = source_dir "/libtcc.c"
+    tmp = src ".new"
+    cmd = "mawk '"
+    cmd = cmd "index($0, \"sscanf(TCC_VERSION, \\\"%d.%d.%d\\\", &a, &b, &c);\") {"
+    cmd = cmd " print \"        char *p;\";"
+    cmd = cmd " print \"        a = strtol(TCC_VERSION, &p, 10);\";"
+    cmd = cmd " print \"        if (*p == '\\''.'\\'') {\";"
+    cmd = cmd " print \"            b = strtol(p + 1, &p, 10);\";"
+    cmd = cmd " print \"            if (*p == '\\''.'\\'')\";"
+    cmd = cmd " print \"                c = strtol(p + 1, 0, 10);\";"
+    cmd = cmd " print \"        }\";"
+    cmd = cmd " next }"
+    cmd = cmd " { print }' \"" src "\" > \"" tmp "\""
+    run(cmd)
+    run("mv \"" tmp "\" \"" src "\"")
 }
 
 function write_config_h(stage_dir,    f) {
