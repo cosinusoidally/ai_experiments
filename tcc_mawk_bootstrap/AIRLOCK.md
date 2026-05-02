@@ -7,6 +7,14 @@ The entry point is:
 
 - [test-airlock-bootstrap-stage2.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-bootstrap-stage2.sh)
 - [test-airlock-bootstrap-portable.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-bootstrap-portable.sh)
+- [test-airlock-system-portable.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-system-portable.sh)
+
+Package build scripts live under:
+
+- [slackware-packages](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages)
+
+The layout mirrors the Slackware source tree, so `gzip` lives under
+`slackware-packages/a/gzip`.
 
 ## Goal
 
@@ -26,6 +34,48 @@ The first airlock produces both:
 The second airlock takes that tarball, injects it into a fresh Slackware 10.2
 airlock, extracts it inside the airlock, uses the extracted `tcc-glibc`, and
 regenerates the same tarball again.
+
+The third airlock is a package-test harness. It starts from the regenerated
+portable tarball and one or more built Slackware packages, installs those
+packages into a fresh Slackware 10.2 rootfs, and tests them with
+`tcc-portable` first on `PATH`.
+
+That second airlock is also where Slackware package builds can begin. The first
+package script in this tree is:
+
+- [slackware-packages/a/gzip/build.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/gzip/build.sh)
+
+## Slackware Package Objective
+
+The package work is aiming at a staged replacement of the base Slackware 10.2
+system with artifacts built by `tcc-portable`.
+
+The intended progression is:
+
+1. Build a relocatable `tcc-portable` inside the airlock.
+2. Use that compiler to rebuild Slackware source packages one by one with
+   package-local scripts under `slackware-packages/<series>/<name>/build.sh`.
+3. Install each rebuilt package into a fresh test airlock and verify that it
+   works in place of the stock system package.
+4. Repeat across the base system until the Slackware userland and toolchain are
+   predominantly built by `tcc-portable`.
+
+The immediate purpose of the package scripts is not just to produce isolated
+package archives. It is to establish a repeatable path for moving the running
+Slackware system itself over to TCC-built packages, incrementally and under
+test.
+
+In that model:
+
+- the second airlock is the package build environment
+- the third airlock is the package installation and validation environment
+- `tcc-portable` is the compiler intended to move toward the role of system
+  compiler
+
+`gzip` is the first concrete package in that sequence. The broader target is a
+Slackware base system where package builds no longer depend on the host toolchain,
+and where `tcc-portable` is sufficient to continue rebuilding and replacing the
+rest of the system.
 
 ## Inputs
 
@@ -76,6 +126,16 @@ For the second airlock run, the injected compiler input is:
 
 In that mode, no separate seed `tcc` binary is injected. The extracted
 portable tarball is the compiler input.
+
+The current second-airlock package test also injects Slackware 10.2 `gzip`
+source assets from:
+
+- `../../slackware-10.2/iso3/source/a/gzip`
+
+The current third-airlock system test injects:
+
+- `artifacts/airlock-bootstrap-portable/tcc-portable.tar`
+- `artifacts/airlock-bootstrap-portable/work/package-build/gzip/out/gzip-1.3.3-i386-2.tgz`
 
 ## Outer Script
 
@@ -145,6 +205,11 @@ For the second airlock, the outer script also compares:
 
 and expects them to match byte-for-byte.
 
+After the portable bundle has regenerated, the second airlock can run one or
+more package build scripts against:
+
+- `/work/bootstrap/tcc-portable/bin/tcc-glibc`
+
 ## Seed Headers And CRT
 
 The minimal headers under:
@@ -186,6 +251,14 @@ There are two distinct header layers:
 - `airlock/build-headers/` is used by the TCC stage drivers and wraps the
   musl headers generated inside the airlock.
 
+The portable toolchain also carries a small glibc compatibility object:
+
+- [airlock/glibc-compat.c](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/airlock/glibc-compat.c)
+
+This currently provides old-glibc `stat` / `fstat` / `lstat` shims via
+`__xstat`, `__fxstat`, and `__lxstat`, which was needed to build Slackware
+10.2 `gzip` with musl headers against the old glibc runtime.
+
 ## Host-Usable Final Compiler
 
 The airlock run emits a portable bundle at:
@@ -196,6 +269,10 @@ and a normalized tarball at:
 
 - `artifacts/airlock-bootstrap-stage2/tcc-portable.tar`
 - `artifacts/airlock-bootstrap-portable/tcc-portable.tar`
+
+The current package-build output from the second airlock is:
+
+- `artifacts/airlock-bootstrap-portable/work/package-build/gzip/out/gzip-1.3.3-i386-2.tgz`
 
 The important files inside that directory are:
 
@@ -295,6 +372,31 @@ Expected completion line:
 airlock portable bootstrap complete
 ```
 
+That second script also runs the current `gzip` package build script, which
+uses `gzip.SlackBuild` as the package-shape reference but replaces the missing
+`make` step with an explicit `tcc-glibc` compile/link sequence.
+
+Then run the third airlock package-test harness:
+
+```sh
+cd /home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap
+./test-airlock-system-portable.sh
+```
+
+Expected completion line:
+
+```text
+airlock portable system harness complete
+```
+
+That third script:
+
+- extracts `tcc-portable.tar` into `/opt/tcc-portable`
+- installs the built `gzip` package into the fresh airlock rootfs
+- uses the package-provided `/bin/gzip` in place of the stock environment
+- compiles a small C program with `tcc-glibc`
+- checks `gzip` round-tripping inside the airlock
+
 Example host usage:
 
 ```sh
@@ -325,5 +427,10 @@ The important properties are:
 - the second airlock rebuilds from only that tarball using extracted
   `tcc-glibc`
 - the regenerated portable tarball matches the input tarball byte-for-byte
+- the second airlock can build at least one real Slackware package with the
+  regenerated portable compiler
+- `gzip-1.3.3-i386-2.tgz` is currently the first validated package artifact
+- the third airlock can install and test that package in a fresh Slackware
+  rootfs with `tcc-portable` as the compiler on `PATH`
 - `tcc-glibc` from that bundle works after copying the directory elsewhere on
   the host

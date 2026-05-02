@@ -151,6 +151,15 @@ build_libtcc1() {
   fi
 }
 
+build_glibc_compat() {
+  cc=$1
+  obj_dir=/work/bootstrap/glibc-compat
+  mkdir -p "$obj_dir"
+  rm -f "$obj_dir"/*.o "$common/glibc-compat.o"
+  ( cd "$obj_dir" && "$cc" -c /work/airlock/glibc-compat.c -o glibc-compat.o )
+  cp -f "$obj_dir/glibc-compat.o" "$common/glibc-compat.o"
+}
+
 build_stage() {
   stage=$1
   cc=$2
@@ -178,16 +187,19 @@ make_portable_bundle() {
 
   cp -Rf "$common/include/." "$portable/lib/tcc/include/"
   cp -f /work/crt.c "$portable/lib/tcc/crt.c"
+  cp -f "$common/glibc-compat.o" "$portable/lib/tcc/glibc-compat.o"
   cp -f "$common/libtcc1.a" "$portable/lib/tcc/libtcc1.a"
   cp -f "$common/libtcc1.o" "$portable/lib/tcc/libtcc1.o"
   cp -f "$common/alloca86.o" "$portable/lib/tcc/alloca86.o"
 }
 
 if [ -f /work/tcc-portable.tar ]; then
+  build_glibc_compat "$seed_cc"
   build_libtcc1 "$seed_cc"
   build_stage stage0 "$seed_cc"
 else
   write_driver /work/bootstrap/seed-driver "$bootstrap_seed_tcc" "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
+  build_glibc_compat /work/bootstrap/seed-driver
   build_libtcc1 /work/bootstrap/seed-driver
   build_stage stage0 /work/bootstrap/seed-driver
 fi

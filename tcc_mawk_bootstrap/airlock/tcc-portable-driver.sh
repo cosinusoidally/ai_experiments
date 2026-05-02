@@ -66,6 +66,7 @@ if [ "$mode" = link ]; then
     -nostdlib \
     "$@" \
     "$crt_c" \
+    "$common_tccdir/glibc-compat.o" \
     "$common_tccdir/libtcc1.o" \
     "$common_tccdir/alloca86.o" \
     "$libc_so" \
