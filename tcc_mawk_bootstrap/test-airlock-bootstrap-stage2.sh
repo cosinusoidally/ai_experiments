@@ -21,23 +21,12 @@ if [ ! -x "$seed_tcc" ] || [ ! -d "$seed_tccdir/include" ]; then
 fi
 
 rm -rf "$artifacts"
-mkdir -p "$rootfs" "$work" "$work/musl-bits" "$work/seed-headers/sys" "$work/src/M2libc"
+mkdir -p "$rootfs" "$work" "$work/seed-headers/sys" "$work/src/M2libc" "$work/airlock"
 
 tmp_img=$artifacts/initrd.ext2
 gzip -dc "$initrd_gz" > "$tmp_img"
 debugfs -R "rdump / $rootfs" "$tmp_img" >/dev/null 2>"$artifacts/debugfs-rdump.err"
 mkdir -p "$rootfs/work"
-
-tmp_musl=$artifacts/musl-host
-mkdir -p "$tmp_musl"
-tar -xzf "$musl_tarball" -C "$tmp_musl"
-mkdir -p "$work/musl-bits"
-sed -f "$tmp_musl/musl-1.1.24/tools/mkalltypes.sed" \
-  "$tmp_musl/musl-1.1.24/arch/i386/bits/alltypes.h.in" \
-  "$tmp_musl/musl-1.1.24/include/alltypes.h.in" \
-  > "$work/musl-bits/alltypes.h"
-cp -f "$tmp_musl/musl-1.1.24/arch/i386/bits/syscall.h.in" "$work/musl-bits/syscall.h"
-sed -n -e 's/__NR_/SYS_/p' "$tmp_musl/musl-1.1.24/arch/i386/bits/syscall.h.in" >> "$work/musl-bits/syscall.h"
 
 cp -f "$seed_tcc" "$work/tcc-seed"
 mkdir -p "$work/seed-tccdir/include"
@@ -55,16 +44,14 @@ chmod 0755 "$rootfs/usr/bin/mawk"
 cp -Rf "$root/airlock/seed-headers/." "$work/seed-headers/"
 cp -f "$root/airlock/crt.c" "$work/crt.c"
 cp -f "$root/airlock/inside-airlock.sh.in" "$work/inside-airlock.sh"
+mkdir -p "$work/airlock/build-headers"
+cp -f "$root/airlock/build-headers/stdarg.h.in" "$work/airlock/build-headers/stdarg.h"
+cp -f "$root/airlock/build-headers/stdio.h.in" "$work/airlock/build-headers/stdio.h"
+cp -f "$root/airlock/tcc-driver.sh.in" "$work/airlock/tcc-driver.sh.in"
+cp -f "$root/airlock/tcc-glibc.sh.in" "$work/airlock/tcc-glibc.sh.in"
 
 chmod 0755 "$work/inside-airlock.sh"
-sed -i \
-  -e "s|__HOST_COMMON_TCCDIR__|$work/bootstrap/common/lib/tcc|g" \
-  -e "s|__HOST_CRT_PREFIX__|/usr/lib32:/lib32:/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu|g" \
-  -e "s|__HOST_LIB_PATHS__|/usr/lib32:/lib32:/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu|g" \
-  -e "s|__HOST_LIBC_SO__|/usr/lib32/libc.so.6|g" \
-  "$work/inside-airlock.sh"
-
-bwrap \
+HOST_ARTIFACT_ROOT="$work/bootstrap" bwrap \
   --ro-bind "$rootfs" / \
   --bind "$work" /work \
   --dev /dev \

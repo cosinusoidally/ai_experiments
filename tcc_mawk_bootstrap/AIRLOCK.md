@@ -65,22 +65,11 @@ The outer script does four jobs:
 1. Unpack the Slackware initrd into `artifacts/airlock-bootstrap-stage2/rootfs`.
 2. Prepare a writable work tree at
    `artifacts/airlock-bootstrap-stage2/work`.
-3. Precompute the generated musl headers that are awkward to synthesize inside
-   the airlock:
-   - `bits/alltypes.h`
-   - `bits/syscall.h`
+3. Copy the static airlock support files into that work tree.
 4. Run the inner script with `bwrap` in a rootless environment.
 
-The outer script also substitutes host-specific placeholders in
-`inside-airlock.sh`:
-
-- `__HOST_COMMON_TCCDIR__`
-- `__HOST_CRT_PREFIX__`
-- `__HOST_LIB_PATHS__`
-- `__HOST_LIBC_SO__`
-
-These are baked into the final compiler so the final `stage2/tcc` can run on
-the host rather than only inside `/work/...` in the airlock.
+No musl headers are pre-generated on the host. They are derived inside the
+airlock from `musl-1.1.24.tar.gz`.
 
 ## Inner Script
 
@@ -96,13 +85,19 @@ Inside the airlock it does this:
 2. Build `untar` with the injected seed `tcc`.
 3. Extract `tcc-0.9.27.tar.bz2`.
 4. Extract `musl-1.1.24.tar.gz`.
-5. Build a local musl header overlay.
-6. Patch the extracted TCC sources.
-7. Build `libtcc1` objects and `libtcc1.a` inside the airlock.
+5. Generate a local musl include tree inside `/work/bootstrap/musl-headers`.
+6. Install wrapper headers and driver scripts used to keep the TCC build off
+   host headers and host startup objects.
+7. Build `libtcc1.o`, `alloca86.o`, and `libtcc1.a` inside the airlock from
+   TCC source.
 8. Build `stage0/tcc` with the injected seed compiler.
 9. Build `stage1/tcc` with `stage0/tcc`.
 10. Build `stage2/tcc` with `stage1/tcc`.
 11. Print `stage2/tcc -v`.
+
+The compiler stages are built in `ONE_SOURCE=1` style: each stage compiles
+`tcc.c` once to `tcc.o`, with `-DONE_SOURCE=1`, and then links that single
+object into `tcc`.
 
 After `bwrap` exits, the outer script checks that:
 
@@ -126,56 +121,45 @@ The startup object source:
 provides a tiny i386 `_start` entry point so this path does not depend on
 injecting `crt1.o`, `crti.o`, or similar startup objects.
 
-## Why The TCC Sources Are Patched
+## Driver Model
 
-The in-airlock bootstrap applies a few targeted source patches to the extracted
-TCC tree.
+The in-airlock bootstrap does not patch the extracted TCC sources.
 
-### 1. Remove `sscanf`-based version parsing
+Instead it uses a generated driver script around each stage compiler. That
+driver is responsible for forcing the build environment:
 
-`libtcc.c` is patched to parse `TCC_VERSION` with `strtol` instead of
-`sscanf`. This avoids the old-glibc incompatibility around
-`__isoc99_sscanf`.
-
-### 2. Adjust header ordering for musl headers
-
-`tcc.h` and `include/stdarg.h` are patched so the mixed musl-header setup does
-not trip over `va_list` ordering and alias definitions.
-
-### 3. Avoid the archive indexed loader path
-
-`tccelf.c` is patched so the archive "alacarte" path is disabled during this
-bootstrap. In this environment, the self-built TCC could crash or spin while
-loading indexed archives.
-
-### 4. Special-case `libtcc1`
-
-`tccelf.c` is patched so `TCC_LIBTCC1` resolves to:
-
+- `-nostdinc`
+- wrapper headers from `airlock/build-headers`
+- musl include paths generated inside the airlock
+- `-nostdlib` at link time
+- `airlock/crt.c`
 - `libtcc1.o`
 - `alloca86.o`
+- dynamic glibc linkage through `libc.so.6`, `libm.so.6`, and `libdl.so.2`
 
-from the TCC library directory, instead of relying on archive member selection
-at ordinary link time.
+This keeps the build off host headers and startup objects while still producing
+a glibc-dynamically-linked compiler.
 
-This keeps the runtime source inside the TCC tree and avoids the problematic
-archive path for the final compiler's normal operation.
+There are two distinct header layers:
 
-### 5. Force libc as a direct file
+- `airlock/seed-headers/` is only for building `unbz2.c` and `untar.c` with
+  the injected seed compiler.
+- `airlock/build-headers/` is used by the TCC stage drivers and wraps the
+  musl headers generated inside the airlock.
 
-The runtime-addition code is patched so libc is added as a direct
-`libc.so.6` path instead of relying on `-lc` resolution through older
-linker-script or archive logic on the host.
+## Host-Usable Final Compiler
 
-## Why `alloca86-bt.o` Is Built
+The final stage also gets:
 
-`alloca86-bt.o` is still built into `libtcc1.a` because the archive itself is
-meant to be complete, but the direct runtime sidecar path only uses:
+- `work/bootstrap/stage2/tcc-driver`
+- `work/bootstrap/stage2/tcc-glibc`
 
-- `libtcc1.o`
-- `alloca86.o`
+`tcc-driver` is the explicit driver with all include and library overrides.
+`tcc-glibc` is a thin wrapper over that driver.
 
-The bounds-check variant is not used in the default no-bcheck compiler path.
+Those wrappers point at the artifact-local runtime tree and the host i386 glibc
+shared libraries, so the final `stage2/tcc` produced in the airlock can be run
+on the host system.
 
 ## Artifacts
 
@@ -188,6 +172,8 @@ Important outputs are:
 - `work/bootstrap/stage0/tcc`
 - `work/bootstrap/stage1/tcc`
 - `work/bootstrap/stage2/tcc`
+- `work/bootstrap/stage2/tcc-driver`
+- `work/bootstrap/stage2/tcc-glibc`
 - `work/bootstrap/common/lib/tcc/libtcc1.a`
 - `work/bootstrap/common/lib/tcc/libtcc1.o`
 - `work/bootstrap/common/lib/tcc/alloca86.o`
@@ -222,6 +208,11 @@ The important properties are:
 
 - rootless Slackware 10.2 airlock
 - only source inputs plus the seed `stage2/tcc` and `mawk` are injected
+- no TCC source patching inside the airlock
+- no host-side generated musl header artifacts
 - `libtcc1` is built inside the airlock from TCC source
+- stage compilers are built through a driver with explicit `-nostdinc` and
+  `-nostdlib` control
+- `tcc.c` is compiled in `ONE_SOURCE=1` mode for each compiler stage
 - `stage1/tcc` and `stage2/tcc` match
 - final `stage2/tcc` works on the host

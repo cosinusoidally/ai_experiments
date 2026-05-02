@@ -1,0 +1,7 @@
+#ifndef AIRLOCK_STDIO_WRAPPER_H
+#define AIRLOCK_STDIO_WRAPPER_H
+
+#include <stdarg.h>
+#include "__MUSL_INCLUDE__/stdio.h"
+
+#endif

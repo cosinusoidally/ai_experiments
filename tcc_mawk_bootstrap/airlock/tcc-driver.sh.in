@@ -1,0 +1,51 @@
+#!/bin/sh
+set -eu
+
+tcc_real='__TCC_REAL__'
+common_tccdir='__COMMON_TCCDIR__'
+wrap_include='__WRAP_INCLUDE__'
+musl_include='__MUSL_INCLUDE__'
+crt_c='__CRT_C__'
+libc_so='__LIBC_SO__'
+libm_so='__LIBM_SO__'
+libdl_so='__LIBDL_SO__'
+
+mode=link
+for arg in "$@"; do
+  case "$arg" in
+    -c|-E|-S|-M|-MM|-MD|-MMD|-ar|-run|-v|-vv|-print-search-dirs)
+      mode=compile
+      ;;
+  esac
+done
+
+if [ "$mode" = link ]; then
+  exec "$tcc_real" \
+    -B"$common_tccdir" \
+    -m32 \
+    -nostdinc \
+    -I"$wrap_include" \
+    -isystem "$musl_include" \
+    -isystem "$musl_include/bits" \
+    -L/lib \
+    -L/usr/lib \
+    -nostdlib \
+    "$@" \
+    "$crt_c" \
+    "$common_tccdir/libtcc1.o" \
+    "$common_tccdir/alloca86.o" \
+    "$libc_so" \
+    "$libm_so" \
+    "$libdl_so"
+fi
+
+exec "$tcc_real" \
+  -B"$common_tccdir" \
+  -m32 \
+  -nostdinc \
+  -I"$wrap_include" \
+  -isystem "$musl_include" \
+  -isystem "$musl_include/bits" \
+  -L/lib \
+  -L/usr/lib \
+  "$@"

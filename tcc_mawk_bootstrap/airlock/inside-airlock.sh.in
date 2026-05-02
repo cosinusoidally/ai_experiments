@@ -2,12 +2,22 @@
 set -eu
 
 cd /work
-mkdir -p build extracted/tcc extracted/musl bootstrap/common/lib/tcc/include bootstrap/stage0 bootstrap/stage1 bootstrap/stage2
+mkdir -p \
+  build \
+  extracted/tcc \
+  extracted/musl \
+  bootstrap/common/lib/tcc/include \
+  bootstrap/wrap-headers \
+  bootstrap/stage0 \
+  bootstrap/stage1 \
+  bootstrap/stage2
 
-host_common_tccdir='__HOST_COMMON_TCCDIR__'
-host_crt_prefix='__HOST_CRT_PREFIX__'
-host_lib_paths='__HOST_LIB_PATHS__'
-host_libc_so='__HOST_LIBC_SO__'
+host_artifact_root=${HOST_ARTIFACT_ROOT:?}
+host_common_tccdir="$host_artifact_root/common/lib/tcc"
+host_musl_include="$host_artifact_root/musl-headers/include"
+host_stage2_tcc="$host_artifact_root/stage2/tcc"
+host_stage2_driver="$host_artifact_root/stage2/tcc-driver"
+host_stage2_glibc="$host_artifact_root/stage2/tcc-glibc"
 
 seed_cflags='-nostdinc -I/work/seed-headers -I/work/src'
 seed_ldflags='-nostdlib -L/lib -L/usr/lib /work/crt.c /lib/libc.so.6'
@@ -25,93 +35,39 @@ srcdir=/work/extracted/tcc/tcc-0.9.27
 musl_src=/work/extracted/musl/musl-1.1.24
 musl_inc=/work/bootstrap/musl-headers/include
 common=/work/bootstrap/common/lib/tcc
+wrap_inc=/work/bootstrap/wrap-headers
+version=$(mawk 'NR == 1 { print; exit }' "$srcdir/VERSION")
 
 mkdir -p "$musl_inc/bits"
 cp -Rf "$musl_src/include/." "$musl_inc"
 cp -Rf "$musl_src/arch/generic/bits/." "$musl_inc/bits"
 cp -Rf "$musl_src/arch/i386/bits/." "$musl_inc/bits"
-cp -f /work/musl-bits/alltypes.h "$musl_inc/bits/alltypes.h"
-cp -f /work/musl-bits/syscall.h "$musl_inc/bits/syscall.h"
+sed -f "$musl_src/tools/mkalltypes.sed" \
+  "$musl_src/arch/i386/bits/alltypes.h.in" \
+  "$musl_src/include/alltypes.h.in" \
+  > "$musl_inc/bits/alltypes.h"
+cp -f "$musl_src/arch/i386/bits/syscall.h.in" "$musl_inc/bits/syscall.h"
+mawk 'sub(/^__NR_/, "SYS_") { print }' \
+  "$musl_src/arch/i386/bits/syscall.h.in" >> "$musl_inc/bits/syscall.h"
 
-mawk '
-  /typedef va_list __gnuc_va_list;/ {
+cp -Rf /work/airlock/build-headers/. "$wrap_inc/"
+mawk -v musl_inc="$musl_inc" '
+  {
+    gsub(/__MUSL_INCLUDE__/, musl_inc);
     print;
-    print "typedef va_list __isoc_va_list;";
-    print "#define __DEFINED_va_list";
-    print "#define __DEFINED___isoc_va_list";
-    next
   }
-  { print }
-' "$srcdir/include/stdarg.h" > "$srcdir/include/stdarg.h.new"
-mv "$srcdir/include/stdarg.h.new" "$srcdir/include/stdarg.h"
-
-mawk '
-  /#include <stdio.h>/ {
-    print "#include <stdarg.h>";
+' "$wrap_inc/stdarg.h" > "$wrap_inc/stdarg.h.new"
+mv "$wrap_inc/stdarg.h.new" "$wrap_inc/stdarg.h"
+mawk -v musl_inc="$musl_inc" '
+  {
+    gsub(/__MUSL_INCLUDE__/, musl_inc);
     print;
-    next
   }
-  /#include <stdarg.h>/ { next }
-  { print }
-' "$srcdir/tcc.h" > "$srcdir/tcc.h.new"
-mv "$srcdir/tcc.h.new" "$srcdir/tcc.h"
-
-mawk '
-  index($0, "sscanf(TCC_VERSION, \"%d.%d.%d\", &a, &b, &c);") {
-    print "        char *p;";
-    print "        a = strtol(TCC_VERSION, &p, 10);";
-    print "        if (*p == '\''.'\'') {";
-    print "            b = strtol(p + 1, &p, 10);";
-    print "            if (*p == '\''.'\'')";
-    print "                c = strtol(p + 1, 0, 10);";
-    print "        }";
-    next
-  }
-  { print }
-' "$srcdir/libtcc.c" > "$srcdir/libtcc.c.new"
-mv "$srcdir/libtcc.c.new" "$srcdir/libtcc.c"
-
-mawk '
-  index($0, "tcc_add_library_err(s1, \"c\");") {
-    print "        tcc_add_file(s1, \"__HOST_LIBC_SO__\");"
-    next
-  }
-  index($0, "return tcc_load_alacarte(s1, fd, size, 4);") {
-    print "                if (0 && s1->alacarte_link) return tcc_load_alacarte(s1, fd, size, 4);"
-    next
-  }
-  index($0, "return tcc_load_alacarte(s1, fd, size, 8);") {
-    print "                if (0 && s1->alacarte_link) return tcc_load_alacarte(s1, fd, size, 8);"
-    next
-  }
-  { print }
-' "$srcdir/tccelf.c" > "$srcdir/tccelf.c.new"
-mv "$srcdir/tccelf.c.new" "$srcdir/tccelf.c"
-
-mawk '
-  index($0, "return tcc_add_file(s1, buf);") {
-    print "    if (!strcmp(filename, TCC_LIBTCC1)) {";
-    print "        snprintf(buf, sizeof(buf), \"%s/libtcc1.o\", s1->tcc_lib_path);";
-    print "        if (tcc_add_file(s1, buf) < 0)";
-    print "            return -1;";
-    print "        snprintf(buf, sizeof(buf), \"%s/alloca86.o\", s1->tcc_lib_path);";
-    print "        if (tcc_add_file(s1, buf) < 0)";
-    print "            return -1;";
-    print "        return 0;";
-    print "    }";
-    print;
-    next
-  }
-  { print }
-' "$srcdir/tccelf.c" > "$srcdir/tccelf.c.new"
-mv "$srcdir/tccelf.c.new" "$srcdir/tccelf.c"
+' "$wrap_inc/stdio.h" > "$wrap_inc/stdio.h.new"
+mv "$wrap_inc/stdio.h.new" "$wrap_inc/stdio.h"
 
 cp -Rf "$srcdir/include/." "$common/include/"
 cp -f "$srcdir/tcclib.h" "$common/include/"
-version=$(sed -n '1p' "$srcdir/VERSION")
-
-tcc_cflags="-m32 -DCONFIG_TCCBOOT -DTCC_TARGET_I386 -DONE_SOURCE=0 -nostdinc -I. -I$srcdir -I$srcdir/include -isystem $musl_inc -isystem $musl_inc/bits"
-tcc_link="-L/lib -L/usr/lib /work/crt.c $common/libtcc1.o $common/alloca86.o /lib/libm.so.6 /lib/libdl.so.2 /lib/libc.so.6 -nostdlib"
 
 write_config() {
   stage_dir=$1
@@ -121,14 +77,64 @@ write_config() {
 # define CONFIG_TCCDIR "$host_common_tccdir"
 #endif
 #ifndef CONFIG_TCC_CRTPREFIX
-# define CONFIG_TCC_CRTPREFIX "$host_crt_prefix"
+# define CONFIG_TCC_CRTPREFIX "/usr/lib32:/lib32:/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu"
 #endif
 #ifndef CONFIG_TCC_LIBPATHS
-# define CONFIG_TCC_LIBPATHS "$host_lib_paths"
+# define CONFIG_TCC_LIBPATHS "/usr/lib32:/lib32:/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu"
 #endif
-#undef CONFIG_TCC_BCHECK
 #define TCC_VERSION "$version"
 CFG
+}
+
+write_driver() {
+  out=$1
+  tcc_real=$2
+  common_tccdir=$3
+  wrap_include=$4
+  musl_include=$5
+  crt_c=$6
+  libc_so=$7
+  libm_so=$8
+  libdl_so=$9
+
+  cp -f /work/airlock/tcc-driver.sh.in "$out"
+  mawk \
+    -v tcc_real="$tcc_real" \
+    -v common_tccdir="$common_tccdir" \
+    -v wrap_include="$wrap_include" \
+    -v musl_include="$musl_include" \
+    -v crt_c="$crt_c" \
+    -v libc_so="$libc_so" \
+    -v libm_so="$libm_so" \
+    -v libdl_so="$libdl_so" '
+      {
+        gsub(/__TCC_REAL__/, tcc_real);
+        gsub(/__COMMON_TCCDIR__/, common_tccdir);
+        gsub(/__WRAP_INCLUDE__/, wrap_include);
+        gsub(/__MUSL_INCLUDE__/, musl_include);
+        gsub(/__CRT_C__/, crt_c);
+        gsub(/__LIBC_SO__/, libc_so);
+        gsub(/__LIBM_SO__/, libm_so);
+        gsub(/__LIBDL_SO__/, libdl_so);
+        print;
+      }
+    ' "$out" > "$out.new"
+  mv "$out.new" "$out"
+  chmod 0755 "$out"
+}
+
+write_glibc_wrapper() {
+  out=$1
+  driver=$2
+  cp -f /work/airlock/tcc-glibc.sh.in "$out"
+  mawk -v driver="$driver" '
+    {
+      gsub(/__TCC_DRIVER__/, driver);
+      print;
+    }
+  ' "$out" > "$out.new"
+  mv "$out.new" "$out"
+  chmod 0755 "$out"
 }
 
 build_libtcc1() {
@@ -137,13 +143,13 @@ build_libtcc1() {
   mkdir -p "$obj_dir"
   rm -f "$obj_dir"/*.o "$common/libtcc1.a"
 
-  ( cd "$obj_dir" && sh -c "$cc -c \"$srcdir/lib/libtcc1.c\" -o libtcc1.o $tcc_cflags" )
-  ( cd "$obj_dir" && sh -c "$cc -c \"$srcdir/lib/alloca86.S\" -o alloca86.o $tcc_cflags" )
-  ( cd "$obj_dir" && sh -c "$cc -c \"$srcdir/lib/alloca86-bt.S\" -o alloca86-bt.o $tcc_cflags" )
+  ( cd "$obj_dir" && "$cc" -c "$srcdir/lib/libtcc1.c" -o libtcc1.o -I"$srcdir" )
+  ( cd "$obj_dir" && "$cc" -c "$srcdir/lib/alloca86.S" -o alloca86.o -I"$srcdir" )
   cp -f "$obj_dir/libtcc1.o" "$common/libtcc1.o"
   cp -f "$obj_dir/alloca86.o" "$common/alloca86.o"
-  cp -f "$obj_dir/alloca86-bt.o" "$common/alloca86-bt.o"
-  /work/tcc-seed -ar rcs "$common/libtcc1.a" "$obj_dir/libtcc1.o" "$obj_dir/alloca86.o" "$obj_dir/alloca86-bt.o"
+  /work/tcc-seed -ar rcs "$common/libtcc1.a" \
+    "$obj_dir/libtcc1.o" \
+    "$obj_dir/alloca86.o"
 }
 
 build_stage() {
@@ -151,21 +157,18 @@ build_stage() {
   cc=$2
   stage_dir=/work/bootstrap/$stage
   write_config "$stage_dir"
-  objs=
-
-  for src in tcc.c libtcc.c tccpp.c tccgen.c tccelf.c tccasm.c tccrun.c i386-gen.c i386-link.c i386-asm.c; do
-    base=$(basename "$src")
-    obj=${base%.c}.o
-    ( cd "$stage_dir" && sh -c "$cc -c \"$srcdir/$src\" -o \"$obj\" $tcc_cflags" )
-    objs="$objs $stage_dir/$obj"
-  done
-
-  sh -c "$cc $objs -o \"$stage_dir/tcc\" $tcc_link"
+  ( cd "$stage_dir" && "$cc" -DONE_SOURCE=1 -c "$srcdir/tcc.c" -o tcc.o -I. -I"$srcdir" )
+  "$cc" "$stage_dir/tcc.o" -o "$stage_dir/tcc" -I"$stage_dir" -I"$srcdir"
 }
 
-build_libtcc1 '"/work/tcc-seed" -B/work/seed-tccdir'
-build_stage stage0 '"/work/tcc-seed" -B/work/seed-tccdir'
-build_stage stage1 '"/work/bootstrap/stage0/tcc" -B/work/bootstrap/common/lib/tcc'
-build_stage stage2 '"/work/bootstrap/stage1/tcc" -B/work/bootstrap/common/lib/tcc'
+write_driver /work/bootstrap/seed-driver /work/tcc-seed "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
+build_libtcc1 /work/bootstrap/seed-driver
+build_stage stage0 /work/bootstrap/seed-driver
+write_driver /work/bootstrap/stage0-driver /work/bootstrap/stage0/tcc "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
+build_stage stage1 /work/bootstrap/stage0-driver
+write_driver /work/bootstrap/stage1-driver /work/bootstrap/stage1/tcc "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
+build_stage stage2 /work/bootstrap/stage1-driver
 
+write_driver /work/bootstrap/stage2/tcc-driver "$host_stage2_tcc" "$host_common_tccdir" "$host_artifact_root/wrap-headers" "$host_musl_include" "$host_artifact_root/crt.c" /usr/lib32/libc.so.6 /usr/lib32/libm.so.6 /usr/lib32/libdl.so.2
+write_glibc_wrapper /work/bootstrap/stage2/tcc-glibc /work/bootstrap/stage2/tcc-driver
 /work/bootstrap/stage2/tcc -v
