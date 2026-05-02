@@ -13,6 +13,7 @@ musl_tarball=$root/musl-1.1.24.tar.gz
 bootstrappable_h=$root/M2libc/bootstrappable.h
 bootstrappable_c=$root/M2libc/bootstrappable.c
 woody_mawk=/home/foo/src/woody_mawk/mawk
+bin_pkg=$root/../../slackware-10.2/iso/slackware/a/bin-10.2-i486-1.tgz
 
 if [ ! -f "$portable_tar" ]; then
   printf 'missing portable tarball; run test-airlock-bootstrap-stage2.sh first\n' >&2
@@ -39,6 +40,8 @@ cp -f "$musl_tarball" "$work/musl-1.1.24.tar.gz"
 mkdir -p "$rootfs/usr/bin"
 cp -f "$woody_mawk" "$rootfs/usr/bin/mawk"
 chmod 0755 "$rootfs/usr/bin/mawk"
+tar -xOf "$bin_pkg" usr/bin/patch > "$rootfs/usr/bin/patch"
+chmod 0755 "$rootfs/usr/bin/patch"
 cp -f "$root/airlock/crt.c" "$work/crt.c"
 cp -f "$root/airlock/glibc-compat.c" "$work/airlock/glibc-compat.c"
 cp -f "$root/airlock/inside-airlock.sh.in" "$work/inside-airlock.sh"
@@ -52,7 +55,11 @@ cp -f "$root/airlock/tcc-glibc.sh.in" "$work/airlock/tcc-glibc.sh.in"
 cp -f "$root/airlock/tcc-portable-driver.sh" "$work/airlock/tcc-portable-driver.sh"
 cp -f "$root/airlock/tcc-portable-glibc.sh" "$work/airlock/tcc-portable-glibc.sh"
 cp -f "$root/slackware-packages/a/gzip/build.sh" "$work/package-scripts/a/gzip/build.sh"
+mkdir -p "$work/package-scripts/a/gzip/patches"
+cp -Rf "$root/slackware-packages/a/gzip/patches/." "$work/package-scripts/a/gzip/patches/"
 cp -f "$root/local-packages/mawk/build.sh" "$work/local-package-scripts/mawk/build.sh"
+mkdir -p "$work/local-package-scripts/mawk/patches"
+cp -Rf "$root/local-packages/mawk/patches/." "$work/local-package-scripts/mawk/patches/"
 cp -f "$root/mawk_1.3.3.orig.tar.gz" "$work/local-source/mawk/mawk_1.3.3.orig.tar.gz"
 cp -f "$root/../../slackware-10.2/iso3/source/a/gzip/gzip-1.3.3.tar.gz" \
   "$work/slackware-source/a/gzip/gzip-1.3.3.tar.gz"

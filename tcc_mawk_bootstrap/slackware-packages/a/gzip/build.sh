@@ -6,6 +6,7 @@ tcc_glibc=$root/bin/tcc-glibc
 
 pkgroot=/work/package-build/gzip
 srcroot=/work/slackware-source/a/gzip
+patchdir=/work/package-scripts/a/gzip/patches
 builddir=$pkgroot/build
 pkgdir=$pkgroot/package-gzip
 outdir=$pkgroot/out
@@ -23,8 +24,14 @@ mkdir -p "$builddir" "$pkgdir" "$outdir"
 
 cd "$srcdir"
 chmod -R u+w .
-
-CC="$tcc_glibc" CFLAGS="-O2 -march=i386 -mcpu=i686" ./configure --prefix=/usr
+oldpwd=$(pwd)
+cd "$patchdir"
+set -- *.patch
+[ -f "$1" ]
+for patch do
+  /usr/bin/patch -d "$oldpwd" -p1 < "$patchdir/$patch"
+done
+cd "$oldpwd"
 
 for script in gzexe zdiff zforce zgrep zless zmore znew; do
   sed -e 1d -e "s|BINDIR|/bin|g" "$script.in" > "$script"

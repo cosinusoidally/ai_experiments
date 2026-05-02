@@ -6,6 +6,7 @@ tcc_glibc=$root/bin/tcc-glibc
 
 pkgroot=/work/package-build/mawk
 srcroot=/work/local-source/mawk
+patchdir=/work/local-package-scripts/mawk/patches
 builddir=$pkgroot/build
 pkgdir=$pkgroot/package-mawk
 outdir=$pkgroot/out
@@ -21,27 +22,14 @@ mkdir -p "$builddir" "$pkgdir" "$outdir"
 
 cd "$srcdir"
 chmod -R u+w .
-cat > config.h <<'EOF'
-/* generated for the tcc-portable airlock build */
-#ifndef CONFIG_H
-#define CONFIG_H
-
-#define SIZE_T_STDDEF_H 1
-#define HAVE_REAL_PIPES 1
-#define HAVE_FAKE_PIPES 0
-#define STDC_MATHERR 0
-#define SW_FP_CHECK 0
-
-#endif
-EOF
-mawk '
-  /^#define zmalloc\(size\)/ { print "#define zmalloc(size) ((PTR)malloc((size)))"; next }
-  /^#define zfree\(p,size\)/ { print "#define zfree(p,size) free((p))"; next }
-  /^#define ZMALLOC\(type\)/ { print "#define ZMALLOC(type)  ((type*)malloc(sizeof(type)))"; next }
-  /^#define ZFREE\(p\)/ { print "#define ZFREE(p)\tfree((p))"; next }
-  { print }
-' zmalloc.h > zmalloc.h.new
-mv zmalloc.h.new zmalloc.h
+oldpwd=$(pwd)
+cd "$patchdir"
+set -- *.patch
+[ -f "$1" ]
+for patch do
+  /usr/bin/patch -d "$oldpwd" -p1 < "$patchdir/$patch"
+done
+cd "$oldpwd"
 
 objs='
 parse scan memory main hash execute code da error init bi_vars cast print

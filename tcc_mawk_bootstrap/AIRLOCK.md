@@ -399,9 +399,24 @@ Expected completion line:
 airlock portable bootstrap complete
 ```
 
-That second script also runs the current `gzip` package build script, which
-uses `gzip.SlackBuild` as the package-shape reference but replaces the missing
-`make` step with an explicit `tcc-glibc` compile/link sequence.
+That second script also runs the current package build scripts for:
+
+- `slackware-packages/a/gzip`
+- `local-packages/mawk`
+
+Those package builds now follow a strict rule:
+
+- no `configure` script is run inside the airlock
+- each package has a tracked `patches/` directory
+- those patches are applied inside the airlock with Slackware's own
+  `/usr/bin/patch`
+- the package build script then compiles with an explicit `tcc-glibc`
+  compile/link sequence
+
+Current patch sets:
+
+- [slackware-packages/a/gzip/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/gzip/patches/0001-no-configure-config.patch)
+- [local-packages/mawk/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/patches/0001-no-configure-config.patch)
 
 Then run the third airlock package-test harness:
 
@@ -454,9 +469,13 @@ The important properties are:
 - the second airlock rebuilds from only that tarball using extracted
   `tcc-glibc`
 - the regenerated portable tarball matches the input tarball byte-for-byte
-- the second airlock can build at least one real Slackware package with the
-  regenerated portable compiler
-- `gzip-1.3.3-i386-2.tgz` is currently the first validated package artifact
+- the second airlock applies tracked package patches inside the airlock with
+  Slackware `patch`
+- the second airlock can build package sources without running `configure`
+- `gzip-1.3.3-i386-2.tgz` is currently the first validated Slackware package
+  artifact
+- `mawk-1.3.3-tcc.tar.gz` is currently the first validated non-Slackware local
+  package artifact
 - the third airlock can install and test that package in a fresh Slackware
   rootfs with `tcc-portable` as the compiler on `PATH`
 - `tcc-glibc` from that bundle works after copying the directory elsewhere on
