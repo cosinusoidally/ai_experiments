@@ -296,10 +296,10 @@ and a normalized tarball at:
 - `artifacts/airlock-bootstrap-stage2/tcc-portable.tar`
 - `artifacts/airlock-bootstrap-portable/tcc-portable.tar`
 
-The current package-build output from the second airlock is:
+The current package repository output from the second airlock is:
 
-- `artifacts/airlock-bootstrap-portable/work/package-build/gzip/out/gzip-1.3.3-i386-2.tgz`
-- `artifacts/airlock-bootstrap-portable/work/package-build/mawk/out/mawk-1.3.3-tcc.tar.gz`
+- `artifacts/airlock-bootstrap-portable/work/repo/a/gzip-1.3.3-i386-2.tgz`
+- `artifacts/airlock-bootstrap-portable/work/repo/a/mawk-1.3.3-i386-1.tgz`
 
 The important files inside that directory are:
 
@@ -449,6 +449,29 @@ tar -xf tcc-portable.tar -C moved
 PATH=/tmp/moved/tcc-portable/bin:$PATH tcc-glibc hello.c -o hello
 ```
 
+Then run the packaged-tool rebuild harness:
+
+```sh
+cd /home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap
+./test-airlock-rebuild-portable-packaged.sh
+```
+
+Expected completion line:
+
+```text
+airlock packaged tool rebuild harness complete
+```
+
+That harness:
+
+- installs the built `gzip` and `mawk` packages from `work/repo/a/` into a
+  fresh Slackware 10.2 airlock rootfs
+- smoke-tests the packaged `/bin/gzip` and `/usr/bin/mawk`
+- injects `tcc-portable.tar`
+- runs the portable rebuild path again inside that package-updated rootfs
+- emits `tcc-portable-rebuilt.tar`
+- checks that the rebuilt tarball matches the injected input tarball
+
 ## Current Shape
 
 This is a pragmatic bootstrap path, not a pristine upstream TCC build.
@@ -472,10 +495,9 @@ The important properties are:
 - the second airlock applies tracked package patches inside the airlock with
   Slackware `patch`
 - the second airlock can build package sources without running `configure`
-- `gzip-1.3.3-i386-2.tgz` is currently the first validated Slackware package
-  artifact
-- `mawk-1.3.3-tcc.tar.gz` is currently the first validated non-Slackware local
-  package artifact
+- `gzip-1.3.3-i386-2.tgz` is currently a validated Slackware package artifact
+- `mawk-1.3.3-i386-1.tgz` is currently a validated Slackware-style package
+  artifact emitted into the same `a/` repository directory
 - the third airlock can install and test that package in a fresh Slackware
   rootfs with `tcc-portable` as the compiler on `PATH`
 - `tcc-glibc` from that bundle works after copying the directory elsewhere on

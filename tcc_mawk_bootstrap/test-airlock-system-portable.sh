@@ -7,7 +7,7 @@ rootfs=$artifacts/rootfs
 work=$artifacts/work
 initrd_gz=$root/../../slackware-10.2/iso/isolinux/initrd.img
 portable_tar=$root/artifacts/airlock-bootstrap-portable/tcc-portable.tar
-gzip_pkg=$root/artifacts/airlock-bootstrap-portable/work/package-build/gzip/out/gzip-1.3.3-i386-2.tgz
+gzip_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/gzip-1.3.3-i386-2.tgz
 test_script=$root/airlock/test-system.sh
 
 if [ ! -f "$portable_tar" ]; then

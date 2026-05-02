@@ -9,7 +9,7 @@ srcroot=/work/slackware-source/a/gzip
 patchdir=/work/package-scripts/a/gzip/patches
 builddir=$pkgroot/build
 pkgdir=$pkgroot/package-gzip
-outdir=$pkgroot/out
+repodir=/work/repo/a
 version=1.3.3
 arch=i386
 build=2
@@ -17,7 +17,7 @@ name=gzip
 srcdir=$builddir/$name-$version
 
 rm -rf "$pkgroot"
-mkdir -p "$builddir" "$pkgdir" "$outdir"
+mkdir -p "$builddir" "$pkgdir" "$repodir"
 
 ( cd "$pkgdir" && /bin/tar-1.13 -xzf "$srcroot/_gzip.tar.gz" )
 ( cd "$builddir" && /bin/tar-1.13 -xzf "$srcroot/gzip-$version.tar.gz" )
@@ -73,7 +73,7 @@ for doc in "$pkgdir"/usr/doc/gzip-"$version"/*; do
 done
 cat "$srcroot/slack-desc" > "$pkgdir/install/slack-desc"
 
-pkgfile=$outdir/$name-$version-$arch-$build.tgz
+pkgfile=$repodir/$name-$version-$arch-$build.tgz
 ( cd "$pkgdir" && /bin/tar-1.13 -cf - . ) | /bin/gzip.bin -9c > "$pkgfile"
 
 printf 'built %s\n' "$pkgfile"

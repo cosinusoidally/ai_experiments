@@ -1,0 +1,18 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.  Line
+# up the first '|' above the ':' following the base package name, and the '|' on
+# the right side marks the last column you can put a character in.  You must make
+# exactly 11 lines for the formatting to be correct.  It's also customary to
+# leave one space after the ':'.
+
+    |-----handy-ruler------------------------------------------------------|
+mawk: mawk (pattern scanning and processing language)
+mawk:
+mawk: Mawk is a small, fast implementation of the AWK programming language.
+mawk: It is suitable for shell scripting, text processing, and bootstrap
+mawk: environments that need an awk-compatible tool with a compact runtime.
+mawk: This package is built inside the Slackware 10.2 airlock with the
+mawk: portable TCC toolchain and packaged in Slackware package format for
+mawk: installation and testing alongside the rest of the airlock package set.
+mawk:
+mawk:

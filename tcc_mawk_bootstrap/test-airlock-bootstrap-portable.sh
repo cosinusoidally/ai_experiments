@@ -23,7 +23,8 @@ fi
 rm -rf "$artifacts"
 mkdir -p "$rootfs" "$work" "$work/src/M2libc" "$work/airlock" \
   "$work/slackware-source/a/gzip" "$work/package-scripts/a/gzip" \
-  "$work/local-source/mawk" "$work/local-package-scripts/mawk"
+  "$work/local-source/mawk" "$work/package-scripts/a/mawk" \
+  "$work/repo/a"
 
 tmp_img=$artifacts/initrd.ext2
 gzip -dc "$initrd_gz" > "$tmp_img"
@@ -57,9 +58,10 @@ cp -f "$root/airlock/tcc-portable-glibc.sh" "$work/airlock/tcc-portable-glibc.sh
 cp -f "$root/slackware-packages/a/gzip/build.sh" "$work/package-scripts/a/gzip/build.sh"
 mkdir -p "$work/package-scripts/a/gzip/patches"
 cp -Rf "$root/slackware-packages/a/gzip/patches/." "$work/package-scripts/a/gzip/patches/"
-cp -f "$root/local-packages/mawk/build.sh" "$work/local-package-scripts/mawk/build.sh"
-mkdir -p "$work/local-package-scripts/mawk/patches"
-cp -Rf "$root/local-packages/mawk/patches/." "$work/local-package-scripts/mawk/patches/"
+cp -f "$root/slackware-packages/a/mawk/build.sh" "$work/package-scripts/a/mawk/build.sh"
+cp -f "$root/slackware-packages/a/mawk/slack-desc" "$work/package-scripts/a/mawk/slack-desc"
+mkdir -p "$work/package-scripts/a/mawk/patches"
+cp -Rf "$root/slackware-packages/a/mawk/patches/." "$work/package-scripts/a/mawk/patches/"
 cp -f "$root/mawk_1.3.3.orig.tar.gz" "$work/local-source/mawk/mawk_1.3.3.orig.tar.gz"
 cp -f "$root/../../slackware-10.2/iso3/source/a/gzip/gzip-1.3.3.tar.gz" \
   "$work/slackware-source/a/gzip/gzip-1.3.3.tar.gz"
@@ -97,5 +99,5 @@ bwrap \
   --proc /proc \
   --tmpfs /tmp \
   --chdir /work \
-  /bin/sh /work/local-package-scripts/mawk/build.sh /work/bootstrap/tcc-portable
+  /bin/sh /work/package-scripts/a/mawk/build.sh /work/bootstrap/tcc-portable
 printf 'airlock portable bootstrap complete\n'

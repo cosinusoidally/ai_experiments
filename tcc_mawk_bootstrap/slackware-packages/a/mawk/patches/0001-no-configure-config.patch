@@ -1,0 +1,31 @@
+--- /dev/null
++++ b/config.h
+@@ -0,0 +1,10 @@
++/* fixed configuration for the tcc-portable airlock build */
++#ifndef CONFIG_H
++#define CONFIG_H
++
++#define SIZE_T_STDDEF_H 1
++#define HAVE_REAL_PIPES 1
++#define HAVE_FAKE_PIPES 0
++#define STDC_MATHERR 0
++#define SW_FP_CHECK 0
++#endif
+--- a/zmalloc.h
++++ b/zmalloc.h
+@@ -34,10 +34,10 @@
+ #define ZBLOCKSZ    8    
+ #define ZSHIFT      3
+ 
+-#define zmalloc(size)  bmalloc((((unsigned)size)+ZBLOCKSZ-1)>>ZSHIFT)
+-#define zfree(p,size)  bfree(p,(((unsigned)size)+ZBLOCKSZ-1)>>ZSHIFT)
++#define zmalloc(size) ((PTR)malloc((size)))
++#define zfree(p,size) free((p))
+ 
+-#define ZMALLOC(type)  ((type*)zmalloc(sizeof(type)))
+-#define ZFREE(p)	zfree(p,sizeof(*(p)))
++#define ZMALLOC(type)  ((type*)malloc(sizeof(type)))
++#define ZFREE(p)	free((p))
+ 
+ 
+ #endif  /* ZMALLOC_H */
