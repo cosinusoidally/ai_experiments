@@ -6,6 +6,7 @@ inside a rootless Slackware 10.2 environment.
 The entry point is:
 
 - [test-airlock-bootstrap-stage2.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-bootstrap-stage2.sh)
+- [test-airlock-bootstrap-portable.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-bootstrap-portable.sh)
 
 ## Goal
 
@@ -16,6 +17,15 @@ inputs and that seed compiler into a Slackware 10.2 initrd, and then perform a
 The important final product is a relocatable `tcc-portable/` directory. That
 bundle can be tarred up, moved to another host, unpacked anywhere, and then
 used through `tcc-glibc` without rewriting embedded paths.
+
+The first airlock produces both:
+
+- a `tcc-portable/` directory tree
+- a normalized `tcc-portable.tar`
+
+The second airlock takes that tarball, injects it into a fresh Slackware 10.2
+airlock, extracts it inside the airlock, uses the extracted `tcc-glibc`, and
+regenerates the same tarball again.
 
 ## Inputs
 
@@ -60,6 +70,13 @@ The outer script unpacks the Slackware initrd with `debugfs`, then injects:
 
 No prebuilt `libtcc1.a` is injected.
 
+For the second airlock run, the injected compiler input is:
+
+- `artifacts/airlock-bootstrap-stage2/tcc-portable.tar`
+
+In that mode, no separate seed `tcc` binary is injected. The extracted
+portable tarball is the compiler input.
+
 ## Outer Script
 
 The outer script does four jobs:
@@ -73,6 +90,13 @@ The outer script does four jobs:
 No musl headers are pre-generated on the host. They are derived inside the
 airlock from `musl-1.1.24.tar.gz`.
 
+For `test-airlock-bootstrap-stage2.sh`, the outer script also writes a
+normalized tarball after the airlock run:
+
+- `artifacts/airlock-bootstrap-stage2/tcc-portable.tar`
+
+That tarball is the input to `test-airlock-bootstrap-portable.sh`.
+
 ## Inner Script
 
 The inner script is:
@@ -83,8 +107,12 @@ At runtime it is copied to `/work/inside-airlock.sh` and placeholder-expanded.
 
 Inside the airlock it does this:
 
-1. Build `unbz2` with the injected seed `tcc`.
-2. Build `untar` with the injected seed `tcc`.
+1. Obtain the bootstrap compiler:
+   - first airlock: use the injected seed `stage2/tcc`
+   - second airlock: extract `tcc-portable.tar` and use the extracted
+     `tcc-glibc`
+2. Build `unbz2`.
+3. Build `untar`.
 3. Extract `tcc-0.9.27.tar.bz2`.
 4. Extract `musl-1.1.24.tar.gz`.
 5. Generate a local musl include tree inside `/work/bootstrap/musl-headers`.
@@ -109,6 +137,13 @@ After `bwrap` exits, the outer script checks that:
 - `stage2/tcc`
 
 are bit-identical.
+
+For the second airlock, the outer script also compares:
+
+- input `tcc-portable.tar`
+- regenerated `tcc-portable.tar`
+
+and expects them to match byte-for-byte.
 
 ## Seed Headers And CRT
 
@@ -156,6 +191,11 @@ There are two distinct header layers:
 The airlock run emits a portable bundle at:
 
 - `work/bootstrap/tcc-portable`
+
+and a normalized tarball at:
+
+- `artifacts/airlock-bootstrap-stage2/tcc-portable.tar`
+- `artifacts/airlock-bootstrap-portable/tcc-portable.tar`
 
 The important files inside that directory are:
 
@@ -208,6 +248,7 @@ Important outputs are:
 - `work/bootstrap/stage1/tcc`
 - `work/bootstrap/stage2/tcc`
 - `work/bootstrap/tcc-portable/`
+- `tcc-portable.tar`
 - `work/bootstrap/common/lib/tcc/libtcc1.a`
 - `work/bootstrap/common/lib/tcc/libtcc1.o`
 - `work/bootstrap/common/lib/tcc/alloca86.o`
@@ -234,10 +275,24 @@ Expected completion line:
 airlock stage2-seeded bootstrap complete
 ```
 
-After that, the portable bundle is at:
+After that, the portable outputs are at:
 
 ```text
 artifacts/airlock-bootstrap-stage2/work/bootstrap/tcc-portable
+artifacts/airlock-bootstrap-stage2/tcc-portable.tar
+```
+
+Then run the second airlock from that tarball:
+
+```sh
+cd /home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap
+./test-airlock-bootstrap-portable.sh
+```
+
+Expected completion line:
+
+```text
+airlock portable bootstrap complete
 ```
 
 Example host usage:
@@ -266,5 +321,9 @@ The important properties are:
 - `tcc.c` is compiled in `ONE_SOURCE=1` mode for each compiler stage
 - `stage1/tcc` and `stage2/tcc` match
 - the airlock emits a relocatable `tcc-portable/` bundle
+- the first airlock also emits a normalized `tcc-portable.tar`
+- the second airlock rebuilds from only that tarball using extracted
+  `tcc-glibc`
+- the regenerated portable tarball matches the input tarball byte-for-byte
 - `tcc-glibc` from that bundle works after copying the directory elsewhere on
   the host
