@@ -68,7 +68,6 @@ if [ "$mode" = link ]; then
     "$crt_c" \
     "$common_tccdir/glibc-compat.o" \
     "$common_tccdir/libtcc1.o" \
-    "$common_tccdir/alloca86.o" \
     "$libc_so" \
     "$libm_so" \
     "$libdl_so"
