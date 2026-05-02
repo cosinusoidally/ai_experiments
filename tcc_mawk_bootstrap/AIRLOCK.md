@@ -272,16 +272,18 @@ This currently provides old-glibc `stat` / `fstat` / `lstat` shims via
 `__xstat`, `__fxstat`, and `__lxstat`, which was needed to build Slackware
 10.2 `gzip` with musl headers against the old glibc runtime.
 
-The local `mawk` package uses a package-specific runtime shim instead of the
-shared portable one:
+The shared startup object in [airlock/crt.c](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/airlock/crt.c)
+now carries the glibc-style pieces that were needed for both the seed tools
+and later packages:
 
-- [local-packages/mawk/crt.c](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/crt.c)
-- [local-packages/mawk/glibc-compat.c](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/glibc-compat.c)
+- `_start` with the Slackware 10.2 `__libc_start_main` calling convention
+- `__libc_csu_init` / `__libc_csu_fini`
+- `_init` / `_fini`
+- `_fp_hw`, `__data_start`, and `data_start`
+- an executable-owned `environ` that is initialized from `envp`
 
-That package-local runtime exists because `mawk` references `environ`, and the
-old Slackware 10.2 glibc crashes on the TCC-linked `environ` copy relocation.
-The local shim avoids that relocation by defining `environ` in the executable
-and initializing it from `envp` in a small startup trampoline.
+That is enough for the seed-built `unbz2` / `untar` utilities and also for the
+portable `mawk` package, so there is no longer a per-package startup shim.
 
 ## Host-Usable Final Compiler
 

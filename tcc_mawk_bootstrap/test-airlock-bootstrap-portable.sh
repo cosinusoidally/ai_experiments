@@ -53,8 +53,6 @@ cp -f "$root/airlock/tcc-portable-driver.sh" "$work/airlock/tcc-portable-driver.
 cp -f "$root/airlock/tcc-portable-glibc.sh" "$work/airlock/tcc-portable-glibc.sh"
 cp -f "$root/slackware-packages/a/gzip/build.sh" "$work/package-scripts/a/gzip/build.sh"
 cp -f "$root/local-packages/mawk/build.sh" "$work/local-package-scripts/mawk/build.sh"
-cp -f "$root/local-packages/mawk/crt.c" "$work/local-package-scripts/mawk/crt.c"
-cp -f "$root/local-packages/mawk/glibc-compat.c" "$work/local-package-scripts/mawk/glibc-compat.c"
 cp -f "$root/mawk_1.3.3.orig.tar.gz" "$work/local-source/mawk/mawk_1.3.3.orig.tar.gz"
 cp -f "$root/../../slackware-10.2/iso3/source/a/gzip/gzip-1.3.3.tar.gz" \
   "$work/slackware-source/a/gzip/gzip-1.3.3.tar.gz"
