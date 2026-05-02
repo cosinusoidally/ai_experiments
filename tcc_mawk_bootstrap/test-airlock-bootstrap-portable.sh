@@ -2,37 +2,32 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-artifacts=$root/artifacts/airlock-bootstrap-stage2
+artifacts=$root/artifacts/airlock-bootstrap-portable
 rootfs=$artifacts/rootfs
 work=$artifacts/work
-portable_tar=$artifacts/tcc-portable.tar
 initrd_gz=$root/../../slackware-10.2/iso/isolinux/initrd.img
-seed_bootstrap=$root/artifacts/bootstrap-i386-mawk
-seed_tcc=$seed_bootstrap/stage2/tcc
-seed_tccdir=$seed_bootstrap/common/lib/tcc
+portable_tar=$root/artifacts/airlock-bootstrap-stage2/tcc-portable.tar
+out_tar=$artifacts/tcc-portable.tar
 tarball_bz2=$root/tcc-0.9.27.tar.bz2
 musl_tarball=$root/musl-1.1.24.tar.gz
 bootstrappable_h=$root/M2libc/bootstrappable.h
 bootstrappable_c=$root/M2libc/bootstrappable.c
 woody_mawk=/home/foo/src/woody_mawk/mawk
 
-if [ ! -x "$seed_tcc" ] || [ ! -d "$seed_tccdir/include" ]; then
-  printf 'missing seed stage2 tcc; run bootstrap-i386-mawk.awk first\n' >&2
+if [ ! -f "$portable_tar" ]; then
+  printf 'missing portable tarball; run test-airlock-bootstrap-stage2.sh first\n' >&2
   exit 1
 fi
 
 rm -rf "$artifacts"
-mkdir -p "$rootfs" "$work" "$work/seed-headers/sys" "$work/src/M2libc" "$work/airlock"
+mkdir -p "$rootfs" "$work" "$work/src/M2libc" "$work/airlock"
 
 tmp_img=$artifacts/initrd.ext2
 gzip -dc "$initrd_gz" > "$tmp_img"
 debugfs -R "rdump / $rootfs" "$tmp_img" >/dev/null 2>"$artifacts/debugfs-rdump.err"
 mkdir -p "$rootfs/work"
 
-cp -f "$seed_tcc" "$work/tcc-seed"
-mkdir -p "$work/seed-tccdir/include"
-cp -f "$seed_tccdir/include/"*.h "$work/seed-tccdir/include/"
-
+cp -f "$portable_tar" "$work/tcc-portable.tar"
 cp -f "$root/unbz2.c" "$work/src/unbz2.c"
 cp -f "$root/untar.c" "$work/src/untar.c"
 cp -f "$bootstrappable_h" "$work/src/M2libc/bootstrappable.h"
@@ -42,17 +37,15 @@ cp -f "$musl_tarball" "$work/musl-1.1.24.tar.gz"
 mkdir -p "$rootfs/usr/bin"
 cp -f "$woody_mawk" "$rootfs/usr/bin/mawk"
 chmod 0755 "$rootfs/usr/bin/mawk"
-cp -Rf "$root/airlock/seed-headers/." "$work/seed-headers/"
 cp -f "$root/airlock/crt.c" "$work/crt.c"
 cp -f "$root/airlock/inside-airlock.sh.in" "$work/inside-airlock.sh"
-mkdir -p "$work/airlock/build-headers"
+mkdir -p "$work/airlock/build-headers" "$work/airlock/portable-headers"
 cp -f "$root/airlock/build-headers/stdarg.h.in" "$work/airlock/build-headers/stdarg.h"
 cp -f "$root/airlock/build-headers/stdio.h.in" "$work/airlock/build-headers/stdio.h"
-cp -f "$root/airlock/tcc-driver.sh.in" "$work/airlock/tcc-driver.sh.in"
-cp -f "$root/airlock/tcc-glibc.sh.in" "$work/airlock/tcc-glibc.sh.in"
-mkdir -p "$work/airlock/portable-headers"
 cp -f "$root/airlock/portable-headers/stdarg.h" "$work/airlock/portable-headers/stdarg.h"
 cp -f "$root/airlock/portable-headers/stdio.h" "$work/airlock/portable-headers/stdio.h"
+cp -f "$root/airlock/tcc-driver.sh.in" "$work/airlock/tcc-driver.sh.in"
+cp -f "$root/airlock/tcc-glibc.sh.in" "$work/airlock/tcc-glibc.sh.in"
 cp -f "$root/airlock/tcc-portable-driver.sh" "$work/airlock/tcc-portable-driver.sh"
 cp -f "$root/airlock/tcc-portable-glibc.sh" "$work/airlock/tcc-portable-glibc.sh"
 
@@ -68,5 +61,6 @@ bwrap \
 
 cmp -s "$work/bootstrap/stage1/tcc" "$work/bootstrap/stage2/tcc"
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-  -cf "$portable_tar" -C "$work/bootstrap" tcc-portable
-printf 'airlock stage2-seeded bootstrap complete\n'
+  -cf "$out_tar" -C "$work/bootstrap" tcc-portable
+cmp -s "$portable_tar" "$out_tar"
+printf 'airlock portable bootstrap complete\n'

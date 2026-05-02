@@ -6,24 +6,29 @@ mkdir -p \
   build \
   extracted/tcc \
   extracted/musl \
+  seed-portable \
   bootstrap/common/lib/tcc/include \
+  bootstrap/tcc-portable/bin \
+  bootstrap/tcc-portable/include \
+  bootstrap/tcc-portable/lib/tcc \
   bootstrap/wrap-headers \
   bootstrap/stage0 \
   bootstrap/stage1 \
   bootstrap/stage2
 
-host_artifact_root=${HOST_ARTIFACT_ROOT:?}
-host_common_tccdir="$host_artifact_root/common/lib/tcc"
-host_musl_include="$host_artifact_root/musl-headers/include"
-host_stage2_tcc="$host_artifact_root/stage2/tcc"
-host_stage2_driver="$host_artifact_root/stage2/tcc-driver"
-host_stage2_glibc="$host_artifact_root/stage2/tcc-glibc"
-
-seed_cflags='-nostdinc -I/work/seed-headers -I/work/src'
-seed_ldflags='-nostdlib -L/lib -L/usr/lib /work/crt.c /lib/libc.so.6'
-
-./tcc-seed -B/work/seed-tccdir $seed_cflags $seed_ldflags /work/src/M2libc/bootstrappable.c /work/src/unbz2.c -o /work/build/unbz2
-./tcc-seed -B/work/seed-tccdir $seed_cflags $seed_ldflags /work/src/M2libc/bootstrappable.c /work/src/untar.c -o /work/build/untar
+if [ -f /work/tcc-portable.tar ]; then
+  ( cd /work/seed-portable && /bin/tar-1.13 -xf /work/tcc-portable.tar )
+  seed_cc=/work/seed-portable/tcc-portable/bin/tcc-glibc
+  bootstrap_seed_tcc=$seed_cc
+  "$seed_cc" -I/work/src -I/work/src/M2libc /work/src/M2libc/bootstrappable.c /work/src/unbz2.c -o /work/build/unbz2
+  "$seed_cc" -I/work/src -I/work/src/M2libc /work/src/M2libc/bootstrappable.c /work/src/untar.c -o /work/build/untar
+else
+  seed_cflags='-nostdinc -I/work/seed-headers -I/work/src'
+  seed_ldflags='-nostdlib -L/lib -L/usr/lib /work/crt.c /lib/libc.so.6'
+  bootstrap_seed_tcc=/work/tcc-seed
+  ./tcc-seed -B/work/seed-tccdir $seed_cflags $seed_ldflags /work/src/M2libc/bootstrappable.c /work/src/unbz2.c -o /work/build/unbz2
+  ./tcc-seed -B/work/seed-tccdir $seed_cflags $seed_ldflags /work/src/M2libc/bootstrappable.c /work/src/untar.c -o /work/build/untar
+fi
 
 /work/build/unbz2 --file /work/tcc-0.9.27.tar.bz2 --output /work/extracted/tcc.tar
 ( cd /work/extracted/tcc && /work/build/untar --file /work/extracted/tcc.tar )
@@ -35,6 +40,7 @@ srcdir=/work/extracted/tcc/tcc-0.9.27
 musl_src=/work/extracted/musl/musl-1.1.24
 musl_inc=/work/bootstrap/musl-headers/include
 common=/work/bootstrap/common/lib/tcc
+portable=/work/bootstrap/tcc-portable
 wrap_inc=/work/bootstrap/wrap-headers
 version=$(mawk 'NR == 1 { print; exit }' "$srcdir/VERSION")
 
@@ -74,7 +80,7 @@ write_config() {
   cat > "$stage_dir/config.h" <<CFG
 /* generated inside airlock */
 #ifndef CONFIG_TCCDIR
-# define CONFIG_TCCDIR "$host_common_tccdir"
+# define CONFIG_TCCDIR "lib/tcc"
 #endif
 #ifndef CONFIG_TCC_CRTPREFIX
 # define CONFIG_TCC_CRTPREFIX "/usr/lib32:/lib32:/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu"
@@ -123,20 +129,6 @@ write_driver() {
   chmod 0755 "$out"
 }
 
-write_glibc_wrapper() {
-  out=$1
-  driver=$2
-  cp -f /work/airlock/tcc-glibc.sh.in "$out"
-  mawk -v driver="$driver" '
-    {
-      gsub(/__TCC_DRIVER__/, driver);
-      print;
-    }
-  ' "$out" > "$out.new"
-  mv "$out.new" "$out"
-  chmod 0755 "$out"
-}
-
 build_libtcc1() {
   cc=$1
   obj_dir=/work/bootstrap/libtcc1
@@ -147,9 +139,16 @@ build_libtcc1() {
   ( cd "$obj_dir" && "$cc" -c "$srcdir/lib/alloca86.S" -o alloca86.o -I"$srcdir" )
   cp -f "$obj_dir/libtcc1.o" "$common/libtcc1.o"
   cp -f "$obj_dir/alloca86.o" "$common/alloca86.o"
-  /work/tcc-seed -ar rcs "$common/libtcc1.a" \
-    "$obj_dir/libtcc1.o" \
-    "$obj_dir/alloca86.o"
+  if [ -f /work/tcc-portable.tar ]; then
+    /work/seed-portable/tcc-portable/bin/tcc \
+      -ar rcs "$common/libtcc1.a" \
+      "$obj_dir/libtcc1.o" \
+      "$obj_dir/alloca86.o"
+  else
+    ./tcc-seed -ar rcs "$common/libtcc1.a" \
+      "$obj_dir/libtcc1.o" \
+      "$obj_dir/alloca86.o"
+  fi
 }
 
 build_stage() {
@@ -161,14 +160,40 @@ build_stage() {
   "$cc" "$stage_dir/tcc.o" -o "$stage_dir/tcc" -I"$stage_dir" -I"$srcdir"
 }
 
-write_driver /work/bootstrap/seed-driver /work/tcc-seed "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
-build_libtcc1 /work/bootstrap/seed-driver
-build_stage stage0 /work/bootstrap/seed-driver
+make_portable_bundle() {
+  mkdir -p \
+    "$portable/bin" \
+    "$portable/include/musl" \
+    "$portable/lib/tcc/include"
+
+  cp -f /work/airlock/tcc-portable-driver.sh "$portable/bin/tcc-driver"
+  cp -f /work/airlock/tcc-portable-glibc.sh "$portable/bin/tcc-glibc"
+  chmod 0755 "$portable/bin/tcc-driver" "$portable/bin/tcc-glibc"
+  cp -f /work/bootstrap/stage2/tcc "$portable/bin/tcc"
+  chmod 0755 "$portable/bin/tcc"
+
+  cp -f /work/airlock/portable-headers/stdarg.h "$portable/include/stdarg.h"
+  cp -f /work/airlock/portable-headers/stdio.h "$portable/include/stdio.h"
+  cp -Rf "$musl_inc/." "$portable/include/musl/"
+
+  cp -Rf "$common/include/." "$portable/lib/tcc/include/"
+  cp -f /work/crt.c "$portable/lib/tcc/crt.c"
+  cp -f "$common/libtcc1.a" "$portable/lib/tcc/libtcc1.a"
+  cp -f "$common/libtcc1.o" "$portable/lib/tcc/libtcc1.o"
+  cp -f "$common/alloca86.o" "$portable/lib/tcc/alloca86.o"
+}
+
+if [ -f /work/tcc-portable.tar ]; then
+  build_libtcc1 "$seed_cc"
+  build_stage stage0 "$seed_cc"
+else
+  write_driver /work/bootstrap/seed-driver "$bootstrap_seed_tcc" "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
+  build_libtcc1 /work/bootstrap/seed-driver
+  build_stage stage0 /work/bootstrap/seed-driver
+fi
 write_driver /work/bootstrap/stage0-driver /work/bootstrap/stage0/tcc "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
 build_stage stage1 /work/bootstrap/stage0-driver
 write_driver /work/bootstrap/stage1-driver /work/bootstrap/stage1/tcc "$common" "$wrap_inc" "$musl_inc" /work/crt.c /lib/libc.so.6 /lib/libm.so.6 /lib/libdl.so.2
 build_stage stage2 /work/bootstrap/stage1-driver
-
-write_driver /work/bootstrap/stage2/tcc-driver "$host_stage2_tcc" "$host_common_tccdir" "$host_artifact_root/wrap-headers" "$host_musl_include" "$host_artifact_root/crt.c" /usr/lib32/libc.so.6 /usr/lib32/libm.so.6 /usr/lib32/libdl.so.2
-write_glibc_wrapper /work/bootstrap/stage2/tcc-glibc /work/bootstrap/stage2/tcc-driver
+make_portable_bundle
 /work/bootstrap/stage2/tcc -v
