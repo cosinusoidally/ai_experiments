@@ -1,0 +1,18 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.  Line
+# up the first '|' above the ':' following the base package name, and the '|'
+# on the right side marks the last column you can put a character in.  You must
+# make exactly 11 lines for the formatting to be correct.  It's also
+# customary to leave one space after the ':'.
+
+    |-----handy-ruler------------------------------------------------------|
+patch: patch (apply unified and context diffs)
+patch:
+patch: Patch applies diff listings to original files and writes the patched
+patch: results in place. It is required by the airlock package build flow
+patch: because package-local no-configure patch sets are applied inside the
+patch: Slackware 10.2 airlock before each package is compiled with the
+patch: portable TCC toolchain.
+patch:
+patch:
+patch:

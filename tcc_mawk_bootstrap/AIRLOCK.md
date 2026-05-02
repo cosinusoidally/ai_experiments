@@ -45,12 +45,6 @@ package script in this tree is:
 
 - [slackware-packages/a/gzip/build.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/gzip/build.sh)
 
-There is also a non-Slackware local package path for bootstrapping tools that
-are useful inside the build airlock but are not being mirrored from the
-Slackware source tree:
-
-- [local-packages/mawk/build.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/build.sh)
-
 ## Slackware Package Objective
 
 The package work is aiming at a staged replacement of the base Slackware 10.2
@@ -79,10 +73,10 @@ In that model:
   compiler
 
 `gzip` is the first concrete Slackware package in that sequence. `mawk` is the
-first local utility package built inside the same portable airlock. The broader
-target is a Slackware base system where package builds no longer depend on the
-host toolchain, and where `tcc-portable` is sufficient to continue rebuilding
-and replacing the rest of the system.
+first additional `a/`-series utility package built inside the same portable
+airlock. The broader target is a Slackware base system where package builds no
+longer depend on the host toolchain, and where `tcc-portable` is sufficient to
+continue rebuilding and replacing the rest of the system.
 
 ## Inputs
 
@@ -135,15 +129,15 @@ For the second airlock run, the injected compiler input is:
 In that mode, no separate seed `tcc` binary is injected. The extracted
 portable tarball is the compiler input.
 
-The current second-airlock package test also injects Slackware 10.2 `gzip`
+The current second-airlock package test injects Slackware 10.2 `gzip`
 source assets from:
 
 - `../../slackware-10.2/iso3/source/a/gzip`
 
-It also injects the local `mawk` source tarball and package script from:
+It also injects the `mawk` source tarball and package script from:
 
 - [mawk_1.3.3.orig.tar.gz](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/mawk_1.3.3.orig.tar.gz)
-- [local-packages/mawk](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk)
+- [slackware-packages/a/mawk](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/mawk)
 
 The current third-airlock system test injects:
 
@@ -299,6 +293,7 @@ and a normalized tarball at:
 The current package repository output from the second airlock is:
 
 - `artifacts/airlock-bootstrap-portable/work/repo/a/gzip-1.3.3-i386-2.tgz`
+- `artifacts/airlock-bootstrap-portable/work/repo/a/patch-2.5.4-i386-1.tgz`
 - `artifacts/airlock-bootstrap-portable/work/repo/a/mawk-1.3.3-i386-1.tgz`
 
 The important files inside that directory are:
@@ -402,7 +397,8 @@ airlock portable bootstrap complete
 That second script also runs the current package build scripts for:
 
 - `slackware-packages/a/gzip`
-- `local-packages/mawk`
+- `slackware-packages/a/patch`
+- `slackware-packages/a/mawk`
 
 Those package builds now follow a strict rule:
 
@@ -416,7 +412,8 @@ Those package builds now follow a strict rule:
 Current patch sets:
 
 - [slackware-packages/a/gzip/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/gzip/patches/0001-no-configure-config.patch)
-- [local-packages/mawk/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/patches/0001-no-configure-config.patch)
+- [slackware-packages/a/patch/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/patch/patches/0001-no-configure-config.patch)
+- [slackware-packages/a/mawk/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/mawk/patches/0001-no-configure-config.patch)
 
 Then run the third airlock package-test harness:
 
@@ -464,9 +461,9 @@ airlock packaged tool rebuild harness complete
 
 That harness:
 
-- installs the built `gzip` and `mawk` packages from `work/repo/a/` into a
+- installs the built `gzip`, `patch`, and `mawk` packages from `work/repo/a/` into a
   fresh Slackware 10.2 airlock rootfs
-- smoke-tests the packaged `/bin/gzip` and `/usr/bin/mawk`
+- smoke-tests the packaged `/bin/gzip`, `/usr/bin/patch`, and `/usr/bin/mawk`
 - injects `tcc-portable.tar`
 - runs the portable rebuild path again inside that package-updated rootfs
 - emits `tcc-portable-rebuilt.tar`
@@ -496,6 +493,7 @@ The important properties are:
   Slackware `patch`
 - the second airlock can build package sources without running `configure`
 - `gzip-1.3.3-i386-2.tgz` is currently a validated Slackware package artifact
+- `patch-2.5.4-i386-1.tgz` is currently a validated Slackware package artifact
 - `mawk-1.3.3-i386-1.tgz` is currently a validated Slackware-style package
   artifact emitted into the same `a/` repository directory
 - the third airlock can install and test that package in a fresh Slackware
