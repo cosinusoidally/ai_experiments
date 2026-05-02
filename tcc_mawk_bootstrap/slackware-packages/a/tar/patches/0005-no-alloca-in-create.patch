@@ -1,0 +1,20 @@
+--- a/src/create.c
++++ b/src/create.c
+@@ -842,7 +842,7 @@
+ #ifdef S_ISHIDDEN
+   if (S_ISHIDDEN (current_stat.st_mode))
+     {
+-      char *new = (char *) alloca (strlen (p) + 2);
++      char *new = (char *) xmalloc (strlen (p) + 2);
+       if (new)
+ 	{
+ 	  strcpy (new, p);
+@@ -1276,7 +1276,7 @@
+   else if (S_ISLNK (current_stat.st_mode))
+     {
+       int size;
+-      char *buffer = (char *) alloca (PATH_MAX + 1);
++      char *buffer = (char *) xmalloc (PATH_MAX + 1);
+ 
+       size = readlink (p, buffer, PATH_MAX + 1);
+       if (size < 0)

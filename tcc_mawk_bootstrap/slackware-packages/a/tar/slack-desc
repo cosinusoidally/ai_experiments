@@ -1,0 +1,17 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.  Line
+# up the first '|' above the ':' following the base package name, and the '|'
+# on the right side marks the last column you can put a character in.  You must
+# make exactly 11 lines for the formatting to be correct.  It's also
+# customary to leave one space after the ':'.
+
+    |-----handy-ruler------------------------------------------------------|
+tar: tar (tape archive and package archive utility)
+tar:
+tar: Tar creates and extracts archive files. In the airlock package flow it
+tar: is used both for source unpacking and for building Slackware package
+tar: payloads, so replacing the initrd tar binary is a key step toward a
+tar: self-hosted Slackware 10.2 userland built by the portable TCC toolchain.
+tar:
+tar:
+tar:

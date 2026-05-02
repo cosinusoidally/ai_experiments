@@ -24,6 +24,7 @@ rm -rf "$artifacts"
 mkdir -p "$rootfs" "$work" "$work/src/M2libc" "$work/airlock" \
   "$work/slackware-source/a/gzip" "$work/package-scripts/a/gzip" \
   "$work/slackware-source/a/patch" "$work/package-scripts/a/patch" \
+  "$work/slackware-source/a/tar" "$work/package-scripts/a/tar" \
   "$work/local-source/mawk" "$work/package-scripts/a/mawk" \
   "$work/repo/a"
 
@@ -63,6 +64,10 @@ cp -f "$root/slackware-packages/a/patch/build.sh" "$work/package-scripts/a/patch
 cp -f "$root/slackware-packages/a/patch/slack-desc" "$work/package-scripts/a/patch/slack-desc"
 mkdir -p "$work/package-scripts/a/patch/patches"
 cp -Rf "$root/slackware-packages/a/patch/patches/." "$work/package-scripts/a/patch/patches/"
+cp -f "$root/slackware-packages/a/tar/build.sh" "$work/package-scripts/a/tar/build.sh"
+cp -f "$root/slackware-packages/a/tar/slack-desc" "$work/package-scripts/a/tar/slack-desc"
+mkdir -p "$work/package-scripts/a/tar/patches"
+cp -Rf "$root/slackware-packages/a/tar/patches/." "$work/package-scripts/a/tar/patches/"
 cp -f "$root/slackware-packages/a/mawk/build.sh" "$work/package-scripts/a/mawk/build.sh"
 cp -f "$root/slackware-packages/a/mawk/slack-desc" "$work/package-scripts/a/mawk/slack-desc"
 mkdir -p "$work/package-scripts/a/mawk/patches"
@@ -76,6 +81,10 @@ cp -f "$root/../../slackware-10.2/iso3/source/a/gzip/slack-desc" \
   "$work/slackware-source/a/gzip/slack-desc"
 cp -f "$root/../../slackware-10.2/iso3/source/a/bin/patch-2.5.4.tar.gz" \
   "$work/slackware-source/a/patch/patch-2.5.4.tar.gz"
+cp -f "$root/../../slackware-10.2/iso3/source/a/tar/tar-1.13.tar.gz" \
+  "$work/slackware-source/a/tar/tar-1.13.tar.gz"
+cp -f "$root/../../slackware-10.2/iso3/source/a/tar/tar.1.gz" \
+  "$work/slackware-source/a/tar/tar.1.gz"
 
 chmod 0755 "$work/inside-airlock.sh"
 bwrap \
@@ -107,6 +116,14 @@ bwrap \
   --tmpfs /tmp \
   --chdir /work \
   /bin/sh /work/package-scripts/a/patch/build.sh /work/bootstrap/tcc-portable
+bwrap \
+  --ro-bind "$rootfs" / \
+  --bind "$work" /work \
+  --dev /dev \
+  --proc /proc \
+  --tmpfs /tmp \
+  --chdir /work \
+  /bin/sh /work/package-scripts/a/tar/build.sh /work/bootstrap/tcc-portable
 bwrap \
   --ro-bind "$rootfs" / \
   --bind "$work" /work \
