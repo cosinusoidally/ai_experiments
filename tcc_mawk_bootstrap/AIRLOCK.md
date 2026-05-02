@@ -45,6 +45,12 @@ package script in this tree is:
 
 - [slackware-packages/a/gzip/build.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/gzip/build.sh)
 
+There is also a non-Slackware local package path for bootstrapping tools that
+are useful inside the build airlock but are not being mirrored from the
+Slackware source tree:
+
+- [local-packages/mawk/build.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/build.sh)
+
 ## Slackware Package Objective
 
 The package work is aiming at a staged replacement of the base Slackware 10.2
@@ -72,10 +78,11 @@ In that model:
 - `tcc-portable` is the compiler intended to move toward the role of system
   compiler
 
-`gzip` is the first concrete package in that sequence. The broader target is a
-Slackware base system where package builds no longer depend on the host toolchain,
-and where `tcc-portable` is sufficient to continue rebuilding and replacing the
-rest of the system.
+`gzip` is the first concrete Slackware package in that sequence. `mawk` is the
+first local utility package built inside the same portable airlock. The broader
+target is a Slackware base system where package builds no longer depend on the
+host toolchain, and where `tcc-portable` is sufficient to continue rebuilding
+and replacing the rest of the system.
 
 ## Inputs
 
@@ -83,6 +90,7 @@ The outer script expects these inputs in `tcc_mawk_bootstrap`:
 
 - `tcc-0.9.27.tar.bz2`
 - `musl-1.1.24.tar.gz`
+- `mawk_1.3.3.orig.tar.gz`
 - `unbz2.c`
 - `untar.c`
 - `M2libc/bootstrappable.c`
@@ -131,6 +139,11 @@ The current second-airlock package test also injects Slackware 10.2 `gzip`
 source assets from:
 
 - `../../slackware-10.2/iso3/source/a/gzip`
+
+It also injects the local `mawk` source tarball and package script from:
+
+- [mawk_1.3.3.orig.tar.gz](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/mawk_1.3.3.orig.tar.gz)
+- [local-packages/mawk](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk)
 
 The current third-airlock system test injects:
 
@@ -259,6 +272,17 @@ This currently provides old-glibc `stat` / `fstat` / `lstat` shims via
 `__xstat`, `__fxstat`, and `__lxstat`, which was needed to build Slackware
 10.2 `gzip` with musl headers against the old glibc runtime.
 
+The local `mawk` package uses a package-specific runtime shim instead of the
+shared portable one:
+
+- [local-packages/mawk/crt.c](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/crt.c)
+- [local-packages/mawk/glibc-compat.c](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/local-packages/mawk/glibc-compat.c)
+
+That package-local runtime exists because `mawk` references `environ`, and the
+old Slackware 10.2 glibc crashes on the TCC-linked `environ` copy relocation.
+The local shim avoids that relocation by defining `environ` in the executable
+and initializing it from `envp` in a small startup trampoline.
+
 ## Host-Usable Final Compiler
 
 The airlock run emits a portable bundle at:
@@ -273,6 +297,7 @@ and a normalized tarball at:
 The current package-build output from the second airlock is:
 
 - `artifacts/airlock-bootstrap-portable/work/package-build/gzip/out/gzip-1.3.3-i386-2.tgz`
+- `artifacts/airlock-bootstrap-portable/work/package-build/mawk/out/mawk-1.3.3-tcc.tar.gz`
 
 The important files inside that directory are:
 

@@ -3,6 +3,13 @@ set -eu
 
 root=${1:?usage: build.sh /work/bootstrap/tcc-portable}
 tcc_glibc=$root/bin/tcc-glibc
+tcc_raw=$root/bin/tcc
+common_tccdir=$root/lib/tcc
+case $0 in
+  */*) script_dir=${0%/*} ;;
+  *) script_dir=. ;;
+esac
+script_dir=$(CDPATH= cd -- "$script_dir" && pwd)
 
 pkgroot=/work/package-build/mawk
 srcroot=/work/local-source/mawk
@@ -15,12 +22,14 @@ srcdir=$builddir/$name-$version
 pkgbase=$name-$version-tcc
 
 rm -rf "$pkgroot"
-mkdir -p "$builddir" "$pkgdir" "$outdir"
+mkdir -p "$builddir" "$pkgdir" "$outdir" "$pkgroot/runtime"
 
 ( cd "$builddir" && /bin/tar-1.13 -xzf "$srcroot/mawk_1.3.3.orig.tar.gz" )
 
 cd "$srcdir"
 chmod -R u+w .
+cp -f "$script_dir/crt.c" "$pkgroot/runtime/crt.c"
+cp -f "$script_dir/glibc-compat.c" "$pkgroot/runtime/glibc-compat.c"
 cat > config.h <<'EOF'
 /* generated for the tcc-portable airlock build */
 #ifndef CONFIG_H
@@ -58,24 +67,45 @@ for stem in $rexp_objs; do
   "$tcc_glibc" -DMAWK -I. -Irexp -c "rexp/$stem.c" -o "rexp/$stem.o"
 done
 
-"$tcc_glibc" \
+"$tcc_glibc" -c "$pkgroot/runtime/glibc-compat.c" -o "$pkgroot/runtime/glibc-compat.o"
+
+"$tcc_raw" \
+  -B"$common_tccdir" \
+  -m32 \
+  -nostdinc \
+  -I"$root/include" \
+  -isystem "$root/include/musl" \
+  -isystem "$root/include/musl/bits" \
+  -L/lib \
+  -L/usr/lib \
+  -nostdlib \
   parse.o scan.o memory.o main.o hash.o execute.o code.o da.o error.o init.o \
   bi_vars.o cast.o print.o bi_funct.o kw.o jmp.o array.o field.o split.o \
   re_cmpl.o zmalloc.o fin.o files.o scancode.o matherr.o fcall.o version.o \
   missing.o rexp/rexp.o rexp/rexp0.o rexp/rexp1.o rexp/rexp2.o rexp/rexp3.o \
-  -o mawk
+  -o mawk \
+  "$pkgroot/runtime/crt.c" \
+  "$pkgroot/runtime/glibc-compat.o" \
+  "$common_tccdir/libtcc1.o" \
+  /lib/libc.so.6 \
+  /lib/libm.so.6 \
+  /lib/libdl.so.2
 
 printf 'BEGIN { print "mawk ok" }\n' > "$pkgroot/smoke.awk"
 ./mawk -f "$pkgroot/smoke.awk" /dev/null > "$pkgroot/smoke.out"
-grep -qx 'mawk ok' "$pkgroot/smoke.out"
+test "$(cat "$pkgroot/smoke.out")" = "mawk ok"
 
 mkdir -p "$pkgdir/usr/bin" "$pkgdir/usr/man/man1" "$pkgdir/usr/doc/$pkgbase"
 cp -f mawk "$pkgdir/usr/bin/mawk"
 chmod 0755 "$pkgdir/usr/bin/mawk"
 cp -f man/mawk.1 "$pkgdir/usr/man/man1/mawk.1"
 chmod 0644 "$pkgdir/usr/man/man1/mawk.1"
-cp -f README INSTALL COPYING ACKNOWLEDGMENT CHANGES "$pkgdir/usr/doc/$pkgbase/"
-chmod 0644 "$pkgdir/usr/doc/$pkgbase/"*
+for doc in README INSTALL COPYING ACKNOWLEDGMENT CHANGES; do
+  if [ -f "$doc" ]; then
+    cp -f "$doc" "$pkgdir/usr/doc/$pkgbase/$doc"
+    chmod 0644 "$pkgdir/usr/doc/$pkgbase/$doc"
+  fi
+done
 
 pkgfile=$outdir/$pkgbase.tar.gz
 ( cd "$pkgdir" && /bin/tar-1.13 -cf - . ) | /bin/gzip.bin -9c > "$pkgfile"
