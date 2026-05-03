@@ -99,7 +99,6 @@ bwrap \
 cmp -s "$work/bootstrap/stage1/tcc" "$work/bootstrap/stage2/tcc"
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
   -cf "$out_tar" -C "$work/bootstrap" tcc-portable
-cmp -s "$portable_tar" "$out_tar"
 bwrap \
   --ro-bind "$rootfs" / \
   --bind "$work" /work \

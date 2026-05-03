@@ -1,0 +1,19 @@
+--- a/src/create.c
++++ b/src/create.c
+@@ -865,15 +865,6 @@
+       return;
+     }
+ 
+-#if !MSDOS
+-  /* See if we are trying to dump the archive.  */
+-
+-  if (ar_dev && current_stat.st_dev == ar_dev && current_stat.st_ino == ar_ino)
+-    {
+-      WARN ((0, 0, _("%s is the archive; not dumped"), p));
+-      return;
+-    }
+-#endif
+ 
+   /* Check for multiple links.
+ 
+      We maintain a list of all such files that we've written so far.  Any
