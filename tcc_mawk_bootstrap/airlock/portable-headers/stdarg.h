@@ -1,9 +1,20 @@
 #ifndef AIRLOCK_PORTABLE_STDARG_WRAPPER_H
 #define AIRLOCK_PORTABLE_STDARG_WRAPPER_H
 
+#ifndef __DEFINED_va_list
 typedef char *va_list;
+#define __DEFINED_va_list
+#endif
+
+#ifndef __DEFINED___gnuc_va_list
 typedef va_list __gnuc_va_list;
+#define __DEFINED___gnuc_va_list
+#endif
+
+#ifndef __DEFINED___isoc_va_list
 typedef va_list __isoc_va_list;
+#define __DEFINED___isoc_va_list
+#endif
 
 #define va_start(ap,last) ap = ((char *)&(last)) + ((sizeof(last)+3)&~3)
 #define va_arg(ap,type) (ap += (sizeof(type)+3)&~3, *(type *)(ap - ((sizeof(type)+3)&~3)))
@@ -12,14 +23,6 @@ typedef va_list __isoc_va_list;
 
 #ifndef _VA_LIST_DEFINED
 #define _VA_LIST_DEFINED
-#endif
-
-#ifndef __DEFINED_va_list
-#define __DEFINED_va_list
-#endif
-
-#ifndef __DEFINED___isoc_va_list
-#define __DEFINED___isoc_va_list
 #endif
 
 #endif

@@ -294,7 +294,10 @@ The current package repository output from the second airlock is:
 
 - `artifacts/airlock-bootstrap-portable/work/repo/a/gzip-1.3.3-i386-2.tgz`
 - `artifacts/airlock-bootstrap-portable/work/repo/a/patch-2.5.4-i386-1.tgz`
+- `artifacts/airlock-bootstrap-portable/work/repo/a/sed-4.0.9-i386-2.tgz`
+- `artifacts/airlock-bootstrap-portable/work/repo/a/tar-1.13-i386-1.tgz`
 - `artifacts/airlock-bootstrap-portable/work/repo/a/mawk-1.3.3-i386-1.tgz`
+- `artifacts/airlock-bootstrap-portable/work/repo/a/bash-3.0-i386-3.tgz`
 
 The important files inside that directory are:
 

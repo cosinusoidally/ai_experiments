@@ -1,0 +1,15 @@
+--- a/variables.c
++++ b/variables.c
+@@ -101,11 +101,9 @@
+ /* The list of shell functions that the user has created, or that came from
+    the environment. */
+ HASH_TABLE *shell_functions = (HASH_TABLE *)NULL;
+ 
+-#if defined (DEBUGGER)
+ /* The table of shell function definitions that the user defined or that
+    came from the environment. */
+ HASH_TABLE *shell_function_defs = (HASH_TABLE *)NULL;
+-#endif
+ 
+ /* The current variable context.  This is really a count of how deep into
+    executing functions we are. */

@@ -1,0 +1,114 @@
+--- a/print_cmd.c
++++ b/print_cmd.c
+@@ -52,16 +52,9 @@
+ static int indentation;
+ static int indentation_amount = 4;
+ 
+-#if defined (PREFER_STDARG)
+-typedef void PFUNC __P((const char *, ...));
+-
+-static void cprintf __P((const char *, ...))  __attribute__((__format__ (printf, 1, 2)));
+-static void xprintf __P((const char *, ...))  __attribute__((__format__ (printf, 1, 2)));
+-#else
+ #define PFUNC VFunction
+ static void cprintf ();
+ static void xprintf ();
+-#endif
+ 
+ static void reset_locals __P((void));
+ static void newline __P((char *));
+@@ -1139,25 +1132,22 @@
+ 
+ /* How to make the string. */
+ static void
+-#if defined (PREFER_STDARG)
+-cprintf (const char *control, ...)
+-#else
+-cprintf (control, va_alist)
++cprintf (control, arg1, arg2)
+      const char *control;
+-     va_dcl
+-#endif
++     long arg1, arg2;
+ {
+   register const char *s;
+   char char_arg[2], *argp, intbuf[INT_STRLEN_BOUND (int) + 1];
+-  int digit_arg, arg_len, c;
+-  va_list args;
+-
+-  SH_VA_START (args, control);
++  int digit_arg, arg_len, c, arg_index;
++  long args[2];
+ 
+   arg_len = strlen (control);
+   the_printed_command_resize (arg_len + 1);
+ 
+   char_arg[1] = '\0';
++  args[0] = arg1;
++  args[1] = arg2;
++  arg_index = 0;
+   s = control;
+   while (s && *s)
+     {
+@@ -1181,7 +1171,7 @@
+ 	      break;
+ 
+ 	    case 's':
+-	      argp = va_arg (args, char *);
++	      argp = (char *)args[arg_index++];
+ 	      arg_len = strlen (argp);
+ 	      break;
+ 
+@@ -1190,7 +1180,7 @@
+ 		 integer value.  We can do this because the only use of `%d' in
+ 		 the calls to cprintf is to output a file descriptor number for
+ 		 a redirection. */
+-	      digit_arg = va_arg (args, int);
++	      digit_arg = (int)args[arg_index++];
+ 	      if (digit_arg < 0)
+ 		{
+ 		  sprintf (intbuf, "%u", (unsigned)-1);
+@@ -1202,7 +1192,7 @@
+ 	      break;
+ 
+ 	    case 'c':
+-	      char_arg[0] = va_arg (args, int);
++	      char_arg[0] = (int)args[arg_index++];
+ 	      argp = char_arg;
+ 	      arg_len = 1;
+ 	      break;
+@@ -1249,34 +1239,9 @@
+     }
+ }
+ 
+-#if defined (HAVE_VPRINTF)
+-/* ``If vprintf is available, you may assume that vfprintf and vsprintf are
+-     also available.'' */
+-
+-static void
+-#if defined (PREFER_STDARG)
+-xprintf (const char *format, ...)
+-#else
+-xprintf (format, va_alist)
+-     const char *format;
+-     va_dcl
+-#endif
+-{
+-  va_list args;
+-
+-  SH_VA_START (args, format);
+-
+-  vfprintf (stdout, format, args);
+-  va_end (args);
+-}
+-
+-#else
+-
+ static void
+ xprintf (format, arg1, arg2, arg3, arg4, arg5)
+      const char *format;
+ {
+   printf (format, arg1, arg2, arg3, arg4, arg5);
+ }
+-
+-#endif /* !HAVE_VPRINTF */

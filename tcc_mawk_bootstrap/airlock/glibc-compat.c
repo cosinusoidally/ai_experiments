@@ -10,6 +10,7 @@
 extern int __xstat64(int ver, const char *path, void *buf);
 extern int __fxstat64(int ver, int fd, void *buf);
 extern int __lxstat64(int ver, const char *path, void *buf);
+extern int __sigsetjmp(void *env, int savemask);
 
 #undef readdir64
 extern struct dirent *readdir64(DIR *dirp);
@@ -32,4 +33,9 @@ int lstat(const char *path, struct stat *buf)
 struct dirent *readdir(DIR *dirp)
 {
     return readdir64(dirp);
+}
+
+int sigsetjmp(void *env, int savemask)
+{
+    return __sigsetjmp(env, savemask);
 }

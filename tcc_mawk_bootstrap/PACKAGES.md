@@ -9,6 +9,7 @@ Slackware `a/` series.
 
 Already built in `a/`:
 
+- `bash`
 - `patch`
 - `gzip`
 - `mawk`
@@ -17,12 +18,12 @@ Already built in `a/`:
 
 Still needed from `a/`:
 
-- `bash`
 - `coreutils`
 
 ## Already Built
 
 - `gzip`
+- `bash`
 - `patch`
 - `mawk`
 - `tar`
@@ -36,8 +37,8 @@ and are exercised by:
 
 - [test-airlock-rebuild-portable-packaged.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-rebuild-portable-packaged.sh)
 
-That harness installs the packaged `gzip`, `patch`, `sed`, `tar`, and `mawk`
-into a fresh Slackware 10.2 airlock and then rebuilds `tcc-portable`.
+That harness installs the packaged `gzip`, `patch`, `sed`, `tar`, `mawk`, and
+`bash` into a fresh Slackware 10.2 airlock and then rebuilds `tcc-portable`.
 
 ## Next Packages
 
@@ -45,11 +46,7 @@ These are the remaining `a/`-series packages or `a/`-series tool payloads the
 current airlock still relies on from the base system or from injected
 binaries.
 
-1. `bash`
-Reason: the long-term shell target should be `bash`, not `busybox`. The
-current airlock still runs with the initrd shell and userland.
-
-2. `coreutils`
+1. `coreutils`
 Reason: the long-term target is to replace the initrd userland, not just the
 compiler-specific tools. The current airlock scripts still rely on the base
 system's `cp`, `mv`, `mkdir`, `rm`, `ln`, `chmod`, `cat`, `cmp`, and related
@@ -57,8 +54,7 @@ utilities.
 
 ## Preferred Order
 
-1. `bash`
-2. `coreutils`
+1. `coreutils`
 
 This order removes the most immediate package-build dependencies first, then
 replaces the shell layer and finally the bulk of the base command set.
@@ -69,7 +65,7 @@ For the current airlock bootstrap path: probably not yet.
 
 The current remaining runtime/tooling dependencies all map to `a/`:
 
-- shell: `bash`
+- shell: `bash` already rebuilt
 - base file and text utilities: `coreutils`
 - archive handling: `tar` already rebuilt
 - text transformation: `sed` already rebuilt

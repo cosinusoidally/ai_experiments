@@ -14,6 +14,7 @@ patch_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/patch-2.5.4-i38
 sed_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/sed-4.0.9-i386-2.tgz
 tar_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/tar-1.13-i386-1.tgz
 mawk_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/mawk-1.3.3-i386-1.tgz
+bash_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/bash-3.0-i386-3.tgz
 tarball_bz2=$root/tcc-0.9.27.tar.bz2
 musl_tarball=$root/musl-1.1.24.tar.gz
 bootstrappable_h=$root/M2libc/bootstrappable.h
@@ -25,8 +26,8 @@ if [ ! -f "$portable_tar" ]; then
   exit 1
 fi
 
-if [ ! -f "$gzip_pkg" ] || [ ! -f "$patch_pkg" ] || [ ! -f "$sed_pkg" ] || [ ! -f "$tar_pkg" ] || [ ! -f "$mawk_pkg" ]; then
-  printf 'missing packaged gzip/patch/sed/tar/mawk; run test-airlock-bootstrap-portable.sh first\n' >&2
+if [ ! -f "$gzip_pkg" ] || [ ! -f "$patch_pkg" ] || [ ! -f "$sed_pkg" ] || [ ! -f "$tar_pkg" ] || [ ! -f "$mawk_pkg" ] || [ ! -f "$bash_pkg" ]; then
+  printf 'missing packaged gzip/patch/sed/tar/mawk/bash; run test-airlock-bootstrap-portable.sh first\n' >&2
   exit 1
 fi
 
@@ -43,6 +44,8 @@ mkdir -p "$rootfs/work"
 ( cd "$rootfs" && /bin/tar -xzf "$sed_pkg" )
 ( cd "$rootfs" && /bin/tar -xzf "$tar_pkg" )
 ( cd "$rootfs" && /bin/tar -xzf "$mawk_pkg" )
+( cd "$rootfs" && /bin/tar -xzf "$bash_pkg" )
+( cd "$rootfs" && /bin/sh install/doinst.sh )
 
 cp -f "$portable_tar" "$work/tcc-portable.tar"
 cp -f "$root/unbz2.c" "$work/src/unbz2.c"

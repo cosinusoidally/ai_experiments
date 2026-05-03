@@ -10,6 +10,8 @@ test "$(/bin/gzip -dc /tmp/gzip.in.gz)" = 'packaged gzip test'
 printf 'BEGIN { print "packaged mawk ok" }\n' > /tmp/mawk.awk
 test "$(/usr/bin/mawk -f /tmp/mawk.awk /dev/null)" = 'packaged mawk ok'
 
+test "$(/bin/bash -c 'echo packaged bash ok')" = 'packaged bash ok'
+
 mkdir -p /tmp/tar.in /tmp/tar.out
 printf 'packaged tar ok\n' > /tmp/tar.in/file.txt
 /bin/tar -cf /tmp/tar-test.tar -C /tmp/tar.in .
