@@ -11,6 +11,7 @@ This directory contains an ECMAScript 5.1 Node.js script that converts a Codex/O
 - Includes patch tool calls and patch results
 - Includes explicit file-read and file-listing events when the transcript tagged them
 - Includes command results by default
+- Includes user interrupt events (`turn_aborted`) by default
 - Supports `--verbose` to include broader operational and lifecycle events
 - Writes to standard output by default
 - Writes to a `.txt` file when an output path is provided
@@ -111,6 +112,7 @@ run the bootstrap
 - Every rendered section includes the source `.jsonl` line number or line range.
 - The converter uses `response_item` entries for visible chat, reasoning, tool calls, tool outputs, and custom tool calls.
 - It also uses `event_msg` entries for `patch_apply_end` and file-oriented `exec_command_end` records.
-- In `--verbose` mode it also includes additional non-encrypted operational events such as generic `exec_command_end`, `custom_tool_call_output`, `task_started`, `task_complete`, `turn_aborted`, and similar lifecycle records.
+- It includes `turn_aborted` by default so user interruptions are visible.
+- In `--verbose` mode it also includes additional non-encrypted operational events such as `custom_tool_call_output`, `task_started`, `task_complete`, and similar lifecycle records.
 - Most reasoning entries in these transcripts are encrypted. Those are rendered as `[encrypted reasoning omitted]` because the script skips `encrypted_content`.
 - If you pass an output file path, the script writes there. Otherwise it writes to standard output.

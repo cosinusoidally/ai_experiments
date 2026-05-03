@@ -468,7 +468,7 @@ function parseTranscriptFile(filePath, options) {
       rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Task Started', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'task_complete') {
       rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Task Complete', payload);
-    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'turn_aborted') {
+    } else if (record.type === 'event_msg' && payload.type === 'turn_aborted') {
       rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Turn Aborted', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'error') {
       rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Error', payload);
