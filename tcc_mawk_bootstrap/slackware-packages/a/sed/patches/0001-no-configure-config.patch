@@ -1,0 +1,94 @@
+diff --git a/config.h b/config.h
+new file mode 100644
+index 0000000..eb0771f
+--- /dev/null
++++ b/config.h
+@@ -0,0 +1,88 @@
++#define STDC_HEADERS 1
++#define _GNU_SOURCE 1
++#define ENABLE_NLS 0
++#define C_ALLOCA 1
++#define HAVE_ALLOCA 0
++#define HAVE_ALLOCA_H 1
++#define HAVE_BCOPY 1
++#define HAVE_BZERO 1
++#define HAVE_ERRNO_H 1
++#define HAVE_FCHMOD 1
++#define HAVE_FEOF_UNLOCKED 1
++#define HAVE_FGETS_UNLOCKED 1
++#define HAVE_GETCWD 1
++#define HAVE_GETEGID 1
++#define HAVE_GETEUID 1
++#define HAVE_GETGID 1
++#define HAVE_GETPAGESIZE 1
++#define HAVE_GETUID 1
++#define HAVE_INTTYPES_H 1
++#define HAVE_ISASCII 1
++#define HAVE_ISATTY 1
++#define HAVE_ISBLANK 1
++#define HAVE_LIMITS_H 1
++#define HAVE_MEMORY_H 1
++#define HAVE_MEMCHR 1
++#define HAVE_MEMCMP 1
++#define HAVE_MEMCPY 1
++#define HAVE_MEMMOVE 1
++#define HAVE_MEMPCPY 1
++#define HAVE_MEMSET 1
++#define HAVE_MKSTEMP 1
++#define HAVE_MMAP 1
++#define HAVE_MUNMAP 1
++#define HAVE_POPEN 1
++#define HAVE_PUTENV 1
++#define HAVE_SETENV 1
++#define HAVE_STDARG_H 1
++#define HAVE_STDDEF_H 1
++#define HAVE_STDINT_H 1
++#define HAVE_STDLIB_H 1
++#define HAVE_STPCPY 1
++#define HAVE_STRCASECMP 1
++#define HAVE_STRCHR 1
++#define HAVE_STRDUP 1
++#define HAVE_STRERROR 1
++#define HAVE_STRINGS_H 1
++#define HAVE_STRING_H 1
++#define HAVE_STRTOUL 1
++#define HAVE_STRVERSCMP 1
++#define HAVE_SYS_FILE_H 1
++#define HAVE_SYS_PARAM_H 1
++#define HAVE_SYS_STAT_H 1
++#define HAVE_SYS_TYPES_H 1
++#define HAVE_TSEARCH 1
++#define HAVE_UNISTD_H 1
++#define HAVE_VPRINTF 1
++#define HAVE_GETTEXT 0
++#define HAVE_ICONV 0
++#define HAVE_LANGINFO_CODESET 0
++#define HAVE_LC_MESSAGES 0
++#define HAVE_LIBREGEX 0
++#define HAVE_LOCALE_H 0
++#define HAVE_MALLOC_H 0
++#define HAVE_MBRTOWC 0
++#define HAVE_MBSTATE_T 0
++#define HAVE_NL_TYPES_H 0
++#define HAVE_OBSTACK 0
++#define HAVE_REGEX_H 0
++#define HAVE_SETLOCALE 0
++#define HAVE_WCHAR_H 0
++#define HAVE_WCRTOMB 0
++#define HAVE_WCSCOLL 0
++#define HAVE_WCTYPE_H 0
++#define HAVE___ARGZ_COUNT 0
++#define HAVE___ARGZ_NEXT 0
++#define HAVE___ARGZ_STRINGIFY 0
++#define ICONV_CONST
++#define PACKAGE "sed"
++#define PACKAGE_BUGREPORT "bonzini@gnu.org"
++#define PACKAGE_NAME "sed"
++#define PACKAGE_STRING "sed 4.0.9"
++#define PACKAGE_TARNAME "sed"
++#define PACKAGE_VERSION "4.0.9"
++#define SED_FEATURE_VERSION "4.0"
++#define VERSION "4.0.9"
++#ifndef _ALL_SOURCE
++/* #undef _ALL_SOURCE */
++#endif

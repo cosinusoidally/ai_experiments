@@ -11,6 +11,7 @@ initrd_gz=$root/../../slackware-10.2/iso/isolinux/initrd.img
 portable_tar=$root/artifacts/airlock-bootstrap-portable/tcc-portable.tar
 gzip_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/gzip-1.3.3-i386-2.tgz
 patch_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/patch-2.5.4-i386-1.tgz
+sed_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/sed-4.0.9-i386-2.tgz
 tar_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/tar-1.13-i386-1.tgz
 mawk_pkg=$root/artifacts/airlock-bootstrap-portable/work/repo/a/mawk-1.3.3-i386-1.tgz
 tarball_bz2=$root/tcc-0.9.27.tar.bz2
@@ -24,8 +25,8 @@ if [ ! -f "$portable_tar" ]; then
   exit 1
 fi
 
-if [ ! -f "$gzip_pkg" ] || [ ! -f "$patch_pkg" ] || [ ! -f "$tar_pkg" ] || [ ! -f "$mawk_pkg" ]; then
-  printf 'missing packaged gzip/patch/tar/mawk; run test-airlock-bootstrap-portable.sh first\n' >&2
+if [ ! -f "$gzip_pkg" ] || [ ! -f "$patch_pkg" ] || [ ! -f "$sed_pkg" ] || [ ! -f "$tar_pkg" ] || [ ! -f "$mawk_pkg" ]; then
+  printf 'missing packaged gzip/patch/sed/tar/mawk; run test-airlock-bootstrap-portable.sh first\n' >&2
   exit 1
 fi
 
@@ -39,6 +40,7 @@ mkdir -p "$rootfs/work"
 
 ( cd "$rootfs" && /bin/tar -xzf "$gzip_pkg" )
 ( cd "$rootfs" && /bin/tar -xzf "$patch_pkg" )
+( cd "$rootfs" && /bin/tar -xzf "$sed_pkg" )
 ( cd "$rootfs" && /bin/tar -xzf "$tar_pkg" )
 ( cd "$rootfs" && /bin/tar -xzf "$mawk_pkg" )
 

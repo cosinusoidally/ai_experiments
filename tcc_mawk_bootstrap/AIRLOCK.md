@@ -413,6 +413,13 @@ Current patch sets:
 
 - [slackware-packages/a/gzip/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/gzip/patches/0001-no-configure-config.patch)
 - [slackware-packages/a/patch/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/patch/patches/0001-no-configure-config.patch)
+- [slackware-packages/a/sed/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/sed/patches/0001-no-configure-config.patch)
+- [slackware-packages/a/tar/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/tar/patches/0001-no-configure-config.patch)
+- [slackware-packages/a/tar/patches/0002-slackware-bzip2-support.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/tar/patches/0002-slackware-bzip2-support.patch)
+- [slackware-packages/a/tar/patches/0003-alloca-header-first.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/tar/patches/0003-alloca-header-first.patch)
+- [slackware-packages/a/tar/patches/0004-disable-mknod-extraction.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/tar/patches/0004-disable-mknod-extraction.patch)
+- [slackware-packages/a/tar/patches/0005-no-alloca-in-create.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/tar/patches/0005-no-alloca-in-create.patch)
+- [slackware-packages/a/tar/patches/0006-disable-self-archive-check.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/tar/patches/0006-disable-self-archive-check.patch)
 - [slackware-packages/a/mawk/patches/0001-no-configure-config.patch](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/slackware-packages/a/mawk/patches/0001-no-configure-config.patch)
 
 Then run the third airlock package-test harness:
@@ -461,9 +468,10 @@ airlock packaged tool rebuild harness complete
 
 That harness:
 
-- installs the built `gzip`, `patch`, and `mawk` packages from `work/repo/a/` into a
-  fresh Slackware 10.2 airlock rootfs
-- smoke-tests the packaged `/bin/gzip`, `/usr/bin/patch`, and `/usr/bin/mawk`
+- installs the built `gzip`, `patch`, `sed`, `tar`, and `mawk` packages from
+  `work/repo/a/` into a fresh Slackware 10.2 airlock rootfs
+- smoke-tests the packaged `/bin/gzip`, `/usr/bin/patch`, `/bin/sed`,
+  `/bin/tar`, and `/usr/bin/mawk`
 - injects `tcc-portable.tar`
 - runs the portable rebuild path again inside that package-updated rootfs
 - emits `tcc-portable-rebuilt.tar`
@@ -494,6 +502,8 @@ The important properties are:
 - the second airlock can build package sources without running `configure`
 - `gzip-1.3.3-i386-2.tgz` is currently a validated Slackware package artifact
 - `patch-2.5.4-i386-1.tgz` is currently a validated Slackware package artifact
+- `sed-4.0.9-i386-2.tgz` is currently a validated Slackware package artifact
+- `tar-1.13-i386-1.tgz` is currently a validated Slackware package artifact
 - `mawk-1.3.3-i386-1.tgz` is currently a validated Slackware-style package
   artifact emitted into the same `a/` repository directory
 - the third airlock can install and test that package in a fresh Slackware

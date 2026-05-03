@@ -12,11 +12,11 @@ Already built in `a/`:
 - `patch`
 - `gzip`
 - `mawk`
+- `tar`
+- `sed`
 
 Still needed from `a/`:
 
-- `tar`
-- `sed`
 - `bash`
 - `coreutils`
 
@@ -25,6 +25,8 @@ Still needed from `a/`:
 - `gzip`
 - `patch`
 - `mawk`
+- `tar`
+- `sed`
 
 These are currently produced into the repo-style package tree:
 
@@ -34,8 +36,8 @@ and are exercised by:
 
 - [test-airlock-rebuild-portable-packaged.sh](/home/foo/src/gpt/ai_experiments/tcc_mawk_bootstrap/test-airlock-rebuild-portable-packaged.sh)
 
-That harness installs the packaged `gzip`, `patch`, and `mawk` into a fresh
-Slackware 10.2 airlock and then rebuilds `tcc-portable`.
+That harness installs the packaged `gzip`, `patch`, `sed`, `tar`, and `mawk`
+into a fresh Slackware 10.2 airlock and then rebuilds `tcc-portable`.
 
 ## Next Packages
 
@@ -43,19 +45,11 @@ These are the remaining `a/`-series packages or `a/`-series tool payloads the
 current airlock still relies on from the base system or from injected
 binaries.
 
-1. `tar`
-Reason: the airlock still relies on `/bin/tar-1.13` for unpacking package
-payloads and portable tarballs.
-
-2. `sed`
-Reason: musl header generation in `airlock/inside-airlock.sh.in` still uses
-`sed -f` with musl's `tools/mkalltypes.sed`.
-
-3. `bash`
+1. `bash`
 Reason: the long-term shell target should be `bash`, not `busybox`. The
 current airlock still runs with the initrd shell and userland.
 
-4. `coreutils`
+2. `coreutils`
 Reason: the long-term target is to replace the initrd userland, not just the
 compiler-specific tools. The current airlock scripts still rely on the base
 system's `cp`, `mv`, `mkdir`, `rm`, `ln`, `chmod`, `cat`, `cmp`, and related
@@ -63,10 +57,8 @@ utilities.
 
 ## Preferred Order
 
-1. `tar`
-2. `sed`
-3. `bash`
-4. `coreutils`
+1. `bash`
+2. `coreutils`
 
 This order removes the most immediate package-build dependencies first, then
 replaces the shell layer and finally the bulk of the base command set.
@@ -79,11 +71,11 @@ The current remaining runtime/tooling dependencies all map to `a/`:
 
 - shell: `bash`
 - base file and text utilities: `coreutils`
-- archive handling: `tar`
-- text transformation: `sed`
+- archive handling: `tar` already rebuilt
+- text transformation: `sed` already rebuilt
 
-`patch` has now been rebuilt as its own package under `slackware-packages/a/patch`
-and is exercised by the packaged rebuild airlock.
+`patch`, `tar`, and `sed` have now been rebuilt under `slackware-packages/a/`
+and are exercised by the packaged rebuild airlock.
 
 So the package work needed to make the current airlock self-hosted can stay
 within `a/`.

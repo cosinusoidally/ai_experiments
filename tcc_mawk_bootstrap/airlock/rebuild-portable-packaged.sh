@@ -22,6 +22,7 @@ printf '%s\n' '--- patch.txt' '+++ patch.txt' '@@ -1 +1 @@' '-old' '+new' \
 cd /tmp
 /usr/bin/patch -s < /tmp/patch.diff
 test "$(cat /tmp/patch.txt)" = 'new'
+test "$(/bin/sed 's/old/new/' /tmp/patch.txt)" = 'new'
 cd /work
 
 /bin/sh /work/inside-airlock.sh
