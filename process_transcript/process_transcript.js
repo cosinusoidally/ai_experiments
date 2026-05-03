@@ -78,13 +78,25 @@ function indentBlock(text) {
   return normalizeNewlines(String(text)).replace(/^/gm, '  ');
 }
 
-function formatSection(timestamp, label, text) {
-  return '[' + timestamp + '] ' + label + '\n' + text;
+function formatLineRef(startLine, endLine) {
+  if (typeof startLine !== 'number' || startLine < 1) {
+    return 'line ?';
+  }
+
+  if (typeof endLine === 'number' && endLine > startLine) {
+    return 'lines ' + startLine + '-' + endLine;
+  }
+
+  return 'line ' + startLine;
 }
 
-function formatMessage(role, timestamp, text) {
+function formatSection(timestamp, lineRef, label, text) {
+  return '[' + timestamp + ' ' + lineRef + '] ' + label + '\n' + text;
+}
+
+function formatMessage(role, timestamp, lineRef, text) {
   var label = role === 'assistant' ? 'GPT' : 'User';
-  return formatSection(timestamp, label, text);
+  return formatSection(timestamp, lineRef, label, text);
 }
 
 function extractReasoningText(payload) {
@@ -120,17 +132,17 @@ function extractReasoningText(payload) {
   return normalizeNewlines(parts.join('\n\n')).replace(/^\s+|\s+$/g, '');
 }
 
-function formatReasoning(timestamp, payload) {
+function formatReasoning(timestamp, lineRef, payload) {
   var text = extractReasoningText(payload);
 
   if (!text) {
     return '';
   }
 
-  return formatSection(timestamp, 'Reasoning', text);
+  return formatSection(timestamp, lineRef, 'Reasoning', text);
 }
 
-function formatFunctionCall(timestamp, payload) {
+function formatFunctionCall(timestamp, lineRef, payload) {
   var lines;
 
   lines = [];
@@ -145,10 +157,10 @@ function formatFunctionCall(timestamp, payload) {
     lines.push(indentBlock(payload.arguments));
   }
 
-  return formatSection(timestamp, 'Tool Call', lines.join('\n'));
+  return formatSection(timestamp, lineRef, 'Tool Call', lines.join('\n'));
 }
 
-function formatFunctionCallOutput(timestamp, payload) {
+function formatFunctionCallOutput(timestamp, lineRef, payload) {
   var lines;
   var outputText;
 
@@ -165,10 +177,10 @@ function formatFunctionCallOutput(timestamp, payload) {
     lines.push('output: [none]');
   }
 
-  return formatSection(timestamp, 'Tool Output', lines.join('\n'));
+  return formatSection(timestamp, lineRef, 'Tool Output', lines.join('\n'));
 }
 
-function formatCustomToolCallOutput(timestamp, payload) {
+function formatCustomToolCallOutput(timestamp, lineRef, payload) {
   var lines = [];
 
   if (typeof payload.call_id === 'string' && payload.call_id) {
@@ -182,10 +194,10 @@ function formatCustomToolCallOutput(timestamp, payload) {
     lines.push('output: [none]');
   }
 
-  return formatSection(timestamp, 'Custom Tool Output', lines.join('\n'));
+  return formatSection(timestamp, lineRef, 'Custom Tool Output', lines.join('\n'));
 }
 
-function formatCustomToolCall(timestamp, payload) {
+function formatCustomToolCall(timestamp, lineRef, payload) {
   var lines;
 
   lines = [];
@@ -204,10 +216,10 @@ function formatCustomToolCall(timestamp, payload) {
     lines.push(indentBlock(payload.input));
   }
 
-  return formatSection(timestamp, 'Custom Tool Call', lines.join('\n'));
+  return formatSection(timestamp, lineRef, 'Custom Tool Call', lines.join('\n'));
 }
 
-function formatPatchApplyEnd(timestamp, payload) {
+function formatPatchApplyEnd(timestamp, lineRef, payload) {
   var lines;
   var changePath;
   var change;
@@ -259,7 +271,7 @@ function formatPatchApplyEnd(timestamp, payload) {
     }
   }
 
-  return formatSection(timestamp, 'Patch Result', lines.join('\n'));
+  return formatSection(timestamp, lineRef, 'Patch Result', lines.join('\n'));
 }
 
 function summarizeParsedCommand(parsed, verbose) {
@@ -275,10 +287,10 @@ function summarizeParsedCommand(parsed, verbose) {
     return 'File Listing';
   }
 
-  return verbose ? 'Command Result' : '';
+  return 'Command Result';
 }
 
-function formatExecCommandEnd(timestamp, payload, verbose) {
+function formatExecCommandEnd(timestamp, lineRef, payload, verbose) {
   var parsed;
   var label;
   var lines;
@@ -331,45 +343,97 @@ function formatExecCommandEnd(timestamp, payload, verbose) {
     lines.push(indentBlock(payload.aggregated_output.replace(/^\s+|\s+$/g, '')));
   }
 
-  return formatSection(timestamp, label, lines.join('\n'));
+  return formatSection(timestamp, lineRef, label, lines.join('\n'));
 }
 
-function formatGenericEvent(timestamp, label, payload) {
-  return formatSection(timestamp, label, JSON.stringify(payload, null, 2));
+function formatGenericEvent(timestamp, lineRef, label, payload) {
+  return formatSection(timestamp, lineRef, label, JSON.stringify(payload, null, 2));
 }
 
-function parseTranscriptFile(filePath, options) {
-  var input;
+function parseJsonlRecords(input) {
   var lines;
-  var sections;
+  var records;
+  var buffer;
+  var startLine;
   var i;
   var line;
-  var record;
-  var payload;
-  var text;
-  var rendered;
+  var candidate;
+  var parsed;
 
-  input = readUtf8(filePath);
   lines = normalizeNewlines(input).split('\n');
-  sections = [];
+  records = [];
+  buffer = '';
+  startLine = 0;
 
   for (i = 0; i < lines.length; i += 1) {
-    line = lines[i].replace(/^\s+|\s+$/g, '');
-    if (!line) {
+    line = lines[i];
+
+    if (!buffer && !line.replace(/^\s+|\s+$/g, '')) {
+      continue;
+    }
+
+    if (!buffer) {
+      startLine = i + 1;
+      buffer = line;
+    } else {
+      buffer += '\n' + line;
+    }
+
+    candidate = buffer.replace(/^\s+|\s+$/g, '');
+    if (!candidate) {
+      buffer = '';
+      startLine = 0;
       continue;
     }
 
     try {
-      record = JSON.parse(line);
+      parsed = JSON.parse(candidate);
+      records.push({
+        record: parsed,
+        startLine: startLine,
+        endLine: i + 1
+      });
+      buffer = '';
+      startLine = 0;
     } catch (error) {
-      throw new Error('Invalid JSON on line ' + (i + 1) + ' in ' + filePath + ': ' + error.message);
+      if (i === lines.length - 1) {
+        throw new Error('Invalid JSON ending on line ' + (i + 1) + ': ' + error.message);
+      }
     }
+  }
 
+  if (buffer.replace(/^\s+|\s+$/g, '')) {
+    throw new Error('Unterminated JSON record starting on line ' + startLine);
+  }
+
+  return records;
+}
+
+function parseTranscriptFile(filePath, options) {
+  var input;
+  var records;
+  var sections;
+  var i;
+  var entry;
+  var record;
+  var payload;
+  var text;
+  var rendered;
+  var lineRef;
+
+  input = readUtf8(filePath);
+  records = parseJsonlRecords(input);
+  sections = [];
+
+  for (i = 0; i < records.length; i += 1) {
+    entry = records[i];
+    record = entry.record;
     if (!record || !record.payload) {
       continue;
     }
 
     payload = record.payload;
+    lineRef = formatLineRef(entry.startLine, entry.endLine);
 
     if (record.type === 'response_item' && payload.type === 'message') {
       if (payload.role !== 'user' && payload.role !== 'assistant') {
@@ -385,39 +449,39 @@ function parseTranscriptFile(filePath, options) {
         continue;
       }
 
-      rendered = formatMessage(payload.role, record.timestamp || 'unknown-timestamp', text);
+      rendered = formatMessage(payload.role, record.timestamp || 'unknown-timestamp', lineRef, text);
     } else if (record.type === 'response_item' && payload.type === 'reasoning') {
-      rendered = formatReasoning(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatReasoning(record.timestamp || 'unknown-timestamp', lineRef, payload);
     } else if (record.type === 'response_item' && payload.type === 'function_call') {
-      rendered = formatFunctionCall(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatFunctionCall(record.timestamp || 'unknown-timestamp', lineRef, payload);
     } else if (record.type === 'response_item' && payload.type === 'function_call_output') {
-      rendered = formatFunctionCallOutput(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatFunctionCallOutput(record.timestamp || 'unknown-timestamp', lineRef, payload);
     } else if (record.type === 'response_item' && payload.type === 'custom_tool_call') {
-      rendered = formatCustomToolCall(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatCustomToolCall(record.timestamp || 'unknown-timestamp', lineRef, payload);
     } else if (record.type === 'response_item' && payload.type === 'custom_tool_call_output' && options.verbose) {
-      rendered = formatCustomToolCallOutput(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatCustomToolCallOutput(record.timestamp || 'unknown-timestamp', lineRef, payload);
     } else if (record.type === 'event_msg' && payload.type === 'patch_apply_end') {
-      rendered = formatPatchApplyEnd(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatPatchApplyEnd(record.timestamp || 'unknown-timestamp', lineRef, payload);
     } else if (record.type === 'event_msg' && payload.type === 'exec_command_end') {
-      rendered = formatExecCommandEnd(record.timestamp || 'unknown-timestamp', payload, options.verbose);
+      rendered = formatExecCommandEnd(record.timestamp || 'unknown-timestamp', lineRef, payload, options.verbose);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'task_started') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Task Started', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Task Started', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'task_complete') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Task Complete', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Task Complete', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'turn_aborted') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Turn Aborted', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Turn Aborted', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'error') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Error', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Error', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'agent_message') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Agent Message Event', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Agent Message Event', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'user_message') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'User Message Event', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'User Message Event', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'compaction') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Compaction', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Compaction', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'context_compacted') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Context Compacted', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Context Compacted', payload);
     } else if (record.type === 'event_msg' && options.verbose && payload.type === 'compacted') {
-      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Compacted', payload);
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', lineRef, 'Compacted', payload);
     } else {
       continue;
     }
