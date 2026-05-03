@@ -6,14 +6,8 @@ var fs = require('fs');
 var path = require('path');
 
 function printUsage(scriptName) {
-  console.error('Usage: node ' + scriptName + ' [inputDir] [outputDir]');
-  console.error('Defaults: inputDir=../../transcripts outputDir=same directory as each input file');
-}
-
-function ensureDirectory(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
+  console.error('Usage: node ' + scriptName + ' <inputFile.jsonl> [outputFile.txt]');
+  console.error('Defaults: writes rendered transcript to standard output');
 }
 
 function readUtf8(filePath) {
@@ -80,24 +74,114 @@ function extractContentText(content) {
   return normalizeNewlines(parts.join('\n\n')).replace(/^\s+|\s+$/g, '');
 }
 
+function indentBlock(text) {
+  return normalizeNewlines(String(text)).replace(/^/gm, '  ');
+}
+
+function formatSection(timestamp, label, text) {
+  return '[' + timestamp + '] ' + label + '\n' + text;
+}
+
 function formatMessage(role, timestamp, text) {
   var label = role === 'assistant' ? 'GPT' : 'User';
-  return '[' + timestamp + '] ' + label + '\n' + text;
+  return formatSection(timestamp, label, text);
+}
+
+function extractReasoningText(payload) {
+  var parts;
+  var i;
+  var item;
+
+  parts = [];
+
+  if (payload.summary && payload.summary.length) {
+    for (i = 0; i < payload.summary.length; i += 1) {
+      item = payload.summary[i];
+      if (!item || item.encrypted_content) {
+        continue;
+      }
+
+      if (typeof item.text === 'string' && item.text) {
+        parts.push(item.text);
+      } else if (typeof item.content === 'string' && item.content) {
+        parts.push(item.content);
+      }
+    }
+  }
+
+  if (payload.content && typeof payload.content === 'string') {
+    parts.push(payload.content);
+  }
+
+  if (!parts.length && payload.encrypted_content) {
+    parts.push('[encrypted reasoning omitted]');
+  }
+
+  return normalizeNewlines(parts.join('\n\n')).replace(/^\s+|\s+$/g, '');
+}
+
+function formatReasoning(timestamp, payload) {
+  var text = extractReasoningText(payload);
+
+  if (!text) {
+    return '';
+  }
+
+  return formatSection(timestamp, 'Reasoning', text);
+}
+
+function formatFunctionCall(timestamp, payload) {
+  var lines;
+
+  lines = [];
+  lines.push('name: ' + (payload.name || 'unknown'));
+
+  if (typeof payload.call_id === 'string' && payload.call_id) {
+    lines.push('call_id: ' + payload.call_id);
+  }
+
+  if (typeof payload.arguments === 'string' && payload.arguments) {
+    lines.push('arguments:');
+    lines.push(indentBlock(payload.arguments));
+  }
+
+  return formatSection(timestamp, 'Tool Call', lines.join('\n'));
+}
+
+function formatFunctionCallOutput(timestamp, payload) {
+  var lines;
+  var outputText;
+
+  lines = [];
+  if (typeof payload.call_id === 'string' && payload.call_id) {
+    lines.push('call_id: ' + payload.call_id);
+  }
+
+  outputText = typeof payload.output === 'string' ? normalizeNewlines(payload.output).replace(/^\s+|\s+$/g, '') : '';
+  if (outputText) {
+    lines.push('output:');
+    lines.push(indentBlock(outputText));
+  } else {
+    lines.push('output: [none]');
+  }
+
+  return formatSection(timestamp, 'Tool Output', lines.join('\n'));
 }
 
 function parseTranscriptFile(filePath) {
   var input;
   var lines;
-  var messages;
+  var sections;
   var i;
   var line;
   var record;
   var payload;
   var text;
+  var rendered;
 
   input = readUtf8(filePath);
   lines = normalizeNewlines(input).split('\n');
-  messages = [];
+  sections = [];
 
   for (i = 0; i < lines.length; i += 1) {
     line = lines[i].replace(/^\s+|\s+$/g, '');
@@ -116,85 +200,72 @@ function parseTranscriptFile(filePath) {
     }
 
     payload = record.payload;
-    if (payload.type !== 'message') {
+
+    if (payload.type === 'message') {
+      if (payload.role !== 'user' && payload.role !== 'assistant') {
+        continue;
+      }
+
+      text = extractContentText(payload.content);
+      if (payload.role === 'user') {
+        text = trimSpecialUserMessage(text);
+      }
+
+      if (!text) {
+        continue;
+      }
+
+      rendered = formatMessage(payload.role, record.timestamp || 'unknown-timestamp', text);
+    } else if (payload.type === 'reasoning') {
+      rendered = formatReasoning(record.timestamp || 'unknown-timestamp', payload);
+    } else if (payload.type === 'function_call') {
+      rendered = formatFunctionCall(record.timestamp || 'unknown-timestamp', payload);
+    } else if (payload.type === 'function_call_output') {
+      rendered = formatFunctionCallOutput(record.timestamp || 'unknown-timestamp', payload);
+    } else {
       continue;
     }
 
-    if (payload.role !== 'user' && payload.role !== 'assistant') {
-      continue;
+    if (rendered) {
+      sections.push(rendered);
     }
-
-    text = extractContentText(payload.content);
-    if (payload.role === 'user') {
-      text = trimSpecialUserMessage(text);
-    }
-
-    if (!text) {
-      continue;
-    }
-
-    messages.push(formatMessage(payload.role, record.timestamp || 'unknown-timestamp', text));
   }
 
-  return messages.join('\n\n');
-}
-
-function convertFile(inputPath, outputPath) {
-  var outputText = parseTranscriptFile(inputPath);
-  writeUtf8(outputPath, outputText ? outputText + '\n' : '');
+  return sections.join('\n\n');
 }
 
 function main() {
-  var scriptDir = __dirname;
-  var defaultInputDir = path.resolve(scriptDir, '../../transcripts');
-  var inputDir = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : defaultInputDir;
-  var outputDir = process.argv[3] ? path.resolve(process.cwd(), process.argv[3]) : null;
-  var entries;
-  var jsonlFiles;
-  var i;
-  var entryName;
   var inputPath;
-  var outputName;
   var outputPath;
+  var outputText;
 
-  if (process.argv.length > 4) {
+  if (process.argv.length < 3 || process.argv.length > 4) {
     printUsage(path.basename(process.argv[1] || 'process_transcript.js'));
     process.exit(1);
   }
 
-  if (!fs.existsSync(inputDir) || !fs.statSync(inputDir).isDirectory()) {
-    console.error('Input directory not found: ' + inputDir);
+  inputPath = path.resolve(process.cwd(), process.argv[2]);
+  outputPath = process.argv[3] ? path.resolve(process.cwd(), process.argv[3]) : null;
+
+  if (!fs.existsSync(inputPath) || !fs.statSync(inputPath).isFile()) {
+    console.error('Input file not found: ' + inputPath);
     process.exit(1);
   }
 
-  if (outputDir) {
-    ensureDirectory(outputDir);
-  }
-
-  entries = fs.readdirSync(inputDir);
-  jsonlFiles = [];
-  for (i = 0; i < entries.length; i += 1) {
-    entryName = entries[i];
-    inputPath = path.join(inputDir, entryName);
-    if (fs.statSync(inputPath).isFile() && /\.jsonl$/i.test(entryName)) {
-      jsonlFiles.push(entryName);
-    }
-  }
-
-  jsonlFiles.sort();
-
-  if (!jsonlFiles.length) {
-    console.error('No .jsonl files found in ' + inputDir);
+  if (!/\.jsonl$/i.test(inputPath)) {
+    console.error('Input file must end with .jsonl: ' + inputPath);
     process.exit(1);
   }
 
-  for (i = 0; i < jsonlFiles.length; i += 1) {
-    entryName = jsonlFiles[i];
-    inputPath = path.join(inputDir, entryName);
-    outputName = entryName.replace(/\.jsonl$/i, '.txt');
-    outputPath = outputDir ? path.join(outputDir, outputName) : path.join(inputDir, outputName);
-    convertFile(inputPath, outputPath);
-    console.log('Wrote ' + outputPath);
+  outputText = parseTranscriptFile(inputPath);
+  if (outputText) {
+    outputText += '\n';
+  }
+
+  if (outputPath) {
+    writeUtf8(outputPath, outputText);
+  } else {
+    process.stdout.write(outputText);
   }
 }
 
