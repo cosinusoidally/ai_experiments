@@ -168,6 +168,155 @@ function formatFunctionCallOutput(timestamp, payload) {
   return formatSection(timestamp, 'Tool Output', lines.join('\n'));
 }
 
+function formatCustomToolCall(timestamp, payload) {
+  var lines;
+
+  lines = [];
+  lines.push('name: ' + (payload.name || 'unknown'));
+
+  if (typeof payload.call_id === 'string' && payload.call_id) {
+    lines.push('call_id: ' + payload.call_id);
+  }
+
+  if (typeof payload.status === 'string' && payload.status) {
+    lines.push('status: ' + payload.status);
+  }
+
+  if (typeof payload.input === 'string' && payload.input) {
+    lines.push('input:');
+    lines.push(indentBlock(payload.input));
+  }
+
+  return formatSection(timestamp, 'Custom Tool Call', lines.join('\n'));
+}
+
+function formatPatchApplyEnd(timestamp, payload) {
+  var lines;
+  var changePath;
+  var change;
+
+  lines = [];
+
+  if (typeof payload.call_id === 'string' && payload.call_id) {
+    lines.push('call_id: ' + payload.call_id);
+  }
+
+  if (typeof payload.status === 'string' && payload.status) {
+    lines.push('status: ' + payload.status);
+  }
+
+  if (typeof payload.success === 'boolean') {
+    lines.push('success: ' + payload.success);
+  }
+
+  if (typeof payload.stdout === 'string' && payload.stdout) {
+    lines.push('stdout:');
+    lines.push(indentBlock(payload.stdout.replace(/^\s+|\s+$/g, '')));
+  }
+
+  if (typeof payload.stderr === 'string' && payload.stderr) {
+    lines.push('stderr:');
+    lines.push(indentBlock(payload.stderr.replace(/^\s+|\s+$/g, '')));
+  }
+
+  if (payload.changes) {
+    for (changePath in payload.changes) {
+      if (Object.prototype.hasOwnProperty.call(payload.changes, changePath)) {
+        change = payload.changes[changePath];
+        lines.push('change: ' + changePath);
+        if (change && change.type) {
+          lines.push(indentBlock('type: ' + change.type));
+        }
+        if (change && change.move_path) {
+          lines.push(indentBlock('move_path: ' + change.move_path));
+        }
+        if (change && typeof change.unified_diff === 'string' && change.unified_diff) {
+          lines.push(indentBlock('unified_diff:'));
+          lines.push(indentBlock(indentBlock(change.unified_diff.replace(/^\s+|\s+$/g, ''))));
+        }
+        if (change && typeof change.content === 'string' && change.content) {
+          lines.push(indentBlock('content:'));
+          lines.push(indentBlock(indentBlock(change.content.replace(/^\s+|\s+$/g, ''))));
+        }
+      }
+    }
+  }
+
+  return formatSection(timestamp, 'Patch Result', lines.join('\n'));
+}
+
+function summarizeParsedCommand(parsed) {
+  if (!parsed || !parsed.type) {
+    return '';
+  }
+
+  if (parsed.type === 'read') {
+    return 'File Read';
+  }
+
+  if (parsed.type === 'list_files' || parsed.type === 'search') {
+    return 'File Listing';
+  }
+
+  return '';
+}
+
+function formatExecCommandEnd(timestamp, payload) {
+  var parsed;
+  var label;
+  var lines;
+  var i;
+
+  if (!payload.parsed_cmd || !payload.parsed_cmd.length) {
+    return '';
+  }
+
+  label = '';
+  for (i = 0; i < payload.parsed_cmd.length; i += 1) {
+    parsed = payload.parsed_cmd[i];
+    label = summarizeParsedCommand(parsed);
+    if (label) {
+      break;
+    }
+  }
+
+  if (!label) {
+    return '';
+  }
+
+  lines = [];
+  if (typeof payload.call_id === 'string' && payload.call_id) {
+    lines.push('call_id: ' + payload.call_id);
+  }
+  if (typeof payload.status === 'string' && payload.status) {
+    lines.push('status: ' + payload.status);
+  }
+  if (typeof payload.exit_code !== 'undefined') {
+    lines.push('exit_code: ' + payload.exit_code);
+  }
+
+  for (i = 0; i < payload.parsed_cmd.length; i += 1) {
+    parsed = payload.parsed_cmd[i];
+    lines.push('operation: ' + (parsed.type || 'unknown'));
+    if (parsed.path) {
+      lines.push(indentBlock('path: ' + parsed.path));
+    }
+    if (parsed.name) {
+      lines.push(indentBlock('name: ' + parsed.name));
+    }
+    if (parsed.cmd) {
+      lines.push(indentBlock('command: ' + parsed.cmd));
+    }
+  }
+
+  if (typeof payload.aggregated_output === 'string' && payload.aggregated_output) {
+    lines.push('content:');
+    lines.push(indentBlock(payload.aggregated_output.replace(/^\s+|\s+$/g, '')));
+  }
+
+  return formatSection(timestamp, label, lines.join('\n'));
+}
+
 function parseTranscriptFile(filePath) {
   var input;
   var lines;
@@ -195,13 +344,13 @@ function parseTranscriptFile(filePath) {
       throw new Error('Invalid JSON on line ' + (i + 1) + ' in ' + filePath + ': ' + error.message);
     }
 
-    if (!record || record.type !== 'response_item' || !record.payload) {
+    if (!record || !record.payload) {
       continue;
     }
 
     payload = record.payload;
 
-    if (payload.type === 'message') {
+    if (record.type === 'response_item' && payload.type === 'message') {
       if (payload.role !== 'user' && payload.role !== 'assistant') {
         continue;
       }
@@ -216,12 +365,18 @@ function parseTranscriptFile(filePath) {
       }
 
       rendered = formatMessage(payload.role, record.timestamp || 'unknown-timestamp', text);
-    } else if (payload.type === 'reasoning') {
+    } else if (record.type === 'response_item' && payload.type === 'reasoning') {
       rendered = formatReasoning(record.timestamp || 'unknown-timestamp', payload);
-    } else if (payload.type === 'function_call') {
+    } else if (record.type === 'response_item' && payload.type === 'function_call') {
       rendered = formatFunctionCall(record.timestamp || 'unknown-timestamp', payload);
-    } else if (payload.type === 'function_call_output') {
+    } else if (record.type === 'response_item' && payload.type === 'function_call_output') {
       rendered = formatFunctionCallOutput(record.timestamp || 'unknown-timestamp', payload);
+    } else if (record.type === 'response_item' && payload.type === 'custom_tool_call') {
+      rendered = formatCustomToolCall(record.timestamp || 'unknown-timestamp', payload);
+    } else if (record.type === 'event_msg' && payload.type === 'patch_apply_end') {
+      rendered = formatPatchApplyEnd(record.timestamp || 'unknown-timestamp', payload);
+    } else if (record.type === 'event_msg' && payload.type === 'exec_command_end') {
+      rendered = formatExecCommandEnd(record.timestamp || 'unknown-timestamp', payload);
     } else {
       continue;
     }
