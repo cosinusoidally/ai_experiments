@@ -10,6 +10,7 @@ This directory contains an ECMAScript 5.1 Node.js script that converts a Codex/O
 - Includes tool calls and tool call outputs
 - Includes patch tool calls and patch results
 - Includes explicit file-read and file-listing events when the transcript tagged them
+- Supports `--verbose` to include broader operational and lifecycle events
 - Writes to standard output by default
 - Writes to a `.txt` file when an output path is provided
 - Preserves the transcript timestamp for each message
@@ -41,6 +42,13 @@ You can also provide an output file:
 
 ```sh
 node ai_experiments/process_transcript/process_transcript.js transcripts/example.jsonl transcripts/example.txt
+```
+
+Verbose mode includes extra non-encrypted event data such as generic command completions, custom tool outputs, and lifecycle events:
+
+```sh
+node ai_experiments/process_transcript/process_transcript.js --verbose transcripts/example.jsonl
+node ai_experiments/process_transcript/process_transcript.js --verbose transcripts/example.jsonl transcripts/example.txt
 ```
 
 ## Output format
@@ -101,5 +109,6 @@ run the bootstrap
 
 - The converter uses `response_item` entries for visible chat, reasoning, tool calls, and tool outputs.
 - It also uses `event_msg` entries for `patch_apply_end` and file-oriented `exec_command_end` records.
+- In `--verbose` mode it also includes additional non-encrypted operational events such as generic `exec_command_end`, `custom_tool_call_output`, `task_started`, `task_complete`, `turn_aborted`, and similar lifecycle records.
 - Most reasoning entries in these transcripts are encrypted. Those are rendered as `[encrypted reasoning omitted]` because the script skips `encrypted_content`.
 - If you pass an output file path, the script writes there. Otherwise it writes to standard output.

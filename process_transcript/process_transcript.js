@@ -6,7 +6,7 @@ var fs = require('fs');
 var path = require('path');
 
 function printUsage(scriptName) {
-  console.error('Usage: node ' + scriptName + ' <inputFile.jsonl> [outputFile.txt]');
+  console.error('Usage: node ' + scriptName + ' [--verbose] <inputFile.jsonl> [outputFile.txt]');
   console.error('Defaults: writes rendered transcript to standard output');
 }
 
@@ -168,6 +168,23 @@ function formatFunctionCallOutput(timestamp, payload) {
   return formatSection(timestamp, 'Tool Output', lines.join('\n'));
 }
 
+function formatCustomToolCallOutput(timestamp, payload) {
+  var lines = [];
+
+  if (typeof payload.call_id === 'string' && payload.call_id) {
+    lines.push('call_id: ' + payload.call_id);
+  }
+
+  if (typeof payload.output === 'string' && payload.output) {
+    lines.push('output:');
+    lines.push(indentBlock(payload.output.replace(/^\s+|\s+$/g, '')));
+  } else {
+    lines.push('output: [none]');
+  }
+
+  return formatSection(timestamp, 'Custom Tool Output', lines.join('\n'));
+}
+
 function formatCustomToolCall(timestamp, payload) {
   var lines;
 
@@ -245,9 +262,9 @@ function formatPatchApplyEnd(timestamp, payload) {
   return formatSection(timestamp, 'Patch Result', lines.join('\n'));
 }
 
-function summarizeParsedCommand(parsed) {
+function summarizeParsedCommand(parsed, verbose) {
   if (!parsed || !parsed.type) {
-    return '';
+    return verbose ? 'Command Result' : '';
   }
 
   if (parsed.type === 'read') {
@@ -258,10 +275,10 @@ function summarizeParsedCommand(parsed) {
     return 'File Listing';
   }
 
-  return '';
+  return verbose ? 'Command Result' : '';
 }
 
-function formatExecCommandEnd(timestamp, payload) {
+function formatExecCommandEnd(timestamp, payload, verbose) {
   var parsed;
   var label;
   var lines;
@@ -274,7 +291,7 @@ function formatExecCommandEnd(timestamp, payload) {
   label = '';
   for (i = 0; i < payload.parsed_cmd.length; i += 1) {
     parsed = payload.parsed_cmd[i];
-    label = summarizeParsedCommand(parsed);
+    label = summarizeParsedCommand(parsed, verbose);
     if (label) {
       break;
     }
@@ -317,7 +334,11 @@ function formatExecCommandEnd(timestamp, payload) {
   return formatSection(timestamp, label, lines.join('\n'));
 }
 
-function parseTranscriptFile(filePath) {
+function formatGenericEvent(timestamp, label, payload) {
+  return formatSection(timestamp, label, JSON.stringify(payload, null, 2));
+}
+
+function parseTranscriptFile(filePath, options) {
   var input;
   var lines;
   var sections;
@@ -373,10 +394,30 @@ function parseTranscriptFile(filePath) {
       rendered = formatFunctionCallOutput(record.timestamp || 'unknown-timestamp', payload);
     } else if (record.type === 'response_item' && payload.type === 'custom_tool_call') {
       rendered = formatCustomToolCall(record.timestamp || 'unknown-timestamp', payload);
+    } else if (record.type === 'response_item' && payload.type === 'custom_tool_call_output' && options.verbose) {
+      rendered = formatCustomToolCallOutput(record.timestamp || 'unknown-timestamp', payload);
     } else if (record.type === 'event_msg' && payload.type === 'patch_apply_end') {
       rendered = formatPatchApplyEnd(record.timestamp || 'unknown-timestamp', payload);
     } else if (record.type === 'event_msg' && payload.type === 'exec_command_end') {
-      rendered = formatExecCommandEnd(record.timestamp || 'unknown-timestamp', payload);
+      rendered = formatExecCommandEnd(record.timestamp || 'unknown-timestamp', payload, options.verbose);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'task_started') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Task Started', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'task_complete') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Task Complete', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'turn_aborted') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Turn Aborted', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'error') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Error', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'agent_message') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Agent Message Event', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'user_message') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'User Message Event', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'compaction') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Compaction', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'context_compacted') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Context Compacted', payload);
+    } else if (record.type === 'event_msg' && options.verbose && payload.type === 'compacted') {
+      rendered = formatGenericEvent(record.timestamp || 'unknown-timestamp', 'Compacted', payload);
     } else {
       continue;
     }
@@ -390,17 +431,27 @@ function parseTranscriptFile(filePath) {
 }
 
 function main() {
+  var args;
+  var verbose;
   var inputPath;
   var outputPath;
   var outputText;
 
-  if (process.argv.length < 3 || process.argv.length > 4) {
+  args = process.argv.slice(2);
+  verbose = false;
+
+  if (args.length && args[0] === '--verbose') {
+    verbose = true;
+    args = args.slice(1);
+  }
+
+  if (args.length < 1 || args.length > 2) {
     printUsage(path.basename(process.argv[1] || 'process_transcript.js'));
     process.exit(1);
   }
 
-  inputPath = path.resolve(process.cwd(), process.argv[2]);
-  outputPath = process.argv[3] ? path.resolve(process.cwd(), process.argv[3]) : null;
+  inputPath = path.resolve(process.cwd(), args[0]);
+  outputPath = args[1] ? path.resolve(process.cwd(), args[1]) : null;
 
   if (!fs.existsSync(inputPath) || !fs.statSync(inputPath).isFile()) {
     console.error('Input file not found: ' + inputPath);
@@ -412,7 +463,7 @@ function main() {
     process.exit(1);
   }
 
-  outputText = parseTranscriptFile(inputPath);
+  outputText = parseTranscriptFile(inputPath, { verbose: verbose });
   if (outputText) {
     outputText += '\n';
   }
