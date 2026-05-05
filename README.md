@@ -14,6 +14,16 @@ tcc_simple repo. To a very large extent this succeeded, and the AI wrote the bul
 of the code (with a fair amount of guidance from me).
 
 Model: GPT-5.4 under Codex CLI
+Status: DONE, further refinements are possible.
+
+## tcc_mawk_bootstrap
+
+The aim of this repo is to 3 stage bootstrap the tiny C compiler in a portable
+way that allows me to build slackware packages and gradually build up a version
+of the Slackware 10.2 (circa 2005) distro using tcc.
+
+Model: GPT-5.4 under Codex CLI
+Status: WIP
 
 ## jsvm
 
@@ -21,6 +31,7 @@ Planned to be a self hosted JavaScript VM (by growing mawkcc). This is still at
 the early stages and WIP, but does have the initial test rig in place.
 
 Model: GPT-5.4 under Codex CLI
+Status: early stages, on hold
 
 ## jsapi_test
 
@@ -32,3 +43,4 @@ Claude Haiku 4.5 via GitHub copilot). The Haiku model wasn't very good.
 
 Model: Claude Haiku 4.5 under the web version of GitHub Copilot. Possibly also
        a bit of GPT-5.4 under Codex CLI, but I can't remember for sure.
+Status: early stages, on hold
