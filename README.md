@@ -42,6 +42,10 @@ Model: GPT-5.4 under Codex CLI
 
 Status: WIP, works but may need some more work to improve the output format
 
+## python
+
+Some Python utility scripts/experiments.
+
 ## jsvm
 
 Planned to be a self hosted JavaScript VM (by growing mawkcc). This is still at
