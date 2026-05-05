@@ -25,6 +25,20 @@ of the Slackware 10.2 (circa 2005) distro using tcc.
 Model: GPT-5.4 under Codex CLI
 Status: WIP
 
+## process_transcript
+
+This is a nodejs script that allows me to process the Codex produced jsonl
+transcript files into a human readable form. This allows me to easily review
+my conversations with Codex, with the ultimate idea to publish them in a human
+readable form.
+
+This is also useful to allow me to fully review what Codex is actually done,
+including thing like how it debugged issues, whether it was getting stuck in
+loops, etc.
+
+Model: GPT-5.4 under Codex CLI
+Status: WIP, works but may need some more work to improve the output format
+
 ## jsvm
 
 Planned to be a self hosted JavaScript VM (by growing mawkcc). This is still at
