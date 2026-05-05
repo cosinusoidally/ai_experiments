@@ -46,6 +46,10 @@ Status: WIP, works but may need some more work to improve the output format
 
 Some Python utility scripts/experiments.
 
+Model: GPT-5.4 under Codex CLI
+
+Status: WIP, ongoing there may be more scripts added
+
 ## jsvm
 
 Planned to be a self hosted JavaScript VM (by growing mawkcc). This is still at
@@ -67,3 +71,12 @@ Model: Claude Haiku 4.5 under the web version of GitHub Copilot. Possibly also
        a bit of GPT-5.4 under Codex CLI, but I can't remember for sure.
 
 Status: early stages, on hold
+
+## backup_workflow
+
+This was a Github workflow script for the jsapi_test. I moved it to here to
+avoid triggering Github actions every time I pushed.
+
+Model: Claude Haiku 4.5 under the web version of GitHub Copilot.
+
+Status: on hold, see also jsapi_test
