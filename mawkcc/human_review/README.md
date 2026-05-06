@@ -1,5 +1,7 @@
 # mawkcc human review
 
+See also datad notes [DATED.md](DATED.md)
+
 For more general human review of all of my AI based code see:
 [../../human_review/README.md](../../human_review/README.md)
 
