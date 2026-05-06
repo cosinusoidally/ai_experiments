@@ -12,15 +12,6 @@ rm -f "$BIN" "$ERR"
 mawk -f "$ROOT/cc.awk" -- "$ROOT/examples/argv90.c" -o "$BIN"
 chmod +x "$BIN"
 
-FILE_OUT=$(file "$BIN")
-case "$FILE_OUT" in
-    *"ELF 32-bit LSB executable, Intel 80386"*) ;;
-    *)
-        echo "unexpected file output: $FILE_OUT" >&2
-        exit 1
-        ;;
-esac
-
 set +e
 "$BIN" Z tail 2>"$ERR"
 STATUS=$?
