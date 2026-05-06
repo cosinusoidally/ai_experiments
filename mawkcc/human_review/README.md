@@ -1,6 +1,6 @@
 # mawkcc human review
 
-See also datad notes [DATED.md](DATED.md)
+See also dated notes [DATED.md](DATED.md)
 
 For more general human review of all of my AI based code see:
 [../../human_review/README.md](../../human_review/README.md)
@@ -52,3 +52,11 @@ gcc -m32 artifacts/mawkcc_gcc_support.o artifacts/out.o -o artifacts/out.exe
 * a lot of the machine code generation uses magic opcode numbers (but not
   consistently). This should be refactored to be clearer which opcodes are
   being generated (potentially with helper functions).
+
+* the implementation doesn't track the current line number, only an offset from
+  the start of the file.
+
+* some of the tests are not very good. eg I remember it adding a linking test
+  that did not excerise relocations very well. I suspect the linking tests are
+  generally not very good as it it missied the fact that the gcc based linking
+  is not working correctly.
