@@ -12,10 +12,10 @@ General observation is that Codex GPT-5.4 did a pretty good job. It generated
 3 versions of the compiler (and awk version. ansi C version and a self hosted
 version). All 3 versions produce bit identical output when compiling itself.
 
-The compiler source code is also valid AWK and JavaScript. This means the code
-can be built with mawk or the Mozilla Spidermonkey shell (gawk in theory will
-also work, but you will likely need to `export LC_ALL=C` before running). It
-can also be run in a web browser via the `index.html` file (this part was
+The compiler source code is also valid C, AWK, and JavaScript. This means the
+code can be built with mawk or the Mozilla Spidermonkey shell (gawk in theory
+will also work, but you will likely need to `export LC_ALL=C` before running).
+It can also be run in a web browser via the `index.html` file (this part was
 written by a human (me)).
 
 Some observed limitations of the code (some of which I will try and fix manually
