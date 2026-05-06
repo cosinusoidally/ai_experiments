@@ -5,5 +5,9 @@ down into multiple files, for example I might include dated markdown files
 for random notes I've made on a specific date. In the experiment specific dirs
 I will add human_review directories as I work my way through reviewing the code.
 
-# Date specific notes
+## project specific human_review notes
+
+* [mawkcc](../mawkcc/human_review/README.md)
+
+## Date specific general notes
 * [2026-05-05.md](2026-05-05.md)
