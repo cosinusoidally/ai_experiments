@@ -58,5 +58,5 @@ gcc -m32 artifacts/mawkcc_gcc_support.o artifacts/out.o -o artifacts/out.exe
 
 * some of the tests are not very good. eg I remember it adding a linking test
   that did not excerise relocations very well. I suspect the linking tests are
-  generally not very good as it it missied the fact that the gcc based linking
+  generally not very good as it it missed the fact that the gcc based linking
   is not working correctly.
