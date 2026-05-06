@@ -2,7 +2,7 @@
 
 This repo is where I am testing out AI software development. In each of these
 projects I have tried to get the AI to do as much as possible for me. In each
-project I plan to add a [human_review/README.md](human_review) directory where
+project I plan to add a [human_review](human_review/README.md) directory where
 I review the code that the AI has generated, and add any relevant notes about
 my experience of AI based software development.
 
