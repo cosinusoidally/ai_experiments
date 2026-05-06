@@ -1,5 +1,8 @@
 # mawkcc human review
 
+For more general human review of all of my AI based code see:
+[../../human_review/README.md](../../human_review/README.md)
+
 I will gather general observations in this file. I will also provide some of my
 more undigested thoughts in date specific files (eg 2026-05-06.md).
 
@@ -29,7 +32,11 @@ gcc -m32 artifacts/mawkcc_gcc_support.o artifacts/out.o -o artifacts/out.exe
 * I'm not 100% sure the calling convention is 100% right. I asked it to use the
   System V calling convention. It kind of seemed to do this, but it was not
   correctly preserving the ebx register. It fixed this with a preamble that did
-  preserve .
+  preserve ebx, but I have broader questions about whether it got that right.
+  Maybe a better approach would be to just use the stack rather than ebx, and
+  use ecx as a temp (this approach, which is what other compilers do, would
+  also mean that ebx would not needs to preserved, as ecx is a scratch register
+  that does not need to be preserved across calls).
 
 * there are some magic numbers in the mawkcc_self.c code that do not exist
   in the awk version (or sometimes the ansi C version). I think this is because
