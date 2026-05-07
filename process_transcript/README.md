@@ -68,6 +68,19 @@ You can also point it at a different sessions directory:
 node ai_experiments/process_transcript/calculate_gpt54_session_cost.js ~/.codex/sessions
 ```
 
+You can point it at a single `.jsonl` log file instead of a directory tree:
+
+```sh
+node ai_experiments/process_transcript/calculate_gpt54_session_cost.js ~/.codex/sessions/2026/05/07/rollout-2026-05-07T13-23-52-019e0264-f6ed-7141-ae99-ea4aa3b0572c.jsonl
+```
+
+Use `--detailed` for a per-session breakdown in addition to the aggregate summary:
+
+```sh
+node ai_experiments/process_transcript/calculate_gpt54_session_cost.js --detailed
+node ai_experiments/process_transcript/calculate_gpt54_session_cost.js --detailed ~/.codex/sessions
+```
+
 ## Output format
 
 Each message is written like this:
@@ -135,12 +148,13 @@ run the bootstrap
 ## Cost Calculation Notes
 
 - `calculate_gpt54_session_cost.js` is separate from `process_transcript.js`; it does not change the transcript rendering path.
-- It recursively scans `.jsonl` files under `~/.codex/sessions/` by default.
+- It scans `~/.codex/sessions/` recursively by default, but it can also scan an explicit directory or a single `.jsonl` file.
 - It follows `turn_context.payload.model` to determine which token-count snapshots belong to `gpt-5.4`.
 - It uses `event_msg` records of type `token_count` and reads `payload.info.total_token_usage`, which is cumulative within a session file.
 - To avoid double-counting, it prices the delta between consecutive cumulative snapshots rather than summing every snapshot directly.
 - It treats `cached_input_tokens` as a subset of `input_tokens`, so uncached input is `input_tokens - cached_input_tokens`.
 - It treats `reasoning_output_tokens` as informational only because reasoning tokens are included inside `output_tokens`, so the script does not bill them separately.
+- In default mode it prints one aggregate summary. With `--detailed`, it also prints a per-session breakdown sorted by estimated total cost.
 - The script uses the OpenAI GPT-5.4 standard API prices verified on 2026-05-07: input `$2.50 / 1M`, cached input `$0.25 / 1M`, output `$15.00 / 1M`.
 - Official references used in the code comments:
   - Pricing: https://openai.com/api/pricing/
