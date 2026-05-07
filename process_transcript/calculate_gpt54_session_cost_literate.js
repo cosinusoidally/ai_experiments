@@ -3,46 +3,39 @@
 'use strict';
 
 /*
- * This is the literate counterpart to `calculate_gpt54_session_cost.js`.
+ * Problem statement.
  *
- * "Literate" here means the program should explain itself as it unfolds.  A
- * reader should be able to move from top to bottom and answer, in order:
+ * Given one `.jsonl` transcript or a directory tree of transcripts, estimate
+ * the dollar cost attributable to the exact model identifier `gpt-5.4`.
  *
- * 1. What is being estimated?
- * 2. Which external facts does the estimate depend on?
- * 3. Which transcript fields are treated as billable evidence?
- * 4. How are those fields turned into a cost?
- * 5. How does the script aggregate results and present them?
+ * The cost calculation is simple once the relevant token counts are known.  The
+ * real work is extracting those counts from cumulative transcript snapshots and
+ * stating the conventions used when the transcript is incomplete or malformed.
  *
- * The CLI behavior is intentionally kept identical to the original script.
- * The difference is in how the source is narrated, not in what the tool does.
+ * The program is therefore written in the order one would write precise
+ * pseudocode:
+ *
+ *   1. define the normalized data we manipulate;
+ *   2. define the cost of one normalized usage vector;
+ *   3. define how one transcript file yields model-attributed increments;
+ *   4. define how multiple files are aggregated and reported.
  */
 
 var fs = require('fs');
-var path = require('path');
 var os = require('os');
+var path = require('path');
 
 /*
- * The original script is about one model only, so this version keeps the same
- * target.  Matching remains exact because the goal is behavioral parity rather
- * than a broader or smarter interpretation of model families.
+ * Constants.
+ *
+ * We estimate only the exact model string below.  We do not infer families or
+ * aliases.
+ *
+ * The prices were checked on 2026-05-07 at
+ * https://openai.com/api/pricing/
  */
 var TARGET_MODEL = 'gpt-5.4';
 
-/*
- * Every estimate in this file eventually reduces to the three public token
- * prices below.
- *
- * Source checked on 2026-05-07:
- *   https://openai.com/api/pricing/
- *
- * GPT-5.4 standard rates there were:
- * - input:        $2.50 / 1M tokens
- * - cached input: $0.25 / 1M tokens
- * - output:       $15.00 / 1M tokens
- *
- * The script reports those rates back to the caller, just like the original.
- */
 var PRICING = {
   inputPerMillion: 2.50,
   cachedInputPerMillion: 0.25,
@@ -50,82 +43,20 @@ var PRICING = {
 };
 
 /*
- * The program consumes transcript logs that contain token-count snapshots.
- * Conceptually we normalize every relevant snapshot to the same four numbers:
+ * Step 1. Normalize transcript data.
  *
- * - inputTokens
- * - cachedInputTokens
- * - outputTokens
- * - reasoningOutputTokens
+ * We reduce every usable token snapshot to a four-field record:
  *
- * `reasoningOutputTokens` is carried through for visibility only.  It is not
- * billed separately because it is understood to be part of output tokens.
+ *   usage = {
+ *     inputTokens,
+ *     cachedInputTokens,
+ *     outputTokens,
+ *     reasoningOutputTokens
+ *   }
  *
- * Public docs describe the same ideas through the Responses API usage objects
- * and prompt-caching docs, although the transcript logs flatten the shape:
- * - https://platform.openai.com/docs/api-reference/responses
- * - https://platform.openai.com/docs/guides/prompt-caching
- */
-
-function printUsage(scriptName) {
-  console.error('Usage: node ' + scriptName + ' [--detailed] [--json] [logPath]');
-  console.error('Default logPath: ~/.codex/sessions');
-  console.error('`logPath` may be either a single .jsonl file or a directory tree.');
-}
-
-/*
- * The original tool accepts `~` in paths, so the literate version keeps that
- * small convenience intact.  This is part of matching the original interface,
- * not part of the cost model itself.
- */
-function expandHome(inputPath) {
-  if (!inputPath) {
-    return inputPath;
-  }
-
-  if (inputPath === '~') {
-    return os.homedir();
-  }
-
-  if (inputPath.indexOf('~/') === 0) {
-    return path.join(os.homedir(), inputPath.slice(2));
-  }
-
-  return inputPath;
-}
-
-/*
- * These formatting helpers are deliberately tiny, but they matter because the
- * script exposes the estimate both to humans and to machine consumers.
- */
-function formatMoney(amount) {
-  return '$' + amount.toFixed(6);
-}
-
-function formatPercent(numerator, denominator) {
-  if (!denominator) {
-    return '0.00%';
-  }
-
-  return ((numerator / denominator) * 100).toFixed(2) + '%';
-}
-
-/*
- * Transcript fields are not guaranteed to be present or well-typed.  Rather
- * than failing hard on a missing count, the original script treats bad values
- * as zero.  We preserve that policy here.
- */
-function toCount(value) {
-  if (typeof value === 'number' && isFinite(value) && value >= 0) {
-    return value;
-  }
-
-  return 0;
-}
-
-/*
- * All accumulation in the program uses the same normalized usage shape.  The
- * next three helpers define that shape and the standard operations on it.
+ * The counts are intended to be non-negative integers.  Any other scalar is
+ * treated as unusable and replaced by zero.  That replacement is counted in a
+ * diagnostics ledger rather than done silently.
  */
 function zeroUsage() {
   return {
@@ -136,7 +67,7 @@ function zeroUsage() {
   };
 }
 
-function cloneUsage(usage) {
+function copyUsage(usage) {
   return {
     inputTokens: usage.inputTokens,
     cachedInputTokens: usage.cachedInputTokens,
@@ -145,91 +76,88 @@ function cloneUsage(usage) {
   };
 }
 
-function addUsage(target, delta) {
-  target.inputTokens += delta.inputTokens;
-  target.cachedInputTokens += delta.cachedInputTokens;
-  target.outputTokens += delta.outputTokens;
-  target.reasoningOutputTokens += delta.reasoningOutputTokens;
+function addUsage(totalUsage, incrementUsage) {
+  totalUsage.inputTokens += incrementUsage.inputTokens;
+  totalUsage.cachedInputTokens += incrementUsage.cachedInputTokens;
+  totalUsage.outputTokens += incrementUsage.outputTokens;
+  totalUsage.reasoningOutputTokens += incrementUsage.reasoningOutputTokens;
 }
 
-/*
- * Each token_count event carries cumulative usage in
- * `payload.info.total_token_usage`.  We normalize that structure immediately so
- * the rest of the program can ignore transcript-specific field names.
- */
-function makeUsageSnapshot(info) {
-  var totalUsage = info && info.total_token_usage ? info.total_token_usage : null;
+function newDiagnostics() {
+  return {
+    malformedLines: 0,
+    malformedLineLocations: [],
+    missingUsageSnapshots: 0,
+    invalidUsageFields: 0,
+    resetSnapshots: 0
+  };
+}
 
-  if (!totalUsage) {
+function mergeDiagnostics(totalDiagnostics, fileDiagnostics) {
+  totalDiagnostics.malformedLines += fileDiagnostics.malformedLines;
+  totalDiagnostics.missingUsageSnapshots += fileDiagnostics.missingUsageSnapshots;
+  totalDiagnostics.invalidUsageFields += fileDiagnostics.invalidUsageFields;
+  totalDiagnostics.resetSnapshots += fileDiagnostics.resetSnapshots;
+  totalDiagnostics.malformedLineLocations = totalDiagnostics.malformedLineLocations
+    .concat(fileDiagnostics.malformedLineLocations)
+    .slice(0, 20);
+}
+
+function noteMalformedLine(diagnostics, filePath, lineNumber) {
+  diagnostics.malformedLines += 1;
+  if (diagnostics.malformedLineLocations.length < 20) {
+    diagnostics.malformedLineLocations.push({
+      filePath: filePath,
+      lineNumber: lineNumber
+    });
+  }
+}
+
+function normalizedCount(value, diagnostics) {
+  if (typeof value === 'number' &&
+      isFinite(value) &&
+      value >= 0 &&
+      Math.floor(value) === value) {
+    return value;
+  }
+
+  if (diagnostics && value !== undefined) {
+    diagnostics.invalidUsageFields += 1;
+  }
+
+  return 0;
+}
+
+function usageFromInfo(infoObject, diagnostics) {
+  var totalUsageObject = infoObject && infoObject.total_token_usage ? infoObject.total_token_usage : null;
+
+  if (!totalUsageObject) {
+    if (diagnostics) {
+      diagnostics.missingUsageSnapshots += 1;
+    }
     return null;
   }
 
   return {
-    inputTokens: toCount(totalUsage.input_tokens),
-    cachedInputTokens: toCount(totalUsage.cached_input_tokens),
-    outputTokens: toCount(totalUsage.output_tokens),
-    reasoningOutputTokens: toCount(totalUsage.reasoning_output_tokens)
+    inputTokens: normalizedCount(totalUsageObject.input_tokens, diagnostics),
+    cachedInputTokens: normalizedCount(totalUsageObject.cached_input_tokens, diagnostics),
+    outputTokens: normalizedCount(totalUsageObject.output_tokens, diagnostics),
+    reasoningOutputTokens: normalizedCount(totalUsageObject.reasoning_output_tokens, diagnostics)
   };
 }
 
 /*
- * The transcript snapshots are cumulative within a session file.  Summing them
- * directly would therefore massively overcount.  The original script fixes that
- * by billing only the delta between consecutive snapshots, and that remains the
- * core accounting idea here.
+ * Step 2. Price one normalized usage vector.
  *
- * There is one awkward case: counters can appear to go backwards.  If they do,
- * we cannot prove whether the log restarted, the session was spliced, or the
- * transcript simply changed shape.  The original behavior is to treat the new
- * snapshot as a fresh chunk rather than emit negative usage.  This preserves
- * behavioral parity, even though the estimate can still be imperfect in such a
- * file.
+ * Cached input is treated as a subset of input.  Therefore we price
+ *
+ *   uncached input = max(input - cachedInput, 0)
+ *   cached input   = cachedInput
+ *   output         = output
+ *
+ * Reasoning output is carried for visibility but not priced separately.
  */
-function diffUsage(previous, current) {
-  var delta = zeroUsage();
-
-  if (!previous) {
-    return cloneUsage(current);
-  }
-
-  if (current.inputTokens < previous.inputTokens ||
-      current.cachedInputTokens < previous.cachedInputTokens ||
-      current.outputTokens < previous.outputTokens ||
-      current.reasoningOutputTokens < previous.reasoningOutputTokens) {
-    return cloneUsage(current);
-  }
-
-  delta.inputTokens = current.inputTokens - previous.inputTokens;
-  delta.cachedInputTokens = current.cachedInputTokens - previous.cachedInputTokens;
-  delta.outputTokens = current.outputTokens - previous.outputTokens;
-  delta.reasoningOutputTokens = current.reasoningOutputTokens - previous.reasoningOutputTokens;
-
-  return delta;
-}
-
-/*
- * This is the billing formula the entire tool exists to compute.
- *
- * Let:
- *   I = inputTokens
- *   C = cachedInputTokens
- *   O = outputTokens
- *
- * Then:
- *   uncached input = max(I - C, 0)
- *   cached input   = C
- *   output         = O
- *
- * Cost:
- *   ((I - C) / 1,000,000) * input rate
- * + ( C      / 1,000,000) * cached-input rate
- * + ( O      / 1,000,000) * output rate
- *
- * The `max(I - C, 0)` guard reflects another defensive choice carried over
- * from the original script: if the transcript ever claims more cached tokens
- * than total input tokens, we do not let the estimate go negative.
- */
-function computeCosts(usage) {
+function costsOf(usage) {
   var uncachedInputTokens = usage.inputTokens - usage.cachedInputTokens;
   var inputCost;
   var cachedInputCost;
@@ -253,47 +181,221 @@ function computeCosts(usage) {
 }
 
 /*
- * The original script accepts either a single `.jsonl` file or a directory
- * tree.  These helpers are the filesystem half of that contract.
+ * Step 3. Turn one transcript file into model-attributed increments.
+ *
+ * The transcript logic can be stated as pseudocode:
+ *
+ *   currentModel  := null
+ *   previousUsage := null
+ *   fileUsage     := zero
+ *
+ *   for each non-empty line:
+ *     parse JSON; if malformed, count and skip
+ *     if line is a turn_context with model, update currentModel
+ *     if line is not a token_count event, skip
+ *     extract normalized usage snapshot U
+ *     let delta be:
+ *       U                      if previousUsage is null
+ *       U                      if any coordinate moved backward
+ *       U - previousUsage      otherwise
+ *     if currentModel == TARGET_MODEL, add delta to fileUsage
+ *     previousUsage := U
+ *
+ * The crucial assumption is that token-count snapshots are attributable to the
+ * model named by the most recent `turn_context`.  Since the snapshots are
+ * cumulative, correctness depends on transcript ordering being well-behaved
+ * enough that differencing adjacent snapshots does not smear one model's usage
+ * into another's.
+ *
+ * When a counter moves backward, we take the current snapshot itself as the
+ * increment.  This is a recovery convention, not a theorem.  It is chosen so
+ * that resets are visible in diagnostics rather than hidden as dropped usage.
  */
-function walkFiles(rootDir, results) {
-  var entries;
-  var i;
+function parseJsonLine(lineText, filePath, lineNumber, diagnostics) {
+  try {
+    return JSON.parse(lineText);
+  } catch (error) {
+    if (diagnostics) {
+      noteMalformedLine(diagnostics, filePath, lineNumber);
+    }
+    return null;
+  }
+}
+
+function isModelTurnRecord(record, payload) {
+  return record.type === 'turn_context' &&
+    typeof payload.model === 'string' &&
+    payload.model;
+}
+
+function isTokenCountRecord(record, payload) {
+  return record.type === 'event_msg' &&
+    payload.type === 'token_count' &&
+    payload.info;
+}
+
+function incrementFromSnapshots(previousUsage, currentUsage, diagnostics) {
+  var incrementUsage = zeroUsage();
+
+  if (!previousUsage) {
+    return copyUsage(currentUsage);
+  }
+
+  if (currentUsage.inputTokens < previousUsage.inputTokens ||
+      currentUsage.cachedInputTokens < previousUsage.cachedInputTokens ||
+      currentUsage.outputTokens < previousUsage.outputTokens ||
+      currentUsage.reasoningOutputTokens < previousUsage.reasoningOutputTokens) {
+    if (diagnostics) {
+      diagnostics.resetSnapshots += 1;
+    }
+    return copyUsage(currentUsage);
+  }
+
+  incrementUsage.inputTokens = currentUsage.inputTokens - previousUsage.inputTokens;
+  incrementUsage.cachedInputTokens = currentUsage.cachedInputTokens - previousUsage.cachedInputTokens;
+  incrementUsage.outputTokens = currentUsage.outputTokens - previousUsage.outputTokens;
+  incrementUsage.reasoningOutputTokens = currentUsage.reasoningOutputTokens - previousUsage.reasoningOutputTokens;
+
+  return incrementUsage;
+}
+
+function analyzeSessionFile(filePath, targetModel) {
+  var fileContents;
+  var fileLines;
+  var currentModel;
+  var previousUsage;
+  var fileUsage;
+  var diagnostics;
+  var stats;
+  var lineIndex;
+  var trimmedLine;
+  var record;
+  var payload;
+  var currentUsage;
+  var incrementUsage;
+
+  fileContents = fs.readFileSync(filePath, 'utf8');
+  fileLines = fileContents.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  currentModel = null;
+  previousUsage = null;
+  fileUsage = zeroUsage();
+  diagnostics = newDiagnostics();
+
+  stats = {
+    filePath: filePath,
+    usage: fileUsage,
+    diagnostics: diagnostics,
+    tokenCountEvents: 0,
+    matchedTokenCountEvents: 0,
+    matchedAnyTurn: false
+  };
+
+  for (lineIndex = 0; lineIndex < fileLines.length; lineIndex += 1) {
+    trimmedLine = fileLines[lineIndex].replace(/^\s+|\s+$/g, '');
+    if (!trimmedLine) {
+      continue;
+    }
+
+    record = parseJsonLine(trimmedLine, filePath, lineIndex + 1, diagnostics);
+    if (!record || !record.payload) {
+      continue;
+    }
+
+    payload = record.payload;
+
+    if (isModelTurnRecord(record, payload)) {
+      currentModel = payload.model;
+      if (currentModel === targetModel) {
+        stats.matchedAnyTurn = true;
+      }
+      continue;
+    }
+
+    if (!isTokenCountRecord(record, payload)) {
+      continue;
+    }
+
+    currentUsage = usageFromInfo(payload.info, diagnostics);
+    if (!currentUsage) {
+      continue;
+    }
+
+    stats.tokenCountEvents += 1;
+    incrementUsage = incrementFromSnapshots(previousUsage, currentUsage, diagnostics);
+
+    if (currentModel === targetModel) {
+      addUsage(fileUsage, incrementUsage);
+      stats.matchedTokenCountEvents += 1;
+    }
+
+    previousUsage = currentUsage;
+  }
+
+  return stats;
+}
+
+/*
+ * Step 4. Resolve the input path to an ordered list of files.
+ *
+ * This is intentionally simple.  The program accepts a single `.jsonl` file or
+ * a directory tree and recursively gathers `.jsonl` descendants.  It does not
+ * attempt to recover from filesystem errors beyond the explicit "path not
+ * found" check.
+ */
+function expandHome(inputPath) {
+  if (!inputPath) {
+    return inputPath;
+  }
+
+  if (inputPath === '~') {
+    return os.homedir();
+  }
+
+  if (inputPath.indexOf('~/') === 0) {
+    return path.join(os.homedir(), inputPath.slice(2));
+  }
+
+  return inputPath;
+}
+
+function walkJsonlFiles(rootDirectory, fileList) {
+  var directoryEntries;
+  var entryIndex;
   var entryPath;
-  var stat;
+  var entryStat;
 
-  entries = fs.readdirSync(rootDir);
-  for (i = 0; i < entries.length; i += 1) {
-    entryPath = path.join(rootDir, entries[i]);
-    stat = fs.statSync(entryPath);
+  directoryEntries = fs.readdirSync(rootDirectory);
+  for (entryIndex = 0; entryIndex < directoryEntries.length; entryIndex += 1) {
+    entryPath = path.join(rootDirectory, directoryEntries[entryIndex]);
+    entryStat = fs.statSync(entryPath);
 
-    if (stat.isDirectory()) {
-      walkFiles(entryPath, results);
-    } else if (stat.isFile() && /\.jsonl$/i.test(entries[i])) {
-      results.push(entryPath);
+    if (entryStat.isDirectory()) {
+      walkJsonlFiles(entryPath, fileList);
+    } else if (entryStat.isFile() && /\.jsonl$/i.test(directoryEntries[entryIndex])) {
+      fileList.push(entryPath);
     }
   }
 }
 
-function listJsonlFiles(rootDir) {
-  var results = [];
+function listJsonlFiles(rootDirectory) {
+  var fileList = [];
 
-  walkFiles(rootDir, results);
-  results.sort();
-  return results;
+  walkJsonlFiles(rootDirectory, fileList);
+  fileList.sort();
+  return fileList;
 }
 
 function resolveInputFiles(inputPath) {
   var resolvedPath;
-  var stat;
+  var resolvedStat;
 
   resolvedPath = path.resolve(expandHome(inputPath || '~/.codex/sessions'));
   if (!fs.existsSync(resolvedPath)) {
     throw new Error('Log path not found: ' + resolvedPath);
   }
 
-  stat = fs.statSync(resolvedPath);
-  if (stat.isDirectory()) {
+  resolvedStat = fs.statSync(resolvedPath);
+  if (resolvedStat.isDirectory()) {
     return {
       inputPath: resolvedPath,
       inputKind: 'directory',
@@ -301,7 +403,7 @@ function resolveInputFiles(inputPath) {
     };
   }
 
-  if (stat.isFile()) {
+  if (resolvedStat.isFile()) {
     if (!/\.jsonl$/i.test(path.basename(resolvedPath))) {
       throw new Error('Log file must end in .jsonl: ' + resolvedPath);
     }
@@ -317,180 +419,20 @@ function resolveInputFiles(inputPath) {
 }
 
 /*
- * Malformed lines are skipped rather than terminating the whole run.  The
- * caller still sees how many were skipped, which is the original script's way
- * of signalling "estimate completed, but input quality was imperfect".
- */
-function parseJsonLine(line, filePath, lineNumber, stats) {
-  try {
-    return JSON.parse(line);
-  } catch (error) {
-    if (stats) {
-      stats.malformedLines += 1;
-    }
-    return null;
-  }
-}
-
-/*
- * This function is where transcript structure turns into model-specific usage.
+ * Step 5. Aggregate files into one report.
  *
- * The transcript indicates the active model through `turn_context` records.
- * Token-count records do not themselves repeat the model name, so we attribute
- * each token snapshot to the most recent `turn_context.payload.model`.
+ * Again the pseudocode is short:
  *
- * That attribution is not perfect in an abstract sense, but it is the
- * transcript model assumed by the original script and it matches the observable
- * structure of these logs.
+ *   totalUsage       := zero
+ *   totalDiagnostics := zero diagnostics
+ *   for each file:
+ *     fileStats := analyzeSessionFile(file)
+ *     add fileStats.usage to totalUsage
+ *     merge fileStats.diagnostics into totalDiagnostics
+ *   package totals, diagnostics, and optional per-file reports
  */
-function processSessionFile(filePath, targetModel) {
-  var contents;
-  var lines;
-  var currentModel;
-  var previousUsage;
-  var matchedAnyTurn;
-  var fileUsage;
-  var stats;
-  var i;
-  var trimmed;
-  var record;
-  var payload;
-  var snapshot;
-  var delta;
-
-  contents = fs.readFileSync(filePath, 'utf8');
-  lines = contents.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  currentModel = null;
-  previousUsage = null;
-  matchedAnyTurn = false;
-  fileUsage = zeroUsage();
-  stats = {
-    filePath: filePath,
-    usage: fileUsage,
-    tokenCountEvents: 0,
-    matchedTokenCountEvents: 0,
-    matchedAnyTurn: false,
-    malformedLines: 0
-  };
-
-  for (i = 0; i < lines.length; i += 1) {
-    trimmed = lines[i].replace(/^\s+|\s+$/g, '');
-    if (!trimmed) {
-      continue;
-    }
-
-    record = parseJsonLine(trimmed, filePath, i + 1, stats);
-    if (!record || !record.payload) {
-      continue;
-    }
-
-    payload = record.payload;
-
-    if (record.type === 'turn_context' && typeof payload.model === 'string' && payload.model) {
-      currentModel = payload.model;
-      if (currentModel === targetModel) {
-        matchedAnyTurn = true;
-        stats.matchedAnyTurn = true;
-      }
-      continue;
-    }
-
-    if (record.type !== 'event_msg' || payload.type !== 'token_count' || !payload.info) {
-      continue;
-    }
-
-    snapshot = makeUsageSnapshot(payload.info);
-    if (!snapshot) {
-      continue;
-    }
-
-    stats.tokenCountEvents += 1;
-    delta = diffUsage(previousUsage, snapshot);
-
-    if (currentModel === targetModel) {
-      addUsage(fileUsage, delta);
-      stats.matchedTokenCountEvents += 1;
-    }
-
-    previousUsage = snapshot;
-  }
-
-  return stats;
-}
-
-/*
- * Once each file has a normalized usage total, presentation becomes simpler.
- * We sort detailed results by descending cost so the most expensive sessions
- * appear first, exactly as in the original script.
- */
-function compareFileStats(a, b) {
-  var aCost;
-  var bCost;
-
-  aCost = computeCosts(a.usage).totalCost;
-  bCost = computeCosts(b.usage).totalCost;
-
-  if (bCost !== aCost) {
-    return bCost - aCost;
-  }
-
-  if (a.filePath < b.filePath) {
-    return -1;
-  }
-
-  if (a.filePath > b.filePath) {
-    return 1;
-  }
-
-  return 0;
-}
-
-/*
- * Human-readable output and JSON output are both derived from the same summary
- * structures so that there is one place where the numbers are assembled.
- */
-function printTotals(label, usage, malformedLines) {
-  var costs = computeCosts(usage);
-
-  console.log(label);
-  console.log('  input_tokens: ' + usage.inputTokens);
-  console.log('  cached_input_tokens: ' + usage.cachedInputTokens);
-  console.log('  uncached_input_tokens: ' + costs.uncachedInputTokens);
-  console.log('  cached_input_ratio: ' + formatPercent(usage.cachedInputTokens, usage.inputTokens));
-  console.log('  output_tokens: ' + usage.outputTokens);
-  console.log('  reasoning_output_tokens: ' + usage.reasoningOutputTokens + ' (included in output_tokens)');
-  if (typeof malformedLines === 'number') {
-    console.log('  malformed_jsonl_lines: ' + malformedLines);
-  }
-  console.log('  uncached_input_cost: ' + formatMoney(costs.inputCost));
-  console.log('  cached_input_cost: ' + formatMoney(costs.cachedInputCost));
-  console.log('  output_cost: ' + formatMoney(costs.outputCost));
-  console.log('  total_cost: ' + formatMoney(costs.totalCost));
-}
-
-function printDetailedBreakdown(fileStatsList) {
-  var sorted;
-  var i;
-  var fileStats;
-
-  sorted = fileStatsList.slice(0).sort(compareFileStats);
-  console.log('Per-session breakdown');
-
-  for (i = 0; i < sorted.length; i += 1) {
-    fileStats = sorted[i];
-    if (!fileStats.matchedAnyTurn) {
-      continue;
-    }
-
-    printTotals(fileStats.filePath, fileStats.usage, fileStats.malformedLines);
-    console.log('  token_count_snapshots: ' + fileStats.tokenCountEvents);
-    console.log('  priced_snapshots: ' + fileStats.matchedTokenCountEvents);
-    console.log('');
-  }
-}
-
-function buildSummaryObject(usage, malformedLines) {
-  var costs = computeCosts(usage);
+function summaryOf(usage, diagnosticsObject) {
+  var costs = costsOf(usage);
 
   return {
     usage: {
@@ -507,181 +449,380 @@ function buildSummaryObject(usage, malformedLines) {
       output_cost: costs.outputCost,
       total_cost: costs.totalCost
     },
-    malformed_jsonl_lines: malformedLines
+    diagnostics: diagnosticsObject || null
   };
 }
 
-function buildDetailedObjects(fileStatsList) {
-  var sorted;
-  var results;
-  var i;
+function diagnosticsObjectOf(diagnostics) {
+  return {
+    malformed_jsonl_lines: diagnostics.malformedLines,
+    malformed_jsonl_line_locations: diagnostics.malformedLineLocations,
+    token_count_events_missing_usage: diagnostics.missingUsageSnapshots,
+    invalid_usage_fields_coerced_to_zero: diagnostics.invalidUsageFields,
+    counter_resets_priced_as_fresh_snapshots: diagnostics.resetSnapshots
+  };
+}
+
+function compareFileStats(leftFileStats, rightFileStats) {
+  var leftCost;
+  var rightCost;
+
+  leftCost = costsOf(leftFileStats.usage).totalCost;
+  rightCost = costsOf(rightFileStats.usage).totalCost;
+
+  if (rightCost !== leftCost) {
+    return rightCost - leftCost;
+  }
+
+  if (leftFileStats.filePath < rightFileStats.filePath) {
+    return -1;
+  }
+
+  if (leftFileStats.filePath > rightFileStats.filePath) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function sortedFileStatsOf(fileStatsList) {
+  return fileStatsList.slice(0).sort(compareFileStats);
+}
+
+function detailedReportsOf(fileStatsList) {
+  var sortedFileStats;
+  var reports;
+  var fileIndex;
   var fileStats;
-  var summary;
+  var fileDiagnostics;
+  var fileSummary;
 
-  sorted = fileStatsList.slice(0).sort(compareFileStats);
-  results = [];
+  sortedFileStats = sortedFileStatsOf(fileStatsList);
+  reports = [];
 
-  for (i = 0; i < sorted.length; i += 1) {
-    fileStats = sorted[i];
+  for (fileIndex = 0; fileIndex < sortedFileStats.length; fileIndex += 1) {
+    fileStats = sortedFileStats[fileIndex];
     if (!fileStats.matchedAnyTurn) {
       continue;
     }
 
-    summary = buildSummaryObject(fileStats.usage, fileStats.malformedLines);
-    results.push({
+    fileDiagnostics = diagnosticsObjectOf(fileStats.diagnostics);
+    fileSummary = summaryOf(fileStats.usage, fileDiagnostics);
+    reports.push({
       file_path: fileStats.filePath,
       token_count_snapshots: fileStats.tokenCountEvents,
       priced_snapshots: fileStats.matchedTokenCountEvents,
-      usage: summary.usage,
-      costs: summary.costs,
-      malformed_jsonl_lines: summary.malformed_jsonl_lines
+      usage: fileSummary.usage,
+      costs: fileSummary.costs,
+      diagnostics: fileSummary.diagnostics
     });
   }
 
-  return results;
+  return reports;
 }
 
-/*
- * The final section is the control flow of the tool:
- * parse flags, resolve inputs, accumulate per-file usage, and choose either
- * text or JSON output.
- *
- * Keeping `main()` last is part of the literate structure: by the time the
- * reader gets here, every operation it calls has already been explained.
- */
-function main() {
-  var args;
-  var detailed;
-  var jsonOutput;
-  var inputPath;
-  var resolvedInput;
-  var files;
-  var totals;
+function aggregateFiles(files, targetModel) {
+  var totalUsage;
+  var totalDiagnostics;
   var matchedFiles;
   var totalTokenCountEvents;
   var matchedTokenCountEvents;
-  var malformedLines;
   var fileStatsList;
-  var i;
+  var fileIndex;
   var fileStats;
 
-  args = process.argv.slice(2);
-  detailed = false;
-  jsonOutput = false;
-  inputPath = null;
-
-  while (args.length) {
-    if (args[0] === '--detailed') {
-      detailed = true;
-      args = args.slice(1);
-      continue;
-    }
-
-    if (args[0] === '--json') {
-      jsonOutput = true;
-      args = args.slice(1);
-      continue;
-    }
-
-    if (args[0] === '--help' || args[0] === '-h') {
-      printUsage(path.basename(process.argv[1] || 'calculate_gpt54_session_cost.js'));
-      process.exit(0);
-    }
-
-    if (inputPath !== null) {
-      printUsage(path.basename(process.argv[1] || 'calculate_gpt54_session_cost.js'));
-      process.exit(1);
-    }
-
-    inputPath = args[0];
-    args = args.slice(1);
-  }
-
-  try {
-    resolvedInput = resolveInputFiles(inputPath);
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-
-  files = resolvedInput.files;
-  if (!files.length) {
-    console.error('No .jsonl files found under: ' + resolvedInput.inputPath);
-    process.exit(1);
-  }
-
-  if (args.length > 0) {
-    printUsage(path.basename(process.argv[1] || 'calculate_gpt54_session_cost.js'));
-    process.exit(1);
-  }
-  totals = zeroUsage();
+  totalUsage = zeroUsage();
+  totalDiagnostics = newDiagnostics();
   matchedFiles = 0;
   totalTokenCountEvents = 0;
   matchedTokenCountEvents = 0;
-  malformedLines = 0;
   fileStatsList = [];
 
-  for (i = 0; i < files.length; i += 1) {
-    fileStats = processSessionFile(files[i], TARGET_MODEL);
+  for (fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+    fileStats = analyzeSessionFile(files[fileIndex], targetModel);
     fileStatsList.push(fileStats);
-    addUsage(totals, fileStats.usage);
+    addUsage(totalUsage, fileStats.usage);
+    mergeDiagnostics(totalDiagnostics, fileStats.diagnostics);
     totalTokenCountEvents += fileStats.tokenCountEvents;
     matchedTokenCountEvents += fileStats.matchedTokenCountEvents;
-    malformedLines += fileStats.malformedLines;
+
     if (fileStats.matchedAnyTurn) {
       matchedFiles += 1;
     }
   }
 
-  if (jsonOutput) {
-    fileStats = {
-      model: TARGET_MODEL,
-      input_path: resolvedInput.inputPath,
-      input_kind: resolvedInput.inputKind,
-      jsonl_files_scanned: files.length,
-      files_with_matching_turns: matchedFiles,
-      token_count_snapshots_scanned: totalTokenCountEvents,
-      token_count_snapshots_priced: matchedTokenCountEvents,
-      malformed_jsonl_lines_skipped: malformedLines,
-      pricing_verified_on: '2026-05-07',
-      pricing_source: 'https://openai.com/api/pricing/',
-      pricing: {
-        input_per_million: PRICING.inputPerMillion,
-        cached_input_per_million: PRICING.cachedInputPerMillion,
-        output_per_million: PRICING.outputPerMillion
-      },
-      totals: buildSummaryObject(totals, malformedLines)
-    };
+  return {
+    totalUsage: totalUsage,
+    totalDiagnostics: totalDiagnostics,
+    matchedFiles: matchedFiles,
+    totalTokenCountEvents: totalTokenCountEvents,
+    matchedTokenCountEvents: matchedTokenCountEvents,
+    fileStatsList: fileStatsList
+  };
+}
 
-    if (detailed) {
-      fileStats.session_summary = buildSummaryObject(totals, malformedLines);
-      fileStats.sessions = buildDetailedObjects(fileStatsList);
-    }
+function reportOf(resolvedInput, aggregation) {
+  var totalDiagnosticsObject;
+  var totalSummary;
 
-    console.log(JSON.stringify(fileStats, null, 2));
-    return;
+  totalDiagnosticsObject = diagnosticsObjectOf(aggregation.totalDiagnostics);
+  totalSummary = summaryOf(aggregation.totalUsage, totalDiagnosticsObject);
+
+  return {
+    model: TARGET_MODEL,
+    input_path: resolvedInput.inputPath,
+    input_kind: resolvedInput.inputKind,
+    jsonl_files_scanned: resolvedInput.files.length,
+    files_with_matching_turns: aggregation.matchedFiles,
+    token_count_snapshots_scanned: aggregation.totalTokenCountEvents,
+    token_count_snapshots_priced: aggregation.matchedTokenCountEvents,
+    diagnostics: totalDiagnosticsObject,
+    pricing_verified_on: '2026-05-07',
+    pricing_source: 'https://openai.com/api/pricing/',
+    pricing: {
+      input_per_million: PRICING.inputPerMillion,
+      cached_input_per_million: PRICING.cachedInputPerMillion,
+      output_per_million: PRICING.outputPerMillion
+    },
+    totals: totalSummary
+  };
+}
+
+/*
+ * Step 6. Render the report.
+ *
+ * The rendering code is intentionally late.  By this point all numbers are
+ * already fixed.
+ */
+function formatMoney(amount) {
+  return '$' + amount.toFixed(6);
+}
+
+function formatPercent(numerator, denominator) {
+  if (!denominator) {
+    return '0.00%';
   }
 
-  console.log('Model: ' + TARGET_MODEL);
-  console.log('Input path: ' + resolvedInput.inputPath);
-  console.log('Input kind: ' + resolvedInput.inputKind);
-  console.log('JSONL files scanned: ' + files.length);
-  console.log('Files with at least one ' + TARGET_MODEL + ' turn: ' + matchedFiles);
-  console.log('Token-count snapshots scanned: ' + totalTokenCountEvents);
-  console.log('Token-count snapshots priced for ' + TARGET_MODEL + ': ' + matchedTokenCountEvents);
-  console.log('Malformed JSONL lines skipped: ' + malformedLines);
+  return ((numerator / denominator) * 100).toFixed(2) + '%';
+}
+
+function printRows(rows) {
+  var rowIndex;
+
+  for (rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    console.log(rows[rowIndex]);
+  }
+}
+
+function pricingRows() {
+  return [
+    'Pricing verified on 2026-05-07 from https://openai.com/api/pricing/',
+    '  input rate: ' + formatMoney(PRICING.inputPerMillion) + ' / 1M tokens',
+    '  cached input rate: ' + formatMoney(PRICING.cachedInputPerMillion) + ' / 1M tokens',
+    '  output rate: ' + formatMoney(PRICING.outputPerMillion) + ' / 1M tokens'
+  ];
+}
+
+function rowsOfDiagnostics(diagnosticsObject) {
+  var rows;
+  var locationIndex;
+
+  rows = [
+    '  malformed_jsonl_lines: ' + diagnosticsObject.malformed_jsonl_lines,
+    '  token_count_events_missing_usage: ' + diagnosticsObject.token_count_events_missing_usage,
+    '  invalid_usage_fields_coerced_to_zero: ' + diagnosticsObject.invalid_usage_fields_coerced_to_zero,
+    '  counter_resets_priced_as_fresh_snapshots: ' + diagnosticsObject.counter_resets_priced_as_fresh_snapshots
+  ];
+
+  for (locationIndex = 0; locationIndex < diagnosticsObject.malformed_jsonl_line_locations.length; locationIndex += 1) {
+    rows.push('  malformed_jsonl_line[' + locationIndex + ']: ' +
+      diagnosticsObject.malformed_jsonl_line_locations[locationIndex].filePath + ':' +
+      diagnosticsObject.malformed_jsonl_line_locations[locationIndex].lineNumber);
+  }
+
+  return rows;
+}
+
+function rowsOfSummary(summaryObject) {
+  return [
+    '  input_tokens: ' + summaryObject.usage.input_tokens,
+    '  cached_input_tokens: ' + summaryObject.usage.cached_input_tokens,
+    '  uncached_input_tokens: ' + summaryObject.usage.uncached_input_tokens,
+    '  cached_input_ratio: ' + formatPercent(summaryObject.usage.cached_input_tokens, summaryObject.usage.input_tokens),
+    '  output_tokens: ' + summaryObject.usage.output_tokens,
+    '  reasoning_output_tokens: ' + summaryObject.usage.reasoning_output_tokens + ' (included in output_tokens)',
+    '  uncached_input_cost: ' + formatMoney(summaryObject.costs.uncached_input_cost),
+    '  cached_input_cost: ' + formatMoney(summaryObject.costs.cached_input_cost),
+    '  output_cost: ' + formatMoney(summaryObject.costs.output_cost),
+    '  total_cost: ' + formatMoney(summaryObject.costs.total_cost)
+  ];
+}
+
+function rowsOfReportPreamble(report) {
+  var rows;
+  var locationIndex;
+
+  rows = [
+    'Model: ' + report.model,
+    'Input path: ' + report.input_path,
+    'Input kind: ' + report.input_kind,
+    'JSONL files scanned: ' + report.jsonl_files_scanned,
+    'Files with at least one ' + report.model + ' turn: ' + report.files_with_matching_turns,
+    'Token-count snapshots scanned: ' + report.token_count_snapshots_scanned,
+    'Token-count snapshots priced for ' + report.model + ': ' + report.token_count_snapshots_priced,
+    'Malformed JSONL lines skipped: ' + report.diagnostics.malformed_jsonl_lines,
+    'Token-count events missing usage: ' + report.diagnostics.token_count_events_missing_usage,
+    'Invalid usage fields coerced to zero: ' + report.diagnostics.invalid_usage_fields_coerced_to_zero,
+    'Counter resets priced as fresh snapshots: ' + report.diagnostics.counter_resets_priced_as_fresh_snapshots
+  ];
+
+  for (locationIndex = 0; locationIndex < report.diagnostics.malformed_jsonl_line_locations.length; locationIndex += 1) {
+    rows.push('Malformed JSONL line ' + (locationIndex + 1) + ': ' +
+      report.diagnostics.malformed_jsonl_line_locations[locationIndex].filePath + ':' +
+      report.diagnostics.malformed_jsonl_line_locations[locationIndex].lineNumber);
+  }
+
+  return rows;
+}
+
+function printSummary(label, summaryObject, includeDiagnostics) {
+  var summaryRows;
+
+  summaryRows = rowsOfSummary(summaryObject);
+  console.log(label);
+  printRows(summaryRows.slice(0, 6));
+  if (includeDiagnostics !== false && summaryObject.diagnostics) {
+    printRows(rowsOfDiagnostics(summaryObject.diagnostics));
+  }
+  printRows(summaryRows.slice(6));
+}
+
+function printDetailedReports(fileStatsList) {
+  var sortedFileStats;
+  var fileIndex;
+  var fileStats;
+  var fileSummary;
+
+  sortedFileStats = sortedFileStatsOf(fileStatsList);
+  console.log('Per-session breakdown');
+
+  for (fileIndex = 0; fileIndex < sortedFileStats.length; fileIndex += 1) {
+    fileStats = sortedFileStats[fileIndex];
+    if (!fileStats.matchedAnyTurn) {
+      continue;
+    }
+
+    fileSummary = summaryOf(fileStats.usage, diagnosticsObjectOf(fileStats.diagnostics));
+    printSummary(fileStats.filePath, fileSummary, true);
+    console.log('  token_count_snapshots: ' + fileStats.tokenCountEvents);
+    console.log('  priced_snapshots: ' + fileStats.matchedTokenCountEvents);
+    console.log('');
+  }
+}
+
+function printReport(report, detailed, fileStatsList) {
+  printRows(rowsOfReportPreamble(report));
   console.log('');
-  printTotals('Token totals', totals, null);
+  printSummary('Token totals', report.totals, false);
   console.log('');
-  console.log('Pricing verified on 2026-05-07 from https://openai.com/api/pricing/');
-  console.log('  input rate: ' + formatMoney(PRICING.inputPerMillion) + ' / 1M tokens');
-  console.log('  cached input rate: ' + formatMoney(PRICING.cachedInputPerMillion) + ' / 1M tokens');
-  console.log('  output rate: ' + formatMoney(PRICING.outputPerMillion) + ' / 1M tokens');
+  printRows(pricingRows());
 
   if (detailed) {
     console.log('');
-    printDetailedBreakdown(fileStatsList);
+    printDetailedReports(fileStatsList);
   }
+}
+
+/*
+ * Step 7. Parse the command line and execute the plan.
+ */
+function printUsage(scriptName) {
+  console.error('Usage: node ' + scriptName + ' [--detailed] [--json] [logPath]');
+  console.error('Default logPath: ~/.codex/sessions');
+  console.error('`logPath` may be either a single .jsonl file or a directory tree.');
+}
+
+function parseCommandLine(argv) {
+  var remainingArgs;
+  var detailed;
+  var jsonOutput;
+  var inputPath;
+  var scriptName;
+
+  remainingArgs = argv.slice(2);
+  detailed = false;
+  jsonOutput = false;
+  inputPath = null;
+  scriptName = path.basename(argv[1] || 'calculate_gpt54_session_cost.js');
+
+  while (remainingArgs.length) {
+    if (remainingArgs[0] === '--detailed') {
+      detailed = true;
+      remainingArgs = remainingArgs.slice(1);
+      continue;
+    }
+
+    if (remainingArgs[0] === '--json') {
+      jsonOutput = true;
+      remainingArgs = remainingArgs.slice(1);
+      continue;
+    }
+
+    if (remainingArgs[0] === '--help' || remainingArgs[0] === '-h') {
+      printUsage(scriptName);
+      process.exit(0);
+    }
+
+    if (inputPath !== null) {
+      printUsage(scriptName);
+      process.exit(1);
+    }
+
+    inputPath = remainingArgs[0];
+    remainingArgs = remainingArgs.slice(1);
+  }
+
+  return {
+    detailed: detailed,
+    jsonOutput: jsonOutput,
+    inputPath: inputPath
+  };
+}
+
+function main() {
+  var options;
+  var resolvedInput;
+  var aggregation;
+  var report;
+
+  options = parseCommandLine(process.argv);
+
+  try {
+    resolvedInput = resolveInputFiles(options.inputPath);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
+  if (!resolvedInput.files.length) {
+    console.error('No .jsonl files found under: ' + resolvedInput.inputPath);
+    process.exit(1);
+  }
+
+  aggregation = aggregateFiles(resolvedInput.files, TARGET_MODEL);
+  report = reportOf(resolvedInput, aggregation);
+
+  if (options.jsonOutput) {
+    if (options.detailed) {
+      report.session_summary = report.totals;
+      report.sessions = detailedReportsOf(aggregation.fileStatsList);
+    }
+
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  printReport(report, options.detailed, aggregation.fileStatsList);
 }
 
 main();
