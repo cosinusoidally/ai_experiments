@@ -2,6 +2,8 @@
 
 This directory contains an ECMAScript 5.1 Node.js script that converts a Codex/OpenAI transcript `.jsonl` file into a plain text conversation log.
 
+It also contains a separate ECMAScript 5.1 Node.js script that scans `~/.codex/sessions/` logs and estimates the total token cost for `gpt-5.4`.
+
 ## What it does
 
 - Reads an explicit `.jsonl` transcript file
@@ -22,6 +24,7 @@ This directory contains an ECMAScript 5.1 Node.js script that converts a Codex/O
 ## Location
 
 - Script: `ai_experiments/process_transcript/process_transcript.js`
+- Cost script: `ai_experiments/process_transcript/calculate_gpt54_session_cost.js`
 - Input: explicit `.jsonl` file path
 - Default output location: standard output
 
@@ -51,6 +54,18 @@ Verbose mode includes extra non-encrypted event data such as generic command com
 ```sh
 node ai_experiments/process_transcript/process_transcript.js --verbose transcripts/example.jsonl
 node ai_experiments/process_transcript/process_transcript.js --verbose transcripts/example.jsonl transcripts/example.txt
+```
+
+To estimate the total `gpt-5.4` session cost from Codex logs:
+
+```sh
+node ai_experiments/process_transcript/calculate_gpt54_session_cost.js
+```
+
+You can also point it at a different sessions directory:
+
+```sh
+node ai_experiments/process_transcript/calculate_gpt54_session_cost.js ~/.codex/sessions
 ```
 
 ## Output format
@@ -116,3 +131,18 @@ run the bootstrap
 - In `--verbose` mode it also includes additional non-encrypted operational events such as `custom_tool_call_output`, `task_started`, `task_complete`, and similar lifecycle records.
 - Most reasoning entries in these transcripts are encrypted. Those are rendered as `[encrypted reasoning omitted]` because the script skips `encrypted_content`.
 - If you pass an output file path, the script writes there. Otherwise it writes to standard output.
+
+## Cost Calculation Notes
+
+- `calculate_gpt54_session_cost.js` is separate from `process_transcript.js`; it does not change the transcript rendering path.
+- It recursively scans `.jsonl` files under `~/.codex/sessions/` by default.
+- It follows `turn_context.payload.model` to determine which token-count snapshots belong to `gpt-5.4`.
+- It uses `event_msg` records of type `token_count` and reads `payload.info.total_token_usage`, which is cumulative within a session file.
+- To avoid double-counting, it prices the delta between consecutive cumulative snapshots rather than summing every snapshot directly.
+- It treats `cached_input_tokens` as a subset of `input_tokens`, so uncached input is `input_tokens - cached_input_tokens`.
+- It treats `reasoning_output_tokens` as informational only because reasoning tokens are included inside `output_tokens`, so the script does not bill them separately.
+- The script uses the OpenAI GPT-5.4 standard API prices verified on 2026-05-07: input `$2.50 / 1M`, cached input `$0.25 / 1M`, output `$15.00 / 1M`.
+- Official references used in the code comments:
+  - Pricing: https://openai.com/api/pricing/
+  - Usage schema: https://platform.openai.com/docs/api-reference/responses/list
+  - Prompt caching: https://developers.openai.com/api/docs/guides/prompt-caching
