@@ -25,6 +25,7 @@ It also contains a separate ECMAScript 5.1 Node.js script that scans `~/.codex/s
 
 - Script: `ai_experiments/process_transcript/process_transcript.js`
 - Cost script: `ai_experiments/process_transcript/calculate_gpt54_session_cost.js`
+- Literate cost script: `ai_experiments/process_transcript/calculate_gpt54_session_cost_literate.js`
 - Input: explicit `.jsonl` file path
 - Default output location: standard output
 
@@ -60,6 +61,12 @@ To estimate the total `gpt-5.4` session cost from Codex logs:
 
 ```sh
 node ai_experiments/process_transcript/calculate_gpt54_session_cost.js
+```
+
+The literate version is also a directly runnable JavaScript file:
+
+```sh
+node ai_experiments/process_transcript/calculate_gpt54_session_cost_literate.js
 ```
 
 You can also point it at a different sessions directory:

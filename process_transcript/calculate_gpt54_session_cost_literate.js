@@ -3,39 +3,40 @@
 'use strict';
 
 /*
- * Problem statement.
+ * Estimating the cost of GPT-5.4 sessions.
  *
- * Given one `.jsonl` transcript or a directory tree of transcripts, estimate
- * the dollar cost attributable to the exact model identifier `gpt-5.4`.
+ * This file is intended to be read as the source.  There is no separate
+ * tangling step.  The prose gives the calculation in the order a reader needs;
+ * the JavaScript paragraphs immediately following it are the executable
+ * definitions.
  *
- * The cost calculation is simple once the relevant token counts are known.  The
- * real work is extracting those counts from cumulative transcript snapshots and
- * stating the conventions used when the transcript is incomplete or malformed.
+ * The input is either one Codex session `.jsonl` file or a directory tree of
+ * such files.  The output is an estimate of the dollar cost attributable to the
+ * exact model string `gpt-5.4`.
  *
- * The program is therefore written in the order one would write precise
- * pseudocode:
+ * The logs give us two facts:
  *
- *   1. define the normalized data we manipulate;
- *   2. define the cost of one normalized usage vector;
- *   3. define how one transcript file yields model-attributed increments;
- *   4. define how multiple files are aggregated and reported.
+ *   1. `turn_context` records name the active model.
+ *   2. `token_count` events give cumulative token usage snapshots.
+ *
+ * The calculation is therefore:
+ *
+ *   resolve the input files;
+ *   analyze each file into usage attributable to the target model;
+ *   add the file results;
+ *   attach prices and diagnostics;
+ *   print the report.
  */
 
 var fs = require('fs');
 var os = require('os');
 var path = require('path');
 
-/*
- * Constants.
- *
- * We estimate only the exact model string below.  We do not infer families or
- * aliases.
- *
- * The prices were checked on 2026-05-07 at
- * https://openai.com/api/pricing/
- */
 var TARGET_MODEL = 'gpt-5.4';
 
+/*
+ * Prices checked on 2026-05-07 at https://openai.com/api/pricing/.
+ */
 var PRICING = {
   inputPerMillion: 2.50,
   cachedInputPerMillion: 0.25,
@@ -43,20 +44,55 @@ var PRICING = {
 };
 
 /*
- * Step 1. Normalize transcript data.
+ * The whole program.
  *
- * We reduce every usable token snapshot to a four-field record:
+ * The rest of the file is an expansion of this paragraph.  Command-line flags
+ * choose a path and an output form; every output form uses the same report.
+ */
+function main() {
+  var options;
+  var resolvedInput;
+  var aggregation;
+  var report;
+
+  options = parseCommandLine(process.argv);
+
+  try {
+    resolvedInput = resolveInputFiles(options.inputPath);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
+  if (!resolvedInput.files.length) {
+    console.error('No .jsonl files found under: ' + resolvedInput.inputPath);
+    process.exit(1);
+  }
+
+  aggregation = aggregateFiles(resolvedInput.files, TARGET_MODEL);
+  report = reportOf(resolvedInput, aggregation, options.detailed);
+
+  if (options.jsonOutput) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  printReport(report);
+}
+
+/*
+ * Usage arithmetic.
  *
- *   usage = {
- *     inputTokens,
- *     cachedInputTokens,
- *     outputTokens,
- *     reasoningOutputTokens
- *   }
+ * We reduce every usable token snapshot to four integer coordinates:
  *
- * The counts are intended to be non-negative integers.  Any other scalar is
- * treated as unusable and replaced by zero.  That replacement is counted in a
- * diagnostics ledger rather than done silently.
+ *   inputTokens
+ *   cachedInputTokens
+ *   outputTokens
+ *   reasoningOutputTokens
+ *
+ * Missing fields contribute zero.  Present fields that are negative,
+ * fractional, or not finite also contribute zero, but that coercion is counted
+ * because it says something about the quality of the transcript.
  */
 function zeroUsage() {
   return {
@@ -147,15 +183,14 @@ function usageFromInfo(infoObject, diagnostics) {
 }
 
 /*
- * Step 2. Price one normalized usage vector.
+ * Pricing a usage vector.
  *
- * Cached input is treated as a subset of input.  Therefore we price
+ * Cached input is a subset of input, so the full-rate input count is:
  *
- *   uncached input = max(input - cachedInput, 0)
- *   cached input   = cachedInput
- *   output         = output
+ *   max(inputTokens - cachedInputTokens, 0)
  *
- * Reasoning output is carried for visibility but not priced separately.
+ * Reasoning output is reported for visibility, but it is already included in
+ * `outputTokens`, so it is not priced a second time.
  */
 function costsOf(usage) {
   var uncachedInputTokens = usage.inputTokens - usage.cachedInputTokens;
@@ -181,36 +216,54 @@ function costsOf(usage) {
 }
 
 /*
- * Step 3. Turn one transcript file into model-attributed increments.
+ * One file as a state machine.
  *
- * The transcript logic can be stated as pseudocode:
+ * A session file is scanned from top to bottom.  The state is:
  *
- *   currentModel  := null
- *   previousUsage := null
- *   fileUsage     := zero
+ *   currentModel  the model named by the most recent turn_context
+ *   previousUsage the previous usable cumulative token snapshot
+ *   usage         the sum attributed to TARGET_MODEL
  *
- *   for each non-empty line:
- *     parse JSON; if malformed, count and skip
- *     if line is a turn_context with model, update currentModel
- *     if line is not a token_count event, skip
- *     extract normalized usage snapshot U
- *     let delta be:
- *       U                      if previousUsage is null
- *       U                      if any coordinate moved backward
- *       U - previousUsage      otherwise
- *     if currentModel == TARGET_MODEL, add delta to fileUsage
- *     previousUsage := U
+ * Each parsed line becomes one of three observations:
  *
- * The crucial assumption is that token-count snapshots are attributable to the
- * model named by the most recent `turn_context`.  Since the snapshots are
- * cumulative, correctness depends on transcript ordering being well-behaved
- * enough that differencing adjacent snapshots does not smear one model's usage
- * into another's.
+ *   model_turn(model)
+ *   usage_snapshot(usage)
+ *   other
  *
- * When a counter moves backward, we take the current snapshot itself as the
- * increment.  This is a recovery convention, not a theorem.  It is chosen so
- * that resets are visible in diagnostics rather than hidden as dropped usage.
+ * The central assumption is that a usage snapshot belongs to the model named
+ * by the most recent `turn_context`.  Because token snapshots are cumulative,
+ * the quantity we add is the difference from the previous usable snapshot.
+ *
+ * Example:
+ *
+ *   turn_context gpt-5.4
+ *   token_count  input=100 cached=20 output=10   add (100,20,10)
+ *   token_count  input=150 cached=30 output=15   add (50,10,5)
+ *   turn_context gpt-5.5
+ *   token_count  input=190 cached=40 output=20   skip (40,10,5)
+ *   turn_context gpt-5.4
+ *   token_count  input=10  cached=1  output=2    reset, add (10,1,2)
+ *
+ * A backward-moving counter is treated as a reset: the whole current snapshot
+ * is used as the increment, and the reset is reported.  This is a recovery
+ * convention, not a claim that the transcript proves a clean restart.
  */
+function newFileAnalysis(filePath) {
+  var usage = zeroUsage();
+  var diagnostics = newDiagnostics();
+
+  return {
+    filePath: filePath,
+    currentModel: null,
+    previousUsage: null,
+    usage: usage,
+    diagnostics: diagnostics,
+    tokenCountEvents: 0,
+    matchedTokenCountEvents: 0,
+    matchedAnyTurn: false
+  };
+}
+
 function parseJsonLine(lineText, filePath, lineNumber, diagnostics) {
   try {
     return JSON.parse(lineText);
@@ -230,8 +283,41 @@ function isModelTurnRecord(record, payload) {
 
 function isTokenCountRecord(record, payload) {
   return record.type === 'event_msg' &&
-    payload.type === 'token_count' &&
-    payload.info;
+    payload.type === 'token_count';
+}
+
+function observationOfRecord(record, diagnostics) {
+  var payload;
+  var usage;
+
+  if (!record || !record.payload) {
+    return {
+      kind: 'other'
+    };
+  }
+
+  payload = record.payload;
+
+  if (isModelTurnRecord(record, payload)) {
+    return {
+      kind: 'model_turn',
+      model: payload.model
+    };
+  }
+
+  if (isTokenCountRecord(record, payload)) {
+    usage = usageFromInfo(payload.info, diagnostics);
+    if (usage) {
+      return {
+        kind: 'usage_snapshot',
+        usage: usage
+      };
+    }
+  }
+
+  return {
+    kind: 'other'
+  };
 }
 
 function incrementFromSnapshots(previousUsage, currentUsage, diagnostics) {
@@ -259,36 +345,55 @@ function incrementFromSnapshots(previousUsage, currentUsage, diagnostics) {
   return incrementUsage;
 }
 
+function advanceFileAnalysis(analysis, observation, targetModel) {
+  var incrementUsage;
+
+  if (observation.kind === 'model_turn') {
+    analysis.currentModel = observation.model;
+    if (analysis.currentModel === targetModel) {
+      analysis.matchedAnyTurn = true;
+    }
+    return;
+  }
+
+  if (observation.kind !== 'usage_snapshot') {
+    return;
+  }
+
+  analysis.tokenCountEvents += 1;
+  incrementUsage = incrementFromSnapshots(analysis.previousUsage, observation.usage, analysis.diagnostics);
+
+  if (analysis.currentModel === targetModel) {
+    addUsage(analysis.usage, incrementUsage);
+    analysis.matchedTokenCountEvents += 1;
+  }
+
+  analysis.previousUsage = observation.usage;
+}
+
+function fileAnalysisResult(analysis) {
+  return {
+    filePath: analysis.filePath,
+    usage: analysis.usage,
+    diagnostics: analysis.diagnostics,
+    tokenCountEvents: analysis.tokenCountEvents,
+    matchedTokenCountEvents: analysis.matchedTokenCountEvents,
+    matchedAnyTurn: analysis.matchedAnyTurn
+  };
+}
+
 function analyzeSessionFile(filePath, targetModel) {
   var fileContents;
   var fileLines;
-  var currentModel;
-  var previousUsage;
-  var fileUsage;
-  var diagnostics;
-  var stats;
+  var analysis;
   var lineIndex;
   var trimmedLine;
   var record;
-  var payload;
-  var currentUsage;
-  var incrementUsage;
+  var observation;
 
   fileContents = fs.readFileSync(filePath, 'utf8');
   fileLines = fileContents.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  currentModel = null;
-  previousUsage = null;
-  fileUsage = zeroUsage();
-  diagnostics = newDiagnostics();
-
-  stats = {
-    filePath: filePath,
-    usage: fileUsage,
-    diagnostics: diagnostics,
-    tokenCountEvents: 0,
-    matchedTokenCountEvents: 0,
-    matchedAnyTurn: false
-  };
+  analysis = newFileAnalysis(filePath);
 
   for (lineIndex = 0; lineIndex < fileLines.length; lineIndex += 1) {
     trimmedLine = fileLines[lineIndex].replace(/^\s+|\s+$/g, '');
@@ -296,51 +401,21 @@ function analyzeSessionFile(filePath, targetModel) {
       continue;
     }
 
-    record = parseJsonLine(trimmedLine, filePath, lineIndex + 1, diagnostics);
-    if (!record || !record.payload) {
-      continue;
-    }
-
-    payload = record.payload;
-
-    if (isModelTurnRecord(record, payload)) {
-      currentModel = payload.model;
-      if (currentModel === targetModel) {
-        stats.matchedAnyTurn = true;
-      }
-      continue;
-    }
-
-    if (!isTokenCountRecord(record, payload)) {
-      continue;
-    }
-
-    currentUsage = usageFromInfo(payload.info, diagnostics);
-    if (!currentUsage) {
-      continue;
-    }
-
-    stats.tokenCountEvents += 1;
-    incrementUsage = incrementFromSnapshots(previousUsage, currentUsage, diagnostics);
-
-    if (currentModel === targetModel) {
-      addUsage(fileUsage, incrementUsage);
-      stats.matchedTokenCountEvents += 1;
-    }
-
-    previousUsage = currentUsage;
+    record = parseJsonLine(trimmedLine, filePath, lineIndex + 1, analysis.diagnostics);
+    observation = observationOfRecord(record, analysis.diagnostics);
+    advanceFileAnalysis(analysis, observation, targetModel);
   }
 
-  return stats;
+  return fileAnalysisResult(analysis);
 }
 
 /*
- * Step 4. Resolve the input path to an ordered list of files.
+ * The input domain.
  *
- * This is intentionally simple.  The program accepts a single `.jsonl` file or
- * a directory tree and recursively gathers `.jsonl` descendants.  It does not
- * attempt to recover from filesystem errors beyond the explicit "path not
- * found" check.
+ * By default we scan `~/.codex/sessions`.  The caller may instead provide one
+ * `.jsonl` file or a directory tree.  Directory traversal is sorted so reports
+ * are deterministic.  This program deliberately does not recover from
+ * filesystem errors beyond the explicit "path not found" check.
  */
 function expandHome(inputPath) {
   if (!inputPath) {
@@ -419,17 +494,19 @@ function resolveInputFiles(inputPath) {
 }
 
 /*
- * Step 5. Aggregate files into one report.
+ * From files to a report.
  *
- * Again the pseudocode is short:
+ * Aggregation is just a fold:
  *
  *   totalUsage       := zero
  *   totalDiagnostics := zero diagnostics
  *   for each file:
- *     fileStats := analyzeSessionFile(file)
- *     add fileStats.usage to totalUsage
- *     merge fileStats.diagnostics into totalDiagnostics
- *   package totals, diagnostics, and optional per-file reports
+ *     analyze the file
+ *     add its usage
+ *     merge its diagnostics
+ *
+ * We then translate the internal names to the public report schema.  Text and
+ * JSON output both consume this same report object.
  */
 function summaryOf(usage, diagnosticsObject) {
   var costs = costsOf(usage);
@@ -489,38 +566,6 @@ function sortedFileStatsOf(fileStatsList) {
   return fileStatsList.slice(0).sort(compareFileStats);
 }
 
-function detailedReportsOf(fileStatsList) {
-  var sortedFileStats;
-  var reports;
-  var fileIndex;
-  var fileStats;
-  var fileDiagnostics;
-  var fileSummary;
-
-  sortedFileStats = sortedFileStatsOf(fileStatsList);
-  reports = [];
-
-  for (fileIndex = 0; fileIndex < sortedFileStats.length; fileIndex += 1) {
-    fileStats = sortedFileStats[fileIndex];
-    if (!fileStats.matchedAnyTurn) {
-      continue;
-    }
-
-    fileDiagnostics = diagnosticsObjectOf(fileStats.diagnostics);
-    fileSummary = summaryOf(fileStats.usage, fileDiagnostics);
-    reports.push({
-      file_path: fileStats.filePath,
-      token_count_snapshots: fileStats.tokenCountEvents,
-      priced_snapshots: fileStats.matchedTokenCountEvents,
-      usage: fileSummary.usage,
-      costs: fileSummary.costs,
-      diagnostics: fileSummary.diagnostics
-    });
-  }
-
-  return reports;
-}
-
 function aggregateFiles(files, targetModel) {
   var totalUsage;
   var totalDiagnostics;
@@ -561,14 +606,47 @@ function aggregateFiles(files, targetModel) {
   };
 }
 
-function reportOf(resolvedInput, aggregation) {
+function detailedReportsOf(fileStatsList) {
+  var sortedFileStats;
+  var reports;
+  var fileIndex;
+  var fileStats;
+  var fileDiagnostics;
+  var fileSummary;
+
+  sortedFileStats = sortedFileStatsOf(fileStatsList);
+  reports = [];
+
+  for (fileIndex = 0; fileIndex < sortedFileStats.length; fileIndex += 1) {
+    fileStats = sortedFileStats[fileIndex];
+    if (!fileStats.matchedAnyTurn) {
+      continue;
+    }
+
+    fileDiagnostics = diagnosticsObjectOf(fileStats.diagnostics);
+    fileSummary = summaryOf(fileStats.usage, fileDiagnostics);
+    reports.push({
+      file_path: fileStats.filePath,
+      token_count_snapshots: fileStats.tokenCountEvents,
+      priced_snapshots: fileStats.matchedTokenCountEvents,
+      usage: fileSummary.usage,
+      costs: fileSummary.costs,
+      diagnostics: fileSummary.diagnostics
+    });
+  }
+
+  return reports;
+}
+
+function reportOf(resolvedInput, aggregation, includeDetails) {
   var totalDiagnosticsObject;
   var totalSummary;
+  var report;
 
   totalDiagnosticsObject = diagnosticsObjectOf(aggregation.totalDiagnostics);
   totalSummary = summaryOf(aggregation.totalUsage, totalDiagnosticsObject);
 
-  return {
+  report = {
     model: TARGET_MODEL,
     input_path: resolvedInput.inputPath,
     input_kind: resolvedInput.inputKind,
@@ -586,13 +664,20 @@ function reportOf(resolvedInput, aggregation) {
     },
     totals: totalSummary
   };
+
+  if (includeDetails) {
+    report.session_summary = totalSummary;
+    report.sessions = detailedReportsOf(aggregation.fileStatsList);
+  }
+
+  return report;
 }
 
 /*
- * Step 6. Render the report.
+ * Rendering.
  *
- * The rendering code is intentionally late.  By this point all numbers are
- * already fixed.
+ * The renderer formats an already-computed report.  It does not perform token
+ * attribution or pricing decisions.
  */
 function formatMoney(amount) {
   return '$' + amount.toFixed(6);
@@ -614,12 +699,12 @@ function printRows(rows) {
   }
 }
 
-function pricingRows() {
+function pricingRows(report) {
   return [
-    'Pricing verified on 2026-05-07 from https://openai.com/api/pricing/',
-    '  input rate: ' + formatMoney(PRICING.inputPerMillion) + ' / 1M tokens',
-    '  cached input rate: ' + formatMoney(PRICING.cachedInputPerMillion) + ' / 1M tokens',
-    '  output rate: ' + formatMoney(PRICING.outputPerMillion) + ' / 1M tokens'
+    'Pricing verified on ' + report.pricing_verified_on + ' from ' + report.pricing_source,
+    '  input rate: ' + formatMoney(report.pricing.input_per_million) + ' / 1M tokens',
+    '  cached input rate: ' + formatMoney(report.pricing.cached_input_per_million) + ' / 1M tokens',
+    '  output rate: ' + formatMoney(report.pricing.output_per_million) + ' / 1M tokens'
   ];
 }
 
@@ -697,44 +782,40 @@ function printSummary(label, summaryObject, includeDiagnostics) {
   printRows(summaryRows.slice(6));
 }
 
-function printDetailedReports(fileStatsList) {
-  var sortedFileStats;
-  var fileIndex;
-  var fileStats;
-  var fileSummary;
+function printDetailedReports(sessionReports) {
+  var sessionIndex;
+  var sessionReport;
 
-  sortedFileStats = sortedFileStatsOf(fileStatsList);
   console.log('Per-session breakdown');
 
-  for (fileIndex = 0; fileIndex < sortedFileStats.length; fileIndex += 1) {
-    fileStats = sortedFileStats[fileIndex];
-    if (!fileStats.matchedAnyTurn) {
-      continue;
-    }
-
-    fileSummary = summaryOf(fileStats.usage, diagnosticsObjectOf(fileStats.diagnostics));
-    printSummary(fileStats.filePath, fileSummary, true);
-    console.log('  token_count_snapshots: ' + fileStats.tokenCountEvents);
-    console.log('  priced_snapshots: ' + fileStats.matchedTokenCountEvents);
+  for (sessionIndex = 0; sessionIndex < sessionReports.length; sessionIndex += 1) {
+    sessionReport = sessionReports[sessionIndex];
+    printSummary(sessionReport.file_path, {
+      usage: sessionReport.usage,
+      costs: sessionReport.costs,
+      diagnostics: sessionReport.diagnostics
+    }, true);
+    console.log('  token_count_snapshots: ' + sessionReport.token_count_snapshots);
+    console.log('  priced_snapshots: ' + sessionReport.priced_snapshots);
     console.log('');
   }
 }
 
-function printReport(report, detailed, fileStatsList) {
+function printReport(report) {
   printRows(rowsOfReportPreamble(report));
   console.log('');
   printSummary('Token totals', report.totals, false);
   console.log('');
-  printRows(pricingRows());
+  printRows(pricingRows(report));
 
-  if (detailed) {
+  if (report.sessions) {
     console.log('');
-    printDetailedReports(fileStatsList);
+    printDetailedReports(report.sessions);
   }
 }
 
 /*
- * Step 7. Parse the command line and execute the plan.
+ * Command line.
  */
 function printUsage(scriptName) {
   console.error('Usage: node ' + scriptName + ' [--detailed] [--json] [logPath]');
@@ -787,42 +868,6 @@ function parseCommandLine(argv) {
     jsonOutput: jsonOutput,
     inputPath: inputPath
   };
-}
-
-function main() {
-  var options;
-  var resolvedInput;
-  var aggregation;
-  var report;
-
-  options = parseCommandLine(process.argv);
-
-  try {
-    resolvedInput = resolveInputFiles(options.inputPath);
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-
-  if (!resolvedInput.files.length) {
-    console.error('No .jsonl files found under: ' + resolvedInput.inputPath);
-    process.exit(1);
-  }
-
-  aggregation = aggregateFiles(resolvedInput.files, TARGET_MODEL);
-  report = reportOf(resolvedInput, aggregation);
-
-  if (options.jsonOutput) {
-    if (options.detailed) {
-      report.session_summary = report.totals;
-      report.sessions = detailedReportsOf(aggregation.fileStatsList);
-    }
-
-    console.log(JSON.stringify(report, null, 2));
-    return;
-  }
-
-  printReport(report, options.detailed, aggregation.fileStatsList);
 }
 
 main();
