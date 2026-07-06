@@ -12,3 +12,5 @@
 !/jsapi_test/artifacts/placeholder
 /tcc_mawk_bootstrap/artifacts/*
 !/tcc_mawk_bootstrap/artifacts/placeholder
+/postscript_cc/artifacts/*
+!/postscript_cc/artifacts/placeholder
