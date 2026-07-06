@@ -1,0 +1,1628 @@
+%!
+
+/BUF_CHUNK 32768 def
+/BUF_MAX_CHUNKS 512 def
+/MAX_FUNCTIONS 2048 def
+/MAX_GLOBALS 2048 def
+/MAX_CALLS 16384 def
+/MAX_PATCHES 16384 def
+/MAX_PARAMS 512 def
+/MAX_LOOPS 512 def
+/MAX_BREAKS 4096 def
+/RUNTIME_BYTES 4 def
+/BRK_CUR_OFFSET 0 def
+
+/stderr (%stderr) (w) file def
+/out_byte 1 string def
+/num_buf 32 string def
+/name_buf 128 string def
+
+/new_buffer {
+    8 dict begin
+    /chunks BUF_MAX_CHUNKS array def
+    /len 0 def
+    currentdict
+    end
+} bind def
+
+/buf_append1 {
+    10 dict begin
+    /val exch def
+    /buf exch def
+    /pos buf /len get def
+    /chunk_index pos BUF_CHUNK idiv def
+    /chunk_off pos BUF_CHUNK mod def
+    /chunks buf /chunks get def
+    chunks chunk_index get null eq {
+        chunks chunk_index BUF_CHUNK string put
+    } if
+    chunks chunk_index get chunk_off val put
+    buf /len pos 1 add put
+    end
+} bind def
+
+/buf_append_string {
+    8 dict begin
+    /s exch def
+    /buf exch def
+    /i 0 def
+    {
+        i s length ge { exit } if
+        buf s i get buf_append1
+        /i i 1 add def
+    } loop
+    end
+} bind def
+
+/buf_get1 {
+    6 dict begin
+    /pos exch def
+    /buf exch def
+    /chunk_index pos BUF_CHUNK idiv def
+    /chunk_off pos BUF_CHUNK mod def
+    chunk_index 0 lt { (buf_get1 negative chunk index) fail } if
+    chunk_index BUF_MAX_CHUNKS ge { (buf_get1 chunk index overflow) fail } if
+    /chunk buf /chunks get chunk_index get def
+    chunk null eq { (buf_get1 null chunk) fail } if
+    chunk_off chunk length ge { (buf_get1 chunk offset overflow) fail } if
+    chunk chunk_off get
+    end
+} bind def
+
+/buf_get1_or_zero {
+    6 dict begin
+    /pos exch def
+    /buf exch def
+    /chunk_index pos BUF_CHUNK idiv def
+    /chunk_off pos BUF_CHUNK mod def
+    chunk_index 0 lt {
+        0
+    }{
+        chunk_index BUF_MAX_CHUNKS ge {
+            0
+        }{
+            /chunk buf /chunks get chunk_index get def
+            chunk null eq {
+                0
+            }{
+                chunk_off chunk length ge {
+                    0
+                }{
+                    chunk chunk_off get
+                } ifelse
+            } ifelse
+        } ifelse
+    } ifelse
+    end
+} bind def
+
+/buf_set1 {
+    8 dict begin
+    /val exch def
+    /pos exch def
+    /buf exch def
+    /chunk_index pos BUF_CHUNK idiv def
+    /chunk_off pos BUF_CHUNK mod def
+    chunk_index 0 lt { (buf_set1 negative chunk index) fail } if
+    chunk_index BUF_MAX_CHUNKS ge { (buf_set1 chunk index overflow) fail } if
+    /chunks buf /chunks get def
+    chunks chunk_index get null eq {
+        chunks chunk_index BUF_CHUNK string put
+    } if
+    chunk_off BUF_CHUNK ge { (buf_set1 chunk offset overflow) fail } if
+    chunks chunk_index get chunk_off val put
+    end
+} bind def
+
+/buf_slice {
+    8 dict begin
+    /len exch def
+    /start exch def
+    /buf exch def
+    /out len string def
+    /i 0 def
+    {
+        i len ge { exit } if
+        out i buf start i add buf_get1 put
+        /i i 1 add def
+    } loop
+    out
+    end
+} bind def
+
+/buf_write_file {
+    10 dict begin
+    /out_file exch def
+    /buf exch def
+    /total buf /len get def
+    /pos 0 def
+    {
+        pos total ge { exit } if
+        /chunk_index pos BUF_CHUNK idiv def
+        /chunk_off pos BUF_CHUNK mod def
+        /chunk buf /chunks get chunk_index get def
+        /chunk_len BUF_CHUNK chunk_off sub def
+        total pos sub chunk_len lt {
+            /chunk_len total pos sub def
+        } if
+        out_file chunk chunk_off chunk_len getinterval writestring
+        /pos pos chunk_len add def
+    } loop
+    end
+} bind def
+
+/buf_write_string_at {
+    12 dict begin
+    /src_string exch def
+    /dst_pos exch def
+    /buf exch def
+    /src_off 0 def
+    /remaining src_string length def
+    {
+        remaining 0 le { exit } if
+        /chunk_index dst_pos BUF_CHUNK idiv def
+        /chunk_off dst_pos BUF_CHUNK mod def
+        /chunks buf /chunks get def
+        chunks chunk_index get null eq {
+            chunks chunk_index BUF_CHUNK string put
+        } if
+        /chunk chunks chunk_index get def
+        /piece_len BUF_CHUNK chunk_off sub def
+        remaining piece_len lt { /piece_len remaining def } if
+        chunk chunk_off src_string src_off piece_len getinterval putinterval
+        /dst_pos dst_pos piece_len add def
+        /src_off src_off piece_len add def
+        /remaining remaining piece_len sub def
+    } loop
+    buf /len get dst_pos lt {
+        buf /len dst_pos put
+    } if
+    end
+} bind def
+
+/puts_err {
+    stderr exch writestring
+} bind def
+
+/putnl_err {
+    stderr (\n) writestring
+} bind def
+
+/print_num_err {
+    stderr exch num_buf cvs writestring
+} bind def
+
+/print_name_err {
+    stderr exch name_buf cvs writestring
+} bind def
+
+/trace_msg {
+    /trace_text exch def
+    /TRACE where {
+        pop
+        TRACE 0 ne {
+            stderr trace_text writestring
+            stderr (\n) writestring
+        } if
+    } if
+} bind def
+
+/trace_function_name {
+    /function_name_text exch def
+    /TRACE_TOP where {
+        pop
+        TRACE_TOP 0 ne {
+            stderr (function ) writestring
+            stderr function_name_text writestring
+            stderr (\n) writestring
+        } if
+    } if
+} bind def
+
+/trace_stack_depth {
+    /TRACE_STACK where {
+        pop
+        TRACE_STACK 0 ne {
+            stderr (stack=) writestring
+            count num_buf cvs stderr exch writestring
+            stderr (\n) writestring
+        } if
+    } if
+} bind def
+
+/fail {
+    /msg exch def
+    msg puts_err
+    /tok where {
+        pop
+        ( [tok=) puts_err
+        tok print_name_err
+        ( text=) puts_err
+        /tok_text where {
+            pop
+            stderr tok_text writestring
+        } if
+        ( pos=) puts_err
+        /tok_pos where {
+            pop
+            tok_pos print_num_err
+        } if
+        (]) puts_err
+    } if
+    putnl_err
+    1 quit
+} bind def
+
+/u32 {
+    {
+        dup 0 lt not { exit } if
+        4294967296 add
+    } loop
+    {
+        dup 4294967296 lt { exit } if
+        4294967296 sub
+    } loop
+} bind def
+
+/align4 {
+    3 add 4 idiv 4 mul
+} bind def
+
+/init_tables {
+    /reserved 16 dict def
+    reserved /function /FUNCTION put
+    reserved /var /VAR put
+    reserved /return /RETURN put
+    reserved /if /IF put
+    reserved /else /ELSE put
+    reserved /while /WHILE put
+    reserved /break /BREAK put
+
+    /builtin1 64 dict def
+    builtin1 /neg true put
+    builtin1 /NEG true put
+    builtin1 /not true put
+    builtin1 /NOT true put
+    builtin1 /ri32 true put
+    builtin1 /ri8 true put
+    builtin1 /brk true put
+    builtin1 /close true put
+    builtin1 /exit true put
+    builtin1 /mks true put
+    builtin1 /mkC true put
+
+    /builtin2 96 dict def
+    builtin2 /add true put
+    builtin2 /ADD true put
+    builtin2 /sub true put
+    builtin2 /SUB true put
+    builtin2 /mul true put
+    builtin2 /MUL true put
+    builtin2 /div true put
+    builtin2 /DIV true put
+    builtin2 /mod true put
+    builtin2 /MOD true put
+    builtin2 /eq true put
+    builtin2 /EQ true put
+    builtin2 /ne true put
+    builtin2 /NE true put
+    builtin2 /lt true put
+    builtin2 /LT true put
+    builtin2 /le true put
+    builtin2 /LE true put
+    builtin2 /gt true put
+    builtin2 /GT true put
+    builtin2 /ge true put
+    builtin2 /GE true put
+    builtin2 /and true put
+    builtin2 /AND true put
+    builtin2 /or true put
+    builtin2 /OR true put
+    builtin2 /xor true put
+    builtin2 /XOR true put
+    builtin2 /shl true put
+    builtin2 /SHL true put
+    builtin2 /shr true put
+    builtin2 /SHR true put
+    builtin2 /wi32 true put
+    builtin2 /wi8 true put
+
+    /builtin3 16 dict def
+    builtin3 /open true put
+    builtin3 /read true put
+    builtin3 /write true put
+} bind def
+
+/code_reset {
+    /codebuf new_buffer def
+    /code_len 0 def
+    /srcbuf new_buffer def
+    /src_len 0 def
+    /databuf new_buffer def
+    /data_used RUNTIME_BYTES def
+    /next_data_offset RUNTIME_BYTES def
+    /global_bytes RUNTIME_BYTES def
+
+    /global_seen 2048 dict def
+    /global_offset 2048 dict def
+    /global_name MAX_GLOBALS array def
+    /global_count 0 def
+
+    /function_seen 2048 dict def
+    /function_arity 2048 dict def
+    /function_addr 2048 dict def
+    /function_name MAX_FUNCTIONS array def
+    /function_count 0 def
+
+    /call_target MAX_CALLS array def
+    /call_pos MAX_CALLS array def
+    /call_argc MAX_CALLS array def
+    /call_count 0 def
+
+    /data_patch_offset MAX_PATCHES array def
+    /data_patch_addend MAX_PATCHES array def
+    /data_patch_count 0 def
+
+    /param_names MAX_PARAMS array def
+    /current_param_offset 64 dict def
+
+    /loop_stack MAX_LOOPS array def
+    /loop_depth 0 def
+    /next_loop_id 0 def
+    /break_count MAX_LOOPS array def
+    /break_patch MAX_BREAKS array def
+    /break_loop MAX_BREAKS array def
+    /break_total 0 def
+
+    /idx 0 def
+    /tok /EOF def
+    /tok_text () def
+    /tok_num 0 def
+    /tok_pos 0 def
+    /current_function /none def
+    /start_call_patch 0 def
+    /bin_len 0 def
+} bind def
+
+/read_all_into {
+    10 dict begin
+    /buf exch def
+    /f exch def
+    /tmp 4096 string def
+    {
+        f tmp readstring
+        {
+            buf exch buf_append_string
+        }{
+            dup length 0 gt {
+                buf exch buf_append_string
+            }{
+                pop
+            } ifelse
+            exit
+        } ifelse
+    } loop
+    end
+} bind def
+
+/read_source {
+    /f /SOURCE where {
+        pop
+        SOURCE (r) file
+    }{
+        (%stdin) (r) file
+    } ifelse def
+    f srcbuf read_all_into
+    /src_len srcbuf /len get def
+    f closefile
+} bind def
+
+/src_ch {
+    srcbuf exch buf_get1
+} bind def
+
+/is_space {
+    dup 32 eq
+    exch dup 9 eq
+    exch dup 10 eq
+    exch dup 13 eq
+    exch dup 12 eq
+    exch 11 eq
+    or or or or or
+} bind def
+
+/is_digit {
+    dup 48 ge exch 57 le and
+} bind def
+
+/is_alpha {
+    2 dict begin
+    /ch exch def
+    ch 97 ge ch 122 le and
+    ch 65 ge ch 90 le and
+    or
+    ch 95 eq
+    or
+    end
+} bind def
+
+/is_alnum {
+    dup is_alpha exch is_digit or
+} bind def
+
+/skip_ws_and_comments {
+    {
+        idx src_len ge { exit } if
+        /ch idx src_ch def
+        ch is_space {
+            /idx idx 1 add store
+        }{
+            idx 1 add src_len lt {
+                /ch2 idx 1 add src_ch def
+                ch 47 eq ch2 42 eq and {
+                    /idx idx 2 add store
+                    {
+                        idx 1 add src_len ge { (unterminated comment) fail } if
+                        idx src_ch 42 eq idx 1 add src_ch 47 eq and { exit } if
+                        /idx idx 1 add store
+                    } loop
+                    /idx idx 2 add store
+                }{
+                    ch 47 eq ch2 47 eq and {
+                        /idx idx 2 add store
+                        {
+                            idx src_len ge { exit } if
+                            idx src_ch 10 eq { exit } if
+                            /idx idx 1 add store
+                        } loop
+                    }{
+                        exit
+                    } ifelse
+                } ifelse
+            }{
+                exit
+            } ifelse
+        } ifelse
+    } loop
+} bind def
+
+/read_string_token {
+    10 dict begin
+    /tmp new_buffer def
+    /idx idx 1 add store
+    {
+        idx src_len ge { (unterminated string literal) fail } if
+        /ch idx src_ch def
+        ch 34 eq {
+            /idx idx 1 add store
+            /tok /STR store
+            /tok_text tmp 0 tmp /len get buf_slice store
+            exit
+        } if
+        ch 92 eq {
+            /idx idx 1 add store
+            idx src_len ge { (unterminated string escape) fail } if
+            /esc idx src_ch def
+            esc 110 eq {
+                tmp 10 buf_append1
+            }{
+                esc 116 eq {
+                    tmp 9 buf_append1
+                }{
+                    esc 114 eq {
+                        tmp 13 buf_append1
+                    }{
+                        esc 102 eq {
+                            tmp 12 buf_append1
+                        }{
+                            esc 118 eq {
+                                tmp 11 buf_append1
+                            }{
+                                esc 34 eq {
+                                    tmp 34 buf_append1
+                                }{
+                                    esc 92 eq {
+                                        tmp 92 buf_append1
+                                    }{
+                                        esc 48 eq {
+                                            tmp 0 buf_append1
+                                        }{
+                                            (unsupported string escape) fail
+                                        } ifelse
+                                    } ifelse
+                                } ifelse
+                            } ifelse
+                        } ifelse
+                    } ifelse
+                } ifelse
+            } ifelse
+            /idx idx 1 add store
+        }{
+            tmp ch buf_append1
+            /idx idx 1 add store
+        } ifelse
+    } loop
+    end
+} bind def
+
+/next_tok {
+    12 dict begin
+    skip_ws_and_comments
+    /tok_pos idx store
+    idx src_len ge {
+        /tok /EOF store
+        /tok_text () store
+    }{
+        /ch idx src_ch def
+        ch is_alpha {
+            /start idx def
+            /idx idx 1 add store
+            {
+                idx src_len ge { exit } if
+                idx src_ch is_alnum not { exit } if
+                /idx idx 1 add store
+            } loop
+            /tok_text srcbuf start idx start sub buf_slice store
+            /name tok_text cvn def
+            reserved name known {
+                /tok reserved name get store
+            }{
+                /tok /IDENT store
+            } ifelse
+        }{
+            ch is_digit {
+                /num 0 def
+                {
+                    idx src_len ge { exit } if
+                    idx src_ch dup is_digit not { pop exit } if
+                    48 sub
+                    num 10 mul add /num exch def
+                    /idx idx 1 add store
+                } loop
+                /tok /NUM store
+                /tok_num num store
+                /tok_text () store
+            }{
+                ch 34 eq {
+                    read_string_token
+                }{
+                    ch 40 eq {
+                        /tok /LPAREN store
+                        /idx idx 1 add store
+                    }{
+                        ch 41 eq {
+                            /tok /RPAREN store
+                            /idx idx 1 add store
+                        }{
+                            ch 123 eq {
+                                /tok /LBRACE store
+                                /idx idx 1 add store
+                            }{
+                                ch 125 eq {
+                                    /tok /RBRACE store
+                                    /idx idx 1 add store
+                                }{
+                                    ch 59 eq {
+                                        /tok /SEMI store
+                                        /idx idx 1 add store
+                                    }{
+                                        ch 44 eq {
+                                            /tok /COMMA store
+                                            /idx idx 1 add store
+                                        }{
+                                            ch 61 eq {
+                                                /tok /EQUAL store
+                                                /idx idx 1 add store
+                                            }{
+                                                (unexpected character) fail
+                                            } ifelse
+                                        } ifelse
+                                    } ifelse
+                                } ifelse
+                            } ifelse
+                        } ifelse
+                    } ifelse
+                } ifelse
+            } ifelse
+        } ifelse
+    } ifelse
+    end
+} bind def
+
+/expect {
+    tok ne { (unexpected token) fail } if
+    next_tok
+} bind def
+
+/builtin_arity {
+    dup builtin1 exch known {
+        pop 1
+    }{
+        dup builtin2 exch known {
+            pop 2
+        }{
+            dup builtin3 exch known {
+                pop 3
+            }{
+                pop 0
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+
+/record_data_patch {
+    /rdp_addend exch def
+    /rdp_offset exch def
+    data_patch_offset data_patch_count rdp_offset put
+    data_patch_addend data_patch_count rdp_addend put
+    /data_patch_count data_patch_count 1 add store
+} bind def
+
+/register_string {
+    12 dict begin
+    /text exch def
+    /data_pos next_data_offset def
+    databuf data_pos text buf_write_string_at
+    databuf data_pos text length add 0 buf_set1
+    /next_data_offset data_pos text length add 1 add store
+    data_used next_data_offset lt { /data_used next_data_offset store } if
+    data_pos
+    end
+} bind def
+
+/emit1 {
+    codebuf exch buf_append1
+    /code_len code_len 1 add store
+} bind def
+
+/emit4 {
+    u32 /n exch def
+    n 255 and emit1
+    n -8 bitshift 255 and emit1
+    n -16 bitshift 255 and emit1
+    n -24 bitshift 255 and emit1
+} bind def
+
+/patch4 {
+    8 dict begin
+    /v exch def
+    /pos exch def
+    v u32 /n exch def
+    codebuf pos n 255 and buf_set1
+    codebuf pos 1 add n -8 bitshift 255 and buf_set1
+    codebuf pos 2 add n -16 bitshift 255 and buf_set1
+    codebuf pos 3 add n -24 bitshift 255 and buf_set1
+    end
+} bind def
+
+/patch_rel32 {
+    4 dict begin
+    /target exch def
+    /pos exch def
+    pos target pos 4 add sub patch4
+    end
+} bind def
+
+/emit_mov_eax_imm32 { 184 emit1 emit4 } bind def
+/emit_push_eax { 80 emit1 } bind def
+/emit_push_ebx { 83 emit1 } bind def
+/emit_pop_ebx { 91 emit1 } bind def
+/emit_pop_ecx { 89 emit1 } bind def
+/emit_load_param { 139 emit1 69 emit1 emit1 } bind def
+/emit_store_param { 137 emit1 69 emit1 emit1 } bind def
+/emit_test_eax_eax { 133 emit1 192 emit1 } bind def
+/emit_add_esp_imm32 { 129 emit1 196 emit1 emit4 } bind def
+/emit_mov_eax_esp { 137 emit1 224 emit1 } bind def
+/emit_mov_ebx_ptr_esp { 139 emit1 28 emit1 36 emit1 } bind def
+/emit_mov_ebx_eax { 137 emit1 195 emit1 } bind def
+/emit_mov_edx_eax { 137 emit1 194 emit1 } bind def
+/emit_mov_ebx_ecx { 137 emit1 203 emit1 } bind def
+/emit_mov_eax_ecx { 137 emit1 200 emit1 } bind def
+/emit_xor_ebx_ebx { 49 emit1 219 emit1 } bind def
+/emit_xor_eax_eax { 49 emit1 192 emit1 } bind def
+/emit_add_ebx_edx { 1 emit1 211 emit1 } bind def
+/emit_cmp_eax_ebx { 57 emit1 216 emit1 } bind def
+/emit_int_80 { 205 emit1 128 emit1 } bind def
+/emit_add_eax_ebx { 1 emit1 216 emit1 } bind def
+/emit_and_eax_ebx { 33 emit1 216 emit1 } bind def
+/emit_or_eax_ebx { 9 emit1 216 emit1 } bind def
+/emit_xor_eax_ebx { 49 emit1 216 emit1 } bind def
+/emit_neg_eax { 247 emit1 216 emit1 } bind def
+/emit_read_i32 { 139 emit1 0 emit1 } bind def
+/emit_read_u8 { 15 emit1 182 emit1 0 emit1 } bind def
+/emit_write_i32 { 137 emit1 3 emit1 } bind def
+/emit_sys_open { 5 emit_mov_eax_imm32 emit_int_80 } bind def
+/emit_sys_read { 3 emit_mov_eax_imm32 emit_int_80 } bind def
+/emit_sys_write { 4 emit_mov_eax_imm32 emit_int_80 } bind def
+/emit_sys_close { emit_mov_ebx_eax 6 emit_mov_eax_imm32 emit_int_80 } bind def
+/emit_sys_exit { emit_mov_ebx_eax 1 emit_mov_eax_imm32 emit_int_80 } bind def
+
+/emit_load_global {
+    /name exch def
+    161 emit1
+    code_len global_offset name get record_data_patch
+    0 emit4
+} bind def
+
+/emit_store_global {
+    /name exch def
+    163 emit1
+    code_len global_offset name get record_data_patch
+    0 emit4
+} bind def
+
+/emit_mks_literal {
+    register_string /off exch def
+    184 emit1
+    code_len off record_data_patch
+    0 emit4
+} bind def
+
+/emit4_data_patch {
+    /addend exch def
+    code_len addend record_data_patch
+    0 emit4
+} bind def
+
+/emit_prologue {
+    85 emit1
+    137 emit1
+    229 emit1
+    emit_push_ebx
+} bind def
+
+/emit_epilogue {
+    139 emit1
+    93 emit1
+    252 emit1
+    137 emit1
+    236 emit1
+    93 emit1
+    195 emit1
+} bind def
+
+/emit_start {
+    emit_mov_eax_esp
+    emit_mov_ebx_ptr_esp
+    4 emit_add_eax_imm32
+    emit_push_eax
+    emit_push_ebx
+    232 emit1
+    /start_call_patch code_len def
+    0 emit4
+    8 emit_add_esp_imm32
+    137 emit1
+    195 emit1
+    184 emit1
+    1 emit4
+    emit_int_80
+} bind def
+
+/emit_mov_eax_stack_disp32 {
+    139 emit1
+    132 emit1
+    36 emit1
+    emit4
+} bind def
+
+/emit_mov_ebx_stack_disp32 {
+    139 emit1
+    156 emit1
+    36 emit1
+    emit4
+} bind def
+
+/emit_mov_stack_disp32_ebx {
+    137 emit1
+    156 emit1
+    36 emit1
+    emit4
+} bind def
+
+/emit_mov_stack_disp32_eax {
+    137 emit1
+    132 emit1
+    36 emit1
+    emit4
+} bind def
+
+/emit_je_placeholder {
+    15 emit1
+    132 emit1
+    /pos code_len def
+    0 emit4
+    pos
+} bind def
+
+/emit_jne_placeholder {
+    15 emit1
+    133 emit1
+    /pos code_len def
+    0 emit4
+    pos
+} bind def
+
+/emit_jmp_placeholder {
+    233 emit1
+    /pos code_len def
+    0 emit4
+    pos
+} bind def
+
+/emit_jmp {
+    emit_jmp_placeholder
+    exch patch_rel32
+} bind def
+
+/emit_add_eax_imm32 { 5 emit1 emit4 } bind def
+
+/emit_shl_ebx_by_eax {
+    137 emit1 193 emit1
+    211 emit1 227 emit1
+    137 emit1 216 emit1
+} bind def
+
+/emit_shr_ebx_by_eax {
+    137 emit1 193 emit1
+    211 emit1 235 emit1
+    137 emit1 216 emit1
+} bind def
+
+/emit_sub_from_stack_top {
+    137 emit1 193 emit1
+    137 emit1 216 emit1
+    41 emit1 200 emit1
+} bind def
+
+/emit_imul_eax_ebx {
+    15 emit1 175 emit1 195 emit1
+} bind def
+
+/emit_div_stack_top_by_eax {
+    137 emit1 193 emit1
+    137 emit1 216 emit1
+    153 emit1
+    247 emit1 249 emit1
+} bind def
+
+/emit_mod_stack_top_by_eax {
+    emit_div_stack_top_by_eax
+    137 emit1 208 emit1
+} bind def
+
+/emit_cmp_set {
+    /opcode exch def
+    57 emit1 195 emit1
+    15 emit1 opcode emit1 192 emit1
+    15 emit1 182 emit1 192 emit1
+} bind def
+
+/emit_not_eax {
+    133 emit1 192 emit1
+    15 emit1 148 emit1 192 emit1
+    15 emit1 182 emit1 192 emit1
+} bind def
+
+/emit_write_u8 {
+    136 emit1 3 emit1
+    15 emit1 182 emit1 192 emit1
+} bind def
+
+/name_is_either {
+    3 dict begin
+    /rhs_b exch def
+    /rhs_a exch def
+    /lhs exch def
+    lhs rhs_a eq
+    lhs rhs_b eq
+    or
+    end
+} bind def
+
+/emit_brk_alloc {
+    /init_skip 0 def
+    /fail_patch 0 def
+    /done_patch 0 def
+    emit_mov_edx_eax
+    161 emit1
+    BRK_CUR_OFFSET emit4_data_patch
+    emit_test_eax_eax
+    /init_skip emit_jne_placeholder def
+
+    45 emit_mov_eax_imm32
+    emit_xor_ebx_ebx
+    emit_int_80
+    163 emit1
+    BRK_CUR_OFFSET emit4_data_patch
+
+    init_skip code_len patch_rel32
+
+    139 emit1
+    13 emit1
+    BRK_CUR_OFFSET emit4_data_patch
+    emit_mov_ebx_ecx
+    emit_add_ebx_edx
+    45 emit_mov_eax_imm32
+    emit_int_80
+    emit_cmp_eax_ebx
+    /fail_patch emit_jne_placeholder def
+
+    137 emit1
+    29 emit1
+    BRK_CUR_OFFSET emit4_data_patch
+    emit_mov_eax_ecx
+    /done_patch emit_jmp_placeholder def
+
+    fail_patch code_len patch_rel32
+    emit_xor_eax_eax
+    done_patch code_len patch_rel32
+} bind def
+
+/emit_builtin1 {
+    dup /neg /NEG name_is_either {
+        pop emit_neg_eax
+    }{
+        dup /not /NOT name_is_either {
+            pop emit_not_eax
+        }{
+            dup /ri32 eq {
+                pop emit_read_i32
+            }{
+                dup /ri8 eq {
+                    pop emit_read_u8
+                }{
+                    dup /brk eq {
+                        pop emit_brk_alloc
+                    }{
+                        dup /close eq {
+                            pop emit_sys_close
+                        }{
+                            dup /exit eq {
+                                pop emit_sys_exit
+                            }{
+                                pop (unknown unary builtin) fail
+                            } ifelse
+                        } ifelse
+                    } ifelse
+                } ifelse
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+
+/emit_builtin2 {
+    dup /add /ADD name_is_either {
+        pop emit_add_eax_ebx
+    }{
+        dup /sub /SUB name_is_either {
+            pop emit_sub_from_stack_top
+        }{
+            dup /mul /MUL name_is_either {
+                pop emit_imul_eax_ebx
+            }{
+                dup /div /DIV name_is_either {
+                    pop emit_div_stack_top_by_eax
+                }{
+                    dup /mod /MOD name_is_either {
+                        pop emit_mod_stack_top_by_eax
+                    }{
+                        dup /eq /EQ name_is_either {
+                            pop 148 emit_cmp_set
+                        }{
+                            dup /ne /NE name_is_either {
+                                pop 149 emit_cmp_set
+                            }{
+                                dup /lt /LT name_is_either {
+                                    pop 156 emit_cmp_set
+                                }{
+                                    dup /le /LE name_is_either {
+                                        pop 158 emit_cmp_set
+                                    }{
+                                        dup /gt /GT name_is_either {
+                                            pop 159 emit_cmp_set
+                                        }{
+                                            dup /ge /GE name_is_either {
+                                                pop 157 emit_cmp_set
+                                            }{
+                                                dup /and /AND name_is_either {
+                                                    pop emit_and_eax_ebx
+                                                }{
+                                                    dup /or /OR name_is_either {
+                                                        pop emit_or_eax_ebx
+                                                    }{
+                                                        dup /xor /XOR name_is_either {
+                                                            pop emit_xor_eax_ebx
+                                                        }{
+                                                            dup /shl /SHL name_is_either {
+                                                                pop emit_shl_ebx_by_eax
+                                                            }{
+                                                                dup /shr /SHR name_is_either {
+                                                                    pop emit_shr_ebx_by_eax
+                                                                }{
+                                                                    dup /wi32 eq {
+                                                                        pop emit_write_i32
+                                                                    }{
+                                                                        dup /wi8 eq {
+                                                                            pop emit_write_u8
+                                                                        }{
+                                                                            pop (unknown binary builtin) fail
+                                                                        } ifelse
+                                                                    } ifelse
+                                                                } ifelse
+                                                            } ifelse
+                                                        } ifelse
+                                                    } ifelse
+                                                } ifelse
+                                            } ifelse
+                                        } ifelse
+                                    } ifelse
+                                } ifelse
+                            } ifelse
+                        } ifelse
+                    } ifelse
+                } ifelse
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+
+/emit_builtin3 {
+    dup /open eq {
+        pop emit_sys_open
+    }{
+        dup /read eq {
+            pop emit_sys_read
+        }{
+            dup /write eq {
+                pop emit_sys_write
+            }{
+                pop (unknown ternary builtin) fail
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+
+/emit_reverse_args {
+    /era_argc exch def
+    /era_i 0 def
+    {
+        era_i era_argc 2 idiv ge { exit } if
+        /lo 4 era_i mul def
+        /hi 4 era_argc 1 sub era_i sub mul def
+        lo emit_mov_eax_stack_disp32
+        hi emit_mov_ebx_stack_disp32
+        lo emit_mov_stack_disp32_ebx
+        hi emit_mov_stack_disp32_eax
+        /era_i era_i 1 add def
+    } loop
+} bind def
+
+/emit_user_call {
+    /euc_argc exch def
+    /euc_name exch def
+    232 emit1
+    /euc_call_patch code_len def
+    0 emit4
+    euc_argc 0 gt { euc_argc 4 mul emit_add_esp_imm32 } if
+    call_target call_count euc_name put
+    call_pos call_count euc_call_patch put
+    call_argc call_count euc_argc put
+    /call_count call_count 1 add store
+} bind def
+
+/parse_expr null def
+
+/parse_builtin_call {
+    8 dict begin
+    /pbc_argc exch def
+    /pbc_name exch def
+    /LPAREN expect
+    pbc_name /mks eq {
+        tok /STR ne { (mks expects string literal) fail } if
+        tok_text emit_mks_literal
+        next_tok
+        /RPAREN expect
+    }{
+        pbc_name /mkC eq {
+            tok /STR ne { (mkC expects string literal) fail } if
+            tok_text length 0 eq { 0 } { tok_text 0 get } ifelse
+            emit_mov_eax_imm32
+            next_tok
+            /RPAREN expect
+        }{
+            pbc_argc 1 eq {
+                parse_expr
+            } if
+            pbc_argc 2 eq {
+                parse_expr
+                emit_push_eax
+                /COMMA expect
+                parse_expr
+                emit_pop_ebx
+            } if
+            pbc_argc 3 eq {
+                parse_expr
+                emit_push_eax
+                /COMMA expect
+                parse_expr
+                emit_push_eax
+                /COMMA expect
+                parse_expr
+                emit_mov_edx_eax
+                emit_pop_ecx
+                emit_pop_ebx
+            } if
+            /RPAREN expect
+            pbc_argc 1 eq { pbc_name emit_builtin1 } if
+            pbc_argc 2 eq { pbc_name emit_builtin2 } if
+            pbc_argc 3 eq { pbc_name emit_builtin3 } if
+        } ifelse
+    } ifelse
+    end
+} bind def
+
+/parse_user_call_args {
+    6 dict begin
+    /puca_argc 0 def
+    /LPAREN expect
+    tok /RPAREN eq {
+        next_tok
+    }{
+        {
+            parse_expr
+            emit_push_eax
+            /puca_argc puca_argc 1 add def
+            tok /COMMA ne { exit } if
+            next_tok
+        } loop
+        /RPAREN expect
+        puca_argc emit_reverse_args
+    } ifelse
+    puca_argc
+    end
+} bind def
+
+/parse_primary {
+    tok /NUM eq {
+        tok_num emit_mov_eax_imm32
+        next_tok
+    }{
+        tok /STR eq {
+            tok_text emit_mks_literal
+            next_tok
+        }{
+            tok /LPAREN eq {
+                next_tok
+                parse_expr
+                /RPAREN expect
+            }{
+                (expected expression) fail
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+
+/parse_assign_or_primary {
+    8 dict begin
+    /name tok_text cvn def
+    next_tok
+    tok /EQUAL eq {
+        next_tok
+        parse_expr
+        current_param_offset name known {
+            current_param_offset name get emit_store_param
+        }{
+            global_seen name known {
+                name emit_store_global
+            }{
+                (invalid assignment target) fail
+            } ifelse
+        } ifelse
+        }{
+            tok /LPAREN eq {
+                name builtin_arity /arity exch def
+                arity 0 gt {
+                    name arity parse_builtin_call
+                }{
+                    name parse_user_call_args emit_user_call
+                } ifelse
+            }{
+            current_param_offset name known {
+                current_param_offset name get emit_load_param
+            }{
+                global_seen name known {
+                    name emit_load_global
+                }{
+                    (unknown identifier) fail
+                } ifelse
+            } ifelse
+        } ifelse
+    } ifelse
+    end
+} bind def
+
+/parse_expr {
+    tok /IDENT eq {
+        parse_assign_or_primary
+    }{
+        parse_primary
+    } ifelse
+} bind def
+
+/record_break {
+    /patch_pos exch def
+    /loop_id exch def
+    break_loop break_total loop_id put
+    break_patch break_total patch_pos put
+    break_count loop_id break_count loop_id get 1 add put
+    /break_total break_total 1 add store
+} bind def
+
+/push_loop {
+    /exit_patch exch def
+    /id next_loop_id def
+    /next_loop_id next_loop_id 1 add store
+    loop_stack loop_depth id put
+    /loop_depth loop_depth 1 add store
+    break_count id 0 put
+    id
+} bind def
+
+/pop_loop {
+    /loop_depth loop_depth 1 sub def
+} bind def
+
+/patch_breaks {
+    10 dict begin
+    /target exch def
+    /loop_id exch def
+    /i 0 def
+    {
+        i break_total ge { exit } if
+        break_loop i get loop_id eq {
+            break_patch i get target patch_rel32
+        } if
+        /i i 1 add def
+    } loop
+    end
+} bind def
+
+/parse_break {
+    loop_depth 1 lt { (break outside loop) fail } if
+    /BREAK expect
+    /SEMI expect
+    loop_stack loop_depth 1 sub get emit_jmp_placeholder record_break
+} bind def
+
+/parse_block {
+    /LBRACE expect
+    {
+        tok /RBRACE eq tok /EOF eq or { exit } if
+        parse_stmt
+    } loop
+    /RBRACE expect
+} bind def
+
+/parse_if {
+    8 dict begin
+    /IF expect
+    /LPAREN expect
+    parse_expr
+    /RPAREN expect
+    emit_test_eax_eax
+    /false_patch emit_je_placeholder def
+    parse_stmt
+    tok /ELSE eq {
+        /end_patch emit_jmp_placeholder def
+        false_patch code_len patch_rel32
+        next_tok
+        parse_stmt
+        end_patch code_len patch_rel32
+    }{
+        false_patch code_len patch_rel32
+    } ifelse
+    end
+} bind def
+
+/parse_while {
+    8 dict begin
+    /WHILE expect
+    /LPAREN expect
+    /loop_start code_len def
+    parse_expr
+    /RPAREN expect
+    emit_test_eax_eax
+    /exit_patch emit_je_placeholder def
+    exit_patch push_loop /loop_id exch def
+    parse_stmt
+    loop_start emit_jmp
+    exit_patch code_len patch_rel32
+    loop_id code_len patch_breaks
+    pop_loop
+    end
+} bind def
+
+/parse_stmt {
+    tok /LBRACE eq {
+        parse_block
+    }{
+        tok /RETURN eq {
+            next_tok
+            parse_expr
+            /SEMI expect
+            emit_epilogue
+        }{
+            tok /IF eq {
+                parse_if
+            }{
+                tok /WHILE eq {
+                    parse_while
+                }{
+                    tok /BREAK eq {
+                        parse_break
+                    }{
+                        parse_expr
+                        /SEMI expect
+                    } ifelse
+                } ifelse
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+
+/enter_function {
+    8 dict begin
+    /param_count exch def
+    /name exch def
+    /current_function name store
+    /current_param_offset 128 dict store
+    /i 0 def
+    {
+        i param_count ge { exit } if
+        current_param_offset param_names i get 8 4 i mul add put
+        /i i 1 add def
+    } loop
+    end
+} bind def
+
+/leave_function {
+    /current_function /none def
+    /current_param_offset 64 dict def
+} bind def
+
+/parse_params {
+    8 dict begin
+    /pp_count 0 def
+    tok /RPAREN eq {
+    }{
+        {
+            tok /IDENT ne { (expected parameter name) fail } if
+            /name tok_text cvn def
+            current_param_offset name known { (duplicate parameter) fail } if
+            current_param_offset name pp_count put
+            param_names pp_count name put
+            /pp_count pp_count 1 add def
+            next_tok
+            tok /COMMA ne { exit } if
+            next_tok
+        } loop
+    } ifelse
+    /current_param_offset 64 dict def
+    pp_count
+    end
+} bind def
+
+/parse_function {
+    /FUNCTION expect
+    tok /IDENT ne { (expected function name) fail } if
+    tok_text trace_function_name
+    /name tok_text cvn def
+    next_tok
+    /LPAREN expect
+    parse_params /param_count exch def
+    /RPAREN expect
+    function_seen name known { (duplicate function) fail } if
+    function_seen name true put
+    function_arity name param_count put
+    function_addr name code_len put
+    function_name function_count name put
+    /function_count function_count 1 add def
+    emit_prologue
+    name param_count enter_function
+    /LBRACE expect
+    {
+        tok /RBRACE eq tok /EOF eq or { exit } if
+        parse_stmt
+    } loop
+    /RBRACE expect
+    0 emit_mov_eax_imm32
+    emit_epilogue
+    leave_function
+    trace_stack_depth
+} bind def
+
+/parse_global {
+    /VAR expect
+    tok /IDENT ne { (expected global name) fail } if
+    /name tok_text cvn def
+    next_tok
+    tok /EQUAL eq { (global initializers unsupported) fail } if
+    /SEMI expect
+    global_seen name known function_seen name known or { (duplicate global) fail } if
+    global_seen name true put
+    global_name global_count name put
+    /global_count global_count 1 add def
+    global_bytes next_data_offset lt not {
+    }{
+        /global_bytes next_data_offset align4 def
+        /next_data_offset global_bytes def
+    } ifelse
+    global_offset name global_bytes put
+    /global_bytes global_bytes 4 add def
+    next_data_offset global_bytes lt { /next_data_offset global_bytes def } if
+    data_used global_bytes lt { /data_used global_bytes def } if
+} bind def
+
+/parse_program {
+    {
+        tok /EOF eq { exit } if
+        tok /VAR eq {
+            parse_global
+        }{
+            parse_function
+        } ifelse
+    } loop
+    function_seen /main known not { (missing main function) fail } if
+} bind def
+
+/patch_calls {
+    /i 0 def
+    {
+        i call_count ge { exit } if
+        /TRACE_PATCH where {
+            pop
+            TRACE_PATCH 0 ne i 1000 mod 0 eq and {
+                (patch_calls i=) trace_msg
+            } if
+        } if
+        /name call_target i get def
+        /argc call_argc i get def
+        function_seen name known not { (undefined function call) fail } if
+        function_arity name get argc ne { (wrong function arity) fail } if
+        call_pos i get
+        function_addr name get
+        patch_rel32
+        /i i 1 add def
+    } loop
+} bind def
+
+/bout1 {
+    out_byte 0 3 -1 roll put
+    outf out_byte writestring
+    /bin_len bin_len 1 add def
+} bind def
+
+/bout2 {
+    dup 255 and bout1
+    -8 bitshift 255 and bout1
+} bind def
+
+/bout4 {
+    u32 /n exch def
+    n 255 and bout1
+    n -8 bitshift 255 and bout1
+    n -16 bitshift 255 and bout1
+    n -24 bitshift 255 and bout1
+} bind def
+
+/boutstr {
+    outf exch writestring
+    /bin_len bin_len 1 index length add def
+} bind def
+
+/pad_to {
+    {
+        bin_len 1 index ge { exit } if
+        0 bout1
+    } loop
+    pop
+} bind def
+
+/build_binary {
+    20 dict begin
+    /base 134512640 def
+    /ehsize 52 def
+    /phsize 32 def
+    /headers ehsize phsize add def
+    /entry base headers add def
+    /data_off headers code_len add align4 def
+    /data_base base data_off add def
+    /filesz data_off data_used add def
+    /memsz filesz def
+    /flags 7 def
+
+    function_addr /main get start_call_patch 4 add sub
+    start_call_patch exch patch4
+
+    /i 0 def
+    {
+        i data_patch_count ge { exit } if
+        data_patch_offset i get
+        data_base data_patch_addend i get add
+        patch4
+        /i i 1 add def
+    } loop
+
+    /outf /OUT where {
+        pop OUT (w) file
+    }{
+        (%stdout) (w) file
+    } ifelse def
+    /bin_len 0 def
+
+    127 bout1 69 bout1 76 bout1 70 bout1
+    1 bout1 1 bout1 1 bout1 0 bout1
+    0 bout1 0 bout1 0 bout1 0 bout1
+    0 bout1 0 bout1 0 bout1 0 bout1
+
+    2 bout2
+    3 bout2
+    1 bout4
+    entry bout4
+    ehsize bout4
+    0 bout4
+    0 bout4
+    ehsize bout2
+    phsize bout2
+    1 bout2
+    0 bout2
+    0 bout2
+    0 bout2
+
+    1 bout4
+    0 bout4
+    base bout4
+    base bout4
+    filesz bout4
+    memsz bout4
+    flags bout4
+    4096 bout4
+
+    /i 0 def
+    {
+        i code_len ge { exit } if
+        codebuf i buf_get1 bout1
+        /i i 1 add def
+    } loop
+    data_off pad_to
+
+    /i 0 def
+    {
+        i data_used ge { exit } if
+        databuf i buf_get1_or_zero bout1
+        /i i 1 add def
+    } loop
+    outf closefile
+    end
+} bind def
+
+/main {
+    init_tables
+    code_reset
+    (read_source) trace_msg
+    read_source
+    (next_tok) trace_msg
+    next_tok
+    (emit_start) trace_msg
+    emit_start
+    (parse_program) trace_msg
+    parse_program
+    /EOF expect
+    (patch_calls) trace_msg
+    patch_calls
+    (build_binary) trace_msg
+    build_binary
+    quit
+} bind def
+
+main

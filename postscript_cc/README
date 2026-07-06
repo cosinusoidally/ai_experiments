@@ -1,0 +1,42 @@
+`pscc.ps` is a Ghostscript-hosted port of the executable-emitting `mawkcc`
+pipeline. `mawkcc` remains the reference implementation and the current
+milestone is executable-only parity for small programs.
+
+Current state:
+
+- reads source from `-sSOURCE=...` or `%stdin`
+- writes the emitted ELF32/i386 executable to `-sOUT=...` or `%stdout`
+- builds `artifacts/mawkcc.pscc.exe` byte-identically to
+  `../mawkcc/artifacts/mawkcc.self.exe`
+- rebuilds `artifacts/mawkcc.self.exe` byte-identically via the PS-built
+  compiler
+- matches `mawkcc/cc.awk` on the checked-in `ret42`, `hello_write`, and
+  `if_chain` examples
+- does not implement `-c` object output yet
+
+Usage:
+
+```sh
+scripts/build-pscc.sh examples/ret42.c artifacts/ret42.pscc.exe
+artifacts/ret42.pscc.exe
+echo $?
+```
+
+stdin/stdout mode also works:
+
+```sh
+cat examples/ret42.c | gs -q -dNODISPLAY pscc.ps > artifacts/ret42.pscc.exe
+chmod +x artifacts/ret42.pscc.exe
+```
+
+Smoke tests:
+
+```sh
+scripts/run-tests.sh
+```
+
+Artifact cleanup:
+
+```sh
+scripts/empty-artifacts.sh
+```
