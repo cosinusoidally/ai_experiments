@@ -1,6 +1,6 @@
 `pscc.ps` is a Ghostscript-hosted port of the executable-emitting `mawkcc`
 pipeline. `mawkcc` remains the reference implementation and the current
-milestone is executable-only parity for small programs.
+milestone is executable-only self-host parity.
 
 Current state:
 
@@ -13,6 +13,13 @@ Current state:
 - matches `mawkcc/cc.awk` on the checked-in `ret42`, `hello_write`, and
   `if_chain` examples
 - does not implement `-c` object output yet
+
+The current bootstrap result is:
+
+- `pscc.ps` compiling `../mawkcc/mawkcc_self.c` produces the same bytes as
+  `mawkcc/artifacts/mawkcc.self.exe`
+- that PS-built compiler can then rebuild `mawkcc_self.c` to the same bytes
+  again
 
 Usage:
 
@@ -29,11 +36,17 @@ cat examples/ret42.c | gs -q -dNODISPLAY pscc.ps > artifacts/ret42.pscc.exe
 chmod +x artifacts/ret42.pscc.exe
 ```
 
-Smoke tests:
+Test suite:
 
 ```sh
 scripts/run-tests.sh
 ```
+
+`scripts/run-tests.sh` runs:
+
+- `tests/test_smoke.sh` for byte-identical output on the checked-in examples
+- `tests/test_selfhost.sh` for byte-identical `mawkcc.pscc.exe` and
+  `mawkcc.self.exe` rebuilds against the `mawkcc` reference artifacts
 
 Artifact cleanup:
 
