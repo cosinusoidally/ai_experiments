@@ -36,7 +36,7 @@
     chunks chunk_index get null eq {
         chunks chunk_index BUF_CHUNK string put
     } if
-    chunks chunk_index get chunk_off val put
+    chunks chunk_index get chunk_off val u8 put
     buf /len pos 1 add put
     end
 } bind def
@@ -110,7 +110,7 @@
         chunks chunk_index BUF_CHUNK string put
     } if
     chunk_off BUF_CHUNK ge { (buf_set1 chunk offset overflow) fail } if
-    chunks chunk_index get chunk_off val put
+    chunks chunk_index get chunk_off val u8 put
     end
 } bind def
 
@@ -253,15 +253,18 @@
     1 quit
 } bind def
 
-/u32 {
+/i32 {
     {
-        dup 0 lt not { exit } if
-        4294967296 add
+        dup 2147483647 gt { 4294967296 sub } { exit } ifelse
     } loop
     {
-        dup 4294967296 lt { exit } if
-        4294967296 sub
+        dup -2147483648 lt { 4294967296 add } { exit } ifelse
     } loop
+    cvi
+} bind def
+
+/u8 {
+    dup 256 div floor 256 mul sub cvi
 } bind def
 
 /align4 {
@@ -676,18 +679,20 @@
 } bind def
 
 /emit4 {
-    u32 /n exch def
+    1 dict begin
+    i32 /n exch def
     n 255 and emit1
     n -8 bitshift 255 and emit1
     n -16 bitshift 255 and emit1
     n -24 bitshift 255 and emit1
+    end
 } bind def
 
 /patch4 {
     8 dict begin
     /v exch def
     /pos exch def
-    v u32 /n exch def
+    v i32 /n exch def
     codebuf pos n 255 and buf_set1
     codebuf pos 1 add n -8 bitshift 255 and buf_set1
     codebuf pos 2 add n -16 bitshift 255 and buf_set1
@@ -1497,9 +1502,8 @@
 } bind def
 
 /bout1 {
-    out_byte 0 3 -1 roll put
-    outf out_byte writestring
-    /bin_len bin_len 1 add def
+    outbuf exch buf_append1
+    /bin_len bin_len 1 add store
 } bind def
 
 /bout2 {
@@ -1508,16 +1512,18 @@
 } bind def
 
 /bout4 {
-    u32 /n exch def
+    1 dict begin
+    i32 /n exch def
     n 255 and bout1
     n -8 bitshift 255 and bout1
     n -16 bitshift 255 and bout1
     n -24 bitshift 255 and bout1
+    end
 } bind def
 
 /boutstr {
-    outf exch writestring
-    /bin_len bin_len 1 index length add def
+    outbuf exch buf_append_string
+    /bin_len bin_len 1 index length add store
 } bind def
 
 /pad_to {
@@ -1558,6 +1564,7 @@
     }{
         (%stdout) (w) file
     } ifelse def
+    /outbuf new_buffer def
     /bin_len 0 def
 
     127 bout1 69 bout1 76 bout1 70 bout1
@@ -1602,6 +1609,7 @@
         databuf i buf_get1_or_zero bout1
         /i i 1 add def
     } loop
+    outbuf outf buf_write_file
     outf closefile
     end
 } bind def
