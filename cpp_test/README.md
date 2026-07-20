@@ -48,8 +48,9 @@ This produces both `cpp_test/artifacts/build/mawkcc_cpp` and
 `cpp_test/artifacts/build/mawkcc_cpp_original`. The ignored `artifacts`
 directory contains all generated files.
 
-Three convenience scripts configure and build separate trees beneath
-`artifacts`:
+Three compiler-only convenience scripts configure separate trees beneath
+`artifacts` and build only `mawkcc_cpp`, `mawkcc_core`, and the independent
+`mawkcc_cpp_original` compiler:
 
 ```sh
 cpp_test/build-debug.sh
@@ -65,13 +66,27 @@ They produce `artifacts/debug`, `artifacts/release`, and
 optimizations, and `Unoptimized` explicitly uses `-O0` without otherwise
 selecting the Debug configuration.
 
+The corresponding test-build scripts build those compilers and all unit-test
+binaries in the same configuration:
+
+```sh
+cpp_test/build-debug-test.sh
+cpp_test/build-release-test.sh
+cpp_test/build-unoptimized-test.sh
+```
+
+Test executables are excluded from ordinary CMake builds. Internally, each
+test-build script invokes its compiler-only counterpart and then builds the
+opt-in `mawkcc_test_binaries` target.
+
 The normal build enables strict warnings. An optional sanitizer build can be
 created in a separate directory under `artifacts`:
 
 ```sh
 cmake -S cpp_test -B cpp_test/artifacts/sanitize \
   -DMAWKCC_ENABLE_SANITIZERS=ON
-cmake --build cpp_test/artifacts/sanitize
+cmake --build cpp_test/artifacts/sanitize \
+  --target mawkcc_cpp mawkcc_cpp_original mawkcc_test_binaries
 ctest --test-dir cpp_test/artifacts/sanitize --output-on-failure
 ```
 
@@ -81,17 +96,24 @@ the frozen historical target is intentionally exempt from style diagnostics:
 ```sh
 cmake -S cpp_test -B cpp_test/artifacts/developer \
   -DCMAKE_BUILD_TYPE=Debug -DMAWKCC_DEVELOPER_MODE=ON
-cmake --build cpp_test/artifacts/developer
+cmake --build cpp_test/artifacts/developer \
+  --target mawkcc_cpp mawkcc_cpp_original mawkcc_test_binaries
 ctest --test-dir cpp_test/artifacts/developer --output-on-failure
 ```
 
 ## Test
 
-Run the complete port test through CTest:
+Build the test binaries and run the complete Debug suite through CTest:
 
 ```sh
-ctest --test-dir cpp_test/artifacts/build --output-on-failure
+cpp_test/build-debug-test.sh
+ctest --test-dir cpp_test/artifacts/debug --output-on-failure
 ```
+
+Substitute `build-release-test.sh` and `artifacts/release`, or
+`build-unoptimized-test.sh` and `artifacts/unoptimized`, to test the other
+configurations. For a manually configured build tree, build the
+`mawkcc_test_binaries` target before invoking CTest.
 
 CTest runs both C++ compilers on `../mawkcc/mawkcc_self.c`, then compares each
 emitted executable byte-for-byte with
@@ -103,10 +125,21 @@ compiler state, ELF image writer and semantic builder, in-memory API,
 command-line behavior, representative example programs, generated i386
 runtime behavior, object-file output, and invalid-input diagnostics.
 
+Tests are labeled by responsibility. A quick reference-independent pass is:
+
+```sh
+ctest --test-dir cpp_test/artifacts/debug --output-on-failure -LE reference
+```
+
+Individual groups can be selected with `-L unit`, `-L cli`, `-L runtime`,
+`-L regression`, or `-L self-host`. The `reference` label selects all three
+tests that require `../mawkcc/artifacts/mawkcc.self.exe`; use `-L reference`
+for the complete byte-comparison gate once that executable is available.
+
 To run the same verification script directly:
 
 ```sh
-cpp_test/verify-self-host.sh cpp_test/artifacts/build/mawkcc_cpp
+cpp_test/verify-self-host.sh cpp_test/artifacts/debug/mawkcc_cpp
 ```
 
 The verification script creates a unique directory below
@@ -144,16 +177,22 @@ The refactored compiler is organized around small ownership boundaries:
   static data, typed symbol records, duplicate-safe symbol lookup, and deferred
   call/relocation/data/break fixups.
 - `lexer.hpp` and `lexer.cpp` own source traversal and token construction.
-- `x86_emitter.hpp` and `x86_emitter.cpp` own i386 instruction bytes and
-  relative-branch patching through typed target words and condition codes.
+- `x86_emitter.hpp` and `x86_emitter.cpp` own i386 instruction sequences and
+  relative-branch patching through typed target words and condition codes. A
+  private encoding layer centralizes named opcodes, registers, grouped-opcode
+  selectors, and documented ModR/M and SIB construction; higher-level emitter
+  code contains no unexplained instruction bytes.
 - `elf32_writer.hpp` and `elf32_writer.cpp` own checked little-endian output
   serialization.
 - `elf32_builder.hpp` and `elf32_builder.cpp` own typed executable/object
-  layout, ELF headers, sections, symbols, relocations, string tables, and
-  target-range validation.
+  layout, named ELF headers/flags/indices, generated section and symbol string
+  tables, typed symbols and relocations, and target-range validation.
 - `byte_writer.hpp` provides bounds-checked byte storage and patching.
 - `mawkcc_types.hpp` distinguishes target words, code offsets, data offsets,
   argument counts, and loop identifiers.
+- `tests/test_support.hpp` gives every dependency-free C++ unit binary the
+  same exception boundary and named assertion diagnostics, including exact
+  offsets and values for byte mismatches.
 
 The public API accepts a `std::string_view` plus a typed `OutputKind` and
 returns the complete output as `std::vector<std::uint8_t>`. This makes the core

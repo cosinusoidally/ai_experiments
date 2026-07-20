@@ -77,6 +77,8 @@ public:
     void read_u8();
     void write_i32();
     void write_u8();
+    void sys_current_break();
+    void sys_brk();
     void sys_open();
     void sys_read();
     void sys_write();
@@ -84,14 +86,6 @@ public:
     void sys_exit();
 
 private:
-    void byte(TargetWord value);
-    void word(TargetWord value);
-    void add_eax_immediate(TargetWord value);
-    void mov_eax_from_stack(TargetSignedWord displacement);
-    void mov_ebx_from_stack(TargetSignedWord displacement);
-    void mov_stack_from_ebx(TargetSignedWord displacement);
-    void mov_stack_from_eax(TargetSignedWord displacement);
-
     mawkcc::ByteWriter code_;
 };
 

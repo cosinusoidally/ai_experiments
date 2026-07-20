@@ -81,34 +81,40 @@ configure_mawkcc_maintained_target(mawkcc_cpp)
 add_executable(mawkcc_cpp_original mawkcc.cpp)
 configure_mawkcc_target(mawkcc_cpp_original)
 
-add_executable(byte_writer_test tests/byte_writer_test.cpp)
+add_executable(byte_writer_test EXCLUDE_FROM_ALL tests/byte_writer_test.cpp)
 target_include_directories(byte_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 configure_mawkcc_maintained_target(byte_writer_test)
 
-add_executable(lexer_test tests/lexer_test.cpp lexer.cpp)
+add_executable(lexer_test EXCLUDE_FROM_ALL tests/lexer_test.cpp lexer.cpp)
 target_include_directories(lexer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 configure_mawkcc_maintained_target(lexer_test)
 
-add_executable(x86_emitter_test tests/x86_emitter_test.cpp x86_emitter.cpp)
+add_executable(x86_emitter_test EXCLUDE_FROM_ALL
+    tests/x86_emitter_test.cpp
+    x86_emitter.cpp
+)
 target_include_directories(x86_emitter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 configure_mawkcc_maintained_target(x86_emitter_test)
 
-add_executable(elf32_writer_test tests/elf32_writer_test.cpp elf32_writer.cpp)
+add_executable(elf32_writer_test EXCLUDE_FROM_ALL
+    tests/elf32_writer_test.cpp
+    elf32_writer.cpp
+)
 target_include_directories(elf32_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 configure_mawkcc_maintained_target(elf32_writer_test)
 
-add_executable(compiler_api_test tests/compiler_api_test.cpp)
+add_executable(compiler_api_test EXCLUDE_FROM_ALL tests/compiler_api_test.cpp)
 target_link_libraries(compiler_api_test PRIVATE mawkcc_core)
 configure_mawkcc_maintained_target(compiler_api_test)
 
-add_executable(compiler_state_test
+add_executable(compiler_state_test EXCLUDE_FROM_ALL
     tests/compiler_state_test.cpp
     compiler_state.cpp
 )
 target_include_directories(compiler_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 configure_mawkcc_maintained_target(compiler_state_test)
 
-add_executable(elf32_builder_test
+add_executable(elf32_builder_test EXCLUDE_FROM_ALL
     tests/elf32_builder_test.cpp
     compiler_state.cpp
     elf32_builder.cpp
@@ -116,6 +122,16 @@ add_executable(elf32_builder_test
 )
 target_include_directories(elf32_builder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 configure_mawkcc_maintained_target(elf32_builder_test)
+
+add_custom_target(mawkcc_test_binaries DEPENDS
+    byte_writer_test
+    lexer_test
+    x86_emitter_test
+    elf32_writer_test
+    compiler_api_test
+    compiler_state_test
+    elf32_builder_test
+)
 
 enable_testing()
 add_test(
@@ -147,4 +163,26 @@ add_test(
     NAME original_self_host_identity
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/verify-self-host.sh
             $<TARGET_FILE:mawkcc_cpp_original>
+)
+
+set_tests_properties(
+    byte_writer_unit
+    lexer_unit
+    x86_emitter_unit
+    elf32_writer_unit
+    compiler_api_unit
+    compiler_state_unit
+    elf32_builder_unit
+    PROPERTIES LABELS "unit"
+)
+set_tests_properties(refactored_cli PROPERTIES LABELS "cli")
+set_tests_properties(refactored_runtime PROPERTIES LABELS "runtime")
+set_tests_properties(
+    refactored_regressions
+    PROPERTIES LABELS "reference;regression"
+)
+set_tests_properties(
+    refactored_self_host_identity
+    original_self_host_identity
+    PROPERTIES LABELS "reference;self-host"
 )

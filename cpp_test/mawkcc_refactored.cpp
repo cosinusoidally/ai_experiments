@@ -701,9 +701,7 @@ void Compiler::emit_brk_alloc()
         x86.load_eax_absolute(), StaticData::BreakPointerOffset);
     x86.test_eax();
     init_skip = x86.jne_placeholder();
-    x86.mov_eax_immediate(45);
-    x86.xor_ebx();
-    x86.interrupt_80();
+    x86.sys_current_break();
     record_data_patch(
         x86.store_eax_absolute(), StaticData::BreakPointerOffset);
     x86.patch_relative(init_skip, x86.offset());
@@ -711,8 +709,7 @@ void Compiler::emit_brk_alloc()
         x86.load_ecx_absolute(), StaticData::BreakPointerOffset);
     x86.mov_ebx_ecx();
     x86.add_ebx_edx();
-    x86.mov_eax_immediate(45);
-    x86.interrupt_80();
+    x86.sys_brk();
     x86.cmp_eax_ebx();
     fail_patch = x86.jne_placeholder();
     record_data_patch(

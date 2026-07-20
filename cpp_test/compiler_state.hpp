@@ -58,8 +58,8 @@ private:
 };
 
 enum class ElfSymbolType : std::uint8_t {
-    Object = 17,
-    Function = 18,
+    Object = 1,
+    Function = 2,
 };
 
 struct ExternalSymbol {

@@ -71,11 +71,18 @@ no AST or optimizer.
 the maintained core.
 
 `build-debug.sh`, `build-release.sh`, and `build-unoptimized.sh` are the
-supported convenience entry points. They create independent CMake trees at
-`artifacts/debug`, `artifacts/release`, and `artifacts/unoptimized`. The last
-configuration explicitly selects `-O0` without inheriting the other semantic
-choices CMake associates with its Debug configuration. All three scripts
-forward additional arguments to `cmake --build`.
+compiler-only convenience entry points. They create independent CMake trees
+at `artifacts/debug`, `artifacts/release`, and `artifacts/unoptimized` and
+explicitly build only `mawkcc_cpp` and `mawkcc_cpp_original` (with
+`mawkcc_core` arriving as a dependency). The last configuration selects `-O0`
+without inheriting the other semantic choices CMake associates with Debug.
+
+`build-debug-test.sh`, `build-release-test.sh`, and
+`build-unoptimized-test.sh` first invoke the matching compiler-only script and
+then build the opt-in `mawkcc_test_binaries` aggregate target. Every test
+executable is `EXCLUDE_FROM_ALL`, so neither a convenience compiler build nor
+a default CMake build spends time creating tests. All six scripts forward
+additional arguments to `cmake --build`.
 
 The intended dependency direction is:
 
@@ -138,6 +145,8 @@ must preserve those invariants. `FixupTable` similarly owns pending calls,
 ELF relocations, executable data patches, and loop-break patches and exposes
 only named insertion operations plus immutable ordered views. Emission order
 is observable in byte-identical ELF output, so neither type sorts its records.
+`ElfSymbolType` represents the semantic ELF object/function type only; the ELF
+builder combines it with the appropriate binding when constructing `st_info`.
 
 ### `lexer.hpp` and `.cpp`
 
@@ -160,11 +169,25 @@ stack vocabulary. Placeholder methods return the offset of a 32-bit relative
 operand, not the start of the instruction; `patch_relative` therefore writes
 `target - (operand_offset + 4)`.
 
-Raw opcode-byte and word writes are private. The public interface uses
-`TargetWord`, `TargetSignedWord`, `ArgumentCount`, and `X86Condition`, checks
-relative-branch and stack-range conversions, and exposes named instruction
-templates or address-operand placeholders. Parser code must not emit numeric
-opcodes directly.
+The implementation has two layers. Public emitter methods describe readable
+instruction sequences such as moving between named registers, loading through
+the stack pointer, or performing a signed divide. A private `Encoder` turns
+those operations into bytes. Its named opcode tables, register numbers,
+condition codes, grouped-opcode selectors, and ModR/M/SIB constructors are the
+only place that deals with x86 bit fields and opcode values. Comments alongside
+that layer document the `mod | reg/opcode | r/m` and `scale | index | base`
+layouts and the special `esp` and `ebp` encodings.
+
+Raw byte and little-endian word writes are confined to `Encoder`. The public
+interface uses `TargetWord`, `TargetSignedWord`, `ArgumentCount`, and
+`X86Condition`, checks relative-branch and stack-range conversions, and
+exposes named instruction templates or address-operand placeholders. Parser
+code must not emit numeric opcodes directly.
+
+The emitter also owns Linux i386 syscall numbers. Compiler policy requests
+named sequences such as `sys_brk` or `sys_current_break`; it must not load a
+numeric syscall identifier directly. `sys_current_break` preserves the target
+ABI detail that querying the current break passes zero in `ebx`.
 
 Compiler-specific choices remain above this layer. For example, the compiler
 decides whether a global access needs an executable data patch or an ELF
@@ -197,9 +220,19 @@ checks. Its inputs are immutable code/data plus read-only `SymbolTable` and
 the entry call and absolute data addresses before handing the final bytes to
 the builder. Object construction never reaches into parser state.
 
-ELF types, section types, and flags are named target-domain enums. Declaration
-and fixup order is preserved because symbol indices and byte identity depend
-on it.
+ELF class, encoding, ABI, machine, file/program/section types, permissions,
+section indices, symbol binding, and symbol type are named target-domain
+enums. Typed `ElfHeader`, `ProgramHeader`, `SectionHeader`, and `Symbol`
+records are serialized field-by-field; factory functions construct each
+concrete section instead of exposing positional ten-integer initializers at
+call sites.
+
+Both symbol names and section names are accumulated through `StringTable`.
+Offsets are captured when names are inserted, so adding or renaming a section
+does not require manually recalculating every following string-table offset.
+Declaration and fixup order is preserved because string offsets, symbol
+indices, and byte identity depend on it. ELF symbol `st_info` and relocation
+`r_info` are assembled from named fields only in this layer.
 
 Executable mode patches absolute data addresses after code size and data base
 are known. Object mode emits `R_386_32` absolute relocations and `R_386_PC32`
@@ -260,7 +293,7 @@ ELF writes.
 
 ## Test strategy
 
-The CTest suite has three layers:
+The CTest suite has four layers:
 
 1. Unit tests exercise `ByteWriter`, `Lexer`, symbol/fixup/static-data state,
    `X86Emitter`, `Elf32Writer`, `Elf32Builder`, and the in-memory compiler API,
@@ -277,6 +310,20 @@ The CTest suite has three layers:
 The self-host identity test is the release gate. Unit tests localize failures
 but cannot replace it. For changes to parsing or code generation, add the
 smallest focused unit/regression case and retain the full identity check.
+
+CTest labels make those layers independently selectable:
+
+- `unit` selects the seven dependency-free C++ unit binaries;
+- `cli` and `runtime` select reference-independent integration checks;
+- `regression` selects example/object/diagnostic comparison with the reference;
+- `self-host` selects maintained and historical compiler identity checks;
+- `reference` selects all tests that need `mawkcc.self.exe`.
+
+Use `ctest ... -LE reference` while developing without the reference artifact,
+then `ctest ... -L reference` and finally the unfiltered suite before release.
+The unit programs share `tests/test_support.hpp`; a failure is caught at the
+test process boundary and reports its named case. Byte comparisons additionally
+report the first mismatching offset and expected/actual values.
 
 The optional sanitizer configuration exercises the same suite with Address-
 Sanitizer and UndefinedBehaviorSanitizer. All normal and sanitizer build trees
@@ -296,17 +343,21 @@ fixtures. When adding a builtin, update the descriptor table, parser handling
 only if it has special literal syntax, `emit_builtin`, and the x86 emitter;
 then add an emitter unit test and an end-to-end example.
 
-When changing an instruction template, write its expected bytes in
-`tests/x86_emitter_test.cpp` before relying on self-host comparison. When
-changing ELF output, add a writer unit test for serialization and compare both
-executable and object output. Inspect a byte difference before updating any
-expected reference: reference output is owned by `../mawkcc`, not this port.
+When changing an instruction template or the internal encoding tables, write
+its expected bytes in `tests/x86_emitter_test.cpp` before relying on self-host
+comparison. The focused tests cover opcode+register forms, ModR/M register and
+memory forms, SIB stack addressing, relative branches, arithmetic groups, and
+byte-width operations. When changing ELF output, add a writer unit test for
+serialization, use named encoding fields and table-generated string offsets,
+and compare both executable and object output. Inspect a byte difference before
+updating any expected reference: reference output is owned by `../mawkcc`, not
+this port.
 
 Before committing a maintained-code change, run:
 
 ```sh
-cmake --build cpp_test/artifacts/build
-ctest --test-dir cpp_test/artifacts/build --output-on-failure
+cpp_test/build-debug-test.sh
+ctest --test-dir cpp_test/artifacts/debug --output-on-failure
 git diff --check
 ```
 
