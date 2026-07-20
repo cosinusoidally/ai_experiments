@@ -14,3 +14,5 @@
 !/tcc_mawk_bootstrap/artifacts/placeholder
 /postscript_cc/artifacts/*
 !/postscript_cc/artifacts/placeholder
+/cpp_test/artifacts/*
+!/cpp_test/artifacts/placeholder
