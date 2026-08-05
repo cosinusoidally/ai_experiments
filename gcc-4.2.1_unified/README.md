@@ -64,7 +64,18 @@ setarch i686
 on the host. This is because the chroot itself does not have the setarch
 command.
 
+Enter the chroot, become the foo user, and then run:
+```
+uname -a
+```
+Expect something like:
+```
+Linux foo-Vostro-270s 5.15.0-186-generic #196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026 i686 GNU/Linux
+```
+Note it mentions i686 (outside of the setarch env it will likely say x86_64).
+
 Next you can get the gcc-4.2.1 tarball. Obtain the tarball from here:
+https://ftp.gnu.org/pub/gnu/gcc/gcc-4.2.1/
 
 I'd recommend checking the sig too (`gpg --verify ...` ). For reference the
 sha256sum of the file I used is:
