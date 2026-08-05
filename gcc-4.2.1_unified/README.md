@@ -87,7 +87,7 @@ sha256sum of the file I used is:
 ca0a12695b3bccfa8628509e08cb9ed7d8ed48deff0a299e4cb8de87d2c1fced  gcc-4.2.1.tar.bz2
 ```
 
-Place the tarball in /home/foo/src in
+Place the tarball in `/home/foo/src` in
 the chroot. Note you cannot extract the tarball inside the chroot since the
 chroot does not contain bunzip2. Extract the tarball before entering the chroot
 again.
@@ -122,3 +122,25 @@ Now run the build:
 ```
 time ../gcc-4.2.1/build-cc1-unified.sh
 ```
+On my system the above command take about 40 seconds. If it is sucessful you
+will find the cc1 binary in `./unified-artifacts/cc1_unified`:
+```
+~/src/build$ ./unified-artifacts/cc1_unified --version
+GNU C version 4.2.1 (i686-pc-linux-gnu)
+	compiled by GNU C version 4.1.2 20061115 (prerelease) (Debian 4.1.1-21).
+GGC heuristics: --param ggc-min-expand=30 --param ggc-min-heapsize=4096
+```
+Note at this point the script will only build cc1 (which is the C compiler
+proper). It does not build the `gcc` "compiler driver" (the `gcc` command that
+will run the compiler (`cc1`), assembler (`as`), and linker (`ld`, via the
+`collect2` wrapper) in turn). My plan is to add some kind of driver, but for
+now  you'll have to run something like:
+
+```
+cc1_unified -I /usr/lib/gcc/i486-linux-gnu/4.1.2/include/ foo.c -o foo.s
+gcc foo.s -o foo.exe
+```
+Note the reason to include `/usr/lib/gcc/i486-linux-gnu/4.1.2/include/` above
+is for stuff like `stddef.h`. You should also be able to use the gcc-4.2.1
+includes if you have them installed somewhere (they might work directly from
+the source tree, but I've not tried).
