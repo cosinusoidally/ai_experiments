@@ -1,4 +1,4 @@
-This patch allow cc1 from gcc-4.2.1 to be built in a "unified" way. By that I
+This patch allows cc1 from gcc-4.2.1 to be built in a "unified" way. By that I
 mean that there essentially exists a `cc1_unified.c` file that `#include` every
 file from cc1, approximately this:
 
@@ -75,7 +75,7 @@ Linux foo-Vostro-270s 5.15.0-186-generic #196-Ubuntu SMP Sat Jun 20 16:09:34 UTC
 Note it mentions i686 (outside of the setarch env it will likely say x86_64).
 
 Next you can get the gcc-4.2.1 tarball. Obtain the tarball from here:
-https://ftp.gnu.org/pub/gnu/gcc/gcc-4.2.1/
+https://ftp.gnu.org/pub/gnu/gcc/gcc-4.2.1/ (or via a mirror).
 
 I'd recommend checking the sig too (`gpg --verify ...` ). For reference the
 sha256sum of the file I used is:
@@ -95,4 +95,27 @@ directory should look as follows:
 ```
 $ ls
 build  gcc-4.2.1  gcc-4.2.1.tar.bz2  gcc-4.2.1_unified.patch
+```
+next enter the `gcc-4.2.1` directory and apply the patch (do this inside the
+chroot).
+
+```
+patch -p1 < ../gcc-4.2.1_unified.patch
+```
+
+Mark the build script as executable:
+
+```
+chmod +x build-cc1-unified.sh
+```
+
+Now move over into your empty build directory:
+```
+~/src/gcc-4.2.1$ cd ../build
+~/src/build$ ls ..
+build  gcc-4.2.1  gcc-4.2.1.tar.bz2  gcc-4.2.1_unified.patch
+```
+Now run the build:
+```
+time ../gcc-4.2.1/build-cc1-unified.sh
 ```
