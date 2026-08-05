@@ -63,3 +63,25 @@ setarch i686
 ```
 on the host. This is because the chroot itself does not have the setarch
 command.
+
+Next you can get the gcc-4.2.1 tarball. Obtain the tarball from here:
+
+I'd recommend checking the sig too (`gpg --verify ...` ). For reference the
+sha256sum of the file I used is:
+
+```
+ca0a12695b3bccfa8628509e08cb9ed7d8ed48deff0a299e4cb8de87d2c1fced  gcc-4.2.1.tar.bz2
+```
+
+Place the tarball in /home/foo/src in
+the chroot. Note you cannot extract the tarball inside the chroot since the
+chroot does not contain bunzip2. Extract the tarball before entering the chroot
+again.
+
+Inside the chroot create yourself a build directory (eg, call it build).
+Place the `gcc-4.2.1_unified.patch` in the chroot. Your `/home/foo/src/`
+directory should look as follows:
+```
+$ ls
+build  gcc-4.2.1  gcc-4.2.1.tar.bz2  gcc-4.2.1_unified.patch
+```
