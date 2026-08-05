@@ -73,7 +73,7 @@ uname -a
 ```
 Expect something like:
 ```
-Linux foo-Vostro-270s 5.15.0-186-generic #196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026 i686 GNU/Linux
+Linux 5.15.0-186-generic #196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026 i686 GNU/Linux
 ```
 Note it mentions i686 (outside of the setarch env it will likely say x86_64).
 
