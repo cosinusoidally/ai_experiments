@@ -1,3 +1,6 @@
+Building a unified version of gcc-4.2.1
+=======================================
+
 This patch allows cc1 from gcc-4.2.1 to be built in a "unified" way. By that I
 mean that there essentially exists a `cc1_unified.c` file that `#include` every
 file from cc1, approximately this:
