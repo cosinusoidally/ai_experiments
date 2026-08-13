@@ -1,3 +1,210 @@
+diff --git a/BENCHMARK-REPORT-2026-08-11.md b/BENCHMARK-REPORT-2026-08-11.md
+new file mode 100644
+index 00000000..76cafcfa
+--- /dev/null
++++ b/BENCHMARK-REPORT-2026-08-11.md
+@@ -0,0 +1,201 @@
++# `cc1_unified.c` compilation benchmark — 2026-08-11
++
++## Scope
++
++This benchmark measures only the correctness-proven system-GCC compilation of
++`gcc/cc1_unified.c`.  It does not include unified libiberty, generator builds,
++machine-description generation, checksum links, final linking, or the smoke
++test.  No build flags were changed and no optimization was attempted.
++
++The measured command uses Etch GCC 4.1.2 with the production unified flags:
++
++```text
++-c -O0 -g -DIN_GCC -DHAVE_CONFIG_H -DGCC_UNIFIED_EXTERNAL_CHECKSUM
++```
++
++plus the fixed generated, GCC, include, libcpp, and libdecnumber include
++paths.  The first complete compilation warmed filesystem and compiler-input
++caches and was excluded from the three-run median.
++
++Etch has no `/usr/bin/time`.  POSIX shell `time -p` supplies wall, user, and
++system time with hundredth-second resolution, but not peak RSS.  No package
++was installed to fill that gap.
++
++## Reliable wall-time decomposition
++
++```text
++phase                            real     user      sys
++preprocess                       0.75     0.64     0.10
++preprocessed-to-assembly        21.68    20.65     0.86
++assemble                         3.60     3.34     0.24
++source-to-assembly              22.53    21.43     0.93
++end-to-end run 1                25.99    24.43     1.17
++end-to-end run 2                24.43    23.20     1.09
++end-to-end run 3                25.07    23.61     1.10
++end-to-end median               25.07
++```
++
++The separately launched phases sum to 26.03 seconds.  Their shares of that
++sum are:
++
++```text
++preprocessing                    2.88 percent
++preprocessed C to assembly      83.29 percent
++GNU assembler                   13.83 percent
++```
++
++The isolated sum is 0.96 seconds longer than the direct median because it
++contains three process/driver paths and was measured at different points in
++the run.  A second view avoids summing separate invocations: direct source to
++assembly takes 22.53 seconds, or 89.87 percent of the 25.07-second median.
++Whichever view is used, the conclusion is the same:
++
++- preprocessing is already a small part of elapsed time;
++- GCC's C-to-assembly work dominates; and
++- assembling the very large output is a meaningful secondary cost.
++
++## Data volume
++
++```text
++tracked unity driver                46,735 bytes
++preprocessed C                  19,855,290 bytes
++generated assembly             57,490,969 bytes
++assembled object               12,893,784 bytes
++```
++
++The object made through the decomposed `.i` → `.s` → `.o` path is byte-for-
++byte identical to the first normal end-to-end object.  Both have SHA-256:
++
++```text
++14f14679301161a08a4b3daa18f97281b78777e70195fd36069929ea2a440257
++```
++
++This validates that the phase decomposition measured the same compiler input
++and output rather than a reduced surrogate.
++
++## Source and preprocessed line attribution
++
++The small tracked unity driver is not a useful source-line comparison by
++itself: its 1,581 lines recursively include 288 implementation files.  Those
++implementation inputs contain 788,264 physical lines in total.  The complete
++preprocessed translation unit contains 760,228 lines, or 28,036 fewer lines
++than the implementation inputs.  Preprocessing removes comments, excluded
++conditional branches, directives, and other source text even as it adds
++headers and expands macros.
++
++If the unity driver alone is used as the denominator, preprocessing appears
++to add 758,647 lines.  That number mostly measures the deliberate inclusion
++of the implementation files, not macro or header expansion.  The largest
++physical implementation inputs are generated `insn-attrtab.c` (78,047
++lines), `insn-recog.c` (67,486), `insn-output.c` (51,662), and `insn-emit.c`
++(31,243), followed by the target's `i386.c` (19,168).  All twelve generated
++backend inputs together contain 250,834 lines, 31.82 percent of the complete
++implementation set.
++
++The preprocessed line total consists of:
++
++```text
++preprocessor line markers          21,410
++attributed nonblank data lines    561,218
++attributed blank data lines       177,600
++total                             760,228
++```
++
++Using GCC's line markers to attribute every non-marker line gives:
++
++```text
++attributed origin                    all   nonblank      blank
++C implementation/generated C     481,142    347,556    133,586
++machine descriptions             205,099    181,001     24,098
++headers                            42,675     27,941     14,734
++definition tables                   9,902      4,720      5,182
++```
++
++The largest apparent expansion is therefore not recursive header inclusion.
++It comes from the i386 machine description used to generate the `insn-*.c`
++files:
++
++```text
++source       physical lines   attributed preprocessed lines   difference
++i386.md              20,952                         127,593       +106,641
++mmx.md                1,433                          55,283        +53,850
++sse.md                3,951                          17,432        +13,481
++```
++
++This attribution requires an important qualification.  GCC's build-time
++generators turn the `.md` descriptions into C, and the generated C contains
++`#line` directives pointing back to the originating `.md` location.  The C
++preprocessor preserves that provenance in its own line markers.  The 205,099
++lines attributed to machine descriptions are consequently generated
++instruction-selection C, not literal text included directly from the three
++`.md` files and not 205,099 additional lines on top of the generated C already
++counted among the implementation inputs.  The twelve `backend-generated`
++manifest inputs contain 250,834 physical lines; the `insn-*.c` subset alone
++contains 239,498.
++
++Ordinary headers account for only 42,675 attributed lines, 5.61 percent of
++the preprocessed file.  The largest individual headers are `gt-c-decl.h`
++(2,030 attributed lines), `tree.h` (1,897), `gt-dwarf2out.h` (1,881),
++`tree-flow-inline.h` (1,557), and `insn-flags.h` (1,361).  This agrees with
++the timing result: header preprocessing is not the source of most of the
++translation-unit size or elapsed compilation time.
++
++Run `../../gcc-4.2.1/contrib/analyze-cc1-unified-lines.sh` from the prepared
++out-of-tree build directory to reproduce the physical-line,
++attribution-category, largest-file, and machine-description expansion tables.
++It reads the `.i` file emitted by the phase benchmark and does not rebuild the
++compiler.
++
++## GCC internal `-ftime-report`
++
++One additional compile enabled GCC 4.1.2's own `-ftime-report`.  It reported
++these largest wall-time buckets:
++
++```text
++lexical analysis        26.91 seconds   33 percent
++parser                  17.57 seconds   22 percent
++preprocessing           15.71 seconds   19 percent
++expand                   5.29 seconds    7 percent
++global allocation        3.20 seconds    4 percent
++final                     2.60 seconds    3 percent
++local allocation         2.10 seconds    3 percent
++tree gimplify             1.39 seconds    2 percent
++life analysis             1.27 seconds    2 percent
++```
++
++Those absolute values are not representative of a normal compile.  The
++instrumented invocation took 84.57 seconds—3.37 times the normal median—and
++charged 45.74 seconds to system CPU, versus about 1.1 seconds in normal runs.
++Old GCC's fine-grained timing calls therefore perturb this exceptionally large
++translation unit heavily, especially in the lexer/parser paths.  The report
++is retained as a qualitative indication that front-end processing dominates,
++not as an additive or production-speed measurement.  It does show that GCC
++garbage collection itself accounted for only 0.29 reported wall seconds, so
++there is no evidence here that GC is the primary bottleneck.
++
++## Conclusion
++
++The current 25.07-second median is not dominated by recursive header parsing:
++the complete preprocessing pass takes only 0.75 seconds.  Approximately 22
++seconds are spent turning the 19.86 MB preprocessed translation unit into
++57.49 MB of assembly, followed by roughly 3 seconds of assembler work.
++
++Future experiments should therefore measure changes affecting C/debug/RTL
++processing or assembly volume.  Further include-guard or preprocessing work
++cannot recover more than a small fraction of the current wall time.  This
++report deliberately does not recommend or apply such changes; it establishes
++the baseline requested before optimization begins.
++
++## Reproduction
++
++From a prepared out-of-tree directory:
++
++```sh
++../../gcc-4.2.1/build-cc1-unified.sh
++../../gcc-4.2.1/contrib/benchmark-cc1-unified-phases.sh
++```
++
++`RUNS` changes the number of end-to-end repetitions.  `CC`,
++`UNIFIED_ARTIFACTS`, and `BENCHMARK_OUTPUT` select the compiler, prepared
++artifact tree, and output directory respectively.  Large benchmark outputs
++remain under the artifact tree and are not committed.
 diff --git a/MILESTONE-1-REPORT-2026-08-01.md b/MILESTONE-1-REPORT-2026-08-01.md
 new file mode 100644
 index 00000000..085a4588
@@ -195,10 +402,10 @@ index 00000000..5b60adf7
 +test-tool prefix, and explicit Make targets may follow the script name.
 diff --git a/README.cc1-unified.md b/README.cc1-unified.md
 new file mode 100644
-index 00000000..31b83092
+index 00000000..2c814d51
 --- /dev/null
 +++ b/README.cc1-unified.md
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,172 @@
 +# Single-translation-unit i686 `cc1` build
 +
 +`gcc/cc1_unified.c` and `libiberty/libiberty_unified.c` directly include the
@@ -223,6 +430,10 @@ index 00000000..31b83092
 +small compatibility headers in `gcc/unified-i686-config` are the only
 +configure-generated files kept in Git.  They record host ABI, target header,
 +and standard integer decisions which would otherwise require Autoconf tests.
++`PREFIX` defaults to `/tmp/gcc-4.2.1-unified` and is compiled into cc1's GCC
++private-header search entry.  This matches the prefix used by stage two of the
++complete installation; pass the same `PREFIX` to both stages when overriding
++it.
 +
 +All other generated material is produced beneath `unified-artifacts`:
 +
@@ -237,6 +448,13 @@ index 00000000..31b83092
 +`gcc/unified-i686-gengtype.files` is a maintained input list, not generated
 +output.  Its AWK formatter uses only tools already required by a standard GCC
 +4.2.1 build.  The build has no Python, network, or package-install dependency.
++
++PCH validation uses a real compiler-executable checksum.  The script compiles
++`cc1_unified.c` exactly once with an external checksum declaration, links a
++dummy compiler with GCC's zero checksum, runs the release's existing
++`genchecksum` utility on that executable, and links the resulting small
++checksum object into the final compiler.  This is the same dummy/final-link
++model as the conventional build and does not add a second unity compilation.
 +
 +## Compiler selection
 +
@@ -298,7 +516,9 @@ index 00000000..31b83092
 +compatibility input; the normal unified build runs no configure probes.
 +
 +`UNIFIED_ARTIFACTS` may select another artifact directory.  `AWK` may select a
-+different compatible AWK implementation.
++different compatible AWK implementation.  Relative `UNIFIED_ARTIFACTS` values
++are resolved beneath the calling build directory before any generator changes
++directory; absolute values are preserved.
 +
 +## Current measurements
 +
@@ -337,6 +557,1229 @@ index 00000000..31b83092
 +`gcc/testsuite/cc1-unified-known-nonpasses.txt`.  After a testsuite run, use
 +`contrib/compare-cc1-unified-testsuite.sh` to reject new failures, unexpected
 +passes, errors, or changes to the known non-passing set.
++
++The complete post-fix run on 2026-08-11 matched that baseline exactly: 42139
++PASS, 116 XFAIL, zero FAIL/XPASS/ERROR, one known UNRESOLVED, 28 UNTESTED, and
++293 UNSUPPORTED.  The full diagnosis and external-result checksums are in
++`WORKLOG-2026-08-11-UNIFIED-BUGFIXES.md`.
++
++## Core compilation benchmark
++
++After preparing an artifact tree, run
++`contrib/benchmark-cc1-unified-phases.sh` from the out-of-tree build directory
++to measure preprocessing, preprocessed-C-to-assembly, assembly, repeated
++end-to-end compilation, and GCC's internal phase report separately.  It uses
++the current `-O0 -g` flags and does not alter the compiler.  The measured
++2026-08-11 baseline and interpretation are recorded in
++`BENCHMARK-REPORT-2026-08-11.md`.
++
++Run `../../gcc-4.2.1/contrib/analyze-cc1-unified-lines.sh` from the same
++directory after the benchmark to compare the manifest implementation inputs
++with the preprocessed translation unit and attribute the largest groups of
++lines.  The analysis also distinguishes generated instruction C attributed
++to i386 `.md` files from ordinary header inclusion.
+diff --git a/README.gcc-unified.md b/README.gcc-unified.md
+new file mode 100644
+index 00000000..a01d2b0d
+--- /dev/null
++++ b/README.gcc-unified.md
+@@ -0,0 +1,136 @@
++# Complete unified GCC C installation
++
++The complete unified build is deliberately split into two explicit stages.
++Run both from an empty out-of-tree directory:
++
++```sh
++mkdir -p /home/foo/src/builds/gcc-unified
++cd /home/foo/src/builds/gcc-unified
++../../gcc-4.2.1/build-cc1-unified.sh
++../../gcc-4.2.1/build-gcc-unified-tools.sh
++```
++
++`build-gcc-unified.sh` is the convenience wrapper which runs those same two
++commands in that order.  The default installation is
++`/tmp/gcc-4.2.1-unified`; set `PREFIX` consistently for both stages to choose
++another location.
++
++Neither stage invokes `configure`, runs Autoconf probes, invokes fixincludes,
++fetches anything, or requires a conventional GCC build.  The fixed
++i686-pc-linux-gnu configuration under `gcc/unified-i686-config` is the only
++checked-in configure output.  All generated sources, objects, smoke files,
++and temporary build tools remain below the calling directory's
++`unified-artifacts` directory and are not source-controlled.
++
++## Stage one: C compiler proper
++
++`build-cc1-unified.sh` builds the complete C front end, middle end, i386 back
++end, libcpp, and libdecnumber closure by compiling `gcc/cc1_unified.c` in one
++C compiler invocation.  It also builds the complete configured libiberty as
++one translation unit and a one-member `libiberty.a`.  See
++`README.cc1-unified.md` for its construction and compiler-selection details.
++
++## Stage two: installed tools and target runtimes
++
++`build-gcc-unified-tools.sh` requires stage one's `cc1_unified` and
++`libiberty.a`.  It then builds each distinct installed host program from one
++translation unit:
++
++- `gcc` and `cpp` from `gcc/gcc_driver_unified.c`;
++- `collect2` from `gcc/collect2_unified.c`;
++- `gcov` and `gcov-dump` from `gcc/gcov_unified.c`.
++
++Each executable needs its own invocation because each has a different
++`main`.  All are linked against the exact one-member unified libiberty from
++stage one.  `cc1` is the stage-one unity executable.  `gccbug` is a shell
++script rather than a binary, and `protoize`/`unprotoize` are not normal targets
++of this C-only Etch configuration.  Fixincludes is intentionally absent.
++
++The target runtime is compiled by the newly built unified GCC and `cc1`, not
++by the bootstrap compiler:
++
++- `gcc/libgcc2_unified.c` creates one object for `libgcc.a` and one PIC object
++  for `libgcc_s.so.1`;
++- `gcc/libgcc_eh_unified.c` creates one object for `libgcc_eh.a` and one PIC
++  object for the shared runtime;
++- `gcc/libgcov_unified.c` creates one object for `libgcov.a`;
++- each configured `crtbegin`, `crtend`, and `crtfastmath` variant is already a
++  single-source compilation and is built separately because its preprocessor
++  selection changes the object ABI and startup role.
++
++The three archives retain the normal filenames but each contains exactly one
++unity object.  The shared runtime receives the normal `libgcc_s.so.1` SONAME
++and GCC/GLIBC symbol-version map.  The installed private headers are copied
++directly from GCC's own target headers and the Etch system headers are used
++without fixincludes.
++
++The resulting installation contains the C compiler drivers, `cc1`,
++`collect2`, coverage tools, target aliases, private headers, all configured
++startup objects, static target runtimes, and versioned shared `libgcc`.  It is
++a complete C-only compiler installation; it intentionally contains no other
++language front ends or language runtimes.
++
++## Validation
++
++Stage two shows every command with shell tracing and finishes with smoke tests
++for driver program discovery, static and shared libgcc lookup, preprocessing,
++normal compilation/link/execution, a long-long helper with shared libgcc,
++shared-library creation, and gcov data generation/readback.  It also verifies
++that each unified runtime archive has one member.
++
++Run the full standard C testsuite directly against the complete installation
++from any out-of-tree directory:
++
++```sh
++cd /home/foo/src/builds/unified-testsuite
++../../gcc-4.2.1/check-gcc-unified-install.sh
++```
++
++The script creates a small fixed native `site.exp` beneath
++`unified-artifacts/installed-testsuite` and invokes DejaGNU's `runtest`
++directly.  It does not configure or build a conventional GCC and does not use
++`make check-gcc`.  `GCC_UNDER_TEST` is the absolute installed unified `gcc`,
++so tests use the unified driver, `cc1`, `collect2`, headers, CRT objects, and
++runtimes.  The final `gcc.sum` is compared with the checked-in known non-pass
++set.  DejaGNU and Expect must already be available under `/tmp/test_tools`;
++the script never installs or downloads them.  `RUNTESTFLAGS` can select a
++targeted subset, for example `RUNTESTFLAGS=gcc.target/i386/i386.exp`.
++DejaGNU returns a nonzero status for the recorded UNRESOLVED test; the script
++therefore treats its exact baseline comparison as the authoritative full-run
++result.
++
++The unified build and test wrappers keep the process `TMPDIR` beneath their
++`unified-artifacts/tmp` directories.  The installed-compiler test wrapper also
++sets both DejaGNU's `tmpdir` and the process `TMPDIR` to
++`unified-artifacts/installed-testsuite/tmp` beneath the caller's out-of-tree
++directory.  Compiler intermediates and test scratch files must not be written
++to the chroot's shared `/tmp` directory.
++
++The system-GCC-hosted complete installation run on 2026-08-11 matched the
++established baseline exactly: 42,139 PASS, 116 XFAIL, zero FAIL/XPASS/ERROR, one known
++UNRESOLVED, 28 UNTESTED, and 293 UNSUPPORTED.  This run used the absolute
++installed unified driver and therefore covered the unified `cc1`, driver,
++`collect2`, private and i386 intrinsic headers, startup objects, and target
++runtimes together.
++
++## Unity compatibility changes
++
++`gcc/gbl-ctors.h` now has an ordinary include guard.  A conventional libgcc
++build compiles constructor support selections separately, but the unified
++runtime selects `L__main` and `L_ctors` in the same translation unit and both
++paths include this header.  The guard makes the declarations idempotent and
++does not change the conventional build.
++
++`gcc/libgcc2.c` normally poisons its internal type macros at the end of an
++object-specific compilation so accidental later use fails.  A few libgcc
++routines are mutually exclusive preprocessor variants and therefore require
++controlled repeated inclusion in the unified wrapper.  The poison block is
++suppressed only when `GCC_UNIFIED_LIBGCC` is defined; the wrapper explicitly
++cleans the internal selection macros between passes.  Conventional builds do
++not define that macro and retain the original diagnostic behaviour.
++
++The unwinder's POSIX thread header and `gthr-gnat.c` use overlapping private
++helper/type names because they conventionally live in separate objects.
++`gcc/libgcc_eh_unified.c` locally renames those private spellings around the
++includes.  Exported unwinder and GNAT entry points keep their normal names and
++ABI, while the ordinary source files remain unchanged.
+diff --git a/TCC-DEBIAN-SHORT-CIRCUIT-MISCOMPILATION-2026-08-13.md b/TCC-DEBIAN-SHORT-CIRCUIT-MISCOMPILATION-2026-08-13.md
+new file mode 100644
+index 00000000..ceb92c71
+--- /dev/null
++++ b/TCC-DEBIAN-SHORT-CIRCUIT-MISCOMPILATION-2026-08-13.md
+@@ -0,0 +1,425 @@
++# TCC-debian short-circuit miscompilation report — 2026-08-13
++
++## Summary
++
++GCC 4.2.1 built with the TCC-debian compiler described below completes most
++of the GCC C testsuite, but fails every test that reaches one particular
++floating-point-to-integer expansion path.  The installed GCC is not crashing
++because of a GCC source or unified-build defect.  TCC has miscompiled GCC's
++generated `gen_fix_truncsfdi2` function so that it returns a null RTL pattern.
++GCC later dereferences that null pointer in `emit_unop_insn`.
++
++The TCC defect is independently reproducible in a small program containing a
++nested constant short-circuit expression.  It is also reproducible when
++GCC's generated `insn-emit.c` is compiled as a conventional, standalone
++translation unit.  It therefore does not depend on `cc1_unified.c`.
++
++The root cause is an incorrectly retained `nocode_wanted` state while TCC
++parses nested `&&`, `||`, and `!` expressions.  Reachable statements following
++the expression are treated as dead code and are omitted from the executable.
++
++## Precisely which TCC version is affected
++
++This report confirms the defect in this exact source package and target build:
++
++```text
++Source package:  tcc 0.9.27+git20200814.62c30a4a-1
++Source tree:     /home/foo/src/tcc-debian/tcc-0.9.27+git20200814.62c30a4a
++Installed TCC:   /tmp/tcc-debian/bin/tcc
++Target:          i386 Linux
++SHA-256:         22ed34bc7f44c53a134f88e817a605025d42cd0821d240a72e122b93cce7013b
++```
++
++The source package version comes from:
++
++```text
++/home/foo/src/tcc-debian/tcc_0.9.27+git20200814.62c30a4a-1.dsc
++```
++
++and from the first entry in `debian/changelog`.  The built executable in the
++source tree and the installed executable have the same SHA-256 digest, so the
++compiler associated with the failure is not an older executable accidentally
++found through `PATH`.
++
++Running the affected compiler reports:
++
++```text
++$ /tmp/tcc-debian/bin/tcc -v
++tcc version 0.9.27 (i386 Linux)
++```
++
++That banner is not sufficiently specific: it omits the Git snapshot and
++Debian package revision.  In this document, **TCC-debian** means the tested
++`0.9.27+git20200814.62c30a4a-1` source package, not every compiler whose banner
++merely says `tcc version 0.9.27`.
++
++The defect is confirmed for this exact 2020 snapshot.  This investigation has
++not established which later TCC revision fixes it, nor that every other TCC
++0.9.27-derived package is affected.  Vanilla TCC 0.9.27 has a different
++`nocode_wanted` bug documented in `TCC-FLOATING-POINT-ISSUE.md`; the two issues
++must not be conflated.
++
++The Debian patch series in this source tree contains:
++
++```text
++0001-Disable-test-not-working-on-i386.patch
++0002-Disable-stack-protector-in-runtime-library.patch
++0003-Prevent-dead-code-on-x86-in-prepare_dynamic_rel.patch
++```
++
++None of those patches changes `expr_landor` or the C expression parser.  The
++evidence currently points to the snapshot's TCC expression-code-generation
++logic, rather than one of those three packaging patches.
++
++## GCC testsuite symptoms
++
++The completed test run is stored outside the repository at:
++
++```text
++/home/foo/src/build/unified-artifacts/installed-testsuite/gcc.sum
++/home/foo/src/build/unified-artifacts/installed-testsuite/gcc.log
++/home/foo/src/build/unified-artifacts/installed-testsuite/site.exp
++```
++
++`site.exp` identifies the compiler under test as:
++
++```text
++/tmp/gcc-4.2.1-unified/bin/gcc
++```
++
++The run completed; it did not stop on the first compiler crash.  Its totals
++are:
++
++```text
++# of expected passes          42072
++# of unexpected failures        74
++# of expected failures          116
++# of unresolved testcases        25
++# of untested testcases          28
++# of unsupported tests          293
++```
++
++The new results are confined to:
++
++```text
++gcc.c-torture/compile/20020930-1.c
++gcc.c-torture/compile/950613-1.c
++gcc.c-torture/compile/fix-trunc-mem-1.c
++gcc.c-torture/execute/conversion.c
++gcc.c-torture/execute/gofast.c
++gcc.dg/builtins-53.c
++gcc.dg/torture/fp-int-convert-float.c
++gcc.dg/torture/fp-int-convert-timode.c
++```
++
++These tests all exercise floating-point-to-integer conversion.  The apparently
++large failure count is repetition of the same compiler defect at `-O0`, `-O1`,
++`-O2`, `-O3 -fomit-frame-pointer`, `-O3 -g`, and `-Os`.  Some compile tests
++also record both an internal-compiler-error failure and an excess-errors
++failure for the same invocation.
++
++Twenty-four of the 25 unresolved results are secondary: the test executable
++could not run because its compilation crashed.  The remaining unresolved
++result is the already documented GCC 4.2.1 `mayalias-2.c -O3 -g` baseline
++result from `TESTSUITE-REPORT-2026-08-01.md`.
++
++## Small GCC-side trigger
++
++The following two functions show where the behavior diverges:
++
++```c
++void f1(float v, int *p)
++{
++    *p = v;
++}
++
++void f2(float v, unsigned int *p)
++{
++    *p = v;
++}
++```
++
++The affected GCC compiles `f1` and crashes while compiling `f2`.  The
++unsigned conversion causes GCC's `expand_fix` routine to consider a wider
++signed conversion and select `CODE_FOR_fix_truncsfdi2`.
++
++## GCC crash chain
++
++Running the failing compiler under GDB gives this relevant stack:
++
++```text
++#0 emit_unop_insn
++   code=FIX
++   icode=1262
++   pat=0x0
++
++#1 expand_fix
++   unsignedp=1
++   fmode=SFmode
++   imode=DImode
++   icode=CODE_FOR_fix_truncsfdi2
++```
++
++The crash occurs in `gcc/optabs.c` in this sequence:
++
++```c
++pat = GEN_FCN (icode) (temp, op0);
++
++if (INSN_P (pat) && NEXT_INSN (pat) != NULL_RTX && code != UNKNOWN)
++  add_equal_note (pat, temp, code, op0, NULL_RTX);
++```
++
++`GEN_FCN(icode)` invokes the generated function
++`gen_fix_truncsfdi2(temp, op0)`.  The TCC-debian-built function returns zero,
++so `INSN_P(pat)` dereferences a null pointer.
++
++## What TCC omits
++
++The relevant generated GCC source is:
++
++```text
++/home/foo/src/build/unified-artifacts/generated/gcc/insn-emit.c
++```
++
++In simplified form, the function is:
++
++```c
++rtx
++gen_fix_truncsfdi2(rtx operand0, rtx operand1)
++{
++    rtx _val = 0;
++    start_sequence();
++
++    {
++        rtx operands[2];
++        operands[0] = operand0;
++        operands[1] = operand1;
++
++        if (TARGET_FISTTP
++            && !(TARGET_64BIT
++                 && SSE_FLOAT_MODE_P(SFmode)
++                 && TARGET_SSE_MATH))
++        {
++            emit_insn(gen_fix_truncdi_fisttp_i387_1(
++                operands[0], operands[1]));
++            DONE;
++        }
++
++        if (TARGET_64BIT && SSE_FLOAT_MODE_P(SFmode))
++        {
++            /* 64-bit SSE implementation. */
++            DONE;
++        }
++
++        operand0 = operands[0];
++        operand1 = operands[1];
++    }
++
++    emit(/* normal i387 fallback pattern */);
++    _val = get_insns();
++    end_sequence();
++    return _val;
++}
++```
++
++For the fixed i686 build, `TARGET_64BIT` expands to the constant zero.  The
++first condition therefore contains the equivalent of:
++
++```c
++TARGET_FISTTP
++&& !(0 && ((TARGET_SSE && 1) || (TARGET_SSE2 && 0))
++     && TARGET_SSE_MATH)
++```
++
++Disassembly and symbol-size comparison make the corruption visible:
++
++```text
++                         TCC-debian    Etch system GCC
++gen_fix_truncsfdi2          75 bytes          279 bytes
++gen_fix_truncdfdi2         275 bytes          279 bytes
++```
++
++The TCC-debian version of `gen_fix_truncsfdi2` contains only its prologue,
++tests of two target-flag bits, and its epilogue.  It omits:
++
++- the reachable body of the first `if`;
++- the second `if`;
++- the normal i387 fallback pattern;
++- `get_insns()` and `end_sequence()`; and
++- the intended return-value setup.
++
++Since `_val` is initialized to zero, the truncated function returns a null
++RTL pointer.  The adjacent `gen_fix_truncdfdi2` takes a slightly different
++constant-folding route and is emitted normally.
++
++Compiling `insn-emit.c` alone with TCC-debian produces the same 75-byte bad
++`gen_fix_truncsfdi2`, proving that the unified translation unit is not needed
++to trigger the bug.
++
++## Minimal standalone TCC reproducer
++
++The checked-in, header-free reproducer is:
++
++```text
++contrib/tcc-debian-short-circuit-reproducer.c
++```
++
++The essential test logic is reproduced below.  The checked-in file is the
++canonical copy and also contains a short result-contract comment:
++
++```c
++volatile int target_flags;
++volatile int ix86_fpmath;
++
++enum machine_mode { SFmode = 12, DFmode = 13 };
++
++#define TARGET_SSE3  ((target_flags & (1 << 19)) != 0)
++#define TARGET_80387 ((target_flags & (1 << 3)) != 0)
++#define TARGET_SSE   ((target_flags & (1 << 17)) != 0)
++#define TARGET_SSE2  ((target_flags & (1 << 18)) != 0)
++#define TARGET_FISTTP (TARGET_SSE3 && TARGET_80387)
++#define TARGET_SSE_MATH ((ix86_fpmath & 1) != 0)
++#define SSE_FLOAT_MODE_P(MODE)                 \
++  ((TARGET_SSE && (MODE) == SFmode)            \
++   || (TARGET_SSE2 && (MODE) == DFmode))
++
++static int reproduce(void)
++{
++  if (TARGET_FISTTP
++      && !(0 && SSE_FLOAT_MODE_P(SFmode) && TARGET_SSE_MATH))
++    return 17;
++
++  if (0 && SSE_FLOAT_MODE_P(SFmode))
++    return 19;
++
++  return 23;
++}
++
++int main(void)
++{
++  target_flags = 0;
++  if (reproduce() != 23)
++    return 1;
++
++  target_flags = (1 << 19) | (1 << 3);
++  if (reproduce() != 17)
++    return 2;
++
++  return 0;
++}
++```
++
++Build and run it inside the Etch chroot:
++
++```text
++/tmp/tcc-debian/bin/tcc -O0 -g \
++  /home/foo/src/gcc-4.2.1/contrib/tcc-debian-short-circuit-reproducer.c \
++  -o reproducer-tcc
++./reproducer-tcc
++echo $?
++```
++
++Observed result with TCC-debian `0.9.27+git20200814.62c30a4a-1`:
++
++```text
++1
++```
++
++Correct result, observed when built with the Etch system GCC:
++
++```text
++/usr/bin/gcc -O0 -g \
++  /home/foo/src/gcc-4.2.1/contrib/tcc-debian-short-circuit-reproducer.c \
++  -o reproducer-gcc
++./reproducer-gcc
++echo $?
++
++0
++```
++
++The TCC-built `reproduce` function falls out of the function after testing
++the flag bits.  It does not emit either the reachable `return 17` or the
++unconditional `return 23`.
++
++## Probable TCC subsystem at fault
++
++The relevant code is `expr_landor` in the affected source tree's `tccgen.c`.
++It uses `condition_3way()` to recognize a constant operand and increments
++`nocode_wanted` while parsing a short-circuited operand:
++
++```c
++static void expr_landor(int op)
++{
++    int t = 0, cc = 1, f = 0, i = op == TOK_LAND, c;
++
++    for (;;) {
++        c = f ? i : condition_3way();
++        if (c < 0)
++            save_regs(1), cc = 0;
++        else if (c != i)
++            nocode_wanted++, f = 1;
++        /* Parse the remaining operands. */
++    }
++
++    if (cc || f) {
++        /* Produce the constant result. */
++        nocode_wanted -= f;
++    }
++}
++```
++
++Suppressing output for the right side of `0 && expression` is correct.  In
++the reduced expression, however, the nesting of `&&`, `||`, and `!` causes
++the no-code state to survive beyond the operand for which it was intended.
++TCC consequently suppresses later, reachable statements.
++
++This is a diagnosis of the affected subsystem, not yet a validated TCC patch.
++A proposed fix should be checked against the TCC test suite, the standalone
++reproducer above, standalone compilation of GCC's `insn-emit.c`, a complete
++GCC rebuild, and the full GCC C testsuite.
++
++## Difference from the earlier vanilla TCC issue
++
++`TCC-FLOATING-POINT-ISSUE.md` and `TCC-FIX-VALIDATION-2026-08-12.md` describe
++an earlier problem in the original TCC 0.9.27 build.  In that defect,
++`decl_initializer_alloc` gave named automatic variables zero-sized storage
++while `NODATA_WANTED` was active, allowing locals to overlap.
++
++The Debian/Ubuntu-era snapshot contains a correction for that allocation
++case:
++
++```c
++if (!v && NODATA_WANTED)
++    size = 0;
++```
++
++The failure in this report occurs later in the same broad no-code machinery,
++but has a different observable mechanism: reachable instructions are omitted
++after a nested logical expression.  Fixing named-local allocation alone does
++not fix this short-circuit state leak.
++
++## Verification criteria for a future fix
++
++A TCC fix should not be considered validated until all of these hold:
++
++1. The standalone reproducer returns zero at `-O0`.
++2. Standalone TCC compilation of generated `insn-emit.c` emits a complete,
++   non-null-returning `gen_fix_truncsfdi2` comparable to
++   `gen_fix_truncdfdi2`.
++3. GCC built with the corrected TCC compiles `fix-trunc-mem-1.c` at all six
++   torture optimization settings without an internal compiler error.
++4. The eight affected test groups no longer produce the 74 unexpected
++   failures or their 24 secondary unresolved results.
++5. The full GCC C testsuite returns to the established baseline:
++
++```text
++# of expected passes          42139
++# of unexpected failures          0
++# of expected failures          116
++# of unresolved testcases          1
++# of untested testcases            28
++# of unsupported tests            293
++```
++
++6. The complete TCC test suite has no regression relative to the unmodified
++   `0.9.27+git20200814.62c30a4a-1` build.
+diff --git a/TCC-FIX-VALIDATION-2026-08-12.md b/TCC-FIX-VALIDATION-2026-08-12.md
+new file mode 100644
+index 00000000..e00f4b79
+--- /dev/null
++++ b/TCC-FIX-VALIDATION-2026-08-12.md
+@@ -0,0 +1,264 @@
++# TCC 0.9.27 local-allocation fix validation
++
++Date: 2026-08-12
++
++## Outcome
++
++The one-line TCC fix documented in `TCC-FLOATING-POINT-ISSUE.md` was applied
++to a clean, separate TCC 0.9.27 source copy, tested against an identically
++configured stock copy, and installed at:
++
++```text
++/tmp/tcc-0.9.27-fix
++```
++
++A complete C-only unified GCC 4.2.1 installation was then built with the
++fixed TCC and installed at:
++
++```text
++/tmp/gcc-4.2.1-unified-tcc-fix
++```
++
++The fixed TCC removes the floating-point regression.  The complete GCC test
++suite matches the established good baseline exactly, with no unexpected
++failure.
++
++## Isolated directories
++
++No test or build was performed in the source repository or loose under
++`/home/foo/src`.  All validation build trees and logs are below:
++
++```text
++/home/foo/src/builds/tcc-0.9.27-fix-validation/
++```
++
++Important paths within that directory are:
++
++```text
++stock-src/                 unmodified TCC A/B source and build
++fixed-src/                 one-line-fixed TCC source and build
++gcc-build/                 complete unified GCC build
++logs/tcc-stock-test.log    stock TCC `make -k test`
++logs/tcc-fixed-test.log    fixed TCC `make -k test`
++logs/gcc-build.log         complete GCC build transcript
++logs/gcc-testsuite.log     complete GCC test wrapper transcript
++```
++
++The pre-existing `/tmp/tcc-0.9.27` installation was not modified.
++
++## Patch under test
++
++The directly applicable patch is checked in as
++`contrib/tcc-0.9.27-nocode-local-allocation.patch`.  Its functional change is:
++
++```diff
++-    if (NODATA_WANTED)
+++    if (NODATA_WANTED && (r & VT_VALMASK) != VT_LOCAL)
++         size = 0, align = 1;
++```
++
++This leaves the no-data optimization in place for non-local data while always
++allocating the real amount of frame storage for automatic variables.  A later
++label or `case` can make such an automatic variable reachable even if its
++declaration was parsed while TCC's one-pass control-flow state said no code
++was currently wanted.
++
++## Clean TCC A/B build
++
++Both trees were copied from the same source directory and configured inside
++the Etch chroot for the same i386 target.  Specifying `--cpu=i386` is necessary
++because bubblewrap retains the x86-64 kernel's `uname` result even though the
++chroot's userspace and compiler are 32-bit.
++
++The stock configuration used:
++
++```sh
++./configure \
++  --cpu=i386 \
++  --prefix=/home/foo/src/builds/tcc-0.9.27-fix-validation/stock-install
++make clean
++make -j2
++make libtcc1.a
++```
++
++The fixed configuration differed only in its prefix:
++
++```sh
++./configure --cpu=i386 --prefix=/tmp/tcc-0.9.27-fix
++make clean
++make -j2
++make libtcc1.a
++```
++
++Diffing `stock-src/tccgen.c` and `fixed-src/tccgen.c` showed only the one line
++in the checked-in patch.
++
++## TCC test-suite comparison
++
++Each build ran:
++
++```sh
++make -k test
++```
++
++The `-k` is material: both stock and fixed TCC have the same existing `test3`
++comparison mismatch in this Etch environment.  Continuing after that mismatch
++ensures that the remaining runtime, ABI, tests2, and preprocessor targets run.
++
++Both commands returned status 2 because of that same `test3` result.  Their
++logs contain the identical substantive diff:
++
++```text
++-bfa1: n_frame_address
++-bfa2: n_frame_address
++-bfa3: n_frame_address
+++bfa1: __builtin_frame_address
+++bfa2: __builtin_frame_address
+++bfa3: __builtin_frame_address
++```
++
++After pathnames and timestamps, which necessarily differ between the two
++trees, the stock and fixed logs are identical.  Both continued through and
++completed:
++
++- the ordinary executable and `-run` hello tests;
++- the libtcc embedding test;
++- the remaining runtime, ABI, DLL, VLA, and assembly/C targets selected by
++  this native i386 configuration;
++- every `tests/tests2` case, including `89_nocode_wanted` and
++  `96_nodata_wanted`;
++- every preprocessor test, including `pp-counter`.
++
++There is therefore no new TCC suite failure caused by the fix.  A completely
++clean top-level result is not claimed because the stock compiler already has
++the `test3` mismatch described above.
++
++## Installation and direct regression test
++
++The fixed tree was installed with `make install`.  Both stock and fixed
++executables report:
++
++```text
++tcc version 0.9.27 (i386 Linux)
++```
++
++The installed fixed executable is ELF32 for Intel 80386.  The standalone
++compiler-bug reproducer was run against both installations:
++
++```sh
++src=/home/foo/src/gcc-4.2.1/contrib/tcc-0.9.27-case-local-reproducer.c
++
++/tmp/tcc-0.9.27/bin/tcc -O0 "$src" -o stock-reproducer
++./stock-reproducer
++
++/tmp/tcc-0.9.27-fix/bin/tcc -O0 "$src" -o fixed-reproducer
++./fixed-reproducer
++```
++
++The stock compiler returned 1, reproducing the overlapping-local bug.  The
++fixed compiler returned 0.
++
++Installed fixed-TCC hashes are:
++
++```text
++a1fbfbdda454d2826220cf2defd935d4d2ff9e86c8bb1f62aae6e4b53b47528e  bin/tcc
++2a952df4f5c16ec612f7801c5c040c2319bc9e45d8308aaa9b04bc91026c9eae  lib/tcc/libtcc1.a
++```
++
++## Complete GCC build with fixed TCC
++
++The complete build was run from the empty `gcc-build` directory with both
++host-compiler variables explicit:
++
++```sh
++CC=/tmp/tcc-0.9.27-fix/bin/tcc \
++CC_FOR_BUILD=/tmp/tcc-0.9.27-fix/bin/tcc \
++PREFIX=/tmp/gcc-4.2.1-unified-tcc-fix \
++/home/foo/src/gcc-4.2.1/build-gcc-unified.sh
++```
++
++The build log records the single unified front-end invocation as:
++
++```text
++Compiling gcc/cc1_unified.c once with /tmp/tcc-0.9.27-fix/bin/tcc
++```
++
++and shows the full TCC command.  The complete build and all of its installation
++smoke tests succeeded, including the driver, preprocessor, private headers,
++shared libgcc, shared-library creation, gcov, and installed-artifact checks.
++
++The installed GCC driver and `cc1` are ELF32 Intel 80386 executables.  `cc1`
++reports:
++
++```text
++GNU C version 4.2.1 (i686-pc-linux-gnu) compiled by CC.
++```
++
++Representative hashes are:
++
++```text
++f026fca768387f9f5a79d517ad752426502091a503d846281da8967d3610aaa4  bin/gcc
++1a3d9d4106baeec37b14808b01a61d988fc7672e25c86bf8ac8f0713e5ca9974  libexec/gcc/i686-pc-linux-gnu/4.2.1/cc1
++6ed63294a566e7e5cdeb617da8469097b69b146b7eb371be03fa64c7ca8f3a15  lib/libgcc_s.so.1
++```
++
++## Floating-point regression result
++
++The installed GCC compiled `contrib/unified-tcc-fp-reproducer.c` at five
++optimization settings.  Every resulting executable returned zero:
++
++| Setting | Result |
++| --- | --- |
++| `-O0` | PASS |
++| `-O1` | PASS |
++| `-O2` | PASS |
++| `-O3` | PASS |
++| `-Os` | PASS |
++
++Stock TCC-hosted GCC had failed this test at every setting except `-O0`.
++
++## Complete GCC test suite
++
++The standalone installed-compiler wrapper was used:
++
++```sh
++PREFIX=/tmp/gcc-4.2.1-unified-tcc-fix \
++TEST_TOOLS=/tmp/test_tools \
++/home/foo/src/gcc-4.2.1/check-gcc-unified-install.sh
++```
++
++This wrapper directly selected
++`/tmp/gcc-4.2.1-unified-tcc-fix/bin/gcc`; it did not configure or build a
++conventional GCC first.  The run completed every listed GCC suite, including
++`gcc.c-torture/execute/ieee/ieee.exp`.
++
++Final results were:
++
++```text
++PASS          42139
++XFAIL           116
++FAIL               0
++XPASS              0
++UNRESOLVED         1
++UNTESTED          28
++UNSUPPORTED      293
++ERROR               0
++```
++
++The only UNRESOLVED result was the established baseline case:
++
++```text
++gcc.c-torture/execute/mayalias-2.c execution, -O3 -g
++```
++
++The baseline comparison accepted the result exactly.  DejaGNU itself returned
++1 because it treats that known UNRESOLVED result generically; the wrapper's
++exact identity comparison returned success.  The final `gcc.sum` SHA-256 is:
++
++```text
++d2de4e5cfcdb0af9062544f37b8192f2deb22de0af985677ab7ce4ab0b94b781
++```
++
++This validates both conclusions: the TCC change introduces no observed TCC
++regression relative to stock 0.9.27, and it removes the TCC-hosted GCC
++floating-point failures without creating a GCC testsuite regression.
+diff --git a/TCC-FLOATING-POINT-ISSUE.md b/TCC-FLOATING-POINT-ISSUE.md
+new file mode 100644
+index 00000000..e8637052
+--- /dev/null
++++ b/TCC-FLOATING-POINT-ISSUE.md
+@@ -0,0 +1,353 @@
++# TCC-hosted unified `cc1` floating-comparison failure
++
++Date: 2026-08-12
++
++## Summary
++
++The TCC-hosted unified `cc1` miscompiles unordered floating-point comparisons
++at `-O1` and above.  This is not a floating-point arithmetic, x87, libm, or
++libgcc failure.  TCC generates incorrect host code for `do_jump` in
++`gcc/dojump.c`: three distinct local enum variables are assigned the same
++stack slot.  The last tree-code assignment therefore overwrites the RTL
++comparison code before `can_compare_p` receives it.
++
++The underlying TCC 0.9.27 defect is now identified.  Its one-pass parser marks
++the source following `break` as not requiring code, and
++`decl_initializer_alloc` changes every automatic declaration encountered in
++that state to size zero.  A later `case` label can legally enter the scope
++after those declarations.  TCC restores code generation at the label, but it
++has already assigned all of the zero-sized locals the same frame address.
++
++For the `UNEQ_EXPR` path involved in the reproducer, the source intends to
++pass RTL code `UNEQ` (85).  The TCC-built function instead passes 102, the
++numeric value of tree code `EQ_EXPR`.  It consequently looks in the wrong
++entry of `bcc_gen_fctn`, concludes that the combined unordered comparison is
++unavailable, and expands the comparison incorrectly for NaNs.
++
++This mechanism accounts for the previously observed 38 failures in the GCC
++IEEE floating-comparison execution tests.  A GCC-4.1.2-hosted unified `cc1`
++does not have the corruption and passes those tests.
++
++## Minimal end-to-end reproducer
++
++The test is checked in as
++`contrib/unified-tcc-fp-reproducer.c`.  It deliberately has no headers or
++library dependencies.  Success is exit status zero; failure is exit status
++one.  `noinline` is required to retain the affected branch-expansion path at
++optimization levels above zero.
++
++Build a fresh TCC-hosted unified `cc1` from an empty build directory inside
++the Etch chroot:
++
++```sh
++mkdir -p /home/foo/src/builds/tcc-fp-reproduction
++cd /home/foo/src/builds/tcc-fp-reproduction
++CC=/tmp/tcc-0.9.27/bin/tcc \
++CC_FOR_BUILD=/usr/bin/gcc \
++PREFIX=/home/foo/src/builds/tcc-fp-reproduction/install \
++/home/foo/src/gcc-4.2.1/build-cc1-unified.sh
++```
++
++Compile the reproducer directly with the resulting `cc1`, then use the system
++GCC only to assemble and link its output:
++
++```sh
++cd /home/foo/src/builds/tcc-fp-reproduction
++./unified-artifacts/cc1_unified \
++  -quiet -O1 \
++  -o unified-tcc-fp-reproducer.s \
++  /home/foo/src/gcc-4.2.1/contrib/unified-tcc-fp-reproducer.c
++/usr/bin/gcc unified-tcc-fp-reproducer.s -o unified-tcc-fp-reproducer
++./unified-tcc-fp-reproducer
++echo $?
++```
++
++The observed result is `1`; the correct result is `0`.  `/usr/bin/gcc` does
++not compile or optimize the C source in this sequence.  It only assembles and
++links assembly already generated by the compiler under test.
++
++The measured optimization-level matrix was:
++
++| host compiler used to build unified `cc1` | `-O0` | `-O1` | `-O2` | `-O3` | `-Os` |
++| --- | ---: | ---: | ---: | ---: | ---: |
++| TCC 0.9.27 | pass | **fail** | **fail** | **fail** | **fail** |
++| Etch GCC 4.1.2 | pass | pass | pass | pass | pass |
++
++The division `zero / zero` is intentional: it creates a NaN at run time and
++prevents constant folding from hiding the bad comparison expansion.
++
++## Where the corruption occurs
++
++The relevant source is the nested block in `do_jump` beginning near
++`gcc/dojump.c:452`:
++
++```c
++    {
++      enum rtx_code rcode1;
++      enum tree_code tcode1, tcode2;
++
++      case UNEQ_EXPR:
++        rcode1 = UNEQ;
++        tcode1 = UNORDERED_EXPR;
++        tcode2 = EQ_EXPR;
++        goto unordered_bcc;
++
++      unordered_bcc:
++        mode = TYPE_MODE (TREE_TYPE (TREE_OPERAND (exp, 0)));
++        if (can_compare_p (rcode1, mode, ccp_jump))
++```
++
++The constants in this build are:
++
++```text
++RTL UNEQ          85 (0x55)
++RTL LTGT          90 (0x5a)
++tree EQ_EXPR     102 (0x66)
++tree UNORDERED   104 (0x68)
++```
++
++Disassembling the TCC-hosted executable shows all three assignments targeting
++the same stack location, `-0x70(%ebp)`:
++
++```text
++mov $0x55,%eax                  # rcode1 = UNEQ
++mov %eax,-0x70(%ebp)
++mov $0x68,%eax                  # tcode1 = UNORDERED_EXPR
++mov %eax,-0x70(%ebp)
++mov $0x66,%eax                  # tcode2 = EQ_EXPR
++mov %eax,-0x70(%ebp)
++```
++
++Thus the final value read as `rcode1` is 102.  The same pattern exists for all
++six cases in that block; it is not specific to one enum constant.  This can be
++inspected without changing the source:
++
++```sh
++cd /home/foo/src/builds/tcc-fp-reproduction
++nm -n unified-artifacts/cc1_unified | grep ' do_jump$'
++objdump -dr unified-artifacts/cc1_unified > cc1-disassembly.txt
++```
++
++Search the `do_jump` disassembly for the immediate sequence `0x55`, `0x68`,
++`0x66`.  Addresses and frame offsets may vary between builds, but the defect
++is that the three stores use one frame offset.
++
++An additional diagnostic was made temporarily in `can_compare_p` in
++`gcc/optabs.c`:
++
++```c
++fprintf (stderr, "code=%d bcc=%p\n", (int) code,
++         (void *) bcc_gen_fctn[(int) code]);
++```
++
++For the reproducer, the first relevant call from the bad executable printed:
++
++```text
++code=102 bcc=(nil)
++```
++
++The source assignments and enum probes both establish that this call should
++have received `UNEQ` (85), not tree code `EQ_EXPR` (102).
++
++## Root cause in TCC 0.9.27
++
++The relevant state is `nocode_wanted` in `tccgen.c`.  Its dead-source bit is
++set after statements such as `break`:
++
++```c
++nocode_wanted |= 0x20000000;
++```
++
++The `TOK_CASE` handler clears that bit because a case label is a new control
++flow entry point:
++
++```c
++nocode_wanted &= ~0x20000000;
++```
++
++That is too late for declarations lexically located between the previous
++`break` and the next `case`.  `decl_initializer_alloc` has already processed
++them.  It contains this optimization:
++
++```c
++if (NODATA_WANTED)
++    size = 0, align = 1;
++```
++
++Automatic storage is allocated immediately afterward:
++
++```c
++if ((r & VT_VALMASK) == VT_LOCAL) {
++    loc = (loc - size) & -align;
++    addr = loc;
++```
++
++With `size == 0`, `loc` does not move.  Every automatic declaration processed
++in that state receives the same address.  The variables are nevertheless
++visible and used when TCC reaches the later case label, so this is observable
++wrong code rather than harmless dead-storage elimination.
++
++Temporary allocation tracing while TCC compiled `cc1_unified.c` produced:
++
++```text
++name=rcode1 size=0 align=1 addr=-112 scope=3
++name=tcode1 size=0 align=1 addr=-112 scope=3
++name=tcode2 size=0 align=1 addr=-112 scope=3
++```
++
++This directly accounts for the identical `-0x70(%ebp)` stores in the emitted
++host assembly.
++
++### Standalone TCC reproducer
++
++`contrib/tcc-0.9.27-case-local-reproducer.c` reproduces the allocation defect
++without GCC headers, GCC source, floating point, or the unified translation
++unit.  Run it inside the Etch chroot with:
++
++```sh
++cd /home/foo/src/gcc-4.2.1
++/tmp/tcc-0.9.27/bin/tcc -O0 \
++  contrib/tcc-0.9.27-case-local-reproducer.c \
++  -o /home/foo/src/builds/tcc-case-local-reproducer
++/home/foo/src/builds/tcc-case-local-reproducer
++echo $?
++```
++
++Unmodified TCC 0.9.27 returns `1`; GCC and the corrected TCC return `0`.
++Without the harmless `anchor` local, the zero-sized locals are placed at
++offset zero and their stores overwrite the saved frame pointer, often causing
++a segmentation fault.  The anchor gives the shared bad slot a safe negative
++offset so the test reports a deterministic failure instead.
++
++Disassembly of the bad standalone executable shows `first`, `second`, and
++`third` all stored at `-4(%ebp)`, which is also the anchor's address.
++
++### TCC-side correction tested
++
++The narrow correction tested in TCC's `decl_initializer_alloc` was:
++
++```diff
++-    if (NODATA_WANTED)
+++    if (NODATA_WANTED && (r & VT_VALMASK) != VT_LOCAL)
++         size = 0, align = 1;
++```
++
++This preserves the existing no-data optimization for non-local objects but
++always reserves real frame space for automatic variables.  That is necessary
++because a label encountered later in TCC's one-pass parse may make their scope
++reachable.  The tradeoff is that a function can reserve stack space for an
++automatic object in genuinely unreachable source.  That is preferable to
++wrong code, and a more elaborate implementation would require deferring or
++revisiting frame allocation after labels are known.
++
++After rebuilding TCC with this one-line change, allocation tracing showed:
++
++```text
++name=rcode1 size=4 align=4 addr=-116 scope=3
++name=tcode1 size=4 align=4 addr=-120 scope=3
++name=tcode2 size=4 align=4 addr=-124 scope=3
++```
++
++The standalone TCC reproducer then returned zero.  A `cc1_unified` object
++compiled by that corrected TCC also passed the floating-point reproducer at
++`-O0`, `-O1`, `-O2`, `-O3`, and `-Os`.  This establishes that the
++`NODATA_WANTED` zero-size allocation is the TCC defect responsible for the
++GCC failures.
++
++The corrected TCC also completed its `tests/tests2` and preprocessor suites
++without a failure.  The top-level `make test` did not complete cleanly: it
++stopped at `test3` because the three `__builtin_frame_address` output lines
++differed from the GCC-generated reference.  A separately rebuilt, unmodified
++TCC 0.9.27 stopped at precisely the same test with precisely the same diff, so
++that result is an existing property of this Etch test setup rather than a new
++failure introduced by the correction.  It does mean that a completely clean
++top-level TCC suite result is not claimed here.
++
++## The target comparison table is valid
++
++The generated `insn-opinit.c` contains:
++
++```c
++if (HAVE_bltgt)
++  bcc_gen_fctn[LTGT] = gen_bltgt;
++```
++
++Both TCC and GCC independently evaluate RTL `LTGT` as 90.  In the TCC-hosted
++executable, `nm` and `objdump` show `init_all_optabs` storing `gen_bltgt` at
++`bcc_gen_fctn + 90 * sizeof(void *)`.  The generated comparison pattern and
++its initialization are therefore present.  The lookup fails because the
++corrupted caller supplies a tree-code value as an RTL-code index.
++
++## Compiler pipeline evidence
++
++The following commands produce the optimized-tree and initial-RTL dumps:
++
++```sh
++mkdir -p /home/foo/src/builds/tcc-fp-reproduction/dumps
++cd /home/foo/src/builds/tcc-fp-reproduction/dumps
++../unified-artifacts/cc1_unified \
++  -quiet -O1 -fdump-tree-optimized -fdump-rtl-expand \
++  -o reproducer.s \
++  /home/foo/src/gcc-4.2.1/contrib/unified-tcc-fp-reproducer.c
++```
++
++Comparison with an otherwise identical GCC-hosted unified `cc1` found that
++the optimized-tree dumps are byte-for-byte identical.  The first semantic
++difference is in RTL expansion.  The good compiler retains one combined
++unordered comparison.  The bad compiler takes the fallback decomposition and
++emits two ordinary comparisons, which does not preserve the required result
++when both operands are NaNs.
++
++This locates the problem in the host machine code for GCC's RTL-expansion
++logic, not in the C front end's parsing, folding, or GIMPLE optimization.
++
++## Tested source workaround
++
++A temporary experiment replaced the three individual locals with fields in a
++single aggregate and updated the uses accordingly:
++
++```c
++      struct
++      {
++        enum rtx_code rcode1;
++        enum tree_code tcode1, tcode2;
++      } comparison;
++```
++
++For example, the `UNEQ_EXPR` case then assigns
++`comparison.rcode1`, `comparison.tcode1`, and `comparison.tcode2`, and the
++call reads `comparison.rcode1`.  TCC assigns the fields distinct offsets.  A
++fresh TCC-hosted unified `cc1` with this change passed the minimal reproducer
++at all five optimization settings in the table above.
++
++Marking the original three variables `volatile` was also tested.  TCC still
++assigned all three to the same stack slot, and the reproducer still failed.
++`volatile` is therefore not a fix.
++
++The aggregate change is a narrow GCC-side workaround and should remain valid
++for conventional, GCC-hosted, and TCC-hosted builds.  The underlying compiler
++bug is TCC's zero-size automatic-variable allocation while `NODATA_WANTED` is
++set.  The standalone reproducer above should be preferred when changing TCC;
++the floating-point reproducer remains the end-to-end GCC regression test.
++
++No workaround has been applied to `gcc/dojump.c` in this commit.  This report
++records the tested edit so it can be reviewed and applied deliberately.
++
++## Verification after a fix
++
++At minimum:
++
++1. Rebuild `cc1_unified` from an empty build directory with TCC 0.9.27.
++2. Run `contrib/unified-tcc-fp-reproducer.c` at `-O0`, `-O1`, `-O2`, `-O3`,
++   and `-Os`; every executable must return zero.
++3. Inspect `do_jump` and confirm the three simultaneously live values no
++   longer share storage.
++4. Run the IEEE comparison tests, especially
++   `gcc.c-torture/execute/ieee/fp-cmp-4.c`.
++5. Run the complete GCC testsuite.  The established good baseline is 42,139
++   PASS, 116 XFAIL, no FAIL, and one known UNRESOLVED
++   (`mayalias-2.c -O3 -g`).  None of the 38 IEEE failures should remain.
++
++The full suite is important because this block also handles `UNLT_EXPR`,
++`UNLE_EXPR`, `UNGT_EXPR`, `UNGE_EXPR`, `UNEQ_EXPR`, and `LTGT_EXPR`; passing
++only the one reduced NaN case is necessary but not sufficient.
 diff --git a/TESTSUITE-REPORT-2026-08-01.md b/TESTSUITE-REPORT-2026-08-01.md
 new file mode 100644
 index 00000000..eba11f7f
@@ -2558,12 +4001,440 @@ index 00000000..a46d1664
 +3. Compare unified and conventional assembly for `gcc.target/i386/lea.c`.
 +4. After all three categories pass targeted checks, rerun the full C suite.
 +
+diff --git a/WORKLOG-2026-08-11-FULL-UNIFIED-GCC.md b/WORKLOG-2026-08-11-FULL-UNIFIED-GCC.md
+new file mode 100644
+index 00000000..2b8611c5
+--- /dev/null
++++ b/WORKLOG-2026-08-11-FULL-UNIFIED-GCC.md
+@@ -0,0 +1,228 @@
++# Full unified GCC work log — 2026-08-11
++
++## Scope
++
++Extend the fixed C-only i686 build beyond `cc1` so a complete usable GCC
++installation can be built through unity translation units.  The additional
++build is a separate second stage after `build-cc1-unified.sh`.  It must retain
++the no-configure, no-fixincludes, no-network, and standard-GCC-dependencies-only
++properties of stage one.
++
++## 2026-08-11 host-program inventory
++
++A one-time conventional configuration was generated under
++`/home/foo/src/builds/unified-tools-reference` solely to audit the exact Etch
++i686 C-only configuration.  It is not part of the unified build.  The normal
++language set is `c`, `gcov`, and `gcov-dump`; the installed or build-relevant
++host executables are the GCC driver, CPP driver, `cc1`, `collect2`, `gcov`,
++and `gcov-dump`.  `gccbug` is a shell script rather than a compiled binary.
++`protoize` and `unprotoize` are not members of this configuration's normal
++language target.
++
++The complete target-side installation must additionally provide `libgcc.a`,
++`libgcc_eh.a`, `libgcc_s.so.1`, `libgcov.a`, `crtbegin.o`, `crtbeginS.o`,
++`crtbeginT.o`, `crtend.o`, `crtendS.o`, and `crtfastmath.o`, plus the GCC
++private headers and driver aliases.
++
++## 2026-08-11 host-program pilot
++
++Added true unity drivers for:
++
++- `gcc` and `cpp`: `gcc_driver_unified.c` includes the common driver,
++  generated option table, the selected language spec, localization, prefix,
++  version, and i386 host-detection implementations;
++- `collect2`: `collect2_unified.c` includes its `collect2`, template-linking,
++  localization, and version implementation closure;
++- `gcov` and `gcov-dump`: `gcov_unified.c` selects the requested main program
++  and includes its version/error implementation closure.
++
++Each resulting executable was compiled with exactly one C compiler invocation
++and linked against stage one's one-member unified `libiberty.a`.
++
++The GCC driver initially failed because `gcc.c` and `prefix.c` both define a
++private static helper named `save_string`.  The unity wrapper renames only the
++`prefix.c` spelling while that implementation is included.  This has no effect
++on the conventional build and avoids an invasive source change.
++
++All five pilot programs compile and link with Etch GCC 4.1.2.  The GCC driver
++reports 4.2.1; both gcov programs report 4.2.1; and collect2 successfully
++dispatches the system linker.  The next implementation step is the unified
++target-runtime closure and installation layout.
++
++## 2026-08-11 18:12 BST — target runtimes and complete installation
++
++Added unity translation units for the configured `libgcc2`, unwinder, and
++libgcov closures.  A first attempt to include all `libgcc2.c` selectors in one
++pass exposed two properties of its conventional object-at-a-time build: the
++constructor selections include `gbl-ctors.h` twice, and mutually exclusive
++floating/complex variants leave internal type-selection macros behind.  An
++ordinary include guard fixes the former.  The latter is handled by a
++unity-only opt-out from `libgcc2.c`'s final poison macros plus an explicit
++cleanup header between the small number of controlled re-inclusions.  The
++normal build does not define `GCC_UNIFIED_LIBGCC` and is unchanged.
++
++Combining the unwinder exposed private-name collisions between the inline
++POSIX gthread helpers and `gthr-gnat.c`.  The unity wrapper locally renames the
++private POSIX helpers and the GNAT mutex typedef while retaining every public
++symbol.  Both static and PIC unity objects now compile with the newly built
++unified GCC driver and cc1.
++
++The second-stage script now creates one-member `libgcc.a`, `libgcc_eh.a`, and
++`libgcov.a`; compiles the configured CRT variants; derives the normal shared
++libgcc version script from the release's map inputs; links a
++SONAME-bearing, symbol-versioned `libgcc_s.so.1`; and installs the complete
++C-only toolchain under `/tmp/gcc-4.2.1-unified` by default.  No configure or
++fixincludes step occurs.
++
++The installation passed program-path and library-path checks, preprocessing,
++ordinary compile/link/run, shared-libgcc long-long division, shared-object
++creation, and coverage generation/readback through the installed unified
++gcov.  Each runtime archive was also verified to contain exactly one object.
++The full installed-toolchain testsuite is the next validation step.
++
++## 2026-08-11 18:16 BST — runtime symbol audit and correction
++
++A comparison with the just-built conventional runtime caught two ABI-level
++omissions before the testsuite.  The static libgcc selector set compiled
++`L_udivmoddi4` together with the four division entry points.  In that mode
++`libgcc2.c` deliberately makes `__udivmoddi4` an always-inline private helper,
++whereas its dedicated conventional object exports the function.  The first
++attempt at a separate controlled inclusion correctly failed because the
++private inline body was already present in the translation unit.  The fixed
++path instead makes that first body public only under the wrapper's
++`GCC_UNIFIED_LIBGCC_EXPORT_UDIVMOD` marker.  Conventional compilations retain
++the inline helper and dedicated public object arrangement.
++
++The shared unified unwinder had incorrectly inherited the static
++`libgcc_eh.a` flags `-fvisibility=hidden -DHIDE_EXPORTS`.  The conventional
++shared objects use `-DSHARED` without those flags so the public `_Unwind_*`
++and frame-registration declarations receive default visibility.  Split the
++static and shared flag sets accordingly.  This is especially important even
++for a C-only compiler because linked objects and system libraries can depend
++on the standard libgcc unwinding ABI.
++
++## 2026-08-11 18:24 BST — installed private-header discovery
++
++The first full installed-toolchain testsuite run was stopped after it exposed
++repeated missing `stdbool.h` failures.  The header existed in the installed
++GCC private include directory, but `cc1 -v` showed only `/usr/include`: stage
++one had not supplied the `GCC_INCLUDE_DIR` definition which the conventional
++Makefile adds specifically when compiling `cppdefault.c`.
++
++Stage one now derives that directory from the same `PREFIX` (default
++`/tmp/gcc-4.2.1-unified`), target, and version used by stage two and defines it
++for the one cc1 compilation.  This preserves the fixed no-configure build and
++also makes non-default prefixes work when the same `PREFIX` is passed to both
++stages.  The failed run was an invalid installation-layout test and is not a
++compiler regression result; it will be discarded and rerun from scratch.
++
++## 2026-08-11 18:38 BST — target intrinsic header inventory
++
++The second full run completed all tests but reported 56 FAIL, 10 ERROR, and
++28 additional UNRESOLVED results, all clustered in `gcc.target/i386` MMX,
++3DNow!, SSE, SSE2, and SSE3 cases.  Their primary diagnostics were missing
++`mmintrin.h`, `xmmintrin.h`, or `emmintrin.h`; subsequent errors were merely
++undefined vector types and missing assembly outputs.
++
++The initial private-header installation copied only `gcc/ginclude/*.h`.
++The configured conventional Makefile's `EXTRA_HEADERS` audit shows five
++additional i386 headers: `mmintrin.h`, `mm3dnow.h`, `xmmintrin.h`,
++`emmintrin.h`, and `pmmintrin.h`.  Stage two now installs exactly that target
++list as well.  This is independent of fixincludes: these are GCC-owned target
++intrinsic headers, not transformed system headers.  A targeted i386 suite run
++will precede the next full run.
++
++The first targeted rerun reduced the missing-header error to `mm_malloc.h`.
++That header does not appear literally in `EXTRA_HEADERS`: the configured
++i386 `t-pmm_malloc` fragment generates it by copying `pmm_malloc.h`, and the
++normal header-preparation target installs the generated name.  The fixed path
++now performs the same copy directly into the private include directory.  No
++code generation or configuration probe is involved.
++
++## 2026-08-11 19:14 BST — final regression result
++
++After rebuilding and reinstalling stage two, the targeted
++`gcc.target/i386/i386.exp` run produced 496 PASS, one expected XFAIL, seven
++UNSUPPORTED, and no FAIL/XPASS/ERROR/UNRESOLVED results.
++
++The complete `make -k check-gcc` equivalent was then rerun through
++`check-gcc-unified-install.sh`.  `gcc.log` confirms every invocation used
++`/tmp/gcc-4.2.1-unified/bin/gcc`; no conventional compiler executable or
++partial cc1 substitution served as the compiler under test.  The final result
++matched the checked-in baseline exactly:
++
++- PASS: 42,139
++- XFAIL: 116
++- FAIL: 0
++- XPASS: 0
++- UNRESOLVED: 1 (the established `mayalias-2.c -O3 -g` case)
++- UNTESTED: 28
++- UNSUPPORTED: 293
++- ERROR: 0
++
++The final `gcc.sum` SHA-256 was
++`0945b1069e5ba4499f9ef26235cb98313a475cd42efe3a83f1493a1f6ab7d8e0`.
++Installed artifact hashes for this run were:
++
++- `bin/gcc`: `a58cad136893a24aae995cb882302661b421ac054a64e9cff6e35c78e42a8c7e`
++- `libexec/gcc/i686-pc-linux-gnu/4.2.1/cc1`:
++  `aeccf73462443f81e905571688db8c04d047d90631709662b4c8554bc14d2394`
++- `lib/libgcc_s.so.1`:
++  `1eabd3490ddd8f6e40daccc09f9933cea0acc7caa2fd0384c3b93c47a25deabd`
++
++This completes the requested C-only unified installation path.  Performance
++work remains deliberately parked.
++
++## 2026-08-11 standalone testsuite harness correction
++
++The first complete-installation test wrapper still called `build.sh all-gcc`
++and `make check-gcc` solely to obtain a conventionally generated `site.exp`
++and DejaGNU object directory.  Although `GCC_UNDER_TEST` correctly selected
++the installed unified compiler, requiring a conventional GCC build was
++contrary to the standalone unified-build goal.
++
++`check-gcc-unified-install.sh` now writes the fixed native Etch triplets,
++source directory, result directory, installed-library root, and absolute
++unified compiler directly to a generated `site.exp`.  It invokes the existing
++DejaGNU `runtest` executable directly from that result directory.  There is no
++configure, `build.sh`, GCC Makefile, `xgcc`, or conventional compiler artifact
++in the test path.
++
++A fresh-directory targeted run selected `gcc.target/i386/i386.exp` and
++completed with 496 PASS, one XFAIL, seven UNSUPPORTED, and no unexpected
++result.  The directory had never been configured and contained no Makefile or
++conventional GCC executable.
++
++The first full direct run also exposed an important distinction in the
++installed compiler being tested.  The then-current default-prefix compiler
++had been rebuilt with TCC as its host compiler (`cc1 -v` identifies its host
++compiler as `CC`), whereas the recorded clean baseline used Etch GCC 4.1.2 as
++the host compiler.  The TCC-hosted compiler produced 38 failures in the IEEE
++floating-comparison execution tests.  A reduced `fp-cmp-4.c` run aborts with
++that compiler but passes with a separately installed system-GCC-hosted unified
++compiler.  Their GIMPLE dumps are identical; their initial RTL differs because
++the TCC-hosted cc1 decomposes combined unordered comparisons that the
++system-GCC-hosted cc1 expands directly.  This is a real TCC-host bootstrap
++code-generation defect revealed by the corrected harness, not a dependency on
++a conventional build directory or a libgcc selection effect.
++
++A full fresh-directory run against the separate system-GCC-hosted installation
++then completed with the exact recorded result:
++
++```text
++PASS          42139
++XFAIL           116
++FAIL               0
++XPASS              0
++UNRESOLVED         1
++UNTESTED          28
++UNSUPPORTED      293
++ERROR               0
++```
++
++The baseline comparator accepted the exact XFAIL/UNRESOLVED identities.
++DejaGNU itself nevertheless returned status 1 because its raw status does not
++distinguish the recorded UNRESOLVED case from an unexpected one.  The wrapper
++now reports that raw status for diagnostics but makes the exact baseline
++comparison authoritative.  Otherwise a correct run would misleadingly make
++the convenience script fail.
+diff --git a/WORKLOG-2026-08-11-UNIFIED-BUGFIXES.md b/WORKLOG-2026-08-11-UNIFIED-BUGFIXES.md
+new file mode 100644
+index 00000000..73e3b495
+--- /dev/null
++++ b/WORKLOG-2026-08-11-UNIFIED-BUGFIXES.md
+@@ -0,0 +1,161 @@
++# Unified-path bug fixes — 2026-08-11
++
++This log records the repair of every unexpected result from the complete
++2026-08-02 C testsuite run.  Generated builds and test results remain under
++`/home/foo/src/builds`, outside the repository.
++
++## 16:05 BST — clean-state audit
++
++The earlier full-check build had been removed.  No compiler or testsuite
++process was active.  The source branch was `unified_cc1` at `ccc237ae`; the
++only pre-existing untracked file was `gcc/cc1_unified.c.004t.gimple`, which
++was left untouched because its ownership was not established.
++
++The accepted conventional baseline and complete unified regression ledger
++remain checked in.  The three repair targets are the common PCH failure,
++`gcc.dg/20050111-1.c`, and `gcc.target/i386/lea.c`.
++
++## 16:10 BST — PCH checksum root cause and repair
++
++Every PCH case failed at the assertion on `c-pch.c:135`, before PCH state was
++serialized.  That assertion requires `executable_checksum` to differ from the
++all-zero dummy value.  The standalone script had intentionally emitted an
++all-zero `cc1-checksum.c`, so the unified build could never create a PCH.
++
++The repair follows the conventional GCC 4.2.1 link design without compiling
++the large unity source twice:
++
++1. compile `cc1_unified.c` once with its checksum definition external;
++2. link that object with `dummy-checksum.o` to make a dummy cc1;
++3. build and run GCC's existing `genchecksum` utility on the dummy executable;
++4. compile the small generated checksum definition; and
++5. link the final cc1 with that nonzero checksum object.
++
++This retains exactly one C-compiler invocation for `cc1_unified.c`, gives PCH
++files a checksum tied to the actual dummy compiler executable, and uses only
++tools and source already required by the conventional GCC build.
++
++The first clean system-GCC build completed successfully.  The single unity
++compile took 27 seconds and produced this nonzero checksum:
++
++```text
++1214bb1ca42fdc3b43620717658b2579
++```
++
++A direct PCH smoke invocation created a 999648-byte `.gch` file and
++`-print-pch-checksum` reported the same value.  This proves the former
++`c-pch.c:135` assertion no longer fires.  The GCC PCH testsuite group remains
++the semantic create-and-consume check.
++
++The complete targeted `gcc.dg/pch/pch.exp` run then produced 994 expected
++passes, zero failures, and the conventional 28 untested follow-on cases.  The
++PCH regression category is closed.
++
++## 16:18 BST — conditional-execution fallback leaks into peephole2
++
++Detailed conventional and unified RTL dumps for `gcc.dg/20050111-1.c` were
++identical through the pre-peephole CSA pass for `foo`.  Unified cc1 then
++reported a local/global live-at-start mismatch for register `dx` in basic
++block 3.
++
++Preprocessing `recog.c` conventionally and as part of `cc1_unified.c` exposed
++the semantic difference.  `bb-reorder.c` and `ifcvt.c` each supply this
++file-local fallback on i686:
++
++```c
++#ifndef HAVE_conditional_execution
++#define HAVE_conditional_execution 0
++#endif
++```
++
++That definition disappears at the end of either conventional translation
++unit.  In unity it survived into later files.  `cfgrtl.c`, `final.c`,
++`flow.c`, and especially `recog.c` use `#ifdef HAVE_conditional_execution`;
++therefore the defined-but-zero fallback incorrectly compiled their
++conditional-execution paths.  In `peephole2_optimize` this changed death-note
++propagation and selected a local liveness update, leading directly to the
++verified mismatch.
++
++The repeatable unity boundary now undefines `HAVE_conditional_execution`,
++reproducing the ordinary translation-unit lifetime of the fallback.  A target
++which genuinely supplies the macro would require a target-specific boundary,
++but the fixed i686 configuration intentionally does not define it.
++
++After rebuilding, direct unified and conventional compilations produced
++byte-identical assembly for both `20050111-1.c` and `lea.c`.  The targeted
++DejaGnu results were also clean:
++
++```text
++gcc.dg/20050111-1.c                 1 PASS, 0 FAIL
++gcc.target/i386/lea.c group        12 PASS, 0 FAIL
++```
++
++The i386 group count includes the small `vect-args.c` prerequisite matrix
++selected by that `.exp` invocation.  `lea.c` itself passed both compilation
++and its `scan-assembler leal` check.  Thus the RTL ICE and LEA difference were
++two symptoms of the same leaked fallback, not independent defects.
++
++## 16:20 BST — relative artifact override fails after directory change
++
++The first TCC validation selected a separate artifact tree with the documented
++`UNIFIED_ARTIFACTS=unified-artifacts-tcc` override.  The build stopped when it
++changed into the generated GCC directory and tried to execute the now-invalid
++relative path `unified-artifacts-tcc/generators/gengtype`.  The default had
++hidden this because it expanded to an absolute path.
++
++The wrapper now normalizes both default and supplied artifact settings against
++the caller's absolute build directory, while preserving an explicitly
++absolute override unchanged.  This is a build-wrapper correctness fix and
++does not add a dependency.
++
++The restarted TCC build completed and passed the standalone smoke test.  Its
++compiler SHA-256 is:
++
++```text
++55b880626a81e0e0aeca732cada00cb1dcf67cf9f378a8b757290dca0e863aa8
++```
++
++With that TCC-produced cc1 substituted into the conventional harness,
++`20050111-1.c` compiled, `lea.c` emitted `leal`, and the complete targeted PCH
++group again produced 994 PASS, zero FAIL, and 28 UNTESTED.  Both supported
++seed compilers therefore pass every previously failing targeted category.
++
++## Full post-fix C testsuite
++
++The system-GCC-produced unified cc1 was substituted into the freshly built
++C-only harness and `check-cc1-unified.sh` was allowed to reach the final
++DejaGnu summary.  The checked-in comparator returned success and reported
++that the exact non-pass set matches the conventional baseline:
++
++```text
++PASS          42139
++XFAIL           116
++FAIL               0
++XPASS              0
++UNRESOLVED         1
++UNTESTED           28
++UNSUPPORTED       293
++ERROR               0
++```
++
++The complete result explicitly records `20050111-1.c` as PASS, all 994 PCH
++expected passes are restored, and `lea.c` passes both compilation and its
++`scan-assembler leal` check.  The wrapper exited zero, restored conventional
++`gcc/cc1`, and left no saved replacement file.
++
++The final system-GCC unified executable has SHA-256:
++
++```text
++341e565df9365a12bc5c8166806799c27bf450dad7ddee749b2bed384ce12de4
++```
++
++Generated evidence remains outside Git under
++`/home/foo/src/builds/unified-bugfix`:
++
++```text
++50b00f2b415684d2cc3740f7c5d946c678974e2e9343a0c0a4afbeb2ceaca729  gcc.sum
++b771d823a48837098d25d4e54de560cb7b2c4331b7953bc908dfaef94ae6daca  gcc.log
++742dbfd158c3bb31fbe73541a4fd98a96fd1e58a1c29ffa344755dd17ae6281e  full-check-after-fixes.log
++```
++
++All unexpected results in the 2026-08-02 complete run are therefore fixed.
+diff --git a/WORKLOG-2026-08-12-TMP-CLEANUP.md b/WORKLOG-2026-08-12-TMP-CLEANUP.md
+new file mode 100644
+index 00000000..ea370ee3
+--- /dev/null
++++ b/WORKLOG-2026-08-12-TMP-CLEANUP.md
+@@ -0,0 +1,21 @@
++# `/tmp` cleanup and containment — 2026-08-12
++
++Diagnostic investigation had incorrectly used the Etch chroot's shared
++`/tmp` directory as a working directory.  In particular, `-fdump-tree-all`
++left a large set of `fp-ga.c.*` and `fp-ta.c.*` compiler dumps there.  Older
++unified-build investigations had also left assembly outputs, probe binaries,
++objects, dump directories, and smoke-test sources in the same directory.
++
++All project diagnostic residue was removed from the chroot's `/tmp`.  The
++requested `/tmp/tcc-0.9.27` and `/tmp/test_tools` installations were preserved.
++After cleanup, those are the only two top-level entries in `/tmp`.
++
++`check-gcc-unified-install.sh` now creates a dedicated scratch directory at
++`unified-artifacts/installed-testsuite/tmp` beneath the out-of-tree directory.
++It supplies that path as both DejaGNU's `tmpdir` and the process `TMPDIR`, so
++DejaGNU outputs and the compiler driver's temporary assembly/preprocessor files
++remain contained in the build artifact tree.  `build-cc1-unified.sh`,
++`build-gcc-unified-tools.sh`, and the legacy `check-cc1-unified.sh` harness now
++likewise export their own `unified-artifacts/tmp` directories as `TMPDIR`.
++Future ad-hoc diagnostics must use a task directory beneath
++`/home/foo/src/builds`, never the shared chroot `/tmp`.
 diff --git a/build-cc1-unified.sh b/build-cc1-unified.sh
 new file mode 100755
-index 00000000..1e656dad
+index 00000000..d31b363d
 --- /dev/null
 +++ b/build-cc1-unified.sh
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,195 @@
 +#!/bin/sh
 +
 +# Build the fixed i686-linux cc1 without configure and compile the complete
@@ -2574,13 +4445,22 @@ index 00000000..1e656dad
 +
 +source_root=`CDPATH= cd "\`dirname "$0"\`" && pwd`
 +build_root=`pwd`
-+artifact_root=${UNIFIED_ARTIFACTS-$build_root/unified-artifacts}
++artifact_setting=${UNIFIED_ARTIFACTS-unified-artifacts}
++case $artifact_setting in
++  /*) artifact_root=$artifact_setting ;;
++  *) artifact_root=$build_root/$artifact_setting ;;
++esac
 +generated_root=$artifact_root/generated/gcc
 +libiberty_generated_root=$artifact_root/generated/libiberty
 +tool_root=$artifact_root/generators
++temporary_root=$artifact_root/tmp
 +compiler=${CC-/usr/bin/gcc}
 +bootstrap_compiler=${CC_FOR_BUILD-$compiler}
 +md_file=$source_root/gcc/config/i386/i386.md
++install_prefix=${PREFIX-/tmp/gcc-4.2.1-unified}
++target_name=i686-pc-linux-gnu
++gcc_version=4.2.1
++gcc_private_include=$install_prefix/lib/gcc/$target_name/$gcc_version/include
 +
 +test "$build_root" != "$source_root" || {
 +  echo "run build-cc1-unified.sh from an out-of-tree build directory" >&2
@@ -2595,7 +4475,10 @@ index 00000000..1e656dad
 +  exit 1
 +}
 +
-+mkdir -p "$generated_root" "$libiberty_generated_root" "$tool_root"
++mkdir -p "$generated_root" "$libiberty_generated_root" "$tool_root" \
++  "$temporary_root"
++TMPDIR=$temporary_root
++export TMPDIR
 +cp "$source_root"/gcc/unified-i686-config/*.h "$generated_root"/
 +cp "$source_root/gcc/unified-i686-config/libiberty-config.h" \
 +  "$libiberty_generated_root/config.h"
@@ -2711,10 +4594,14 @@ index 00000000..1e656dad
 +compile_generator_object gcov-iov
 +link_generator gcov-iov
 +"$tool_root/gcov-iov" '4.2.1' '' > "$generated_root/gcov-iov.h"
-+printf '%s\n' 'const unsigned char executable_checksum[16] = { 0 };' \
-+  > "$generated_root/cc1-checksum.c"
 +
-+core_flags="-c -O0 -g -DIN_GCC -DHAVE_CONFIG_H -I$generated_root -I$source_root/gcc -I$source_root/include -I$source_root/libcpp/include -I$source_root/libdecnumber"
++# A real executable checksum is required for PCH creation and validation.
++# Match the conventional GCC flow: link a dummy cc1 with the zero checksum,
++# hash that executable, then link the final cc1 with the generated checksum.
++compile_generator_object genchecksum
++link_generator genchecksum
++
++core_flags="-c -O0 -g -DIN_GCC -DHAVE_CONFIG_H -DGCC_UNIFIED_EXTERNAL_CHECKSUM -DGCC_INCLUDE_DIR=\"$gcc_private_include\" -I$generated_root -I$source_root/gcc -I$source_root/include -I$source_root/libcpp/include -I$source_root/libdecnumber"
 +
 +echo "Compiling gcc/cc1_unified.c once with $compiler"
 +start=`date +%s`
@@ -2723,15 +4610,343 @@ index 00000000..1e656dad
 +end=`date +%s`
 +echo `expr "$end" - "$start"` > "$artifact_root/cc1-unified-compile-seconds"
 +
++"$compiler" -c -O0 -g "$source_root/gcc/dummy-checksum.c" \
++  -o "$artifact_root/dummy-checksum.o"
++"$compiler" -O0 -g -o "$artifact_root/cc1_unified_dummy" \
++  "$artifact_root/cc1_unified.o" "$artifact_root/dummy-checksum.o" \
++  "$artifact_root/libiberty.a"
++"$tool_root/genchecksum" "$artifact_root/cc1_unified_dummy" \
++  > "$generated_root/cc1-checksum.c"
++"$compiler" -c -O0 -g "$generated_root/cc1-checksum.c" \
++  -o "$artifact_root/cc1-checksum.o"
++
 +echo "Linking unified cc1"
 +"$compiler" -O0 -g -o "$artifact_root/cc1_unified" \
-+  "$artifact_root/cc1_unified.o" "$artifact_root/libiberty.a"
++  "$artifact_root/cc1_unified.o" "$artifact_root/cc1-checksum.o" \
++  "$artifact_root/libiberty.a"
 +
 +printf '%s\n' 'int main(void) { return 0; }' > "$artifact_root/smoke.c"
 +"$artifact_root/cc1_unified" -quiet "$artifact_root/smoke.c" \
 +  -o "$artifact_root/smoke.s"
 +test -s "$artifact_root/smoke.s"
 +echo "Built and smoke-tested $artifact_root/cc1_unified"
+diff --git a/build-gcc-unified-tools.sh b/build-gcc-unified-tools.sh
+new file mode 100755
+index 00000000..c7779315
+--- /dev/null
++++ b/build-gcc-unified-tools.sh
+@@ -0,0 +1,295 @@
++#!/bin/sh
++
++# Stage two of the fixed i686 unified build.  Stage one must already have
++# produced cc1 and the common unified libiberty archive.
++
++set -eux
++
++source_root=`CDPATH= cd "\`dirname "$0"\`" && pwd`
++build_root=`pwd`
++artifact_setting=${UNIFIED_ARTIFACTS-unified-artifacts}
++case $artifact_setting in
++  /*) artifact_root=$artifact_setting ;;
++  *) artifact_root=$build_root/$artifact_setting ;;
++esac
++generated_root=$artifact_root/generated/gcc
++tools_root=$artifact_root/unified-tools
++runtime_root=$artifact_root/unified-runtime
++runtime_include=$artifact_root/runtime-include
++temporary_root=$artifact_root/tmp
++compiler=${CC-/usr/bin/gcc}
++install_prefix=${PREFIX-/tmp/gcc-4.2.1-unified}
++target_name=i686-pc-linux-gnu
++gcc_version=4.2.1
++libsubdir=$install_prefix/lib/gcc/$target_name/$gcc_version
++libexecsubdir=$install_prefix/libexec/gcc/$target_name/$gcc_version
++
++test "$build_root" != "$source_root" || {
++  echo "run build-gcc-unified-tools.sh from an out-of-tree build directory" >&2
++  exit 1
++}
++test -x "$artifact_root/cc1_unified" || {
++  echo "stage-one cc1 is missing: $artifact_root/cc1_unified" >&2
++  echo "run $source_root/build-cc1-unified.sh first" >&2
++  exit 1
++}
++test -f "$artifact_root/libiberty.a" || {
++  echo "stage-one unified libiberty is missing: $artifact_root/libiberty.a" >&2
++  exit 1
++}
++command -v "$compiler" >/dev/null 2>&1 || {
++  echo "compiler is missing: $compiler" >&2
++  exit 1
++}
++
++mkdir -p "$tools_root" "$runtime_root" "$runtime_include" "$temporary_root"
++TMPDIR=$temporary_root
++export TMPDIR
++
++echo "Preparing fixed native-driver inputs"
++printf '%s\n' '/* No language-specific specs for the C-only build. */' \
++  > "$generated_root/specs.h"
++printf '%s\n' \
++  'static const char *const multilib_raw[] = {' \
++  '". ;",' \
++  'NULL' \
++  '};' \
++  'static const char *const multilib_matches_raw[] = { NULL };' \
++  'static const char *multilib_extra = "";' \
++  'static const char *const multilib_exclusions_raw[] = { NULL };' \
++  'static const char *multilib_options = "";' \
++  > "$generated_root/multilib.h"
++printf '%s\n' \
++  '/* Generated by the fixed unified tools build. */' \
++  'static const char configuration_arguments[] = "fixed unified i686-pc-linux-gnu C-only build";' \
++  'static const char thread_model[] = "posix";' \
++  'static const struct { const char *name, *value; } configure_default_options[] = { { "cpu", "generic" } };' \
++  > "$generated_root/configargs.h"
++
++common_flags="-O0 -g -DIN_GCC -DHAVE_CONFIG_H -DBASEVER=\"4.2.1\" -DDATESTAMP=\"\" -DDEVPHASE=\"\" -I$generated_root -I$source_root/gcc -I$source_root/include -I$source_root/libcpp/include -I$source_root/libdecnumber"
++driver_flags="$common_flags -DGCC_DRIVER -DENABLE_SHARED_LIBGCC -DPREFIX=\"$install_prefix\" -DSTANDARD_STARTFILE_PREFIX=\"../../../\" -DSTANDARD_EXEC_PREFIX=\"$install_prefix/lib/gcc/\" -DSTANDARD_LIBEXEC_PREFIX=\"$install_prefix/libexec/gcc/\" -DDEFAULT_TARGET_VERSION=\"4.2.1\" -DDEFAULT_TARGET_MACHINE=\"i686-pc-linux-gnu\" -DSTANDARD_BINDIR_PREFIX=\"$install_prefix/bin/\" -DTOOLDIR_BASE_PREFIX=\"../../../../\""
++
++compile_unity ()
++{
++  output_name=$1
++  shift
++  echo "Compiling unified $output_name with $compiler"
++  "$compiler" -c "$@" -o "$tools_root/$output_name.o"
++}
++
++link_unity ()
++{
++  output_name=$1
++  "$compiler" -O0 -g -o "$tools_root/$output_name" \
++    "$tools_root/$output_name.o" "$artifact_root/libiberty.a"
++}
++
++compile_unity gcc-driver $driver_flags "$source_root/gcc/gcc_driver_unified.c"
++link_unity gcc-driver
++
++compile_unity cpp-driver $driver_flags -DGCC_UNIFIED_CPP_DRIVER \
++  "$source_root/gcc/gcc_driver_unified.c"
++link_unity cpp-driver
++
++compile_unity collect2 $common_flags \
++  -DTARGET_MACHINE=\"i686-pc-linux-gnu\" \
++  "$source_root/gcc/collect2_unified.c"
++link_unity collect2
++
++compile_unity gcov $common_flags "$source_root/gcc/gcov_unified.c"
++link_unity gcov
++
++compile_unity gcov-dump $common_flags -DGCC_UNIFIED_GCOV_DUMP \
++  "$source_root/gcc/gcov_unified.c"
++link_unity gcov-dump
++
++"$tools_root/gcc-driver" --version
++"$tools_root/gcov" --version
++"$tools_root/gcov-dump" --version
++
++echo "Preparing the no-fixincludes target header directory"
++cp "$source_root"/gcc/ginclude/*.h "$runtime_include/"
++cp "$source_root"/gcc/config/i386/mmintrin.h \
++  "$source_root"/gcc/config/i386/mm3dnow.h \
++  "$source_root"/gcc/config/i386/xmmintrin.h \
++  "$source_root"/gcc/config/i386/emmintrin.h \
++  "$source_root"/gcc/config/i386/pmmintrin.h \
++  "$runtime_include/"
++cp "$source_root/gcc/config/i386/pmm_malloc.h" \
++  "$runtime_include/mm_malloc.h"
++cp "$source_root/gcc/unwind-generic.h" "$runtime_include/unwind.h"
++cp "$source_root/gcc/gsyslimits.h" "$runtime_include/syslimits.h"
++"${AWK-awk}" '{print}' "$source_root/gcc/limitx.h" \
++  "$source_root/gcc/glimits.h" "$source_root/gcc/limity.h" \
++  > "$runtime_include/limits.h"
++printf '%s\n' '#include "gthr-posix.h"' > "$generated_root/gthr-default.h"
++
++ln -sf ../cc1_unified "$tools_root/cc1"
++
++runtime_flags="-O2 -g -DIN_GCC -DHAVE_CONFIG_H -DHAVE_GTHR_DEFAULT -DIN_LIBGCC2 -D__GCC_FLOAT_NOT_NEEDED -fexceptions -I$generated_root -I$source_root/gcc -I$source_root/include -isystem $runtime_include"
++
++compile_runtime ()
++{
++  output_name=$1
++  shift
++  echo "Compiling unified target runtime $output_name with stage-two GCC"
++  "$tools_root/gcc-driver" -B"$tools_root/" -c "$@" \
++    -o "$runtime_root/$output_name.o"
++}
++
++compile_runtime libgcc2 $runtime_flags -fnon-call-exceptions \
++  "$source_root/gcc/libgcc2_unified.c"
++compile_runtime libgcc2-shared $runtime_flags -fnon-call-exceptions \
++  -fPIC -DSHARED "$source_root/gcc/libgcc2_unified.c"
++compile_runtime libgcc-eh $runtime_flags -fvisibility=hidden -DHIDE_EXPORTS \
++  "$source_root/gcc/libgcc_eh_unified.c"
++compile_runtime libgcc-eh-shared $runtime_flags -fPIC -DSHARED \
++  "$source_root/gcc/libgcc_eh_unified.c"
++compile_runtime libgcov $runtime_flags "$source_root/gcc/libgcov_unified.c"
++
++rm -f "$runtime_root/libgcc.a" "$runtime_root/libgcc_eh.a" \
++  "$runtime_root/libgcov.a"
++ar cr "$runtime_root/libgcc.a" "$runtime_root/libgcc2.o"
++ranlib "$runtime_root/libgcc.a"
++ar cr "$runtime_root/libgcc_eh.a" "$runtime_root/libgcc-eh.o"
++ranlib "$runtime_root/libgcc_eh.a"
++ar cr "$runtime_root/libgcov.a" "$runtime_root/libgcov.o"
++ranlib "$runtime_root/libgcov.a"
++
++crt_flags="-O2 -DIN_GCC -DHAVE_CONFIG_H -DHAVE_GTHR_DEFAULT -I$generated_root -I$source_root/gcc -I$source_root/include -isystem $runtime_include -g0 -finhibit-size-directive -fno-inline-functions -fno-exceptions -fno-zero-initialized-in-bss -fno-toplevel-reorder -fno-omit-frame-pointer"
++compile_runtime crtbegin $crt_flags -DCRT_BEGIN "$source_root/gcc/crtstuff.c"
++compile_runtime crtbeginS $crt_flags -fPIC -DCRT_BEGIN -DCRTSTUFFS_O \
++  "$source_root/gcc/crtstuff.c"
++compile_runtime crtbeginT $crt_flags -DCRT_BEGIN -DCRTSTUFFT_O \
++  "$source_root/gcc/crtstuff.c"
++compile_runtime crtend $crt_flags -DCRT_END "$source_root/gcc/crtstuff.c"
++compile_runtime crtendS $crt_flags -fPIC -DCRT_END -DCRTSTUFFS_O \
++  "$source_root/gcc/crtstuff.c"
++compile_runtime crtfastmath -O2 -g -DIN_GCC -DHAVE_CONFIG_H \
++  -DHAVE_GTHR_DEFAULT -I"$generated_root" -I"$source_root/gcc" \
++  -I"$source_root/include" -isystem "$runtime_include" -msse \
++  "$source_root/gcc/config/i386/crtfastmath.c"
++
++for crt_name in crtbegin crtbeginS crtbeginT crtend crtendS crtfastmath; do
++  ln -sf ../unified-runtime/$crt_name.o "$tools_root/$crt_name.o"
++done
++
++echo "Generating the configured libgcc symbol-version map"
++sed -e '/^[   ]*#/d' \
++  -e 's/^%\(if\|else\|elif\|endif\|define\)/#\1/' \
++  "$source_root/gcc/libgcc-std.ver" \
++  "$source_root/gcc/config/libgcc-glibc.ver" |
++  "$tools_root/gcc-driver" -B"$tools_root/" -O2 -DIN_GCC \
++    -DHAVE_CONFIG_H -I"$generated_root" -I"$source_root/gcc" \
++    -I"$source_root/include" -isystem "$runtime_include" \
++    -E -xassembler-with-cpp - > "$runtime_root/libgcc.ver.pp"
++nm -pg "$runtime_root/libgcc2-shared.o" \
++  "$runtime_root/libgcc-eh-shared.o" > "$runtime_root/libgcc.map.in"
++printf '%s\n' '%%' >> "$runtime_root/libgcc.map.in"
++"${AWK-awk}" '{print}' "$runtime_root/libgcc.ver.pp" \
++  >> "$runtime_root/libgcc.map.in"
++"${AWK-awk}" -f "$source_root/gcc/mkmap-symver.awk" \
++  "$runtime_root/libgcc.map.in" > "$runtime_root/libgcc.map"
++
++echo "Linking versioned unified libgcc_s.so.1"
++"$tools_root/gcc-driver" -B"$tools_root/" -O2 -shared -nodefaultlibs \
++  -Wl,-soname=libgcc_s.so.1 \
++  -Wl,--version-script="$runtime_root/libgcc.map" \
++  -o "$runtime_root/libgcc_s.so.1" \
++  "$runtime_root/libgcc2-shared.o" \
++  "$runtime_root/libgcc-eh-shared.o" -lc
++ln -sf libgcc_s.so.1 "$runtime_root/libgcc_s.so"
++
++echo "Installing the complete unified C compiler in $install_prefix"
++mkdir -p "$install_prefix/bin" "$install_prefix/lib" "$libsubdir/include" \
++  "$libexecsubdir"
++cp "$tools_root/gcc-driver" "$install_prefix/bin/gcc"
++cp "$tools_root/cpp-driver" "$install_prefix/bin/cpp"
++cp "$tools_root/gcov" "$install_prefix/bin/gcov"
++cp "$tools_root/gcov-dump" "$install_prefix/bin/gcov-dump"
++ln -f "$install_prefix/bin/gcc" "$install_prefix/bin/$target_name-gcc"
++ln -f "$install_prefix/bin/gcc" \
++  "$install_prefix/bin/$target_name-gcc-$gcc_version"
++cp "$artifact_root/cc1_unified" "$libexecsubdir/cc1"
++cp "$tools_root/collect2" "$libexecsubdir/collect2"
++cp "$runtime_root/libgcc.a" "$runtime_root/libgcc_eh.a" \
++  "$runtime_root/libgcov.a" "$libsubdir/"
++for crt_name in crtbegin crtbeginS crtbeginT crtend crtendS crtfastmath; do
++  cp "$runtime_root/$crt_name.o" "$libsubdir/$crt_name.o"
++done
++cp "$runtime_root/libgcc_s.so.1" "$install_prefix/lib/libgcc_s.so.1"
++ln -sf libgcc_s.so.1 "$install_prefix/lib/libgcc_s.so"
++ln -sf ../../../libgcc_s.so.1 "$libsubdir/libgcc_s.so.1"
++ln -sf ../../../libgcc_s.so "$libsubdir/libgcc_s.so"
++cp "$runtime_include"/*.h "$libsubdir/include/"
++cp "$artifact_root/libiberty.a" "$install_prefix/lib/libiberty.a"
++
++echo "Smoke-testing the complete unified installation"
++"$install_prefix/bin/gcc" --version
++test "`$install_prefix/bin/gcc -print-prog-name=cc1`" = "$libexecsubdir/cc1"
++test "`$install_prefix/bin/gcc -print-prog-name=collect2`" = \
++  "$libexecsubdir/collect2"
++test "`$install_prefix/bin/gcc -print-libgcc-file-name`" = \
++  "$libsubdir/libgcc.a"
++printf '%s\n' 'int main(void) { return 0; }' > "$artifact_root/install-smoke.c"
++"$install_prefix/bin/gcc" "$artifact_root/install-smoke.c" \
++  -o "$artifact_root/install-smoke"
++"$artifact_root/install-smoke"
++
++printf '%s\n' \
++  '#include <stdbool.h>' \
++  'int main(void) { bool value = true; return value ? 0 : 1; }' \
++  > "$artifact_root/install-private-header-smoke.c"
++"$install_prefix/bin/gcc" "$artifact_root/install-private-header-smoke.c" \
++  -o "$artifact_root/install-private-header-smoke"
++"$artifact_root/install-private-header-smoke"
++
++printf '%s\n' \
++  '#define UNIFIED_CPP_VALUE 42' \
++  'UNIFIED_CPP_VALUE' > "$artifact_root/install-cpp-smoke.c"
++"$install_prefix/bin/cpp" -P "$artifact_root/install-cpp-smoke.c" \
++  > "$artifact_root/install-cpp-smoke.i"
++grep '^42$' "$artifact_root/install-cpp-smoke.i"
++
++printf '%s\n' \
++  'int main(void)' \
++  '{' \
++  '  volatile long long a = 9223372036854775807LL;' \
++  '  volatile long long b = 17;' \
++  '  return a / b == 542551296285575047LL ? 0 : 1;' \
++  '}' > "$artifact_root/install-libgcc-smoke.c"
++"$install_prefix/bin/gcc" -shared-libgcc \
++  "$artifact_root/install-libgcc-smoke.c" \
++  -Wl,-rpath,"$install_prefix/lib" \
++  -o "$artifact_root/install-libgcc-smoke"
++"$artifact_root/install-libgcc-smoke"
++
++printf '%s\n' \
++  'int unified_shared_value(void) { return 42; }' \
++  > "$artifact_root/install-shared-smoke.c"
++"$install_prefix/bin/gcc" -fPIC -shared \
++  "$artifact_root/install-shared-smoke.c" \
++  -o "$artifact_root/install-shared-smoke.so"
++
++printf '%s\n' \
++  'int main(void) { return 0; }' > "$artifact_root/install-gcov-smoke.c"
++rm -f "$artifact_root/install-gcov-smoke.gcda" \
++  "$artifact_root/install-gcov-smoke.gcno" \
++  "$artifact_root/install-gcov-smoke.c.gcov"
++"$install_prefix/bin/gcc" -fprofile-arcs -ftest-coverage -c \
++  "$artifact_root/install-gcov-smoke.c" \
++  -o "$artifact_root/install-gcov-smoke.o"
++"$install_prefix/bin/gcc" -fprofile-arcs \
++  "$artifact_root/install-gcov-smoke.o" \
++  -o "$artifact_root/install-gcov-smoke"
++"$artifact_root/install-gcov-smoke"
++(cd "$artifact_root" && "$install_prefix/bin/gcov" install-gcov-smoke.c)
++test -f "$artifact_root/install-gcov-smoke.c.gcov"
++
++test "`ar t "$runtime_root/libgcc.a" | wc -l`" -eq 1
++test "`ar t "$runtime_root/libgcc_eh.a" | wc -l`" -eq 1
++test "`ar t "$runtime_root/libgcov.a" | wc -l`" -eq 1
++nm -D "$runtime_root/libgcc_s.so.1" | grep ' T _Unwind_RaiseException'
++nm -D "$runtime_root/libgcc_s.so.1" | grep ' T __udivmoddi4'
++
++echo "Built and installed the complete unified C compiler in $install_prefix"
+diff --git a/build-gcc-unified.sh b/build-gcc-unified.sh
+new file mode 100755
+index 00000000..deb1cad6
+--- /dev/null
++++ b/build-gcc-unified.sh
+@@ -0,0 +1,10 @@
++#!/bin/sh
++
++# Convenience wrapper for both fixed unified build stages.
++
++set -eux
++
++source_root=`CDPATH= cd "\`dirname "$0"\`" && pwd`
++
++"$source_root/build-cc1-unified.sh"
++"$source_root/build-gcc-unified-tools.sh"
 diff --git a/build.sh b/build.sh
 new file mode 100755
 index 00000000..3f424880
@@ -2780,10 +4995,10 @@ index 00000000..3f424880
 +exec "$make_program" -j"$jobs" "$@"
 diff --git a/check-cc1-unified.sh b/check-cc1-unified.sh
 new file mode 100755
-index 00000000..cceaf093
+index 00000000..f03cf45c
 --- /dev/null
 +++ b/check-cc1-unified.sh
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,89 @@
 +#!/bin/sh
 +
 +# Build the ordinary GCC driver/test harness, substitute the already-built
@@ -2796,6 +5011,7 @@ index 00000000..cceaf093
 +build_root=`pwd`
 +artifact_root=${UNIFIED_ARTIFACTS-$build_root/unified-artifacts}
 +unified_cc1=${UNIFIED_CC1-$artifact_root/cc1_unified}
++temporary_root=$artifact_root/tmp
 +test_tools=${TEST_TOOLS-/tmp/test_tools}
 +make_program=${MAKE-make}
 +saved_cc1=$build_root/gcc/cc1.conventional-for-unified-check
@@ -2804,6 +5020,10 @@ index 00000000..cceaf093
 +  echo "run check-cc1-unified.sh from an out-of-tree build directory" >&2
 +  exit 1
 +}
++
++mkdir -p "$temporary_root"
++TMPDIR=$temporary_root
++export TMPDIR
 +
 +if test ! -x "$unified_cc1"; then
 +  "$source_root/build-cc1-unified.sh"
@@ -2868,6 +5088,109 @@ index 00000000..cceaf093
 +  exit "$compare_status"
 +fi
 +exit "$suite_status"
+diff --git a/check-gcc-unified-install.sh b/check-gcc-unified-install.sh
+new file mode 100755
+index 00000000..1643d819
+--- /dev/null
++++ b/check-gcc-unified-install.sh
+@@ -0,0 +1,97 @@
++#!/bin/sh
++
++# Run the complete C testsuite directly against the installed unified GCC.
++
++set -eux
++
++source_root=`CDPATH= cd "\`dirname "$0"\`" && pwd`
++build_root=`pwd`
++artifact_setting=${UNIFIED_ARTIFACTS-unified-artifacts}
++case $artifact_setting in
++  /*) artifact_root=$artifact_setting ;;
++  *) artifact_root=$build_root/$artifact_setting ;;
++esac
++results_root=$artifact_root/installed-testsuite
++temporary_root=$results_root/tmp
++install_prefix=${PREFIX-/tmp/gcc-4.2.1-unified}
++unified_gcc=$install_prefix/bin/gcc
++test_tools=${TEST_TOOLS-/tmp/test_tools}
++runtest_flags=${RUNTESTFLAGS-}
++
++test "$build_root" != "$source_root" || {
++  echo "run check-gcc-unified-install.sh from an out-of-tree build directory" >&2
++  exit 1
++}
++
++test -x "$unified_gcc" || {
++  echo "the complete unified compiler is missing: $unified_gcc" >&2
++  echo "run $source_root/build-gcc-unified.sh first" >&2
++  exit 1
++}
++
++if test ! -x "$test_tools/bin/runtest" || \
++   test ! -x "$test_tools/bin/expect"; then
++  echo "DejaGnu/Expect are missing under $test_tools" >&2
++  echo "Build /home/foo/src/test_deps with build-test-tools-etch.sh first." >&2
++  exit 1
++fi
++
++# GCC's Makefile normally writes these fixed native values to site.exp.  The
++# standalone unified path writes the equivalent file directly and needs no
++# configured or conventionally compiled GCC build tree.
++mkdir -p "$results_root" "$temporary_root"
++printf '%s\n' \
++  '# Generated by check-gcc-unified-install.sh.' \
++  "set rootme \"$install_prefix/lib\"" \
++  "set srcdir \"$source_root/gcc/testsuite\"" \
++  'set host_triplet i686-pc-linux-gnu' \
++  'set build_triplet i686-pc-linux-gnu' \
++  'set target_triplet i686-pc-linux-gnu' \
++  'set target_alias i686-pc-linux-gnu' \
++  'set libiconv ""' \
++  'set CFLAGS ""' \
++  'set CXXFLAGS ""' \
++  'set HOSTCC "/usr/bin/gcc"' \
++  'set HOSTCFLAGS ""' \
++  "set tmpdir \"$temporary_root\"" \
++  "set GCC_UNDER_TEST \"$unified_gcc\"" \
++  > "$results_root/site.exp"
++
++PATH=$test_tools/bin:$PATH
++TMPDIR=$temporary_root
++LANG=C
++LC_ALL=C
++export PATH TMPDIR LANG LC_ALL
++
++suite_status=0
++(cd "$results_root" && \
++  "$test_tools/bin/runtest" --tool gcc \
++    --srcdir "$source_root/gcc/testsuite" $runtest_flags) || suite_status=$?
++
++sum_file=$results_root/gcc.sum
++compare_status=0
++if test -z "$runtest_flags"; then
++  "$source_root/contrib/compare-cc1-unified-testsuite.sh" "$sum_file" || \
++    compare_status=$?
++else
++  echo "targeted RUNTESTFLAGS run; checking for unexpected outcomes"
++  if grep -E '^(FAIL|XPASS|ERROR):' "$sum_file"; then
++    compare_status=1
++  fi
++  for result_kind in PASS XFAIL FAIL XPASS UNRESOLVED UNTESTED UNSUPPORTED ERROR; do
++    result_count=`grep -c "^$result_kind:" "$sum_file" || true`
++    echo "$result_kind=$result_count"
++  done
++fi
++
++if test "$suite_status" -ne 0; then
++  echo "runtest returned $suite_status" >&2
++fi
++if test "$compare_status" -ne 0; then
++  echo "installed unified GCC produced unexpected testsuite results" >&2
++  exit "$compare_status"
++fi
++# DejaGNU returns nonzero for the one recorded UNRESOLVED result.  The exact
++# baseline comparison above is more specific: accept a matching full run (or
++# a targeted run without FAIL/XPASS/ERROR) despite that coarse exit status.
++exit 0
 diff --git a/check.sh b/check.sh
 new file mode 100755
 index 00000000..a3de0333
@@ -2902,6 +5225,175 @@ index 00000000..a3de0333
 +fi
 +
 +exec ${MAKE-make} -k "$@"
+diff --git a/contrib/analyze-cc1-unified-lines.sh b/contrib/analyze-cc1-unified-lines.sh
+new file mode 100755
+index 00000000..0597f7eb
+--- /dev/null
++++ b/contrib/analyze-cc1-unified-lines.sh
+@@ -0,0 +1,163 @@
++#!/bin/sh
++
++# Compare the physical cc1 implementation inputs with the preprocessed unity
++# translation unit and attribute preprocessed lines using GCC line markers.
++
++set -eu
++
++source_root=`CDPATH= cd "\`dirname "$0"\`/.." && pwd`
++build_root=`pwd`
++artifact_setting=${UNIFIED_ARTIFACTS-unified-artifacts}
++case $artifact_setting in
++  /*) artifact_root=$artifact_setting ;;
++  *) artifact_root=$build_root/$artifact_setting ;;
++esac
++generated_base=$artifact_root/generated
++preprocessed_file=${PREPROCESSED_FILE-$artifact_root/benchmark-cc1-phases/cc1_unified.i}
++manifest=$source_root/gcc/cc1-unified-sources.manifest
++attribute_file=${TMPDIR-/tmp}/cc1-unified-line-attributes.$$
++physical_file=${TMPDIR-/tmp}/cc1-unified-physical-lines.$$
++md_file=${TMPDIR-/tmp}/cc1-unified-md-lines.$$
++
++cleanup ()
++{
++  rm -f "$attribute_file" "$physical_file" "$md_file"
++}
++
++trap cleanup 0 1 2 3 15
++
++test -f "$preprocessed_file" || {
++  echo "missing preprocessed input: $preprocessed_file" >&2
++  echo "run contrib/benchmark-cc1-unified-phases.sh first" >&2
++  exit 1
++}
++test -f "$manifest" || {
++  echo "missing unified source manifest: $manifest" >&2
++  exit 1
++}
++
++awk -F '\t' -v source_root="$source_root" \
++    -v generated_base="$generated_base" '
++  !/^#/ {
++    kind=$2
++    origin=$4
++    if (sub(/^source:/, "", origin))
++      file=source_root "/" origin
++    else if (sub(/^build:/, "", origin))
++      file=generated_base "/" origin
++    else
++      next
++    print kind "\t" file
++  }
++' "$manifest" | while IFS="`printf '\t'`" read kind file; do
++  test -f "$file" || {
++    echo "manifest input is missing: $file" >&2
++    exit 1
++  }
++  lines=`wc -l < "$file"`
++  printf '%s\t%s\t%s\n' "$lines" "$kind" "$file"
++done > "$physical_file"
++
++awk '
++  /^# [0-9]+ "/ {
++    file=$0
++    sub(/^# [0-9]+ "/, "", file)
++    sub(/".*$/, "", file)
++    markers++
++    next
++  }
++  {
++    all[file]++
++    if ($0 ~ /^[ \t]*$/)
++      blank[file]++
++    else
++      nonblank[file]++
++  }
++  END {
++    for (file in all)
++      printf "%d\t%d\t%d\t%s\n", all[file], nonblank[file], blank[file], file
++    printf "#markers\t%d\n", markers > "/dev/stderr"
++  }
++' "$preprocessed_file" 2> "$md_file" > "$attribute_file"
++
++physical_total=`awk -F '\t' '{total += $1} END {print total}' "$physical_file"`
++implementation_count=`awk -F '\t' 'END {print NR}' "$physical_file"`
++preprocessed_total=`wc -l < "$preprocessed_file"`
++marker_total=`awk -F '\t' '$1 == "#markers" {print $2}' "$md_file"`
++data_total=`awk -F '\t' '{total += $1} END {print total}' "$attribute_file"`
++nonblank_total=`awk -F '\t' '{total += $2} END {print total}' "$attribute_file"`
++blank_total=`awk -F '\t' '{total += $3} END {print total}' "$attribute_file"`
++
++echo "cc1_unified.c line analysis"
++echo "preprocessed-file=$preprocessed_file"
++echo
++printf '%-38s %10s\n' metric lines
++printf '%-38s %10d\n' "unity wrapper" `wc -l < "$source_root/gcc/cc1_unified.c"`
++printf '%-38s %10d\n' "$implementation_count implementation inputs" "$physical_total"
++printf '%-38s %10d\n' "preprocessed file" "$preprocessed_total"
++printf '%-38s %10d\n' "preprocessor line markers" "$marker_total"
++printf '%-38s %10d\n' "attributed data lines" "$data_total"
++printf '%-38s %10d\n' "attributed nonblank lines" "$nonblank_total"
++printf '%-38s %10d\n' "attributed blank lines" "$blank_total"
++
++echo
++echo "Physical implementation inputs by manifest class"
++printf '%10s %8s  %s\n' lines files class
++awk -F '\t' '
++  {lines[$2]+=$1; files[$2]++}
++  END {
++    for (kind in lines)
++      printf "%10d\t%8d\t%s\n", lines[kind], files[kind], kind
++  }
++' "$physical_file" | sort -nr
++
++echo
++echo "Preprocessed data lines by attributed file type"
++printf '%10s %10s %10s  %s\n' all nonblank blank type
++awk -F '\t' '
++  {
++    file=$4
++    if (file ~ /\.c$/)
++      kind="C implementation/generated C"
++    else if (file ~ /\.h$/)
++      kind="headers"
++    else if (file ~ /\.md$/)
++      kind="machine descriptions"
++    else if (file ~ /\.def$/)
++      kind="definition tables"
++    else
++      kind="other"
++    all[kind]+=$1
++    nonblank[kind]+=$2
++    blank[kind]+=$3
++  }
++  END {
++    for (kind in all)
++      printf "%10d\t%10d\t%10d\t%s\n", all[kind], nonblank[kind], blank[kind], kind
++  }
++' "$attribute_file" | sort -nr
++
++echo
++echo "Largest attributed preprocessed contributors"
++printf '%10s %10s %10s  %s\n' all nonblank blank file
++sort -t "`printf '\t'`" -k1,1nr "$attribute_file" | sed -n '1,20p'
++
++echo
++echo "Largest attributed headers"
++printf '%10s %10s %10s  %s\n' all nonblank blank file
++awk -F '\t' '$4 ~ /\.h$/ {print}' "$attribute_file" |
++  sort -t "`printf '\t'`" -k1,1nr | sed -n '1,20p'
++
++awk -F '\t' '$4 ~ /\.md$/ {print}' "$attribute_file" |
++while IFS="`printf '\t'`" read emitted nonblank blank file; do
++  if test -f "$file"; then
++    physical=`wc -l < "$file"`
++    delta=`expr "$emitted" - "$physical"`
++    printf '%d\t%d\t%d\t%s\n' "$delta" "$physical" "$emitted" "$file"
++  fi
++done > "$md_file"
++
++echo
++echo "Largest machine-description attribution expansions"
++printf '%10s %10s %10s  %s\n' delta physical attributed file
++sort -t "`printf '\t'`" -k1,1nr "$md_file" | sed -n '1,20p'
 diff --git a/contrib/analyze-cc1-unified.sh b/contrib/analyze-cc1-unified.sh
 new file mode 100755
 index 00000000..23026c75
@@ -3452,6 +5944,197 @@ index 00000000..002ff9e2
 +    exit 1
 +    ;;
 +esac
+diff --git a/contrib/benchmark-cc1-unified-phases.sh b/contrib/benchmark-cc1-unified-phases.sh
+new file mode 100755
+index 00000000..782c6ff2
+--- /dev/null
++++ b/contrib/benchmark-cc1-unified-phases.sh
+@@ -0,0 +1,185 @@
++#!/bin/sh
++
++# Measure where wall time is spent in the correctness-proven -O0 -g build of
++# gcc/cc1_unified.c.  Run from an out-of-tree directory after
++# build-cc1-unified.sh has prepared unified-artifacts/generated/gcc.
++
++set -eu
++
++source_root=`CDPATH= cd "\`dirname "$0"\`/.." && pwd`
++build_root=`pwd`
++artifact_setting=${UNIFIED_ARTIFACTS-unified-artifacts}
++case $artifact_setting in
++  /*) artifact_root=$artifact_setting ;;
++  *) artifact_root=$build_root/$artifact_setting ;;
++esac
++generated_root=$artifact_root/generated/gcc
++compiler=${CC-/usr/bin/gcc}
++runs=${RUNS-3}
++benchmark_setting=${BENCHMARK_OUTPUT-$artifact_root/benchmark-cc1-phases}
++case $benchmark_setting in
++  /*) benchmark_root=$benchmark_setting ;;
++  *) benchmark_root=$build_root/$benchmark_setting ;;
++esac
++
++test "$build_root" != "$source_root" || {
++  echo "run this benchmark from an out-of-tree build directory" >&2
++  exit 1
++}
++test -f "$generated_root/config.h" || {
++  echo "missing generated inputs under $generated_root" >&2
++  echo "run $source_root/build-cc1-unified.sh first" >&2
++  exit 1
++}
++command -v "$compiler" >/dev/null 2>&1 || {
++  echo "compiler is missing: $compiler" >&2
++  exit 1
++}
++case $runs in
++  *[!0-9]*|'') echo "RUNS must be a positive integer" >&2; exit 1 ;;
++  0) echo "RUNS must be a positive integer" >&2; exit 1 ;;
++esac
++
++mkdir -p "$benchmark_root"
++rm -f "$benchmark_root"/*.stdout "$benchmark_root"/*.stderr \
++  "$benchmark_root"/*.time "$benchmark_root"/*.o \
++  "$benchmark_root"/*.s "$benchmark_root"/*.i \
++  "$benchmark_root"/end-to-end-real-values
++
++core_defines="-DIN_GCC -DHAVE_CONFIG_H -DGCC_UNIFIED_EXTERNAL_CHECKSUM"
++core_includes="-I$generated_root -I$source_root/gcc -I$source_root/include -I$source_root/libcpp/include -I$source_root/libdecnumber"
++core_mode_flags="-O0 -g"
++source_file=$source_root/gcc/cc1_unified.c
++preprocessed_file=$benchmark_root/cc1_unified.i
++assembly_file=$benchmark_root/cc1_unified.s
++
++print_command ()
++{
++  printf '%s' '+'
++  for command_arg in "$@"; do
++    printf ' %s' "$command_arg"
++  done
++  printf '\n'
++}
++
++run_timed ()
++{
++  timing_name=$1
++  shift
++  print_command time -p "$@"
++  { time -p "$@"; } > "$benchmark_root/$timing_name.stdout" \
++    2> "$benchmark_root/$timing_name.stderr"
++  awk '/^real [0-9]/{real=$2} /^user [0-9]/{user=$2} /^sys [0-9]/{sys=$2}
++       END {printf "real %.2f\nuser %.2f\nsys %.2f\n", real, user, sys}' \
++    "$benchmark_root/$timing_name.stderr" \
++    > "$benchmark_root/$timing_name.time"
++}
++
++echo "Warming filesystem and compiler input caches"
++run_timed warmup "$compiler" -c $core_mode_flags $core_defines \
++  $core_includes "$source_file" -o "$benchmark_root/warmup.o"
++
++echo "Measuring preprocessing only"
++run_timed preprocess "$compiler" -E $core_defines $core_includes \
++  "$source_file" -o "$preprocessed_file"
++
++echo "Measuring preprocessed C to assembly"
++run_timed preprocessed-to-assembly "$compiler" -S $core_mode_flags \
++  "$preprocessed_file" -o "$assembly_file"
++
++echo "Measuring assembly to object"
++run_timed assemble /usr/bin/as --32 "$assembly_file" \
++  -o "$benchmark_root/assembled.o"
++
++echo "Measuring source to assembly in one driver invocation"
++run_timed source-to-assembly "$compiler" -S $core_mode_flags $core_defines \
++  $core_includes "$source_file" -o "$benchmark_root/source-direct.s"
++
++echo "Measuring normal source-to-object compilation $runs times"
++run_number=1
++while test "$run_number" -le "$runs"; do
++  run_name=end-to-end-$run_number
++  run_timed "$run_name" "$compiler" -c $core_mode_flags $core_defines \
++    $core_includes "$source_file" -o "$benchmark_root/$run_name.o"
++  awk '$1 == "real" {print $2}' "$benchmark_root/$run_name.time" \
++    >> "$benchmark_root/end-to-end-real-values"
++  run_number=`expr "$run_number" + 1`
++done
++
++sort -n "$benchmark_root/end-to-end-real-values" \
++  > "$benchmark_root/end-to-end-real-values.sorted"
++awk '{value[NR]=$1}
++     END {
++       if (NR % 2) print value[(NR + 1) / 2]
++       else printf "%.2f\n", (value[NR / 2] + value[NR / 2 + 1]) / 2
++     }' "$benchmark_root/end-to-end-real-values.sorted" \
++  > "$benchmark_root/end-to-end-real-median"
++
++echo "Collecting GCC internal phase report"
++run_timed ftime-report "$compiler" -c $core_mode_flags -ftime-report \
++  $core_defines $core_includes "$source_file" \
++  -o "$benchmark_root/ftime-report.o"
++
++preprocess_real=`awk '$1 == "real" {print $2}' "$benchmark_root/preprocess.time"`
++compile_real=`awk '$1 == "real" {print $2}' "$benchmark_root/preprocessed-to-assembly.time"`
++assemble_real=`awk '$1 == "real" {print $2}' "$benchmark_root/assemble.time"`
++source_assembly_real=`awk '$1 == "real" {print $2}' "$benchmark_root/source-to-assembly.time"`
++profile_real=`awk '$1 == "real" {print $2}' "$benchmark_root/ftime-report.time"`
++median_real=`cat "$benchmark_root/end-to-end-real-median"`
++
++{
++  echo "cc1_unified.c phase benchmark"
++  echo "compiler=$compiler"
++  "$compiler" --version | sed -n '1p'
++  echo "flags=$core_mode_flags $core_defines $core_includes"
++  echo "runs=$runs"
++  echo "memory=not measured: /usr/bin/time is unavailable in Etch"
++  echo
++  printf '%-28s %8s %8s %8s\n' phase real user sys
++  for phase in preprocess preprocessed-to-assembly assemble \
++    source-to-assembly ftime-report; do
++    awk -v phase="$phase" '
++      $1 == "real" {real=$2}
++      $1 == "user" {user=$2}
++      $1 == "sys" {sys=$2}
++      END {printf "%-28s %8.2f %8.2f %8.2f\n", phase, real, user, sys}
++    ' "$benchmark_root/$phase.time"
++  done
++  run_number=1
++  while test "$run_number" -le "$runs"; do
++    phase=end-to-end-$run_number
++    awk -v phase="$phase" '
++      $1 == "real" {real=$2}
++      $1 == "user" {user=$2}
++      $1 == "sys" {sys=$2}
++      END {printf "%-28s %8.2f %8.2f %8.2f\n", phase, real, user, sys}
++    ' "$benchmark_root/$phase.time"
++    run_number=`expr "$run_number" + 1`
++  done
++  printf '%-28s %8.2f\n' end-to-end-median \
++    "$median_real"
++  echo
++  awk -v preprocess="$preprocess_real" -v compile="$compile_real" \
++      -v assemble="$assemble_real" -v source_assembly="$source_assembly_real" \
++      -v median="$median_real" -v profile="$profile_real" '
++    BEGIN {
++      isolated = preprocess + compile + assemble
++      printf "isolated-phase-sum=%.2f seconds\n", isolated
++      printf "preprocess-share-of-isolated=%.2f%%\n", 100 * preprocess / isolated
++      printf "c-to-assembly-share-of-isolated=%.2f%%\n", 100 * compile / isolated
++      printf "assembler-share-of-isolated=%.2f%%\n", 100 * assemble / isolated
++      printf "direct-source-to-assembly-share-of-median=%.2f%%\n", 100 * source_assembly / median
++      printf "ftime-report-slowdown=%.2fx\n", profile / median
++    }
++  '
++  echo
++  wc -c "$source_file" "$preprocessed_file" "$assembly_file" \
++    "$benchmark_root/assembled.o"
++  echo
++  sha256sum "$benchmark_root/assembled.o" \
++    "$benchmark_root/end-to-end-1.o"
++} > "$benchmark_root/summary.txt"
++
++cat "$benchmark_root/summary.txt"
++echo "GCC internal timing report: $benchmark_root/ftime-report.stderr"
++echo "All benchmark artifacts: $benchmark_root"
 diff --git a/contrib/benchmark-cc1-unified-pilots.sh b/contrib/benchmark-cc1-unified-pilots.sh
 new file mode 100755
 index 00000000..2fb4ccfb
@@ -3978,6 +6661,113 @@ index 00000000..3cab6e96
 +
 +echo "placed files: `wc -l < "$output_root/placements.tsv" | tr -d ' '`"
 +echo "deferred files: `wc -l < "$output_root/deferred.tsv" | tr -d ' '`"
+diff --git a/contrib/tcc-0.9.27-case-local-reproducer.c b/contrib/tcc-0.9.27-case-local-reproducer.c
+new file mode 100644
+index 00000000..e8ebacf8
+--- /dev/null
++++ b/contrib/tcc-0.9.27-case-local-reproducer.c
+@@ -0,0 +1,40 @@
++/* TCC 0.9.27 must allocate locals whose declarations precede a case label.  */
++
++static int
++__attribute__ ((noinline))
++check (int first, int second, int third)
++{
++  return first == 11 && second == 22 && third == 33;
++}
++
++static int
++choose (int selector)
++{
++  int anchor;
++
++  anchor = 0;
++  switch (selector)
++    {
++    case 0:
++      break;
++
++    {
++      int first, second, third;
++
++    case 1:
++      first = 11;
++      second = 22;
++      third = 33;
++      return check (first, second, third);
++    }
++    }
++
++  return anchor;
++}
++
++int
++main (void)
++{
++  volatile int selector = 1;
++  return choose (selector) != 1;
++}
+diff --git a/contrib/tcc-0.9.27-nocode-local-allocation.patch b/contrib/tcc-0.9.27-nocode-local-allocation.patch
+new file mode 100644
+index 00000000..9a98b6b7
+--- /dev/null
++++ b/contrib/tcc-0.9.27-nocode-local-allocation.patch
+@@ -0,0 +1,6 @@
++--- tcc-0.9.27.orig/tccgen.c	2017-12-17 08:27:05.000000000 +0000
+++++ tcc-0.9.27/tccgen.c	2026-08-12 00:00:00.000000000 +0000
++@@ -6899,2 +6899,2 @@
++-    if (NODATA_WANTED)
+++    if (NODATA_WANTED && (r & VT_VALMASK) != VT_LOCAL)
++         size = 0, align = 1;
+diff --git a/contrib/tcc-debian-short-circuit-reproducer.c b/contrib/tcc-debian-short-circuit-reproducer.c
+new file mode 100644
+index 00000000..e34e176e
+--- /dev/null
++++ b/contrib/tcc-debian-short-circuit-reproducer.c
+@@ -0,0 +1,43 @@
++/* Return zero when TCC preserves reachable code after a dead && operand.  */
++
++volatile int target_flags;
++volatile int ix86_fpmath;
++
++enum machine_mode { SFmode = 12, DFmode = 13 };
++
++#define TARGET_SSE3  ((target_flags & (1 << 19)) != 0)
++#define TARGET_80387 ((target_flags & (1 << 3)) != 0)
++#define TARGET_SSE   ((target_flags & (1 << 17)) != 0)
++#define TARGET_SSE2  ((target_flags & (1 << 18)) != 0)
++#define TARGET_FISTTP (TARGET_SSE3 && TARGET_80387)
++#define TARGET_SSE_MATH ((ix86_fpmath & 1) != 0)
++#define SSE_FLOAT_MODE_P(MODE)                 \
++  ((TARGET_SSE && (MODE) == SFmode)            \
++   || (TARGET_SSE2 && (MODE) == DFmode))
++
++static int
++reproduce (void)
++{
++  if (TARGET_FISTTP
++      && !(0 && SSE_FLOAT_MODE_P (SFmode) && TARGET_SSE_MATH))
++    return 17;
++
++  if (0 && SSE_FLOAT_MODE_P (SFmode))
++    return 19;
++
++  return 23;
++}
++
++int
++main (void)
++{
++  target_flags = 0;
++  if (reproduce () != 23)
++    return 1;
++
++  target_flags = (1 << 19) | (1 << 3);
++  if (reproduce () != 17)
++    return 2;
++
++  return 0;
++}
 diff --git a/contrib/test-cc1-unified-pilots.sh b/contrib/test-cc1-unified-pilots.sh
 new file mode 100755
 index 00000000..873604eb
@@ -4109,6 +6899,30 @@ index 00000000..873604eb
 +trap - 0 1 2 3 15
 +
 +echo "decimal and core-tree unity pilots passed"
+diff --git a/contrib/unified-tcc-fp-reproducer.c b/contrib/unified-tcc-fp-reproducer.c
+new file mode 100644
+index 00000000..8644ce62
+--- /dev/null
++++ b/contrib/unified-tcc-fp-reproducer.c
+@@ -0,0 +1,18 @@
++/* Return zero when unordered floating-point comparison expansion is correct.  */
++
++__attribute__ ((noinline)) int
++comparison_is_wrong (double x, double y, int expected)
++{
++  if (__builtin_islessgreater (x, y))
++    return !expected;
++  return expected;
++}
++
++int
++main (void)
++{
++  volatile double zero = 0.0;
++  double nan = zero / zero;
++
++  return comparison_is_wrong (nan, nan, 0);
++}
 diff --git a/gcc/addresses.h b/gcc/addresses.h
 index 6741acac..9a7990be 100644
 --- a/gcc/addresses.h
@@ -5197,10 +8011,10 @@ index 00000000..777c1821
 +2	type_hash_table	backend-source/tree.o(b),direct-source/c-common.o(b)
 diff --git a/gcc/cc1_unified.c b/gcc/cc1_unified.c
 new file mode 100644
-index 00000000..b84efaae
+index 00000000..0b09c88c
 --- /dev/null
 +++ b/gcc/cc1_unified.c
-@@ -0,0 +1,1579 @@
+@@ -0,0 +1,1581 @@
 +/* Complete i686-linux cc1 amalgamation.
 +
 +   This is a deliberately maintained source driver, not a build-generated
@@ -5359,7 +8173,9 @@ index 00000000..b84efaae
 +#undef U
 +
 +/* 0028: build:gcc/cc1-checksum.c */
++#ifndef GCC_UNIFIED_EXTERNAL_CHECKSUM
 +#include "cc1-checksum.c"
++#endif
 +#include "core-tree-unified-boundary.h"
 +
 +/* 0029: source:gcc/main.c */
@@ -6780,6 +9596,18 @@ index 00000000..b84efaae
 +
 +/* Libiberty is compiled once by libiberty/libiberty_unified.c and linked as
 +   the same one-object archive used by the temporary generator programs.  */
+diff --git a/gcc/collect2_unified.c b/gcc/collect2_unified.c
+new file mode 100644
+index 00000000..447fc618
+--- /dev/null
++++ b/gcc/collect2_unified.c
+@@ -0,0 +1,6 @@
++/* Single-translation-unit build of collect2.  */
++
++#include "collect2.c"
++#include "tlink.c"
++#include "intl.c"
++#include "version.c"
 diff --git a/gcc/config/i386/i386.c b/gcc/config/i386/i386.c
 index 729dd408..44ee8729 100644
 --- a/gcc/config/i386/i386.c
@@ -6795,10 +9623,10 @@ index 729dd408..44ee8729 100644
  static int ix86_value_regno (enum machine_mode, tree, tree);
 diff --git a/gcc/core-tree-unified-boundary.h b/gcc/core-tree-unified-boundary.h
 new file mode 100644
-index 00000000..22c77def
+index 00000000..4786c84e
 --- /dev/null
 +++ b/gcc/core-tree-unified-boundary.h
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,51 @@
 +/* Translation-unit boundary for the core tree-IR unity pilot.
 +
 +   This header is intentionally repeatable.  Boundary restorations discovered
@@ -6826,6 +9654,12 @@ index 00000000..22c77def
 +   chance to supply its matching generator fallback independently.  */
 +#undef HAVE_conditional_trap
 +#undef gen_conditional_trap
++
++/* bb-reorder.c and ifcvt.c define a zero-valued fallback when the target has
++   no conditional-execution pattern.  Other implementations test whether the
++   macro is defined, rather than its value, so that fallback must end at the
++   conventional translation-unit boundary.  */
++#undef HAVE_conditional_execution
 +
 +/* combine.c and cse.c specialize these initializer fields for their private
 +   hook tables.  In separate translation units those definitions disappear at
@@ -6903,6 +9737,66 @@ index 1f96477f..e209cd53 100644
  #endif
 +
 +#endif /* GCC_EXCEPT_H */
+diff --git a/gcc/gbl-ctors.h b/gcc/gbl-ctors.h
+index 638cc451..b4b7a8b2 100644
+--- a/gcc/gbl-ctors.h
++++ b/gcc/gbl-ctors.h
+@@ -38,6 +38,9 @@ Software Foundation, 51 Franklin Street, Fifth Floor, Boston, MA
+ 	Note that this file should only be compiled with GCC.
+ */
+ 
++#ifndef GCC_GBL_CTORS_H
++#define GCC_GBL_CTORS_H
++
+ /*  Declare a pointer to void function type.  */
+ 
+ typedef void (*func_ptr) (void);
+@@ -84,3 +87,4 @@ do {									\
+ } while (0)
+ #endif
+ 
++#endif /* GCC_GBL_CTORS_H */
+diff --git a/gcc/gcc_driver_unified.c b/gcc/gcc_driver_unified.c
+new file mode 100644
+index 00000000..ea5bf7c1
+--- /dev/null
++++ b/gcc/gcc_driver_unified.c
+@@ -0,0 +1,18 @@
++/* Single-translation-unit build of the native GCC driver.  */
++
++#include "gcc.c"
++#include "opts-common.c"
++#include "options.c"
++
++#ifdef GCC_UNIFIED_CPP_DRIVER
++#include "cppspec.c"
++#else
++#include "gccspec.c"
++#endif
++
++#include "intl.c"
++#define save_string gcc_unified_prefix_save_string
++#include "prefix.c"
++#undef save_string
++#include "version.c"
++#include "config/i386/driver-i386.c"
+diff --git a/gcc/gcov_unified.c b/gcc/gcov_unified.c
+new file mode 100644
+index 00000000..1b3787db
+--- /dev/null
++++ b/gcc/gcov_unified.c
+@@ -0,0 +1,11 @@
++/* Single-translation-unit build of gcov or gcov-dump.  */
++
++#ifdef GCC_UNIFIED_GCOV_DUMP
++#include "gcov-dump.c"
++#else
++#include "gcov.c"
++#include "intl.c"
++#endif
++
++#include "version.c"
++#include "errors.c"
 diff --git a/gcc/gcse.c b/gcc/gcse.c
 index b28273d4..0aaf72f2 100644
 --- a/gcc/gcse.c
@@ -7089,6 +9983,342 @@ index 3a7f98f5..deafa299 100644
    readyp->vec = XRESIZEVEC (rtx, readyp->vec, readyp->veclen);
   
    ready_try = xrecalloc (ready_try, rgn_n_insns + n_new_insns + 1,
+diff --git a/gcc/libgcc2.c b/gcc/libgcc2.c
+index 851bdd07..e6182dc1 100644
+--- a/gcc/libgcc2.c
++++ b/gcc/libgcc2.c
+@@ -837,7 +837,8 @@ __parityDI2 (UDWtype x)
+ #ifdef L_udivmoddi4
+ 
+ #if (defined (L_udivdi3) || defined (L_divdi3) || \
+-     defined (L_umoddi3) || defined (L_moddi3))
++     defined (L_umoddi3) || defined (L_moddi3)) \
++    && !defined (GCC_UNIFIED_LIBGCC_EXPORT_UDIVMOD)
+ static inline __attribute__ ((__always_inline__))
+ #endif
+ UDWtype
+@@ -1914,6 +1915,7 @@ CONCAT3(__div,MODE,3) (MTYPE a, MTYPE b, MTYPE c, MTYPE d)
+ 
+ /* From here on down, the routines use normal data types.  */
+ 
++#ifndef GCC_UNIFIED_LIBGCC
+ #define SItype bogus_type
+ #define USItype bogus_type
+ #define DItype bogus_type
+@@ -1934,6 +1936,7 @@ CONCAT3(__div,MODE,3) (MTYPE a, MTYPE b, MTYPE c, MTYPE d)
+ #undef unsigned
+ #undef float
+ #undef double
++#endif /* ! GCC_UNIFIED_LIBGCC */
+ 
+ #ifdef L__gcc_bcmp
+ 
+diff --git a/gcc/libgcc2_unified.c b/gcc/libgcc2_unified.c
+new file mode 100644
+index 00000000..30486f1f
+--- /dev/null
++++ b/gcc/libgcc2_unified.c
+@@ -0,0 +1,92 @@
++/* Single-translation-unit build of the configured i686 libgcc2 closure.  */
++
++#define GCC_UNIFIED_LIBGCC 1
++
++#define GCC_UNIFIED_LIBGCC_DEFINE
++#include "libgcc2_unified_select.h"
++#undef GCC_UNIFIED_LIBGCC_DEFINE
++#define GCC_UNIFIED_LIBGCC_EXPORT_UDIVMOD 1
++#include "libgcc2.c"
++#undef GCC_UNIFIED_LIBGCC_EXPORT_UDIVMOD
++#include "libgcc2_unified_cleanup.h"
++#include "libgcc2_unified_select.h"
++
++#define L_floatdisf
++#include "libgcc2.c"
++#undef L_floatdisf
++#include "libgcc2_unified_cleanup.h"
++
++#define L_floatdidf
++#include "libgcc2.c"
++#undef L_floatdidf
++#include "libgcc2_unified_cleanup.h"
++
++#define L_floatundisf
++#include "libgcc2.c"
++#undef L_floatundisf
++#include "libgcc2_unified_cleanup.h"
++
++#define L_floatundidf
++#include "libgcc2.c"
++#undef L_floatundidf
++#include "libgcc2_unified_cleanup.h"
++
++#define L_powisf2
++#include "libgcc2.c"
++#undef L_powisf2
++#include "libgcc2_unified_cleanup.h"
++
++#define L_powidf2
++#include "libgcc2.c"
++#undef L_powidf2
++#include "libgcc2_unified_cleanup.h"
++
++#define L_powixf2
++#include "libgcc2.c"
++#undef L_powixf2
++#include "libgcc2_unified_cleanup.h"
++
++#define L_powitf2
++#include "libgcc2.c"
++#undef L_powitf2
++#include "libgcc2_unified_cleanup.h"
++
++#define L_mulsc3
++#include "libgcc2.c"
++#undef L_mulsc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_muldc3
++#include "libgcc2.c"
++#undef L_muldc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_mulxc3
++#include "libgcc2.c"
++#undef L_mulxc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_multc3
++#include "libgcc2.c"
++#undef L_multc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_divsc3
++#include "libgcc2.c"
++#undef L_divsc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_divdc3
++#include "libgcc2.c"
++#undef L_divdc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_divxc3
++#include "libgcc2.c"
++#undef L_divxc3
++#include "libgcc2_unified_cleanup.h"
++
++#define L_divtc3
++#include "libgcc2.c"
++#undef L_divtc3
++#include "libgcc2_unified_cleanup.h"
+diff --git a/gcc/libgcc2_unified_cleanup.h b/gcc/libgcc2_unified_cleanup.h
+new file mode 100644
+index 00000000..eddd9e86
+--- /dev/null
++++ b/gcc/libgcc2_unified_cleanup.h
+@@ -0,0 +1,29 @@
++/* Reset libgcc2.c internals before selecting another mutually-exclusive pass. */
++
++#undef DI_SIZE
++#undef F_MODE_OK
++#undef FUNC
++#undef FSTYPE
++#undef FSSIZE
++#undef FSIZE
++#undef FTYPE
++#undef REP_BIT
++#undef TYPE
++#undef NAME
++#undef MTYPE
++#undef CTYPE
++#undef MODE
++#undef CEXT
++#undef NOTRUNC
++#undef CONCAT3
++#undef _CONCAT3
++#undef CONCAT2
++#undef _CONCAT2
++#undef isnan
++#undef isfinite
++#undef isinf
++#undef INFINITY
++#undef I
++#undef COPYSIGN
++#undef FABS
++#undef TRUNC
+diff --git a/gcc/libgcc2_unified_select.h b/gcc/libgcc2_unified_select.h
+new file mode 100644
+index 00000000..e0260a3b
+--- /dev/null
++++ b/gcc/libgcc2_unified_select.h
+@@ -0,0 +1,120 @@
++/* Define or undefine the libgcc2 selectors which can coexist in one pass.  */
++
++#ifdef GCC_UNIFIED_LIBGCC_DEFINE
++#define L_muldi3
++#define L_negdi2
++#define L_lshrdi3
++#define L_ashldi3
++#define L_ashrdi3
++#define L_cmpdi2
++#define L_ucmpdi2
++#define L_clear_cache
++#define L_enable_execute_stack
++#define L_trampoline
++#define L__main
++#define L_absvsi2
++#define L_absvdi2
++#define L_addvsi3
++#define L_addvdi3
++#define L_subvsi3
++#define L_subvdi3
++#define L_mulvsi3
++#define L_mulvdi3
++#define L_negvsi2
++#define L_negvdi2
++#define L_ctors
++#define L_ffssi2
++#define L_ffsdi2
++#define L_clz
++#define L_clzsi2
++#define L_clzdi2
++#define L_ctzsi2
++#define L_ctzdi2
++#define L_popcount_tab
++#define L_popcountsi2
++#define L_popcountdi2
++#define L_paritysi2
++#define L_paritydi2
++#define L_fixunssfsi
++#define L_fixunsdfsi
++#define L_fixunsxfsi
++#define L_fixsfdi
++#define L_fixunssfdi
++#define L_fixdfdi
++#define L_fixunsdfdi
++#define L_fixxfdi
++#define L_fixunsxfdi
++#define L_fixtfdi
++#define L_fixunstfdi
++#define L_floatdixf
++#define L_floatundixf
++#define L_floatditf
++#define L_floatunditf
++#define L_divdi3
++#define L_moddi3
++#define L_udivdi3
++#define L_umoddi3
++#define L_udiv_w_sdiv
++#ifndef SHARED
++#define L_eprintf
++#define L__gcc_bcmp
++#endif
++#else
++#undef L_muldi3
++#undef L_negdi2
++#undef L_lshrdi3
++#undef L_ashldi3
++#undef L_ashrdi3
++#undef L_cmpdi2
++#undef L_ucmpdi2
++#undef L_clear_cache
++#undef L_enable_execute_stack
++#undef L_trampoline
++#undef L__main
++#undef L_absvsi2
++#undef L_absvdi2
++#undef L_addvsi3
++#undef L_addvdi3
++#undef L_subvsi3
++#undef L_subvdi3
++#undef L_mulvsi3
++#undef L_mulvdi3
++#undef L_negvsi2
++#undef L_negvdi2
++#undef L_ctors
++#undef L_ffssi2
++#undef L_ffsdi2
++#undef L_clz
++#undef L_clzsi2
++#undef L_clzdi2
++#undef L_ctzsi2
++#undef L_ctzdi2
++#undef L_popcount_tab
++#undef L_popcountsi2
++#undef L_popcountdi2
++#undef L_paritysi2
++#undef L_paritydi2
++#undef L_fixunssfsi
++#undef L_fixunsdfsi
++#undef L_fixunsxfsi
++#undef L_fixsfdi
++#undef L_fixunssfdi
++#undef L_fixdfdi
++#undef L_fixunsdfdi
++#undef L_fixxfdi
++#undef L_fixunsxfdi
++#undef L_fixtfdi
++#undef L_fixunstfdi
++#undef L_floatdixf
++#undef L_floatundixf
++#undef L_floatditf
++#undef L_floatunditf
++#undef L_divdi3
++#undef L_moddi3
++#undef L_udivdi3
++#undef L_umoddi3
++#undef L_udiv_w_sdiv
++#undef L_udivmoddi4
++#undef L_eprintf
++#undef L__gcc_bcmp
++#endif
+diff --git a/gcc/libgcc_eh_unified.c b/gcc/libgcc_eh_unified.c
+new file mode 100644
+index 00000000..92502841
+--- /dev/null
++++ b/gcc/libgcc_eh_unified.c
+@@ -0,0 +1,17 @@
++/* Single-translation-unit build of the configured i686 unwinder closure.  */
++
++#define __gthread_active_p gcc_unified_posix_gthread_active_p
++#define __gthread_mutex_lock gcc_unified_posix_gthread_mutex_lock
++#define __gthread_mutex_unlock gcc_unified_posix_gthread_mutex_unlock
++#include "unwind-dw2.c"
++#include "unwind-dw2-fde-glibc.c"
++#include "unwind-sjlj.c"
++#include "unwind-c.c"
++#undef __gthread_active_p
++#undef __gthread_mutex_lock
++#undef __gthread_mutex_unlock
++#undef __GTHREAD_MUTEX_INIT
++
++#define __gthread_mutex_t gcc_unified_gnat_mutex_t
++#include "gthr-gnat.c"
++#undef __gthread_mutex_t
+diff --git a/gcc/libgcov_unified.c b/gcc/libgcov_unified.c
+new file mode 100644
+index 00000000..82cfc1e3
+--- /dev/null
++++ b/gcc/libgcov_unified.c
+@@ -0,0 +1,18 @@
++/* Single-translation-unit build of the configured i686 libgcov closure.  */
++
++#define L_gcov
++#define L_gcov_merge_add
++#define L_gcov_merge_single
++#define L_gcov_merge_delta
++#define L_gcov_fork
++#define L_gcov_execl
++#define L_gcov_execlp
++#define L_gcov_execle
++#define L_gcov_execv
++#define L_gcov_execvp
++#define L_gcov_execve
++#define L_gcov_interval_profiler
++#define L_gcov_pow2_profiler
++#define L_gcov_one_value_profiler
++
++#include "libgcov.c"
 diff --git a/gcc/loop-iv.c b/gcc/loop-iv.c
 index fcf4a252..7620cb2a 100644
 --- a/gcc/loop-iv.c
@@ -7441,27 +10671,43 @@ index 00000000..31750cca
 +# Compilation is XFAIL; the old execution driver then has no program to run.
 diff --git a/gcc/testsuite/cc1-unified-current-regressions.txt b/gcc/testsuite/cc1-unified-current-regressions.txt
 new file mode 100644
-index 00000000..cd3c4876
+index 00000000..87eb6c57
 --- /dev/null
 +++ b/gcc/testsuite/cc1-unified-current-regressions.txt
-@@ -0,0 +1,17 @@
-+# Current fully unified cc1 regressions, complete run 2026-08-02.
+@@ -0,0 +1,33 @@
++# Fully unified cc1 regression state, updated 2026-08-11.
 +# This is a manually maintained diagnosis ledger, not an accepted baseline.
 +# Expected results remain in cc1-unified-known-nonpasses.txt.
 +
-+REGRESSION: gcc.dg/20050111-1.c: ICE plus excess-errors result (2 FAIL lines)
-+REGRESSION: gcc.dg/pch: all 36 header cases ICE in pch_init at c-pch.c:135 across seven option variants (504 FAIL lines)
-+REGRESSION: gcc.target/i386/lea.c: scan-assembler leal (1 FAIL line)
++TARGETED-FIXED: gcc.dg/20050111-1.c: conditional-execution fallback boundary
++TARGETED-FIXED: gcc.dg/pch: real executable checksum; 994 PASS, 28 UNTESTED
++TARGETED-FIXED: gcc.target/i386/lea.c: conditional-execution fallback boundary
 +
-+# Complete result:
-+PASS=41143
++# System-GCC- and TCC-produced unified cc1 executables pass all three targeted
++# categories.  The complete system-GCC-produced unified cc1 suite now exactly
++# matches the conventional baseline and its recorded non-pass set.
++FULL-SUITE-STATUS: baseline matched 2026-08-11
++CURRENT-UNEXPECTED-REGRESSIONS: none
++
++# Complete post-fix result:
++PASS=42139
 +XFAIL=116
-+FAIL=507
++FAIL=0
 +XPASS=0
 +UNRESOLVED=1
-+UNTESTED=504
++UNTESTED=28
 +UNSUPPORTED=293
 +ERROR=0
++
++# Last complete result, before the fixes above:
++PRE_FIX_PASS=41143
++PRE_FIX_XFAIL=116
++PRE_FIX_FAIL=507
++PRE_FIX_XPASS=0
++PRE_FIX_UNRESOLVED=1
++PRE_FIX_UNTESTED=504
++PRE_FIX_UNSUPPORTED=293
++PRE_FIX_ERROR=0
 diff --git a/gcc/testsuite/cc1-unified-known-nonpasses.txt b/gcc/testsuite/cc1-unified-known-nonpasses.txt
 new file mode 100644
 index 00000000..81689ca3
