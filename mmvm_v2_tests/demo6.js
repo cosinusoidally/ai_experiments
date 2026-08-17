@@ -10,12 +10,12 @@ var TRACK_POINTS = 96;
 var ROAD_HALF_WIDTH = 3.7;
 var WALL_OFFSET = 5.15;
 var RACE_LAPS = 3;
-var track = makeTrack();
-var terrainCells = makeTerrainCells();
-var depthBuffer = new Array(options.width * options.height);
-var depthStamps = new Array(options.width * options.height);
+var track;
+var terrainCells;
+var depthBuffer;
+var depthStamps;
 var depthGeneration = 0;
-var background = makeBackground(options.width, options.height);
+var background;
 var controls = {left: false, right: false, throttle: false, brake: false};
 var player;
 var competitors;
@@ -23,6 +23,13 @@ var lastFrameTime = 0;
 var camera;
 var raceFinished = false;
 var rollingMode = true;
+var gameReady = false;
+var loadingFrames = 0;
+var initializationStarted = false;
+var windowInfo = null;
+var frameRateCounter = options.fpsCounter !== false || options.debugEvents !== false ?
+                       new common.FrameRateCounter(options.fpsCounter !== false,
+                                                   options.debugEvents !== false) : null;
 
 function clamp(value, minimum, maximum) {
     return Math.max(minimum, Math.min(maximum, value));
@@ -216,8 +223,6 @@ function resetRace() {
     controls.throttle = false;
     controls.brake = false;
 }
-
-resetRace();
 
 function updatePlayerStep(dt) {
     if (rollingMode) {
@@ -718,9 +723,52 @@ function drawHud(framebuffer) {
     }
 }
 
+function drawLoading(framebuffer) {
+    var message = framebuffer.width >= 120 ? "LOADING..." : "LOAD";
+    paintText(framebuffer, message,
+              Math.max(0, Math.floor((framebuffer.width - message.length *
+                                      common.font.glyphAdvance) / 2)),
+              Math.max(0, Math.floor((framebuffer.height -
+                                      common.font.lineAdvance) / 2)));
+    framebuffer.requestFrame();
+}
+
+function reportGameReady() {
+    console.log("Welsh upland rally created: " + windowInfo.width + "x" +
+                windowInfo.height + ", 1 player and " + competitors.length +
+                " AI cars, " + RACE_LAPS + " laps, " +
+                windowInfo.framesPerSecond + " FPS limit");
+    console.log("Attract mode running; push Space to reset the grid and play");
+    console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
+}
+
+function initializeGame() {
+    track = makeTrack();
+    terrainCells = makeTerrainCells();
+    depthBuffer = new Array(options.width * options.height);
+    depthStamps = new Array(options.width * options.height);
+    depthGeneration = 0;
+    background = makeBackground(options.width, options.height);
+    resetRace();
+    gameReady = true;
+    reportGameReady();
+}
+
 function draw(framebuffer) {
     if (framebuffer.pixelFormat !== "bgrx32le") {
         throw new Error("demo6 requires a little-endian BGRX 32-bit X11 framebuffer");
+    }
+    if (!gameReady) {
+        if (loadingFrames === 0) {
+            loadingFrames++;
+            drawLoading(framebuffer);
+            return;
+        }
+        if (!initializationStarted) {
+            initializationStarted = true;
+            initializeGame();
+        }
+        if (!gameReady) return;
     }
     var now = new Date().getTime();
     if (!lastFrameTime) lastFrameTime = now;
@@ -741,7 +789,8 @@ function draw(framebuffer) {
     drawCar(framebuffer, player.x, player.y, player.z, player.heading,
             0xd94a32, true);
     drawHud(framebuffer);
-    framebuffer.requestFrame();
+    if (frameRateCounter) frameRateCounter.draw(framebuffer);
+    else framebuffer.requestFrame();
 }
 
 function setDrivingKey(event, pressed) {
@@ -766,13 +815,18 @@ var window = common.createWindow({
     width: options.width,
     height: options.height,
     fps: options.fps,
-    fpsCounter: options.fpsCounter,
-    debugEvents: options.debugEvents,
+    fpsCounter: false,
+    debugEvents: false,
     title: "demo6.js Welsh upland rally",
     instanceName: "demo6",
     className: "NodeX11Demo",
     draw: draw,
     keyPress: function (event, activeWindow) {
+        if (!gameReady) {
+            if (event.keysym === common.keysyms.escape ||
+                (!event.keysym && event.keycode === 9)) activeWindow.close();
+            return;
+        }
         if (event.keysym === 32 && (rollingMode || raceFinished)) {
             startHumanRace();
             return;
@@ -787,15 +841,12 @@ var window = common.createWindow({
         }
     },
     keyRelease: function (event) {
+        if (!gameReady) return;
         setDrivingKey(event, false);
     },
     ready: function (info) {
-        console.log("Welsh upland rally created: " + info.width + "x" +
-                    info.height + ", 1 player and " + competitors.length +
-                    " AI cars, " + RACE_LAPS + " laps, " +
-                    info.framesPerSecond + " FPS limit");
-        console.log("Attract mode running; push Space to reset the grid and play");
-        console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
+        windowInfo = info;
+        console.log("Rally window created; loading course and terrain...");
     },
     keyboardMapping: function (mapping) {
         if (options.debugEvents) {

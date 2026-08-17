@@ -620,6 +620,20 @@ Or run the same source directly under Node.js:
 node demo6.js --size 512x384 --fps 20
 ```
 
+Startup is deliberately split across two presented frames. The program opens
+the X11 window before generating the track, terrain, background, depth storage,
+road geometry, or race state. Its first framebuffer contains a centred
+`LOADING...` message (`LOAD` at the narrowest supported widths). Only after
+that framebuffer has completed its upload does the second draw begin the
+synchronous procedural build, so the X server displays the loading screen for
+the complete initialization interval. Escape can close the window during this
+stage; race input is ignored until initialization has completed.
+
+The FPS counter starts with the first game frame rather than the loading frame.
+Consequently the initial console sample does not include procedural build time,
+and disabling both FPS display and debug logging does not break startup: the
+loading draw explicitly requests the frame which triggers initialization.
+
 `demo6.js` is an original arcade-rally game level inspired by the general feel
 of late-1990s rally games rather than their assets or course designs. Its
 closed three-lap stage runs through a reproducibly generated Welsh-inspired
@@ -737,6 +751,11 @@ Or run the identical source directly under Node.js:
 node demo7.js --size 512x384 --fps 20
 ```
 
+Demo7 uses the same present-loading-then-initialize startup sequence as demo6.
+The loading path does not construct its terrain, optimized road sections,
+depth array, packed background, or solid-color span rows before the first
+window upload.
+
 `demo7.js` preserves demo6's course, full-resolution framebuffer, terrain,
 road detail, scenery, cars, five competitors, attract mode, physics, controls,
 HUD, and wall-clock-based simulation. It does not use pixel doubling, dynamic
@@ -765,15 +784,35 @@ The changes target repeated general-purpose work:
   SpiderMonkey, this is faster than generation stamps because every covered
   sample performs one array lookup instead of consulting separate depth and
   stamp arrays.
+- The shoulder is represented by its two visible edge bands instead of a
+  full-width quad hidden beneath the road. Ruts and mud remain simple raised
+  layers because splitting those narrow regions into extra triangles measured
+  no faster.
+- MMVM draws the player and road before terrain. This primes depth with the
+  large foreground surfaces and avoids native color writes behind them. Node
+  retains the more coherent background-to-front order that benchmarks best in
+  V8; both orders produce the same z-buffered image.
+- Ordered course distances are located with binary search rather than scanning
+  all 96 track segments for every player and AI sample. This is particularly
+  useful when a slow rendered frame requires several fixed physics substeps.
 
-Framebuffer colors use packed little-endian words. Under MMVM, the raster span
-writes through the interpreter's native `poke32`; under stock Node.js the same
-operation is polyfilled with `Buffer.writeUInt32LE`. The local packed-word
-adapter also maps reads to `peek32` or `Buffer.readUInt32LE`. The rasterizer
-specializes the two write cases inside its hot loop so neither runtime pays a
-JavaScript wrapper-function call for every pixel. The depth array deliberately
-remains JavaScript storage: a tested packed native depth buffer was slower in
-js_min because each sample acquired extra `peek32`/`poke32` boundary calls.
+Framebuffer colors use packed little-endian words. `poke32` constructs one
+native row for each encountered flat color. The MMVM rasterizer still evaluates
+and updates inverse depth per pixel, but it combines adjacent passing pixels
+into runs and copies each run with one call to the existing `NodeLibc.memmove`
+wrapper. This removes repeated FFI boundary crossings without weakening depth
+testing or introducing screen tiles. Stock Node.js retains its direct
+`Buffer.writeUInt32LE` pixel loop, which benchmarks better under V8. The local
+packed-word adapter maps individual reads and writes to `peek32`/`poke32` or
+`Buffer.readUInt32LE`/`Buffer.writeUInt32LE` as appropriate.
+
+The depth array deliberately remains JavaScript storage: a tested packed native
+depth buffer was slower in js_min because each sample acquired extra
+`peek32`/`poke32` boundary calls. Likewise, projected-vertex stamps, indexed
+road projection, uniform scene grids, distance-sorted terrain buckets, dynamic
+world-vertex pools, and separate indirectly selected span functions were all
+measured and removed when their bookkeeping outweighed the work they saved.
+There is no tile-level or hierarchical early-depth rejection.
 
 The table below records the first complete five-second attract-mode interval
 from otherwise identical 12-second runs. The FPS limit was set to 120 so it did
@@ -783,15 +822,16 @@ individual result slightly.
 
 | Runtime and framebuffer | demo6 | demo7 | Change |
 | --- | ---: | ---: | ---: |
-| `js_min.exe`, 160x120 | 4.3 FPS | 9.0 FPS | 2.09x |
-| `js_min.exe`, 256x192 | 2.5 FPS | 5.4 FPS | 2.16x |
-| Node.js 24, 512x384 | 20.3 FPS | 59.6 FPS | 2.94x |
+| `js_min.exe`, 160x120 | 4.3 FPS | 10.6 FPS | 2.47x |
+| `js_min.exe`, 256x192 | 2.5 FPS | 7.4 FPS | 2.96x |
+| Node.js 24, 512x384 | 20.3 FPS | 59.8 FPS | 2.95x |
 
-The optimized js_min renderer also measured 4.1 FPS at 320x240. A native
-640x480 MMVM frame remains expensive; demo7 intentionally does not conceal
-that limitation with upscaling. Node.js reaches the shared X11 layer's roughly
-60 Hz animation-frame scheduling ceiling at 512x384, so the optimization does
-not exchange Node performance for MMVM performance.
+The optimized js_min renderer also measured 6.0 FPS at 320x240. A longer
+25-second 640x480 run reported 2.4, 2.1, and 2.2 FPS in consecutive intervals.
+Native 640x480 therefore remains expensive; demo7 intentionally does not
+conceal that limitation with upscaling. Node.js reaches the shared X11 layer's
+roughly 60 Hz animation-frame scheduling ceiling at 512x384, so the
+optimization does not exchange Node performance for MMVM performance.
 
 ### Framebuffer drawing benchmark
 

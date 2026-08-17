@@ -10,11 +10,14 @@ var TRACK_POINTS = 96;
 var ROAD_HALF_WIDTH = 3.7;
 var WALL_OFFSET = 5.15;
 var RACE_LAPS = 3;
-var track = makeTrack();
-var terrainCells = makeTerrainCells();
-var roadSections = makeRoadSections();
-var depthBuffer = new Array(options.width * options.height);
-var background = makeBackground(options.width, options.height);
+var track;
+var terrainCells;
+var roadSections;
+var depthBuffer;
+var solidColorRows = {};
+var lastSolidColor = -1;
+var lastSolidRow = null;
+var background;
 var controls = {left: false, right: false, throttle: false, brake: false};
 var player;
 var competitors;
@@ -24,6 +27,13 @@ var raceFinished = false;
 var rollingMode = true;
 var projectedVertexPool = [];
 var projectedVertexCount = 0;
+var gameReady = false;
+var loadingFrames = 0;
+var initializationStarted = false;
+var windowInfo = null;
+var frameRateCounter = options.fpsCounter !== false || options.debugEvents !== false ?
+                       new common.FrameRateCounter(options.fpsCounter !== false,
+                                                   options.debugEvents !== false) : null;
 
 function clamp(value, minimum, maximum) {
     return Math.max(minimum, Math.min(maximum, value));
@@ -49,6 +59,23 @@ function peekPacked32(buffer, offset) {
 function pokePacked32(buffer, offset, value) {
     if (buffer._nodePointer) poke32(buffer._nodePointer + offset, value);
     else buffer.writeUInt32LE(value >>> 0, offset);
+}
+
+function solidColorRow(packed) {
+    packed = packed >>> 0;
+    if (packed === lastSolidColor) return lastSolidRow;
+    var key = String(packed);
+    var row = solidColorRows[key];
+    if (!row) {
+        row = allocatePacked(options.width * 4);
+        for (var offset = 0; offset < row.length; offset += 4) {
+            pokePacked32(row, offset, packed);
+        }
+        solidColorRows[key] = row;
+    }
+    lastSolidColor = packed;
+    lastSolidRow = row;
+    return row;
 }
 
 function makeBackground(width, height) {
@@ -131,15 +158,26 @@ function wrapDistance(distance) {
     return distance;
 }
 
-function sampleTrack(distance, lane) {
-    distance = wrapDistance(distance);
-    var segment = TRACK_POINTS - 1;
-    for (var i = 0; i < TRACK_POINTS; i++) {
-        if (distance < track[i].distance + track[i].segmentLength) {
-            segment = i;
-            break;
+function trackSegmentAtDistance(distance) {
+    var low = 0;
+    var high = TRACK_POINTS - 1;
+    while (low <= high) {
+        var middle = (low + high) >> 1;
+        var point = track[middle];
+        if (distance < point.distance) {
+            high = middle - 1;
+        } else if (distance >= point.distance + point.segmentLength) {
+            low = middle + 1;
+        } else {
+            return middle;
         }
     }
+    return TRACK_POINTS - 1;
+}
+
+function sampleTrack(distance, lane) {
+    distance = wrapDistance(distance);
+    var segment = trackSegmentAtDistance(distance);
     var first = track[segment];
     var second = track[(segment + 1) % TRACK_POINTS];
     var amount = (distance - first.distance) / first.segmentLength;
@@ -233,8 +271,6 @@ function resetRace() {
     controls.throttle = false;
     controls.brake = false;
 }
-
-resetRace();
 
 function updatePlayerStep(dt) {
     if (rollingMode) {
@@ -391,6 +427,12 @@ function rasterRows(framebuffer, firstY, lastY,
                     firstX, firstZ, firstXStep, firstZStep,
                     secondX, secondZ, secondXStep, secondZStep, packed) {
     var pixelAddress = framebuffer.pixelAddress;
+    if (pixelAddress) {
+        return rasterRowsNative(framebuffer, firstY, lastY,
+                                firstX, firstZ, firstXStep, firstZStep,
+                                secondX, secondZ, secondXStep, secondZStep,
+                                packed);
+    }
     var pixels = framebuffer.pixels;
     var width = framebuffer.width;
     var clippedFirstY = Math.max(0, firstY);
@@ -418,13 +460,67 @@ function rasterRows(framebuffer, firstY, lastY,
         var pixelOffset = pixelIndex * 4;
         for (var x = minimumX; x < maximumX; x++) {
             if (inverseZ > depthBuffer[pixelIndex]) {
-                if (pixelAddress) poke32(pixelAddress + pixelOffset, packed);
-                else pixels.writeUInt32LE(packed >>> 0, pixelOffset);
+                pixels.writeUInt32LE(packed >>> 0, pixelOffset);
                 depthBuffer[pixelIndex] = inverseZ;
             }
             inverseZ += depthStep;
             pixelIndex++;
             pixelOffset += 4;
+        }
+        firstX += firstXStep;
+        firstZ += firstZStep;
+        secondX += secondXStep;
+        secondZ += secondZStep;
+    }
+}
+
+function rasterRowsNative(framebuffer, firstY, lastY,
+                          firstX, firstZ, firstXStep, firstZStep,
+                          secondX, secondZ, secondXStep, secondZStep, packed) {
+    var pixelAddress = framebuffer.pixelAddress;
+    var colorRow = solidColorRow(packed);
+    var memmove = NodeLibc.memmove;
+    var width = framebuffer.width;
+    var clippedFirstY = Math.max(0, firstY);
+    var clippedLastY = Math.min(framebuffer.height, lastY);
+    var skippedRows = clippedFirstY - firstY;
+    firstX += firstXStep * skippedRows;
+    firstZ += firstZStep * skippedRows;
+    secondX += secondXStep * skippedRows;
+    secondZ += secondZStep * skippedRows;
+    for (var y = clippedFirstY; y < clippedLastY; y++) {
+        var leftX = firstX;
+        var leftZ = firstZ;
+        var rightX = secondX;
+        var rightZ = secondZ;
+        if (leftX > rightX) {
+            var swap = leftX; leftX = rightX; rightX = swap;
+            swap = leftZ; leftZ = rightZ; rightZ = swap;
+        }
+        var spanWidth = rightX - leftX;
+        var minimumX = Math.max(0, Math.ceil(leftX - 0.5));
+        var maximumX = Math.min(width, Math.ceil(rightX - 0.5));
+        var depthStep = spanWidth ? (rightZ - leftZ) / spanWidth : 0;
+        var inverseZ = leftZ + (minimumX + 0.5 - leftX) * depthStep;
+        var pixelIndex = y * width + minimumX;
+        var pixelOffset = pixelIndex * 4;
+        var runStartOffset = -1;
+        for (var nativeX = minimumX; nativeX < maximumX; nativeX++) {
+            if (inverseZ > depthBuffer[pixelIndex]) {
+                if (runStartOffset < 0) runStartOffset = pixelOffset;
+                depthBuffer[pixelIndex] = inverseZ;
+            } else if (runStartOffset >= 0) {
+                memmove(pixelAddress + runStartOffset, colorRow._nodePointer,
+                        pixelOffset - runStartOffset);
+                runStartOffset = -1;
+            }
+            inverseZ += depthStep;
+            pixelIndex++;
+            pixelOffset += 4;
+        }
+        if (runStartOffset >= 0) {
+            memmove(pixelAddress + runStartOffset, colorRow._nodePointer,
+                    pixelOffset - runStartOffset);
         }
         firstX += firstXStep;
         firstZ += firstZStep;
@@ -630,6 +726,13 @@ function addRoadQuad(section, a, b, c, d, color) {
     section.quads.push({a: a, b: b, c: c, d: d, color: color});
 }
 
+function addRoadBand(section, first, second, left, right, height, color) {
+    addRoadQuad(section, roadEdge(first, left, height),
+                roadEdge(second, left, height),
+                roadEdge(second, right, height),
+                roadEdge(first, right, height), color);
+}
+
 function addWallSection(section, first, second, offset, color) {
     var bottomFirst = roadEdge(first, offset, 0);
     var bottomSecond = roadEdge(second, offset, 0);
@@ -657,28 +760,18 @@ function makeRoadSections() {
                        quads: []};
         var shoulderColor = (i & 1) ? 0x72583a : 0x674d33;
         var roadColor = (i % 3) ? 0x8b7455 : 0x806949;
-        addRoadQuad(section, roadEdge(first, -4.45, -0.05),
-                    roadEdge(second, -4.45, -0.05),
-                    roadEdge(second, 4.45, -0.05),
-                    roadEdge(first, 4.45, -0.05), shoulderColor);
-        addRoadQuad(section, roadEdge(first, -ROAD_HALF_WIDTH, 0),
-                    roadEdge(second, -ROAD_HALF_WIDTH, 0),
-                    roadEdge(second, ROAD_HALF_WIDTH, 0),
-                    roadEdge(first, ROAD_HALF_WIDTH, 0), roadColor);
+        addRoadBand(section, first, second, -4.45, -ROAD_HALF_WIDTH,
+                    -0.05, shoulderColor);
+        addRoadBand(section, first, second, ROAD_HALF_WIDTH, 4.45,
+                    -0.05, shoulderColor);
+        addRoadBand(section, first, second, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH,
+                    0, roadColor);
         var rutColor = (i & 3) ? 0x5d4b37 : 0x68523a;
-        addRoadQuad(section, roadEdge(first, -1.38, 0.018),
-                    roadEdge(second, -1.38, 0.018),
-                    roadEdge(second, -0.82, 0.018),
-                    roadEdge(first, -0.82, 0.018), rutColor);
-        addRoadQuad(section, roadEdge(first, 0.82, 0.018),
-                    roadEdge(second, 0.82, 0.018),
-                    roadEdge(second, 1.38, 0.018),
-                    roadEdge(first, 1.38, 0.018), rutColor);
+        addRoadBand(section, first, second, -1.38, -0.82, 0.018, rutColor);
+        addRoadBand(section, first, second, 0.82, 1.38, 0.018, rutColor);
         if ((i % 5) === 2) {
-            addRoadQuad(section, roadEdge(first, -0.38, 0.022),
-                        roadEdge(second, -0.38, 0.022),
-                        roadEdge(second, 0.42, 0.022),
-                        roadEdge(first, 0.42, 0.022), 0x765d40);
+            addRoadBand(section, first, second, -0.38, 0.42, 0.022,
+                        0x765d40);
         }
 
         var wallShade = (i % 6) ? 0x77766c : 0x99998e;
@@ -845,9 +938,54 @@ function drawHud(framebuffer) {
     }
 }
 
+function drawLoading(framebuffer) {
+    var message = framebuffer.width >= 120 ? "LOADING..." : "LOAD";
+    paintText(framebuffer, message,
+              Math.max(0, Math.floor((framebuffer.width - message.length *
+                                      common.font.glyphAdvance) / 2)),
+              Math.max(0, Math.floor((framebuffer.height -
+                                      common.font.lineAdvance) / 2)));
+    framebuffer.requestFrame();
+}
+
+function reportGameReady() {
+    console.log("Welsh upland rally created: " + windowInfo.width + "x" +
+                windowInfo.height + ", 1 player and " + competitors.length +
+                " AI cars, " + RACE_LAPS + " laps, " +
+                windowInfo.framesPerSecond + " FPS limit");
+    console.log("Attract mode running; push Space to reset the grid and play");
+    console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
+}
+
+function initializeGame() {
+    track = makeTrack();
+    terrainCells = makeTerrainCells();
+    roadSections = makeRoadSections();
+    depthBuffer = new Array(options.width * options.height);
+    solidColorRows = {};
+    lastSolidColor = -1;
+    lastSolidRow = null;
+    background = makeBackground(options.width, options.height);
+    resetRace();
+    gameReady = true;
+    reportGameReady();
+}
+
 function draw(framebuffer) {
     if (framebuffer.pixelFormat !== "bgrx32le") {
         throw new Error("demo7 requires a little-endian BGRX 32-bit X11 framebuffer");
+    }
+    if (!gameReady) {
+        if (loadingFrames === 0) {
+            loadingFrames++;
+            drawLoading(framebuffer);
+            return;
+        }
+        if (!initializationStarted) {
+            initializationStarted = true;
+            initializeGame();
+        }
+        if (!gameReady) return;
     }
     var now = new Date().getTime();
     if (!lastFrameTime) lastFrameTime = now;
@@ -860,18 +998,33 @@ function draw(framebuffer) {
         depthBuffer[depthIndex] = 0;
     }
     background.copy(framebuffer.pixels, 0, 0, background.length);
-    drawHillsides(framebuffer);
-    drawRoad(framebuffer);
+    if (framebuffer.pixelAddress) {
+        /* Native writes are relatively expensive, so prime depth with the
+         * player and foreground road; hidden surfaces then fail without a
+         * poke32. */
+        drawCar(framebuffer, player.x, player.y, player.z, player.heading,
+                0xd94a32, true);
+        drawRoad(framebuffer);
+        drawHillsides(framebuffer);
+    } else {
+        /* V8's Buffer writes favor the original coherent background-to-front
+         * traversal; depth still makes the two orders visually identical. */
+        drawHillsides(framebuffer);
+        drawRoad(framebuffer);
+    }
     drawScenery(framebuffer);
     for (var i = 0; i < competitors.length; i++) {
         var ai = competitors[i];
         drawCar(framebuffer, ai.sample.x, ai.sample.y + 0.10, ai.sample.z,
                 ai.sample.heading, ai.color, false);
     }
-    drawCar(framebuffer, player.x, player.y, player.z, player.heading,
-            0xd94a32, true);
+    if (!framebuffer.pixelAddress) {
+        drawCar(framebuffer, player.x, player.y, player.z, player.heading,
+                0xd94a32, true);
+    }
     drawHud(framebuffer);
-    framebuffer.requestFrame();
+    if (frameRateCounter) frameRateCounter.draw(framebuffer);
+    else framebuffer.requestFrame();
 }
 
 function setDrivingKey(event, pressed) {
@@ -896,13 +1049,18 @@ var window = common.createWindow({
     width: options.width,
     height: options.height,
     fps: options.fps,
-    fpsCounter: options.fpsCounter,
-    debugEvents: options.debugEvents,
+    fpsCounter: false,
+    debugEvents: false,
     title: "demo7.js Welsh upland rally",
     instanceName: "demo7",
     className: "NodeX11Demo",
     draw: draw,
     keyPress: function (event, activeWindow) {
+        if (!gameReady) {
+            if (event.keysym === common.keysyms.escape ||
+                (!event.keysym && event.keycode === 9)) activeWindow.close();
+            return;
+        }
         if (event.keysym === 32 && (rollingMode || raceFinished)) {
             startHumanRace();
             return;
@@ -917,15 +1075,12 @@ var window = common.createWindow({
         }
     },
     keyRelease: function (event) {
+        if (!gameReady) return;
         setDrivingKey(event, false);
     },
     ready: function (info) {
-        console.log("Welsh upland rally created: " + info.width + "x" +
-                    info.height + ", 1 player and " + competitors.length +
-                    " AI cars, " + RACE_LAPS + " laps, " +
-                    info.framesPerSecond + " FPS limit");
-        console.log("Attract mode running; push Space to reset the grid and play");
-        console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
+        windowInfo = info;
+        console.log("Rally window created; loading course and terrain...");
     },
     keyboardMapping: function (mapping) {
         if (options.debugEvents) {
