@@ -264,6 +264,15 @@ reuse the transport and drawing helpers:
   vehicle with mouse-controlled rotation, movement, and scaling.
 - `demo3.js` isolates full-frame X11 upload performance with a fixed background
   and a dirty-region sine-wave text animation.
+- `demo4.js` extends that blit test with a reproducible procedural material,
+  generated normal map, surface lighting, and animated normal-mapped lettering.
+- `demo5.js` extends the demo2 software rasterizer with five procedural height
+  mapped materials, tangent-space normal mapping, and moving per-pixel lighting.
+- `demo6.js` is a playable original Welsh-upland rally level with a chase
+  camera, continuous driving controls, five AI competitors, scenery, and laps.
+- `demo7.js` retains the complete demo6 game and native output resolution while
+  refining its software rasterizer and static-scene path for both MMVM and
+  Node.js performance.
 
 A new program can load the low-level framebuffer module directly:
 
@@ -294,8 +303,9 @@ var window = common.createWindow(options);
 `createFramebufferWindow` accepts `width`, `height`, `fps`, `title`,
 `instanceName`, `className`, and callbacks named `draw`, `ready`,
 `keyboardMapping`, `pointerMove`, `buttonPress`, `buttonRelease`, `keyPress`,
-`expose`, `error`, and `close`. The returned framebuffer-window object exposes
-`width`, `height`, `fps`, `setPixel`, `requestFrame`, `pointer`, and `close`.
+`keyRelease`, `expose`, `error`, and `close`. The returned framebuffer-window
+object exposes `width`, `height`, `fps`, `setPixel`, `requestFrame`, `pointer`,
+and `close`.
 Once X11 setup has completed, it also exposes `pixels`, `pixelAddress`,
 `pixelStride`, and `pixelFormat` to draw code. `pixelFormat` is `bgrx32le` when
 the framebuffer can be uploaded directly in the common little-endian X11
@@ -489,6 +499,300 @@ benchmark.
 Escape closes the benchmark. The standard resolution, FPS limit, on-screen
 counter, and debug-console options are supported.
 
+### X11 procedural normal-mapping demo 4
+
+Run the normal-mapping demo through MMVM with:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  node_runner.js demo4.js \
+  --size 256x192 --fps 20
+```
+
+Or run the same source directly under Node.js:
+
+```sh
+node demo4.js --size 256x192 --fps 20
+```
+
+`demo4.js` is derived from the `demo3.js` dirty-draw/full-upload test. At
+startup it reproducibly generates three packed images entirely in JavaScript:
+
+1. An albedo texture containing alternating hammered copper and blue plates,
+   recessed joins, raised borders, luminous circuit traces, and rivets.
+2. A height map for those material features.
+3. A tangent-space normal map calculated from neighbouring height samples.
+
+The albedo and normal map are combined using ambient, directional, rim,
+radial, and specular lighting to create the fixed full-screen background. The
+animated `NORMAL MAPPING` bitmap lettering has separate beveled normals and a
+directional light which rotates according to elapsed wall-clock time. Its
+orange and cyan surfaces therefore change illumination as they move.
+
+Full-screen material generation and shading happen once rather than on every
+frame. During animation, each of the two client framebuffers restores only its
+old glyph rectangles from the shaded background, then repaints the displaced
+shadows and newly lit glyphs. The FPS label uses the same normal-mapped glyph
+path. As in demo3, `node_x11.js` nevertheless uploads and presents the complete
+framebuffer every frame, making demo4 useful for exercising the common X11
+blit path with richer but still bounded per-frame JavaScript work.
+
+The implementation uses direct `peek32`/`poke32` access with MMVM and built-in
+`Buffer.readUInt32LE`/`Buffer.writeUInt32LE` access under Node.js. It uses no
+image files, npm packages, X11 text operations, XShm, or native Node.js
+extensions. Escape closes the demo, and the standard resolution, FPS counter,
+and debug-console options are supported.
+
+### X11 normal-mapped 3D renderer demo 5
+
+Run the normal-mapped vehicle renderer through MMVM with:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  node_runner.js demo5.js \
+  --size 256x192 --fps 20
+```
+
+Or run the same source directly under Node.js:
+
+```sh
+node demo5.js --size 256x192 --fps 20
+```
+
+`demo5.js` preserves demo2's deterministic anti-gravity vehicle, camera view,
+depth buffer, perspective-correct texture coordinates, autorotation, toolbar,
+pointer, and mouse/keyboard transformations. It replaces the original five
+color-only textures and one flat shade value per triangle with five generated
+material sets:
+
+- Layered graphite-blue hull composite with raised seams, grain, and rivets.
+- Cold glass canopy with curved surface bands and bright structural edges.
+- Ribbed machinery and propulsion-pod panels with warning markings.
+- Emissive propulsion cells with a reproducible radial height profile.
+- Raised coral and yellow identification chevrons.
+
+Each material has an albedo texture, a height map, a tangent-space normal map,
+specular response, and optional emission. The renderer calculates an
+orthonormal tangent/bitangent/normal basis for every visible triangle. Sampled
+normal-map vectors are transformed through that basis into camera space before
+diffuse, rim, specular, and emissive lighting. The light direction moves using
+wall-clock time independently of model rotation, and emissive propulsion
+surfaces pulse using the same time source.
+
+For MMVM performance, generated normals are quantized into a normalized
+25-vector tangent-space palette. Each triangle transforms and lights those 25
+vectors once, then its inner raster loop uses the sampled normal-map index to
+look up brightness and additive highlights. This retains per-pixel normal-map
+selection while avoiding repeated vector transforms and specular exponentiation
+for every covered pixel.
+
+The background is generated once as a packed buffer. Under MMVM it is restored
+to each client framebuffer with the compatibility layer's libc-backed native
+`Buffer.copy`; under Node.js the built-in `Buffer.copy` performs the equivalent
+operation. Generation-stamped depth entries avoid clearing the complete
+JavaScript depth array on every frame. Raw `ffi_call` use remains isolated in
+`node_compat/libc.js`, and no C code or X11 extension is required.
+
+Controls are identical to demo2: left-drag uses the selected Rotate, Move, or
+Scale toolbar mode; middle-drag scales; right-drag moves; and the wheel scales
+when available. A one-button mouse or ordinary single-touch touchpad can use
+the toolbar followed by left-drag for all three operations. `A` or the Auto
+button toggles wall-clock autorotation, `R` resets the view, keys `1`, `2`, and
+`3` select the transform mode, and Escape closes the demo. Standard resolution,
+FPS counter, and debug-console options are supported.
+
+### X11 Welsh upland rally demo 6
+
+Run the rally level through MMVM with:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  node_runner.js demo6.js \
+  --size 160x120 --fps 20
+```
+
+Or run the same source directly under Node.js:
+
+```sh
+node demo6.js --size 512x384 --fps 20
+```
+
+`demo6.js` is an original arcade-rally game level inspired by the general feel
+of late-1990s rally games rather than their assets or course designs. Its
+closed three-lap stage runs through a reproducibly generated Welsh-inspired
+upland landscape with a narrow muddy gravel lane, wheel ruts, puddle-darkened
+patches, continuous two-course dry-stone walls, red-and-white rally posts,
+rolling green fields, rain-darkened distant hills, scattered trees, sheep, and
+slate-roof farm buildings beneath an overcast sky.
+
+The initial camera is a low floating outside chase view 4.8 world units behind
+and 2.15 units above the player car. Its shallow downward pitch keeps the car
+large and low in the frame while showing the road, nearby fields, distant
+hills, and overcast sky together. It follows the player's heading and projects
+the road, terrain, walls, scenery, player, and opponents through the same
+depth-buffered software 3D path. All colors, geometry, track points, terrain,
+vehicles, and scenery are generated in JavaScript; there are no external game
+assets, image files, npm packages, X11 drawing primitives, or XShm operations.
+
+The player car has elapsed-time acceleration, braking and reverse, speed-based
+steering grip, rolling resistance, strong grass drag, stone-wall response, and
+car-to-car contact. The simulation splits each measured wall-clock interval
+into stable 40 ms physics steps, so low rendering frame rates reduce visual
+smoothness without slowing the race or destabilizing collision handling.
+
+The drivetrain is an arcade-style automatic: throttle applies a continuous
+torque curve from rest to the 30-world-unit speed cap, with no gear state,
+clutch, shift timing, or gear-control input. On-road rolling drag is deliberately
+light, while leaving the gravel or hitting a wall still removes speed sharply.
+The displayed speed is scaled from world velocity and reaches roughly 186 at
+the cap; actual speed through a stage depends on steering and surface contact.
+
+Five deterministic AI competitors follow the complete closed course. Each has
+a distinct speed, staggered grid position, color, and oscillating racing line;
+AI target speed decreases for upcoming bends. Position is calculated from
+unwrapped course progress, and the HUD reports speed, lap, and race position.
+The race finishes after three laps, and `R` resets the complete player and AI
+state. HUD labels automatically use compact forms at narrow resolutions.
+
+The program starts in a rolling attract mode rather than on a stationary grid.
+The player car drives itself around the complete course alongside the five AI
+cars while the normal chase camera, physics timing, scenery, lap progress, and
+position display continue running. A framebuffer-painted `PUSH SPACE TO PLAY`
+message appears on one line at normal resolutions and on two non-overlapping
+lines at narrow resolutions.
+
+Pressing Space in attract mode atomically switches to human play and resets the
+player, all five opponents, speed, grid order, lap progress, finish state,
+held-key state, and frame timer. The human race therefore always starts from
+the same visible staggered grid rather than inheriting the demonstration's
+positions. Space also starts a new human race from the finish screen. Once a
+human race is active, Space resumes its normal brake/reverse function and does
+not return to attract mode.
+
+Driving controls are:
+
+- Up arrow or `W`: throttle.
+- Space in attract mode: reset the grid and start human play.
+- Down arrow, `S`, or Space during play: brake and reverse.
+- Left arrow or `A`: steer left.
+- Right arrow or `D`: steer right.
+- `R`: restart the race.
+- Escape: close the window.
+
+Unlike the earlier pointer-oriented demos, rally controls require held-key
+state. `node_x11.js` therefore selects both X11 `KeyPress` and `KeyRelease`
+events and exposes matching callbacks. X11 autorepeat release/press pairs are
+safe: the final state after the pair remains pressed, while the physical key's
+final release clears it.
+
+The renderer precomputes the packed sky and distant-hill background and restores
+it with `Buffer.copy`. Actual depth-tested hillside meshes attach to both road
+edges and extend outward in several irregular field bands. A periodic height
+function creates broad folds, long ridges, and smaller undulations while
+remaining continuous at the closed course seam. Trees, sheep, markers, and
+farm buildings sample that same height function, so they sit on the slopes
+instead of floating at road elevation.
+
+All field cells are precomputed before the first frame. The closed course can
+bring non-adjacent track sections close to a wide hillside ribbon, so every
+terrain vertex queries the nearest non-local track segment. Inside that
+segment's corridor, the terrain height blends downward beneath the road rather
+than intersecting it. Smaller connected cells preserve the hillside surface;
+no cells are simply deleted, which avoids isolated green wedges and holes. A
+near-camera terrain check also prevents a cell crossing the projection plane
+and expanding into a large screen-space triangle.
+
+The renderer does have a z-buffer. Generation-stamped inverse-depth entries are
+shared by the hillside, road, walls, scenery, AI cars, and player car; a pixel
+is replaced only by a closer projected surface. The original hillside overlap
+was therefore intersecting geometry which the z-buffer resolved correctly, not
+a missing visibility test. Carving the static terrain mesh fixes the geometry
+without forcing the road to draw through legitimate foreground hills.
+
+The road is drawn as gravel, shoulder, rut, mud, wall, and scenery triangles,
+while cars are assembled from depth-tested oriented boxes with separately
+shaded bodies, cabins, and bumpers. This version is
+primarily the visual and gameplay implementation; the terrain, renderer,
+physics, and AI are kept as separate functions so their hot paths can be
+optimized later without changing the level design. The requested FPS remains
+a limit rather than a promise.
+
+### Optimized software rasterizer demo 7
+
+Run the optimized version through MMVM with:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  node_runner.js demo7.js \
+  --size 160x120 --fps 20
+```
+
+Or run the identical source directly under Node.js:
+
+```sh
+node demo7.js --size 512x384 --fps 20
+```
+
+`demo7.js` preserves demo6's course, full-resolution framebuffer, terrain,
+road detail, scenery, cars, five competitors, attract mode, physics, controls,
+HUD, and wall-clock-based simulation. It does not use pixel doubling, dynamic
+resolution reduction, altered draw distances selected by runtime, or a
+simplified MMVM-only scene. The optimized renderer remains an ordinary
+depth-buffered triangle rasterizer suitable for other flat-shaded meshes.
+
+The changes target repeated general-purpose work:
+
+- Triangles are filled as horizontal spans. Edge and inverse-depth values are
+  incremented across rows and pixels rather than recomputing three barycentric
+  edge functions throughout each triangle's rectangular bounding box.
+- A projected quad is rejected before triangle setup when its exact
+  pixel-centre bounding box is off-screen or contains no possible sample.
+- Terrain cells and road sections carry conservative horizontal bounds for a
+  world-space view-frustum check. The bound includes the complete cell or
+  section, so this avoids invisible transforms without clipping visible detail.
+- The immutable road, ruts, shoulders, and two-course walls are built once.
+  Frames traverse those reusable quads instead of allocating and calculating
+  the same world vertices repeatedly.
+- Projected-vertex objects are reused between frames, and the terrain loop no
+  longer constructs temporary point arrays.
+- Closed box meshes use a world-space normal/view test to discard back faces
+  before projection. Open terrain, road, and billboard geometry is not culled.
+- One inverse-depth array is cleared and reused each frame. On the tested old
+  SpiderMonkey, this is faster than generation stamps because every covered
+  sample performs one array lookup instead of consulting separate depth and
+  stamp arrays.
+
+Framebuffer colors use packed little-endian words. Under MMVM, the raster span
+writes through the interpreter's native `poke32`; under stock Node.js the same
+operation is polyfilled with `Buffer.writeUInt32LE`. The local packed-word
+adapter also maps reads to `peek32` or `Buffer.readUInt32LE`. The rasterizer
+specializes the two write cases inside its hot loop so neither runtime pays a
+JavaScript wrapper-function call for every pixel. The depth array deliberately
+remains JavaScript storage: a tested packed native depth buffer was slower in
+js_min because each sample acquired extra `peek32`/`poke32` boundary calls.
+
+The table below records the first complete five-second attract-mode interval
+from otherwise identical 12-second runs. The FPS limit was set to 120 so it did
+not cap MMVM. These are comparative measurements from the development machine,
+not portable guarantees; camera position and scheduler load can move an
+individual result slightly.
+
+| Runtime and framebuffer | demo6 | demo7 | Change |
+| --- | ---: | ---: | ---: |
+| `js_min.exe`, 160x120 | 4.3 FPS | 9.0 FPS | 2.09x |
+| `js_min.exe`, 256x192 | 2.5 FPS | 5.4 FPS | 2.16x |
+| Node.js 24, 512x384 | 20.3 FPS | 59.6 FPS | 2.94x |
+
+The optimized js_min renderer also measured 4.1 FPS at 320x240. A native
+640x480 MMVM frame remains expensive; demo7 intentionally does not conceal
+that limitation with upscaling. Node.js reaches the shared X11 layer's roughly
+60 Hz animation-frame scheduling ceiling at 512x384, so the optimization does
+not exchange Node performance for MMVM performance.
+
 ### Framebuffer drawing benchmark
 
 The arguments are width, height, frame count, and storage mode:
@@ -512,7 +816,9 @@ Node.js APIs required by these examples, not npm or a general Node runtime.
 All raw libc `ffi_call` operations are isolated in `node_compat/libc.js`.
 Network I/O uses ordinary sockets, `fcntl(O_NONBLOCK)`, and `poll`; timer
 scheduling uses `gettimeofday` to remain conservative about old Linux kernel
-interfaces.
+interfaces. Native compatibility buffers implement `copy` using libc `memmove`,
+which also avoids JavaScript byte loops when framebuffer demos restore a
+precomputed packed image.
 
 See [NODE_COMPAT_PLAN.md](NODE_COMPAT_PLAN.md) for the original architecture,
 constraints, and acceptance criteria.

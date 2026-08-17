@@ -22,6 +22,7 @@ var NodeLibcSymbols = {
     close: nodeResolveSymbol("close"),
     calloc: nodeResolveSymbol("calloc"),
     free: nodeResolveSymbol("free"),
+    memmove: nodeResolveSymbol("memmove"),
     inet_aton: nodeResolveSymbol("inet_aton"),
     getsockname: nodeResolveSymbol("getsockname"),
     signal: nodeResolveSymbol("signal"),
@@ -80,6 +81,9 @@ var NodeLibc = {
     },
     free: function (pointer) {
         return ffi_call(NodeLibcSymbols.free, pointer);
+    },
+    memmove: function (destination, source, length) {
+        return ffi_call(NodeLibcSymbols.memmove, destination, source, length);
     },
     inetAton: function (text, address) {
         return ffi_call(NodeLibcSymbols.inet_aton, text, address);

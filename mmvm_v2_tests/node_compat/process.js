@@ -93,6 +93,26 @@ var NodeProcess = {
             end = end === undefined ? this.length : end;
             return new NodeNativeBuffer(end - start, this._nodePointer + start);
         };
+        NodeNativeBuffer.prototype.copy = function (target, targetStart, sourceStart,
+                                                    sourceEnd) {
+            targetStart = targetStart || 0;
+            sourceStart = sourceStart || 0;
+            sourceEnd = sourceEnd === undefined ? this.length : sourceEnd;
+            var count = Math.min(sourceEnd - sourceStart,
+                                 target.length - targetStart,
+                                 this.length - sourceStart);
+            if (count <= 0) return 0;
+            if (target._nodePointer) {
+                NodeLibc.memmove(target._nodePointer + targetStart,
+                                 this._nodePointer + sourceStart, count);
+            } else {
+                for (var i = 0; i < count; i++) {
+                    target._nodeBytes[targetStart + i] =
+                        peek8(this._nodePointer + sourceStart + i);
+                }
+            }
+            return count;
+        };
         NodeBuffer.allocNative = function (length) { return new NodeNativeBuffer(length); };
         NodeBuffer.byteLength = function (value, encoding) {
             if (encoding && String(encoding).toLowerCase() !== "utf8" &&

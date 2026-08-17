@@ -311,7 +311,7 @@ function createWindow() {
     connection.gc = resourceId();
     connection.backPixmap = resourceId();
     connection.sequence = 0;
-    var eventMask = 1 | 4 | 8 | 64 | 32768 | 131072;
+    var eventMask = 1 | 2 | 4 | 8 | 64 | 32768 | 131072;
 
     var create = allocate(40);
     writeByte(create, 0, 1); /* CreateWindow */
@@ -610,14 +610,16 @@ function handleEvent(event) {
         protocolError.code = readByte(event, 1);
         protocolError.opcode = readByte(event, 10);
         reportError(protocolError);
-    } else if (type === 2) { /* KeyPress */
+    } else if (type === 2 || type === 3) { /* KeyPress / KeyRelease */
         var keyEvent = {
             keycode: readByte(event, 1),
             keysym: keysymForEvent(event),
             state: event.readUInt16LE(28)
         };
-        if (typeof windowOptions.keyPress === "function") {
-            windowOptions.keyPress(keyEvent, windowApi);
+        var keyHandler = type === 2 ? windowOptions.keyPress :
+                                     windowOptions.keyRelease;
+        if (typeof keyHandler === "function") {
+            keyHandler(keyEvent, windowApi);
         }
         scheduleRedraw();
     } else if (type === 4 || type === 5) { /* ButtonPress / ButtonRelease */
