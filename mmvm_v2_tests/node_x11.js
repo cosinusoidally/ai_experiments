@@ -5,18 +5,38 @@
 var fs = require("fs");
 var net = require("net");
 
+var nodeAnimationFrameDeadline = 0;
+var requestNextAnimationFrame = typeof requestAnimationFrame === "function" ?
+    requestAnimationFrame : function (callback) {
+        var now = new Date().getTime();
+        if (!nodeAnimationFrameDeadline || nodeAnimationFrameDeadline <= now) {
+            nodeAnimationFrameDeadline = now + 1000 / 60;
+        }
+        var deadline = nodeAnimationFrameDeadline;
+        nodeAnimationFrameDeadline += 1000 / 60;
+        return setTimeout(function () {
+            callback(new Date().getTime());
+        }, Math.max(0, deadline - now));
+    };
+
 var WIDTH;
 var HEIGHT;
 var FRAME_DELAY;
 var framesPerSecond;
 var rgb;
+var framebuffers;
+var drawFramebufferIndex;
 var pointerX;
 var pointerY;
 var socket = null;
 var incoming;
 var setupComplete;
-var redrawPending;
-var lastFrameStartedAt;
+var frameRequested;
+var animationFramePending;
+var animationFrameReady;
+var rendering;
+var uploadInProgress;
+var nextFrameDeadline;
 var closing;
 var connection;
 var windowOptions;
@@ -220,8 +240,7 @@ function parseSetupReply(reply, screenNumber) {
     connection.blueBits = maskBits(connection.visual.blueMask, connection.blueShift);
     connection.packedFramebuffer = connection.imageByteOrder === 0 &&
                                    connection.format.bitsPerPixel === 32 &&
-                                   connection.format.scanlinePad === 32 &&
-                                   typeof Buffer.allocNative === "function";
+                                   connection.format.scanlinePad === 32;
     connection.standardBgrx = connection.visual.redMask === 0x00ff0000 &&
                               connection.visual.greenMask === 0x0000ff00 &&
                               connection.visual.blueMask === 0x000000ff;
@@ -238,8 +257,27 @@ function parseSetupReply(reply, screenNumber) {
                                                     connection.blueShift));
         }
     }
-    rgb = connection.packedFramebuffer ? Buffer.allocNative(WIDTH * HEIGHT * 4) :
-                                         allocate(WIDTH * HEIGHT * 3);
+    var framebufferLength = WIDTH * HEIGHT * (connection.packedFramebuffer ? 4 : 3);
+    framebuffers = [];
+    for (var framebufferIndex = 0; framebufferIndex < 2; framebufferIndex++) {
+        framebuffers.push(connection.packedFramebuffer &&
+                          typeof Buffer.allocNative === "function" ?
+                          Buffer.allocNative(framebufferLength) :
+                          allocate(framebufferLength));
+    }
+    drawFramebufferIndex = 0;
+    selectDrawFramebuffer();
+
+    /* These fields become valid before the ready callback and first draw. */
+    windowApi.pixelStride = WIDTH * (connection.packedFramebuffer ? 4 : 3);
+    windowApi.pixelFormat = connection.packedFramebuffer && connection.standardBgrx ?
+                            "bgrx32le" : "rgb24";
+}
+
+function selectDrawFramebuffer() {
+    rgb = framebuffers[drawFramebufferIndex];
+    windowApi.pixels = rgb;
+    windowApi.pixelAddress = rgb._nodePointer || 0;
 }
 
 function resourceId() {
@@ -249,28 +287,29 @@ function resourceId() {
     return id;
 }
 
-function sendRequest(request) {
+function sendRequest(request, callback) {
     if (request.length > connection.maxRequestLength) {
         throw new Error("X11 request exceeds the server maximum request size");
     }
     connection.sequence = (connection.sequence + 1) & 65535;
-    socket.write(request);
+    socket.write(request, callback);
     return connection.sequence;
 }
 
-function sendRequestParts(header, payload) {
+function sendRequestParts(header, payload, callback) {
     if (header.length + payload.length > connection.maxRequestLength) {
         throw new Error("X11 request exceeds the server maximum request size");
     }
     connection.sequence = (connection.sequence + 1) & 65535;
     socket.write(header);
-    socket.write(payload);
+    socket.write(payload, callback);
     return connection.sequence;
 }
 
 function createWindow() {
     connection.window = resourceId();
     connection.gc = resourceId();
+    connection.backPixmap = resourceId();
     connection.sequence = 0;
     var eventMask = 1 | 4 | 8 | 64 | 32768 | 131072;
 
@@ -291,6 +330,16 @@ function createWindow() {
     create.writeUInt32LE(connection.screen.blackPixel, 32);
     create.writeUInt32LE(eventMask, 36);
     sendRequest(create);
+
+    var pixmap = allocate(16);
+    writeByte(pixmap, 0, 53); /* CreatePixmap */
+    writeByte(pixmap, 1, connection.screen.rootDepth);
+    pixmap.writeUInt16LE(4, 2);
+    pixmap.writeUInt32LE(connection.backPixmap, 4);
+    pixmap.writeUInt32LE(connection.screen.root, 8);
+    pixmap.writeUInt16LE(WIDTH, 12);
+    pixmap.writeUInt16LE(HEIGHT, 14);
+    sendRequest(pixmap);
 
     var gc = allocate(16);
     writeByte(gc, 0, 55); /* CreateGC */
@@ -389,14 +438,40 @@ function drawPixel(x, y, red, green, blue) {
 }
 
 
-function renderFramebuffer() {
-    redrawPending = false;
-    if (closing) return;
-    lastFrameStartedAt = new Date().getTime();
+function renderFramebuffer(animationTime) {
+    animationFramePending = false;
+    if (closing || !frameRequested) return;
+    if (nextFrameDeadline && animationTime < nextFrameDeadline) {
+        queueAnimationFrame();
+        return;
+    }
+    if (uploadInProgress || rendering) {
+        animationFrameReady = true;
+        return;
+    }
+    animationFrameReady = false;
+    frameRequested = false;
+    rendering = true;
+    if (!nextFrameDeadline) nextFrameDeadline = animationTime;
+    do {
+        nextFrameDeadline += FRAME_DELAY;
+    } while (nextFrameDeadline <= animationTime);
+    selectDrawFramebuffer();
     if (typeof windowOptions.draw === "function") {
         windowOptions.draw(windowApi);
     }
-    uploadFramebuffer();
+    rendering = false;
+    uploadInProgress = true;
+    uploadFramebuffer(function () {
+        uploadInProgress = false;
+        drawFramebufferIndex = 1 - drawFramebufferIndex;
+        if (frameRequested && animationFrameReady) {
+            animationFrameReady = false;
+            renderFramebuffer(new Date().getTime());
+        } else if (frameRequested) {
+            queueAnimationFrame();
+        }
+    });
 }
 
 function scaleChannel(value, bits, shift) {
@@ -404,7 +479,7 @@ function scaleChannel(value, bits, shift) {
     return (((value * maximum / 255) | 0) << shift) >>> 0;
 }
 
-function uploadFramebuffer() {
+function uploadFramebuffer(completion) {
     var bitsPerPixel = connection.format.bitsPerPixel;
     var bytesPerPixel = Math.ceil(bitsPerPixel / 8);
     var padBytes = connection.format.scanlinePad / 8;
@@ -446,6 +521,23 @@ function uploadFramebuffer() {
         image.copy(request, 24);
         sendRequest(request);
     }
+    copyBackBufferToWindow(completion);
+}
+
+function copyBackBufferToWindow(completion) {
+    var request = allocate(28);
+    writeByte(request, 0, 62); /* CopyArea */
+    request.writeUInt16LE(7, 2);
+    request.writeUInt32LE(connection.backPixmap, 4);
+    request.writeUInt32LE(connection.window, 8);
+    request.writeUInt32LE(connection.gc, 12);
+    request.writeInt16LE(0, 16);
+    request.writeInt16LE(0, 18);
+    request.writeInt16LE(0, 20);
+    request.writeInt16LE(0, 22);
+    request.writeUInt16LE(WIDTH, 24);
+    request.writeUInt16LE(HEIGHT, 26);
+    sendRequest(request, completion);
 }
 
 function makePutImageRequest(bandHeight, firstRow, imageLength) {
@@ -454,7 +546,7 @@ function makePutImageRequest(bandHeight, firstRow, imageLength) {
     writeByte(request, 0, 72); /* PutImage */
     writeByte(request, 1, 2);  /* ZPixmap */
     request.writeUInt16LE((24 + padded4(imageLength)) / 4, 2);
-    request.writeUInt32LE(connection.window, 4);
+    request.writeUInt32LE(connection.backPixmap, 4);
     request.writeUInt32LE(connection.gc, 8);
     request.writeUInt16LE(WIDTH, 12);
     request.writeUInt16LE(bandHeight, 14);
@@ -465,16 +557,16 @@ function makePutImageRequest(bandHeight, firstRow, imageLength) {
     return request;
 }
 
+function queueAnimationFrame() {
+    if (animationFramePending || animationFrameReady || closing || !frameRequested) return;
+    animationFramePending = true;
+    requestNextAnimationFrame(renderFramebuffer);
+}
+
 function scheduleRedraw() {
-    if (redrawPending || closing) return;
-    redrawPending = true;
-    var delay = FRAME_DELAY;
-    if (lastFrameStartedAt) {
-        var elapsed = new Date().getTime() - lastFrameStartedAt;
-        if (elapsed >= FRAME_DELAY) delay = 0;
-        else if (elapsed >= 0) delay = FRAME_DELAY - elapsed;
-    }
-    setTimeout(renderFramebuffer, delay);
+    if (closing) return;
+    frameRequested = true;
+    queueAnimationFrame();
 }
 
 function updatePointerFromEvent(event) {
@@ -619,14 +711,18 @@ function createFramebufferWindow(options) {
         throw new Error("framebuffer dimensions must be integers in 64..1024 and at most 1048576 pixels");
     }
 
-    FRAME_DELAY = Math.round(1000 / framesPerSecond);
+    FRAME_DELAY = 1000 / framesPerSecond;
     rgb = null;
     pointerX = Math.floor(WIDTH / 2);
     pointerY = Math.floor(HEIGHT / 2);
     incoming = allocate(0);
     setupComplete = false;
-    redrawPending = false;
-    lastFrameStartedAt = 0;
+    frameRequested = false;
+    animationFramePending = false;
+    animationFrameReady = false;
+    rendering = false;
+    uploadInProgress = false;
+    nextFrameDeadline = 0;
     closing = false;
     connection = {};
     windowOptions = options;
@@ -636,6 +732,10 @@ function createFramebufferWindow(options) {
         width: WIDTH,
         height: HEIGHT,
         fps: framesPerSecond,
+        pixels: null,
+        pixelAddress: 0,
+        pixelStride: 0,
+        pixelFormat: null,
         setPixel: drawPixel,
         requestFrame: scheduleRedraw,
         close: function () {

@@ -1,9 +1,12 @@
+var NodeAnimationFrameDeadline = 0;
+
 var NodeProcess = {
     exitCode: 0,
     exiting: false,
     exitMarker: {nodeProcessExit: true},
 
     install: function (runnerArguments) {
+        NodeAnimationFrameDeadline = 0;
         var target = runnerArguments[0];
         var nodeArguments = ["artifacts/js_min.exe", target];
         for (var i = 1; i < runnerArguments.length; i++) nodeArguments.push(runnerArguments[i]);
@@ -35,6 +38,20 @@ var NodeProcess = {
             return NodeRuntime.setTimeout(callback, delay);
         };
         clearTimeout = function (id) {
+            NodeRuntime.clearTimeout(id);
+        };
+        requestAnimationFrame = function (callback) {
+            var now = NodeRuntime.now();
+            if (!NodeAnimationFrameDeadline || NodeAnimationFrameDeadline <= now) {
+                NodeAnimationFrameDeadline = now + 1000 / 60;
+            }
+            var deadline = NodeAnimationFrameDeadline;
+            NodeAnimationFrameDeadline += 1000 / 60;
+            return NodeRuntime.setTimeout(function () {
+                callback(NodeRuntime.now());
+            }, Math.max(0, deadline - now));
+        };
+        cancelAnimationFrame = function (id) {
             NodeRuntime.clearTimeout(id);
         };
 

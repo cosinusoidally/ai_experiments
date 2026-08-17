@@ -195,16 +195,16 @@ function NodeSocket(fd) {
 NodeSocket.prototype.on = NodeEventEmitter.prototype.on;
 NodeSocket.prototype.emit = NodeEventEmitter.prototype.emit;
 
-NodeSocket.prototype.write = function (value) {
+NodeSocket.prototype.write = function (value, callback) {
     if (this.closed || this._ending) return false;
     if (value && value._nodePointer !== undefined) {
         this._output.push({pointer: value._nodePointer, length: value.length,
-                           offset: 0, owned: false});
+                           offset: 0, owned: false, callback: callback});
         return true;
     }
     var output = NodeMemory.fromBytes(nodeBufferBytes(value));
     this._output.push({pointer: output.pointer, length: output.length,
-                       offset: 0, owned: true});
+                       offset: 0, owned: true, callback: callback});
     return true;
 };
 
@@ -427,6 +427,9 @@ var NodeRuntime = {
             if (output.offset >= output.length) {
                 if (output.owned) NodeMemory.free(output.pointer);
                 socket._output.shift();
+                if (typeof output.callback === "function") {
+                    NodeRuntime.enqueue(output.callback);
+                }
             }
         }
         if (!socket.closed && socket._ending && socket._output.length === 0) socket.destroy();

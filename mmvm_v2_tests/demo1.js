@@ -12,12 +12,21 @@ var text = new common.BitmapText(options.width, options.height, "CLICK AND TYPE"
 function draw(framebuffer) {
     var x;
     var y;
-    for (y = 0; y < framebuffer.height; y++) {
-        for (x = 0; x < framebuffer.width; x++) {
-            var red = (x * 255 / (framebuffer.width - 1)) | 0;
-            var green = (y * 255 / (framebuffer.height - 1)) | 0;
-            var blue = (((x + y) * 255) /
-                        (framebuffer.width + framebuffer.height - 2)) | 0;
+    var setPixel = framebuffer.setPixel;
+    var width = framebuffer.width;
+    var height = framebuffer.height;
+    var widthScale = 255 / (width - 1);
+    var heightScale = 255 / (height - 1);
+    var diagonalScale = 255 / (width + height - 2);
+    var direct32 = framebuffer.pixelFormat === "bgrx32le";
+    var pixelAddress = framebuffer.pixelAddress;
+    var pixels = framebuffer.pixels;
+    var pixelOffset = 0;
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            var red = (x * widthScale) | 0;
+            var green = (y * heightScale) | 0;
+            var blue = ((x + y) * diagonalScale) | 0;
             var deltaX = x - pointerX;
             var deltaY = y - pointerY;
             var distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
@@ -40,9 +49,26 @@ function draw(framebuffer) {
                     blue = 255;
                 }
             }
-            if (palette === 1) framebuffer.setPixel(x, y, blue, red, green);
-            else if (palette === 2) framebuffer.setPixel(x, y, green, blue, red);
-            else framebuffer.setPixel(x, y, red, green, blue);
+            if (palette === 1) {
+                var originalRed = red;
+                red = blue;
+                blue = green;
+                green = originalRed;
+            } else if (palette === 2) {
+                var originalBlue = blue;
+                blue = red;
+                red = green;
+                green = originalBlue;
+            }
+
+            if (direct32) {
+                var packedPixel = (red << 16) | (green << 8) | blue;
+                if (pixelAddress) poke32(pixelAddress + pixelOffset, packedPixel);
+                else pixels.writeUInt32LE(packedPixel, pixelOffset);
+                pixelOffset += 4;
+            } else {
+                setPixel(x, y, red, green, blue);
+            }
         }
     }
 
@@ -56,8 +82,10 @@ function draw(framebuffer) {
 
 function keyPress(event, window) {
     var keysym = event.keysym;
-    console.log("key press: X11 keycode " + event.keycode + ", keysym 0x" +
-                keysym.toString(16));
+    if (options.debugEvents) {
+        console.log("key press: X11 keycode " + event.keycode + ", keysym 0x" +
+                    keysym.toString(16));
+    }
     if (keysym === common.keysyms.escape || (!keysym && event.keycode === 9)) {
         window.close();
     } else if (keysym === common.keysyms.backspace) {
@@ -83,6 +111,8 @@ var window = common.createWindow({
     width: options.width,
     height: options.height,
     fps: options.fps,
+    fpsCounter: options.fpsCounter,
+    debugEvents: options.debugEvents,
     title: "demo1.js RGB framebuffer",
     instanceName: "demo1",
     className: "NodeX11Demo",
@@ -95,16 +125,20 @@ var window = common.createWindow({
         }
         if (event.button === 1) text.setCursor(pointerX, pointerY);
         clickPulse = 24;
-        console.log("mouse button " + event.button + " pressed at " +
-                    pointerX + "," + pointerY);
+        if (options.debugEvents) {
+            console.log("mouse button " + event.button + " pressed at " +
+                        pointerX + "," + pointerY);
+        }
     },
     buttonRelease: function (event) {
         updatePointer(event);
         if (event.button >= 1 && event.button <= 8) {
             pressedButtons &= ~(1 << (event.button - 1));
         }
-        console.log("mouse button " + event.button + " released at " +
-                    pointerX + "," + pointerY);
+        if (options.debugEvents) {
+            console.log("mouse button " + event.button + " released at " +
+                        pointerX + "," + pointerY);
+        }
     },
     keyPress: keyPress,
     ready: function (info) {
@@ -114,15 +148,17 @@ var window = common.createWindow({
                     info.framesPerSecond + " FPS limit");
     },
     keyboardMapping: function (mapping) {
-        console.log("keyboard mapping loaded: keycodes " + mapping.minimumKeycode + ".." +
-                    mapping.maximumKeycode + ", " + mapping.keysymsPerKeycode +
-                    " keysyms per keycode");
+        if (options.debugEvents) {
+            console.log("keyboard mapping loaded: keycodes " +
+                        mapping.minimumKeycode + ".." + mapping.maximumKeycode +
+                        ", " + mapping.keysymsPerKeycode + " keysyms per keycode");
+        }
     },
     error: function (error) {
         console.error(error.message || String(error));
         process.exitCode = 1;
     },
     close: function () {
-        console.log("X11 connection closed");
+        if (options.debugEvents) console.log("X11 connection closed");
     }
 });

@@ -253,13 +253,17 @@ reuse the transport and drawing helpers:
 
 - `node_x11.js` implements the Xauthority reader, Unix-domain connection, core
   X11 protocol, window lifecycle, keyboard mapping, input events, RGB
-  framebuffer, frame pacing, and `PutImage` uploads. Requiring it has no side
-  effects.
+  framebuffer, animation-frame pacing, double buffering, and `PutImage`
+  uploads. Requiring it has no side effects.
 - `demo_common.js` requires `node_x11` and exports shared option parsing,
   bitmap-font text and caret support, framebuffer pointer painting, keysyms,
-  and the window factory.
+  the window factory, and the shared frame-rate counter.
 - `demo1.js` is the executable original demo: gradient, pointer glow, mouse
   ripple, editable click-to-type text, buttons, and palette changes.
+- `demo2.js` is a software-rendered, procedurally generated anti-gravity racing
+  vehicle with mouse-controlled rotation, movement, and scaling.
+- `demo3.js` isolates full-frame X11 upload performance with a fixed background
+  and a dirty-region sine-wave text animation.
 
 A new program can load the low-level framebuffer module directly:
 
@@ -292,6 +296,31 @@ var window = common.createWindow(options);
 `keyboardMapping`, `pointerMove`, `buttonPress`, `buttonRelease`, `keyPress`,
 `expose`, `error`, and `close`. The returned framebuffer-window object exposes
 `width`, `height`, `fps`, `setPixel`, `requestFrame`, `pointer`, and `close`.
+Once X11 setup has completed, it also exposes `pixels`, `pixelAddress`,
+`pixelStride`, and `pixelFormat` to draw code. `pixelFormat` is `bgrx32le` when
+the framebuffer can be uploaded directly in the common little-endian X11
+depth-24 layout; otherwise it is `rgb24` and `setPixel` provides the portable
+conversion path. `pixelAddress` is the MMVM native allocation address and is
+zero when the backing buffer does not expose one, as with Node.js.
+
+The renderer owns two client-side framebuffer allocations and never reuses one
+until the nonblocking socket reports that its complete upload has been handed
+off. X11 `PutImage` bands target an off-screen server pixmap; after all bands,
+one ordered `CopyArea` presents the completed pixmap to the window. This keeps
+large frames from exposing partially updated horizontal bands. Redraw requests
+are collapsed while one upload is in flight, so animation does not build a
+queue of stale frames.
+
+The MMVM compatibility globals include `requestAnimationFrame` and
+`cancelAnimationFrame`. `node_x11.js` uses animation-frame callbacks for redraw
+pacing and supplies equivalent timer-backed behavior when running directly
+under Node.js, whose built-in APIs do not define browser animation frames. The
+callbacks follow persistent absolute 60 Hz deadlines instead of adding a fresh
+timer delay after every completed upload. Application FPS intervals retain the
+floating-point value `1000 / fps`, and a callback which matures during an X11
+upload is consumed as soon as that single in-flight upload completes. This
+allows timing and upload to overlap without weakening framebuffer ownership or
+queueing stale frames. No XShm extension or native Node.js add-on is used.
 
 These are local CommonJS modules. There is no npm dependency, `node_modules`
 directory, package lookup, or `package.json`. The MMVM runner provides only the
@@ -321,14 +350,144 @@ The same source runs directly under Node.js:
 node demo1.js --size 256x192 --fps 20
 ```
 
+The demo accepts these diagnostic switches:
+
+- `--fps-counter` displays the measured frame rate in the framebuffer and is
+  the default; `--no-fps-counter` hides it.
+- `--debug-events` logs keyboard and mouse-button events and is the default;
+  `--no-debug-events` suppresses those lines. Debug mode also prints a rolling
+  frame-rate sample to stdout every five seconds.
+
+The shared counter is painted with the JavaScript bitmap font after the demo's
+draw callback, so it does not use an X11 text or overlay API. Either the
+on-screen counter or debug frame-rate logging requests continuous frames so
+the measurement reflects actual drawing and upload throughput. With both
+features disabled, the window redraws only for X11 events or an explicit
+`requestFrame()` call.
+
 The pointer, bitmap font, text caret, button effects, and background are all
 painted directly into the RGB framebuffer by JavaScript. No X11 text or drawing
 primitive is used. Left-click places the text caret; printable keys draw at the
 clicked location. F1 changes the palette and Escape closes the demo.
 
 On a compatible little-endian, depth-24 X server using 32 bits per pixel, the
-MMVM path writes one packed server pixel with `poke32`. Other server formats
-use the portable RGB conversion path.
+demo writes its full background directly to the exposed framebuffer: MMVM uses
+`poke32` with `pixelAddress`, while Node.js uses the built-in Buffer's
+`writeUInt32LE`. This avoids a bounds-checked `setPixel` call for every
+background pixel. The much smaller font, caret, and pointer drawing paths still
+use `setPixel`; other server formats use it as the portable RGB conversion
+path for the entire frame.
+
+### X11 software 3D renderer demo 2
+
+Run the software renderer through MMVM with:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  node_runner.js demo2.js \
+  --size 256x192 --fps 20
+```
+
+Or run the same source directly under Node.js:
+
+```sh
+node demo2.js --size 256x192 --fps 20
+```
+
+`demo2.js` implements the complete 3D pipeline in JavaScript: model
+transformation, perspective projection, back-face culling, a per-pixel depth
+buffer, triangle filling, lighting, perspective-correct texture coordinates,
+and nearest-neighbour texture sampling.
+
+The model is an original low-poly vehicle assembled deterministically at
+startup by JavaScript mesh-building functions. Its tapered split-level hull,
+swept lifting plates, twin propulsion booms, canopy, stabilizer fins, intakes,
+underside equipment, and emissive exhaust blocks are all derived from numeric
+design parameters. It evokes broad late-1990s science-fiction racing design
+without loading or reproducing a vehicle from a game.
+
+Five deterministic 32x32 procedural materials provide graphite hull panels,
+reflective canopy glass, warning-striped machinery, coral identification
+markings, and emissive propulsion surfaces. Coordinate formulas provide all
+panel lines, borders, stripes, reflections, and glow patterns, so every run
+generates exactly the same model and textures. There are no model files, image
+files, random external inputs, or decoding dependencies. Completed pixels are
+written directly into the packed framebuffer when the X11 format permits it.
+X11 is used only to create the window, receive input, and upload the finished
+framebuffer.
+
+The default camera view starts above the vehicle and looks slightly down at it,
+with the long axis of the model presented diagonally. Four labels at the top of
+the framebuffer are clickable controls:
+
+- Click `ROT` (`ROTATE` in a wide window), then left-drag anywhere below the
+  toolbar to rotate.
+- Click `MOVE`, then left-drag to move the model.
+- Click `SCALE`, then left-drag vertically to resize the model. Horizontal
+  movement provides a smaller scaling adjustment as well.
+- Click `AUTO` to toggle slow automatic rotation. It is active by default and
+  has a cyan underline while enabled. Automatic motion is based on elapsed
+  time, so its speed is independent of the achieved frame rate; it pauses
+  during a manual drag and resumes on release. Each rendered frame consumes the
+  full wall-clock delta without clamping slow frames, so low frame rates make
+  motion less smooth but do not make the rotation run slowly.
+
+Consequently, all three operations work with a one-button mouse or a touchpad
+which presents itself as an ordinary one-button mouse. No wheel, simulated
+middle button, multitouch gesture, or touchpad-specific code is required.
+When available, the mouse wheel also scales, middle-drag scales, and right-drag
+moves. Keys `1`, `2`, and `3` select the three transform modes, `A` toggles
+automatic rotation, `R` resets the model and camera angle, and Escape closes
+the window.
+
+The shared `--fps-counter`, `--no-fps-counter`, `--debug-events`, and
+`--no-debug-events` options work exactly as in `demo1.js`.
+
+### X11 full-frame blit benchmark demo 3
+
+Run the blit benchmark through MMVM with:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  node_runner.js demo3.js \
+  --size 640x480 --fps 20
+```
+
+Or run the same source directly under Node.js:
+
+```sh
+node demo3.js --size 640x480 --fps 20
+```
+
+`demo3.js` generates a deterministic grid, diagonal-line, and star pattern in
+a packed background buffer. Each of the two client framebuffers receives that
+complete background once. Thereafter, each buffer remembers the positions at
+which it last contained the eleven glyphs in `Hello world`. Reusing that buffer
+restores only those old glyph rectangles from the fixed background and paints
+the glyphs at new sine-wave positions. The dirty-aware FPS label is restored
+only when its displayed value changes.
+
+Under MMVM, background restoration reads packed pixels with `peek32`, glyph
+sprite blitting reads packed source pixels with `peek32`, and affected
+framebuffer pixels are written with `poke32`, all directly in `demo3.js`. The
+same source uses built-in `Buffer.readUInt32LE` and `Buffer.writeUInt32LE` under
+Node.js. This benchmark consequently requires the common little-endian BGRX
+32-bit X11 framebuffer format.
+
+The text wave phase is calculated from elapsed wall-clock time rather than a
+frame count. A lower frame rate produces larger positional steps but does not
+slow the animation. After the two initial full-background copies, JavaScript
+normally touches only a few thousand dirty pixels per frame. Nevertheless,
+`node_x11.js` uploads the entire width-by-height framebuffer to the server-side
+back pixmap and presents it with `CopyArea` on every animation frame. Console
+FPS lines explicitly count these complete framebuffer blits, making this a
+transport and presentation benchmark rather than a full-screen drawing-code
+benchmark.
+
+Escape closes the benchmark. The standard resolution, FPS limit, on-screen
+counter, and debug-console options are supported.
 
 ### Framebuffer drawing benchmark
 

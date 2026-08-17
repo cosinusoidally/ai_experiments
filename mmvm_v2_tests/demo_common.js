@@ -15,11 +15,21 @@ function usage(programName) {
            "  --fps FRAMES     redraw limit in frames per second (default: 20)\n" +
            "  --size WxH        framebuffer resolution (default: 256x192)\n" +
            "  --width PIXELS    framebuffer width\n" +
-           "  --height PIXELS   framebuffer height";
+           "  --height PIXELS   framebuffer height\n" +
+           "  --fps-counter     show the on-screen frame rate (default)\n" +
+           "  --no-fps-counter  hide the on-screen frame rate\n" +
+           "  --debug-events    log input events and frame rate (default)\n" +
+           "  --no-debug-events disable debug event and frame-rate logging";
 }
 
 function parseOptions(argv, programName) {
-    var options = {width: 256, height: 192, fps: 20};
+    var options = {
+        width: 256,
+        height: 192,
+        fps: 20,
+        fpsCounter: true,
+        debugEvents: true
+    };
     programName = programName || "demo.js";
     for (var optionIndex = 2; optionIndex < argv.length; optionIndex++) {
         var option = argv[optionIndex];
@@ -44,6 +54,14 @@ function parseOptions(argv, programName) {
             options.width = parseInt(option.substring(8), 10);
         } else if (option.indexOf("--height=") === 0) {
             options.height = parseInt(option.substring(9), 10);
+        } else if (option === "--fps-counter") {
+            options.fpsCounter = true;
+        } else if (option === "--no-fps-counter") {
+            options.fpsCounter = false;
+        } else if (option === "--debug-events") {
+            options.debugEvents = true;
+        } else if (option === "--no-debug-events") {
+            options.debugEvents = false;
         } else {
             optionError(programName, "unknown option: " + option);
         }
@@ -137,18 +155,23 @@ var FONT_PATTERNS = {
     "*": "00000/10101/01110/11111/01110/10101/00000"
 };
 
+var FONT_ROWS = {};
 
 function glyphRows(character) {
-    var pattern = FONT_PATTERNS[character] || FONT_PATTERNS[character.toUpperCase()] ||
+    var normalized = FONT_PATTERNS[character] ? character : character.toUpperCase();
+    if (FONT_ROWS[normalized]) return FONT_ROWS[normalized];
+    var pattern = FONT_PATTERNS[normalized] ||
                   "11111/10001/00110/00110/00000/00100/00100";
     var strings = pattern.split("/");
     var rows = [];
     for (var i = 0; i < strings.length; i++) rows.push(parseInt(strings[i], 2));
+    FONT_ROWS[normalized] = rows;
     return rows;
 }
 
 function paintGlyph(framebuffer, character, originX, originY) {
     var rows = glyphRows(character);
+    var setPixel = framebuffer.setPixel;
     for (var row = 0; row < FONT_HEIGHT; row++) {
         for (var column = 0; column < FONT_WIDTH; column++) {
             if (!(rows[row] & (1 << (FONT_WIDTH - column - 1)))) continue;
@@ -156,8 +179,8 @@ function paintGlyph(framebuffer, character, originX, originY) {
                 for (var scaleX = 0; scaleX < FONT_SCALE; scaleX++) {
                     var pixelX = originX + column * FONT_SCALE + scaleX;
                     var pixelY = originY + row * FONT_SCALE + scaleY;
-                    framebuffer.setPixel(pixelX + 1, pixelY + 1, 0, 0, 0);
-                    framebuffer.setPixel(pixelX, pixelY, 255, 255, 255);
+                    setPixel(pixelX + 1, pixelY + 1, 0, 0, 0);
+                    setPixel(pixelX, pixelY, 255, 255, 255);
                 }
             }
         }
@@ -178,6 +201,7 @@ function BitmapText(width, height, initialText) {
 }
 
 BitmapText.prototype.paint = function (framebuffer) {
+    var setPixel = framebuffer.setPixel;
     for (var key in this.cells) {
         if (!this.cells.hasOwnProperty(key)) continue;
         var comma = key.indexOf(",");
@@ -186,8 +210,8 @@ BitmapText.prototype.paint = function (framebuffer) {
         paintGlyph(framebuffer, this.cells[key], x, y);
     }
     for (var row = 0; row < FONT_HEIGHT * FONT_SCALE; row++) {
-        framebuffer.setPixel(this.caretX, this.caretY + row, 0, 0, 0);
-        framebuffer.setPixel(this.caretX + 1, this.caretY + row, 255, 255, 0);
+        setPixel(this.caretX, this.caretY + row, 0, 0, 0);
+        setPixel(this.caretX + 1, this.caretY + row, 255, 255, 0);
     }
 };
 
@@ -232,25 +256,98 @@ BitmapText.prototype.newLine = function () {
 };
 
 function paintPointer(framebuffer, pointerX, pointerY) {
+    var setPixel = framebuffer.setPixel;
     for (var y = 0; y < 18; y++) {
         var edge = Math.floor(y / 2);
         for (var x = 0; x <= edge; x++) {
             var boundary = x === 0 || x === edge || y === 17;
-            framebuffer.setPixel(pointerX + x + 1, pointerY + y + 1, 0, 0, 0);
-            framebuffer.setPixel(pointerX + x, pointerY + y,
-                                 boundary ? 0 : 255,
-                                 boundary ? 0 : 255,
-                                 boundary ? 0 : 255);
+            setPixel(pointerX + x + 1, pointerY + y + 1, 0, 0, 0);
+            setPixel(pointerX + x, pointerY + y,
+                     boundary ? 0 : 255,
+                     boundary ? 0 : 255,
+                     boundary ? 0 : 255);
         }
     }
 }
 
+function FrameRateCounter(showOnScreen, logToConsole) {
+    this.showOnScreen = showOnScreen;
+    this.logToConsole = logToConsole;
+    this.displayStartedAt = 0;
+    this.displayFrames = 0;
+    this.displayValue = 0;
+    this.logStartedAt = 0;
+    this.logFrames = 0;
+}
+
+FrameRateCounter.prototype.draw = function (framebuffer) {
+    var now = new Date().getTime();
+    if (!this.displayStartedAt) this.displayStartedAt = now;
+    if (!this.logStartedAt) this.logStartedAt = now;
+    this.displayFrames++;
+    this.logFrames++;
+
+    var displayElapsed = now - this.displayStartedAt;
+    if (displayElapsed >= 1000) {
+        this.displayValue = Math.round(this.displayFrames * 1000 / displayElapsed);
+        this.displayFrames = 0;
+        this.displayStartedAt = now;
+    }
+
+    var logElapsed = now - this.logStartedAt;
+    if (this.logToConsole && logElapsed >= 5000) {
+        var measured = this.logFrames * 1000 / logElapsed;
+        console.log("frame rate: " + measured.toFixed(1) + " FPS (" +
+                    this.logFrames + " frames in " +
+                    (logElapsed / 1000).toFixed(1) + " seconds)");
+        this.logFrames = 0;
+        this.logStartedAt = now;
+    }
+
+    if (this.showOnScreen) {
+        var label = "FPS " + this.displayValue;
+        var originX = framebuffer.width - label.length * GLYPH_ADVANCE;
+        var originY = framebuffer.height - LINE_ADVANCE;
+        if (originX < 0) originX = 0;
+        if (originY < 0) originY = 0;
+        for (var index = 0; index < label.length; index++) {
+            paintGlyph(framebuffer, label.charAt(index),
+                       originX + index * GLYPH_ADVANCE, originY);
+        }
+    }
+
+    /* Keep sampling even when the application scene itself is idle. */
+    framebuffer.requestFrame();
+};
+
+function createWindow(options) {
+    options = options || {};
+    var windowOptions = {};
+    var property;
+    for (property in options) {
+        if (options.hasOwnProperty(property)) windowOptions[property] = options[property];
+    }
+
+    var showOnScreen = options.fpsCounter !== false;
+    var logToConsole = options.debugEvents !== false;
+    if (showOnScreen || logToConsole) {
+        var applicationDraw = options.draw;
+        var counter = new FrameRateCounter(showOnScreen, logToConsole);
+        windowOptions.draw = function (framebuffer) {
+            if (typeof applicationDraw === "function") applicationDraw(framebuffer);
+            counter.draw(framebuffer);
+        };
+    }
+    return x11.createFramebufferWindow(windowOptions);
+}
+
 module.exports = {
-    createWindow: x11.createFramebufferWindow,
+    createWindow: createWindow,
     keysyms: x11.keysyms,
     parseOptions: parseOptions,
     usage: usage,
     BitmapText: BitmapText,
+    FrameRateCounter: FrameRateCounter,
     paintGlyph: paintGlyph,
     paintPointer: paintPointer,
     font: {
