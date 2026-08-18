@@ -20,6 +20,9 @@ var WALL_OFFSET = 5.15;
 var RACE_LAPS = 3;
 var NEAR_PLANE = 0.35;
 var WORLD_DRAW_DISTANCE = 76;
+var SHOULDER_DRAG_PER_FRAME = 0.996;
+var WALL_SCRAPE_DRAG_PER_FRAME = 0.990;
+var WALL_CONTACT_EPSILON = 0.03;
 var track;
 var terrainCells;
 var roadSections;
@@ -481,6 +484,47 @@ function resetRace() {
     controls.brake = false;
 }
 
+function resolveRoadEdge(nearest, dt) {
+    if (nearest.distance > ROAD_HALF_WIDTH) {
+        var shoulderAmount = clamp((nearest.distance - ROAD_HALF_WIDTH) /
+                                   (WALL_OFFSET - ROAD_HALF_WIDTH), 0, 1);
+        player.speed *= Math.pow(1 -
+                                (1 - SHOULDER_DRAG_PER_FRAME) * shoulderAmount,
+                                dt * 60);
+    }
+    if (nearest.distance < WALL_OFFSET - WALL_CONTACT_EPSILON) return;
+
+    var inverseDistance = 1 / nearest.distance;
+    var normalX = (player.x - nearest.x) * inverseDistance;
+    var normalZ = (player.z - nearest.z) * inverseDistance;
+    var penetration = Math.max(0, nearest.distance - WALL_OFFSET);
+
+    /* Resolve only the penetration and outward component of velocity.  The
+     * tangential component survives, so a glancing collision becomes a wall
+     * scrape instead of repeatedly multiplying the whole speed toward zero. */
+    player.x -= normalX * penetration;
+    player.z -= normalZ * penetration;
+    var velocityX = Math.sin(player.heading) * player.speed;
+    var velocityZ = Math.cos(player.heading) * player.speed;
+    var outwardVelocity = velocityX * normalX + velocityZ * normalZ;
+    if (outwardVelocity > 0) {
+        velocityX -= normalX * outwardVelocity;
+        velocityZ -= normalZ * outwardVelocity;
+        var travelSpeed = Math.sqrt(velocityX * velocityX +
+                                    velocityZ * velocityZ);
+        var direction = player.speed < 0 ? -1 : 1;
+        player.speed = travelSpeed * direction;
+        if (travelSpeed > 0.001) {
+            player.heading = direction > 0 ? Math.atan2(velocityX, velocityZ) :
+                                             Math.atan2(-velocityX, -velocityZ);
+        }
+    }
+
+    /* Sliding contact still costs energy, but continuously and in wall-clock
+     * time rather than once per physics substep as a large instantaneous hit. */
+    player.speed *= Math.pow(WALL_SCRAPE_DRAG_PER_FRAME, dt * 60);
+}
+
 function updatePlayerStep(dt) {
     if (rollingMode) {
         player.raceDistance += 13.4 * dt;
@@ -518,16 +562,7 @@ function updatePlayerStep(dt) {
 
     var nearest = nearestTrackPosition(player.x, player.z);
     player.y = nearest.y + 0.15;
-    if (nearest.distance > ROAD_HALF_WIDTH) {
-        player.speed *= Math.pow(0.90, dt * 60);
-    }
-    if (nearest.distance > WALL_OFFSET) {
-        var push = Math.min(nearest.distance - WALL_OFFSET, 2.5) * 0.55;
-        var inverseDistance = 1 / nearest.distance;
-        player.x += (nearest.x - player.x) * inverseDistance * push;
-        player.z += (nearest.z - player.z) * inverseDistance * push;
-        player.speed *= 0.68;
-    }
+    resolveRoadEdge(nearest, dt);
 
     var progressDelta = nearest.wrappedDistance - player.wrappedDistance;
     if (progressDelta > track.totalLength / 2) progressDelta -= track.totalLength;
