@@ -838,29 +838,61 @@ conceal that limitation with upscaling. Node.js reaches the shared X11 layer's
 roughly 60 Hz animation-frame scheduling ceiling at 512x384, so the
 optimization does not exchange Node performance for MMVM performance.
 
-### Standalone MMVM baseline demo 8
+### MMVM-specific demo 8
 
-`demo8.js` is a self-contained MMVM baseline for a later interpreter-specific
-optimization pass. It incorporates the required runner lifecycle, libc
-wrappers, Buffer and process compatibility, timer and poll event loop,
-synchronous filesystem access, X11 framebuffer implementation, shared demo
-helpers, and complete demo7 rally implementation in one file. It does not call
-`load`, `require`, or depend on another project JavaScript file.
+Demo 8 is the demo7 rally refactored and optimized specifically for
+`js_min.exe`. It has a two-file boundary:
 
-Run it directly, without `node_runner.js`:
+- `demo8_runner.js` owns the shell lifecycle, libc wrappers, timers and poll
+  event loop, native memory, X11 framebuffer, common option and font helpers,
+  and the small generated-code API.
+- `demo8.js` owns the rally simulation and renderer and registers its entry
+  point with `DemoRunner.define`.
+
+The runner loads the application named by its first argument, so run it
+without `node_runner.js` as follows:
 
 ```sh
 LD_LIBRARY_PATH="$MOZJS_LIB" \
   "$MMVM_ROOT/artifacts/js_min.exe" \
-  demo8.js --size 160x120 --fps 20
+  demo8_runner.js demo8.js --size 320x240 --fps 20
 ```
 
-The initial demo8 revision deliberately retains the module boundaries as local
-function scopes and otherwise preserves demo7's behavior and abstractions. It
-is a consolidation baseline, not yet the MMVM-only optimized implementation.
-Unlike demo7, the standalone file is not intended to run under Node.js. Future
-demo8 work may remove Node compatibility and refactor representations around
-the old SpiderMonkey shell, FFI, and native `peek`/`poke` operations.
+The default remains 256x192 at 20 FPS. `--size WIDTHxHEIGHT`, separate
+`--width` and `--height` options, and `--fps` continue to work; valid sizes are
+64..1024 pixels in each dimension and valid frame limits are 1..120 FPS.
+`--[no-]fps-counter` controls the on-screen counter and
+`--[no-]debug-events` controls console event and five-second FPS logging.
+
+The optimized rasterizer keeps its depth and framebuffer data in native
+memory. It submits complete triangle halves to compact, colour-specialized
+i386 routines generated at startup, and uses a generated native bitmap-text
+blitter for repeated HUD strings. `demo8.js` expresses all three routines with
+the runner's JavaScript macro assembler: named registers, operations, labels,
+and conditional branches. It contains no raw opcode arrays or byte-offset
+patches. Instruction encoding and branch fixups live behind
+`nativeCode.compile` in `demo8_runner.js`.
+
+Writable mappings are changed to read/execute before being called (W^X); they
+are never simultaneously writable and executable. Shared projected vertices,
+coarser render-only terrain and road meshes, and distance detail levels reduce
+old-SpiderMonkey object and call overhead while the 96-point physics course
+remains unchanged. The runner API keeps the MMVM, macro assembler, and X11
+mechanisms separate from the game so it can become a general demo runner
+later.
+
+Triangles crossing the camera near plane are geometrically clipped rather
+than dropped. Hillside vertices are carved against the nearest point anywhere
+on the complete road, and terrain-band widths are bounded by the carve radius;
+this prevents coarse terrain cells on tight bends from bridging over the road.
+
+This implementation is intentionally not Node.js-compatible. It assumes the
+32-bit x86 Linux `js_min.exe` environment used throughout this repository.
+For the final macro-assembled build, consecutive five-second attract-mode
+samples at 320x240 with a 20 FPS limit measured 20.0, 19.7, 19.9, 19.8, and
+19.8 FPS on the development machine. With the limit raised to 60 to expose
+rendering headroom, it measured 24.0, 22.0, and 25.1 FPS. These measurements
+are a working target, not a portable performance guarantee.
 
 ### Framebuffer drawing benchmark
 
