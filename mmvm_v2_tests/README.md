@@ -838,6 +838,30 @@ conceal that limitation with upscaling. Node.js reaches the shared X11 layer's
 roughly 60 Hz animation-frame scheduling ceiling at 512x384, so the
 optimization does not exchange Node performance for MMVM performance.
 
+### Standalone MMVM baseline demo 8
+
+`demo8.js` is a self-contained MMVM baseline for a later interpreter-specific
+optimization pass. It incorporates the required runner lifecycle, libc
+wrappers, Buffer and process compatibility, timer and poll event loop,
+synchronous filesystem access, X11 framebuffer implementation, shared demo
+helpers, and complete demo7 rally implementation in one file. It does not call
+`load`, `require`, or depend on another project JavaScript file.
+
+Run it directly, without `node_runner.js`:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  demo8.js --size 160x120 --fps 20
+```
+
+The initial demo8 revision deliberately retains the module boundaries as local
+function scopes and otherwise preserves demo7's behavior and abstractions. It
+is a consolidation baseline, not yet the MMVM-only optimized implementation.
+Unlike demo7, the standalone file is not intended to run under Node.js. Future
+demo8 work may remove Node compatibility and refactor representations around
+the old SpiderMonkey shell, FFI, and native `peek`/`poke` operations.
+
 ### Framebuffer drawing benchmark
 
 The arguments are width, height, frame count, and storage mode:
