@@ -4,6 +4,11 @@ This directory contains the JavaScript examples, compatibility layer, and
 framebuffer benchmark developed against `mmvm_v2`. The interpreter and its C
 sources remain in the separate `mmvm_v2` repository.
 
+The existing JavaScript-only Node compatibility implementation is described in
+`NODE_COMPAT_PLAN.md`. The proposed guest JavaScript VM, guest-owned garbage
+collector and Buffer lifetime model, portable bytecode, generated-JavaScript
+backend, and optional i386 JIT are described in `GUEST_VM_PLAN.md`.
+
 ## Required checkout layout
 
 The build scripts use relative paths. Arrange the repositories and Firefox
