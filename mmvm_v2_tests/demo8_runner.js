@@ -2040,7 +2040,8 @@ return {
         up: 0xff52,
         right: 0xff53,
         down: 0xff54,
-        f1: 0xffbe
+        f1: 0xffbe,
+        f2: 0xffbf
     }
 };
 }());

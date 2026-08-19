@@ -30,6 +30,7 @@ var depthBuffer;
 var background;
 var spanRasterizer;
 var spanRasterizers = {};
+var useJavaScriptTriangleRasterizer = false;
 var DEPTH_FIXED_SCALE = 67108864;
 var BOX_LOCAL = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 var BOX_FACES = [[0, 1, 2, 3, 0.48], [4, 7, 6, 5, 1.0],
@@ -249,7 +250,7 @@ function createTriangleHalfRasterizer(packed) {
     });
 }
 
-function triangleHalfRasterizer(packed) {
+function triangleHalfRasterizerCode(packed) {
     var key = String(packed >>> 0);
     var rasterizer = spanRasterizers[key];
     if (!rasterizer) {
@@ -257,6 +258,132 @@ function triangleHalfRasterizer(packed) {
         spanRasterizers[key] = rasterizer;
     }
     return rasterizer;
+}
+
+function triangleHalfRasterizerASM(pixelAddress, packedYRange,
+                                   firstX, secondX, packedXSteps,
+                                   firstZ, secondZ, packedZSteps, packed) {
+    nativeCode.call8(triangleHalfRasterizerCode(packed),
+                     pixelAddress, packedYRange,
+                     firstX, secondX, packedXSteps,
+                     firstZ, secondZ, packedZSteps);
+}
+
+/*
+ * Low-level reference for createTriangleHalfRasterizer above.  Its arguments,
+ * signed 32-bit fixed-point state, clipping, edge stepping, division, depth
+ * comparison, and memory layout intentionally follow the assembled routine.
+ * Keep this restricted shape suitable for a future small-subset JS compiler;
+ * it is a reference implementation, not an attempt to make interpreted pixel
+ * writes fast.  JavaScript bitwise operations provide the i386 32-bit wrapping
+ * used after every arithmetic update.
+ */
+function triangleHalfRasterizerJS(pixelAddress, packedYRange,
+                                  firstX, secondX, packedXSteps,
+                                  firstZ, secondZ, packedZSteps, packed) {
+    var y = packedYRange & 65535;
+    var lastY = packedYRange >>> 16;
+    var x1 = firstX | 0;
+    var x2 = secondX | 0;
+    var x1Step = ((packedXSteps << 16 >> 16) << 8) | 0;
+    var x2Step = ((packedXSteps >> 16) << 8) | 0;
+    var z1 = firstZ | 0;
+    var z2 = secondZ | 0;
+    var z1Step = ((packedZSteps << 16 >> 16) << 10) | 0;
+    var z2Step = ((packedZSteps >> 16) << 10) | 0;
+
+    while (y < lastY) {
+        var leftX = x1;
+        var rightX = x2;
+        var leftZ = z1;
+        var rightZ = z2;
+        if (leftX > rightX) {
+            var swap = leftX;
+            leftX = rightX;
+            rightX = swap;
+            swap = leftZ;
+            leftZ = rightZ;
+            rightZ = swap;
+        }
+
+        var spanStart = ((leftX + 32767) | 0) >> 16;
+        if (spanStart < 0) spanStart = 0;
+        var spanEnd = ((rightX + 32767) | 0) >> 16;
+        if (spanEnd > options.width) spanEnd = options.width;
+        if (spanStart < spanEnd) {
+            var spanLength = spanEnd - spanStart;
+            var spanDepth = leftZ;
+            var depthStep = (((rightZ - leftZ) | 0) / spanLength) | 0;
+            var pixelOffset = ((y * options.width + spanStart) * 4) | 0;
+            var pixelPointer = pixelAddress + pixelOffset;
+            var depthPointer = depthBuffer + pixelOffset;
+
+            while (spanLength !== 0) {
+                if (spanDepth > (peek32(depthPointer) | 0)) {
+                    poke32(depthPointer, spanDepth);
+                    poke32(pixelPointer, packed);
+                }
+                depthPointer += 4;
+                pixelPointer += 4;
+                spanDepth = (spanDepth + depthStep) | 0;
+                spanLength--;
+            }
+        }
+
+        x1 = (x1 + x1Step) | 0;
+        x2 = (x2 + x2Step) | 0;
+        z1 = (z1 + z1Step) | 0;
+        z2 = (z2 + z2Step) | 0;
+        y++;
+    }
+}
+
+function verifyTriangleHalfRasterizers() {
+    var rows = 8;
+    var words = options.width * rows;
+    var byteLength = words * 4;
+    var asmPixels = memory.allocate(byteLength);
+    var jsPixels = memory.allocate(byteLength);
+    var expectedPixels = [];
+    var expectedDepth = [];
+    var packed = 0x008b7455;
+    var packedYRange = packedSignedPair(1, 7);
+    var firstX = fixedPosition(14.25);
+    var secondX = fixedPosition(-2.50);
+    var packedXSteps = packedSignedPair(-128, 64);
+    var firstZ = (0.45 * DEPTH_FIXED_SCALE) | 0;
+    var secondZ = (0.70 * DEPTH_FIXED_SCALE) | 0;
+    var packedZSteps = packedSignedPair(655, -983);
+    var index;
+    var mismatch = "";
+
+    libc.memset(asmPixels, 0, byteLength);
+    libc.memset(depthBuffer, 0, options.width * options.height * 4);
+    triangleHalfRasterizerASM(asmPixels, packedYRange,
+                              firstX, secondX, packedXSteps,
+                              firstZ, secondZ, packedZSteps, packed);
+    for (index = 0; index < words; index++) {
+        expectedPixels[index] = peek32(asmPixels + index * 4) | 0;
+        expectedDepth[index] = peek32(depthBuffer + index * 4) | 0;
+    }
+
+    libc.memset(jsPixels, 0, byteLength);
+    libc.memset(depthBuffer, 0, options.width * options.height * 4);
+    triangleHalfRasterizerJS(jsPixels, packedYRange,
+                             firstX, secondX, packedXSteps,
+                             firstZ, secondZ, packedZSteps, packed);
+    for (index = 0; index < words; index++) {
+        if ((peek32(jsPixels + index * 4) | 0) !== expectedPixels[index] ||
+            (peek32(depthBuffer + index * 4) | 0) !== expectedDepth[index]) {
+            mismatch = "triangle-half ASM/JS mismatch at word " + index;
+            break;
+        }
+    }
+
+    memory.free(jsPixels);
+    memory.free(asmPixels);
+    libc.memset(depthBuffer, 0, options.width * options.height * 4);
+    if (mismatch) throw new Error(mismatch);
 }
 
 function fixedPosition(value) {
@@ -748,14 +875,29 @@ function rasterRows(framebuffer, firstY, lastY,
         var secondPackedXStep = Math.round(secondXStep * 256);
         var firstPackedZStep = Math.round(firstZStep * 65536);
         var secondPackedZStep = Math.round(secondZStep * 65536);
-        nativeCode.call8(triangleHalfRasterizer(packed),
-                         framebuffer.pixelAddress,
-                         packedSignedPair(clippedFirstY, clippedLastY),
-                         fixedPosition(firstX), fixedPosition(secondX),
-                         packedSignedPair(firstPackedXStep, secondPackedXStep),
-                         (firstZ * DEPTH_FIXED_SCALE) | 0,
-                         (secondZ * DEPTH_FIXED_SCALE) | 0,
-                         packedSignedPair(firstPackedZStep, secondPackedZStep));
+        if (useJavaScriptTriangleRasterizer) {
+            triangleHalfRasterizerJS(
+                framebuffer.pixelAddress,
+                packedSignedPair(clippedFirstY, clippedLastY),
+                fixedPosition(firstX), fixedPosition(secondX),
+                packedSignedPair(firstPackedXStep, secondPackedXStep),
+                (firstZ * DEPTH_FIXED_SCALE) | 0,
+                (secondZ * DEPTH_FIXED_SCALE) | 0,
+                packedSignedPair(firstPackedZStep, secondPackedZStep), packed);
+        } else {
+            /* Keep the established ASM hot path direct: an extra interpreted
+             * wrapper call per triangle half is measurable in js_min.exe. */
+            nativeCode.call8(triangleHalfRasterizerCode(packed),
+                             framebuffer.pixelAddress,
+                             packedSignedPair(clippedFirstY, clippedLastY),
+                             fixedPosition(firstX), fixedPosition(secondX),
+                             packedSignedPair(firstPackedXStep,
+                                              secondPackedXStep),
+                             (firstZ * DEPTH_FIXED_SCALE) | 0,
+                             (secondZ * DEPTH_FIXED_SCALE) | 0,
+                             packedSignedPair(firstPackedZStep,
+                                              secondPackedZStep));
+        }
         return;
     }
     for (var y = clippedFirstY; y < clippedLastY; y++) {
@@ -1324,6 +1466,8 @@ function reportGameReady() {
                 windowInfo.framesPerSecond + " FPS limit");
     console.log("Attract mode running; push Space to reset the grid and play");
     console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
+    console.log("F2 toggles triangle rasterization between ASM and JS reference modes");
+    console.log("triangle-half rasterizer: ASM");
 }
 
 function initializeGame() {
@@ -1333,6 +1477,7 @@ function initializeGame() {
     depthBuffer = memory.allocate(options.width * options.height * 4);
     spanRasterizer = createSpanRasterizer(depthBuffer, options.width);
     spanRasterizers = {};
+    verifyTriangleHalfRasterizers();
     background = makeBackground(options.width, options.height);
     resetRace();
     gameReady = true;
@@ -1401,6 +1546,12 @@ function startHumanRace() {
     resetRace();
 }
 
+function toggleTriangleRasterizer() {
+    useJavaScriptTriangleRasterizer = !useJavaScriptTriangleRasterizer;
+    console.log("triangle-half rasterizer: " +
+                (useJavaScriptTriangleRasterizer ? "JS reference" : "ASM"));
+}
+
 var window = common.createWindow({
     width: options.width,
     height: options.height,
@@ -1419,6 +1570,10 @@ var window = common.createWindow({
         }
         if (event.keysym === 32 && (rollingMode || raceFinished)) {
             startHumanRace();
+            return;
+        }
+        if (event.keysym === common.keysyms.f2) {
+            toggleTriangleRasterizer();
             return;
         }
         setDrivingKey(event, true);

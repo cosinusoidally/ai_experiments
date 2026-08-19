@@ -864,6 +864,23 @@ The default remains 256x192 at 20 FPS. `--size WIDTHxHEIGHT`, separate
 `--[no-]fps-counter` controls the on-screen counter and
 `--[no-]debug-events` controls console event and five-second FPS logging.
 
+Press F2 while demo8 is running to switch triangle-half rasterization between
+the default macro-assembled i386 implementation and the low-level JavaScript
+reference implementation. Each change is reported on stdout as
+`triangle-half rasterizer: ASM` or `triangle-half rasterizer: JS reference`.
+The JS version deliberately follows the same packed arguments, signed 32-bit
+fixed-point edge state, clipping, reciprocal-depth interpolation, signed depth
+test, and native framebuffer layout as the assembled routine. It is written as
+a restricted, loop-oriented reference suitable for experiments with a future
+JS-subset compiler; demo8 does not include or invoke such a compiler.
+At startup, a small edge-swapped and horizontally clipped triangle half is run
+through both implementations. Demo8 compares every affected packed pixel and
+signed fixed-point depth word and stops with an error if the results differ.
+On the development machine, the reference measured approximately 3.3--3.5 FPS
+at 320x240 and 10.4 FPS at 160x120 in attract mode. The default ASM mode still
+meets the 320x240 at 20 FPS target. These figures characterize the interpreter
+cost and are not portable performance guarantees.
+
 The optimized rasterizer keeps its depth and framebuffer data in native
 memory. It submits complete triangle halves to compact, colour-specialized
 i386 routines generated at startup, and uses a generated native bitmap-text
