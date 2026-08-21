@@ -1,7 +1,10 @@
-function RenderFrame(frameIndex)
+function RenderFrame(time)
 {
     var p = 0;
-    var t = frameIndex;
+
+    // Convert elapsed seconds into a byte-like animation phase.
+    // 60.0 controls speed; increase or decrease to taste.
+    var t = (time * 60.0) | 0;
 
     for (var y = 0; y < height; ++y)
     {

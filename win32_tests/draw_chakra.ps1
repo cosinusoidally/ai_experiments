@@ -37,6 +37,7 @@ if ($Width -le 0 -or $Height -le 0) {
 $Source = @"
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -106,6 +107,10 @@ public static class ChakraFramebufferHost
     private static IntPtr jsArrayBuffer = IntPtr.Zero;
     private static IntPtr jsTickFunction = IntPtr.Zero;
     private static IntPtr jsUndefined = IntPtr.Zero;
+
+
+    private static readonly Stopwatch animationClock =
+        new Stopwatch();
 
 
     private static ulong sourceContext = 1;
@@ -207,6 +212,9 @@ public static class ChakraFramebufferHost
 
 
             running = true;
+
+
+            animationClock.Restart();
 
 
             // Draw a first frame immediately.
@@ -491,29 +499,16 @@ public static class ChakraFramebufferHost
 
 
         // ----------------------------------------------------
-        // Validate interface and create a tiny persistent tick
-        // function.
-        //
-        // This means we do NOT parse:
-        //
-        //     "RenderFrame(12345)"
-        //
-        // every frame.
-        //
-        // JsCallFunction directly invokes the cached function.
+        // Validate interface. RenderFrame receives elapsed time
+        // in seconds, so animation speed is independent of the
+        // number of frames rendered.
         // ----------------------------------------------------
 
         string setup =
             "if(typeof RenderFrame!=='function')" +
             "throw new Error(" +
-            "'The JS file must define RenderFrame(frameIndex)'" +
-            ");" +
-
-            "var __hostFrame=0;" +
-
-            "function __hostTick(){" +
-            "RenderFrame(__hostFrame++);" +
-            "}";
+            "'The JS file must define RenderFrame(time)'" +
+            ");";
 
 
         RunScript(
@@ -523,20 +518,20 @@ public static class ChakraFramebufferHost
 
 
         // ----------------------------------------------------
-        // Cache __hostTick's JsValueRef.
+        // Cache RenderFrame's JsValueRef.
         // ----------------------------------------------------
 
         IntPtr tickProperty;
 
         error =
             JsGetPropertyIdFromName(
-                "__hostTick",
+                "RenderFrame",
                 out tickProperty
             );
 
         CheckJs(
             error,
-            "JsGetPropertyIdFromName(__hostTick)"
+            "JsGetPropertyIdFromName(RenderFrame)"
         );
 
 
@@ -549,7 +544,7 @@ public static class ChakraFramebufferHost
 
         CheckJs(
             error,
-            "JsGetProperty(__hostTick)"
+            "JsGetProperty(RenderFrame)"
         );
 
 
@@ -561,7 +556,7 @@ public static class ChakraFramebufferHost
 
         CheckJs(
             error,
-            "JsAddRef(__hostTick)"
+            "JsAddRef(RenderFrame)"
         );
     }
 
@@ -624,27 +619,67 @@ public static class ChakraFramebufferHost
         try
         {
             // ------------------------------------------------
-            // JSRT requires arguments[0] to be thisArg.
-            //
-            // No actual RenderFrame arguments are required
-            // because __hostTick maintains __hostFrame itself.
+            // Pass real elapsed time (seconds) into JavaScript.
             // ------------------------------------------------
 
+            double elapsedSeconds =
+                animationClock.Elapsed.TotalSeconds;
+
+
+            IntPtr jsTime;
+
+
+            uint error =
+                JsDoubleToNumber(
+                    elapsedSeconds,
+                    out jsTime
+                );
+
+
+            if (error != JsNoError)
+            {
+                fatalError =
+                    FormatJsError(
+                        error,
+                        "JsDoubleToNumber"
+                    );
+
+
+                running = false;
+
+
+                if (hwnd != IntPtr.Zero)
+                {
+                    DestroyWindow(
+                        hwnd
+                    );
+                }
+
+
+                return;
+            }
+
+
+            // arguments[0] = JavaScript `this`
+            // arguments[1] = elapsed time in seconds
             IntPtr[] arguments =
-                new IntPtr[1];
+                new IntPtr[2];
 
             arguments[0] =
                 jsUndefined;
+
+            arguments[1] =
+                jsTime;
 
 
             IntPtr result;
 
 
-            uint error =
+            error =
                 JsCallFunction(
                     jsTickFunction,
                     arguments,
-                    1,
+                    2,
                     out result
                 );
 
@@ -1312,6 +1347,8 @@ public static class ChakraFramebufferHost
     {
         running = false;
 
+        animationClock.Stop();
+
 
         if (hwnd != IntPtr.Zero)
         {
@@ -1852,6 +1889,17 @@ public static class ChakraFramebufferHost
     )]
     private static extern uint JsGetUndefinedValue(
         out IntPtr undefinedValue
+    );
+
+
+    [DllImport(
+        "chakra.dll",
+        ExactSpelling = true,
+        CallingConvention = CallingConvention.Winapi
+    )]
+    private static extern uint JsDoubleToNumber(
+        double doubleValue,
+        out IntPtr value
     );
 
 
