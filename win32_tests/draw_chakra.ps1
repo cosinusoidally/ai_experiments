@@ -82,9 +82,6 @@ public static class ChakraFramebufferHost
 
     private const uint JsNoError = 0;
 
-    // Windows Chakra's "Edge" runtime.
-    private const int JsRuntimeVersionEdge = -1;
-
     // JsRuntimeAttributeNone
     private const uint JsRuntimeAttributeNone = 0;
 
@@ -308,7 +305,6 @@ public static class ChakraFramebufferHost
         error =
             JsCreateRuntime(
                 JsRuntimeAttributeNone,
-                JsRuntimeVersionEdge,
                 IntPtr.Zero,
                 out jsRuntime
             );
@@ -1736,7 +1732,6 @@ public static class ChakraFramebufferHost
     )]
     private static extern uint JsCreateRuntime(
         uint attributes,
-        int runtimeVersion,
         IntPtr threadService,
         out IntPtr runtime
     );
