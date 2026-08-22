@@ -2070,7 +2070,9 @@ function usage(programName) {
            "  --fps-counter     show the on-screen frame rate (default)\n" +
            "  --no-fps-counter  hide the on-screen frame rate\n" +
            "  --debug-events    log input events and frame rate (default)\n" +
-           "  --no-debug-events disable debug event and frame-rate logging";
+           "  --no-debug-events disable debug event and frame-rate logging\n" +
+           "  --dump-native-assembly\n" +
+           "                     print the first source-compiled macro program";
 }
 
 function parseOptions(argv, programName) {
@@ -2079,7 +2081,8 @@ function parseOptions(argv, programName) {
         height: 192,
         fps: 20,
         fpsCounter: true,
-        debugEvents: true
+        debugEvents: true,
+        dumpNativeAssembly: false
     };
     programName = programName || "demo.js";
     for (var optionIndex = 2; optionIndex < argv.length; optionIndex++) {
@@ -2113,6 +2116,8 @@ function parseOptions(argv, programName) {
             options.debugEvents = true;
         } else if (option === "--no-debug-events") {
             options.debugEvents = false;
+        } else if (option === "--dump-native-assembly") {
+            options.dumpNativeAssembly = true;
         } else {
             optionError(programName, "unknown option: " + option);
         }
@@ -2535,8 +2540,18 @@ X86Assembler.prototype.addRegisters = function (destination, source) {
 X86Assembler.prototype.subtractRegisters = function (destination, source) {
     this.binaryRegisters(0x29, destination, source);
 };
+X86Assembler.prototype.andRegisters = function (destination, source) {
+    this.binaryRegisters(0x21, destination, source);
+};
+X86Assembler.prototype.orRegisters = function (destination, source) {
+    this.binaryRegisters(0x09, destination, source);
+};
 X86Assembler.prototype.xorRegisters = function (destination, source) {
     this.binaryRegisters(0x31, destination, source);
+};
+X86Assembler.prototype.multiplyRegisters = function (destination, source) {
+    this.emit(0x0f, 0xaf);
+    this.modRM(3, this.register(destination), this.register(source));
 };
 X86Assembler.prototype.compareRegisters = function (left, right) {
     this.binaryRegisters(0x39, left, right);
@@ -2600,6 +2615,14 @@ X86Assembler.prototype.divideSignedBy = function (register) {
     this.emit(0xf7);
     this.modRM(3, 7, this.register(register));
 };
+X86Assembler.prototype.negate = function (register) {
+    this.emit(0xf7);
+    this.modRM(3, 3, this.register(register));
+};
+X86Assembler.prototype.bitwiseNot = function (register) {
+    this.emit(0xf7);
+    this.modRM(3, 2, this.register(register));
+};
 X86Assembler.prototype.decrement = function (register) {
     this.emit(0x48 + this.register(register));
 };
@@ -2639,6 +2662,586 @@ X86Assembler.prototype.finish = function () {
         this.bytes[fixup.offset + 3] = (relative >>> 24) & 255;
     }
     return this.bytes;
+};
+
+/* Record only calls made by the source compiler. Calls which an assembler
+ * macro makes internally are deliberately not repeated in the listing. */
+function MacroAssemblyRecorder(assembler) {
+    this.assembler = assembler;
+    this.lines = [];
+    var recorder = this;
+    var methods = [
+        "push", "pop", "moveRegister", "moveImmediate",
+        "moveMemoryToRegister", "moveRegisterToMemory", "moveArgument",
+        "moveLocalToRegister", "moveRegisterToLocal",
+        "moveMemoryIndexedToRegister", "moveRegisterToMemoryIndexed",
+        "loadIndexedAddress", "addRegisters", "subtractRegisters",
+        "andRegisters", "orRegisters", "xorRegisters", "multiplyRegisters",
+        "compareRegisters", "testRegisters", "addMemoryToRegister",
+        "subtractMemoryFromRegister", "compareRegisterWithMemory",
+        "imulImmediate", "addImmediate", "subtractImmediate",
+        "compareImmediate", "shift", "moveZeroExtended16",
+        "moveSignExtended16", "exchangeRegisters", "signExtendEax",
+        "divideSignedBy", "negate", "bitwiseNot", "decrement",
+        "incrementLocal", "label", "jump", "returnFromFunction"
+    ];
+    function install(method) {
+        recorder[method] = function () {
+            recorder.record(method, arguments);
+            return assembler[method].apply(assembler, arguments);
+        };
+    }
+    for (var index = 0; index < methods.length; index++) install(methods[index]);
+}
+
+MacroAssemblyRecorder.prototype.formatArgument = function (value) {
+    if (typeof value === "string") {
+        return "\"" + value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"") + "\"";
+    }
+    return String(value);
+};
+MacroAssemblyRecorder.prototype.record = function (method, values) {
+    var argumentsText = [];
+    for (var index = 0; index < values.length; index++) {
+        argumentsText.push(this.formatArgument(values[index]));
+    }
+    this.lines.push((method === "label" ? "" : "    ") + method + "(" +
+                    argumentsText.join(", ") + ");");
+};
+MacroAssemblyRecorder.prototype.finish = function () {
+    return this.assembler.finish();
+};
+MacroAssemblyRecorder.prototype.toString = function () {
+    return this.lines.join("\n");
+};
+
+/* ---- Restricted JavaScript to i386 compiler ---- */
+function NativeJSTokenizer(source) {
+    this.source = source;
+    this.offset = 0;
+    this.line = 1;
+    this.column = 1;
+}
+
+NativeJSTokenizer.prototype.error = function (message) {
+    throw new Error("compileNative: " + message + " at line " + this.line +
+                    ", column " + this.column);
+};
+
+NativeJSTokenizer.prototype.advance = function () {
+    var character = this.source.charAt(this.offset++);
+    if (character === "\n") {
+        this.line++;
+        this.column = 1;
+    } else {
+        this.column++;
+    }
+    return character;
+};
+
+NativeJSTokenizer.prototype.skipSpace = function () {
+    while (this.offset < this.source.length) {
+        var character = this.source.charAt(this.offset);
+        var next = this.source.charAt(this.offset + 1);
+        if (/\s/.test(character)) {
+            this.advance();
+        } else if (character === "/" && next === "/") {
+            while (this.offset < this.source.length && this.advance() !== "\n") {}
+        } else if (character === "/" && next === "*") {
+            this.advance();
+            this.advance();
+            while (this.offset < this.source.length &&
+                   !(this.source.charAt(this.offset) === "*" &&
+                     this.source.charAt(this.offset + 1) === "/")) {
+                this.advance();
+            }
+            if (this.offset >= this.source.length) this.error("unterminated comment");
+            this.advance();
+            this.advance();
+        } else {
+            return;
+        }
+    }
+};
+
+NativeJSTokenizer.prototype.next = function () {
+    this.skipSpace();
+    var line = this.line;
+    var column = this.column;
+    if (this.offset >= this.source.length) {
+        return {type: "eof", value: "", line: line, column: column};
+    }
+    var character = this.source.charAt(this.offset);
+    if (/[A-Za-z_$]/.test(character)) {
+        var identifier = "";
+        while (this.offset < this.source.length &&
+               /[A-Za-z0-9_$]/.test(this.source.charAt(this.offset))) {
+            identifier += this.advance();
+        }
+        return {type: "identifier", value: identifier,
+                line: line, column: column};
+    }
+    if (/[0-9]/.test(character)) {
+        var numberText = "";
+        if (character === "0" &&
+            (this.source.charAt(this.offset + 1) === "x" ||
+             this.source.charAt(this.offset + 1) === "X")) {
+            numberText += this.advance();
+            numberText += this.advance();
+            while (/[0-9A-Fa-f]/.test(this.source.charAt(this.offset))) {
+                numberText += this.advance();
+            }
+            return {type: "number", value: parseInt(numberText, 16),
+                    line: line, column: column};
+        }
+        while (/[0-9]/.test(this.source.charAt(this.offset))) {
+            numberText += this.advance();
+        }
+        return {type: "number", value: parseInt(numberText, 10),
+                line: line, column: column};
+    }
+    var operators = [">>>", "===", "!==", "<<", ">>", "<=", ">=",
+                     "==", "!=", "+=", "-=", "++", "--"];
+    for (var index = 0; index < operators.length; index++) {
+        var operator = operators[index];
+        if (this.source.substr(this.offset, operator.length) === operator) {
+            for (var part = 0; part < operator.length; part++) this.advance();
+            return {type: "operator", value: operator,
+                    line: line, column: column};
+        }
+    }
+    if ("{}();,.+-*/&|^~!<>=[]".indexOf(character) >= 0) {
+        this.advance();
+        return {type: "operator", value: character,
+                line: line, column: column};
+    }
+    this.error("unsupported character " + character);
+};
+
+function NativeJSParser(source) {
+    this.tokenizer = new NativeJSTokenizer(source);
+    this.token = this.tokenizer.next();
+}
+
+NativeJSParser.prototype.error = function (message) {
+    throw new Error("compileNative: " + message + " at line " +
+                    this.token.line + ", column " + this.token.column);
+};
+NativeJSParser.prototype.take = function () {
+    var token = this.token;
+    this.token = this.tokenizer.next();
+    return token;
+};
+NativeJSParser.prototype.accept = function (value) {
+    if (this.token.value !== value) return false;
+    this.take();
+    return true;
+};
+NativeJSParser.prototype.expect = function (value) {
+    if (!this.accept(value)) this.error("expected " + value + ", found " + this.token.value);
+};
+NativeJSParser.prototype.identifier = function () {
+    if (this.token.type !== "identifier") this.error("expected identifier");
+    return this.take().value;
+};
+
+NativeJSParser.prototype.parseFunction = function () {
+    this.expect("function");
+    var name = this.identifier();
+    this.expect("(");
+    var parameters = [];
+    if (!this.accept(")")) {
+        do { parameters.push(this.identifier()); } while (this.accept(","));
+        this.expect(")");
+    }
+    var body = this.parseBlock();
+    if (this.token.type !== "eof") this.error("unexpected source after function");
+    return {type: "function", name: name, parameters: parameters, body: body};
+};
+
+NativeJSParser.prototype.parseBlock = function () {
+    this.expect("{");
+    var statements = [];
+    while (!this.accept("}")) {
+        if (this.token.type === "eof") this.error("unterminated block");
+        statements.push(this.parseStatement());
+    }
+    return {type: "block", statements: statements};
+};
+
+NativeJSParser.prototype.parseStatement = function () {
+    if (this.token.value === "{") return this.parseBlock();
+    if (this.accept("var")) {
+        var declarations = [];
+        do {
+            var name = this.identifier();
+            var initializer = null;
+            if (this.accept("=")) initializer = this.parseExpression();
+            declarations.push({name: name, initializer: initializer});
+        } while (this.accept(","));
+        this.expect(";");
+        return {type: "var", declarations: declarations};
+    }
+    if (this.accept("while")) {
+        this.expect("(");
+        var whileCondition = this.parseExpression();
+        this.expect(")");
+        return {type: "while", condition: whileCondition,
+                body: this.parseStatement()};
+    }
+    if (this.accept("if")) {
+        this.expect("(");
+        var ifCondition = this.parseExpression();
+        this.expect(")");
+        var consequent = this.parseStatement();
+        var alternate = null;
+        if (this.accept("else")) alternate = this.parseStatement();
+        return {type: "if", condition: ifCondition,
+                consequent: consequent, alternate: alternate};
+    }
+    var expression = this.parseExpression();
+    this.expect(";");
+    return {type: "expression", expression: expression};
+};
+
+NativeJSParser.prototype.parseExpression = function () {
+    return this.parseAssignment();
+};
+NativeJSParser.prototype.parseAssignment = function () {
+    var left = this.parseComparison();
+    if (this.token.value === "=" || this.token.value === "+=" ||
+        this.token.value === "-=") {
+        var operator = this.take().value;
+        return {type: "assignment", operator: operator, left: left,
+                right: this.parseAssignment()};
+    }
+    return left;
+};
+NativeJSParser.prototype.parseComparison = function () {
+    var expression = this.parseBitwiseOr();
+    while (this.token.value === "<" || this.token.value === ">" ||
+           this.token.value === "<=" || this.token.value === ">=" ||
+           this.token.value === "===" || this.token.value === "!==" ||
+           this.token.value === "==" || this.token.value === "!=") {
+        var operator = this.take().value;
+        expression = {type: "binary", operator: operator, left: expression,
+                      right: this.parseBitwiseOr()};
+    }
+    return expression;
+};
+NativeJSParser.prototype.parseBinaryLevel = function (nextMethod, operators) {
+    var expression = this[nextMethod]();
+    function contains(values, value) {
+        for (var index = 0; index < values.length; index++) {
+            if (values[index] === value) return true;
+        }
+        return false;
+    }
+    while (contains(operators, this.token.value)) {
+        var operator = this.take().value;
+        expression = {type: "binary", operator: operator, left: expression,
+                      right: this[nextMethod]()};
+    }
+    return expression;
+};
+NativeJSParser.prototype.parseBitwiseOr = function () {
+    return this.parseBinaryLevel("parseBitwiseXor", ["|"]);
+};
+NativeJSParser.prototype.parseBitwiseXor = function () {
+    return this.parseBinaryLevel("parseBitwiseAnd", ["^"]);
+};
+NativeJSParser.prototype.parseBitwiseAnd = function () {
+    return this.parseBinaryLevel("parseShift", ["&"]);
+};
+NativeJSParser.prototype.parseShift = function () {
+    return this.parseBinaryLevel("parseAdditive", ["<<", ">>", ">>>"]);
+};
+NativeJSParser.prototype.parseAdditive = function () {
+    return this.parseBinaryLevel("parseMultiplicative", ["+", "-"]);
+};
+NativeJSParser.prototype.parseMultiplicative = function () {
+    return this.parseBinaryLevel("parseUnary", ["*", "/"]);
+};
+NativeJSParser.prototype.parseUnary = function () {
+    if (this.token.value === "+" || this.token.value === "-" ||
+        this.token.value === "~" || this.token.value === "!") {
+        return {type: "unary", operator: this.take().value,
+                argument: this.parseUnary()};
+    }
+    return this.parsePostfix();
+};
+NativeJSParser.prototype.parsePostfix = function () {
+    var expression = this.parsePrimary();
+    while (true) {
+        if (this.accept(".")) {
+            expression = {type: "member", object: expression,
+                          property: this.identifier()};
+        } else if (this.accept("(")) {
+            var argumentsList = [];
+            if (!this.accept(")")) {
+                do { argumentsList.push(this.parseExpression()); }
+                while (this.accept(","));
+                this.expect(")");
+            }
+            expression = {type: "call", callee: expression,
+                          arguments: argumentsList};
+        } else if (this.token.value === "++" || this.token.value === "--") {
+            expression = {type: "postfix", operator: this.take().value,
+                          argument: expression};
+        } else {
+            break;
+        }
+    }
+    return expression;
+};
+NativeJSParser.prototype.parsePrimary = function () {
+    if (this.token.type === "number") {
+        return {type: "number", value: this.take().value | 0};
+    }
+    if (this.token.type === "identifier") {
+        return {type: "identifier", name: this.take().value};
+    }
+    if (this.accept("(")) {
+        var expression = this.parseExpression();
+        this.expect(")");
+        return expression;
+    }
+    this.error("expected expression, found " + this.token.value);
+};
+
+function NativeJSCompiler(ast, configuration, specializedValues) {
+    this.ast = ast;
+    this.configuration = configuration;
+    this.specializedValues = specializedValues;
+    this.assembler = new MacroAssemblyRecorder(new X86Assembler());
+    this.locals = {};
+    this.localCount = 0;
+    this.labelCounter = 0;
+    this.parameters = {};
+    for (var index = 0; index < ast.parameters.length; index++) {
+        this.parameters[ast.parameters[index]] = index;
+    }
+    this.collectLocals(ast.body);
+}
+
+NativeJSCompiler.prototype.error = function (message) {
+    throw new Error("compileNative: " + message + " in " + this.ast.name);
+};
+NativeJSCompiler.prototype.collectLocals = function (statement) {
+    if (statement.type === "var") {
+        for (var index = 0; index < statement.declarations.length; index++) {
+            var name = statement.declarations[index].name;
+            if (typeof this.locals[name] !== "number") {
+                this.locals[name] = ++this.localCount * 4;
+            }
+        }
+    } else if (statement.type === "block") {
+        for (index = 0; index < statement.statements.length; index++) {
+            this.collectLocals(statement.statements[index]);
+        }
+    } else if (statement.type === "while") {
+        this.collectLocals(statement.body);
+    } else if (statement.type === "if") {
+        this.collectLocals(statement.consequent);
+        if (statement.alternate) this.collectLocals(statement.alternate);
+    }
+};
+NativeJSCompiler.prototype.newLabel = function (prefix) {
+    return "nativeJS_" + prefix + "_" + (++this.labelCounter);
+};
+NativeJSCompiler.prototype.memberName = function (expression) {
+    if (expression.type === "identifier") return expression.name;
+    if (expression.type === "member") {
+        return this.memberName(expression.object) + "." + expression.property;
+    }
+    this.error("computed member expressions are not supported");
+};
+NativeJSCompiler.prototype.constantValue = function (name) {
+    if (this.specializedValues.hasOwnProperty(name)) return this.specializedValues[name] | 0;
+    var constants = this.configuration.constants || {};
+    if (constants.hasOwnProperty(name)) return constants[name] | 0;
+    return null;
+};
+NativeJSCompiler.prototype.loadIdentifier = function (name) {
+    var constant = this.constantValue(name);
+    if (constant !== null) {
+        this.assembler.moveImmediate("eax", constant);
+    } else if (typeof this.locals[name] === "number") {
+        this.assembler.moveLocalToRegister("eax", this.locals[name]);
+    } else if (typeof this.parameters[name] === "number") {
+        var argumentIndex = this.parameters[name];
+        if (argumentIndex >= 8) this.error("parameter " + name + " must be specialized");
+        this.assembler.moveArgument("eax", argumentIndex);
+    } else {
+        this.error("unresolved identifier " + name);
+    }
+};
+NativeJSCompiler.prototype.storeIdentifier = function (name) {
+    if (typeof this.locals[name] === "number") {
+        this.assembler.moveRegisterToLocal(this.locals[name], "eax");
+    } else {
+        this.error("assignment target must be a local variable: " + name);
+    }
+};
+NativeJSCompiler.prototype.compileCall = function (expression) {
+    var callee = this.memberName(expression.callee);
+    if (callee === "peek32" && expression.arguments.length === 1) {
+        this.compileExpression(expression.arguments[0]);
+        this.assembler.moveMemoryToRegister("eax", "eax", 0);
+        return;
+    }
+    if (callee === "poke32" && expression.arguments.length === 2) {
+        this.compileExpression(expression.arguments[0]);
+        this.assembler.push("eax");
+        this.compileExpression(expression.arguments[1]);
+        this.assembler.pop("ecx");
+        this.assembler.moveRegisterToMemory("ecx", 0, "eax");
+        return;
+    }
+    this.error("unsupported call to " + callee);
+};
+NativeJSCompiler.prototype.compileExpression = function (expression) {
+    var assembler = this.assembler;
+    if (expression.type === "number") {
+        assembler.moveImmediate("eax", expression.value);
+    } else if (expression.type === "identifier") {
+        this.loadIdentifier(expression.name);
+    } else if (expression.type === "member") {
+        var member = this.memberName(expression);
+        var constant = this.constantValue(member);
+        if (constant === null) this.error("unresolved member " + member);
+        assembler.moveImmediate("eax", constant);
+    } else if (expression.type === "call") {
+        this.compileCall(expression);
+    } else if (expression.type === "unary") {
+        this.compileExpression(expression.argument);
+        if (expression.operator === "-") assembler.negate("eax");
+        else if (expression.operator === "~") assembler.bitwiseNot("eax");
+        else if (expression.operator === "+") {}
+        else this.error("unsupported unary operator " + expression.operator);
+    } else if (expression.type === "binary") {
+        this.compileExpression(expression.left);
+        assembler.push("eax");
+        this.compileExpression(expression.right);
+        assembler.moveRegister("ecx", "eax");
+        assembler.pop("eax");
+        var operator = expression.operator;
+        if (operator === "+") assembler.addRegisters("eax", "ecx");
+        else if (operator === "-") assembler.subtractRegisters("eax", "ecx");
+        else if (operator === "*") assembler.multiplyRegisters("eax", "ecx");
+        else if (operator === "&") assembler.andRegisters("eax", "ecx");
+        else if (operator === "|") assembler.orRegisters("eax", "ecx");
+        else if (operator === "^") assembler.xorRegisters("eax", "ecx");
+        else if (operator === "/") {
+            assembler.signExtendEax();
+            assembler.divideSignedBy("ecx");
+        } else if (operator === "<<" || operator === ">>" || operator === ">>>") {
+            if (expression.right.type !== "number") {
+                this.error("shift count must be a numeric constant");
+            }
+            /* Discard the already evaluated right operand; x86 uses the
+             * literal count encoded below and eax still holds the left side. */
+            assembler.shift(operator === "<<" ? "left" :
+                            operator === ">>" ? "arithmeticRight" : "right",
+                            "eax", expression.right.value & 31);
+        } else {
+            this.error("comparison cannot be used as an integer expression: " + operator);
+        }
+    } else if (expression.type === "assignment") {
+        if (expression.left.type !== "identifier") this.error("invalid assignment target");
+        var target = expression.left.name;
+        this.compileExpression(expression.right);
+        if (expression.operator !== "=") {
+            assembler.moveRegister("ecx", "eax");
+            this.loadIdentifier(target);
+            if (expression.operator === "+=") assembler.addRegisters("eax", "ecx");
+            else assembler.subtractRegisters("eax", "ecx");
+        }
+        this.storeIdentifier(target);
+    } else if (expression.type === "postfix") {
+        if (expression.argument.type !== "identifier") this.error("invalid postfix target");
+        this.loadIdentifier(expression.argument.name);
+        if (expression.operator === "++") assembler.addImmediate("eax", 1);
+        else assembler.subtractImmediate("eax", 1);
+        this.storeIdentifier(expression.argument.name);
+    } else {
+        this.error("unsupported expression " + expression.type);
+    }
+};
+
+NativeJSCompiler.prototype.compileConditionFalse = function (expression, label) {
+    var comparisonJumps = {
+        "<": "greaterOrEqual", ">": "lessOrEqual",
+        "<=": "greater", ">=": "less",
+        "===": "notEqual", "==": "notEqual",
+        "!==": "equal", "!=": "equal"
+    };
+    if (expression.type === "binary" && comparisonJumps[expression.operator]) {
+        this.compileExpression(expression.left);
+        this.assembler.push("eax");
+        this.compileExpression(expression.right);
+        this.assembler.moveRegister("ecx", "eax");
+        this.assembler.pop("eax");
+        this.assembler.compareRegisters("eax", "ecx");
+        this.assembler.jump(comparisonJumps[expression.operator], label);
+    } else {
+        this.compileExpression(expression);
+        this.assembler.testRegisters("eax", "eax");
+        this.assembler.jump("equal", label);
+    }
+};
+
+NativeJSCompiler.prototype.compileStatement = function (statement) {
+    if (statement.type === "block") {
+        for (var index = 0; index < statement.statements.length; index++) {
+            this.compileStatement(statement.statements[index]);
+        }
+    } else if (statement.type === "var") {
+        for (index = 0; index < statement.declarations.length; index++) {
+            var declaration = statement.declarations[index];
+            if (declaration.initializer) {
+                this.compileExpression(declaration.initializer);
+                this.storeIdentifier(declaration.name);
+            }
+        }
+    } else if (statement.type === "expression") {
+        this.compileExpression(statement.expression);
+    } else if (statement.type === "while") {
+        var whileStart = this.newLabel("while");
+        var whileEnd = this.newLabel("whileEnd");
+        this.assembler.label(whileStart);
+        this.compileConditionFalse(statement.condition, whileEnd);
+        this.compileStatement(statement.body);
+        this.assembler.jump("always", whileStart);
+        this.assembler.label(whileEnd);
+    } else if (statement.type === "if") {
+        var elseLabel = this.newLabel("else");
+        var ifEnd = this.newLabel("ifEnd");
+        this.compileConditionFalse(statement.condition,
+                                   statement.alternate ? elseLabel : ifEnd);
+        this.compileStatement(statement.consequent);
+        if (statement.alternate) {
+            this.assembler.jump("always", ifEnd);
+            this.assembler.label(elseLabel);
+            this.compileStatement(statement.alternate);
+        }
+        this.assembler.label(ifEnd);
+    } else {
+        this.error("unsupported statement " + statement.type);
+    }
+};
+
+NativeJSCompiler.prototype.compile = function () {
+    var assembler = this.assembler;
+    assembler.push("ebp");
+    assembler.moveRegister("ebp", "esp");
+    if (this.localCount) assembler.subtractImmediate("esp", this.localCount * 4);
+    this.compileStatement(this.ast.body);
+    assembler.xorRegisters("eax", "eax");
+    assembler.moveRegister("esp", "ebp");
+    assembler.pop("ebp");
+    assembler.returnFromFunction();
+    return assembler.finish();
 };
 
 var nativeCode = {
@@ -2700,6 +3303,118 @@ var nativeCode = {
     }
 };
 
+function NativeCompiledFunction(functionObject) {
+    if (typeof functionObject !== "function") {
+        throw new Error("compileNative requires a function");
+    }
+    /* Function.prototype.toString is deliberately the compiler's only source
+     * input.  No function-name substitution or handwritten-code fallback is
+     * permitted here. */
+    this.source = functionObject.toString();
+    this.ast = new NativeJSParser(this.source).parseFunction();
+    this.configuration = functionObject.nativeCompile || {};
+    this.specializedNames = this.configuration.specialize || [];
+    this.specializedIndexes = [];
+    this.variants = {};
+    this.destroyed = false;
+    this.dumpedMacroAssembly = false;
+
+    for (var parameterIndex = 8;
+         parameterIndex < this.ast.parameters.length; parameterIndex++) {
+        var parameterName = this.ast.parameters[parameterIndex];
+        var specialized = false;
+        for (var specializeIndex = 0;
+             specializeIndex < this.specializedNames.length; specializeIndex++) {
+            if (this.specializedNames[specializeIndex] === parameterName) specialized = true;
+        }
+        if (!specialized) {
+            throw new Error("compileNative: parameter " + parameterName +
+                            " exceeds the eight-argument native bridge and " +
+                            "must be listed in nativeCompile.specialize");
+        }
+    }
+    for (specializeIndex = 0;
+         specializeIndex < this.specializedNames.length; specializeIndex++) {
+        var foundIndex = -1;
+        for (parameterIndex = 0;
+             parameterIndex < this.ast.parameters.length; parameterIndex++) {
+            if (this.ast.parameters[parameterIndex] ===
+                this.specializedNames[specializeIndex]) foundIndex = parameterIndex;
+        }
+        if (foundIndex < 0) {
+            throw new Error("compileNative: unknown specialized parameter " +
+                            this.specializedNames[specializeIndex]);
+        }
+        if (foundIndex < 8) {
+            throw new Error("compileNative: specialization of native argument " +
+                            this.specializedNames[specializeIndex] +
+                            " is not supported");
+        }
+        this.specializedIndexes.push(foundIndex);
+    }
+
+    var compiledObject = this;
+    this.fn = function (a1, a2, a3, a4, a5, a6, a7, a8, a9) {
+        return compiledObject.invoke(arguments);
+    };
+    this.fn.compiledObject = this;
+}
+
+NativeCompiledFunction.prototype.variantFor = function (callArguments) {
+    if (this.destroyed) throw new Error("compiled native function has been destroyed");
+    var keyParts = [];
+    var specializedValues = {};
+    for (var index = 0; index < this.specializedNames.length; index++) {
+        var name = this.specializedNames[index];
+        var argumentIndex = this.specializedIndexes[index];
+        var value = callArguments[argumentIndex] | 0;
+        specializedValues[name] = value;
+        keyParts.push(String(value >>> 0));
+    }
+    var key = keyParts.length ? keyParts.join(":") : "default";
+    var variant = this.variants[key];
+    if (!variant) {
+        var compiler = new NativeJSCompiler(this.ast, this.configuration,
+                                            specializedValues);
+        var bytes = compiler.compile();
+        variant = nativeCode.create(bytes);
+        variant.byteLength = bytes.length;
+        variant.specializedValues = specializedValues;
+        variant.macroAssembly = compiler.assembler.toString();
+        this.variants[key] = variant;
+        if (this.configuration.dumpMacroAssembly && !this.dumpedMacroAssembly) {
+            console.log("--- compiled native macro assembly: " + this.ast.name +
+                        " [variant " + key + ", " + bytes.length + " bytes] ---");
+            console.log(variant.macroAssembly);
+            console.log("--- end compiled native macro assembly ---");
+            this.dumpedMacroAssembly = true;
+        }
+    }
+    return variant;
+};
+
+NativeCompiledFunction.prototype.invoke = function (callArguments) {
+    var variant = this.variantFor(callArguments);
+    return NodeLibc.call8(variant.pointer,
+                          callArguments[0] || 0, callArguments[1] || 0,
+                          callArguments[2] || 0, callArguments[3] || 0,
+                          callArguments[4] || 0, callArguments[5] || 0,
+                          callArguments[6] || 0, callArguments[7] || 0);
+};
+
+NativeCompiledFunction.prototype.destroy = function () {
+    if (this.destroyed) return;
+    for (var key in this.variants) {
+        if (this.variants.hasOwnProperty(key)) nativeCode.destroy(this.variants[key]);
+    }
+    this.variants = {};
+    this.destroyed = true;
+};
+
+function compileNative(functionObject) {
+    return new NativeCompiledFunction(functionObject);
+}
+
 DemoRunner = {
     common: common,
     x11: x11,
@@ -2709,6 +3424,7 @@ DemoRunner = {
     libc: NodeLibc,
     memory: NodeMemory,
     nativeCode: nativeCode,
+    compileNative: compileNative,
     define: function (application) {
         if (typeof application !== "function") {
             throw new Error("DemoRunner.define requires a function");

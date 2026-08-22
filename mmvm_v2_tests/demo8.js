@@ -4,6 +4,7 @@ var common = runner.common;
 var libc = runner.libc;
 var memory = runner.memory;
 var nativeCode = runner.nativeCode;
+var compileNative = runner.compileNative;
 /*
  * Optimized general-purpose software rasterizer running the same original
  * Welsh-inspired rally stage as demo6. This application deliberately targets
@@ -30,7 +31,12 @@ var depthBuffer;
 var background;
 var spanRasterizer;
 var spanRasterizers = {};
-var useJavaScriptTriangleRasterizer = false;
+var TRIANGLE_RASTERIZER_HAND_ASM = 0;
+var TRIANGLE_RASTERIZER_COMPILED = 1;
+var TRIANGLE_RASTERIZER_JS = 2;
+var triangleRasterizerMode = TRIANGLE_RASTERIZER_HAND_ASM;
+var triangleHalfRasterizerASM = null;
+var compiledTriangleHalfRasterizer = null;
 var DEPTH_FIXED_SCALE = 67108864;
 var BOX_LOCAL = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 var BOX_FACES = [[0, 1, 2, 3, 0.48], [4, 7, 6, 5, 1.0],
@@ -260,9 +266,9 @@ function triangleHalfRasterizerCode(packed) {
     return rasterizer;
 }
 
-function triangleHalfRasterizerASM(pixelAddress, packedYRange,
-                                   firstX, secondX, packedXSteps,
-                                   firstZ, secondZ, packedZSteps, packed) {
+function triangleHalfRasterizerHandASM(pixelAddress, packedYRange,
+                                       firstX, secondX, packedXSteps,
+                                       firstZ, secondZ, packedZSteps, packed) {
     nativeCode.call8(triangleHalfRasterizerCode(packed),
                      pixelAddress, packedYRange,
                      firstX, secondX, packedXSteps,
@@ -343,6 +349,7 @@ function verifyTriangleHalfRasterizers() {
     var words = options.width * rows;
     var byteLength = words * 4;
     var asmPixels = memory.allocate(byteLength);
+    var compiledPixels = memory.allocate(byteLength);
     var jsPixels = memory.allocate(byteLength);
     var expectedPixels = [];
     var expectedDepth = [];
@@ -359,9 +366,9 @@ function verifyTriangleHalfRasterizers() {
 
     libc.memset(asmPixels, 0, byteLength);
     libc.memset(depthBuffer, 0, options.width * options.height * 4);
-    triangleHalfRasterizerASM(asmPixels, packedYRange,
-                              firstX, secondX, packedXSteps,
-                              firstZ, secondZ, packedZSteps, packed);
+    triangleHalfRasterizerHandASM(asmPixels, packedYRange,
+                                  firstX, secondX, packedXSteps,
+                                  firstZ, secondZ, packedZSteps, packed);
     for (index = 0; index < words; index++) {
         expectedPixels[index] = peek32(asmPixels + index * 4) | 0;
         expectedDepth[index] = peek32(depthBuffer + index * 4) | 0;
@@ -380,7 +387,26 @@ function verifyTriangleHalfRasterizers() {
         }
     }
 
+    if (!mismatch) {
+        libc.memset(compiledPixels, 0, byteLength);
+        libc.memset(depthBuffer, 0, options.width * options.height * 4);
+        triangleHalfRasterizerASM(compiledPixels, packedYRange,
+                                  firstX, secondX, packedXSteps,
+                                  firstZ, secondZ, packedZSteps, packed);
+        for (index = 0; index < words; index++) {
+            if ((peek32(compiledPixels + index * 4) | 0) !==
+                    expectedPixels[index] ||
+                (peek32(depthBuffer + index * 4) | 0) !==
+                    expectedDepth[index]) {
+                mismatch = "triangle-half compiled/hand ASM mismatch at word " +
+                           index;
+                break;
+            }
+        }
+    }
+
     memory.free(jsPixels);
+    memory.free(compiledPixels);
     memory.free(asmPixels);
     libc.memset(depthBuffer, 0, options.width * options.height * 4);
     if (mismatch) throw new Error(mismatch);
@@ -875,8 +901,17 @@ function rasterRows(framebuffer, firstY, lastY,
         var secondPackedXStep = Math.round(secondXStep * 256);
         var firstPackedZStep = Math.round(firstZStep * 65536);
         var secondPackedZStep = Math.round(secondZStep * 65536);
-        if (useJavaScriptTriangleRasterizer) {
+        if (triangleRasterizerMode === TRIANGLE_RASTERIZER_JS) {
             triangleHalfRasterizerJS(
+                framebuffer.pixelAddress,
+                packedSignedPair(clippedFirstY, clippedLastY),
+                fixedPosition(firstX), fixedPosition(secondX),
+                packedSignedPair(firstPackedXStep, secondPackedXStep),
+                (firstZ * DEPTH_FIXED_SCALE) | 0,
+                (secondZ * DEPTH_FIXED_SCALE) | 0,
+                packedSignedPair(firstPackedZStep, secondPackedZStep), packed);
+        } else if (triangleRasterizerMode === TRIANGLE_RASTERIZER_COMPILED) {
+            triangleHalfRasterizerASM(
                 framebuffer.pixelAddress,
                 packedSignedPair(clippedFirstY, clippedLastY),
                 fixedPosition(firstX), fixedPosition(secondX),
@@ -1466,8 +1501,8 @@ function reportGameReady() {
                 windowInfo.framesPerSecond + " FPS limit");
     console.log("Attract mode running; push Space to reset the grid and play");
     console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
-    console.log("F2 toggles triangle rasterization between ASM and JS reference modes");
-    console.log("triangle-half rasterizer: ASM");
+    console.log("F2 cycles triangle rasterization: hand ASM, compiled native, reference JS");
+    console.log("triangle-half rasterizer: hand ASM");
 }
 
 function initializeGame() {
@@ -1477,6 +1512,14 @@ function initializeGame() {
     depthBuffer = memory.allocate(options.width * options.height * 4);
     spanRasterizer = createSpanRasterizer(depthBuffer, options.width);
     spanRasterizers = {};
+    triangleHalfRasterizerJS.nativeCompile = {
+        constants: {"options.width": options.width,
+                    depthBuffer: depthBuffer},
+        specialize: ["packed"],
+        dumpMacroAssembly: options.dumpNativeAssembly
+    };
+    triangleHalfRasterizerASM = compileNative(triangleHalfRasterizerJS).fn;
+    compiledTriangleHalfRasterizer = triangleHalfRasterizerASM.compiledObject;
     verifyTriangleHalfRasterizers();
     background = makeBackground(options.width, options.height);
     resetRace();
@@ -1547,9 +1590,9 @@ function startHumanRace() {
 }
 
 function toggleTriangleRasterizer() {
-    useJavaScriptTriangleRasterizer = !useJavaScriptTriangleRasterizer;
-    console.log("triangle-half rasterizer: " +
-                (useJavaScriptTriangleRasterizer ? "JS reference" : "ASM"));
+    triangleRasterizerMode = (triangleRasterizerMode + 1) % 3;
+    var names = ["hand ASM", "compiled native", "JS reference"];
+    console.log("triangle-half rasterizer: " + names[triangleRasterizerMode]);
 }
 
 var window = common.createWindow({
@@ -1607,6 +1650,9 @@ var window = common.createWindow({
     close: function () {
         if (spanRasterizer) nativeCode.destroy(spanRasterizer);
         if (textBlitter) nativeCode.destroy(textBlitter);
+        if (compiledTriangleHalfRasterizer) {
+            compiledTriangleHalfRasterizer.destroy();
+        }
         for (var rasterizerKey in spanRasterizers) {
             if (spanRasterizers.hasOwnProperty(rasterizerKey)) {
                 nativeCode.destroy(spanRasterizers[rasterizerKey]);
@@ -1618,6 +1664,8 @@ var window = common.createWindow({
         if (depthBuffer) memory.free(depthBuffer);
         spanRasterizer = null;
         spanRasterizers = {};
+        triangleHalfRasterizerASM = null;
+        compiledTriangleHalfRasterizer = null;
         textBlitter = null;
         textCache = {};
         depthBuffer = 0;
