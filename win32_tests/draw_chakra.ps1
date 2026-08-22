@@ -113,7 +113,7 @@ public static class ChakraFramebufferHost
         new Stopwatch();
 
 
-    private static ulong sourceContext = 1;
+    private static ulong sourceContextCounter = 1;
 
 
     // Main render loop runs uncapped.
@@ -576,7 +576,7 @@ public static class ChakraFramebufferHost
         uint error =
             JsRunScript(
                 source,
-                sourceContext++,
+                new UIntPtr(sourceContextCounter++),
                 sourceUrl,
                 out result
             );
@@ -1876,7 +1876,7 @@ public static class ChakraFramebufferHost
     )]
     private static extern uint JsRunScript(
         string script,
-        ulong sourceContext,
+        UIntPtr sourceContext,
         string sourceUrl,
         out IntPtr result
     );
