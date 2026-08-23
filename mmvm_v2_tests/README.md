@@ -961,6 +961,25 @@ it is not hand-written machine code. The whole detailed car needs 12 textured
 triangles for its six panes. At 320x240, representative measurements were about
 14.1-14.4 FPS in free drive and 13.3-13.6 FPS as the garage camera orbited.
 
+The subsequent 0.24 model-submission pass preserves those textures and visible
+geometry but rejects coherent hidden pieces in car-local space before doing
+projection or raster setup. Since the camera stays above the opaque car, the
+floor is omitted; only the near body side and end, corresponding glass and
+trim, and appropriate end lamps and bumper are submitted. The open arches can
+expose three wheels at an oblique angle, so only the far diagonal wheel is
+rejected. The near-side wheels retain sidewalls and hubs, while the exposed
+far-side wheel contributes its tread but not its outward-facing side disc.
+
+Wheel-circle trigonometry is precomputed at initialization. Shared segment
+vertices are transformed once into preallocated scratch rings, rather than
+transforming both endpoints again for every segment and allocating temporary
+objects each frame; opaque tread quads also use back-face rejection. A wheel
+therefore performs 29 rather than 50 point transformations. With the 20 FPS
+limit at 320x240, representative `js_min.exe` free-drive samples rose to about
+19.3-19.4 FPS and the on-screen counter reached 20 FPS. Representative garage
+views rose to approximately 18 FPS. These measurements include the full-screen
+blit and the proper nearest-neighbour window reflections.
+
 Free drive uses the same detailed 1970s saloon as the garage. Its
 front tyres, sidewalls, and hubs yaw around their own vertical centres in
 response to left/right input, easing back to straight ahead after release.

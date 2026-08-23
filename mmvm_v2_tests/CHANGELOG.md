@@ -8,6 +8,34 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.24
+
+Approximate completion: 2026-08-23 22:00 BST
+
+### Demo 8
+
+- Added object-space visibility selection to the detailed saloon. The renderer
+  no longer submits its permanently hidden floor, far body side, far end,
+  opposite glass, trim, lamps, or bumper to projection, clipping, and the
+  z-buffer. Box details similarly submit only their top, near side, and near
+  end faces; the visible model and texture resolution are unchanged.
+- Corrected an initially over-aggressive two-wheel view-dot cull. Open wheel
+  arches expose a third wheel at oblique angles, so the final rule rejects only
+  the far diagonal wheel. Near-side sidewalls and hubs remain detailed, while
+  the far-side exposed wheel submits its visible tread without a hidden outward
+  face.
+- Precomputed the eight-segment wheel circle, reused adjacent ring vertices,
+  enabled back-face rejection on the opaque tread, and changed the wheel mesh
+  to reuse preallocated scratch points. Each visible wheel now needs 29 rather
+  than 50 local-to-world point transformations and creates no ring arrays or
+  point objects during a frame.
+- At 320x240 with a 20 FPS limit under `js_min.exe`, representative free-drive
+  samples improved from about 14.1-14.4 FPS to 19.3-19.4 FPS, with individual
+  intervals and the on-screen counter reaching the 20 FPS cap. Representative
+  garage views improved from about 13.3-13.6 FPS to approximately 18 FPS. A
+  runtime compiled-native -> JavaScript -> hand-ASM -> compiled-native cycle
+  completed successfully after the changes.
+
 ## 0.23
 
 Approximate completion: 2026-08-23 21:30 BST
