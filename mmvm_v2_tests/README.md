@@ -893,11 +893,14 @@ Escape pauses demo8 and opens its mode menu. The menu keys are:
 The garage camera automatically travels around the rally car on an elliptical
 path and follows a sinusoidal up/down motion. Hold mouse button 1 and drag to
 control its orbit angle and height; release the button to resume automatic
-motion. The service-bay checkerboard is a deterministic 2x2 texture generated
-at initialization and nearest-neighbour mapped across one perspective-correct,
-near-plane-clipped floor quad. It is not a checked-in bitmap and does not use
-overlapping floor polygons or depth bias. The detailed car used here and in
-free-driving mode is a boxy 1970s
+motion. The service-bay checkerboard is a deterministic repeating 64x64 texture
+generated at initialization and nearest-neighbour mapped across one
+perspective-correct, near-plane-clipped floor quad. Each visible checker cell
+occupies a solid 32x32 block in the source texture: this retains hard bitmap
+edges while giving fixed-point perspective gradients enough sub-cell precision
+to keep the pattern stable as the camera moves. It is not a checked-in bitmap
+and does not use overlapping floor polygons or depth bias. The detailed car
+used here and in free-driving mode is a boxy 1970s
 two-door rally saloon with a four-seat-sized cabin: long wheelbase, distinct
 bonnet and boot, one long outlined door and handle per side, and fixed rear
 quarter windows rather than rear doors. It also has four low-polygon tyres with

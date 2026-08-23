@@ -8,6 +8,24 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.31
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Fixed visible garage-ground judder during the automatic camera orbit. The
+  procedural checker source now represents each two-world-unit cell with a
+  32x32 block inside a repeating 64x64 texture, rather than using one texture
+  coordinate unit for an entire cell.
+- Increased the perspective texture-gradient fixed-point scale from 32768 to
+  262144. Checker boundaries consequently retain sub-cell precision as the
+  camera moves, while nearest-neighbour sampling preserves hard bitmap edges.
+  The same precision improvement applies to reflected window textures and
+  remains within signed 32-bit range at the near plane.
+- Representative 320x240 garage-orbit measurements with a 30 FPS ceiling
+  remain approximately 21.6-22.3 FPS after the precision increase.
+
 ## 0.30
 
 Approximate completion: 2026-08-23 late evening BST

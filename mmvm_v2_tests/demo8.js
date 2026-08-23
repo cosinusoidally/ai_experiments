@@ -42,8 +42,9 @@ var freeDriveSkyboxBlitter = null;
 var windowTextureRasterizer = null;
 var windowTriangleDescriptor = null;
 var garageFloorTexture = null;
-var garageFloorTextureWidth = 2;
-var garageFloorTextureHeight = 2;
+var GARAGE_FLOOR_TEXELS_PER_CELL = 32;
+var garageFloorTextureWidth = GARAGE_FLOOR_TEXELS_PER_CELL * 2;
+var garageFloorTextureHeight = GARAGE_FLOOR_TEXELS_PER_CELL * 2;
 var spanRasterizer;
 var spanRasterizers = {};
 var TRIANGLE_RASTERIZER_HAND_ASM = 0;
@@ -1821,10 +1822,16 @@ function makeGarageGeometry() {
 function makeGarageFloorTexture() {
     var texture = allocatePacked(garageFloorTextureWidth *
                                  garageFloorTextureHeight * 4);
-    pokePacked32(texture, 0, 0x64645f);
-    pokePacked32(texture, 4, 0x555653);
-    pokePacked32(texture, 8, 0x555653);
-    pokePacked32(texture, 12, 0x64645f);
+    for (var y = 0; y < garageFloorTextureHeight; y++) {
+        var checkerY = Math.floor(y / GARAGE_FLOOR_TEXELS_PER_CELL);
+        for (var x = 0; x < garageFloorTextureWidth; x++) {
+            var checkerX = Math.floor(x / GARAGE_FLOOR_TEXELS_PER_CELL);
+            var color = ((checkerX + checkerY) & 1) ?
+                        0x555653 : 0x64645f;
+            pokePacked32(texture, (y * garageFloorTextureWidth + x) * 4,
+                         color);
+        }
+    }
     return texture;
 }
 
@@ -2224,7 +2231,10 @@ function drawProjectedTextureTriangle(framebuffer, first, second, third,
     writeWindowEdge(40, third, first, minimumX, minimumY);
 
     var depthScale = DEPTH_FIXED_SCALE;
-    var inverseScale = 32768;
+    /* Sub-pixel texture gradients need more precision than solid-colour
+     * triangles. This remains comfortably inside signed 32-bit range for the
+     * 512-pixel skybox and the near-plane inverse-depth maximum. */
+    var inverseScale = 262144;
     writeWindowGradientValues(52, first, second, third,
         first.inverseZ * depthScale, second.inverseZ * depthScale,
         third.inverseZ * depthScale, area, minimumX, minimumY);
@@ -2302,13 +2312,18 @@ function drawTexturedWorldQuad(framebuffer, a, b, c, d,
 
 function drawGarageFloor(framebuffer) {
     /* One perspective-correct, near-clipped quad covers the entire service
-     * bay.  Each texture texel represents one original 2x2 floor cell, and
-     * both axes wrap the deterministic 2x2 checker source. */
+     * bay. Each 32x32 texel block represents one original 2x2 floor cell;
+     * the higher coordinate resolution prevents fixed-point gradient rounding
+     * from moving cell boundaries during the camera orbit. */
     drawTexturedWorldQuad(
         framebuffer,
         {x: -8, y: 0, z: -7}, {x: 8, y: 0, z: -7},
         {x: 8, y: 0, z: 7}, {x: -8, y: 0, z: 7},
-        0, 0, 8, 0, 8, 7, 0, 7,
+        0, 0,
+        8 * GARAGE_FLOOR_TEXELS_PER_CELL, 0,
+        8 * GARAGE_FLOOR_TEXELS_PER_CELL,
+        7 * GARAGE_FLOOR_TEXELS_PER_CELL,
+        0, 7 * GARAGE_FLOOR_TEXELS_PER_CELL,
         garageFloorTexture, garageFloorTextureWidth,
         garageFloorTextureHeight);
 }
