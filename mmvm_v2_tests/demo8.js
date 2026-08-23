@@ -27,6 +27,12 @@ var WALL_CONTACT_EPSILON = 0.03;
 var track;
 var terrainCells;
 var roadSections;
+var freeDriveFieldTiles;
+var freeDriveTrackLines;
+var freeDrivePuddleQuads;
+var freeDriveStartQuad;
+var garageFloorTiles;
+var garageWallQuads;
 var depthBuffer;
 var background;
 var freeDriveSkybox;
@@ -56,14 +62,25 @@ var wheelInsideRing = [];
 var wheelHubRing = [];
 var wheelOutsideCenter = {x: 0, y: 0, z: 0};
 var wheelHubCenter = {x: 0, y: 0, z: 0};
+var detailedArchOffset = [];
+var detailedArchHeight = [];
 var carQuadPoints = [{x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
                      {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0}];
 var carWindowPoints = [{x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
                        {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0}];
+var carWindowUVPoints = [{u: 0, v: 0}, {u: 0, v: 0},
+                         {u: 0, v: 0}, {u: 0, v: 0}];
 var carBoxPoints = [{x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
                     {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
                     {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
                     {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0}];
+var carBoxVisibleFaces = [false, false, false, false, false, false];
+var carBoxVisibleVertices = [false, false, false, false,
+                             false, false, false, false];
+var worldBoxPoints = [{x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
+                      {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
+                      {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0},
+                      {x: 0, y: 0, z: 0}, {x: 0, y: 0, z: 0}];
 var controls = {left: false, right: false, throttle: false, brake: false};
 var GAME_MODE_RALLY = 0;
 var GAME_MODE_GARAGE = 1;
@@ -83,8 +100,15 @@ var FREE_DRIVE_CAR_HALF_LENGTH = 1.68;
 var playerWheelSteer = 0;
 var detailedBodyRollSine = 0;
 var detailedBodyRollCosine = 1;
+var detailedLocalCameraX = 0;
+var detailedLocalCameraY = 0;
+var detailedLocalCameraZ = 0;
 var freeDriveTravelHeading = 0;
 var freeDriveCameraHeading = 0;
+var freeDriveAutoDrive = false;
+var freeDriveAutoSteering = 0;
+var freeDriveAutoThrottle = false;
+var freeDriveAutoBrake = false;
 var player;
 var competitors;
 var lastFrameTime = 0;
@@ -830,14 +854,19 @@ function resetFreeDrive() {
     freeDriveCameraHeading = player.heading;
 }
 
-function enterFreeDriveMode() {
+function enterFreeDriveMode(autoDrive) {
     gameMode = GAME_MODE_FIELD;
     rollingMode = false;
     resetFreeDrive();
+    freeDriveAutoDrive = !!autoDrive;
     menuOpen = false;
     lastFrameTime = 0;
-    console.log("mode: free drive; turn, tap brake, then reapply power " +
-                "to powerslide");
+    if (freeDriveAutoDrive) {
+        console.log("mode: free-drive auto pilot; following the painted track");
+    } else {
+        console.log("mode: free drive; turn, tap brake, then reapply power " +
+                    "to powerslide");
+    }
 }
 
 function resolveRoadEdge(nearest, dt) {
@@ -977,7 +1006,11 @@ function updateSimulation(elapsed) {
 }
 
 function updateFreeDriveStep(dt) {
-    var steering = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
+    var steering = freeDriveAutoDrive ? freeDriveAutoSteering :
+        (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
+    var throttle = freeDriveAutoDrive ? freeDriveAutoThrottle :
+                   controls.throttle;
+    var brake = freeDriveAutoDrive ? freeDriveAutoBrake : controls.brake;
     var targetWheelSteer = -steering * 0.62;
     playerWheelSteer += (targetWheelSteer - playerWheelSteer) *
                         Math.min(1, dt * 10);
@@ -998,11 +1031,11 @@ function updateFreeDriveStep(dt) {
     var frontAxleDistance = 1.12;
     var rearAxleDistance = 1.04;
     var steeringAngle = -steering * 0.40;
-    var brakingForward = controls.brake && longitudinalSpeed > 0.7;
+    var brakingForward = brake && longitudinalSpeed > 0.7;
     if (brakingForward && longitudinalSpeed > 5) {
         player.rearGrip -= dt * 4.2;
     } else {
-        var gripRecovery = controls.throttle && player.powerSliding ?
+        var gripRecovery = throttle && player.powerSliding ?
                            0.32 : 1.25;
         player.rearGrip += dt * gripRecovery;
     }
@@ -1015,7 +1048,7 @@ function updateFreeDriveStep(dt) {
     var rearSlipRatio = Math.abs(rearSlip) /
                         (Math.abs(longitudinalSpeed) + 1);
     var rearGripDisturbed = player.rearGrip < 0.82 || player.powerSliding;
-    var powerTractionUse = controls.throttle && longitudinalSpeed > 5 &&
+    var powerTractionUse = throttle && longitudinalSpeed > 5 &&
                            rearGripDisturbed ?
                            clamp((rearSlipRatio - 0.02) * 5.0, 0, 0.68) : 0;
     var effectiveRearGrip = player.rearGrip * (1 - powerTractionUse);
@@ -1039,13 +1072,13 @@ function updateFreeDriveStep(dt) {
     player.yawRate = clamp(player.yawRate, -1.8, 1.8);
 
     var longitudinalAcceleration = 0;
-    if (controls.throttle && longitudinalSpeed < 30) {
+    if (throttle && longitudinalSpeed < 30) {
         var driveAcceleration = 18.0 -
                                 Math.max(0, longitudinalSpeed) * 0.18;
         longitudinalAcceleration += driveAcceleration *
                                     (0.68 + effectiveRearGrip * 0.32);
     }
-    if (controls.brake) {
+    if (brake) {
         if (longitudinalSpeed > 0.7) {
             longitudinalAcceleration -= 7.5;
         } else if (longitudinalSpeed > -14) {
@@ -1142,8 +1175,37 @@ function updateFreeDriveStep(dt) {
     player.y = 0.15;
 }
 
+function updateFreeDriveAutoControls() {
+    var nearest = nearestTrackPosition(player.x, player.z);
+    player.wrappedDistance = nearest.wrappedDistance;
+    var speed = Math.sqrt(player.velocityX * player.velocityX +
+                          player.velocityZ * player.velocityZ);
+    /* Aim farther down the painted centreline as speed rises.  The controller
+     * supplies the same steering/throttle/brake inputs as a player; movement,
+     * grip, body roll, powerslides, and boundary collision all remain in the
+     * ordinary rear-wheel-drive physics path. */
+    var lookAhead = sampleTrack(nearest.wrappedDistance + 5.5 + speed * 0.38,
+                                0);
+    var desiredHeading = Math.atan2(lookAhead.x - player.x,
+                                    lookAhead.z - player.z);
+    var headingError = shortestAngleDifference(desiredHeading,
+                                               player.heading);
+    var crossTrack = (player.x - nearest.x) * nearest.tangentZ -
+                     (player.z - nearest.z) * nearest.tangentX;
+    freeDriveAutoSteering = clamp(-headingError * 2.15 + crossTrack * 0.12,
+                                  -1, 1);
+
+    var later = sampleTrack(nearest.wrappedDistance + 16, 0);
+    var bendDot = lookAhead.tangentX * later.tangentX +
+                  lookAhead.tangentZ * later.tangentZ;
+    var targetSpeed = 15 + clamp(bendDot, 0, 1) * 7;
+    freeDriveAutoBrake = speed > targetSpeed + 1.5;
+    freeDriveAutoThrottle = !freeDriveAutoBrake && speed < targetSpeed;
+}
+
 function updateFreeDrive(elapsed) {
     elapsed = Math.min(elapsed, 0.5);
+    if (freeDriveAutoDrive) updateFreeDriveAutoControls();
     while (elapsed > 0) {
         var step = Math.min(0.05, elapsed);
         updateFreeDriveStep(step);
@@ -1454,8 +1516,10 @@ function drawQuad(framebuffer, a, b, c, d, color, cullBackFace) {
     }
     var pa = project(a); var pb = project(b); var pc = project(c); var pd = project(d);
     if (!pa || !pb || !pc || !pd) {
-        drawNearClippedTriangle(framebuffer, a, b, c, color);
-        drawNearClippedTriangle(framebuffer, a, c, d, color);
+        /* A triangle whose three cached projections all failed lies wholly
+         * behind the near plane and cannot produce a clipped polygon. */
+        if (pa || pb || pc) drawNearClippedTriangle(framebuffer, a, b, c, color);
+        if (pa || pc || pd) drawNearClippedTriangle(framebuffer, a, c, d, color);
         return;
     }
     var minimumX = Math.min(pa.x, pb.x, pc.x, pd.x);
@@ -1655,6 +1719,117 @@ function makeRoadSections() {
     return sections;
 }
 
+function makeFreeDriveGeometry() {
+    var tile = 20;
+    freeDriveFieldTiles = [];
+    var row = 0;
+    for (var z = -FIELD_HALF_LENGTH; z < FIELD_HALF_LENGTH; z += tile) {
+        var finalZ = Math.min(FIELD_HALF_LENGTH, z + tile);
+        var column = 0;
+        for (var x = -FIELD_HALF_WIDTH; x < FIELD_HALF_WIDTH; x += tile) {
+            var finalX = Math.min(FIELD_HALF_WIDTH, x + tile);
+            freeDriveFieldTiles.push({
+                a: {x: x, y: 0, z: z}, b: {x: finalX, y: 0, z: z},
+                c: {x: finalX, y: 0, z: finalZ},
+                d: {x: x, y: 0, z: finalZ},
+                centerX: (x + finalX) * 0.5,
+                centerZ: (z + finalZ) * 0.5,
+                color: ((row + column) & 1) ? 0x704b2d : 0x50331f
+            });
+            column++;
+        }
+        row++;
+    }
+
+    freeDrivePuddleQuads = [];
+    var puddles = [[-18, -9, 5, 2], [13, 11, 7, 2.5],
+                   [-4, 23, 4, 1.8], [25, -19, 5, 2.1]];
+    for (var puddleIndex = 0; puddleIndex < puddles.length; puddleIndex++) {
+        var puddle = puddles[puddleIndex];
+        freeDrivePuddleQuads.push({
+            a: {x: puddle[0] - puddle[2], y: 0.018,
+                z: puddle[1] - puddle[3]},
+            b: {x: puddle[0] + puddle[2], y: 0.018,
+                z: puddle[1] - puddle[3]},
+            c: {x: puddle[0] + puddle[2], y: 0.018,
+                z: puddle[1] + puddle[3]},
+            d: {x: puddle[0] - puddle[2], y: 0.018,
+                z: puddle[1] + puddle[3]}
+        });
+    }
+
+    freeDriveTrackLines = [];
+    for (var trackIndex = 0; trackIndex < TRACK_POINTS; trackIndex += 6) {
+        var nextTrackIndex = (trackIndex + 6) % TRACK_POINTS;
+        var first = track[trackIndex];
+        var second = track[nextTrackIndex];
+        for (var side = -1; side <= 1; side += 2) {
+            var lineOffset = side * FIELD_TRACK_HALF_WIDTH;
+            var innerOffset = lineOffset - 0.18;
+            var outerOffset = lineOffset + 0.18;
+            freeDriveTrackLines.push({
+                a: {x: first.x + first.normalX * innerOffset, y: 0.032,
+                    z: first.z + first.normalZ * innerOffset},
+                b: {x: second.x + second.normalX * innerOffset, y: 0.032,
+                    z: second.z + second.normalZ * innerOffset},
+                c: {x: second.x + second.normalX * outerOffset, y: 0.032,
+                    z: second.z + second.normalZ * outerOffset},
+                d: {x: first.x + first.normalX * outerOffset, y: 0.032,
+                    z: first.z + first.normalZ * outerOffset},
+                centerX: (first.x + second.x) * 0.5,
+                centerZ: (first.z + second.z) * 0.5
+            });
+        }
+    }
+    var start = track[0];
+    var startHalfDepth = 0.32;
+    freeDriveStartQuad = {
+        a: {x: start.x - start.tangentX * startHalfDepth -
+              start.normalX * FIELD_TRACK_HALF_WIDTH, y: 0.038,
+            z: start.z - start.tangentZ * startHalfDepth -
+              start.normalZ * FIELD_TRACK_HALF_WIDTH},
+        b: {x: start.x + start.tangentX * startHalfDepth -
+              start.normalX * FIELD_TRACK_HALF_WIDTH, y: 0.038,
+            z: start.z + start.tangentZ * startHalfDepth -
+              start.normalZ * FIELD_TRACK_HALF_WIDTH},
+        c: {x: start.x + start.tangentX * startHalfDepth +
+              start.normalX * FIELD_TRACK_HALF_WIDTH, y: 0.038,
+            z: start.z + start.tangentZ * startHalfDepth +
+              start.normalZ * FIELD_TRACK_HALF_WIDTH},
+        d: {x: start.x - start.tangentX * startHalfDepth +
+              start.normalX * FIELD_TRACK_HALF_WIDTH, y: 0.038,
+            z: start.z - start.tangentZ * startHalfDepth +
+              start.normalZ * FIELD_TRACK_HALF_WIDTH}
+    };
+}
+
+function makeGarageGeometry() {
+    garageFloorTiles = [];
+    var tile = 2;
+    for (var z = -7; z < 7; z += tile) {
+        for (var x = -8; x < 8; x += tile) {
+            var dark = (((x + 8) / tile + (z + 7) / tile) & 1);
+            garageFloorTiles.push({
+                a: {x: x, y: 0, z: z}, b: {x: x + tile, y: 0, z: z},
+                c: {x: x + tile, y: 0, z: z + tile},
+                d: {x: x, y: 0, z: z + tile},
+                centerX: x + tile * 0.5, centerZ: z + tile * 0.5,
+                color: dark ? 0x555653 : 0x64645f
+            });
+        }
+    }
+    garageWallQuads = [
+        {a: {x: -8, y: 0, z: 7}, b: {x: 8, y: 0, z: 7},
+         c: {x: 8, y: 4, z: 7}, d: {x: -8, y: 4, z: 7}, color: 0x777871},
+        {a: {x: 8, y: 0, z: -7}, b: {x: -8, y: 0, z: -7},
+         c: {x: -8, y: 4, z: -7}, d: {x: 8, y: 4, z: -7}, color: 0x6b6d68},
+        {a: {x: -8, y: 0, z: -7}, b: {x: -8, y: 0, z: 7},
+         c: {x: -8, y: 4, z: 7}, d: {x: -8, y: 4, z: -7}, color: 0x70716b},
+        {a: {x: 8, y: 0, z: 7}, b: {x: 8, y: 0, z: -7},
+         c: {x: 8, y: 4, z: -7}, d: {x: 8, y: 4, z: 7}, color: 0x70716b}
+    ];
+}
+
 function drawRoad(framebuffer) {
     for (var sectionIndex = 0; sectionIndex < roadSections.length;
          sectionIndex++) {
@@ -1685,16 +1860,20 @@ function shadeColor(color, amount) {
 
 function drawBox(framebuffer, cx, y, cz, heading, halfWidth, height, halfLength,
                  color) {
-    var vertices = [];
+    /* Boxes are submitted sequentially, so one scratch set avoids allocating
+     * eight world points for every garage fitting and boundary post. */
+    var vertices = worldBoxPoints;
     var sine = Math.sin(heading);
     var cosine = Math.cos(heading);
     for (var level = 0; level < 2; level++) {
         for (var i = 0; i < 4; i++) {
             var localX = BOX_LOCAL[i][0] * halfWidth;
             var localZ = BOX_LOCAL[i][1] * halfLength;
-            vertices.push({x: cx + localX * cosine + localZ * sine,
-                           y: y + level * height,
-                           z: cz - localX * sine + localZ * cosine});
+            var vertex = vertices[level * 4 + i];
+            vertex.x = cx + localX * cosine + localZ * sine;
+            vertex.y = y + level * height;
+            vertex.z = cz - localX * sine + localZ * cosine;
+            vertex._projectionFrame = -1;
         }
     }
     for (i = 0; i < BOX_FACES.length; i++) {
@@ -1746,20 +1925,59 @@ function carBodyLocalPointInto(target, carX, carY, carZ, sine, cosine,
 }
 
 function drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                          first, second, third, fourth, color) {
+                          first, second, third, fourth, color,
+                          doubleSided) {
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        first[0], first[1], first[2],
+                        second[0], second[1], second[2],
+                        third[0], third[1], third[2],
+                        fourth[0], fourth[1], fourth[2], color, doubleSided);
+}
+
+function drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                             firstX, firstY, firstZ,
+                             secondX, secondY, secondZ,
+                             thirdX, thirdY, thirdZ,
+                             fourthX, fourthY, fourthZ, color,
+                             doubleSided) {
+    var edgeFirstX = secondX - firstX;
+    var edgeFirstY = secondY - firstY;
+    var edgeFirstZ = secondZ - firstZ;
+    var edgeSecondX = thirdX - firstX;
+    var edgeSecondY = thirdY - firstY;
+    var edgeSecondZ = thirdZ - firstZ;
+    var normalX = edgeFirstY * edgeSecondZ - edgeFirstZ * edgeSecondY;
+    var normalY = edgeFirstZ * edgeSecondX - edgeFirstX * edgeSecondZ;
+    var normalZ = edgeFirstX * edgeSecondY - edgeFirstY * edgeSecondX;
+    var centerX = (firstX + secondX + thirdX + fourthX) * 0.25;
+    var centerY = (firstY + secondY + thirdY + fourthY) * 0.25;
+    var centerZ = (firstZ + secondZ + thirdZ + fourthZ) * 0.25;
+    var outwardDot = normalX * centerX + normalY * (centerY - 0.55) +
+                     normalZ * centerZ;
+    if (!doubleSided) {
+        if (outwardDot < 0) {
+            normalX = -normalX;
+            normalY = -normalY;
+            normalZ = -normalZ;
+        }
+        if (normalX * (detailedLocalCameraX - firstX) +
+            normalY * (detailedLocalCameraY - firstY) +
+            normalZ * (detailedLocalCameraZ - firstZ) <= 0) return;
+    }
     carBodyLocalPointInto(carQuadPoints[0], carX, carY, carZ, sine, cosine,
-                          first[0], first[1], first[2]);
+                          firstX, firstY, firstZ);
     carBodyLocalPointInto(carQuadPoints[1], carX, carY, carZ, sine, cosine,
-                          second[0], second[1], second[2]);
+                          secondX, secondY, secondZ);
     carBodyLocalPointInto(carQuadPoints[2], carX, carY, carZ, sine, cosine,
-                          third[0], third[1], third[2]);
+                          thirdX, thirdY, thirdZ);
     carBodyLocalPointInto(carQuadPoints[3], carX, carY, carZ, sine, cosine,
-                          fourth[0], fourth[1], fourth[2]);
+                          fourthX, fourthY, fourthZ);
     drawQuad(framebuffer, carQuadPoints[0], carQuadPoints[1],
              carQuadPoints[2], carQuadPoints[3], color);
 }
 
-function reflectedSkyCoordinates(point, normalX, normalY, normalZ) {
+function reflectedSkyCoordinatesInto(result, point,
+                                     normalX, normalY, normalZ) {
     var viewX = camera.x - point.x;
     var viewY = camera.y - point.y;
     var viewZ = camera.z - point.z;
@@ -1779,8 +1997,9 @@ function reflectedSkyCoordinates(point, normalX, normalY, normalZ) {
      * ray at the horizon keeps steep side glass reflective rather than
      * inventing a ground texture that the skybox does not contain. */
     var skyHeight = clamp(Math.abs(reflectionY), 0, 1);
-    return {u: longitude * freeDriveSkyboxWidth / (Math.PI * 2),
-            v: (1 - skyHeight) * (freeDriveSkyboxHeight - 1)};
+    result.u = longitude * freeDriveSkyboxWidth / (Math.PI * 2);
+    result.v = (1 - skyHeight) * (freeDriveSkyboxHeight - 1);
+    return result;
 }
 
 function windowTextureTriangleJS(pixels, texture, descriptor) {
@@ -1918,6 +2137,23 @@ function writeWindowGradient(descriptorOffset, gradient) {
                  gradient.yStep);
 }
 
+function writeWindowGradientValues(descriptorOffset, first, second, third,
+                                   firstValue, secondValue, thirdValue,
+                                   area, minimumX, minimumY) {
+    var xStep = ((secondValue - firstValue) * (third.y - first.y) -
+                 (thirdValue - firstValue) * (second.y - first.y)) / area;
+    var yStep = ((second.x - first.x) * (thirdValue - firstValue) -
+                 (third.x - first.x) * (secondValue - firstValue)) / area;
+    pokePacked32(windowTriangleDescriptor, descriptorOffset,
+                 Math.round(firstValue +
+                            xStep * (minimumX + 0.5 - first.x) +
+                            yStep * (minimumY + 0.5 - first.y)));
+    pokePacked32(windowTriangleDescriptor, descriptorOffset + 4,
+                 Math.round(xStep));
+    pokePacked32(windowTriangleDescriptor, descriptorOffset + 8,
+                 Math.round(yStep));
+}
+
 function unwrapWindowTextureU(value, reference) {
     while (value - reference > freeDriveSkyboxWidth * 0.5) {
         value -= freeDriveSkyboxWidth;
@@ -1968,26 +2204,22 @@ function drawReflectedWindowTriangle(framebuffer, firstWorld, secondWorld,
 
     var depthScale = DEPTH_FIXED_SCALE;
     var inverseScale = 32768;
-    writeWindowGradient(52, windowGradient(
-        first, second, third,
+    writeWindowGradientValues(52, first, second, third,
         first.inverseZ * depthScale, second.inverseZ * depthScale,
-        third.inverseZ * depthScale, area, minimumX, minimumY));
-    writeWindowGradient(64, windowGradient(
-        first, second, third,
+        third.inverseZ * depthScale, area, minimumX, minimumY);
+    writeWindowGradientValues(64, first, second, third,
         first.inverseZ * inverseScale, second.inverseZ * inverseScale,
-        third.inverseZ * inverseScale, area, minimumX, minimumY));
-    writeWindowGradient(76, windowGradient(
-        first, second, third,
+        third.inverseZ * inverseScale, area, minimumX, minimumY);
+    writeWindowGradientValues(76, first, second, third,
         firstUV.u * first.inverseZ * inverseScale,
         secondUV.u * second.inverseZ * inverseScale,
         thirdUV.u * third.inverseZ * inverseScale,
-        area, minimumX, minimumY));
-    writeWindowGradient(88, windowGradient(
-        first, second, third,
+        area, minimumX, minimumY);
+    writeWindowGradientValues(88, first, second, third,
         firstUV.v * first.inverseZ * inverseScale,
         secondUV.v * second.inverseZ * inverseScale,
         thirdUV.v * third.inverseZ * inverseScale,
-        area, minimumX, minimumY));
+        area, minimumX, minimumY);
     windowTextureRasterizer(framebuffer.pixelAddress,
                             freeDriveSkybox._nodePointer,
                             windowTriangleDescriptor._nodePointer);
@@ -1995,37 +2227,72 @@ function drawReflectedWindowTriangle(framebuffer, firstWorld, secondWorld,
 
 function drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
                              firstLocal, secondLocal, thirdLocal, fourthLocal) {
+    drawReflectedWindowXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                           firstLocal[0], firstLocal[1], firstLocal[2],
+                           secondLocal[0], secondLocal[1], secondLocal[2],
+                           thirdLocal[0], thirdLocal[1], thirdLocal[2],
+                           fourthLocal[0], fourthLocal[1], fourthLocal[2]);
+}
+
+function drawReflectedWindowXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                                firstX, firstY, firstZ,
+                                secondX, secondY, secondZ,
+                                thirdX, thirdY, thirdZ,
+                                fourthX, fourthY, fourthZ) {
+    var edgeFirstX = secondX - firstX;
+    var edgeFirstY = secondY - firstY;
+    var edgeFirstZ = secondZ - firstZ;
+    var edgeSecondX = fourthX - firstX;
+    var edgeSecondY = fourthY - firstY;
+    var edgeSecondZ = fourthZ - firstZ;
+    var localNormalX = edgeFirstY * edgeSecondZ - edgeFirstZ * edgeSecondY;
+    var localNormalY = edgeFirstZ * edgeSecondX - edgeFirstX * edgeSecondZ;
+    var localNormalZ = edgeFirstX * edgeSecondY - edgeFirstY * edgeSecondX;
+    var faceCenterX = (firstX + secondX + thirdX + fourthX) * 0.25;
+    var faceCenterY = (firstY + secondY + thirdY + fourthY) * 0.25;
+    var faceCenterZ = (firstZ + secondZ + thirdZ + fourthZ) * 0.25;
+    if (localNormalX * faceCenterX +
+        localNormalY * (faceCenterY - 0.65) +
+        localNormalZ * faceCenterZ < 0) {
+        localNormalX = -localNormalX;
+        localNormalY = -localNormalY;
+        localNormalZ = -localNormalZ;
+    }
+    if (localNormalX * (detailedLocalCameraX - firstX) +
+        localNormalY * (detailedLocalCameraY - firstY) +
+        localNormalZ * (detailedLocalCameraZ - firstZ) <= 0) return;
     var first = carBodyLocalPointInto(
         carWindowPoints[0], carX, carY, carZ, sine, cosine,
-        firstLocal[0], firstLocal[1], firstLocal[2]);
+        firstX, firstY, firstZ);
     var second = carBodyLocalPointInto(
         carWindowPoints[1], carX, carY, carZ, sine, cosine,
-        secondLocal[0], secondLocal[1], secondLocal[2]);
+        secondX, secondY, secondZ);
     var third = carBodyLocalPointInto(
         carWindowPoints[2], carX, carY, carZ, sine, cosine,
-        thirdLocal[0], thirdLocal[1], thirdLocal[2]);
+        thirdX, thirdY, thirdZ);
     var fourth = carBodyLocalPointInto(
         carWindowPoints[3], carX, carY, carZ, sine, cosine,
-        fourthLocal[0], fourthLocal[1], fourthLocal[2]);
-    var edgeFirstX = second.x - first.x;
-    var edgeFirstY = second.y - first.y;
-    var edgeFirstZ = second.z - first.z;
-    var edgeSecondX = fourth.x - first.x;
-    var edgeSecondY = fourth.y - first.y;
-    var edgeSecondZ = fourth.z - first.z;
-    var normalX = edgeFirstY * edgeSecondZ - edgeFirstZ * edgeSecondY;
-    var normalY = edgeFirstZ * edgeSecondX - edgeFirstX * edgeSecondZ;
-    var normalZ = edgeFirstX * edgeSecondY - edgeFirstY * edgeSecondX;
-    var inverseNormalLength = 1 / Math.sqrt(normalX * normalX +
-                                            normalY * normalY +
-                                            normalZ * normalZ);
-    normalX *= inverseNormalLength;
-    normalY *= inverseNormalLength;
-    normalZ *= inverseNormalLength;
-    var firstUV = reflectedSkyCoordinates(first, normalX, normalY, normalZ);
-    var secondUV = reflectedSkyCoordinates(second, normalX, normalY, normalZ);
-    var thirdUV = reflectedSkyCoordinates(third, normalX, normalY, normalZ);
-    var fourthUV = reflectedSkyCoordinates(fourth, normalX, normalY, normalZ);
+        fourthX, fourthY, fourthZ);
+    var inverseNormalLength = 1 / Math.sqrt(
+        localNormalX * localNormalX + localNormalY * localNormalY +
+        localNormalZ * localNormalZ);
+    localNormalX *= inverseNormalLength;
+    localNormalY *= inverseNormalLength;
+    localNormalZ *= inverseNormalLength;
+    var rolledNormalX = localNormalX * detailedBodyRollCosine -
+                        localNormalY * detailedBodyRollSine;
+    var normalY = localNormalX * detailedBodyRollSine +
+                  localNormalY * detailedBodyRollCosine;
+    var normalX = rolledNormalX * cosine + localNormalZ * sine;
+    var normalZ = -rolledNormalX * sine + localNormalZ * cosine;
+    var firstUV = reflectedSkyCoordinatesInto(
+        carWindowUVPoints[0], first, normalX, normalY, normalZ);
+    var secondUV = reflectedSkyCoordinatesInto(
+        carWindowUVPoints[1], second, normalX, normalY, normalZ);
+    var thirdUV = reflectedSkyCoordinatesInto(
+        carWindowUVPoints[2], third, normalX, normalY, normalZ);
+    var fourthUV = reflectedSkyCoordinatesInto(
+        carWindowUVPoints[3], fourth, normalX, normalY, normalZ);
     drawReflectedWindowTriangle(framebuffer, first, second, third,
                                 firstUV, secondUV, thirdUV);
     drawReflectedWindowTriangle(framebuffer, first, third, fourth,
@@ -2036,20 +2303,45 @@ function drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                          centerX, bottomY, centerZ,
                          halfWidth, height, halfLength, color) {
     var vertices = carBoxPoints;
-    for (var level = 0; level < 2; level++) {
-        for (var corner = 0; corner < 4; corner++) {
-            carBodyLocalPointInto(vertices[level * 4 + corner],
-                carX, carY, carZ, sine, cosine,
-                centerX + BOX_LOCAL[corner][0] * halfWidth,
-                bottomY + level * height,
-                centerZ + BOX_LOCAL[corner][1] * halfLength);
-        }
+    var topY = bottomY + height;
+    /* A convex axis-aligned local box can expose at most three faces.  Decide
+     * those faces in rolled body space, then transform only vertices used by
+     * them.  This is the exact box back-face test, not component omission. */
+    carBoxVisibleFaces[0] = detailedLocalCameraY < bottomY;
+    carBoxVisibleFaces[1] = detailedLocalCameraY > topY;
+    carBoxVisibleFaces[2] = detailedLocalCameraZ < centerZ - halfLength;
+    carBoxVisibleFaces[3] = detailedLocalCameraX > centerX + halfWidth;
+    carBoxVisibleFaces[4] = detailedLocalCameraZ > centerZ + halfLength;
+    carBoxVisibleFaces[5] = detailedLocalCameraX < centerX - halfWidth;
+    for (var vertexIndex = 0; vertexIndex < 8; vertexIndex++) {
+        carBoxVisibleVertices[vertexIndex] = false;
     }
     for (var faceIndex = 0; faceIndex < BOX_FACES.length; faceIndex++) {
+        if (!carBoxVisibleFaces[faceIndex]) continue;
+        var visibleFace = BOX_FACES[faceIndex];
+        carBoxVisibleVertices[visibleFace[0]] = true;
+        carBoxVisibleVertices[visibleFace[1]] = true;
+        carBoxVisibleVertices[visibleFace[2]] = true;
+        carBoxVisibleVertices[visibleFace[3]] = true;
+    }
+    for (var level = 0; level < 2; level++) {
+        for (var corner = 0; corner < 4; corner++) {
+            vertexIndex = level * 4 + corner;
+            if (carBoxVisibleVertices[vertexIndex]) {
+                carBodyLocalPointInto(vertices[vertexIndex],
+                    carX, carY, carZ, sine, cosine,
+                    centerX + BOX_LOCAL[corner][0] * halfWidth,
+                    bottomY + level * height,
+                    centerZ + BOX_LOCAL[corner][1] * halfLength);
+            }
+        }
+    }
+    for (faceIndex = 0; faceIndex < BOX_FACES.length; faceIndex++) {
+        if (!carBoxVisibleFaces[faceIndex]) continue;
         var face = BOX_FACES[faceIndex];
         drawQuad(framebuffer, vertices[face[0]], vertices[face[1]],
                  vertices[face[2]], vertices[face[3]],
-                 shadeColor(color, face[4]), true);
+                 shadeColor(color, face[4]));
     }
 }
 
@@ -2063,6 +2355,20 @@ function drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
     var centerY = 0.32;
     var steeringSine = Math.sin(steeringAngle || 0);
     var steeringCosine = Math.cos(steeringAngle || 0);
+    var centerWorldX = carX + localX * cosine + localZ * sine;
+    var centerWorldY = carY + centerY;
+    var centerWorldZ = carZ - localX * sine + localZ * cosine;
+    var rollingWorldX = steeringSine * cosine + steeringCosine * sine;
+    var rollingWorldZ = -steeringSine * sine + steeringCosine * cosine;
+    var cameraRolling = (camera.x - centerWorldX) * rollingWorldX +
+                        (camera.z - centerWorldZ) * rollingWorldZ;
+    var cameraVertical = camera.y - centerWorldY;
+    var acrossWorldX = steeringCosine * cosine - steeringSine * sine;
+    var acrossWorldZ = -steeringCosine * sine - steeringSine * cosine;
+    var outsideDirection = localX < 0 ? -1 : 1;
+    var outsideFaceVisible = outsideDirection *
+        (acrossWorldX * (camera.x - centerWorldX) +
+         acrossWorldZ * (camera.z - centerWorldZ)) > 0;
     function wheelPoint(target, across, y, rolling) {
         var offsetX = across * steeringCosine + rolling * steeringSine;
         var offsetZ = -across * steeringSine + rolling * steeringCosine;
@@ -2099,16 +2405,24 @@ function drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
         var outsideSecond = outsideRing[segment + 1];
         var insideFirst = insideRing[segment];
         var insideSecond = insideRing[segment + 1];
-        /* Keep the complete double-sided tread ring.  Its apparent winding
-         * changes between wheel sides and as a steered wheel yaws, so generic
-         * quad back-face rejection can discard segments which are visible. */
-        drawQuad(framebuffer, outsideFirst, insideFirst, insideSecond,
-                 outsideSecond, (segment & 1) ? 0x17191a : 0x202223);
-        drawNearClippedTriangle(framebuffer, outsideCenter,
-                                outsideFirst, outsideSecond, 0x191b1c);
-        drawNearClippedTriangle(framebuffer, hubCenter,
-                                hubRing[segment], hubRing[segment + 1],
-                                (segment & 1) ? 0xa6aaa8 : 0xc8cbc7);
+        /* The tread normal is radial in the wheel's rolling plane.  Test that
+         * actual normal after steering rather than relying on quad winding. */
+        var middleCosine = wheelCircleCosine[segment] +
+                           wheelCircleCosine[segment + 1];
+        var middleSine = wheelCircleSine[segment] +
+                         wheelCircleSine[segment + 1];
+        if (cameraVertical * middleCosine +
+            cameraRolling * middleSine > 0) {
+            drawQuad(framebuffer, outsideFirst, insideFirst, insideSecond,
+                     outsideSecond, (segment & 1) ? 0x17191a : 0x202223);
+        }
+        if (outsideFaceVisible) {
+            drawNearClippedTriangle(framebuffer, outsideCenter,
+                                    outsideFirst, outsideSecond, 0x191b1c);
+            drawNearClippedTriangle(framebuffer, hubCenter,
+                                    hubRing[segment], hubRing[segment + 1],
+                                    (segment & 1) ? 0xa6aaa8 : 0xc8cbc7);
+        }
     }
 }
 
@@ -2124,26 +2438,29 @@ function drawDetailedBodyShell(framebuffer, carX, carY, carZ, sine, cosine,
     var archSegments = 8;
 
     /* Top, floor, and both end faces form the central shell. */
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-halfWidth, top, -halfLength],
-                     [-halfWidth, top, halfLength],
-                     [halfWidth, top, halfLength],
-                     [halfWidth, top, -halfLength], color);
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-halfWidth, bottom, halfLength],
-                     [-halfWidth, bottom, -halfLength],
-                     [halfWidth, bottom, -halfLength],
-                     [halfWidth, bottom, halfLength], shadeColor(color, 0.48));
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-halfWidth, bottom, -halfLength],
-                     [-halfWidth, top, -halfLength],
-                     [halfWidth, top, -halfLength],
-                     [halfWidth, bottom, -halfLength], shadeColor(color, 0.65));
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [halfWidth, bottom, halfLength],
-                     [halfWidth, top, halfLength],
-                     [-halfWidth, top, halfLength],
-                     [-halfWidth, bottom, halfLength], shadeColor(color, 0.58));
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -halfWidth, top, -halfLength,
+                        -halfWidth, top, halfLength,
+                        halfWidth, top, halfLength,
+                        halfWidth, top, -halfLength, color);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -halfWidth, bottom, halfLength,
+                        -halfWidth, bottom, -halfLength,
+                        halfWidth, bottom, -halfLength,
+                        halfWidth, bottom, halfLength,
+                        shadeColor(color, 0.48));
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -halfWidth, bottom, -halfLength,
+                        -halfWidth, top, -halfLength,
+                        halfWidth, top, -halfLength,
+                        halfWidth, bottom, -halfLength,
+                        shadeColor(color, 0.65));
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        halfWidth, bottom, halfLength,
+                        halfWidth, top, halfLength,
+                        -halfWidth, top, halfLength,
+                        -halfWidth, bottom, halfLength,
+                        shadeColor(color, 0.58));
 
     /* Build each side around two genuine openings.  Above an opening, the
      * lower vertices follow a semicircle; no body triangles occupy the hole. */
@@ -2155,45 +2472,47 @@ function drawDetailedBodyShell(framebuffer, carX, carY, carZ, sine, cosine,
             var centerZ = wheelCenters[wheel];
             var archStart = centerZ - archRadius;
             var archEnd = centerZ + archRadius;
-            drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                             [sideX, bottom, cursorZ],
-                             [sideX, bottom, archStart],
-                             [sideX, top, archStart],
-                             [sideX, top, cursorZ], sideColor);
+            drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                                sideX, bottom, cursorZ,
+                                sideX, bottom, archStart,
+                                sideX, top, archStart,
+                                sideX, top, cursorZ, sideColor);
             for (var segment = 0; segment < archSegments; segment++) {
-                var firstZ = archStart + segment * archRadius * 2 /
-                             archSegments;
-                var secondZ = archStart + (segment + 1) * archRadius * 2 /
-                              archSegments;
-                var firstOffset = firstZ - centerZ;
-                var secondOffset = secondZ - centerZ;
-                var firstY = wheelCenterY +
-                             Math.sqrt(Math.max(0, archRadius * archRadius -
-                                                firstOffset * firstOffset));
-                var secondY = wheelCenterY +
-                              Math.sqrt(Math.max(0, archRadius * archRadius -
-                                                 secondOffset * secondOffset));
-                drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                                 [sideX, firstY, firstZ],
-                                 [sideX, secondY, secondZ],
-                                 [sideX, top, secondZ],
-                                 [sideX, top, firstZ], sideColor);
+                var firstZ = centerZ + detailedArchOffset[segment];
+                var secondZ = centerZ + detailedArchOffset[segment + 1];
+                var firstY = detailedArchHeight[segment];
+                var secondY = detailedArchHeight[segment + 1];
+                drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ,
+                                    sine, cosine,
+                                    sideX, firstY, firstZ,
+                                    sideX, secondY, secondZ,
+                                    sideX, top, secondZ,
+                                    sideX, top, firstZ, sideColor);
 
                 /* A recessed dark liner gives the cut edge visible depth. */
                 var innerX = side * 0.68;
-                drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                                 [sideX, firstY, firstZ],
-                                 [innerX, firstY, firstZ],
-                                 [innerX, secondY, secondZ],
-                                 [sideX, secondY, secondZ], 0x292724);
+                var linerMiddleY = (firstY + secondY) * 0.5;
+                var linerMiddleZ = (firstZ + secondZ) * 0.5;
+                var linerNormalY = wheelCenterY - linerMiddleY;
+                var linerNormalZ = centerZ - linerMiddleZ;
+                if (linerNormalY * (detailedLocalCameraY - linerMiddleY) +
+                    linerNormalZ * (detailedLocalCameraZ - linerMiddleZ) > 0) {
+                    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ,
+                                        sine, cosine,
+                                        sideX, firstY, firstZ,
+                                        innerX, firstY, firstZ,
+                                        innerX, secondY, secondZ,
+                                        sideX, secondY, secondZ,
+                                        0x292724, true);
+                }
             }
             cursorZ = archEnd;
         }
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, bottom, cursorZ],
-                         [sideX, bottom, halfLength],
-                         [sideX, top, halfLength],
-                         [sideX, top, cursorZ], sideColor);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            sideX, bottom, cursorZ,
+                            sideX, bottom, halfLength,
+                            sideX, top, halfLength,
+                            sideX, top, cursorZ, sideColor);
     }
 }
 
@@ -2205,20 +2524,20 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
     var wheelX;
     var wheelZ;
 
-    /* Submit all four complete wheels.  Their open arches, steering angle,
-     * and narrow tread make camera-side wheel culling visibly discontinuous
-     * around oblique views; the depth buffer resolves shell occlusion. */
-    for (wheelZ = -0.97; wheelZ <= 0.97; wheelZ += 1.94) {
-        for (wheelX = -0.80; wheelX <= 0.80; wheelX += 1.60) {
-            drawDetailedWheel(framebuffer, carX, carY, carZ,
-                              sine, cosine, wheelX, wheelZ,
-                              wheelZ > 0 ? frontWheelSteer : 0);
-        }
-    }
-
     bodyRoll = bodyRoll || 0;
     detailedBodyRollSine = Math.sin(bodyRoll);
     detailedBodyRollCosine = Math.cos(bodyRoll);
+    var cameraDx = camera.x - carX;
+    var cameraDz = camera.z - carZ;
+    var headingLocalX = cameraDx * cosine - cameraDz * sine;
+    var headingLocalZ = cameraDx * sine + cameraDz * cosine;
+    var cameraRelativeY = camera.y - carY - 0.32;
+    detailedLocalCameraX = headingLocalX * detailedBodyRollCosine +
+                           cameraRelativeY * detailedBodyRollSine;
+    detailedLocalCameraY = 0.32 -
+                           headingLocalX * detailedBodyRollSine +
+                           cameraRelativeY * detailedBodyRollCosine;
+    detailedLocalCameraZ = headingLocalZ;
 
     /* Long, boxy shell with distinct bonnet and boot: a four-seat 1970s
      * two-door saloon rather than a short two-seat coupe. */
@@ -2231,12 +2550,12 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
                     shadeColor(color, 0.94));
 
     /* Sloped front and rear glass. */
-    drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
-                        [-0.54, 0.68, 0.68], [0.54, 0.68, 0.68],
-                        [0.45, 1.13, 0.38], [-0.45, 1.13, 0.38]);
-    drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
-                        [0.54, 0.68, -0.83], [-0.54, 0.68, -0.83],
-                        [-0.45, 1.13, -0.51], [0.45, 1.13, -0.51]);
+    drawReflectedWindowXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                           -0.54, 0.68, 0.68, 0.54, 0.68, 0.68,
+                           0.45, 1.13, 0.38, -0.45, 1.13, 0.38);
+    drawReflectedWindowXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                           0.54, 0.68, -0.83, -0.54, 0.68, -0.83,
+                           -0.45, 1.13, -0.51, 0.45, 1.13, -0.51);
 
     /* Each side has one long front door and a fixed rear quarter window.  The
      * rear glass and extended roof retain enough cabin length for four seats,
@@ -2246,62 +2565,62 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
         var sideX = side * 0.59;
         var glassTopX = side * 0.45;
         var frameTopX = side * 0.51;
-        drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
-                            [sideX, 0.69, 0.65], [sideX, 0.69, -0.18],
-                            [glassTopX, 1.10, -0.17],
-                            [glassTopX, 1.10, 0.36]);
-        drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
-                            [sideX, 0.69, -0.25], [sideX, 0.69, -0.79],
-                            [glassTopX, 1.10, -0.49],
-                            [glassTopX, 1.10, -0.24]);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, 0.65, -0.84], [sideX, 0.65, 0.70],
-                         [sideX, 0.72, 0.65], [sideX, 0.72, -0.79], frame);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, 0.68, -0.26], [sideX, 0.68, -0.17],
-                         [frameTopX, 1.15, -0.15],
-                         [frameTopX, 1.15, -0.27], frame);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, 0.66, 0.70], [sideX, 0.66, 0.62],
-                         [frameTopX, 1.16, 0.34],
-                         [frameTopX, 1.16, 0.42], frame);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, 0.66, -0.84], [sideX, 0.66, -0.76],
-                         [frameTopX, 1.16, -0.47],
-                         [frameTopX, 1.16, -0.55], frame);
+        drawReflectedWindowXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                               sideX, 0.69, 0.65, sideX, 0.69, -0.18,
+                               glassTopX, 1.10, -0.17,
+                               glassTopX, 1.10, 0.36);
+        drawReflectedWindowXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                               sideX, 0.69, -0.25, sideX, 0.69, -0.79,
+                               glassTopX, 1.10, -0.49,
+                               glassTopX, 1.10, -0.24);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            sideX, 0.65, -0.84, sideX, 0.65, 0.70,
+                            sideX, 0.72, 0.65, sideX, 0.72, -0.79, frame);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            sideX, 0.68, -0.26, sideX, 0.68, -0.17,
+                            frameTopX, 1.15, -0.15,
+                            frameTopX, 1.15, -0.27, frame);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            sideX, 0.66, 0.70, sideX, 0.66, 0.62,
+                            frameTopX, 1.16, 0.34,
+                            frameTopX, 1.16, 0.42, frame);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            sideX, 0.66, -0.84, sideX, 0.66, -0.76,
+                            frameTopX, 1.16, -0.47,
+                            frameTopX, 1.16, -0.55, frame);
 
         /* One long door outline and one handle per side. */
         var panelX = side * 0.848;
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [panelX, 0.25, 0.68], [panelX, 0.25, 0.64],
-                         [panelX, 0.67, 0.64], [panelX, 0.67, 0.68], 0x332a28);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [panelX, 0.25, -0.38], [panelX, 0.25, -0.34],
-                         [panelX, 0.67, -0.34], [panelX, 0.67, -0.38], 0x332a28);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [panelX, 0.25, -0.38], [panelX, 0.25, 0.68],
-                         [panelX, 0.28, 0.68], [panelX, 0.28, -0.38], 0x332a28);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [panelX, 0.53, -0.27], [panelX, 0.53, -0.08],
-                         [panelX, 0.58, -0.08], [panelX, 0.58, -0.27], 0xb5b3a8);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            panelX, 0.25, 0.68, panelX, 0.25, 0.64,
+                            panelX, 0.67, 0.64, panelX, 0.67, 0.68, 0x332a28);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            panelX, 0.25, -0.38, panelX, 0.25, -0.34,
+                            panelX, 0.67, -0.34, panelX, 0.67, -0.38, 0x332a28);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            panelX, 0.25, -0.38, panelX, 0.25, 0.68,
+                            panelX, 0.28, 0.68, panelX, 0.28, -0.38, 0x332a28);
+        drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                            panelX, 0.53, -0.27, panelX, 0.53, -0.08,
+                            panelX, 0.58, -0.08, panelX, 0.58, -0.27, 0xb5b3a8);
     }
 
     /* Painted windscreen/rear-window surrounds and a visible metal roof skin. */
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-0.63, 0.64, 0.71], [-0.53, 0.69, 0.65],
-                     [-0.44, 1.11, 0.39], [-0.53, 1.17, 0.34], frame);
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [0.53, 0.69, 0.65], [0.63, 0.64, 0.71],
-                     [0.53, 1.17, 0.34], [0.44, 1.11, 0.39], frame);
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-0.53, 1.17, 0.34], [-0.44, 1.11, 0.39],
-                     [0.44, 1.11, 0.39], [0.53, 1.17, 0.34], frame);
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [0.63, 0.64, -0.86], [0.53, 0.69, -0.79],
-                     [0.44, 1.11, -0.50], [0.53, 1.17, -0.55], frame);
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-0.53, 0.69, -0.79], [-0.63, 0.64, -0.86],
-                     [-0.53, 1.17, -0.55], [-0.44, 1.11, -0.50], frame);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -0.63, 0.64, 0.71, -0.53, 0.69, 0.65,
+                        -0.44, 1.11, 0.39, -0.53, 1.17, 0.34, frame);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        0.53, 0.69, 0.65, 0.63, 0.64, 0.71,
+                        0.53, 1.17, 0.34, 0.44, 1.11, 0.39, frame);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -0.53, 1.17, 0.34, -0.44, 1.11, 0.39,
+                        0.44, 1.11, 0.39, 0.53, 1.17, 0.34, frame);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        0.63, 0.64, -0.86, 0.53, 0.69, -0.79,
+                        0.44, 1.11, -0.50, 0.53, 1.17, -0.55, frame);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -0.53, 0.69, -0.79, -0.63, 0.64, -0.86,
+                        -0.53, 1.17, -0.55, -0.44, 1.11, -0.50, frame);
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                     0, 1.11, -0.08, 0.55, 0.11, 0.46,
                     shadeColor(color, 1.12));
@@ -2317,41 +2636,41 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
                     0.55, 0.43, -1.525, 0.19, 0.15, 0.025, 0xc51f22);
 
     /* Period rectangular grille and bright metal bumpers. */
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-0.27, 0.40, 1.553], [0.27, 0.40, 1.553],
-                     [0.27, 0.55, 1.553], [-0.27, 0.55, 1.553], 0x24282a);
+    drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
+                        -0.27, 0.40, 1.553, 0.27, 0.40, 1.553,
+                        0.27, 0.55, 1.553, -0.27, 0.55, 1.553, 0x24282a);
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                     0, 0.27, 1.56, 0.78, 0.07, 0.025, 0xb7b9b4);
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                     0, 0.27, -1.56, 0.78, 0.07, 0.025, 0xa6a8a4);
+
+    /* Submit all four complete wheels after the opaque shell.  The depth
+     * buffer still resolves every arch and steering angle exactly, while
+     * pixels hidden inside the body fail before being written. */
+    for (wheelZ = -0.97; wheelZ <= 0.97; wheelZ += 1.94) {
+        for (wheelX = -0.80; wheelX <= 0.80; wheelX += 1.60) {
+            drawDetailedWheel(framebuffer, carX, carY, carZ,
+                              sine, cosine, wheelX, wheelZ,
+                              wheelZ > 0 ? frontWheelSteer : 0);
+        }
+    }
 }
 
 function drawGarage(framebuffer) {
-    var x;
-    var z;
-    var tile = 2;
-    for (z = -7; z < 7; z += tile) {
-        for (x = -8; x < 8; x += tile) {
-            var checker = (((x + 8) / tile + (z + 7) / tile) & 1);
-            var floorColor = checker ? 0x555653 : 0x64645f;
-            drawQuad(framebuffer,
-                     {x: x, y: 0, z: z},
-                     {x: x + tile, y: 0, z: z},
-                     {x: x + tile, y: 0, z: z + tile},
-                     {x: x, y: 0, z: z + tile}, floorColor);
-        }
+    for (var tileIndex = 0; tileIndex < garageFloorTiles.length; tileIndex++) {
+        var tile = garageFloorTiles[tileIndex];
+        var tileDx = tile.centerX - camera.x;
+        var tileDz = tile.centerZ - camera.z;
+        if (!horizontallyVisible(tileDx, tileDz, 1.42)) continue;
+        drawQuad(framebuffer, tile.a, tile.b, tile.c, tile.d, tile.color);
     }
 
     /* The orbit remains inside this simple service bay, so the walls form a
      * background behind the car rather than passing between camera and car. */
-    drawQuad(framebuffer, {x: -8, y: 0, z: 7}, {x: 8, y: 0, z: 7},
-             {x: 8, y: 4, z: 7}, {x: -8, y: 4, z: 7}, 0x777871);
-    drawQuad(framebuffer, {x: 8, y: 0, z: -7}, {x: -8, y: 0, z: -7},
-             {x: -8, y: 4, z: -7}, {x: 8, y: 4, z: -7}, 0x6b6d68);
-    drawQuad(framebuffer, {x: -8, y: 0, z: -7}, {x: -8, y: 0, z: 7},
-             {x: -8, y: 4, z: 7}, {x: -8, y: 4, z: -7}, 0x70716b);
-    drawQuad(framebuffer, {x: 8, y: 0, z: 7}, {x: 8, y: 0, z: -7},
-             {x: 8, y: 4, z: -7}, {x: 8, y: 4, z: 7}, 0x70716b);
+    for (var wallIndex = 0; wallIndex < garageWallQuads.length; wallIndex++) {
+        var wall = garageWallQuads[wallIndex];
+        drawQuad(framebuffer, wall.a, wall.b, wall.c, wall.d, wall.color);
+    }
 
     /* Lift rails, safety stripes, columns, and a workbench make the room read
      * as a garage while retaining the general box/triangle renderer. */
@@ -2367,110 +2686,56 @@ function drawGarage(framebuffer) {
 }
 
 function drawMuddyField(framebuffer) {
-    var tile = 20;
-    var row = 0;
-    for (var z = -FIELD_HALF_LENGTH; z < FIELD_HALF_LENGTH; z += tile) {
-        var finalZ = Math.min(FIELD_HALF_LENGTH, z + tile);
-        var column = 0;
-        for (var x = -FIELD_HALF_WIDTH; x < FIELD_HALF_WIDTH; x += tile) {
-            var finalX = Math.min(FIELD_HALF_WIDTH, x + tile);
-            var checkerColumn = column++;
-            var tileDx = (x + finalX) * 0.5 - camera.x;
-            var tileDz = (z + finalZ) * 0.5 - camera.z;
-            if (!horizontallyVisible(tileDx, tileDz, 15)) continue;
-            var fieldColor = ((row + checkerColumn) & 1) ?
-                             0x704b2d : 0x50331f;
-            drawQuad(framebuffer,
-                     {x: x, y: 0, z: z}, {x: finalX, y: 0, z: z},
-                     {x: finalX, y: 0, z: finalZ}, {x: x, y: 0, z: finalZ},
-                     fieldColor);
-        }
-        row++;
+    var tileIndex;
+    for (tileIndex = 0; tileIndex < freeDriveFieldTiles.length; tileIndex++) {
+        var tile = freeDriveFieldTiles[tileIndex];
+        var tileDx = tile.centerX - camera.x;
+        var tileDz = tile.centerZ - camera.z;
+        if (!horizontallyVisible(tileDx, tileDz, 15)) continue;
+        drawQuad(framebuffer, tile.a, tile.b, tile.c, tile.d, tile.color);
     }
-    var puddles = [[-18, -9, 5, 2], [13, 11, 7, 2.5],
-                   [-4, 23, 4, 1.8], [25, -19, 5, 2.1]];
-    for (var puddleIndex = 0; puddleIndex < puddles.length; puddleIndex++) {
-        var puddle = puddles[puddleIndex];
-        drawQuad(framebuffer,
-                 {x: puddle[0] - puddle[2], y: 0.018, z: puddle[1] - puddle[3]},
-                 {x: puddle[0] + puddle[2], y: 0.018, z: puddle[1] - puddle[3]},
-                 {x: puddle[0] + puddle[2], y: 0.018, z: puddle[1] + puddle[3]},
-                 {x: puddle[0] - puddle[2], y: 0.018, z: puddle[1] + puddle[3]},
+    for (var puddleIndex = 0; puddleIndex < freeDrivePuddleQuads.length;
+         puddleIndex++) {
+        var puddle = freeDrivePuddleQuads[puddleIndex];
+        drawQuad(framebuffer, puddle.a, puddle.b, puddle.c, puddle.d,
                  0x343b38);
     }
 
     /* Two purely painted lines reuse the reproducible rally centreline.  They
      * have no collision or grip effect: this is a driving guide, not a road. */
-    for (var trackIndex = 0; trackIndex < TRACK_POINTS; trackIndex += 6) {
-        var nextTrackIndex = (trackIndex + 6) % TRACK_POINTS;
-        var first = track[trackIndex];
-        var second = track[nextTrackIndex];
-        var lineMiddleX = (first.x + second.x) * 0.5;
-        var lineMiddleZ = (first.z + second.z) * 0.5;
-        var lineDx = lineMiddleX - camera.x;
-        var lineDz = lineMiddleZ - camera.z;
+    for (var lineIndex = 0; lineIndex < freeDriveTrackLines.length;
+         lineIndex++) {
+        var line = freeDriveTrackLines[lineIndex];
+        var lineDx = line.centerX - camera.x;
+        var lineDz = line.centerZ - camera.z;
         if (lineDx * lineDx + lineDz * lineDz > 70 * 70 ||
             !horizontallyVisible(lineDx, lineDz, 8)) continue;
-        for (var side = -1; side <= 1; side += 2) {
-            var lineOffset = side * FIELD_TRACK_HALF_WIDTH;
-            var innerOffset = lineOffset - 0.18;
-            var outerOffset = lineOffset + 0.18;
-            drawQuad(framebuffer,
-                     {x: first.x + first.normalX * innerOffset,
-                      y: 0.032,
-                      z: first.z + first.normalZ * innerOffset},
-                     {x: second.x + second.normalX * innerOffset,
-                      y: 0.032,
-                      z: second.z + second.normalZ * innerOffset},
-                     {x: second.x + second.normalX * outerOffset,
-                      y: 0.032,
-                      z: second.z + second.normalZ * outerOffset},
-                     {x: first.x + first.normalX * outerOffset,
-                      y: 0.032,
-                      z: first.z + first.normalZ * outerOffset},
-                     0xe0c98b);
-        }
+        drawQuad(framebuffer, line.a, line.b, line.c, line.d, 0xe0c98b);
     }
-    var start = track[0];
-    var startHalfDepth = 0.32;
-    drawQuad(framebuffer,
-             {x: start.x - start.tangentX * startHalfDepth -
-                 start.normalX * FIELD_TRACK_HALF_WIDTH,
-              y: 0.038,
-              z: start.z - start.tangentZ * startHalfDepth -
-                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
-             {x: start.x + start.tangentX * startHalfDepth -
-                 start.normalX * FIELD_TRACK_HALF_WIDTH,
-              y: 0.038,
-              z: start.z + start.tangentZ * startHalfDepth -
-                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
-             {x: start.x + start.tangentX * startHalfDepth +
-                 start.normalX * FIELD_TRACK_HALF_WIDTH,
-              y: 0.038,
-              z: start.z + start.tangentZ * startHalfDepth +
-                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
-             {x: start.x - start.tangentX * startHalfDepth +
-                 start.normalX * FIELD_TRACK_HALF_WIDTH,
-              y: 0.038,
-              z: start.z - start.tangentZ * startHalfDepth +
-                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
-             0xf0e5bd);
+    drawQuad(framebuffer, freeDriveStartQuad.a, freeDriveStartQuad.b,
+             freeDriveStartQuad.c, freeDriveStartQuad.d, 0xf0e5bd);
 
+    var x;
+    var z;
     for (x = -FIELD_HALF_WIDTH; x <= FIELD_HALF_WIDTH; x += 20) {
-        drawBox(framebuffer, x, 0, -FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
-                0x66513a);
-        drawBox(framebuffer, x, 0, FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
-                0x66513a);
+        drawFieldBoundaryPost(framebuffer, x, -FIELD_HALF_LENGTH);
+        drawFieldBoundaryPost(framebuffer, x, FIELD_HALF_LENGTH);
     }
     for (z = -FIELD_HALF_LENGTH; z <= FIELD_HALF_LENGTH; z += 20) {
-        drawBox(framebuffer, -FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
-                0x66513a);
-        drawBox(framebuffer, FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
-                0x66513a);
+        drawFieldBoundaryPost(framebuffer, -FIELD_HALF_WIDTH, z);
+        drawFieldBoundaryPost(framebuffer, FIELD_HALF_WIDTH, z);
     }
     drawDetailedCar(framebuffer, player.x, player.y - 0.13, player.z,
                     player.heading, 0xd94a32, playerWheelSteer,
                     player.bodyRoll);
+}
+
+function drawFieldBoundaryPost(framebuffer, x, z) {
+    var dx = x - camera.x;
+    var dz = z - camera.z;
+    if (dx * dx + dz * dz > 82 * 82 ||
+        !horizontallyVisible(dx, dz, 1.1)) return;
+    drawBox(framebuffer, x, 0, z, 0, 0.09, 1.0, 0.09, 0x66513a);
 }
 
 function drawBillboard(framebuffer, x, bottomY, z, width, height, color) {
@@ -2728,7 +2993,8 @@ function drawModeHud(framebuffer) {
                                          player.velocityZ * player.velocityZ) * 6.2);
         scale = textScale(framebuffer);
         lineAdvance = textLineAdvance(framebuffer);
-        paintText(framebuffer, "FREE DRIVE", scale, scale);
+        paintText(framebuffer, freeDriveAutoDrive ? "AUTO DRIVE" : "FREE DRIVE",
+                  scale, scale);
         paintText(framebuffer, "SPEED " + speed, scale, scale + lineAdvance);
         if (player.powerSliding) {
             paintText(framebuffer, "POWER SLIDE", scale,
@@ -2742,14 +3008,15 @@ function drawMenu(framebuffer) {
     var glyphAdvance = textGlyphAdvance(framebuffer);
     var lineAdvance = textLineAdvance(framebuffer);
     var fullWidth = 16 * glyphAdvance + scale * 4;
-    var fullHeight = 6 * lineAdvance + scale * 4;
+    var fullHeight = 7 * lineAdvance + scale * 4;
     var tiny = framebuffer.width / glyphAdvance < 8;
     var compact = tiny || framebuffer.width < fullWidth ||
                   framebuffer.height < fullHeight;
-    var lines = tiny ? ["MENU", "R G F", "Q ESC"] :
-                compact ? ["MENU", "R G F Q", "ESC"] :
+    var lines = tiny ? ["MENU", "R G F A", "Q ESC"] :
+                compact ? ["MENU", "R G F A Q", "ESC"] :
                           ["PAUSED MENU", "ESC  RESUME", "R  RESTART GAME",
-                           "G  GARAGE", "F  FREE DRIVE", "Q  QUIT"];
+                           "G  GARAGE", "F  FREE DRIVE", "A  AUTO DRIVE",
+                           "Q  QUIT"];
     var maximumCharacters = 0;
     for (var measureIndex = 0; measureIndex < lines.length; measureIndex++) {
         maximumCharacters = Math.max(maximumCharacters, lines[measureIndex].length);
@@ -2792,7 +3059,8 @@ function reportGameReady() {
                 windowInfo.framesPerSecond + " FPS limit");
     console.log("Attract mode running; push Space to reset the grid and play");
     console.log("Drive with arrows or WASD; Space brakes; Escape opens the menu");
-    console.log("Menu: Escape resumes, R restarts game, G garage, F free drive, Q quits");
+    console.log("Menu: Escape resumes, R restarts game, G garage, " +
+                "F free drive, A auto drive, Q quits");
     console.log("F2 cycles triangle rasterization: compiled native, " +
                 "reference JS, hand ASM");
     console.log("triangle-half rasterizer: compiled native");
@@ -2807,10 +3075,16 @@ function initializeGame() {
         wheelOutsideRing[wheelStep] = {x: 0, y: 0, z: 0};
         wheelInsideRing[wheelStep] = {x: 0, y: 0, z: 0};
         wheelHubRing[wheelStep] = {x: 0, y: 0, z: 0};
+        var archOffset = -0.33 + wheelStep * 0.66 / 8;
+        detailedArchOffset[wheelStep] = archOffset;
+        detailedArchHeight[wheelStep] = 0.32 +
+            Math.sqrt(Math.max(0, 0.33 * 0.33 - archOffset * archOffset));
     }
     track = makeTrack();
     terrainCells = makeTerrainCells();
     roadSections = makeRoadSections();
+    makeFreeDriveGeometry();
+    makeGarageGeometry();
     depthBuffer = memory.allocate(options.width * options.height * 4);
     spanRasterizer = createSpanRasterizer(depthBuffer, options.width);
     spanRasterizers = {};
@@ -2962,7 +3236,8 @@ function handleMenuKey(event, activeWindow) {
     else if (key === 113 || key === 81) activeWindow.close();
     else if (key === 114 || key === 82) enterRallyMode();
     else if (key === 103 || key === 71) enterGarageMode();
-    else if (key === 102 || key === 70) enterFreeDriveMode();
+    else if (key === 102 || key === 70) enterFreeDriveMode(false);
+    else if (key === 97 || key === 65) enterFreeDriveMode(true);
 }
 
 function toggleTriangleRasterizer() {
