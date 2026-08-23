@@ -890,9 +890,20 @@ Escape pauses demo8 and opens its mode menu. The menu keys are:
 The garage camera automatically travels around the rally car on an elliptical
 path and follows a sinusoidal up/down motion. Hold mouse button 1 and drag to
 control its orbit angle and height; release the button to resume automatic
-motion. Free-driving mode uses the normal arrow/WASD automatic-style driving
-controls, but replaces the rally course and competitors with a fixed
-90-by-68-unit brown field, puddles, and visible boundary posts.
+motion. Its garage-only detailed car is a boxy 1970s two-door rally saloon with
+a four-seat-sized cabin: long wheelbase, distinct bonnet and boot, one long
+outlined door and handle per side, and fixed rear quarter windows rather than
+rear doors. It also has four low-polygon tyres with metal hubs, rectangular
+unlit front and rear lamp lenses, a dark grille, bright period-style bumpers,
+sloped front and rear glass, body-coloured external frames and pillars, and a
+highlighted painted-metal roof. The side-window sills follow the wider body
+line while the upper glass and pillar vertices taper inward to meet the roof;
+the glazed cabin does not splay outward. The lightweight race and AI car
+representation is retained outside the garage.
+
+Free-driving mode uses the normal arrow/WASD automatic-style driving controls,
+but replaces the rally course and competitors with a fixed 90-by-68-unit brown
+field, puddles, and visible boundary posts.
 
 Demo8 text remains the built-in 5x7 bitmap font painted directly into the
 framebuffer. Its integer pixel scale is proportional to the viewport: 320x240
