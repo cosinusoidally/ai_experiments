@@ -34,7 +34,7 @@ var spanRasterizers = {};
 var TRIANGLE_RASTERIZER_HAND_ASM = 0;
 var TRIANGLE_RASTERIZER_COMPILED = 1;
 var TRIANGLE_RASTERIZER_JS = 2;
-var triangleRasterizerMode = TRIANGLE_RASTERIZER_HAND_ASM;
+var triangleRasterizerMode = TRIANGLE_RASTERIZER_COMPILED;
 var triangleHalfRasterizerASM = null;
 var compiledTriangleHalfRasterizer = null;
 var DEPTH_FIXED_SCALE = 67108864;
@@ -53,8 +53,8 @@ var garageManualLift = 0;
 var garageDragging = false;
 var garageDragX = 0;
 var garageDragY = 0;
-var FIELD_HALF_WIDTH = 80;
-var FIELD_HALF_LENGTH = 64;
+var FIELD_HALF_WIDTH = 100;
+var FIELD_HALF_LENGTH = 80;
 var FIELD_TRACK_HALF_WIDTH = 4.5;
 var FREE_DRIVE_CAR_HALF_WIDTH = 1.45;
 var FREE_DRIVE_CAR_HALF_LENGTH = 1.68;
@@ -685,7 +685,7 @@ function resetFreeDrive() {
     player = {x: fieldStart.x, y: 0.15, z: fieldStart.z,
               heading: Math.atan2(fieldStart.tangentX,
                                   fieldStart.tangentZ), speed: 0,
-              velocityX: 0, velocityZ: 0, yawRate: 0,
+              velocityX: 0, velocityZ: 0, yawRate: 0, rearGrip: 1,
               powerSliding: false, wrappedDistance: 0, raceDistance: 0,
               lap: 0, position: 1};
     clearControls();
@@ -700,8 +700,8 @@ function enterFreeDriveMode() {
     resetFreeDrive();
     menuOpen = false;
     lastFrameTime = 0;
-    console.log("mode: free drive on the muddy field; brake while steering " +
-                "at speed to powerslide");
+    console.log("mode: free drive; turn, tap brake, then reapply power " +
+                "to powerslide");
 }
 
 function resolveRoadEdge(nearest, dt) {
@@ -855,23 +855,69 @@ function updateFreeDriveStep(dt) {
     var lateralSpeed = player.velocityX * rightX +
                        player.velocityZ * rightZ;
 
-    /* Steering produces yaw only while the tyres are rolling.  Yaw has a
-     * little inertia, and reverses naturally when travelling backwards. */
-    var steeringRate = longitudinalSpeed < 0 ? 0.105 : 0.070;
-    var targetYawRate = -steering * longitudinalSpeed * steeringRate;
-    targetYawRate = clamp(targetYawRate, -1.55, 1.55);
-    var yawResponse = controls.brake && longitudinalSpeed > 6 ?
-                      3.0 : 6.5;
-    player.yawRate += (targetYawRate - player.yawRate) *
-                      Math.min(1, dt * yawResponse);
-    if (!steering || Math.abs(longitudinalSpeed) < 0.15) {
-        player.yawRate *= Math.max(0, 1 - dt * 2.5);
+    /* A compact bicycle model: front and rear axle slip produce separate
+     * lateral forces and a torque about the car.  A brake tap transfers load
+     * forward and temporarily lowers rear grip.  Because drive is applied at
+     * the rear axle, throttle also consumes rear traction when it is slipping. */
+    var frontAxleDistance = 1.12;
+    var rearAxleDistance = 1.04;
+    var steeringAngle = -steering * 0.40;
+    var brakingForward = controls.brake && longitudinalSpeed > 0.7;
+    if (brakingForward && longitudinalSpeed > 5) {
+        player.rearGrip -= dt * 4.2;
+    } else {
+        var gripRecovery = controls.throttle && player.powerSliding ?
+                           0.32 : 1.25;
+        player.rearGrip += dt * gripRecovery;
     }
+    player.rearGrip = clamp(player.rearGrip, 0.16, 1);
+
+    var frontSlip = lateralSpeed + player.yawRate * frontAxleDistance -
+                    longitudinalSpeed * steeringAngle;
+    var rearSlip = lateralSpeed - player.yawRate * rearAxleDistance;
+    var frontGrip = brakingForward ? 1.12 : 1;
+    var rearSlipRatio = Math.abs(rearSlip) /
+                        (Math.abs(longitudinalSpeed) + 1);
+    var rearGripDisturbed = player.rearGrip < 0.82 || player.powerSliding;
+    var powerTractionUse = controls.throttle && longitudinalSpeed > 5 &&
+                           rearGripDisturbed ?
+                           clamp((rearSlipRatio - 0.02) * 5.0, 0, 0.68) : 0;
+    var effectiveRearGrip = player.rearGrip * (1 - powerTractionUse);
+    var frontLateralAcceleration = -frontSlip * 4.2 * frontGrip;
+    var rearLateralAcceleration = -rearSlip * 6.0 * effectiveRearGrip;
+    var lateralAcceleration = frontLateralAcceleration +
+                              rearLateralAcceleration;
+    var yawAcceleration = (frontLateralAcceleration * frontAxleDistance -
+                           rearLateralAcceleration * rearAxleDistance) * 0.62;
+    player.yawRate += yawAcceleration * dt;
+    player.yawRate *= Math.max(0, 1 - dt * 0.22);
+    player.yawRate = clamp(player.yawRate, -1.8, 1.8);
+
+    var longitudinalAcceleration = 0;
+    if (controls.throttle && longitudinalSpeed < 30) {
+        var driveAcceleration = 18.0 -
+                                Math.max(0, longitudinalSpeed) * 0.18;
+        longitudinalAcceleration += driveAcceleration *
+                                    (0.68 + effectiveRearGrip * 0.32);
+    }
+    if (controls.brake) {
+        if (longitudinalSpeed > 0.7) {
+            longitudinalAcceleration -= 7.5;
+        } else if (longitudinalSpeed > -14) {
+            longitudinalAcceleration -=
+                12.0 - Math.min(12, Math.abs(longitudinalSpeed)) * 0.20;
+        }
+    }
+
+    player.velocityX += (forwardX * longitudinalAcceleration +
+                         rightX * lateralAcceleration) * dt;
+    player.velocityZ += (forwardZ * longitudinalAcceleration +
+                         rightZ * lateralAcceleration) * dt;
+    var rollingDrag = Math.pow(0.996, dt * 60);
+    player.velocityX *= rollingDrag;
+    player.velocityZ *= rollingDrag;
     player.heading += player.yawRate * dt;
 
-    /* Recalculate the body axes after yaw.  Lateral tyre grip rotates the
-     * velocity toward the body heading.  Braking while steering at speed
-     * releases most rear grip, leaving momentum to carry the car sideways. */
     forwardX = Math.sin(player.heading);
     forwardZ = Math.cos(player.heading);
     rightX = forwardZ;
@@ -879,31 +925,12 @@ function updateFreeDriveStep(dt) {
     longitudinalSpeed = player.velocityX * forwardX +
                         player.velocityZ * forwardZ;
     lateralSpeed = player.velocityX * rightX + player.velocityZ * rightZ;
-    var wasPowerSliding = player.powerSliding;
-    player.powerSliding = controls.brake && steering !== 0 &&
-                          longitudinalSpeed > 6;
-    if (options.debugEvents && player.powerSliding !== wasPowerSliding) {
-        console.log(player.powerSliding ? "power slide started" :
-                    "power slide ended");
+    if (longitudinalSpeed < -14) {
+        var reverseExcess = -14 - longitudinalSpeed;
+        player.velocityX += forwardX * reverseExcess;
+        player.velocityZ += forwardZ * reverseExcess;
+        longitudinalSpeed = -14;
     }
-    var lateralGrip = player.powerSliding ? 0.72 :
-                      (Math.abs(longitudinalSpeed) > 17 && steering !== 0 ?
-                       2.8 : 7.5);
-    lateralSpeed *= Math.max(0, 1 - dt * lateralGrip * 0.92);
-
-    if (controls.throttle) {
-        longitudinalSpeed +=
-            (18.0 - Math.max(0, longitudinalSpeed) * 0.18) * dt;
-    }
-    if (controls.brake) {
-        if (longitudinalSpeed > 0.7) longitudinalSpeed -= 7.5 * dt;
-        else longitudinalSpeed -=
-            (12.0 - Math.min(12, Math.abs(longitudinalSpeed)) * 0.20) * dt;
-    }
-    longitudinalSpeed *= Math.pow(0.996, dt * 60);
-    longitudinalSpeed = clamp(longitudinalSpeed, -14, 30);
-    player.velocityX = forwardX * longitudinalSpeed + rightX * lateralSpeed;
-    player.velocityZ = forwardZ * longitudinalSpeed + rightZ * lateralSpeed;
     var velocitySquared = player.velocityX * player.velocityX +
                           player.velocityZ * player.velocityZ;
     if (velocitySquared > 900) {
@@ -911,6 +938,20 @@ function updateFreeDriveStep(dt) {
         player.velocityX *= velocityScale;
         player.velocityZ *= velocityScale;
         velocitySquared = 900;
+    }
+    longitudinalSpeed = player.velocityX * forwardX +
+                        player.velocityZ * forwardZ;
+    lateralSpeed = player.velocityX * rightX + player.velocityZ * rightZ;
+
+    var wasPowerSliding = player.powerSliding;
+    var slideRatio = wasPowerSliding ? 0.055 : 0.085;
+    player.powerSliding = longitudinalSpeed > 5 &&
+                          Math.abs(lateralSpeed) >
+                          longitudinalSpeed * slideRatio &&
+                          Math.abs(player.yawRate) > 0.12;
+    if (options.debugEvents && player.powerSliding !== wasPowerSliding) {
+        console.log(player.powerSliding ? "power slide started" :
+                    "power slide ended");
     }
     player.speed = longitudinalSpeed;
     var movementX = player.velocityX * dt;
@@ -1558,7 +1599,7 @@ function drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
                            localX, localZ, steeringAngle) {
     var segments = 8;
     var radius = 0.32;
-    var halfTread = 0.18;
+    var halfTread = 0.11;
     var outsideAcross = localX < 0 ? -halfTread : halfTread;
     var insideAcross = -outsideAcross;
     var centerY = 0.34;
@@ -1777,7 +1818,7 @@ function drawGarage(framebuffer) {
 }
 
 function drawMuddyField(framebuffer) {
-    var tile = 16;
+    var tile = 20;
     var row = 0;
     for (var z = -FIELD_HALF_LENGTH; z < FIELD_HALF_LENGTH; z += tile) {
         var finalZ = Math.min(FIELD_HALF_LENGTH, z + tile);
@@ -1787,7 +1828,7 @@ function drawMuddyField(framebuffer) {
             var checkerColumn = column++;
             var tileDx = (x + finalX) * 0.5 - camera.x;
             var tileDz = (z + finalZ) * 0.5 - camera.z;
-            if (!horizontallyVisible(tileDx, tileDz, 12)) continue;
+            if (!horizontallyVisible(tileDx, tileDz, 15)) continue;
             var fieldColor = ((row + checkerColumn) & 1) ?
                              0x704b2d : 0x50331f;
             drawQuad(framebuffer,
@@ -1866,13 +1907,13 @@ function drawMuddyField(framebuffer) {
                  start.normalZ * FIELD_TRACK_HALF_WIDTH},
              0xf0e5bd);
 
-    for (x = -FIELD_HALF_WIDTH; x <= FIELD_HALF_WIDTH; x += 16) {
+    for (x = -FIELD_HALF_WIDTH; x <= FIELD_HALF_WIDTH; x += 20) {
         drawBox(framebuffer, x, 0, -FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
                 0x66513a);
         drawBox(framebuffer, x, 0, FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
                 0x66513a);
     }
-    for (z = -FIELD_HALF_LENGTH; z <= FIELD_HALF_LENGTH; z += 16) {
+    for (z = -FIELD_HALF_LENGTH; z <= FIELD_HALF_LENGTH; z += 20) {
         drawBox(framebuffer, -FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
                 0x66513a);
         drawBox(framebuffer, FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
@@ -2202,8 +2243,9 @@ function reportGameReady() {
     console.log("Attract mode running; push Space to reset the grid and play");
     console.log("Drive with arrows or WASD; Space brakes; Escape opens the menu");
     console.log("Menu: Escape resumes, R restarts game, G garage, F free drive, Q quits");
-    console.log("F2 cycles triangle rasterization: hand ASM, compiled native, reference JS");
-    console.log("triangle-half rasterizer: hand ASM");
+    console.log("F2 cycles triangle rasterization: compiled native, " +
+                "reference JS, hand ASM");
+    console.log("triangle-half rasterizer: compiled native");
 }
 
 function initializeGame() {

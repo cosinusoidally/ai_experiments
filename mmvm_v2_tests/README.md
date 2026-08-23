@@ -890,21 +890,24 @@ Escape pauses demo8 and opens its mode menu. The menu keys are:
 The garage camera automatically travels around the rally car on an elliptical
 path and follows a sinusoidal up/down motion. Hold mouse button 1 and drag to
 control its orbit angle and height; release the button to resume automatic
-motion. Its garage-only detailed car is a boxy 1970s two-door rally saloon with
-a four-seat-sized cabin: long wheelbase, distinct bonnet and boot, one long
-outlined door and handle per side, and fixed rear quarter windows rather than
-rear doors. It also has four low-polygon tyres with metal hubs, rectangular
+motion. The detailed car used here and in free-driving mode is a boxy 1970s
+two-door rally saloon with a four-seat-sized cabin: long wheelbase, distinct
+bonnet and boot, one long outlined door and handle per side, and fixed rear
+quarter windows rather than rear doors. It also has four low-polygon tyres with
+metal hubs. Their tread is 0.22 simulation units wide against a 0.64-unit
+diameter, retaining a period rally profile without the earlier toy-like width.
+The model has rectangular
 unlit front and rear lamp lenses, a dark grille, bright period-style bumpers,
 sloped front and rear glass, body-coloured external frames and pillars, and a
-highlighted painted-metal roof. The side-window sills follow the wider body
-line while the upper glass and pillar vertices taper inward to meet the roof;
-the glazed cabin does not splay outward. The lightweight race and AI car
-representation is retained outside the garage.
+highlighted painted-metal roof. The side-window sills follow the wider body line
+while the upper glass and pillar vertices taper inward to meet the roof; the
+glazed cabin does not splay outward. The lightweight race and AI car
+representation is retained outside the garage and free-driving mode.
 
 Free-driving mode uses the normal arrow/WASD automatic-style driving controls,
-but replaces the rally course and competitors with a fixed 160-by-128-unit
-field, over three times the area of the original 90-by-68 field. Its surface is
-a clearly alternating dark/light brown checkerboard of 16-unit squares, with
+but replaces the rally course and competitors with a fixed 200-by-160-unit
+field, over five times the area of the original 90-by-68 field. Its surface is
+a clearly alternating dark/light brown checkerboard of 20-unit squares, with
 puddles and visible posts at the outer field boundary. The outer perimeter is
 colliding: limits account for the saloon's rotated width and length, keeping its
 body, wheels, and bumpers inside the checkerboard at sides and corners. Contact
@@ -928,20 +931,30 @@ steering, and the camera retains the last travel direction while the car is
 stationary. Its smoothing uses wall-clock elapsed time and is independent of the
 achieved frame rate.
 
-Free drive uses separate longitudinal and lateral velocity, inertial yaw, and
-speed-dependent tyre grip. Turning the wheels while stopped does not rotate the
-car; steering only produces yaw once it is moving, and reverse steering acts in
+Free drive uses separate world-space velocity, inertial yaw, and a two-axle
+tyre model. Front- and rear-axle lateral slip generate separate tyre forces and
+yaw torque. Turning the wheels while stopped therefore does not rotate the car;
+steering only produces force once it is moving, and reverse steering acts in
 the opposite direction. Holding Space, Down, or S from low speed supplies
 continuous reverse torque; reverse is limited to 14 simulation units compared
-with 30 forwards, and has additional steering authority to produce a practical
-turning arc without permitting rotation in place. To powerslide, build up
-forward speed, hold left or right, and hold Space, Down, or S to brake and
-release rear lateral grip. The body can then yaw across the retained direction
-of momentum while the camera continues to face the actual trajectory.
-Releasing either steering or brake restores normal grip progressively.
-`POWER SLIDE` appears in the HUD while rear grip is released; with
-`--debug-events`, slide start and end are also written to the console. Reverse
-steering does not engage the powerslide state.
+with 30 forwards and retains a practical turning arc without permitting
+rotation in place.
+
+The saloon is rear-wheel drive. To initiate a powerslide, accelerate, begin the
+turn, briefly release the throttle, tap Space, Down, or S, release the brake,
+and reapply throttle. Forward braking transfers load away from the rear axle,
+temporarily reducing its lateral grip so front tyre force can kick the rear
+out. Once rear slip exists, engine force at the driven rear axle consumes part
+of the same finite traction budget that provides lateral grip; power can
+therefore sustain the slide after the brake is released. Countersteer controls
+the front lateral force and arrests excessive yaw. Reduce or release throttle
+to let rear grip recover and settle the car. A sufficiently aggressive
+full-throttle turn may also produce power oversteer without a brake tap.
+
+`POWER SLIDE` is based on measured lateral velocity and yaw rate, not held keys,
+and uses hysteresis so it does not flicker at the threshold. With
+`--debug-events`, physical slide start and end are also written to the console.
+Reverse steering does not engage the powerslide state.
 
 Demo8 text remains the built-in 5x7 bitmap font painted directly into the
 framebuffer. Its integer pixel scale is proportional to the viewport: 320x240
@@ -954,9 +967,10 @@ counter all use the same scaled glyph and line metrics.
 Press F2 while demo8 is running to cycle triangle-half rasterization through
 three independently selectable implementations:
 
-1. the default, existing hand-written macro-assembled i386 routine;
-2. native i386 generated by compiling `triangleHalfRasterizerJS` itself; and
-3. the same function interpreted as ordinary JavaScript.
+1. the default native i386 generated by compiling `triangleHalfRasterizerJS`
+   itself;
+2. the same function interpreted as ordinary JavaScript; and
+3. the existing hand-written macro-assembled i386 routine.
 
 Each change is reported on stdout as `hand ASM`, `compiled native`, or
 `JS reference`. The JavaScript function deliberately follows the hand-written
@@ -1018,11 +1032,12 @@ LD_LIBRARY_PATH="$MOZJS_LIB" \
   node_runner.js demo8_x11_test.js --count 3 --delay 1000
 ```
 
-The default three events make one complete hand ASM -> compiled native ->
-JavaScript reference -> hand ASM cycle. `--count`, `--delay`, `--title`, and
-`--depth` control the number and spacing of F2 presses, the target window name,
-and maximum X11 tree-search depth. The driver currently supports local Unix
-displays; `/tmp/.X11-unix/XN` is the standard X11 Unix-domain socket location.
+The default three events make one complete compiled native -> JavaScript
+reference -> hand ASM -> compiled native cycle. `--count`, `--delay`, `--title`,
+and `--depth` control the number and spacing of F2 presses, the target window
+name, and maximum X11 tree-search depth. The driver currently supports local
+Unix displays; `/tmp/.X11-unix/XN` is the standard X11 Unix-domain socket
+location.
 
 The optimized rasterizer keeps its depth and framebuffer data in native
 memory. It submits complete triangle halves to compact i386 routines and uses

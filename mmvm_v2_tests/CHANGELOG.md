@@ -8,6 +8,43 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.16
+
+Approximate completion: 2026-08-23 19:11 BST
+
+### Demo 8
+
+- Made the source-compiled native i386 triangle-half rasterizer the default at
+  startup. F2 still retains all three implementations and now cycles from the
+  default through JavaScript reference, hand-written ASM, and back to compiled
+  native for direct correctness and performance comparisons.
+- Reduced the detailed saloon tyre tread from 0.36 to 0.22 total simulation
+  units, approximately 39 percent. Kept the 0.64-unit diameter, hubs, axle
+  positions, and independently steerable front-wheel geometry unchanged.
+
+## 0.15
+
+Approximate completion: 2026-08-23 19:03 BST
+
+### Demo 8
+
+- Replaced the brake-held powerslide switch with a two-axle vehicle model.
+  Front and rear slip velocities now generate independent lateral tyre forces
+  and yaw torque, and `POWER SLIDE` is derived from measured lateral motion and
+  yaw rather than control state.
+- Made the rally saloon rear-wheel drive. Braking at forward speed transfers
+  load away from the rear axle for a short-lived grip loss; after brake release,
+  rear drive consumes part of the slipping tyres' traction budget so reapplied
+  throttle can sustain the slide. Lifting power restores rear grip, while front
+  tyre force makes countersteering arrest the yaw.
+- Added hysteresis to physical slide detection, retained ordinary powered
+  cornering and reverse steering, and preserved stationary and perimeter
+  behavior. A high-speed full-throttle turn can also induce power oversteer
+  without braking, as expected for rear-wheel drive.
+- Expanded the checkerboard from 160-by-128 to 200-by-160 units to provide
+  useful runoff for slide testing. Changed its squares from 16 to 20 units,
+  keeping visible geometry cost bounded through the existing frustum rejection.
+
 ## 0.14
 
 Approximate completion: 2026-08-23 18:45 BST
