@@ -8,6 +8,57 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.27
+
+Approximate completion: 2026-08-23 23:00 BST
+
+### Demo 8
+
+- Removed the 0.24 car-local quadrant culling in full. The complete body shell,
+  both sides and ends, all window panes and trim, front and rear details, and
+  all four complete wheels are submitted at every camera angle. The depth
+  buffer is again the sole visibility authority for the detailed saloon.
+- Identified the underlying scratch-mesh regression: `project()` caches its
+  result on a world-point object for the current frame. Reusing a mutable point
+  without invalidation made later wheels reuse the back-left wheel's projected
+  coordinates, explaining why only that tread remained visible.
+- Added explicit projection-cache invalidation to every mutable car and wheel
+  point transformation. Quad, box, window, and wheel scratch objects can now be
+  reused without changing geometry or screen coordinates.
+- Retained only topology-preserving wheel work: precomputed circle values,
+  shared segment endpoints, 29 rather than 50 point transforms per wheel, and
+  allocation-free scratch rings. At 320x240 with a 20 FPS limit, representative
+  measurements reached about 15.5 FPS in free drive and 14.0-14.3 FPS in the
+  garage with the complete model restored.
+
+## 0.26
+
+Approximate completion: 2026-08-23 22:30 BST
+
+### Demo 8
+
+- Restored all four complete wheel assemblies at every camera angle. Each now
+  always submits its full double-sided tread ring, outside sidewall, and hub;
+  the depth buffer handles occlusion by the carved body shell.
+- Removed the remaining far-diagonal wheel and far-side disc culls because
+  open arches, narrow tyres, and steering made them visibly discontinuous at
+  oblique views. Retained precomputed circle values, shared ring vertices,
+  scratch-object reuse, and the reduction from 50 to 29 point transforms per
+  wheel.
+
+## 0.25
+
+Approximate completion: 2026-08-23 22:15 BST
+
+### Demo 8
+
+- Restored the complete double-sided tyre tread rings. The 0.24 generic
+  back-face test could reject visible tread because wheel-side orientation and
+  front-wheel steering change a tread quad's apparent winding.
+- Retained the safe wheel optimizations: precomputed circle values, shared
+  segment vertices, reusable scratch rings, reduced point transformations, and
+  rejection of only the far-diagonal wheel.
+
 ## 0.24
 
 Approximate completion: 2026-08-23 22:00 BST
