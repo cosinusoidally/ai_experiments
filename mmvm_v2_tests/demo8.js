@@ -29,6 +29,11 @@ var terrainCells;
 var roadSections;
 var depthBuffer;
 var background;
+var freeDriveSkybox;
+var freeDriveSkyboxWidth = 512;
+var freeDriveSkyboxHeight = 64;
+var freeDriveSkyboxSourceStep = 0;
+var freeDriveSkyboxBlitter = null;
 var spanRasterizer;
 var spanRasterizers = {};
 var TRIANGLE_RASTERIZER_HAND_ASM = 0;
@@ -461,6 +466,112 @@ function peekPacked32(buffer, offset) {
 function pokePacked32(buffer, offset, value) {
     if (buffer._nodePointer) poke32(buffer._nodePointer + offset, value);
     else buffer.writeUInt32LE(value >>> 0, offset);
+}
+
+function cloudNoiseHash(x, y, seed) {
+    var value = (x * 251 + y * 911 + seed * 3571) | 0;
+    value ^= value << 13;
+    value ^= value >>> 17;
+    value ^= value << 5;
+    return (value >>> 8) & 255;
+}
+
+function cloudValueNoise(x, y, width, height, cellWidth, cellHeight, seed) {
+    var cellsAcross = width / cellWidth;
+    var cellsDown = Math.ceil(height / cellHeight);
+    var cellX = Math.floor(x / cellWidth);
+    var cellY = Math.floor(y / cellHeight);
+    var nextCellX = (cellX + 1) % cellsAcross;
+    var nextCellY = Math.min(cellsDown, cellY + 1);
+    cellX %= cellsAcross;
+    var fractionX = (x % cellWidth) / cellWidth;
+    var fractionY = (y % cellHeight) / cellHeight;
+    fractionX = fractionX * fractionX * (3 - 2 * fractionX);
+    fractionY = fractionY * fractionY * (3 - 2 * fractionY);
+    var topLeft = cloudNoiseHash(cellX, cellY, seed);
+    var topRight = cloudNoiseHash(nextCellX, cellY, seed);
+    var bottomLeft = cloudNoiseHash(cellX, nextCellY, seed);
+    var bottomRight = cloudNoiseHash(nextCellX, nextCellY, seed);
+    var top = topLeft + (topRight - topLeft) * fractionX;
+    var bottom = bottomLeft + (bottomRight - bottomLeft) * fractionX;
+    return top + (bottom - top) * fractionY;
+}
+
+function makeFreeDriveSkybox() {
+    /* The low-resolution source is expanded by a NativeCompiler-generated
+     * nearest-neighbour blitter.  Every octave divides the width exactly, so
+     * the procedural panorama wraps without a generated bitmap seam. */
+    var width = freeDriveSkyboxWidth;
+    var height = freeDriveSkyboxHeight;
+    var pixels = allocatePacked(width * height * 4);
+    var offset = 0;
+    for (var y = 0; y < height; y++) {
+        var vertical = y / (height - 1);
+        for (var x = 0; x < width; x++) {
+            var broad = cloudValueNoise(x, y, width, height,
+                                        64, 32, 0x31);
+            var middle = cloudValueNoise(x, y, width, height,
+                                         32, 16, 0x72);
+            var detail = cloudValueNoise(x, y, width, height,
+                                         16, 8, 0xb5);
+            var cloud = broad * 0.52 + middle * 0.33 + detail * 0.15;
+            var billow = (Math.abs(middle - 128) - 24) * 0.20;
+            var base = 94 + vertical * 38;
+            var shade = (cloud - 128) * 0.62 + billow;
+            var red = clamp(base + shade - 4, 48, 180) | 0;
+            var green = clamp(base + shade + 1, 52, 184) | 0;
+            var blue = clamp(base + shade + 8, 58, 192) | 0;
+            pixels.writeUInt32LE((red << 16) | (green << 8) | blue, offset);
+            offset += 4;
+        }
+    }
+    return pixels;
+}
+
+function freeDriveSkyboxBlitJS(source, destination, horizon,
+                               firstSourceFixed, sourceStepFixed) {
+    var y = 0;
+    var x;
+    var sourceY;
+    var sourceX;
+    var sourceFixed;
+    var color;
+    while (y < horizon) {
+        sourceY = y * freeDriveSkyboxHeight / horizon;
+        x = 0;
+        sourceFixed = firstSourceFixed;
+        while (x < options.width) {
+            sourceX = sourceFixed >> 16;
+            color = peek32(source +
+                           (sourceY * freeDriveSkyboxWidth + sourceX) * 4);
+            poke32(destination + (y * options.width + x) * 4, color);
+            sourceFixed += sourceStepFixed;
+            if (sourceFixed >= freeDriveSkyboxWidth * 65536) {
+                sourceFixed -= freeDriveSkyboxWidth * 65536;
+            }
+            x++;
+        }
+        y++;
+    }
+}
+
+function drawFreeDriveSkybox(framebuffer) {
+    /* The ground-plane horizon for the current pitched camera. */
+    var horizon = Math.ceil(camera.centerY -
+                            camera.pitchSin / camera.pitchCos * camera.focal);
+    horizon = clamp(horizon, 1, framebuffer.height);
+    var heading = Math.atan2(camera.forwardX, camera.forwardZ);
+    if (heading < 0) heading += Math.PI * 2;
+    var cycle = freeDriveSkyboxWidth * 65536;
+    var centerFixed = Math.floor(heading * cycle / (Math.PI * 2));
+    var firstSourceFixed = centerFixed -
+                           Math.floor(freeDriveSkyboxSourceStep *
+                                      framebuffer.width / 2);
+    while (firstSourceFixed < 0) firstSourceFixed += cycle;
+    while (firstSourceFixed >= cycle) firstSourceFixed -= cycle;
+    freeDriveSkyboxBlitter(freeDriveSkybox._nodePointer,
+                           framebuffer.pixelAddress, horizon,
+                           firstSourceFixed, freeDriveSkyboxSourceStep);
 }
 
 function makeBackground(width, height) {
@@ -2373,6 +2484,7 @@ function reportGameReady() {
 }
 
 function initializeGame() {
+    var initializationStart = new Date().getTime();
     track = makeTrack();
     terrainCells = makeTerrainCells();
     roadSections = makeRoadSections();
@@ -2388,9 +2500,30 @@ function initializeGame() {
     triangleHalfRasterizerASM = compileNative(triangleHalfRasterizerJS).fn;
     compiledTriangleHalfRasterizer = triangleHalfRasterizerASM.compiledObject;
     verifyTriangleHalfRasterizers();
+    freeDriveSkyboxBlitJS.nativeCompile = {
+        constants: {freeDriveSkyboxWidth: freeDriveSkyboxWidth,
+                    freeDriveSkyboxHeight: freeDriveSkyboxHeight,
+                    "options.width": options.width},
+        dumpMacroAssembly: options.dumpNativeAssembly
+    };
+    freeDriveSkyboxBlitter = compileNative(freeDriveSkyboxBlitJS).fn;
+    var skyboxFocal = Math.min(options.width, options.height) * 1.05;
+    var skyboxFieldOfView = 2 * Math.atan(options.width /
+                                         (2 * skyboxFocal));
+    freeDriveSkyboxSourceStep = Math.max(1, Math.floor(
+        skyboxFieldOfView * freeDriveSkyboxWidth * 65536 /
+        (Math.PI * 2 * options.width)));
     background = makeBackground(options.width, options.height);
+    var skyboxStart = new Date().getTime();
+    freeDriveSkybox = makeFreeDriveSkybox();
+    var skyboxMilliseconds = new Date().getTime() - skyboxStart;
     resetRace();
     gameReady = true;
+    console.log("procedural cloudy skybox: " + freeDriveSkyboxWidth + "x" +
+                freeDriveSkyboxHeight + ", generated in " +
+                skyboxMilliseconds + " ms");
+    console.log("game initialization: " +
+                (new Date().getTime() - initializationStart) + " ms");
     reportGameReady();
 }
 
@@ -2431,6 +2564,7 @@ function draw(framebuffer) {
     projectionFrame++;
     libc.memset(depthBuffer, 0, options.width * options.height * 4);
     background.copy(framebuffer.pixels, 0, 0, background.length);
+    if (gameMode === GAME_MODE_FIELD) drawFreeDriveSkybox(framebuffer);
     if (gameMode === GAME_MODE_RALLY) {
         drawCar(framebuffer, player.x, player.y, player.z, player.heading,
                 0xd94a32, true);

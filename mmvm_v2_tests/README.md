@@ -925,7 +925,24 @@ of the reproducible rally-course shape at +/-4.5 units from its centre, and a
 stripe marks its start. The car resets on that stripe, aligned with the course
 tangent. These internal markings are paint only: they have no collision, grip,
 steering, or speed effect, and the car may cross them to free drive over the rest
-of the checkerboard. It uses the same detailed 1970s saloon as the garage. Its
+of the checkerboard. Above the field is a horizontally wrapping cloudy grey
+skybox texture. It is generated deterministically at initialization from three
+octaves of wrapping value noise into a 512x64 native-memory panorama; no bitmap
+file is required or checked in. Camera heading selects the panoramic longitude,
+horizontal field of view determines the sampled span, and the texture is scaled
+vertically to the pitched ground-plane horizon.
+
+The small source texture takes about 1.4 seconds to synthesize under
+`js_min.exe` at 320x240, compared with about 10.9 seconds for the discarded
+2048x128 version. `freeDriveSkyboxBlitJS` is compiled through the runner's
+NativeCompiler and expands the wrapped texture into the visible sky in one
+native call per frame. A 320x240 A/B measurement produced about 14.4-15.1 FPS
+with the sky and 14.8-15.0 FPS with the draw call disabled, so the new pass has
+no measurable impact on the existing free-drive ceiling. The generated blitter
+is included in `--dump-native-assembly` output; it is not hand-written machine
+code.
+
+Free drive uses the same detailed 1970s saloon as the garage. Its
 front tyres, sidewalls, and hubs yaw around their own vertical centres in
 response to left/right input, easing back to straight ahead after release.
 Steering lock is approximately +/-35.5 degrees with equal front and rear track;

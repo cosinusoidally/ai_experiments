@@ -8,6 +8,27 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.22
+
+Approximate completion: 2026-08-23 20:50 BST
+
+### Demo 8
+
+- Added a deterministic procedurally generated cloudy grey skybox texture to
+  free-drive mode. Three wrapping value-noise octaves create layered slate,
+  silver, and blue-grey clouds in a 512x64 in-memory panorama; no bitmap asset
+  is stored or loaded.
+- Mapped camera heading and horizontal field of view into the wrapping texture,
+  with the vertical texture scaled to the pitched ground-plane horizon.
+- Replaced an initial 2048x128 interpreted generation and per-row FFI design
+  with the compact texture and a one-call nearest-neighbour blitter compiled
+  from `freeDriveSkyboxBlitJS` by the existing NativeCompiler. At 320x240,
+  texture generation fell from about 10.9 seconds to about 1.4 seconds and total
+  initialization measured about 2.9-3.0 seconds.
+- An A/B run at 320x240 found approximately 14.4-15.1 FPS with the sky enabled
+  and 14.8-15.0 FPS with its draw call disabled. The sky pass therefore had no
+  measurable effect on the existing free-drive rendering ceiling.
+
 ## 0.21
 
 Approximate completion: 2026-08-23 20:25 BST
