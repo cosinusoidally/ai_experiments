@@ -34,6 +34,8 @@ var freeDriveSkyboxWidth = 512;
 var freeDriveSkyboxHeight = 64;
 var freeDriveSkyboxSourceStep = 0;
 var freeDriveSkyboxBlitter = null;
+var windowTextureRasterizer = null;
+var windowTriangleDescriptor = null;
 var spanRasterizer;
 var spanRasterizers = {};
 var TRIANGLE_RASTERIZER_HAND_ASM = 0;
@@ -509,18 +511,23 @@ function makeFreeDriveSkybox() {
         var vertical = y / (height - 1);
         for (var x = 0; x < width; x++) {
             var broad = cloudValueNoise(x, y, width, height,
-                                        64, 32, 0x31);
+                                        8, 32, 0x31);
             var middle = cloudValueNoise(x, y, width, height,
-                                         32, 16, 0x72);
+                                         4, 16, 0x72);
             var detail = cloudValueNoise(x, y, width, height,
-                                         16, 8, 0xb5);
-            var cloud = broad * 0.52 + middle * 0.33 + detail * 0.15;
-            var billow = (Math.abs(middle - 128) - 24) * 0.20;
-            var base = 94 + vertical * 38;
-            var shade = (cloud - 128) * 0.62 + billow;
-            var red = clamp(base + shade - 4, 48, 180) | 0;
-            var green = clamp(base + shade + 1, 52, 184) | 0;
-            var blue = clamp(base + shade + 8, 58, 192) | 0;
+                                         2, 8, 0xb5);
+            var grain = cloudValueNoise(x, y, width, height,
+                                        2, 4, 0xe3);
+            var cloud = broad * 0.54 + middle * 0.31 + detail * 0.15;
+            var density = clamp((cloud - 70) / 125, 0, 1);
+            density = density * density * (3 - 2 * density);
+            var base = 100 + vertical * 24;
+            var shade = (density - 0.5) * 62 +
+                        (detail - 128) * 0.20 +
+                        (grain - 128) * 0.09;
+            var red = clamp(base + shade - 5, 45, 184) | 0;
+            var green = clamp(base + shade, 50, 188) | 0;
+            var blue = clamp(base + shade + 7, 56, 196) | 0;
             pixels.writeUInt32LE((red << 16) | (green << 8) | blue, offset);
             offset += 4;
         }
@@ -1730,6 +1737,277 @@ function drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
                                fourth[0], fourth[1], fourth[2]), color);
 }
 
+function reflectedSkyCoordinates(point, normalX, normalY, normalZ) {
+    var viewX = camera.x - point.x;
+    var viewY = camera.y - point.y;
+    var viewZ = camera.z - point.z;
+    var inverseViewLength = 1 / Math.sqrt(viewX * viewX + viewY * viewY +
+                                          viewZ * viewZ);
+    viewX *= inverseViewLength;
+    viewY *= inverseViewLength;
+    viewZ *= inverseViewLength;
+    var normalDotView = normalX * viewX + normalY * viewY + normalZ * viewZ;
+    var reflectionX = normalX * normalDotView * 2 - viewX;
+    var reflectionY = normalY * normalDotView * 2 - viewY;
+    var reflectionZ = normalZ * normalDotView * 2 - viewZ;
+    var longitude = Math.atan2(reflectionX, reflectionZ);
+    while (longitude < 0) longitude += Math.PI * 2;
+    while (longitude >= Math.PI * 2) longitude -= Math.PI * 2;
+    /* The texture represents the sky hemisphere only.  Mirroring a downward
+     * ray at the horizon keeps steep side glass reflective rather than
+     * inventing a ground texture that the skybox does not contain. */
+    var skyHeight = clamp(Math.abs(reflectionY), 0, 1);
+    return {u: longitude * freeDriveSkyboxWidth / (Math.PI * 2),
+            v: (1 - skyHeight) * (freeDriveSkyboxHeight - 1)};
+}
+
+function windowTextureTriangleJS(pixels, texture, descriptor) {
+    var minimumX = peek32(descriptor);
+    var maximumX = peek32(descriptor + 4);
+    var minimumY = peek32(descriptor + 8);
+    var maximumY = peek32(descriptor + 12);
+    var edgeFirstRow = peek32(descriptor + 16);
+    var edgeFirstXStep = peek32(descriptor + 20);
+    var edgeFirstYStep = peek32(descriptor + 24);
+    var edgeSecondRow = peek32(descriptor + 28);
+    var edgeSecondXStep = peek32(descriptor + 32);
+    var edgeSecondYStep = peek32(descriptor + 36);
+    var edgeThirdRow = peek32(descriptor + 40);
+    var edgeThirdXStep = peek32(descriptor + 44);
+    var edgeThirdYStep = peek32(descriptor + 48);
+    var depthRow = peek32(descriptor + 52);
+    var depthXStep = peek32(descriptor + 56);
+    var depthYStep = peek32(descriptor + 60);
+    var inverseRow = peek32(descriptor + 64);
+    var inverseXStep = peek32(descriptor + 68);
+    var inverseYStep = peek32(descriptor + 72);
+    var textureURow = peek32(descriptor + 76);
+    var textureUXStep = peek32(descriptor + 80);
+    var textureUYStep = peek32(descriptor + 84);
+    var textureVRow = peek32(descriptor + 88);
+    var textureVXStep = peek32(descriptor + 92);
+    var textureVYStep = peek32(descriptor + 96);
+    var y = minimumY;
+    var x;
+    var edgeFirst;
+    var edgeSecond;
+    var edgeThird;
+    var depth;
+    var inverse;
+    var textureUOverZ;
+    var textureVOverZ;
+    var pixelOffset;
+    var sourceX;
+    var sourceY;
+    var color;
+    while (y < maximumY) {
+        x = minimumX;
+        edgeFirst = edgeFirstRow;
+        edgeSecond = edgeSecondRow;
+        edgeThird = edgeThirdRow;
+        depth = depthRow;
+        inverse = inverseRow;
+        textureUOverZ = textureURow;
+        textureVOverZ = textureVRow;
+        while (x < maximumX) {
+            if (edgeFirst >= 0) {
+                if (edgeSecond >= 0) {
+                    if (edgeThird >= 0) {
+                        pixelOffset = (y * options.width + x) * 4;
+                        if (depth > peek32(depthBuffer + pixelOffset)) {
+                            if (inverse > 0) {
+                                sourceX = textureUOverZ / inverse;
+                                sourceY = textureVOverZ / inverse;
+                                while (sourceX < 0) {
+                                    sourceX += freeDriveSkyboxWidth;
+                                }
+                                while (sourceX >= freeDriveSkyboxWidth) {
+                                    sourceX -= freeDriveSkyboxWidth;
+                                }
+                                if (sourceY < 0) sourceY = 0;
+                                if (sourceY >= freeDriveSkyboxHeight) {
+                                    sourceY = freeDriveSkyboxHeight - 1;
+                                }
+                                color = peek32(texture +
+                                    (sourceY * freeDriveSkyboxWidth + sourceX) * 4);
+                                poke32(depthBuffer + pixelOffset, depth);
+                                poke32(pixels + pixelOffset, color);
+                            }
+                        }
+                    }
+                }
+            }
+            edgeFirst += edgeFirstXStep;
+            edgeSecond += edgeSecondXStep;
+            edgeThird += edgeThirdXStep;
+            depth += depthXStep;
+            inverse += inverseXStep;
+            textureUOverZ += textureUXStep;
+            textureVOverZ += textureVXStep;
+            x++;
+        }
+        edgeFirstRow += edgeFirstYStep;
+        edgeSecondRow += edgeSecondYStep;
+        edgeThirdRow += edgeThirdYStep;
+        depthRow += depthYStep;
+        inverseRow += inverseYStep;
+        textureURow += textureUYStep;
+        textureVRow += textureVYStep;
+        y++;
+    }
+}
+
+function windowGradient(first, second, third, firstValue, secondValue,
+                        thirdValue, area, minimumX, minimumY) {
+    var xStep = ((secondValue - firstValue) * (third.y - first.y) -
+                 (thirdValue - firstValue) * (second.y - first.y)) / area;
+    var yStep = ((second.x - first.x) * (thirdValue - firstValue) -
+                 (third.x - first.x) * (secondValue - firstValue)) / area;
+    return {value: Math.round(firstValue +
+                              xStep * (minimumX + 0.5 - first.x) +
+                              yStep * (minimumY + 0.5 - first.y)),
+            xStep: Math.round(xStep), yStep: Math.round(yStep)};
+}
+
+function writeWindowEdge(descriptorOffset, first, second,
+                         minimumX, minimumY) {
+    var firstX = Math.round(first.x * 16);
+    var firstY = Math.round(first.y * 16);
+    var secondX = Math.round(second.x * 16);
+    var secondY = Math.round(second.y * 16);
+    var coefficientX = firstY - secondY;
+    var coefficientY = secondX - firstX;
+    var constant = firstX * secondY - secondX * firstY;
+    var sampleX = minimumX * 16 + 8;
+    var sampleY = minimumY * 16 + 8;
+    pokePacked32(windowTriangleDescriptor, descriptorOffset,
+                 coefficientX * sampleX + coefficientY * sampleY + constant);
+    pokePacked32(windowTriangleDescriptor, descriptorOffset + 4,
+                 coefficientX * 16);
+    pokePacked32(windowTriangleDescriptor, descriptorOffset + 8,
+                 coefficientY * 16);
+}
+
+function writeWindowGradient(descriptorOffset, gradient) {
+    pokePacked32(windowTriangleDescriptor, descriptorOffset, gradient.value);
+    pokePacked32(windowTriangleDescriptor, descriptorOffset + 4,
+                 gradient.xStep);
+    pokePacked32(windowTriangleDescriptor, descriptorOffset + 8,
+                 gradient.yStep);
+}
+
+function unwrapWindowTextureU(value, reference) {
+    while (value - reference > freeDriveSkyboxWidth * 0.5) {
+        value -= freeDriveSkyboxWidth;
+    }
+    while (value - reference < -freeDriveSkyboxWidth * 0.5) {
+        value += freeDriveSkyboxWidth;
+    }
+    return value;
+}
+
+function drawReflectedWindowTriangle(framebuffer, firstWorld, secondWorld,
+                                     thirdWorld, firstUV, secondUV, thirdUV) {
+    var first = project(firstWorld);
+    var second = project(secondWorld);
+    var third = project(thirdWorld);
+    if (!first || !second || !third) return;
+    var area = (second.x - first.x) * (third.y - first.y) -
+               (third.x - first.x) * (second.y - first.y);
+    if (Math.abs(area) < 0.01) return;
+    if (area < 0) {
+        var swapPoint = second;
+        second = third;
+        third = swapPoint;
+        var swapUV = secondUV;
+        secondUV = thirdUV;
+        thirdUV = swapUV;
+        area = -area;
+    }
+    var minimumX = Math.max(0, Math.floor(Math.min(first.x, second.x,
+                                                   third.x)));
+    var maximumX = Math.min(framebuffer.width,
+                            Math.ceil(Math.max(first.x, second.x, third.x)));
+    var minimumY = Math.max(0, Math.floor(Math.min(first.y, second.y,
+                                                   third.y)));
+    var maximumY = Math.min(framebuffer.height,
+                            Math.ceil(Math.max(first.y, second.y, third.y)));
+    if (minimumX >= maximumX || minimumY >= maximumY) return;
+
+    secondUV.u = unwrapWindowTextureU(secondUV.u, firstUV.u);
+    thirdUV.u = unwrapWindowTextureU(thirdUV.u, firstUV.u);
+    pokePacked32(windowTriangleDescriptor, 0, minimumX);
+    pokePacked32(windowTriangleDescriptor, 4, maximumX);
+    pokePacked32(windowTriangleDescriptor, 8, minimumY);
+    pokePacked32(windowTriangleDescriptor, 12, maximumY);
+    writeWindowEdge(16, first, second, minimumX, minimumY);
+    writeWindowEdge(28, second, third, minimumX, minimumY);
+    writeWindowEdge(40, third, first, minimumX, minimumY);
+
+    var depthScale = DEPTH_FIXED_SCALE;
+    var inverseScale = 32768;
+    writeWindowGradient(52, windowGradient(
+        first, second, third,
+        first.inverseZ * depthScale, second.inverseZ * depthScale,
+        third.inverseZ * depthScale, area, minimumX, minimumY));
+    writeWindowGradient(64, windowGradient(
+        first, second, third,
+        first.inverseZ * inverseScale, second.inverseZ * inverseScale,
+        third.inverseZ * inverseScale, area, minimumX, minimumY));
+    writeWindowGradient(76, windowGradient(
+        first, second, third,
+        firstUV.u * first.inverseZ * inverseScale,
+        secondUV.u * second.inverseZ * inverseScale,
+        thirdUV.u * third.inverseZ * inverseScale,
+        area, minimumX, minimumY));
+    writeWindowGradient(88, windowGradient(
+        first, second, third,
+        firstUV.v * first.inverseZ * inverseScale,
+        secondUV.v * second.inverseZ * inverseScale,
+        thirdUV.v * third.inverseZ * inverseScale,
+        area, minimumX, minimumY));
+    windowTextureRasterizer(framebuffer.pixelAddress,
+                            freeDriveSkybox._nodePointer,
+                            windowTriangleDescriptor._nodePointer);
+}
+
+function drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
+                             firstLocal, secondLocal, thirdLocal, fourthLocal) {
+    var first = carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                                  firstLocal[0], firstLocal[1], firstLocal[2]);
+    var second = carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                                   secondLocal[0], secondLocal[1],
+                                   secondLocal[2]);
+    var third = carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                                  thirdLocal[0], thirdLocal[1], thirdLocal[2]);
+    var fourth = carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                                   fourthLocal[0], fourthLocal[1],
+                                   fourthLocal[2]);
+    var edgeFirstX = second.x - first.x;
+    var edgeFirstY = second.y - first.y;
+    var edgeFirstZ = second.z - first.z;
+    var edgeSecondX = fourth.x - first.x;
+    var edgeSecondY = fourth.y - first.y;
+    var edgeSecondZ = fourth.z - first.z;
+    var normalX = edgeFirstY * edgeSecondZ - edgeFirstZ * edgeSecondY;
+    var normalY = edgeFirstZ * edgeSecondX - edgeFirstX * edgeSecondZ;
+    var normalZ = edgeFirstX * edgeSecondY - edgeFirstY * edgeSecondX;
+    var inverseNormalLength = 1 / Math.sqrt(normalX * normalX +
+                                            normalY * normalY +
+                                            normalZ * normalZ);
+    normalX *= inverseNormalLength;
+    normalY *= inverseNormalLength;
+    normalZ *= inverseNormalLength;
+    var firstUV = reflectedSkyCoordinates(first, normalX, normalY, normalZ);
+    var secondUV = reflectedSkyCoordinates(second, normalX, normalY, normalZ);
+    var thirdUV = reflectedSkyCoordinates(third, normalX, normalY, normalZ);
+    var fourthUV = reflectedSkyCoordinates(fourth, normalX, normalY, normalZ);
+    drawReflectedWindowTriangle(framebuffer, first, second, third,
+                                firstUV, secondUV, thirdUV);
+    drawReflectedWindowTriangle(framebuffer, first, third, fourth,
+                                firstUV, thirdUV, fourthUV);
+}
+
 function drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                          centerX, bottomY, centerZ,
                          halfWidth, height, halfLength, color) {
@@ -1888,8 +2166,6 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
                          frontWheelSteer, bodyRoll) {
     var sine = Math.sin(heading);
     var cosine = Math.cos(heading);
-    var glass = 0x69a9bd;
-    var darkGlass = 0x477b8d;
     var frame = shadeColor(color, 0.86);
 
     drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
@@ -1916,12 +2192,12 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
                     shadeColor(color, 0.94));
 
     /* Sloped front and rear glass. */
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [-0.54, 0.68, 0.68], [0.54, 0.68, 0.68],
-                     [0.45, 1.13, 0.38], [-0.45, 1.13, 0.38], glass);
-    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                     [0.54, 0.68, -0.83], [-0.54, 0.68, -0.83],
-                     [-0.45, 1.13, -0.51], [0.45, 1.13, -0.51], darkGlass);
+    drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
+                        [-0.54, 0.68, 0.68], [0.54, 0.68, 0.68],
+                        [0.45, 1.13, 0.38], [-0.45, 1.13, 0.38]);
+    drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
+                        [0.54, 0.68, -0.83], [-0.54, 0.68, -0.83],
+                        [-0.45, 1.13, -0.51], [0.45, 1.13, -0.51]);
 
     /* Each side has one long front door and a fixed rear quarter window.  The
      * rear glass and extended roof retain enough cabin length for four seats,
@@ -1931,14 +2207,14 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
         var sideX = side * 0.59;
         var glassTopX = side * 0.45;
         var frameTopX = side * 0.51;
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, 0.69, 0.65], [sideX, 0.69, -0.18],
-                         [glassTopX, 1.10, -0.17],
-                         [glassTopX, 1.10, 0.36], glass);
-        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
-                         [sideX, 0.69, -0.25], [sideX, 0.69, -0.79],
-                         [glassTopX, 1.10, -0.49],
-                         [glassTopX, 1.10, -0.24], darkGlass);
+        drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
+                            [sideX, 0.69, 0.65], [sideX, 0.69, -0.18],
+                            [glassTopX, 1.10, -0.17],
+                            [glassTopX, 1.10, 0.36]);
+        drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
+                            [sideX, 0.69, -0.25], [sideX, 0.69, -0.79],
+                            [glassTopX, 1.10, -0.49],
+                            [glassTopX, 1.10, -0.24]);
         drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
                          [sideX, 0.65, -0.84], [sideX, 0.65, 0.70],
                          [sideX, 0.72, 0.65], [sideX, 0.72, -0.79], frame);
@@ -2507,6 +2783,15 @@ function initializeGame() {
         dumpMacroAssembly: options.dumpNativeAssembly
     };
     freeDriveSkyboxBlitter = compileNative(freeDriveSkyboxBlitJS).fn;
+    windowTextureTriangleJS.nativeCompile = {
+        constants: {depthBuffer: depthBuffer,
+                    freeDriveSkyboxWidth: freeDriveSkyboxWidth,
+                    freeDriveSkyboxHeight: freeDriveSkyboxHeight,
+                    "options.width": options.width},
+        dumpMacroAssembly: options.dumpNativeAssembly
+    };
+    windowTextureRasterizer = compileNative(windowTextureTriangleJS).fn;
+    windowTriangleDescriptor = allocatePacked(100);
     var skyboxFocal = Math.min(options.width, options.height) * 1.05;
     var skyboxFieldOfView = 2 * Math.atan(options.width /
                                          (2 * skyboxFocal));

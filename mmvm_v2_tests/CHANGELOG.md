@@ -8,6 +8,32 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.23
+
+Approximate completion: 2026-08-23 21:30 BST
+
+### Demo 8
+
+- Replaced coarse flat-color window subdivision with proper per-pixel texture
+  mapping on all six panes of the detailed saloon in garage and free-drive
+  modes. Each pane is two textured triangles sharing the normal depth buffer.
+- Derived sky coordinates at the transformed window vertices from camera view
+  vectors and reflected pane normals. The rasterizer perspective-corrects them
+  by interpolating `u/z`, `v/z`, and `1/z`, then performs explicitly
+  nearest-neighbour sampling from the wrapping procedural sky texture.
+- Compiled the hot `windowTextureTriangleJS` bounding-box/edge/depth/texture
+  loop through NativeCompiler. There is no hand-generated machine code. The
+  complete car uses 12 textured window triangles instead of the discarded
+  36-quad approximation.
+- Changed the deterministic cloud synthesis to four anisotropy-compensated
+  octaves with square high-frequency billows. The visible sky now forms compact
+  mottled cloud banks rather than horizontal wisps, and the 512x64 texture has
+  enough local detail to produce dense window reflections.
+- At 320x240, the final build measured about 14.1-14.4 FPS in free drive and
+  13.3-13.6 FPS through representative garage views. Procedural texture
+  generation measured about 1.9-2.0 seconds and total initialization about
+  3.4-3.7 seconds under `js_min.exe`.
+
 ## 0.22
 
 Approximate completion: 2026-08-23 20:50 BST

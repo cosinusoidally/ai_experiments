@@ -926,13 +926,13 @@ stripe marks its start. The car resets on that stripe, aligned with the course
 tangent. These internal markings are paint only: they have no collision, grip,
 steering, or speed effect, and the car may cross them to free drive over the rest
 of the checkerboard. Above the field is a horizontally wrapping cloudy grey
-skybox texture. It is generated deterministically at initialization from three
+skybox texture. It is generated deterministically at initialization from four
 octaves of wrapping value noise into a 512x64 native-memory panorama; no bitmap
 file is required or checked in. Camera heading selects the panoramic longitude,
 horizontal field of view determines the sampled span, and the texture is scaled
 vertically to the pitched ground-plane horizon.
 
-The small source texture takes about 1.4 seconds to synthesize under
+The source texture takes about 1.9-2.0 seconds to synthesize under
 `js_min.exe` at 320x240, compared with about 10.9 seconds for the discarded
 2048x128 version. `freeDriveSkyboxBlitJS` is compiled through the runner's
 NativeCompiler and expands the wrapped texture into the visible sky in one
@@ -941,6 +941,25 @@ with the sky and 14.8-15.0 FPS with the draw call disabled, so the new pass has
 no measurable impact on the existing free-drive ceiling. The generated blitter
 is included in `--dump-native-assembly` output; it is not hand-written machine
 code.
+
+The fourth octave and anisotropy-compensated noise cell shapes add compact,
+roughly square high-frequency billows, preventing the projected panorama from
+reading as long horizontal wisps. The same native-memory texture is reflected
+by every windscreen, rear window, door window, and fixed quarter window in both
+free-drive and garage modes. A view vector and the transformed pane normal
+produce reflection coordinates at each of the four vertices. Each pane is then
+drawn as two properly texture-mapped triangles: `u/z`, `v/z`, and `1/z` are
+interpolated per pixel for perspective correction, the shared depth buffer is
+tested and updated, and the resulting integer coordinates select a texel using
+nearest-neighbour sampling. Downward reflection rays are mirrored at the
+horizon because this environment texture contains a sky hemisphere rather than
+a ground texture.
+
+The hot edge, depth, perspective-division, wrapping, and texture-sampling loop
+is the checked-in `windowTextureTriangleJS` function compiled by NativeCompiler;
+it is not hand-written machine code. The whole detailed car needs 12 textured
+triangles for its six panes. At 320x240, representative measurements were about
+14.1-14.4 FPS in free drive and 13.3-13.6 FPS as the garage camera orbited.
 
 Free drive uses the same detailed 1970s saloon as the garage. Its
 front tyres, sidewalls, and hubs yaw around their own vertical centres in
