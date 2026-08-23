@@ -8,6 +8,82 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.21
+
+Approximate completion: 2026-08-23 20:25 BST
+
+### Demo 8
+
+- Added suspension-style body roll to the detailed saloon in free-drive mode.
+  The roll target comes from the tyre model's actual lateral acceleration, so
+  it depends on speed, grip, and sliding rather than steering input alone.
+- Added a damped roll spring with a roughly +/-6.9-degree normal target and
+  +/-8-degree safety limit. The sprung shell, glass, trim, lights, and bumpers
+  tilt around a low longitudinal axis while the wheels remain upright.
+- Converted every box-shaped detail on the saloon to the same rolled local-body
+  transform, preventing the bonnet, boot, roof, lamps, or bumpers from becoming
+  detached while the body leans.
+
+## 0.20
+
+Approximate completion: 2026-08-23 20:05 BST
+
+### Demo 8
+
+- Replaced the detailed saloon's solid lower body box with a body shell whose
+  side-panel triangles are built around four real semicircular wheel openings.
+  No body triangles are emitted inside those openings.
+- Removed the external wheel-arch lips introduced in 0.19 and added recessed
+  dark inner liners connected directly to the cut edges of the body shell.
+- Returned all four thin 0.11-unit tyres to equal +/-0.80 wheel centres. The
+  tyres are tucked nearly flush with the body again while the carved openings
+  provide clearance for visible front steering. The 0.33-unit arch radius sits
+  around the 0.32-unit tyre radius and meets the top of the lower shell without
+  inverted or overlapping side-panel strips.
+
+## 0.19
+
+Approximate completion: 2026-08-23 19:45 BST
+
+### Demo 8
+
+- Corrected the equal-track wheel adjustment so it does not embed the detailed
+  saloon's tyres in its solid body shell. Both axles now use wheel centres at
+  +/-0.91: the front returns to its original clearance and the rear moves out to
+  match it.
+- Retained the thin 0.11-unit tread, visible front steering, and equal front and
+  rear protrusion.
+- Added body-coloured upper wheel-arch lips which visibly overlap the tyre edges,
+  preventing the tyres from appearing to cut through the box-shaped side panels.
+
+## 0.18
+
+Approximate completion: 2026-08-23 19:28 BST
+
+### Demo 8
+
+- Moved the detailed saloon's front wheel centres inboard from +/-0.91 to
+  +/-0.80, matching the rear axle. All four straight-ahead 0.11-unit tyres now
+  have outer faces at approximately +/-0.855 and sit nearly flush with the body;
+  the front wheels no longer protrude farther than the rear wheels.
+- Retained visible front steering through the existing wheel-yaw geometry and
+  travel-facing camera: during a turn, body yaw exposes the steered tyres without
+  requiring an artificially wider front track.
+
+## 0.17
+
+Approximate completion: 2026-08-23 19:25 BST
+
+### Demo 8
+
+- Halved the detailed saloon tyre tread again, from 0.22 to 0.11 total
+  simulation units. The tyres are now approximately 69 percent narrower than
+  their original 0.36-unit form while retaining the 0.64-unit diameter.
+- Moved the rear wheel centres slightly inboard from +/-0.83 to +/-0.80 so their
+  outer faces sit nearly flush with the body. Retained the established +/-0.91
+  front centres so the much thinner front tyres remain visible when steering,
+  without restoring their former toy-like width.
+
 ## 0.16
 
 Approximate completion: 2026-08-23 19:11 BST

@@ -59,6 +59,8 @@ var FIELD_TRACK_HALF_WIDTH = 4.5;
 var FREE_DRIVE_CAR_HALF_WIDTH = 1.45;
 var FREE_DRIVE_CAR_HALF_LENGTH = 1.68;
 var playerWheelSteer = 0;
+var detailedBodyRollSine = 0;
+var detailedBodyRollCosine = 1;
 var freeDriveTravelHeading = 0;
 var freeDriveCameraHeading = 0;
 var player;
@@ -686,6 +688,7 @@ function resetFreeDrive() {
               heading: Math.atan2(fieldStart.tangentX,
                                   fieldStart.tangentZ), speed: 0,
               velocityX: 0, velocityZ: 0, yawRate: 0, rearGrip: 1,
+              bodyRoll: 0, bodyRollVelocity: 0,
               powerSliding: false, wrappedDistance: 0, raceDistance: 0,
               lap: 0, position: 1};
     clearControls();
@@ -887,6 +890,15 @@ function updateFreeDriveStep(dt) {
     var rearLateralAcceleration = -rearSlip * 6.0 * effectiveRearGrip;
     var lateralAcceleration = frontLateralAcceleration +
                               rearLateralAcceleration;
+    /* The sprung body leans away from lateral acceleration.  A damped spring
+     * gives the weight transfer a progressive onset and a clean return to
+     * level instead of tying the visual angle directly to steering input. */
+    var targetBodyRoll = clamp(lateralAcceleration * 0.012, -0.12, 0.12);
+    player.bodyRollVelocity +=
+        ((targetBodyRoll - player.bodyRoll) * 28 -
+         player.bodyRollVelocity * 8) * dt;
+    player.bodyRoll += player.bodyRollVelocity * dt;
+    player.bodyRoll = clamp(player.bodyRoll, -0.14, 0.14);
     var yawAcceleration = (frontLateralAcceleration * frontAxleDistance -
                            rearLateralAcceleration * rearAxleDistance) * 0.62;
     player.yawRate += yawAcceleration * dt;
@@ -1582,27 +1594,60 @@ function carLocalPoint(carX, carY, carZ, sine, cosine, x, y, z) {
             z: carZ - x * sine + z * cosine};
 }
 
+function carBodyLocalPoint(carX, carY, carZ, sine, cosine, x, y, z) {
+    /* Roll the sprung shell around a low longitudinal suspension axis. */
+    var pivotY = 0.32;
+    var relativeY = y - pivotY;
+    var rolledX = x * detailedBodyRollCosine -
+                  relativeY * detailedBodyRollSine;
+    var rolledY = pivotY + x * detailedBodyRollSine +
+                  relativeY * detailedBodyRollCosine;
+    return carLocalPoint(carX, carY, carZ, sine, cosine,
+                         rolledX, rolledY, z);
+}
+
 function drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
                           first, second, third, fourth, color) {
     drawQuad(framebuffer,
-             carLocalPoint(carX, carY, carZ, sine, cosine,
-                           first[0], first[1], first[2]),
-             carLocalPoint(carX, carY, carZ, sine, cosine,
-                           second[0], second[1], second[2]),
-             carLocalPoint(carX, carY, carZ, sine, cosine,
-                           third[0], third[1], third[2]),
-             carLocalPoint(carX, carY, carZ, sine, cosine,
-                           fourth[0], fourth[1], fourth[2]), color);
+             carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                               first[0], first[1], first[2]),
+             carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                               second[0], second[1], second[2]),
+             carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                               third[0], third[1], third[2]),
+             carBodyLocalPoint(carX, carY, carZ, sine, cosine,
+                               fourth[0], fourth[1], fourth[2]), color);
+}
+
+function drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                         centerX, bottomY, centerZ,
+                         halfWidth, height, halfLength, color) {
+    var vertices = [];
+    for (var level = 0; level < 2; level++) {
+        for (var corner = 0; corner < 4; corner++) {
+            vertices.push(carBodyLocalPoint(
+                carX, carY, carZ, sine, cosine,
+                centerX + BOX_LOCAL[corner][0] * halfWidth,
+                bottomY + level * height,
+                centerZ + BOX_LOCAL[corner][1] * halfLength));
+        }
+    }
+    for (var faceIndex = 0; faceIndex < BOX_FACES.length; faceIndex++) {
+        var face = BOX_FACES[faceIndex];
+        drawQuad(framebuffer, vertices[face[0]], vertices[face[1]],
+                 vertices[face[2]], vertices[face[3]],
+                 shadeColor(color, face[4]), true);
+    }
 }
 
 function drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
                            localX, localZ, steeringAngle) {
     var segments = 8;
     var radius = 0.32;
-    var halfTread = 0.11;
+    var halfTread = 0.055;
     var outsideAcross = localX < 0 ? -halfTread : halfTread;
     var insideAcross = -outsideAcross;
-    var centerY = 0.34;
+    var centerY = 0.32;
     var steeringSine = Math.sin(steeringAngle || 0);
     var steeringCosine = Math.cos(steeringAngle || 0);
     function wheelPoint(across, y, rolling) {
@@ -1643,8 +1688,93 @@ function drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
     }
 }
 
+function drawDetailedBodyShell(framebuffer, carX, carY, carZ, sine, cosine,
+                               color) {
+    var halfWidth = 0.84;
+    var halfLength = 1.52;
+    var bottom = 0.22;
+    var top = 0.65;
+    var wheelCenterY = 0.32;
+    var wheelCenters = [-0.97, 0.97];
+    var archRadius = 0.33;
+    var archSegments = 8;
+
+    /* Top, floor, and end faces retain the dimensions of the former box. */
+    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                     [-halfWidth, top, -halfLength],
+                     [-halfWidth, top, halfLength],
+                     [halfWidth, top, halfLength],
+                     [halfWidth, top, -halfLength], color);
+    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                     [-halfWidth, bottom, halfLength],
+                     [-halfWidth, bottom, -halfLength],
+                     [halfWidth, bottom, -halfLength],
+                     [halfWidth, bottom, halfLength], shadeColor(color, 0.48));
+    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                     [-halfWidth, bottom, -halfLength],
+                     [-halfWidth, top, -halfLength],
+                     [halfWidth, top, -halfLength],
+                     [halfWidth, bottom, -halfLength], shadeColor(color, 0.65));
+    drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                     [halfWidth, bottom, halfLength],
+                     [halfWidth, top, halfLength],
+                     [-halfWidth, top, halfLength],
+                     [-halfWidth, bottom, halfLength], shadeColor(color, 0.58));
+
+    /* Build each side around two genuine openings.  Above an opening, the
+     * lower vertices follow a semicircle; no body triangles occupy the hole. */
+    for (var side = -1; side <= 1; side += 2) {
+        var sideX = side * halfWidth;
+        var sideColor = shadeColor(color, side < 0 ? 0.72 : 0.82);
+        var cursorZ = -halfLength;
+        for (var wheel = 0; wheel < wheelCenters.length; wheel++) {
+            var centerZ = wheelCenters[wheel];
+            var archStart = centerZ - archRadius;
+            var archEnd = centerZ + archRadius;
+            drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                             [sideX, bottom, cursorZ],
+                             [sideX, bottom, archStart],
+                             [sideX, top, archStart],
+                             [sideX, top, cursorZ], sideColor);
+            for (var segment = 0; segment < archSegments; segment++) {
+                var firstZ = archStart + segment * archRadius * 2 /
+                             archSegments;
+                var secondZ = archStart + (segment + 1) * archRadius * 2 /
+                              archSegments;
+                var firstOffset = firstZ - centerZ;
+                var secondOffset = secondZ - centerZ;
+                var firstY = wheelCenterY +
+                             Math.sqrt(Math.max(0, archRadius * archRadius -
+                                                firstOffset * firstOffset));
+                var secondY = wheelCenterY +
+                              Math.sqrt(Math.max(0, archRadius * archRadius -
+                                                 secondOffset * secondOffset));
+                drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                                 [sideX, firstY, firstZ],
+                                 [sideX, secondY, secondZ],
+                                 [sideX, top, secondZ],
+                                 [sideX, top, firstZ], sideColor);
+
+                /* A recessed dark liner gives the cut edge visible depth. */
+                var innerX = side * 0.68;
+                drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                                 [sideX, firstY, firstZ],
+                                 [innerX, firstY, firstZ],
+                                 [innerX, secondY, secondZ],
+                                 [sideX, secondY, secondZ], 0x292724);
+            }
+            cursorZ = archEnd;
+        }
+        drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
+                         [sideX, bottom, cursorZ],
+                         [sideX, bottom, halfLength],
+                         [sideX, top, halfLength],
+                         [sideX, top, cursorZ], sideColor);
+    }
+}
+
 function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
-                         frontWheelSteer) {
+                         frontWheelSteer, bodyRoll) {
     var sine = Math.sin(heading);
     var cosine = Math.cos(heading);
     var glass = 0x69a9bd;
@@ -1652,24 +1782,27 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
     var frame = shadeColor(color, 0.86);
 
     drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
-                      -0.91, 0.97, frontWheelSteer);
+                      -0.80, 0.97, frontWheelSteer);
     drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
-                      0.91, 0.97, frontWheelSteer);
+                      0.80, 0.97, frontWheelSteer);
     drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
-                      -0.83, -0.97, 0);
+                      -0.80, -0.97, 0);
     drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
-                      0.83, -0.97, 0);
+                      0.80, -0.97, 0);
+
+    bodyRoll = bodyRoll || 0;
+    detailedBodyRollSine = Math.sin(bodyRoll);
+    detailedBodyRollCosine = Math.cos(bodyRoll);
 
     /* Long, boxy shell with distinct bonnet and boot: a four-seat 1970s
      * two-door saloon rather than a short two-seat coupe. */
-    drawBox(framebuffer, carX, carY + 0.22, carZ, heading,
-            0.84, 0.43, 1.52, color);
-    var bonnet = carLocalPoint(carX, carY, carZ, sine, cosine, 0, 0, 1.08);
-    drawBox(framebuffer, bonnet.x, carY + 0.61, bonnet.z, heading,
-            0.76, 0.10, 0.43, shadeColor(color, 1.08));
-    var boot = carLocalPoint(carX, carY, carZ, sine, cosine, 0, 0, -1.16);
-    drawBox(framebuffer, boot.x, carY + 0.58, boot.z, heading,
-            0.76, 0.10, 0.35, shadeColor(color, 0.94));
+    drawDetailedBodyShell(framebuffer, carX, carY, carZ, sine, cosine, color);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0, 0.61, 1.08, 0.76, 0.10, 0.43,
+                    shadeColor(color, 1.08));
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0, 0.58, -1.16, 0.76, 0.10, 0.35,
+                    shadeColor(color, 0.94));
 
     /* Sloped front and rear glass. */
     drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
@@ -1743,38 +1876,28 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
     drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
                      [-0.53, 0.69, -0.79], [-0.63, 0.64, -0.86],
                      [-0.53, 1.17, -0.55], [-0.44, 1.11, -0.50], frame);
-    var roof = carLocalPoint(carX, carY, carZ, sine, cosine, 0, 0, -0.08);
-    drawBox(framebuffer, roof.x, carY + 1.11, roof.z, heading,
-            0.55, 0.11, 0.46, shadeColor(color, 1.12));
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0, 1.11, -0.08, 0.55, 0.11, 0.46,
+                    shadeColor(color, 1.12));
 
     /* Unlit lamp units: pale front lenses and red rear lenses. */
-    var frontLeft = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                  -0.52, 0, 1.525);
-    var frontRight = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                   0.52, 0, 1.525);
-    drawBox(framebuffer, frontLeft.x, carY + 0.43, frontLeft.z, heading,
-            0.22, 0.17, 0.025, 0xe8e2bd);
-    drawBox(framebuffer, frontRight.x, carY + 0.43, frontRight.z, heading,
-            0.22, 0.17, 0.025, 0xe8e2bd);
-    var rearLeft = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                 -0.55, 0, -1.525);
-    var rearRight = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                  0.55, 0, -1.525);
-    drawBox(framebuffer, rearLeft.x, carY + 0.43, rearLeft.z, heading,
-            0.19, 0.15, 0.025, 0xc51f22);
-    drawBox(framebuffer, rearRight.x, carY + 0.43, rearRight.z, heading,
-            0.19, 0.15, 0.025, 0xc51f22);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    -0.52, 0.43, 1.525, 0.22, 0.17, 0.025, 0xe8e2bd);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0.52, 0.43, 1.525, 0.22, 0.17, 0.025, 0xe8e2bd);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    -0.55, 0.43, -1.525, 0.19, 0.15, 0.025, 0xc51f22);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0.55, 0.43, -1.525, 0.19, 0.15, 0.025, 0xc51f22);
 
     /* Period rectangular grille and bright metal bumpers. */
     drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
                      [-0.27, 0.40, 1.553], [0.27, 0.40, 1.553],
                      [0.27, 0.55, 1.553], [-0.27, 0.55, 1.553], 0x24282a);
-    var frontBumper = carLocalPoint(carX, carY, carZ, sine, cosine, 0, 0, 1.56);
-    var rearBumper = carLocalPoint(carX, carY, carZ, sine, cosine, 0, 0, -1.56);
-    drawBox(framebuffer, frontBumper.x, carY + 0.27, frontBumper.z, heading,
-            0.78, 0.07, 0.025, 0xb7b9b4);
-    drawBox(framebuffer, rearBumper.x, carY + 0.27, rearBumper.z, heading,
-            0.78, 0.07, 0.025, 0xa6a8a4);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0, 0.27, 1.56, 0.78, 0.07, 0.025, 0xb7b9b4);
+    drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
+                    0, 0.27, -1.56, 0.78, 0.07, 0.025, 0xa6a8a4);
 }
 
 function drawGarage(framebuffer) {
@@ -1920,7 +2043,8 @@ function drawMuddyField(framebuffer) {
                 0x66513a);
     }
     drawDetailedCar(framebuffer, player.x, player.y - 0.13, player.z,
-                    player.heading, 0xd94a32, playerWheelSteer);
+                    player.heading, 0xd94a32, playerWheelSteer,
+                    player.bodyRoll);
 }
 
 function drawBillboard(framebuffer, x, bottomY, z, width, height, color) {

@@ -894,9 +894,16 @@ motion. The detailed car used here and in free-driving mode is a boxy 1970s
 two-door rally saloon with a four-seat-sized cabin: long wheelbase, distinct
 bonnet and boot, one long outlined door and handle per side, and fixed rear
 quarter windows rather than rear doors. It also has four low-polygon tyres with
-metal hubs. Their tread is 0.22 simulation units wide against a 0.64-unit
-diameter, retaining a period rally profile without the earlier toy-like width.
-The model has rectangular
+metal hubs. Their tread is 0.11 simulation units wide against a 0.64-unit
+diameter: half the previous width and approximately 69 percent narrower than the
+original tyres. All four wheel centres use the same +/-0.80 lateral position,
+placing their straight-ahead outer faces at approximately +/-0.855 against the
++/-0.84 body sides. The lower body is a purpose-built shell rather than a solid
+box: its side-panel triangles follow four segmented semicircular wheel openings,
+with no body triangles spanning those openings. Recessed dark liners run inward
+from the cut edges, so the arches are part of the main body rather than separate
+pieces floating outside it. Front steering remains visible naturally when the
+car yaws relative to the travel-facing camera. The model has rectangular
 unlit front and rear lamp lenses, a dark grille, bright period-style bumpers,
 sloped front and rear glass, body-coloured external frames and pillars, and a
 highlighted painted-metal roof. The side-window sills follow the wider body line
@@ -921,10 +928,10 @@ steering, or speed effect, and the car may cross them to free drive over the res
 of the checkerboard. It uses the same detailed 1970s saloon as the garage. Its
 front tyres, sidewalls, and hubs yaw around their own vertical centres in
 response to left/right input, easing back to straight ahead after release.
-Steering lock is approximately +/-35.5 degrees and the front track is slightly
-wider than the body so the angle remains visible from the chase camera; the rear
-wheels remain aligned with the body. Rally mode retains the lightweight car
-geometry for the player and five AI competitors. The free-drive camera follows
+Steering lock is approximately +/-35.5 degrees with equal front and rear track;
+the rear wheels remain aligned with the body while the front tyres yaw about
+their centres. Rally mode retains the lightweight car geometry for the player
+and five AI competitors. The free-drive camera follows
 a smoothed recent direction of travel rather than being rigidly locked to the
 body heading. The saloon therefore visibly yaws relative to the camera when
 steering, and the camera retains the last travel direction while the car is
@@ -938,7 +945,13 @@ steering only produces force once it is moving, and reverse steering acts in
 the opposite direction. Holding Space, Down, or S from low speed supplies
 continuous reverse torque; reverse is limited to 14 simulation units compared
 with 30 forwards and retains a practical turning arc without permitting
-rotation in place.
+rotation in place. The same computed lateral acceleration drives the saloon's
+body-roll target, so faster, harder turns and power slides lean the sprung body
+farther than low-speed manoeuvres. A damped suspension spring smooths both
+weight transfer and return to level. The body shell, windows, trim, lights, and
+bumpers rotate together around a low longitudinal axis, independently of the
+upright wheels; normal roll is limited to about +/-6.9 degrees with an
++/-8-degree safety bound.
 
 The saloon is rear-wheel drive. To initiate a powerslide, accelerate, begin the
 turn, briefly release the throttle, tap Space, Down, or S, release the brake,
