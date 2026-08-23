@@ -902,8 +902,46 @@ the glazed cabin does not splay outward. The lightweight race and AI car
 representation is retained outside the garage.
 
 Free-driving mode uses the normal arrow/WASD automatic-style driving controls,
-but replaces the rally course and competitors with a fixed 90-by-68-unit brown
-field, puddles, and visible boundary posts.
+but replaces the rally course and competitors with a fixed 160-by-128-unit
+field, over three times the area of the original 90-by-68 field. Its surface is
+a clearly alternating dark/light brown checkerboard of 16-unit squares, with
+puddles and visible posts at the outer field boundary. The outer perimeter is
+colliding: limits account for the saloon's rotated width and length, keeping its
+body, wheels, and bumpers inside the checkerboard at sides and corners. Contact
+removes only velocity directed out of the field, so a glancing car can scrape
+along an edge, sustained throttle into it settles without bouncing through it,
+and reverse can pull the car away. Two pale painted lines trace a coarse version
+of the reproducible rally-course shape at +/-4.5 units from its centre, and a
+stripe marks its start. The car resets on that stripe, aligned with the course
+tangent. These internal markings are paint only: they have no collision, grip,
+steering, or speed effect, and the car may cross them to free drive over the rest
+of the checkerboard. It uses the same detailed 1970s saloon as the garage. Its
+front tyres, sidewalls, and hubs yaw around their own vertical centres in
+response to left/right input, easing back to straight ahead after release.
+Steering lock is approximately +/-35.5 degrees and the front track is slightly
+wider than the body so the angle remains visible from the chase camera; the rear
+wheels remain aligned with the body. Rally mode retains the lightweight car
+geometry for the player and five AI competitors. The free-drive camera follows
+a smoothed recent direction of travel rather than being rigidly locked to the
+body heading. The saloon therefore visibly yaws relative to the camera when
+steering, and the camera retains the last travel direction while the car is
+stationary. Its smoothing uses wall-clock elapsed time and is independent of the
+achieved frame rate.
+
+Free drive uses separate longitudinal and lateral velocity, inertial yaw, and
+speed-dependent tyre grip. Turning the wheels while stopped does not rotate the
+car; steering only produces yaw once it is moving, and reverse steering acts in
+the opposite direction. Holding Space, Down, or S from low speed supplies
+continuous reverse torque; reverse is limited to 14 simulation units compared
+with 30 forwards, and has additional steering authority to produce a practical
+turning arc without permitting rotation in place. To powerslide, build up
+forward speed, hold left or right, and hold Space, Down, or S to brake and
+release rear lateral grip. The body can then yaw across the retained direction
+of momentum while the camera continues to face the actual trajectory.
+Releasing either steering or brake restores normal grip progressively.
+`POWER SLIDE` appears in the HUD while rear grip is released; with
+`--debug-events`, slide start and end are also written to the console. Reverse
+steering does not engage the powerslide state.
 
 Demo8 text remains the built-in 5x7 bitmap font painted directly into the
 framebuffer. Its integer pixel scale is proportional to the viewport: 320x240

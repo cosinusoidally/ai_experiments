@@ -53,8 +53,14 @@ var garageManualLift = 0;
 var garageDragging = false;
 var garageDragX = 0;
 var garageDragY = 0;
-var FIELD_HALF_WIDTH = 45;
-var FIELD_HALF_LENGTH = 34;
+var FIELD_HALF_WIDTH = 80;
+var FIELD_HALF_LENGTH = 64;
+var FIELD_TRACK_HALF_WIDTH = 4.5;
+var FREE_DRIVE_CAR_HALF_WIDTH = 1.45;
+var FREE_DRIVE_CAR_HALF_LENGTH = 1.68;
+var playerWheelSteer = 0;
+var freeDriveTravelHeading = 0;
+var freeDriveCameraHeading = 0;
 var player;
 var competitors;
 var lastFrameTime = 0;
@@ -675,9 +681,17 @@ function enterGarageMode() {
 }
 
 function resetFreeDrive() {
-    player = {x: 0, y: 0.15, z: 0, heading: 0, speed: 0,
-              wrappedDistance: 0, raceDistance: 0, lap: 0, position: 1};
+    var fieldStart = track[0];
+    player = {x: fieldStart.x, y: 0.15, z: fieldStart.z,
+              heading: Math.atan2(fieldStart.tangentX,
+                                  fieldStart.tangentZ), speed: 0,
+              velocityX: 0, velocityZ: 0, yawRate: 0,
+              powerSliding: false, wrappedDistance: 0, raceDistance: 0,
+              lap: 0, position: 1};
     clearControls();
+    playerWheelSteer = 0;
+    freeDriveTravelHeading = player.heading;
+    freeDriveCameraHeading = player.heading;
 }
 
 function enterFreeDriveMode() {
@@ -686,7 +700,8 @@ function enterFreeDriveMode() {
     resetFreeDrive();
     menuOpen = false;
     lastFrameTime = 0;
-    console.log("mode: free drive on the muddy field");
+    console.log("mode: free drive on the muddy field; brake while steering " +
+                "at speed to powerslide");
 }
 
 function resolveRoadEdge(nearest, dt) {
@@ -826,47 +841,132 @@ function updateSimulation(elapsed) {
 }
 
 function updateFreeDriveStep(dt) {
+    var steering = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
+    var targetWheelSteer = -steering * 0.62;
+    playerWheelSteer += (targetWheelSteer - playerWheelSteer) *
+                        Math.min(1, dt * 10);
+
+    var forwardX = Math.sin(player.heading);
+    var forwardZ = Math.cos(player.heading);
+    var rightX = forwardZ;
+    var rightZ = -forwardX;
+    var longitudinalSpeed = player.velocityX * forwardX +
+                            player.velocityZ * forwardZ;
+    var lateralSpeed = player.velocityX * rightX +
+                       player.velocityZ * rightZ;
+
+    /* Steering produces yaw only while the tyres are rolling.  Yaw has a
+     * little inertia, and reverses naturally when travelling backwards. */
+    var steeringRate = longitudinalSpeed < 0 ? 0.105 : 0.070;
+    var targetYawRate = -steering * longitudinalSpeed * steeringRate;
+    targetYawRate = clamp(targetYawRate, -1.55, 1.55);
+    var yawResponse = controls.brake && longitudinalSpeed > 6 ?
+                      3.0 : 6.5;
+    player.yawRate += (targetYawRate - player.yawRate) *
+                      Math.min(1, dt * yawResponse);
+    if (!steering || Math.abs(longitudinalSpeed) < 0.15) {
+        player.yawRate *= Math.max(0, 1 - dt * 2.5);
+    }
+    player.heading += player.yawRate * dt;
+
+    /* Recalculate the body axes after yaw.  Lateral tyre grip rotates the
+     * velocity toward the body heading.  Braking while steering at speed
+     * releases most rear grip, leaving momentum to carry the car sideways. */
+    forwardX = Math.sin(player.heading);
+    forwardZ = Math.cos(player.heading);
+    rightX = forwardZ;
+    rightZ = -forwardX;
+    longitudinalSpeed = player.velocityX * forwardX +
+                        player.velocityZ * forwardZ;
+    lateralSpeed = player.velocityX * rightX + player.velocityZ * rightZ;
+    var wasPowerSliding = player.powerSliding;
+    player.powerSliding = controls.brake && steering !== 0 &&
+                          longitudinalSpeed > 6;
+    if (options.debugEvents && player.powerSliding !== wasPowerSliding) {
+        console.log(player.powerSliding ? "power slide started" :
+                    "power slide ended");
+    }
+    var lateralGrip = player.powerSliding ? 0.72 :
+                      (Math.abs(longitudinalSpeed) > 17 && steering !== 0 ?
+                       2.8 : 7.5);
+    lateralSpeed *= Math.max(0, 1 - dt * lateralGrip * 0.92);
+
     if (controls.throttle) {
-        player.speed += (18.0 - Math.max(0, player.speed) * 0.18) * dt;
+        longitudinalSpeed +=
+            (18.0 - Math.max(0, longitudinalSpeed) * 0.18) * dt;
     }
     if (controls.brake) {
-        if (player.speed > 0.5) player.speed -= 20 * dt;
-        else player.speed -= 7 * dt;
+        if (longitudinalSpeed > 0.7) longitudinalSpeed -= 7.5 * dt;
+        else longitudinalSpeed -=
+            (12.0 - Math.min(12, Math.abs(longitudinalSpeed)) * 0.20) * dt;
     }
-    player.speed *= Math.pow(0.996, dt * 60);
-    player.speed = clamp(player.speed, -7, 30);
-    var steering = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
-    var steeringGrip = clamp(Math.abs(player.speed) / 7, 0.18, 1);
-    player.heading -= steering * steeringGrip * 1.65 * dt *
-                      (player.speed < 0 ? -1 : 1);
-    player.x += Math.sin(player.heading) * player.speed * dt;
-    player.z += Math.cos(player.heading) * player.speed * dt;
+    longitudinalSpeed *= Math.pow(0.996, dt * 60);
+    longitudinalSpeed = clamp(longitudinalSpeed, -14, 30);
+    player.velocityX = forwardX * longitudinalSpeed + rightX * lateralSpeed;
+    player.velocityZ = forwardZ * longitudinalSpeed + rightZ * lateralSpeed;
+    var velocitySquared = player.velocityX * player.velocityX +
+                          player.velocityZ * player.velocityZ;
+    if (velocitySquared > 900) {
+        var velocityScale = 30 / Math.sqrt(velocitySquared);
+        player.velocityX *= velocityScale;
+        player.velocityZ *= velocityScale;
+        velocitySquared = 900;
+    }
+    player.speed = longitudinalSpeed;
+    var movementX = player.velocityX * dt;
+    var movementZ = player.velocityZ * dt;
+    player.x += movementX;
+    player.z += movementZ;
 
-    var hitBoundary = false;
-    if (player.x < -FIELD_HALF_WIDTH + 1) {
-        player.x = -FIELD_HALF_WIDTH + 1;
-        hitBoundary = true;
-    } else if (player.x > FIELD_HALF_WIDTH - 1) {
-        player.x = FIELD_HALF_WIDTH - 1;
-        hitBoundary = true;
+    /* Keep the complete oriented saloon inside the outer perimeter, including
+     * its wheels and bumpers.  Remove only outward velocity so glancing contact
+     * scrapes along the boundary and steering away remains responsive. */
+    var boundaryExtentX = Math.abs(rightX) * FREE_DRIVE_CAR_HALF_WIDTH +
+                          Math.abs(forwardX) * FREE_DRIVE_CAR_HALF_LENGTH;
+    var boundaryExtentZ = Math.abs(rightZ) * FREE_DRIVE_CAR_HALF_WIDTH +
+                          Math.abs(forwardZ) * FREE_DRIVE_CAR_HALF_LENGTH;
+    var minimumX = -FIELD_HALF_WIDTH + boundaryExtentX;
+    var maximumX = FIELD_HALF_WIDTH - boundaryExtentX;
+    var minimumZ = -FIELD_HALF_LENGTH + boundaryExtentZ;
+    var maximumZ = FIELD_HALF_LENGTH - boundaryExtentZ;
+    var hitBoundaryX = false;
+    var hitBoundaryZ = false;
+    if (player.x < minimumX) {
+        player.x = minimumX;
+        if (player.velocityX < 0) player.velocityX = 0;
+        hitBoundaryX = true;
+    } else if (player.x > maximumX) {
+        player.x = maximumX;
+        if (player.velocityX > 0) player.velocityX = 0;
+        hitBoundaryX = true;
     }
-    if (player.z < -FIELD_HALF_LENGTH + 1) {
-        player.z = -FIELD_HALF_LENGTH + 1;
-        hitBoundary = true;
-    } else if (player.z > FIELD_HALF_LENGTH - 1) {
-        player.z = FIELD_HALF_LENGTH - 1;
-        hitBoundary = true;
+    if (player.z < minimumZ) {
+        player.z = minimumZ;
+        if (player.velocityZ < 0) player.velocityZ = 0;
+        hitBoundaryZ = true;
+    } else if (player.z > maximumZ) {
+        player.z = maximumZ;
+        if (player.velocityZ > 0) player.velocityZ = 0;
+        hitBoundaryZ = true;
     }
-    if (hitBoundary) player.speed *= 0.62;
+    if (hitBoundaryX || hitBoundaryZ) {
+        player.speed = player.velocityX * forwardX +
+                       player.velocityZ * forwardZ;
+    }
     player.y = 0.15;
 }
 
 function updateFreeDrive(elapsed) {
     elapsed = Math.min(elapsed, 0.5);
     while (elapsed > 0) {
-        var step = Math.min(0.04, elapsed);
+        var step = Math.min(0.05, elapsed);
         updateFreeDriveStep(step);
         elapsed -= step;
+    }
+    if (player.velocityX * player.velocityX +
+        player.velocityZ * player.velocityZ > 0.000625) {
+        freeDriveTravelHeading = Math.atan2(player.velocityX,
+                                            player.velocityZ);
     }
 }
 
@@ -912,6 +1012,31 @@ function setLookAtCamera(cameraX, cameraY, cameraZ,
                                (2 * Math.min(options.width, options.height) * 1.05),
               centerX: options.width / 2,
               centerY: options.height * 0.48};
+}
+
+function shortestAngleDifference(target, current) {
+    var difference = target - current;
+    while (difference > Math.PI) difference -= Math.PI * 2;
+    while (difference < -Math.PI) difference += Math.PI * 2;
+    return difference;
+}
+
+function setFreeDriveCamera(elapsed) {
+    /* Follow the recent trajectory rather than attaching the view rigidly to
+     * the body.  The short wall-clock-based lag makes steering yaw visible,
+     * while the view still settles onto the actual direction of travel. */
+    var response = 1 - Math.pow(0.08, Math.min(elapsed, 0.5));
+    freeDriveCameraHeading +=
+        shortestAngleDifference(freeDriveTravelHeading,
+                                freeDriveCameraHeading) * response;
+    var forwardX = Math.sin(freeDriveCameraHeading);
+    var forwardZ = Math.cos(freeDriveCameraHeading);
+    setLookAtCamera(player.x - forwardX * 4.8,
+                    player.y + 2.15,
+                    player.z - forwardZ * 4.8,
+                    player.x + forwardX,
+                    player.y + 0.43,
+                    player.z + forwardZ);
 }
 
 function setGarageCamera(elapsed) {
@@ -1430,61 +1555,69 @@ function drawCarLocalQuad(framebuffer, carX, carY, carZ, sine, cosine,
 }
 
 function drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
-                           localX, localZ) {
+                           localX, localZ, steeringAngle) {
     var segments = 8;
     var radius = 0.32;
     var halfTread = 0.18;
-    var outsideX = localX < 0 ? localX - halfTread : localX + halfTread;
-    var insideX = localX < 0 ? localX + halfTread : localX - halfTread;
+    var outsideAcross = localX < 0 ? -halfTread : halfTread;
+    var insideAcross = -outsideAcross;
     var centerY = 0.34;
-    var outsideCenter = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                      outsideX, centerY, localZ);
+    var steeringSine = Math.sin(steeringAngle || 0);
+    var steeringCosine = Math.cos(steeringAngle || 0);
+    function wheelPoint(across, y, rolling) {
+        var offsetX = across * steeringCosine + rolling * steeringSine;
+        var offsetZ = -across * steeringSine + rolling * steeringCosine;
+        return carLocalPoint(carX, carY, carZ, sine, cosine,
+                             localX + offsetX, y, localZ + offsetZ);
+    }
+    var outsideCenter = wheelPoint(outsideAcross, centerY, 0);
     for (var segment = 0; segment < segments; segment++) {
         var firstAngle = segment * Math.PI * 2 / segments;
         var secondAngle = (segment + 1) * Math.PI * 2 / segments;
         var firstY = centerY + Math.cos(firstAngle) * radius;
-        var firstZ = localZ + Math.sin(firstAngle) * radius;
+        var firstRolling = Math.sin(firstAngle) * radius;
         var secondY = centerY + Math.cos(secondAngle) * radius;
-        var secondZ = localZ + Math.sin(secondAngle) * radius;
-        var outsideFirst = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                         outsideX, firstY, firstZ);
-        var outsideSecond = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                          outsideX, secondY, secondZ);
-        var insideFirst = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                        insideX, firstY, firstZ);
-        var insideSecond = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                         insideX, secondY, secondZ);
+        var secondRolling = Math.sin(secondAngle) * radius;
+        var outsideFirst = wheelPoint(outsideAcross, firstY, firstRolling);
+        var outsideSecond = wheelPoint(outsideAcross, secondY, secondRolling);
+        var insideFirst = wheelPoint(insideAcross, firstY, firstRolling);
+        var insideSecond = wheelPoint(insideAcross, secondY, secondRolling);
         drawQuad(framebuffer, outsideFirst, insideFirst, insideSecond,
                  outsideSecond, (segment & 1) ? 0x17191a : 0x202223);
         drawNearClippedTriangle(framebuffer, outsideCenter,
                                 outsideFirst, outsideSecond, 0x191b1c);
 
         var hubRadius = 0.14;
-        var hubFirst = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                     outsideX - (localX < 0 ? 0.006 : -0.006),
-                                     centerY + Math.cos(firstAngle) * hubRadius,
-                                     localZ + Math.sin(firstAngle) * hubRadius);
-        var hubSecond = carLocalPoint(carX, carY, carZ, sine, cosine,
-                                      outsideX - (localX < 0 ? 0.006 : -0.006),
-                                      centerY + Math.cos(secondAngle) * hubRadius,
-                                      localZ + Math.sin(secondAngle) * hubRadius);
-        drawNearClippedTriangle(framebuffer, outsideCenter,
+        var hubAcross = outsideAcross + (localX < 0 ? -0.006 : 0.006);
+        var hubCenter = wheelPoint(hubAcross, centerY, 0);
+        var hubFirst = wheelPoint(hubAcross,
+                                  centerY + Math.cos(firstAngle) * hubRadius,
+                                  Math.sin(firstAngle) * hubRadius);
+        var hubSecond = wheelPoint(hubAcross,
+                                   centerY + Math.cos(secondAngle) * hubRadius,
+                                   Math.sin(secondAngle) * hubRadius);
+        drawNearClippedTriangle(framebuffer, hubCenter,
                                 hubFirst, hubSecond,
                                 (segment & 1) ? 0xa6aaa8 : 0xc8cbc7);
     }
 }
 
-function drawDetailedGarageCar(framebuffer, carX, carY, carZ, heading, color) {
+function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
+                         frontWheelSteer) {
     var sine = Math.sin(heading);
     var cosine = Math.cos(heading);
     var glass = 0x69a9bd;
     var darkGlass = 0x477b8d;
     var frame = shadeColor(color, 0.86);
 
-    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine, -0.83, 0.97);
-    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine, 0.83, 0.97);
-    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine, -0.83, -0.97);
-    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine, 0.83, -0.97);
+    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
+                      -0.91, 0.97, frontWheelSteer);
+    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
+                      0.91, 0.97, frontWheelSteer);
+    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
+                      -0.83, -0.97, 0);
+    drawDetailedWheel(framebuffer, carX, carY, carZ, sine, cosine,
+                      0.83, -0.97, 0);
 
     /* Long, boxy shell with distinct bonnet and boot: a four-seat 1970s
      * two-door saloon rather than a short two-seat coupe. */
@@ -1640,23 +1773,27 @@ function drawGarage(framebuffer) {
     drawBox(framebuffer, 5.8, 0, -5.4, 0, 0.22, 3.2, 0.22, 0x444845);
     drawBox(framebuffer, -4.7, 0.32, 6.35, 0, 1.4, 0.72, 0.42, 0x8b3c2f);
     drawBox(framebuffer, -4.7, 1.03, 6.58, 0, 1.35, 0.12, 0.18, 0xc2c3b9);
-    drawDetailedGarageCar(framebuffer, 0, 0.02, 0, 0.18, 0xd94a32);
+    drawDetailedCar(framebuffer, 0, 0.02, 0, 0.18, 0xd94a32, 0);
 }
 
 function drawMuddyField(framebuffer) {
-    var tile = 10;
+    var tile = 16;
     var row = 0;
     for (var z = -FIELD_HALF_LENGTH; z < FIELD_HALF_LENGTH; z += tile) {
         var finalZ = Math.min(FIELD_HALF_LENGTH, z + tile);
         var column = 0;
         for (var x = -FIELD_HALF_WIDTH; x < FIELD_HALF_WIDTH; x += tile) {
             var finalX = Math.min(FIELD_HALF_WIDTH, x + tile);
-            var shade = ((row * 7 + column * 11) % 4) * 0x030201;
+            var checkerColumn = column++;
+            var tileDx = (x + finalX) * 0.5 - camera.x;
+            var tileDz = (z + finalZ) * 0.5 - camera.z;
+            if (!horizontallyVisible(tileDx, tileDz, 12)) continue;
+            var fieldColor = ((row + checkerColumn) & 1) ?
+                             0x704b2d : 0x50331f;
             drawQuad(framebuffer,
                      {x: x, y: 0, z: z}, {x: finalX, y: 0, z: z},
                      {x: finalX, y: 0, z: finalZ}, {x: x, y: 0, z: finalZ},
-                     0x65482f + shade);
-            column++;
+                     fieldColor);
         }
         row++;
     }
@@ -1671,20 +1808,78 @@ function drawMuddyField(framebuffer) {
                  {x: puddle[0] - puddle[2], y: 0.018, z: puddle[1] + puddle[3]},
                  0x343b38);
     }
-    for (x = -FIELD_HALF_WIDTH; x <= FIELD_HALF_WIDTH; x += 10) {
+
+    /* Two purely painted lines reuse the reproducible rally centreline.  They
+     * have no collision or grip effect: this is a driving guide, not a road. */
+    for (var trackIndex = 0; trackIndex < TRACK_POINTS; trackIndex += 6) {
+        var nextTrackIndex = (trackIndex + 6) % TRACK_POINTS;
+        var first = track[trackIndex];
+        var second = track[nextTrackIndex];
+        var lineMiddleX = (first.x + second.x) * 0.5;
+        var lineMiddleZ = (first.z + second.z) * 0.5;
+        var lineDx = lineMiddleX - camera.x;
+        var lineDz = lineMiddleZ - camera.z;
+        if (lineDx * lineDx + lineDz * lineDz > 70 * 70 ||
+            !horizontallyVisible(lineDx, lineDz, 8)) continue;
+        for (var side = -1; side <= 1; side += 2) {
+            var lineOffset = side * FIELD_TRACK_HALF_WIDTH;
+            var innerOffset = lineOffset - 0.18;
+            var outerOffset = lineOffset + 0.18;
+            drawQuad(framebuffer,
+                     {x: first.x + first.normalX * innerOffset,
+                      y: 0.032,
+                      z: first.z + first.normalZ * innerOffset},
+                     {x: second.x + second.normalX * innerOffset,
+                      y: 0.032,
+                      z: second.z + second.normalZ * innerOffset},
+                     {x: second.x + second.normalX * outerOffset,
+                      y: 0.032,
+                      z: second.z + second.normalZ * outerOffset},
+                     {x: first.x + first.normalX * outerOffset,
+                      y: 0.032,
+                      z: first.z + first.normalZ * outerOffset},
+                     0xe0c98b);
+        }
+    }
+    var start = track[0];
+    var startHalfDepth = 0.32;
+    drawQuad(framebuffer,
+             {x: start.x - start.tangentX * startHalfDepth -
+                 start.normalX * FIELD_TRACK_HALF_WIDTH,
+              y: 0.038,
+              z: start.z - start.tangentZ * startHalfDepth -
+                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
+             {x: start.x + start.tangentX * startHalfDepth -
+                 start.normalX * FIELD_TRACK_HALF_WIDTH,
+              y: 0.038,
+              z: start.z + start.tangentZ * startHalfDepth -
+                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
+             {x: start.x + start.tangentX * startHalfDepth +
+                 start.normalX * FIELD_TRACK_HALF_WIDTH,
+              y: 0.038,
+              z: start.z + start.tangentZ * startHalfDepth +
+                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
+             {x: start.x - start.tangentX * startHalfDepth +
+                 start.normalX * FIELD_TRACK_HALF_WIDTH,
+              y: 0.038,
+              z: start.z - start.tangentZ * startHalfDepth +
+                 start.normalZ * FIELD_TRACK_HALF_WIDTH},
+             0xf0e5bd);
+
+    for (x = -FIELD_HALF_WIDTH; x <= FIELD_HALF_WIDTH; x += 16) {
         drawBox(framebuffer, x, 0, -FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
                 0x66513a);
         drawBox(framebuffer, x, 0, FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
                 0x66513a);
     }
-    for (z = -FIELD_HALF_LENGTH + 4; z < FIELD_HALF_LENGTH; z += 10) {
+    for (z = -FIELD_HALF_LENGTH; z <= FIELD_HALF_LENGTH; z += 16) {
         drawBox(framebuffer, -FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
                 0x66513a);
         drawBox(framebuffer, FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
                 0x66513a);
     }
-    drawCar(framebuffer, player.x, player.y, player.z, player.heading,
-            0xd94a32, true);
+    drawDetailedCar(framebuffer, player.x, player.y - 0.13, player.z,
+                    player.heading, 0xd94a32, playerWheelSteer);
 }
 
 function drawBillboard(framebuffer, x, bottomY, z, width, height, color) {
@@ -1938,11 +2133,16 @@ function drawModeHud(framebuffer) {
                          framebuffer.height - lineAdvance);
         }
     } else {
-        var speed = Math.max(0, Math.round(player.speed * 6.2));
+        var speed = Math.round(Math.sqrt(player.velocityX * player.velocityX +
+                                         player.velocityZ * player.velocityZ) * 6.2);
         scale = textScale(framebuffer);
         lineAdvance = textLineAdvance(framebuffer);
         paintText(framebuffer, "FREE DRIVE", scale, scale);
         paintText(framebuffer, "SPEED " + speed, scale, scale + lineAdvance);
+        if (player.powerSliding) {
+            paintText(framebuffer, "POWER SLIDE", scale,
+                      scale + lineAdvance * 2);
+        }
     }
 }
 
@@ -2059,7 +2259,7 @@ function draw(framebuffer) {
         setGarageCamera(menuOpen ? 0 : elapsed);
     } else {
         if (!menuOpen) updateFreeDrive(elapsed);
-        setCamera();
+        setFreeDriveCamera(menuOpen ? 0 : elapsed);
     }
     projectedVertexCount = 0;
     projectionFrame++;
