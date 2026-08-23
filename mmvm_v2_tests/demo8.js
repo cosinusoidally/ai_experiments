@@ -43,6 +43,18 @@ var BOX_FACES = [[0, 1, 2, 3, 0.48], [4, 7, 6, 5, 1.0],
                  [0, 4, 5, 1, 0.65], [1, 5, 6, 2, 0.82],
                  [2, 6, 7, 3, 0.58], [3, 7, 4, 0, 0.72]];
 var controls = {left: false, right: false, throttle: false, brake: false};
+var GAME_MODE_RALLY = 0;
+var GAME_MODE_GARAGE = 1;
+var GAME_MODE_FIELD = 2;
+var gameMode = GAME_MODE_RALLY;
+var menuOpen = false;
+var garageOrbitPhase = 0.65;
+var garageManualLift = 0;
+var garageDragging = false;
+var garageDragX = 0;
+var garageDragY = 0;
+var FIELD_HALF_WIDTH = 45;
+var FIELD_HALF_LENGTH = 34;
 var player;
 var competitors;
 var lastFrameTime = 0;
@@ -637,6 +649,46 @@ function resetRace() {
     controls.brake = false;
 }
 
+function clearControls() {
+    controls.left = false;
+    controls.right = false;
+    controls.throttle = false;
+    controls.brake = false;
+}
+
+function enterRallyMode() {
+    gameMode = GAME_MODE_RALLY;
+    resetRace();
+    rollingMode = true;
+    menuOpen = false;
+    lastFrameTime = 0;
+    console.log("game restarted; rolling mode active; push Space to play");
+}
+
+function enterGarageMode() {
+    gameMode = GAME_MODE_GARAGE;
+    garageDragging = false;
+    clearControls();
+    menuOpen = false;
+    lastFrameTime = 0;
+    console.log("mode: garage; drag with mouse button 1 to control the camera");
+}
+
+function resetFreeDrive() {
+    player = {x: 0, y: 0.15, z: 0, heading: 0, speed: 0,
+              wrappedDistance: 0, raceDistance: 0, lap: 0, position: 1};
+    clearControls();
+}
+
+function enterFreeDriveMode() {
+    gameMode = GAME_MODE_FIELD;
+    rollingMode = false;
+    resetFreeDrive();
+    menuOpen = false;
+    lastFrameTime = 0;
+    console.log("mode: free drive on the muddy field");
+}
+
 function resolveRoadEdge(nearest, dt) {
     if (nearest.distance > ROAD_HALF_WIDTH) {
         var shoulderAmount = clamp((nearest.distance - ROAD_HALF_WIDTH) /
@@ -773,6 +825,51 @@ function updateSimulation(elapsed) {
     }
 }
 
+function updateFreeDriveStep(dt) {
+    if (controls.throttle) {
+        player.speed += (18.0 - Math.max(0, player.speed) * 0.18) * dt;
+    }
+    if (controls.brake) {
+        if (player.speed > 0.5) player.speed -= 20 * dt;
+        else player.speed -= 7 * dt;
+    }
+    player.speed *= Math.pow(0.996, dt * 60);
+    player.speed = clamp(player.speed, -7, 30);
+    var steering = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
+    var steeringGrip = clamp(Math.abs(player.speed) / 7, 0.18, 1);
+    player.heading -= steering * steeringGrip * 1.65 * dt *
+                      (player.speed < 0 ? -1 : 1);
+    player.x += Math.sin(player.heading) * player.speed * dt;
+    player.z += Math.cos(player.heading) * player.speed * dt;
+
+    var hitBoundary = false;
+    if (player.x < -FIELD_HALF_WIDTH + 1) {
+        player.x = -FIELD_HALF_WIDTH + 1;
+        hitBoundary = true;
+    } else if (player.x > FIELD_HALF_WIDTH - 1) {
+        player.x = FIELD_HALF_WIDTH - 1;
+        hitBoundary = true;
+    }
+    if (player.z < -FIELD_HALF_LENGTH + 1) {
+        player.z = -FIELD_HALF_LENGTH + 1;
+        hitBoundary = true;
+    } else if (player.z > FIELD_HALF_LENGTH - 1) {
+        player.z = FIELD_HALF_LENGTH - 1;
+        hitBoundary = true;
+    }
+    if (hitBoundary) player.speed *= 0.62;
+    player.y = 0.15;
+}
+
+function updateFreeDrive(elapsed) {
+    elapsed = Math.min(elapsed, 0.5);
+    while (elapsed > 0) {
+        var step = Math.min(0.04, elapsed);
+        updateFreeDriveStep(step);
+        elapsed -= step;
+    }
+}
+
 function setCamera() {
     var forwardX = Math.sin(player.heading);
     var forwardZ = Math.cos(player.heading);
@@ -790,6 +887,41 @@ function setCamera() {
                                (2 * Math.min(options.width, options.height) * 1.05),
               centerX: options.width / 2,
               centerY: options.height * 0.46};
+}
+
+function setLookAtCamera(cameraX, cameraY, cameraZ,
+                         targetX, targetY, targetZ) {
+    var dx = targetX - cameraX;
+    var dz = targetZ - cameraZ;
+    var horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+    if (horizontalDistance < 0.001) horizontalDistance = 0.001;
+    var forwardX = dx / horizontalDistance;
+    var forwardZ = dz / horizontalDistance;
+    var pitch = Math.atan2(cameraY - targetY, horizontalDistance);
+    camera = {x: cameraX,
+              y: cameraY,
+              z: cameraZ,
+              forwardX: forwardX,
+              forwardZ: forwardZ,
+              rightX: forwardZ,
+              rightZ: -forwardX,
+              pitchSin: Math.sin(pitch),
+              pitchCos: Math.cos(pitch),
+              focal: Math.min(options.width, options.height) * 1.05,
+              horizontalSlope: options.width /
+                               (2 * Math.min(options.width, options.height) * 1.05),
+              centerX: options.width / 2,
+              centerY: options.height * 0.48};
+}
+
+function setGarageCamera(elapsed) {
+    if (!garageDragging) garageOrbitPhase += elapsed * 0.34;
+    var cameraX = Math.sin(garageOrbitPhase) * 4.9;
+    var cameraZ = Math.cos(garageOrbitPhase) * 3.8;
+    var cameraY = 1.75 + Math.sin(garageOrbitPhase * 2) * 0.52 +
+                  garageManualLift;
+    cameraY = clamp(cameraY, 0.65, 3.5);
+    setLookAtCamera(cameraX, cameraY, cameraZ, 0, 0.48, 0);
 }
 
 function horizontallyVisible(dx, dz, radius) {
@@ -1278,6 +1410,90 @@ function drawCar(framebuffer, carX, carY, carZ, heading, color, isPlayer) {
             0.90, 0.16, 0.12, isPlayer ? 0xf1d328 : 0x25282a);
 }
 
+function drawGarage(framebuffer) {
+    var x;
+    var z;
+    var tile = 2;
+    for (z = -7; z < 7; z += tile) {
+        for (x = -8; x < 8; x += tile) {
+            var checker = (((x + 8) / tile + (z + 7) / tile) & 1);
+            var floorColor = checker ? 0x555653 : 0x64645f;
+            drawQuad(framebuffer,
+                     {x: x, y: 0, z: z},
+                     {x: x + tile, y: 0, z: z},
+                     {x: x + tile, y: 0, z: z + tile},
+                     {x: x, y: 0, z: z + tile}, floorColor);
+        }
+    }
+
+    /* The orbit remains inside this simple service bay, so the walls form a
+     * background behind the car rather than passing between camera and car. */
+    drawQuad(framebuffer, {x: -8, y: 0, z: 7}, {x: 8, y: 0, z: 7},
+             {x: 8, y: 4, z: 7}, {x: -8, y: 4, z: 7}, 0x777871);
+    drawQuad(framebuffer, {x: 8, y: 0, z: -7}, {x: -8, y: 0, z: -7},
+             {x: -8, y: 4, z: -7}, {x: 8, y: 4, z: -7}, 0x6b6d68);
+    drawQuad(framebuffer, {x: -8, y: 0, z: -7}, {x: -8, y: 0, z: 7},
+             {x: -8, y: 4, z: 7}, {x: -8, y: 4, z: -7}, 0x70716b);
+    drawQuad(framebuffer, {x: 8, y: 0, z: 7}, {x: 8, y: 0, z: -7},
+             {x: 8, y: 4, z: -7}, {x: 8, y: 4, z: 7}, 0x70716b);
+
+    /* Lift rails, safety stripes, columns, and a workbench make the room read
+     * as a garage while retaining the general box/triangle renderer. */
+    drawBox(framebuffer, -1.05, 0.025, 0, 0, 0.12, 0.05, 2.25, 0xd6b82b);
+    drawBox(framebuffer, 1.05, 0.025, 0, 0, 0.12, 0.05, 2.25, 0xd6b82b);
+    drawBox(framebuffer, -5.8, 0, 5.4, 0, 0.22, 3.2, 0.22, 0x444845);
+    drawBox(framebuffer, 5.8, 0, 5.4, 0, 0.22, 3.2, 0.22, 0x444845);
+    drawBox(framebuffer, -5.8, 0, -5.4, 0, 0.22, 3.2, 0.22, 0x444845);
+    drawBox(framebuffer, 5.8, 0, -5.4, 0, 0.22, 3.2, 0.22, 0x444845);
+    drawBox(framebuffer, -4.7, 0.32, 6.35, 0, 1.4, 0.72, 0.42, 0x8b3c2f);
+    drawBox(framebuffer, -4.7, 1.03, 6.58, 0, 1.35, 0.12, 0.18, 0xc2c3b9);
+    drawCar(framebuffer, 0, 0.08, 0, 0.18, 0xd94a32, true);
+}
+
+function drawMuddyField(framebuffer) {
+    var tile = 10;
+    var row = 0;
+    for (var z = -FIELD_HALF_LENGTH; z < FIELD_HALF_LENGTH; z += tile) {
+        var finalZ = Math.min(FIELD_HALF_LENGTH, z + tile);
+        var column = 0;
+        for (var x = -FIELD_HALF_WIDTH; x < FIELD_HALF_WIDTH; x += tile) {
+            var finalX = Math.min(FIELD_HALF_WIDTH, x + tile);
+            var shade = ((row * 7 + column * 11) % 4) * 0x030201;
+            drawQuad(framebuffer,
+                     {x: x, y: 0, z: z}, {x: finalX, y: 0, z: z},
+                     {x: finalX, y: 0, z: finalZ}, {x: x, y: 0, z: finalZ},
+                     0x65482f + shade);
+            column++;
+        }
+        row++;
+    }
+    var puddles = [[-18, -9, 5, 2], [13, 11, 7, 2.5],
+                   [-4, 23, 4, 1.8], [25, -19, 5, 2.1]];
+    for (var puddleIndex = 0; puddleIndex < puddles.length; puddleIndex++) {
+        var puddle = puddles[puddleIndex];
+        drawQuad(framebuffer,
+                 {x: puddle[0] - puddle[2], y: 0.018, z: puddle[1] - puddle[3]},
+                 {x: puddle[0] + puddle[2], y: 0.018, z: puddle[1] - puddle[3]},
+                 {x: puddle[0] + puddle[2], y: 0.018, z: puddle[1] + puddle[3]},
+                 {x: puddle[0] - puddle[2], y: 0.018, z: puddle[1] + puddle[3]},
+                 0x343b38);
+    }
+    for (x = -FIELD_HALF_WIDTH; x <= FIELD_HALF_WIDTH; x += 10) {
+        drawBox(framebuffer, x, 0, -FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
+                0x66513a);
+        drawBox(framebuffer, x, 0, FIELD_HALF_LENGTH, 0, 0.09, 1.0, 0.09,
+                0x66513a);
+    }
+    for (z = -FIELD_HALF_LENGTH + 4; z < FIELD_HALF_LENGTH; z += 10) {
+        drawBox(framebuffer, -FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
+                0x66513a);
+        drawBox(framebuffer, FIELD_HALF_WIDTH, 0, z, 0, 0.09, 1.0, 0.09,
+                0x66513a);
+    }
+    drawCar(framebuffer, player.x, player.y, player.z, player.heading,
+            0xd94a32, true);
+}
+
 function drawBillboard(framebuffer, x, bottomY, z, width, height, color) {
     var left = {x: x - camera.rightX * width / 2, y: bottomY,
                 z: z - camera.rightZ * width / 2};
@@ -1352,16 +1568,34 @@ function createTextBlitter() {
     });
 }
 
+/* The source glyph is 5x7.  A 320x240 viewport is the 2x visual baseline;
+ * nearby viewport sizes round to the closest integral bitmap scale, with 1x
+ * as the smallest readable representation. */
+function textScale(framebuffer) {
+    return Math.max(1, Math.round(Math.min(framebuffer.width / 160,
+                                           framebuffer.height / 120)));
+}
+
+function textGlyphAdvance(framebuffer) {
+    return (common.font.width + 1) * textScale(framebuffer);
+}
+
+function textLineAdvance(framebuffer) {
+    return (common.font.height + 1) * textScale(framebuffer);
+}
+
 function cachedText(framebuffer, text, originX, originY) {
+    var scale = textScale(framebuffer);
     var key = framebuffer.width + "x" + framebuffer.height + ":" +
-              originX + ":" + originY + ":" + text;
+              scale + ":" + originX + ":" + originY + ":" + text;
     var cached = textCache[key];
     if (cached) return cached;
     var commands = [];
-    var scale = common.font.scale;
+    var glyphAdvance = textGlyphAdvance(framebuffer);
+    var shadowOffset = Math.max(1, Math.floor(scale / 2));
     for (var characterIndex = 0; characterIndex < text.length; characterIndex++) {
         var rows = common.font.glyphRows(text.charAt(characterIndex));
-        var characterX = originX + characterIndex * common.font.glyphAdvance;
+        var characterX = originX + characterIndex * glyphAdvance;
         for (var row = 0; row < common.font.height; row++) {
             for (var column = 0; column < common.font.width; column++) {
                 if (!(rows[row] & (1 << (common.font.width - column - 1)))) continue;
@@ -1369,8 +1603,8 @@ function cachedText(framebuffer, text, originX, originY) {
                     for (var scaleX = 0; scaleX < scale; scaleX++) {
                         var pixelX = characterX + column * scale + scaleX;
                         var pixelY = originY + row * scale + scaleY;
-                        var shadowX = pixelX + 1;
-                        var shadowY = pixelY + 1;
+                        var shadowX = pixelX + shadowOffset;
+                        var shadowY = pixelY + shadowOffset;
                         if (shadowX >= 0 && shadowY >= 0 &&
                             shadowX < framebuffer.width && shadowY < framebuffer.height) {
                             commands.push((shadowY * framebuffer.width + shadowX) * 4, 0);
@@ -1436,61 +1670,134 @@ Demo8FrameRateCounter.prototype.draw = function (framebuffer) {
     }
     if (this.showOnScreen) {
         var label = "FPS " + this.displayValue;
+        var glyphAdvance = textGlyphAdvance(framebuffer);
+        var lineAdvance = textLineAdvance(framebuffer);
         paintText(framebuffer, label,
                   Math.max(0, framebuffer.width -
-                           label.length * common.font.glyphAdvance),
-                  Math.max(0, framebuffer.height - common.font.lineAdvance));
+                           label.length * glyphAdvance),
+                  Math.max(0, framebuffer.height - lineAdvance));
     }
     framebuffer.requestFrame();
 };
 
 function drawHud(framebuffer) {
     var speed = Math.max(0, Math.round(player.speed * 6.2));
-    var compact = framebuffer.width < 220;
-    paintText(framebuffer, (compact ? "SPD " : "SPEED ") + speed, 2, 2);
+    var scale = textScale(framebuffer);
+    var glyphAdvance = textGlyphAdvance(framebuffer);
+    var lineAdvance = textLineAdvance(framebuffer);
+    var margin = scale;
+    var compact = framebuffer.width / glyphAdvance < 19;
+    paintText(framebuffer, (compact ? "SPD " : "SPEED ") + speed,
+              margin, margin);
     paintText(framebuffer, (compact ? "L" : "LAP ") +
-              Math.min(RACE_LAPS, player.lap + 1) + "/" + RACE_LAPS, 2, 18);
+              Math.min(RACE_LAPS, player.lap + 1) + "/" + RACE_LAPS,
+              margin, margin + lineAdvance);
     var positionLabel = (compact ? "P" : "POS ") + player.position + "/6";
     paintText(framebuffer, positionLabel,
-              Math.max(2, framebuffer.width - positionLabel.length *
-                       common.font.glyphAdvance - 2), 2);
+              Math.max(margin, framebuffer.width - positionLabel.length *
+                       glyphAdvance - margin), margin);
     if (raceFinished) {
         var finish = "FINISH  POS " + player.position;
         paintText(framebuffer, finish,
                   Math.max(0, Math.floor((framebuffer.width - finish.length *
-                                         common.font.glyphAdvance) / 2)),
+                                         glyphAdvance) / 2)),
                   Math.floor(framebuffer.height * 0.28));
     }
     if (rollingMode) {
-        if (framebuffer.width >= 230) {
+        if (framebuffer.width / glyphAdvance >= 20) {
             var prompt = "PUSH SPACE TO PLAY";
             paintText(framebuffer, prompt,
                       Math.max(0, Math.floor((framebuffer.width - prompt.length *
-                                             common.font.glyphAdvance) / 2)),
+                                             glyphAdvance) / 2)),
                       Math.floor(framebuffer.height * 0.28));
         } else {
             var firstLine = "PUSH SPACE";
             var secondLine = "TO PLAY";
             paintText(framebuffer, firstLine,
                       Math.max(0, Math.floor((framebuffer.width - firstLine.length *
-                                             common.font.glyphAdvance) / 2)),
+                                             glyphAdvance) / 2)),
                       Math.floor(framebuffer.height * 0.36));
             paintText(framebuffer, secondLine,
                       Math.max(0, Math.floor((framebuffer.width - secondLine.length *
-                                             common.font.glyphAdvance) / 2)),
+                                             glyphAdvance) / 2)),
                       Math.floor(framebuffer.height * 0.36) +
-                      common.font.lineAdvance);
+                      lineAdvance);
         }
+    }
+}
+
+function centeredText(framebuffer, text, y) {
+    paintText(framebuffer, text,
+              Math.max(0, Math.floor((framebuffer.width - text.length *
+                                      textGlyphAdvance(framebuffer)) / 2)), y);
+}
+
+function drawModeHud(framebuffer) {
+    if (gameMode === GAME_MODE_RALLY) {
+        drawHud(framebuffer);
+    } else if (gameMode === GAME_MODE_GARAGE) {
+        var scale = textScale(framebuffer);
+        var glyphAdvance = textGlyphAdvance(framebuffer);
+        var lineAdvance = textLineAdvance(framebuffer);
+        paintText(framebuffer, "GARAGE", scale, scale);
+        if (framebuffer.width / glyphAdvance >= 24) {
+            centeredText(framebuffer, "DRAG MOUSE TO MOVE CAMERA",
+                         framebuffer.height - lineAdvance);
+        }
+    } else {
+        var speed = Math.max(0, Math.round(player.speed * 6.2));
+        scale = textScale(framebuffer);
+        lineAdvance = textLineAdvance(framebuffer);
+        paintText(framebuffer, "FREE DRIVE", scale, scale);
+        paintText(framebuffer, "SPEED " + speed, scale, scale + lineAdvance);
+    }
+}
+
+function drawMenu(framebuffer) {
+    var scale = textScale(framebuffer);
+    var glyphAdvance = textGlyphAdvance(framebuffer);
+    var lineAdvance = textLineAdvance(framebuffer);
+    var fullWidth = 16 * glyphAdvance + scale * 4;
+    var fullHeight = 6 * lineAdvance + scale * 4;
+    var tiny = framebuffer.width / glyphAdvance < 8;
+    var compact = tiny || framebuffer.width < fullWidth ||
+                  framebuffer.height < fullHeight;
+    var lines = tiny ? ["MENU", "R G F", "Q ESC"] :
+                compact ? ["MENU", "R G F Q", "ESC"] :
+                          ["PAUSED MENU", "ESC  RESUME", "R  RESTART GAME",
+                           "G  GARAGE", "F  FREE DRIVE", "Q  QUIT"];
+    var maximumCharacters = 0;
+    for (var measureIndex = 0; measureIndex < lines.length; measureIndex++) {
+        maximumCharacters = Math.max(maximumCharacters, lines[measureIndex].length);
+    }
+    var padding = scale * 2;
+    var panelWidth = Math.min(framebuffer.width - scale * 2,
+                              maximumCharacters * glyphAdvance + padding * 2);
+    var panelHeight = lines.length * lineAdvance + padding * 2;
+    var left = Math.floor((framebuffer.width - panelWidth) / 2);
+    var top = Math.max(2, Math.floor((framebuffer.height - panelHeight) / 2));
+    var right = left + panelWidth;
+    var bottom = Math.min(framebuffer.height - 2, top + panelHeight);
+    for (var y = top; y < bottom; y++) {
+        libc.memset(framebuffer.pixelAddress +
+                    (y * framebuffer.width + left) * 4,
+                    0, (right - left) * 4);
+    }
+    for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        centeredText(framebuffer, lines[lineIndex], top + padding +
+                     lineIndex * lineAdvance);
     }
 }
 
 function drawLoading(framebuffer) {
     var message = framebuffer.width >= 120 ? "LOADING..." : "LOAD";
+    var glyphAdvance = textGlyphAdvance(framebuffer);
+    var lineAdvance = textLineAdvance(framebuffer);
     paintText(framebuffer, message,
               Math.max(0, Math.floor((framebuffer.width - message.length *
-                                      common.font.glyphAdvance) / 2)),
+                                      glyphAdvance) / 2)),
               Math.max(0, Math.floor((framebuffer.height -
-                                      common.font.lineAdvance) / 2)));
+                                      lineAdvance) / 2)));
     framebuffer.requestFrame();
 }
 
@@ -1500,7 +1807,8 @@ function reportGameReady() {
                 " AI cars, " + RACE_LAPS + " laps, " +
                 windowInfo.framesPerSecond + " FPS limit");
     console.log("Attract mode running; push Space to reset the grid and play");
-    console.log("Drive with arrows or WASD; Space brakes; R restarts; Escape exits");
+    console.log("Drive with arrows or WASD; Space brakes; Escape opens the menu");
+    console.log("Menu: Escape resumes, R restarts game, G garage, F free drive, Q quits");
     console.log("F2 cycles triangle rasterization: hand ASM, compiled native, reference JS");
     console.log("triangle-half rasterizer: hand ASM");
 }
@@ -1550,23 +1858,38 @@ function draw(framebuffer) {
     if (!lastFrameTime) lastFrameTime = now;
     var elapsed = (now - lastFrameTime) / 1000;
     lastFrameTime = now;
-    updateSimulation(elapsed);
-    setCamera();
+    if (menuOpen) elapsed = 0;
+    if (gameMode === GAME_MODE_RALLY) {
+        if (!menuOpen) updateSimulation(elapsed);
+        setCamera();
+    } else if (gameMode === GAME_MODE_GARAGE) {
+        setGarageCamera(menuOpen ? 0 : elapsed);
+    } else {
+        if (!menuOpen) updateFreeDrive(elapsed);
+        setCamera();
+    }
     projectedVertexCount = 0;
     projectionFrame++;
     libc.memset(depthBuffer, 0, options.width * options.height * 4);
     background.copy(framebuffer.pixels, 0, 0, background.length);
-    drawCar(framebuffer, player.x, player.y, player.z, player.heading,
-            0xd94a32, true);
-    drawRoad(framebuffer);
-    drawHillsides(framebuffer);
-    drawScenery(framebuffer);
-    for (var i = 0; i < competitors.length; i++) {
-        var ai = competitors[i];
-        drawCar(framebuffer, ai.sample.x, ai.sample.y + 0.10, ai.sample.z,
-                ai.sample.heading, ai.color, false);
+    if (gameMode === GAME_MODE_RALLY) {
+        drawCar(framebuffer, player.x, player.y, player.z, player.heading,
+                0xd94a32, true);
+        drawRoad(framebuffer);
+        drawHillsides(framebuffer);
+        drawScenery(framebuffer);
+        for (var i = 0; i < competitors.length; i++) {
+            var ai = competitors[i];
+            drawCar(framebuffer, ai.sample.x, ai.sample.y + 0.10, ai.sample.z,
+                    ai.sample.heading, ai.color, false);
+        }
+    } else if (gameMode === GAME_MODE_GARAGE) {
+        drawGarage(framebuffer);
+    } else {
+        drawMuddyField(framebuffer);
     }
-    drawHud(framebuffer);
+    drawModeHud(framebuffer);
+    if (menuOpen) drawMenu(framebuffer);
     if (frameRateCounter) frameRateCounter.draw(framebuffer);
     else framebuffer.requestFrame();
 }
@@ -1585,8 +1908,36 @@ function setDrivingKey(event, pressed) {
 }
 
 function startHumanRace() {
+    gameMode = GAME_MODE_RALLY;
     rollingMode = false;
     resetRace();
+}
+
+function isEscape(event) {
+    return event.keysym === common.keysyms.escape ||
+           (!event.keysym && event.keycode === 9);
+}
+
+function openMenu() {
+    menuOpen = true;
+    garageDragging = false;
+    clearControls();
+    console.log("menu opened");
+}
+
+function closeMenu() {
+    menuOpen = false;
+    lastFrameTime = 0;
+    console.log("menu closed; resuming");
+}
+
+function handleMenuKey(event, activeWindow) {
+    var key = event.keysym;
+    if (isEscape(event)) closeMenu();
+    else if (key === 113 || key === 81) activeWindow.close();
+    else if (key === 114 || key === 82) enterRallyMode();
+    else if (key === 103 || key === 71) enterGarageMode();
+    else if (key === 102 || key === 70) enterFreeDriveMode();
 }
 
 function toggleTriangleRasterizer() {
@@ -1607,11 +1958,19 @@ var window = common.createWindow({
     draw: draw,
     keyPress: function (event, activeWindow) {
         if (!gameReady) {
-            if (event.keysym === common.keysyms.escape ||
-                (!event.keysym && event.keycode === 9)) activeWindow.close();
+            if (isEscape(event)) activeWindow.close();
             return;
         }
-        if (event.keysym === 32 && (rollingMode || raceFinished)) {
+        if (menuOpen) {
+            handleMenuKey(event, activeWindow);
+            return;
+        }
+        if (isEscape(event)) {
+            openMenu();
+            return;
+        }
+        if (gameMode === GAME_MODE_RALLY && event.keysym === 32 &&
+            (rollingMode || raceFinished)) {
             startHumanRace();
             return;
         }
@@ -1619,10 +1978,7 @@ var window = common.createWindow({
             toggleTriangleRasterizer();
             return;
         }
-        setDrivingKey(event, true);
-        if (event.keysym === common.keysyms.escape ||
-            (!event.keysym && event.keycode === 9)) activeWindow.close();
-        else if (event.keysym === 114 || event.keysym === 82) resetRace();
+        if (gameMode !== GAME_MODE_GARAGE) setDrivingKey(event, true);
         if (options.debugEvents) {
             console.log("key press: X11 keycode " + event.keycode +
                         ", keysym 0x" + event.keysym.toString(16));
@@ -1630,7 +1986,26 @@ var window = common.createWindow({
     },
     keyRelease: function (event) {
         if (!gameReady) return;
-        setDrivingKey(event, false);
+        if (!menuOpen && gameMode !== GAME_MODE_GARAGE) setDrivingKey(event, false);
+    },
+    buttonPress: function (event) {
+        if (!gameReady || menuOpen || gameMode !== GAME_MODE_GARAGE ||
+            event.button !== 1) return;
+        garageDragging = true;
+        garageDragX = event.x;
+        garageDragY = event.y;
+    },
+    buttonRelease: function (event) {
+        if (event.button === 1) garageDragging = false;
+    },
+    pointerMove: function (event) {
+        if (!garageDragging || menuOpen || gameMode !== GAME_MODE_GARAGE) return;
+        var deltaX = event.x - garageDragX;
+        var deltaY = event.y - garageDragY;
+        garageOrbitPhase -= deltaX * 0.012;
+        garageManualLift = clamp(garageManualLift - deltaY * 0.012, -0.9, 1.35);
+        garageDragX = event.x;
+        garageDragY = event.y;
     },
     ready: function (info) {
         windowInfo = info;

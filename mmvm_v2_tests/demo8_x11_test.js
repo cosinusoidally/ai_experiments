@@ -104,16 +104,20 @@ function setupRequest(authority) {
 
 function parseOptions(argv) {
     var options = {title: "demo8.js Welsh upland rally", count: 3,
-                   delay: 1000, depth: 3};
+                   delay: 1000, depth: 3, keys: null, drag: null, hold: null};
     for (var index = 2; index < argv.length; index++) {
         var option = argv[index];
         if (option === "--title") options.title = argv[++index];
         else if (option === "--count") options.count = parseInt(argv[++index], 10);
         else if (option === "--delay") options.delay = parseInt(argv[++index], 10);
         else if (option === "--depth") options.depth = parseInt(argv[++index], 10);
+        else if (option === "--keys") options.keys = argv[++index];
+        else if (option === "--drag") options.drag = argv[++index];
+        else if (option === "--hold") options.hold = argv[++index];
         else if (option === "--help" || option === "-h") {
             console.log("usage: demo8_x11_test.js [--title TEXT] [--count N] " +
-                        "[--delay MS] [--depth N]");
+                        "[--delay MS] [--depth N] [--keys LIST] " +
+                        "[--drag X1,Y1:X2,Y2] [--hold KEY:MS]");
             process.exit(0);
         } else throw new Error("unknown option: " + option);
     }
@@ -123,7 +127,41 @@ function parseOptions(argv) {
     if (!(options.delay >= 0 && options.delay <= 60000)) {
         throw new Error("--delay must be between 0 and 60000");
     }
+    if (options.keys) options.keyNames = options.keys.split(",");
+    else if (options.hold) options.keyNames = [];
+    else {
+        options.keyNames = [];
+        for (var keyIndex = 0; keyIndex < options.count; keyIndex++) {
+            options.keyNames.push("F2");
+        }
+    }
+    if (options.drag) {
+        var dragMatch = /^([0-9]+),([0-9]+):([0-9]+),([0-9]+)$/.exec(options.drag);
+        if (!dragMatch) throw new Error("--drag must be X1,Y1:X2,Y2");
+        options.dragPoints = [parseInt(dragMatch[1], 10), parseInt(dragMatch[2], 10),
+                              parseInt(dragMatch[3], 10), parseInt(dragMatch[4], 10)];
+    }
+    if (options.hold) {
+        var holdMatch = /^([^:]+):([0-9]+)$/.exec(options.hold);
+        if (!holdMatch) throw new Error("--hold must be KEY:MS");
+        options.holdName = holdMatch[1];
+        options.holdMilliseconds = parseInt(holdMatch[2], 10);
+        if (options.holdMilliseconds < 1 || options.holdMilliseconds > 60000) {
+            throw new Error("--hold duration must be between 1 and 60000 ms");
+        }
+    }
+    options.lookupNames = options.keyNames.slice(0);
+    if (options.holdName) options.lookupNames.push(options.holdName);
     return options;
+}
+
+function keysymForName(name) {
+    var upper = name.toUpperCase();
+    if (upper === "ESC" || upper === "ESCAPE") return 0xff1b;
+    if (upper === "SPACE") return 32;
+    if (upper === "F2") return 0xffbf;
+    if (name.length === 1) return name.toLowerCase().charCodeAt(0);
+    throw new Error("unknown key name: " + name);
 }
 
 function X11TestClient(options) {
@@ -261,11 +299,11 @@ X11TestClient.prototype.findWindow = function () {
         if (!window) return client.fail(new Error("could not find X11 window titled " +
                                                  client.options.title));
         client.window = window;
-        client.queryF2Keycode();
+        client.queryKeycodes();
     });
 };
 
-X11TestClient.prototype.queryF2Keycode = function () {
+X11TestClient.prototype.queryKeycodes = function () {
     var client = this;
     var count = this.maximumKeycode - this.minimumKeycode + 1;
     var request = allocate(8);
@@ -277,46 +315,108 @@ X11TestClient.prototype.queryF2Keycode = function () {
         if (error) return client.fail(error);
         var perKeycode = byteAt(reply, 1);
         var offset = 32;
-        var keycode = 0;
+        var keycodes = {};
         for (var code = client.minimumKeycode;
              code <= client.maximumKeycode; code++) {
             for (var slot = 0; slot < perKeycode; slot++) {
-                if (reply.readUInt32LE(offset) === 0xffbf) keycode = code;
+                var mappedKeysym = reply.readUInt32LE(offset);
+                for (var wantedIndex = 0;
+                     wantedIndex < client.options.lookupNames.length; wantedIndex++) {
+                    var wantedKeysym = keysymForName(client.options.lookupNames[wantedIndex]);
+                    if (mappedKeysym === wantedKeysym && !keycodes[wantedKeysym]) {
+                        keycodes[wantedKeysym] = code;
+                    }
+                }
                 offset += 4;
             }
         }
-        if (!keycode) return client.fail(new Error("F2 keysym is absent from X11 mapping"));
-        client.keycode = keycode;
-        client.runToggles(0);
+        for (wantedIndex = 0; wantedIndex < client.options.lookupNames.length;
+             wantedIndex++) {
+            wantedKeysym = keysymForName(client.options.lookupNames[wantedIndex]);
+            if (!keycodes[wantedKeysym]) {
+                return client.fail(new Error(client.options.lookupNames[wantedIndex] +
+                                             " keysym is absent from X11 mapping"));
+            }
+        }
+        client.keycodes = keycodes;
+        client.runKeys(0);
     });
 };
 
-X11TestClient.prototype.sendKeyEvent = function (type, mask) {
+X11TestClient.prototype.sendKeyEvent = function (type, mask, keycode) {
     var request = allocate(44);
     setByte(request, 0, 25); /* SendEvent */
     request.writeUInt16LE(11, 2);
     request.writeUInt32LE(this.window, 4);
     request.writeUInt32LE(mask, 8);
     setByte(request, 12, type);
-    setByte(request, 13, this.keycode);
+    setByte(request, 13, keycode);
     request.writeUInt32LE(this.root, 20);
     request.writeUInt32LE(this.window, 24);
     setByte(request, 42, 1); /* same-screen */
     this.send(request);
 };
 
-X11TestClient.prototype.runToggles = function (index) {
+X11TestClient.prototype.sendPointerEvent = function (type, detail, mask, state, x, y) {
+    var request = allocate(44);
+    setByte(request, 0, 25); /* SendEvent */
+    request.writeUInt16LE(11, 2);
+    request.writeUInt32LE(this.window, 4);
+    request.writeUInt32LE(mask, 8);
+    setByte(request, 12, type);
+    setByte(request, 13, detail);
+    request.writeUInt32LE(this.root, 20);
+    request.writeUInt32LE(this.window, 24);
+    request.writeInt16LE(x, 32);
+    request.writeInt16LE(y, 34);
+    request.writeInt16LE(x, 36);
+    request.writeInt16LE(y, 38);
+    request.writeUInt16LE(state, 40);
+    setByte(request, 42, 1);
+    this.send(request);
+};
+
+X11TestClient.prototype.finishInput = function () {
     var client = this;
-    if (index >= this.options.count) {
-        console.log("sent " + this.options.count + " F2 toggle(s) to X11 window 0x" +
-                    this.window.toString(16));
-        this.socket.end();
+    if (this.options.holdName) {
+        var holdName = this.options.holdName;
+        var holdKeysym = keysymForName(holdName);
+        var holdKeycode = this.keycodes[holdKeysym];
+        this.options.holdName = null;
+        this.sendKeyEvent(2, 1, holdKeycode);
+        console.log("holding " + holdName + " for " +
+                    this.options.holdMilliseconds + " ms");
+        setTimeout(function () {
+            client.sendKeyEvent(3, 2, holdKeycode);
+            console.log("released " + holdName);
+            client.finishInput();
+        }, this.options.holdMilliseconds);
         return;
     }
-    this.sendKeyEvent(2, 1); /* KeyPress / KeyPressMask */
-    this.sendKeyEvent(3, 2); /* KeyRelease / KeyReleaseMask */
-    console.log("sent F2 toggle " + (index + 1) + "/" + this.options.count);
-    setTimeout(function () { client.runToggles(index + 1); }, this.options.delay);
+    if (this.options.dragPoints) {
+        var point = this.options.dragPoints;
+        this.sendPointerEvent(4, 1, 4, 0, point[0], point[1]);
+        this.sendPointerEvent(6, 0, 64, 256, point[2], point[3]);
+        this.sendPointerEvent(5, 1, 8, 256, point[2], point[3]);
+        console.log("sent button-1 drag " + point[0] + "," + point[1] + " -> " +
+                    point[2] + "," + point[3]);
+    }
+    console.log("sent " + this.options.keyNames.length + " key event(s) to X11 window 0x" +
+                this.window.toString(16));
+    this.socket.end();
+};
+
+X11TestClient.prototype.runKeys = function (index) {
+    var client = this;
+    if (index >= this.options.keyNames.length) return this.finishInput();
+    var name = this.options.keyNames[index];
+    var keysym = keysymForName(name);
+    var keycode = this.keycodes[keysym];
+    this.sendKeyEvent(2, 1, keycode); /* KeyPress / KeyPressMask */
+    this.sendKeyEvent(3, 2, keycode); /* KeyRelease / KeyReleaseMask */
+    console.log("sent " + name + " key " + (index + 1) + "/" +
+                this.options.keyNames.length);
+    setTimeout(function () { client.runKeys(index + 1); }, this.options.delay);
 };
 
 X11TestClient.prototype.fail = function (error) {

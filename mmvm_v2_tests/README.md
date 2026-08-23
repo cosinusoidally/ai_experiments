@@ -875,6 +875,33 @@ LD_LIBRARY_PATH="$MOZJS_LIB" \
   demo8_runner.js demo8.js --size 64x64 --dump-native-assembly
 ```
 
+Escape pauses demo8 and opens its mode menu. The menu keys are:
+
+- Escape resumes the current mode without resetting it. Pressing Escape twice
+  therefore acts as pause/resume.
+- `R` selects **Restart Game**: it resets the race grid, lap/position state,
+  and player/AI vehicles, then returns to rolling attract mode with the
+  `PUSH SPACE TO PLAY` prompt. Space resets the grid again and starts the
+  human-controlled rally.
+- `G` enters the garage view.
+- `F` enters free driving on the bounded muddy field.
+- `Q` exits demo8.
+
+The garage camera automatically travels around the rally car on an elliptical
+path and follows a sinusoidal up/down motion. Hold mouse button 1 and drag to
+control its orbit angle and height; release the button to resume automatic
+motion. Free-driving mode uses the normal arrow/WASD automatic-style driving
+controls, but replaces the rally course and competitors with a fixed
+90-by-68-unit brown field, puddles, and visible boundary posts.
+
+Demo8 text remains the built-in 5x7 bitmap font painted directly into the
+framebuffer. Its integer pixel scale is proportional to the viewport: 320x240
+is the 2x baseline, 160x120 and smaller displays use the native 1x glyph, and
+larger displays choose the nearest corresponding integral scale. There is no
+font interpolation, antialiasing, X11 text call, or external font renderer.
+HUD placement, menu dimensions, loading text, garage labels, and the FPS
+counter all use the same scaled glyph and line metrics.
+
 Press F2 while demo8 is running to cycle triangle-half rasterization through
 three independently selectable implementations:
 
