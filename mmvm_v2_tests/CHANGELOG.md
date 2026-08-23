@@ -8,6 +8,32 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.28
+
+Approximate completion: 2026-08-23 23:30 BST
+
+### Demo 8 runner and NativeCompiler
+
+- Added recursively compiled native function dependencies through explicit
+  `function.nativeCompile.dependencies` name-to-function maps. Dependencies may
+  declare further dependencies; the compiler handles nested, self-recursive,
+  and mutually recursive graphs without returning through interpreted
+  JavaScript at call boundaries.
+- Added native `return` statements, internal stack arguments, left-to-right
+  argument evaluation, relative native call fixups, and support for helpers
+  with more than eight arguments. The external root retains its existing
+  eight-argument FFI/specialization contract.
+- Emit each specialized graph into one owned executable mapping. Destroying the
+  compiled root releases every dependency together; macro-assembly dumps now
+  show function labels and native calls, and each variant records its emitted
+  function count.
+- Added `native_compiler_dependencies_test.js`, compatible with Node.js and
+  `js_min.exe`. The native run validates seven recursively collected functions,
+  nested calls, mutual recursion, nine internal arguments, return values,
+  evaluation order, destruction, and declaration errors. Existing Demo 8
+  single-function rasterizers continue to initialize and pass their comparison
+  test unchanged.
+
 ## 0.27
 
 Approximate completion: 2026-08-23 23:00 BST

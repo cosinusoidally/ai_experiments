@@ -2649,6 +2649,11 @@ X86Assembler.prototype.jump = function (condition, label) {
     this.fixups.push({offset: this.bytes.length, label: label});
     this.emit32(0);
 };
+X86Assembler.prototype.call = function (label) {
+    this.emit(0xe8);
+    this.fixups.push({offset: this.bytes.length, label: label});
+    this.emit32(0);
+};
 X86Assembler.prototype.returnFromFunction = function () { this.emit(0xc3); };
 X86Assembler.prototype.finish = function () {
     for (var index = 0; index < this.fixups.length; index++) {
@@ -2683,7 +2688,7 @@ function MacroAssemblyRecorder(assembler) {
         "compareImmediate", "shift", "moveZeroExtended16",
         "moveSignExtended16", "exchangeRegisters", "signExtendEax",
         "divideSignedBy", "negate", "bitwiseNot", "decrement",
-        "incrementLocal", "label", "jump", "returnFromFunction"
+        "incrementLocal", "label", "jump", "call", "returnFromFunction"
     ];
     function install(method) {
         recorder[method] = function () {
@@ -2871,6 +2876,12 @@ NativeJSParser.prototype.parseBlock = function () {
 
 NativeJSParser.prototype.parseStatement = function () {
     if (this.token.value === "{") return this.parseBlock();
+    if (this.accept("return")) {
+        var returnExpression = null;
+        if (this.token.value !== ";") returnExpression = this.parseExpression();
+        this.expect(";");
+        return {type: "return", expression: returnExpression};
+    }
     if (this.accept("var")) {
         var declarations = [];
         do {
@@ -3009,14 +3020,20 @@ NativeJSParser.prototype.parsePrimary = function () {
     this.error("expected expression, found " + this.token.value);
 };
 
-function NativeJSCompiler(ast, configuration, specializedValues) {
+function NativeJSCompiler(ast, configuration, specializedValues,
+                          assembler, callTargets, internalFunction,
+                          entryLabel) {
     this.ast = ast;
     this.configuration = configuration;
     this.specializedValues = specializedValues;
-    this.assembler = new MacroAssemblyRecorder(new X86Assembler());
+    this.assembler = assembler || new MacroAssemblyRecorder(new X86Assembler());
+    this.callTargets = callTargets || {};
+    this.internalFunction = !!internalFunction;
+    this.entryLabel = entryLabel || null;
     this.locals = {};
     this.localCount = 0;
     this.labelCounter = 0;
+    this.epilogueLabel = null;
     this.parameters = {};
     for (var index = 0; index < ast.parameters.length; index++) {
         this.parameters[ast.parameters[index]] = index;
@@ -3047,7 +3064,8 @@ NativeJSCompiler.prototype.collectLocals = function (statement) {
     }
 };
 NativeJSCompiler.prototype.newLabel = function (prefix) {
-    return "nativeJS_" + prefix + "_" + (++this.labelCounter);
+    return "nativeJS_" + this.ast.name + "_" + prefix + "_" +
+           (++this.labelCounter);
 };
 NativeJSCompiler.prototype.memberName = function (expression) {
     if (expression.type === "identifier") return expression.name;
@@ -3070,7 +3088,9 @@ NativeJSCompiler.prototype.loadIdentifier = function (name) {
         this.assembler.moveLocalToRegister("eax", this.locals[name]);
     } else if (typeof this.parameters[name] === "number") {
         var argumentIndex = this.parameters[name];
-        if (argumentIndex >= 8) this.error("parameter " + name + " must be specialized");
+        if (argumentIndex >= 8 && !this.internalFunction) {
+            this.error("parameter " + name + " must be specialized");
+        }
         this.assembler.moveArgument("eax", argumentIndex);
     } else {
         this.error("unresolved identifier " + name);
@@ -3096,6 +3116,25 @@ NativeJSCompiler.prototype.compileCall = function (expression) {
         this.compileExpression(expression.arguments[1]);
         this.assembler.pop("ecx");
         this.assembler.moveRegisterToMemory("ecx", 0, "eax");
+        return;
+    }
+    var target = this.callTargets[callee];
+    if (target) {
+        if (expression.arguments.length !== target.arity) {
+            this.error("call to " + callee + " expects " + target.arity +
+                       " arguments, received " + expression.arguments.length);
+        }
+        var argumentBytes = expression.arguments.length * 4;
+        if (argumentBytes) this.assembler.subtractImmediate("esp", argumentBytes);
+        /* Reserve the complete argument area first, then evaluate and store
+         * left-to-right to retain JavaScript evaluation order. */
+        for (var argumentIndex = 0;
+             argumentIndex < expression.arguments.length; argumentIndex++) {
+            this.compileExpression(expression.arguments[argumentIndex]);
+            this.assembler.moveRegisterToMemory("esp", argumentIndex * 4, "eax");
+        }
+        this.assembler.call(target.label);
+        if (argumentBytes) this.assembler.addImmediate("esp", argumentBytes);
         return;
     }
     this.error("unsupported call to " + callee);
@@ -3226,22 +3265,33 @@ NativeJSCompiler.prototype.compileStatement = function (statement) {
             this.compileStatement(statement.alternate);
         }
         this.assembler.label(ifEnd);
+    } else if (statement.type === "return") {
+        if (statement.expression) this.compileExpression(statement.expression);
+        else this.assembler.xorRegisters("eax", "eax");
+        this.assembler.jump("always", this.epilogueLabel);
     } else {
         this.error("unsupported statement " + statement.type);
     }
 };
 
-NativeJSCompiler.prototype.compile = function () {
+NativeJSCompiler.prototype.emit = function () {
     var assembler = this.assembler;
+    if (this.entryLabel) assembler.label(this.entryLabel);
+    this.epilogueLabel = this.newLabel("return");
     assembler.push("ebp");
     assembler.moveRegister("ebp", "esp");
     if (this.localCount) assembler.subtractImmediate("esp", this.localCount * 4);
     this.compileStatement(this.ast.body);
     assembler.xorRegisters("eax", "eax");
+    assembler.label(this.epilogueLabel);
     assembler.moveRegister("esp", "ebp");
     assembler.pop("ebp");
     assembler.returnFromFunction();
-    return assembler.finish();
+};
+
+NativeJSCompiler.prototype.compile = function () {
+    this.emit();
+    return this.assembler.finish();
 };
 
 var nativeCode = {
@@ -3313,6 +3363,11 @@ function NativeCompiledFunction(functionObject) {
     this.source = functionObject.toString();
     this.ast = new NativeJSParser(this.source).parseFunction();
     this.configuration = functionObject.nativeCompile || {};
+    this.functionObject = functionObject;
+    this.graphNodes = [];
+    this.graphByName = {};
+    this.addGraphFunction(this.ast.name, functionObject, true,
+                          this.source, this.ast);
     this.specializedNames = this.configuration.specialize || [];
     this.specializedIndexes = [];
     this.variants = {};
@@ -3360,6 +3415,79 @@ function NativeCompiledFunction(functionObject) {
     this.fn.compiledObject = this;
 }
 
+NativeCompiledFunction.prototype.addGraphFunction = function (
+        declaredName, functionObject, isRoot, knownSource, knownAst) {
+    var existing = this.graphByName[declaredName];
+    if (existing) {
+        if (existing.functionObject !== functionObject) {
+            throw new Error("compileNative: dependency name " + declaredName +
+                            " refers to more than one function");
+        }
+        return existing;
+    }
+    if (typeof functionObject !== "function") {
+        throw new Error("compileNative: dependency " + declaredName +
+                        " is not a function");
+    }
+    var source = knownSource || functionObject.toString();
+    var ast = knownAst || new NativeJSParser(source).parseFunction();
+    if (ast.name !== declaredName) {
+        throw new Error("compileNative: dependency key " + declaredName +
+                        " does not match function name " + ast.name);
+    }
+    var configuration = functionObject.nativeCompile || {};
+    if (!isRoot && configuration.specialize && configuration.specialize.length) {
+        throw new Error("compileNative: internal dependency " + declaredName +
+                        " cannot specialize parameters");
+    }
+    var node = {
+        name: declaredName,
+        functionObject: functionObject,
+        source: source,
+        ast: ast,
+        configuration: configuration,
+        dependencyNames: [],
+        isRoot: !!isRoot,
+        label: "nativeFunction_" + this.graphNodes.length + "_" + declaredName
+    };
+    /* Insert before descending so direct and mutual recursion terminate. */
+    this.graphByName[declaredName] = node;
+    this.graphNodes.push(node);
+    var dependencies = configuration.dependencies || {};
+    for (var dependencyName in dependencies) {
+        if (!dependencies.hasOwnProperty(dependencyName)) continue;
+        node.dependencyNames.push(dependencyName);
+        this.addGraphFunction(dependencyName, dependencies[dependencyName], false);
+    }
+    return node;
+};
+
+NativeCompiledFunction.prototype.configurationForNode = function (node) {
+    var constants = {};
+    var rootConstants = this.configuration.constants || {};
+    var nodeConstants = node.configuration.constants || {};
+    var name;
+    for (name in rootConstants) {
+        if (rootConstants.hasOwnProperty(name)) constants[name] = rootConstants[name];
+    }
+    for (name in nodeConstants) {
+        if (nodeConstants.hasOwnProperty(name)) constants[name] = nodeConstants[name];
+    }
+    return {constants: constants};
+};
+
+NativeCompiledFunction.prototype.callTargetsForNode = function (node) {
+    var targets = {};
+    targets[node.name] = {label: node.label, arity: node.ast.parameters.length};
+    for (var index = 0; index < node.dependencyNames.length; index++) {
+        var name = node.dependencyNames[index];
+        var dependency = this.graphByName[name];
+        targets[name] = {label: dependency.label,
+                         arity: dependency.ast.parameters.length};
+    }
+    return targets;
+};
+
 NativeCompiledFunction.prototype.variantFor = function (callArguments) {
     if (this.destroyed) throw new Error("compiled native function has been destroyed");
     var keyParts = [];
@@ -3374,17 +3502,26 @@ NativeCompiledFunction.prototype.variantFor = function (callArguments) {
     var key = keyParts.length ? keyParts.join(":") : "default";
     var variant = this.variants[key];
     if (!variant) {
-        var compiler = new NativeJSCompiler(this.ast, this.configuration,
-                                            specializedValues);
-        var bytes = compiler.compile();
+        var assembler = new MacroAssemblyRecorder(new X86Assembler());
+        for (var nodeIndex = 0; nodeIndex < this.graphNodes.length; nodeIndex++) {
+            var node = this.graphNodes[nodeIndex];
+            var compiler = new NativeJSCompiler(
+                node.ast, this.configurationForNode(node), specializedValues,
+                assembler, this.callTargetsForNode(node), !node.isRoot,
+                node.label);
+            compiler.emit();
+        }
+        var bytes = assembler.finish();
         variant = nativeCode.create(bytes);
         variant.byteLength = bytes.length;
         variant.specializedValues = specializedValues;
-        variant.macroAssembly = compiler.assembler.toString();
+        variant.macroAssembly = assembler.toString();
+        variant.functionCount = this.graphNodes.length;
         this.variants[key] = variant;
         if (this.configuration.dumpMacroAssembly && !this.dumpedMacroAssembly) {
             console.log("--- compiled native macro assembly: " + this.ast.name +
-                        " [variant " + key + ", " + bytes.length + " bytes] ---");
+                        " [variant " + key + ", " + bytes.length + " bytes, " +
+                        this.graphNodes.length + " function(s)] ---");
             console.log(variant.macroAssembly);
             console.log("--- end compiled native macro assembly ---");
             this.dumpedMacroAssembly = true;
