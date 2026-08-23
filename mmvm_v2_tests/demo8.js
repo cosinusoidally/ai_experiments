@@ -31,7 +31,6 @@ var freeDriveFieldTiles;
 var freeDriveTrackLines;
 var freeDrivePuddleQuads;
 var freeDriveStartQuad;
-var garageFloorTiles;
 var garageWallQuads;
 var depthBuffer;
 var background;
@@ -42,6 +41,9 @@ var freeDriveSkyboxSourceStep = 0;
 var freeDriveSkyboxBlitter = null;
 var windowTextureRasterizer = null;
 var windowTriangleDescriptor = null;
+var garageFloorTexture = null;
+var garageFloorTextureWidth = 2;
+var garageFloorTextureHeight = 2;
 var spanRasterizer;
 var spanRasterizers = {};
 var TRIANGLE_RASTERIZER_HAND_ASM = 0;
@@ -1804,20 +1806,6 @@ function makeFreeDriveGeometry() {
 }
 
 function makeGarageGeometry() {
-    garageFloorTiles = [];
-    var tile = 2;
-    for (var z = -7; z < 7; z += tile) {
-        for (var x = -8; x < 8; x += tile) {
-            var dark = (((x + 8) / tile + (z + 7) / tile) & 1);
-            garageFloorTiles.push({
-                a: {x: x, y: 0, z: z}, b: {x: x + tile, y: 0, z: z},
-                c: {x: x + tile, y: 0, z: z + tile},
-                d: {x: x, y: 0, z: z + tile},
-                centerX: x + tile * 0.5, centerZ: z + tile * 0.5,
-                color: dark ? 0x555653 : 0x64645f
-            });
-        }
-    }
     garageWallQuads = [
         {a: {x: -8, y: 0, z: 7}, b: {x: 8, y: 0, z: 7},
          c: {x: 8, y: 4, z: 7}, d: {x: -8, y: 4, z: 7}, color: 0x777871},
@@ -1828,6 +1816,16 @@ function makeGarageGeometry() {
         {a: {x: 8, y: 0, z: 7}, b: {x: 8, y: 0, z: -7},
          c: {x: 8, y: 4, z: -7}, d: {x: 8, y: 4, z: 7}, color: 0x70716b}
     ];
+}
+
+function makeGarageFloorTexture() {
+    var texture = allocatePacked(garageFloorTextureWidth *
+                                 garageFloorTextureHeight * 4);
+    pokePacked32(texture, 0, 0x64645f);
+    pokePacked32(texture, 4, 0x555653);
+    pokePacked32(texture, 8, 0x555653);
+    pokePacked32(texture, 12, 0x64645f);
+    return texture;
 }
 
 function drawRoad(framebuffer) {
@@ -2002,7 +2000,8 @@ function reflectedSkyCoordinatesInto(result, point,
     return result;
 }
 
-function windowTextureTriangleJS(pixels, texture, descriptor) {
+function windowTextureTriangleJS(pixels, texture, descriptor,
+                                 textureWidth, textureHeight, wrapU, wrapV) {
     var minimumX = peek32(descriptor);
     var maximumX = peek32(descriptor + 4);
     var minimumY = peek32(descriptor + 8);
@@ -2059,18 +2058,30 @@ function windowTextureTriangleJS(pixels, texture, descriptor) {
                             if (inverse > 0) {
                                 sourceX = textureUOverZ / inverse;
                                 sourceY = textureVOverZ / inverse;
-                                while (sourceX < 0) {
-                                    sourceX += freeDriveSkyboxWidth;
+                                if (wrapU) {
+                                    while (sourceX < 0) sourceX += textureWidth;
+                                    while (sourceX >= textureWidth) {
+                                        sourceX -= textureWidth;
+                                    }
+                                } else {
+                                    if (sourceX < 0) sourceX = 0;
+                                    if (sourceX >= textureWidth) {
+                                        sourceX = textureWidth - 1;
+                                    }
                                 }
-                                while (sourceX >= freeDriveSkyboxWidth) {
-                                    sourceX -= freeDriveSkyboxWidth;
-                                }
-                                if (sourceY < 0) sourceY = 0;
-                                if (sourceY >= freeDriveSkyboxHeight) {
-                                    sourceY = freeDriveSkyboxHeight - 1;
+                                if (wrapV) {
+                                    while (sourceY < 0) sourceY += textureHeight;
+                                    while (sourceY >= textureHeight) {
+                                        sourceY -= textureHeight;
+                                    }
+                                } else {
+                                    if (sourceY < 0) sourceY = 0;
+                                    if (sourceY >= textureHeight) {
+                                        sourceY = textureHeight - 1;
+                                    }
                                 }
                                 color = peek32(texture +
-                                    (sourceY * freeDriveSkyboxWidth + sourceX) * 4);
+                                    (sourceY * textureWidth + sourceX) * 4);
                                 poke32(depthBuffer + pixelOffset, depth);
                                 poke32(pixels + pixelOffset, color);
                             }
@@ -2170,6 +2181,18 @@ function drawReflectedWindowTriangle(framebuffer, firstWorld, secondWorld,
     var second = project(secondWorld);
     var third = project(thirdWorld);
     if (!first || !second || !third) return;
+    secondUV.u = unwrapWindowTextureU(secondUV.u, firstUV.u);
+    thirdUV.u = unwrapWindowTextureU(thirdUV.u, firstUV.u);
+    drawProjectedTextureTriangle(framebuffer, first, second, third,
+                                 firstUV, secondUV, thirdUV,
+                                 freeDriveSkybox, freeDriveSkyboxWidth,
+                                 freeDriveSkyboxHeight, true, false);
+}
+
+function drawProjectedTextureTriangle(framebuffer, first, second, third,
+                                      firstUV, secondUV, thirdUV,
+                                      texture, textureWidth, textureHeight,
+                                      wrapU, wrapV) {
     var area = (second.x - first.x) * (third.y - first.y) -
                (third.x - first.x) * (second.y - first.y);
     if (Math.abs(area) < 0.01) return;
@@ -2192,8 +2215,6 @@ function drawReflectedWindowTriangle(framebuffer, firstWorld, secondWorld,
                             Math.ceil(Math.max(first.y, second.y, third.y)));
     if (minimumX >= maximumX || minimumY >= maximumY) return;
 
-    secondUV.u = unwrapWindowTextureU(secondUV.u, firstUV.u);
-    thirdUV.u = unwrapWindowTextureU(thirdUV.u, firstUV.u);
     pokePacked32(windowTriangleDescriptor, 0, minimumX);
     pokePacked32(windowTriangleDescriptor, 4, maximumX);
     pokePacked32(windowTriangleDescriptor, 8, minimumY);
@@ -2221,8 +2242,75 @@ function drawReflectedWindowTriangle(framebuffer, firstWorld, secondWorld,
         thirdUV.v * third.inverseZ * inverseScale,
         area, minimumX, minimumY);
     windowTextureRasterizer(framebuffer.pixelAddress,
-                            freeDriveSkybox._nodePointer,
-                            windowTriangleDescriptor._nodePointer);
+                            texture._nodePointer,
+                            windowTriangleDescriptor._nodePointer,
+                            textureWidth, textureHeight,
+                            wrapU ? 1 : 0, wrapV ? 1 : 0);
+}
+
+function texturedCameraSpace(world, u, v) {
+    var vertex = cameraSpace(world);
+    vertex.u = u;
+    vertex.v = v;
+    return vertex;
+}
+
+function texturedNearIntersection(inside, outside) {
+    var amount = (NEAR_PLANE - inside.depth) /
+                 (outside.depth - inside.depth);
+    return {right: inside.right + (outside.right - inside.right) * amount,
+            vertical: inside.vertical +
+                      (outside.vertical - inside.vertical) * amount,
+            depth: NEAR_PLANE,
+            u: inside.u + (outside.u - inside.u) * amount,
+            v: inside.v + (outside.v - inside.v) * amount};
+}
+
+function drawTexturedWorldQuad(framebuffer, a, b, c, d,
+                               firstU, firstV, secondU, secondV,
+                               thirdU, thirdV, fourthU, fourthV,
+                               texture, textureWidth, textureHeight) {
+    var input = [texturedCameraSpace(a, firstU, firstV),
+                 texturedCameraSpace(b, secondU, secondV),
+                 texturedCameraSpace(c, thirdU, thirdV),
+                 texturedCameraSpace(d, fourthU, fourthV)];
+    var output = [];
+    var previous = input[input.length - 1];
+    var previousInside = previous.depth >= NEAR_PLANE;
+    for (var index = 0; index < input.length; index++) {
+        var current = input[index];
+        var currentInside = current.depth >= NEAR_PLANE;
+        if (currentInside !== previousInside) {
+            output.push(currentInside ?
+                texturedNearIntersection(current, previous) :
+                texturedNearIntersection(previous, current));
+        }
+        if (currentInside) output.push(current);
+        previous = current;
+        previousInside = currentInside;
+    }
+    if (output.length < 3) return;
+    var projectedFirst = projectCameraSpace(output[0]);
+    for (index = 1; index + 1 < output.length; index++) {
+        drawProjectedTextureTriangle(
+            framebuffer, projectedFirst, projectCameraSpace(output[index]),
+            projectCameraSpace(output[index + 1]),
+            output[0], output[index], output[index + 1],
+            texture, textureWidth, textureHeight, true, true);
+    }
+}
+
+function drawGarageFloor(framebuffer) {
+    /* One perspective-correct, near-clipped quad covers the entire service
+     * bay.  Each texture texel represents one original 2x2 floor cell, and
+     * both axes wrap the deterministic 2x2 checker source. */
+    drawTexturedWorldQuad(
+        framebuffer,
+        {x: -8, y: 0, z: -7}, {x: 8, y: 0, z: -7},
+        {x: 8, y: 0, z: 7}, {x: -8, y: 0, z: 7},
+        0, 0, 8, 0, 8, 7, 0, 7,
+        garageFloorTexture, garageFloorTextureWidth,
+        garageFloorTextureHeight);
 }
 
 function drawReflectedWindow(framebuffer, carX, carY, carZ, sine, cosine,
@@ -2657,13 +2745,7 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
 }
 
 function drawGarage(framebuffer) {
-    for (var tileIndex = 0; tileIndex < garageFloorTiles.length; tileIndex++) {
-        var tile = garageFloorTiles[tileIndex];
-        var tileDx = tile.centerX - camera.x;
-        var tileDz = tile.centerZ - camera.z;
-        if (!horizontallyVisible(tileDx, tileDz, 1.42)) continue;
-        drawQuad(framebuffer, tile.a, tile.b, tile.c, tile.d, tile.color);
-    }
+    drawGarageFloor(framebuffer);
 
     /* The orbit remains inside this simple service bay, so the walls form a
      * background behind the car rather than passing between camera and car. */
@@ -3106,13 +3188,12 @@ function initializeGame() {
     freeDriveSkyboxBlitter = compileNative(freeDriveSkyboxBlitJS).fn;
     windowTextureTriangleJS.nativeCompile = {
         constants: {depthBuffer: depthBuffer,
-                    freeDriveSkyboxWidth: freeDriveSkyboxWidth,
-                    freeDriveSkyboxHeight: freeDriveSkyboxHeight,
                     "options.width": options.width},
         dumpMacroAssembly: options.dumpNativeAssembly
     };
     windowTextureRasterizer = compileNative(windowTextureTriangleJS).fn;
     windowTriangleDescriptor = allocatePacked(100);
+    garageFloorTexture = makeGarageFloorTexture();
     var skyboxFocal = Math.min(options.width, options.height) * 1.05;
     var skyboxFieldOfView = 2 * Math.atan(options.width /
                                          (2 * skyboxFocal));

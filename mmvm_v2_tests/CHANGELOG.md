@@ -8,6 +8,46 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.30
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Replaced the garage's individually submitted checker cells with one
+  perspective-correct textured floor. A deterministic 2x2 nearest-neighbour
+  checker texture is generated in JavaScript during initialization and wraps
+  over the complete service bay; no bitmap asset is stored in the repository.
+- Added UV-preserving near-plane clipping for textured world quads and
+  generalized the NativeCompiler-generated reflected-window texture triangle
+  routine to accept independent texture dimensions and wrap modes. The floor
+  uses the normal reciprocal-depth buffer and does not overlap a second plane,
+  eliminating the garage floor's depth flicker.
+- Added mathematically exact opaque-face rejection for the detailed body,
+  wheel tread/side faces, reflected windows, arch liners, and local boxes.
+  Precomputed static garage/free-drive geometry and reusable world/UV scratch
+  storage reduce interpreted allocation and transformation work without
+  omitting model components.
+- With a 30 FPS measurement ceiling under `js_min.exe`, representative
+  320x240 runs sustain approximately 21-22.5 FPS in the automatic garage
+  orbit and approximately 22-24.8 FPS while auto-driving around the free-drive
+  course. Both therefore have rendering headroom for the 20 FPS target.
+
+## 0.29
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Added `A  AUTO DRIVE` to the pause menu. It resets into free-driving mode and
+  follows the painted field course using virtual steering, throttle, and brake
+  inputs supplied to the same rear-wheel-drive physics used by the player.
+- Auto drive selects a speed from upcoming course curvature and uses a
+  speed-dependent look-ahead point. It does not move the car kinematically or
+  bypass tyre slip, body roll, powerslide, camera, or perimeter collision.
+- Added an `AUTO DRIVE` HUD label and stdout mode report so automated and human
+  free-driving sessions are unambiguous.
+
 ## 0.28
 
 Approximate completion: 2026-08-23 23:30 BST

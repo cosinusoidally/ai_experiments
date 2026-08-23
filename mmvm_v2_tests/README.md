@@ -885,12 +885,19 @@ Escape pauses demo8 and opens its mode menu. The menu keys are:
   human-controlled rally.
 - `G` enters the garage view.
 - `F` enters free driving on the bounded muddy field.
+- `A` enters auto-driving mode on the same muddy field. The car follows the
+  painted course using the ordinary free-drive steering, throttle, brake, tyre
+  slip, body-roll, and collision simulation.
 - `Q` exits demo8.
 
 The garage camera automatically travels around the rally car on an elliptical
 path and follows a sinusoidal up/down motion. Hold mouse button 1 and drag to
 control its orbit angle and height; release the button to resume automatic
-motion. The detailed car used here and in free-driving mode is a boxy 1970s
+motion. The service-bay checkerboard is a deterministic 2x2 texture generated
+at initialization and nearest-neighbour mapped across one perspective-correct,
+near-plane-clipped floor quad. It is not a checked-in bitmap and does not use
+overlapping floor polygons or depth bias. The detailed car used here and in
+free-driving mode is a boxy 1970s
 two-door rally saloon with a four-seat-sized cabin: long wheelbase, distinct
 bonnet and boot, one long outlined door and handle per side, and fixed rear
 quarter windows rather than rear doors. It also has four low-polygon tyres with
@@ -1030,6 +1037,20 @@ full-throttle turn may also produce power oversteer without a brake tap.
 and uses hysteresis so it does not flicker at the threshold. With
 `--debug-events`, physical slide start and end are also written to the console.
 Reverse steering does not engage the powerslide state.
+
+Selecting `A  AUTO DRIVE` from the pause menu resets the field and drives the
+same car around the painted course. A speed-dependent look-ahead controller
+produces virtual steering, throttle, and brake inputs; the result then passes
+through the same rear-wheel-drive bicycle model as human input. Auto drive does
+not snap the car to the centreline, set its position directly, or bypass slip,
+power-slide, body-roll, camera, and perimeter-collision behaviour. The HUD and
+stdout mode report identify the automated session.
+
+At 320x240 under `js_min.exe`, a 30 FPS ceiling can be used to measure available
+headroom rather than the 20 FPS limiter. Representative warmed-up measurements
+are approximately 21-22.5 FPS during the automatic garage orbit and 22-24.8 FPS
+while the free-drive controller follows the course. Actual results depend on
+the X server and host, but both measured workloads exceed the 20 FPS target.
 
 Demo8 text remains the built-in 5x7 bitmap font painted directly into the
 framebuffer. Its integer pixel scale is proportional to the viewport: 320x240
