@@ -914,7 +914,8 @@ with no body triangles spanning those openings. Recessed dark liners run inward
 from the cut edges, so the arches are part of the main body rather than separate
 pieces floating outside it. Front steering remains visible naturally when the
 car yaws relative to the travel-facing camera. The model has rectangular
-unlit front and rear lamp lenses, a dark grille, bright period-style bumpers,
+unlit front lamp lenses and rear lamp lenses which brighten under human or
+automatic braking, plus a dark grille, bright period-style bumpers,
 sloped front and rear glass, body-coloured external frames and pillars, and a
 highlighted painted-metal roof. The side-window sills follow the wider body line
 while the upper glass and pillar vertices taper inward to meet the roof; the
@@ -922,8 +923,8 @@ glazed cabin does not splay outward. The lightweight race and AI car
 representation is retained outside the garage and free-driving mode.
 
 Free-driving mode uses the normal arrow/WASD automatic-style driving controls,
-but replaces the rally course and competitors with a fixed 200-by-160-unit
-field, over five times the area of the original 90-by-68 field. Its surface is
+but replaces the rally course and competitors with a fixed 200-by-200-unit
+field, over six times the area of the original 90-by-68 field. Its surface is
 a clearly alternating dark/light brown checkerboard of 20-unit squares, with
 puddles and visible posts at the outer field boundary. The outer perimeter is
 colliding: limits account for the saloon's rotated width and length, keeping its
@@ -1010,14 +1011,37 @@ steering, and the camera retains the last travel direction while the car is
 stationary. Its smoothing uses wall-clock elapsed time and is independent of the
 achieved frame rate.
 
+Free drive uses metres, seconds, and metres per second internally. HUD speed is
+the magnitude of world-space velocity rather than merely its projection along
+the car body, so the display remains meaningful while the car yaws or slides.
+It is converted with the physical `2.23693629`
+metres-per-second-to-miles-per-hour factor and is explicitly labelled `MPH`;
+it no longer uses the old arbitrary display multiplier. The continuous
+automatic torque curve reaches 60 mph in
+approximately 7-8 seconds on the loose surface and settles near 105-107 mph at
+the top end. Forward braking removes approximately 14 mph per second on mud.
+Mud rolling resistance starts at 0.30 m/s^2 and increases with speed, making
+coasting deceleration visible on the integer MPH display. Rally-mode player
+and competitor speeds use the same unit convention.
+
 Free drive uses separate world-space velocity, inertial yaw, and a two-axle
 tyre model. Front- and rear-axle lateral slip generate separate tyre forces and
-yaw torque. Turning the wheels while stopped therefore does not rotate the car;
+yaw torque. Engine, brake, and rolling-resistance forces establish the maximum
+kinetic energy for each simulation step. The subsequent lateral tyre-force
+step may redirect that velocity or remove energy through tyre scrub, but is
+explicitly prevented from numerically creating speed when its slip correction
+overshoots. Turning the wheels while stopped therefore does not rotate the car;
 steering only produces force once it is moving, and reverse steering acts in
-the opposite direction. Holding Space, Down, or S from low speed supplies
-continuous reverse torque; reverse is limited to 14 simulation units compared
-with 30 forwards and retains a practical turning arc without permitting
-rotation in place. The same computed lateral acceleration drives the saloon's
+the opposite direction. Space, Down, or S first applies the brakes and
+immediately brightens both rear lamp lenses. Reverse torque engages only after
+the input has held the car's total world-space speed below 0.8 m/s for 0.35
+seconds, rather than merely waiting for its body-forward velocity to cross
+zero during a spin. This condition qualifies a persistent reverse-gear state;
+it is not a speed limiter. Once selected, reverse remains engaged while Down or
+S is held, and disengages when the input is released or the car resumes forward
+motion. It therefore does not swap direction immediately, and reverse is
+limited to approximately 25 mph. The
+same computed lateral acceleration drives the saloon's
 body-roll target, so faster, harder turns and power slides lean the sprung body
 farther than low-speed manoeuvres. A damped suspension spring smooths both
 weight transfer and return to level. The body shell, windows, trim, lights, and
@@ -1025,21 +1049,29 @@ bumpers rotate together around a low longitudinal axis, independently of the
 upright wheels; normal roll is limited to about +/-6.9 degrees with an
 +/-8-degree safety bound.
 
-The saloon is rear-wheel drive. To initiate a powerslide, accelerate, begin the
-turn, briefly release the throttle, tap Space, Down, or S, release the brake,
-and reapply throttle. Forward braking transfers load away from the rear axle,
-temporarily reducing its lateral grip so front tyre force can kick the rear
-out. Once rear slip exists, engine force at the driven rear axle consumes part
-of the same finite traction budget that provides lateral grip; power can
-therefore sustain the slide after the brake is released. Countersteer controls
-the front lateral force and arrests excessive yaw. Reduce or release throttle
-to let rear grip recover and settle the car. A sufficiently aggressive
-full-throttle turn may also produce power oversteer without a brake tap.
+The saloon is rear-wheel drive on loose mud. Normal powered cornering retains
+enough rear grip to feel planted rather than continuously sliding. To initiate
+a rally-style powerslide, accelerate, begin a firm turn, and briefly tap Space,
+Down, or S to transfer load forward and unstick the rear; release the brake and
+reapply power to hold the slide. A sufficiently aggressive powered turn can
+still produce power oversteer, but does not discard as much rear traction as in
+release 0.32. Countersteer controls front lateral force and arrests excessive
+yaw. Reduce or release throttle to let rear grip recover and settle the car.
 
-`POWER SLIDE` is based on measured lateral velocity and yaw rate, not held keys,
-and uses hysteresis so it does not flicker at the threshold. With
+`POWER SLIDE` is based on measured lateral velocity and yaw rate, not held keys.
+Entry and exit use separate thresholds plus a 0.32-second release delay, so
+modest cornering is not labelled as a sustained slide and genuine slide state
+does not chatter at the threshold. With
 `--debug-events`, physical slide start and end are also written to the console.
 Reverse steering does not engage the powerslide state.
+
+Actual rear-axle slip and heavy forward braking lay two dark world-space tyre
+trails at the rear contact patches. Segments are distance-spaced rather than
+created once per rendered frame, so their density is independent of frame
+rate. The history is a fixed 36-pair circular buffer: once full, each new pair
+overwrites the oldest. Marks outside a 55-unit draw radius or the horizontal
+view are rejected before projection, preventing an extended session from
+accumulating geometry or progressively reducing performance.
 
 Selecting `A  AUTO DRIVE` from the pause menu resets the field and drives the
 same car around the painted course. A speed-dependent look-ahead controller
@@ -1051,8 +1083,9 @@ stdout mode report identify the automated session.
 
 At 320x240 under `js_min.exe`, a 30 FPS ceiling can be used to measure available
 headroom rather than the 20 FPS limiter. Representative warmed-up measurements
-are approximately 21-22.5 FPS during the automatic garage orbit and 22-24.8 FPS
-while the free-drive controller follows the course. Actual results depend on
+are approximately 21-22.5 FPS during the automatic garage orbit and 20.7-22.3
+FPS while the free-drive controller follows the course with a full skid-mark
+history. Actual results depend on
 the X server and host, but both measured workloads exceed the 20 FPS target.
 
 Demo8 text remains the built-in 5x7 bitmap font painted directly into the

@@ -8,6 +8,106 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.35
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Fixed reverse being unintentionally limited to roughly 2 mph after the spin
+  protection in release 0.33. Crossing the 0.8 m/s qualification threshold had
+  immediately cleared the reverse timer, so each held input delivered only one
+  short pulse of reverse torque.
+- Added an explicit reverse-gear state. Total world speed below 0.8 m/s for
+  0.35 seconds qualifies the initial shift, after which reverse remains engaged
+  while Down or S is held. Releasing the input or detecting renewed forward
+  motion disengages it. A fast sideways-moving spin therefore still cannot
+  select reverse accidentally.
+- An eight-second reverse hold from rest reached 20.7 mph under `js_min.exe` at
+  320x240. A forward-to-brake-to-reverse test reached 20.0 mph in reverse, and
+  an overlapping accelerate/hard-turn/brake stress run completed without a
+  crash or an unintended mid-spin reverse selection.
+
+## 0.34
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Fixed a numerical-energy regression in the 0.33 tyre retune. With throttle
+  released, sustained steering could increase actual world speed from about
+  9.8 m/s to 16.5 m/s because the explicit lateral-force step overshot the
+  desired slip correction. Engine, brakes, and rolling resistance now establish
+  a per-step kinetic-energy ceiling: lateral tyre forces can redirect velocity
+  or dissipate it through scrub, but cannot accelerate the car.
+- Changed the free-drive MPH display from the car-body longitudinal component
+  to the magnitude of world-space velocity. The speedometer now reports actual
+  ground speed consistently while the body yaws during a slide.
+- Increased baseline rolling resistance from 0.12 to 0.30 m/s^2 and slightly
+  reduced its speed-squared term. Coasting speed now falls visibly instead of
+  leaving the integer MPH display apparently stuck for several seconds, while
+  retaining a progressive automatic power curve and high-speed resistance.
+- Under `js_min.exe` at 320x240, repeated throttle-release/steering samples
+  decreased monotonically from 9.62 to 8.34 m/s rather than gaining speed. A
+  separate accelerate/hard-turn/brake run continued to initiate powerslides,
+  reached rest normally, and did not reproduce the earlier spin crash.
+
+## 0.33
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Fixed the crash exposed by accelerating, steering hard, and then braking
+  into a spin. Reverse engagement now requires the car's complete world-space
+  speed to remain below 0.8 m/s; a spinning car whose body-forward velocity
+  merely crosses zero is no longer mistaken for a stopped car. The reverse
+  torque calculation also uses a bounded, correctly named speed ratio.
+- Made the mud less excessively slippery without replacing the two-axle tyre
+  model: increased baseline and minimum rear grip, reduced the amount of rear
+  traction consumed by engine power, increased lateral tyre response, and
+  reduced maximum yaw rate. Ordinary powered cornering is consequently more
+  planted, while a hard turn and brake-induced weight transfer can still
+  initiate a controllable rear-wheel-drive slide.
+- Raised the measured-slip thresholds for the `POWER SLIDE` indicator while
+  retaining its 0.32-second exit hysteresis. This prevents modest cornering
+  motion from being labelled as a sustained powerslide.
+- Re-ran the reported accelerate/hard-turn/brake sequence at 320x240 under
+  `js_min.exe`, including repeated slide entry and recovery. The frame loop
+  continued without an exception. Reverse engagement from a genuine stop and
+  the automatic free-drive controller were also exercised.
+
+## 0.32
+
+Approximate completion: 2026-08-23 late evening BST
+
+### Demo 8
+
+- Standardized vehicle motion on metres and seconds and changed every speed
+  readout to an explicit miles-per-hour conversion (`m/s * 2.23693629`). The
+  previous arbitrary display multiplier is gone.
+- Retuned the automatic torque curve for approximately 7-8 seconds to 60 mph
+  on loose mud and an attainable top end around 105-107 mph. Added explicit
+  rolling/aerodynamic resistance, approximately 14 mph/s forward braking on
+  mud, a brake-first 0.35-second transition into reverse, and an approximately
+  25 mph reverse limit. Rally-mode player and competitor speeds now use the
+  same physical unit convention.
+- Reduced baseline mud grip and made rear-wheel-drive power consume rear
+  lateral traction during a powered turn. A throttle-and-steering input can
+  now start controllable power oversteer; a short brake tap produces extra
+  forward load transfer and a stronger breakaway. Added timed exit hysteresis
+  so the easier `POWER SLIDE` state does not chatter around its threshold.
+- Brighten both rear lamp lenses whenever Down, S, or Space requests braking,
+  including the brake-first pause before reverse and automatic-driver braking.
+- Added two persistent world-space skid trails from the actual rear contact
+  patches. Slip and heavy forward braking determine mark strength. A fixed
+  36-pair circular history overwrites the oldest marks, while view/distance
+  rejection prevents a long session from accumulating rendering cost.
+- Enlarged the free-drive field from 200x160 to 200x200 units, providing more
+  braking and sliding room around the existing painted course. Representative
+  320x240 auto-drive measurements with a 30 FPS ceiling remain approximately
+  20.7-22.3 FPS after the 36-pair skid-mark history has filled.
+
 ## 0.31
 
 Approximate completion: 2026-08-23 late evening BST

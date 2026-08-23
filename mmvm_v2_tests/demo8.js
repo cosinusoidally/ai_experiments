@@ -96,10 +96,14 @@ var garageDragging = false;
 var garageDragX = 0;
 var garageDragY = 0;
 var FIELD_HALF_WIDTH = 100;
-var FIELD_HALF_LENGTH = 80;
+var FIELD_HALF_LENGTH = 100;
 var FIELD_TRACK_HALF_WIDTH = 4.5;
 var FREE_DRIVE_CAR_HALF_WIDTH = 1.45;
 var FREE_DRIVE_CAR_HALF_LENGTH = 1.68;
+var METRES_PER_SECOND_TO_MPH = 2.23693629;
+var FREE_DRIVE_ENGINE_LIMIT = 50;
+var FREE_DRIVE_REVERSE_LIMIT = 11;
+var MAX_SKID_MARK_PAIRS = 36;
 var playerWheelSteer = 0;
 var detailedBodyRollSine = 0;
 var detailedBodyRollCosine = 1;
@@ -112,6 +116,11 @@ var freeDriveAutoDrive = false;
 var freeDriveAutoSteering = 0;
 var freeDriveAutoThrottle = false;
 var freeDriveAutoBrake = false;
+var skidMarkPairs = [];
+var skidMarkWriteIndex = 0;
+var skidMarkPairCount = 0;
+var previousLeftSkidPoint = null;
+var previousRightSkidPoint = null;
 var player;
 var competitors;
 var lastFrameTime = 0;
@@ -801,8 +810,8 @@ function resetRace() {
     for (var i = 0; i < 5; i++) {
         /* Two rivals start ahead and three behind in a staggered road grid. */
         var car = {raceDistance: 8.0 - i * 4.6,
-                   speed: 3.2 + i * 0.35,
-                   targetSpeed: 12.0 + i * 0.58,
+                   speed: 8.0 + i * 0.45,
+                   targetSpeed: 19.0 + i * 0.82,
                    lanePhase: i * 1.73,
                    color: colors[i]};
         car.lane = Math.sin(car.raceDistance * 0.035 + car.lanePhase) * 1.45;
@@ -847,12 +856,20 @@ function resetFreeDrive() {
     player = {x: fieldStart.x, y: 0.15, z: fieldStart.z,
               heading: Math.atan2(fieldStart.tangentX,
                                   fieldStart.tangentZ), speed: 0,
-              velocityX: 0, velocityZ: 0, yawRate: 0, rearGrip: 1,
+              velocityX: 0, velocityZ: 0, yawRate: 0, rearGrip: 0.84,
               bodyRoll: 0, bodyRollVelocity: 0,
-              powerSliding: false, wrappedDistance: 0, raceDistance: 0,
+              powerSliding: false, brakeLights: false,
+              powerSlideReleaseTime: 0, brakeToReverseTime: 0,
+              reverseEngaged: false, skidAmount: 0,
+              wrappedDistance: 0, raceDistance: 0,
               lap: 0, position: 1};
     clearControls();
     playerWheelSteer = 0;
+    skidMarkPairs = [];
+    skidMarkWriteIndex = 0;
+    skidMarkPairCount = 0;
+    previousLeftSkidPoint = null;
+    previousRightSkidPoint = null;
     freeDriveTravelHeading = player.heading;
     freeDriveCameraHeading = player.heading;
 }
@@ -915,14 +932,14 @@ function resolveRoadEdge(nearest, dt) {
 
 function updatePlayerStep(dt) {
     if (rollingMode) {
-        player.raceDistance += 13.4 * dt;
+        player.raceDistance += 18.0 * dt;
         var rollingLane = Math.sin(player.raceDistance * 0.028) * 0.72;
         var rollingSample = sampleTrack(player.raceDistance, rollingLane);
         player.x = rollingSample.x;
         player.y = rollingSample.y + 0.15;
         player.z = rollingSample.z;
         player.heading = rollingSample.heading;
-        player.speed = 13.4;
+        player.speed = 18.0;
         player.wrappedDistance = rollingSample.distance;
         player.lap = Math.floor(player.raceDistance / track.totalLength) % RACE_LAPS;
         raceFinished = false;
@@ -930,17 +947,22 @@ function updatePlayerStep(dt) {
     }
     if (!raceFinished) {
         if (controls.throttle) {
-            /* Continuous automatic-style torque: no gears or shift input. */
-            player.speed += (18.0 - Math.max(0, player.speed) * 0.18) * dt;
+            /* The rally stage uses the same metre/second convention and a
+             * continuous automatic torque curve as free drive. */
+            var rallyRatio = clamp(Math.max(0, player.speed) / 47, 0, 1);
+            player.speed += 4.5 * (1 - rallyRatio) * dt;
         }
         if (controls.brake) {
-            if (player.speed > 0.5) player.speed -= 20 * dt;
-            else player.speed -= 7 * dt;
+            if (player.speed > 0.5) player.speed -= 6.8 * dt;
+            else player.speed -= 3.6 * dt;
         }
     }
-    var rollingDrag = Math.pow(0.998, dt * 60);
-    player.speed *= rollingDrag;
-    player.speed = clamp(player.speed, -7, 30);
+    if (Math.abs(player.speed) > 0.01) {
+        var rallyResistance = 0.12 + player.speed * player.speed * 0.00006;
+        player.speed += (player.speed > 0 ? -rallyResistance :
+                                            rallyResistance) * dt;
+    }
+    player.speed = clamp(player.speed, -10, 47);
     var steering = (controls.left ? 1 : 0) - (controls.right ? 1 : 0);
     var steeringGrip = clamp(Math.abs(player.speed) / 7, 0.18, 1);
     player.heading -= steering * steeringGrip * 1.65 * dt *
@@ -1026,6 +1048,27 @@ function updateFreeDriveStep(dt) {
                             player.velocityZ * forwardZ;
     var lateralSpeed = player.velocityX * rightX +
                        player.velocityZ * rightZ;
+    var totalSpeedSquared = player.velocityX * player.velocityX +
+                            player.velocityZ * player.velocityZ;
+    player.brakeLights = brake;
+    if (!brake) {
+        player.brakeToReverseTime = 0;
+        player.reverseEngaged = false;
+    } else if (player.reverseEngaged) {
+        /* Reverse remains selected while the input is held.  The low-speed
+         * test qualifies the shift; it is not a reverse speed limiter. */
+        if (longitudinalSpeed > 0.8) {
+            player.brakeToReverseTime = 0;
+            player.reverseEngaged = false;
+        }
+    } else if (totalSpeedSquared < 0.8 * 0.8) {
+        player.brakeToReverseTime += dt;
+        if (player.brakeToReverseTime >= 0.35) {
+            player.reverseEngaged = true;
+        }
+    } else {
+        player.brakeToReverseTime = 0;
+    }
 
     /* A compact bicycle model: front and rear axle slip produce separate
      * lateral forces and a torque about the car.  A brake tap transfers load
@@ -1034,29 +1077,31 @@ function updateFreeDriveStep(dt) {
     var frontAxleDistance = 1.12;
     var rearAxleDistance = 1.04;
     var steeringAngle = -steering * 0.40;
-    var brakingForward = brake && longitudinalSpeed > 0.7;
-    if (brakingForward && longitudinalSpeed > 5) {
-        player.rearGrip -= dt * 4.2;
+    var brakingForward = brake && longitudinalSpeed > 0.35;
+    if (brakingForward && longitudinalSpeed > 3) {
+        /* Loose mud plus forward load transfer makes a short brake tap enough
+         * to unstick the rear, without acting like an on/off handbrake. */
+        player.rearGrip -= dt * 2.0;
     } else {
         var gripRecovery = throttle && player.powerSliding ?
-                           0.32 : 1.25;
-        player.rearGrip += dt * gripRecovery;
+                           0.18 : 0.72;
+        player.rearGrip += (0.84 - player.rearGrip) *
+                           Math.min(1, dt * gripRecovery);
     }
-    player.rearGrip = clamp(player.rearGrip, 0.16, 1);
+    player.rearGrip = clamp(player.rearGrip, 0.32, 0.84);
 
     var frontSlip = lateralSpeed + player.yawRate * frontAxleDistance -
                     longitudinalSpeed * steeringAngle;
     var rearSlip = lateralSpeed - player.yawRate * rearAxleDistance;
-    var frontGrip = brakingForward ? 1.12 : 1;
+    var frontGrip = brakingForward ? 1.06 : 1;
     var rearSlipRatio = Math.abs(rearSlip) /
                         (Math.abs(longitudinalSpeed) + 1);
-    var rearGripDisturbed = player.rearGrip < 0.82 || player.powerSliding;
-    var powerTractionUse = throttle && longitudinalSpeed > 5 &&
-                           rearGripDisturbed ?
-                           clamp((rearSlipRatio - 0.02) * 5.0, 0, 0.68) : 0;
+    var powerTractionUse = throttle && longitudinalSpeed > 3 ?
+        clamp(0.04 + Math.abs(steering) * 0.08 + rearSlipRatio * 2.2,
+              0, 0.42) : 0;
     var effectiveRearGrip = player.rearGrip * (1 - powerTractionUse);
-    var frontLateralAcceleration = -frontSlip * 4.2 * frontGrip;
-    var rearLateralAcceleration = -rearSlip * 6.0 * effectiveRearGrip;
+    var frontLateralAcceleration = -frontSlip * 3.9 * frontGrip;
+    var rearLateralAcceleration = -rearSlip * 5.4 * effectiveRearGrip;
     var lateralAcceleration = frontLateralAcceleration +
                               rearLateralAcceleration;
     /* The sprung body leans away from lateral acceleration.  A damped spring
@@ -1069,34 +1114,71 @@ function updateFreeDriveStep(dt) {
     player.bodyRoll += player.bodyRollVelocity * dt;
     player.bodyRoll = clamp(player.bodyRoll, -0.14, 0.14);
     var yawAcceleration = (frontLateralAcceleration * frontAxleDistance -
-                           rearLateralAcceleration * rearAxleDistance) * 0.62;
+                           rearLateralAcceleration * rearAxleDistance) * 0.56;
     player.yawRate += yawAcceleration * dt;
     player.yawRate *= Math.max(0, 1 - dt * 0.22);
-    player.yawRate = clamp(player.yawRate, -1.8, 1.8);
+    player.yawRate = clamp(player.yawRate, -1.25, 1.25);
 
     var longitudinalAcceleration = 0;
-    if (throttle && longitudinalSpeed < 30) {
-        var driveAcceleration = 18.0 -
-                                Math.max(0, longitudinalSpeed) * 0.18;
+    if (throttle && longitudinalSpeed < FREE_DRIVE_ENGINE_LIMIT) {
+        /* Approximately 0-60 mph in eight seconds on mud and about 105 mph at
+         * the top end. The continuous curve represents an automatic gearbox. */
+        var forwardRatio = clamp(Math.max(0, longitudinalSpeed) /
+                                 FREE_DRIVE_ENGINE_LIMIT, 0, 1);
+        var driveAcceleration = 4.5 * (1 - forwardRatio);
         longitudinalAcceleration += driveAcceleration *
-                                    (0.68 + effectiveRearGrip * 0.32);
+                                    (0.78 + effectiveRearGrip * 0.22);
     }
     if (brake) {
-        if (longitudinalSpeed > 0.7) {
-            longitudinalAcceleration -= 7.5;
-        } else if (longitudinalSpeed > -14) {
-            longitudinalAcceleration -=
-                12.0 - Math.min(12, Math.abs(longitudinalSpeed)) * 0.20;
+        if (longitudinalSpeed > 0.35) {
+            longitudinalAcceleration -= 6.2;
+        } else if (player.reverseEngaged &&
+                   longitudinalSpeed > -FREE_DRIVE_REVERSE_LIMIT) {
+            /* Down/S is a brake first. Reverse engages only after the car has
+             * been held near rest, avoiding an instantaneous direction swap. */
+            var reverseRatio = clamp(-longitudinalSpeed /
+                                     FREE_DRIVE_REVERSE_LIMIT, 0, 1);
+            longitudinalAcceleration -= 3.6 * (1 - reverseRatio);
         }
     }
 
-    player.velocityX += (forwardX * longitudinalAcceleration +
-                         rightX * lateralAcceleration) * dt;
-    player.velocityZ += (forwardZ * longitudinalAcceleration +
-                         rightZ * lateralAcceleration) * dt;
-    var rollingDrag = Math.pow(0.996, dt * 60);
-    player.velocityX *= rollingDrag;
-    player.velocityZ *= rollingDrag;
+    var absoluteLongitudinalSpeed = Math.abs(longitudinalSpeed);
+    if (absoluteLongitudinalSpeed > 0.01) {
+        var resistance = 0.30 + absoluteLongitudinalSpeed *
+                         absoluteLongitudinalSpeed * 0.00004;
+        longitudinalAcceleration += longitudinalSpeed > 0 ?
+                                    -resistance : resistance;
+    }
+
+    /* Longitudinal forces are the only forces allowed to add kinetic energy.
+     * The explicit lateral tyre step below can otherwise overshoot zero slip
+     * and numerically accelerate the car, especially after increasing grip.
+     * Preserve the speed produced by engine, brake, and rolling resistance as
+     * an upper bound while still allowing tyre scrub to remove energy. */
+    player.velocityX += forwardX * longitudinalAcceleration * dt;
+    player.velocityZ += forwardZ * longitudinalAcceleration * dt;
+    var tyreSpeedLimitSquared = player.velocityX * player.velocityX +
+                                player.velocityZ * player.velocityZ;
+    player.velocityX += rightX * lateralAcceleration * dt;
+    player.velocityZ += rightZ * lateralAcceleration * dt;
+    var afterTyreSpeedSquared = player.velocityX * player.velocityX +
+                                player.velocityZ * player.velocityZ;
+    if (afterTyreSpeedSquared > tyreSpeedLimitSquared &&
+        afterTyreSpeedSquared > 0.000001) {
+        var tyreEnergyScale = Math.sqrt(tyreSpeedLimitSquared /
+                                        afterTyreSpeedSquared);
+        player.velocityX *= tyreEnergyScale;
+        player.velocityZ *= tyreEnergyScale;
+    }
+    /* Mud damps sideways motion, but longitudinal rolling/aero resistance is
+     * already expressed above in metres per second squared. */
+    var lateralMudDrag = Math.pow(0.995, dt * 60);
+    var forwardVelocityX = forwardX * longitudinalSpeed;
+    var forwardVelocityZ = forwardZ * longitudinalSpeed;
+    player.velocityX = forwardVelocityX +
+        (player.velocityX - forwardVelocityX) * lateralMudDrag;
+    player.velocityZ = forwardVelocityZ +
+        (player.velocityZ - forwardVelocityZ) * lateralMudDrag;
     player.heading += player.yawRate * dt;
 
     forwardX = Math.sin(player.heading);
@@ -1106,35 +1188,48 @@ function updateFreeDriveStep(dt) {
     longitudinalSpeed = player.velocityX * forwardX +
                         player.velocityZ * forwardZ;
     lateralSpeed = player.velocityX * rightX + player.velocityZ * rightZ;
-    if (longitudinalSpeed < -14) {
-        var reverseExcess = -14 - longitudinalSpeed;
+    if (longitudinalSpeed < -FREE_DRIVE_REVERSE_LIMIT) {
+        var reverseExcess = -FREE_DRIVE_REVERSE_LIMIT - longitudinalSpeed;
         player.velocityX += forwardX * reverseExcess;
         player.velocityZ += forwardZ * reverseExcess;
-        longitudinalSpeed = -14;
+        longitudinalSpeed = -FREE_DRIVE_REVERSE_LIMIT;
     }
     var velocitySquared = player.velocityX * player.velocityX +
                           player.velocityZ * player.velocityZ;
-    if (velocitySquared > 900) {
-        var velocityScale = 30 / Math.sqrt(velocitySquared);
+    if (velocitySquared > FREE_DRIVE_ENGINE_LIMIT * FREE_DRIVE_ENGINE_LIMIT) {
+        var velocityScale = FREE_DRIVE_ENGINE_LIMIT /
+                            Math.sqrt(velocitySquared);
         player.velocityX *= velocityScale;
         player.velocityZ *= velocityScale;
-        velocitySquared = 900;
+        velocitySquared = FREE_DRIVE_ENGINE_LIMIT * FREE_DRIVE_ENGINE_LIMIT;
     }
     longitudinalSpeed = player.velocityX * forwardX +
                         player.velocityZ * forwardZ;
     lateralSpeed = player.velocityX * rightX + player.velocityZ * rightZ;
 
     var wasPowerSliding = player.powerSliding;
-    var slideRatio = wasPowerSliding ? 0.055 : 0.085;
-    player.powerSliding = longitudinalSpeed > 5 &&
-                          Math.abs(lateralSpeed) >
-                          longitudinalSpeed * slideRatio &&
-                          Math.abs(player.yawRate) > 0.12;
+    var slideRatio = wasPowerSliding ? 0.040 : 0.070;
+    var slideDetected = longitudinalSpeed > 3.5 &&
+                        Math.abs(lateralSpeed) >
+                        longitudinalSpeed * slideRatio &&
+                        Math.abs(player.yawRate) >
+                        (wasPowerSliding ? 0.055 : 0.090);
+    if (wasPowerSliding) {
+        if (slideDetected) player.powerSlideReleaseTime = 0;
+        else player.powerSlideReleaseTime += dt;
+        player.powerSliding = player.powerSlideReleaseTime < 0.32;
+    } else {
+        player.powerSliding = slideDetected;
+        player.powerSlideReleaseTime = 0;
+    }
+    player.skidAmount = Math.max(
+        clamp((Math.abs(rearSlip) - 0.75) / 2.2, 0, 1),
+        brakingForward && longitudinalSpeed > 4 ? 0.72 : 0);
     if (options.debugEvents && player.powerSliding !== wasPowerSliding) {
         console.log(player.powerSliding ? "power slide started" :
                     "power slide ended");
     }
-    player.speed = longitudinalSpeed;
+    player.speed = Math.sqrt(velocitySquared);
     var movementX = player.velocityX * dt;
     var movementZ = player.velocityZ * dt;
     player.x += movementX;
@@ -1172,10 +1267,89 @@ function updateFreeDriveStep(dt) {
         hitBoundaryZ = true;
     }
     if (hitBoundaryX || hitBoundaryZ) {
-        player.speed = player.velocityX * forwardX +
-                       player.velocityZ * forwardZ;
+        player.speed = Math.sqrt(player.velocityX * player.velocityX +
+                                 player.velocityZ * player.velocityZ);
     }
     player.y = 0.15;
+    updateFreeDriveSkidMarks();
+}
+
+function setSkidPoint(point, x, z) {
+    point.x = x;
+    point.y = 0.046;
+    point.z = z;
+    point._projectionFrame = -1;
+}
+
+function writeSkidQuad(quad, from, to) {
+    var dx = to.x - from.x;
+    var dz = to.z - from.z;
+    var length = Math.sqrt(dx * dx + dz * dz);
+    if (length < 0.001) return false;
+    var acrossX = -dz / length * 0.055;
+    var acrossZ = dx / length * 0.055;
+    setSkidPoint(quad.a, from.x - acrossX, from.z - acrossZ);
+    setSkidPoint(quad.b, to.x - acrossX, to.z - acrossZ);
+    setSkidPoint(quad.c, to.x + acrossX, to.z + acrossZ);
+    setSkidPoint(quad.d, from.x + acrossX, from.z + acrossZ);
+    return true;
+}
+
+function makeSkidQuad() {
+    return {a: {x: 0, y: 0, z: 0}, b: {x: 0, y: 0, z: 0},
+            c: {x: 0, y: 0, z: 0}, d: {x: 0, y: 0, z: 0}};
+}
+
+function updateFreeDriveSkidMarks() {
+    var absoluteSpeed = Math.sqrt(player.velocityX * player.velocityX +
+                                  player.velocityZ * player.velocityZ);
+    if (player.skidAmount < 0.16 || absoluteSpeed < 3) {
+        previousLeftSkidPoint = null;
+        previousRightSkidPoint = null;
+        return;
+    }
+    var forwardX = Math.sin(player.heading);
+    var forwardZ = Math.cos(player.heading);
+    var rightX = forwardZ;
+    var rightZ = -forwardX;
+    var rearCenterX = player.x - forwardX * 1.04;
+    var rearCenterZ = player.z - forwardZ * 1.04;
+    var currentLeft = {x: rearCenterX - rightX * 0.80,
+                       z: rearCenterZ - rightZ * 0.80};
+    var currentRight = {x: rearCenterX + rightX * 0.80,
+                        z: rearCenterZ + rightZ * 0.80};
+    if (!previousLeftSkidPoint) {
+        previousLeftSkidPoint = currentLeft;
+        previousRightSkidPoint = currentRight;
+        return;
+    }
+    var dx = currentLeft.x - previousLeftSkidPoint.x;
+    var dz = currentLeft.z - previousLeftSkidPoint.z;
+    var distanceSquared = dx * dx + dz * dz;
+    if (distanceSquared < 0.22 * 0.22) return;
+    if (distanceSquared > 3.5 * 3.5) {
+        previousLeftSkidPoint = currentLeft;
+        previousRightSkidPoint = currentRight;
+        return;
+    }
+
+    var pair = skidMarkPairs[skidMarkWriteIndex];
+    if (!pair) {
+        pair = {left: makeSkidQuad(), right: makeSkidQuad(),
+                centerX: 0, centerZ: 0, strength: 0};
+        skidMarkPairs[skidMarkWriteIndex] = pair;
+    }
+    writeSkidQuad(pair.left, previousLeftSkidPoint, currentLeft);
+    writeSkidQuad(pair.right, previousRightSkidPoint, currentRight);
+    pair.centerX = (currentLeft.x + currentRight.x +
+                    previousLeftSkidPoint.x + previousRightSkidPoint.x) * 0.25;
+    pair.centerZ = (currentLeft.z + currentRight.z +
+                    previousLeftSkidPoint.z + previousRightSkidPoint.z) * 0.25;
+    pair.strength = player.skidAmount;
+    skidMarkWriteIndex = (skidMarkWriteIndex + 1) % MAX_SKID_MARK_PAIRS;
+    if (skidMarkPairCount < MAX_SKID_MARK_PAIRS) skidMarkPairCount++;
+    previousLeftSkidPoint = currentLeft;
+    previousRightSkidPoint = currentRight;
 }
 
 function updateFreeDriveAutoControls() {
@@ -2620,7 +2794,7 @@ function drawDetailedBodyShell(framebuffer, carX, carY, carZ, sine, cosine,
 }
 
 function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
-                         frontWheelSteer, bodyRoll) {
+                         frontWheelSteer, bodyRoll, braking) {
     var sine = Math.sin(heading);
     var cosine = Math.cos(heading);
     var frame = shadeColor(color, 0.86);
@@ -2728,15 +2902,18 @@ function drawDetailedCar(framebuffer, carX, carY, carZ, heading, color,
                     0, 1.11, -0.08, 0.55, 0.11, 0.46,
                     shadeColor(color, 1.12));
 
-    /* Unlit lamp units: pale front lenses and red rear lenses. */
+    /* The rear lamp lenses brighten immediately for human or automatic brake
+     * input. Down/S remains visibly a brake even during the pause before the
+     * automatic transmission engages reverse. */
+    var rearLampColor = braking ? 0xff291c : 0x7e191b;
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                     -0.52, 0.43, 1.525, 0.22, 0.17, 0.025, 0xe8e2bd);
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
                     0.52, 0.43, 1.525, 0.22, 0.17, 0.025, 0xe8e2bd);
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
-                    -0.55, 0.43, -1.525, 0.19, 0.15, 0.025, 0xc51f22);
+                    -0.55, 0.43, -1.525, 0.19, 0.15, 0.025, rearLampColor);
     drawCarLocalBox(framebuffer, carX, carY, carZ, sine, cosine,
-                    0.55, 0.43, -1.525, 0.19, 0.15, 0.025, 0xc51f22);
+                    0.55, 0.43, -1.525, 0.19, 0.15, 0.025, rearLampColor);
 
     /* Period rectangular grille and bright metal bumpers. */
     drawCarLocalQuadXYZ(framebuffer, carX, carY, carZ, sine, cosine,
@@ -2779,7 +2956,7 @@ function drawGarage(framebuffer) {
     drawBox(framebuffer, 5.8, 0, -5.4, 0, 0.22, 3.2, 0.22, 0x444845);
     drawBox(framebuffer, -4.7, 0.32, 6.35, 0, 1.4, 0.72, 0.42, 0x8b3c2f);
     drawBox(framebuffer, -4.7, 1.03, 6.58, 0, 1.35, 0.12, 0.18, 0xc2c3b9);
-    drawDetailedCar(framebuffer, 0, 0.02, 0, 0.18, 0xd94a32, 0);
+    drawDetailedCar(framebuffer, 0, 0.02, 0, 0.18, 0xd94a32, 0, 0, false);
 }
 
 function drawMuddyField(framebuffer) {
@@ -2822,9 +2999,10 @@ function drawMuddyField(framebuffer) {
         drawFieldBoundaryPost(framebuffer, -FIELD_HALF_WIDTH, z);
         drawFieldBoundaryPost(framebuffer, FIELD_HALF_WIDTH, z);
     }
+    drawFreeDriveSkidMarks(framebuffer);
     drawDetailedCar(framebuffer, player.x, player.y - 0.13, player.z,
                     player.heading, 0xd94a32, playerWheelSteer,
-                    player.bodyRoll);
+                    player.bodyRoll, player.brakeLights);
 }
 
 function drawFieldBoundaryPost(framebuffer, x, z) {
@@ -2833,6 +3011,24 @@ function drawFieldBoundaryPost(framebuffer, x, z) {
     if (dx * dx + dz * dz > 82 * 82 ||
         !horizontallyVisible(dx, dz, 1.1)) return;
     drawBox(framebuffer, x, 0, z, 0, 0.09, 1.0, 0.09, 0x66513a);
+}
+
+function drawFreeDriveSkidMarks(framebuffer) {
+    var firstIndex = skidMarkPairCount === MAX_SKID_MARK_PAIRS ?
+                     skidMarkWriteIndex : 0;
+    for (var order = 0; order < skidMarkPairCount; order++) {
+        var index = (firstIndex + order) % MAX_SKID_MARK_PAIRS;
+        var pair = skidMarkPairs[index];
+        var dx = pair.centerX - camera.x;
+        var dz = pair.centerZ - camera.z;
+        if (dx * dx + dz * dz > 55 * 55 ||
+            !horizontallyVisible(dx, dz, 2.5)) continue;
+        var color = pair.strength > 0.65 ? 0x241a14 : 0x34241a;
+        drawQuad(framebuffer, pair.left.a, pair.left.b,
+                 pair.left.c, pair.left.d, color);
+        drawQuad(framebuffer, pair.right.a, pair.right.b,
+                 pair.right.c, pair.right.d, color);
+    }
 }
 
 function drawBillboard(framebuffer, x, bottomY, z, width, height, color) {
@@ -3022,13 +3218,14 @@ Demo8FrameRateCounter.prototype.draw = function (framebuffer) {
 };
 
 function drawHud(framebuffer) {
-    var speed = Math.max(0, Math.round(player.speed * 6.2));
+    var speed = Math.max(0, Math.round(player.speed *
+                                       METRES_PER_SECOND_TO_MPH));
     var scale = textScale(framebuffer);
     var glyphAdvance = textGlyphAdvance(framebuffer);
     var lineAdvance = textLineAdvance(framebuffer);
     var margin = scale;
     var compact = framebuffer.width / glyphAdvance < 19;
-    paintText(framebuffer, (compact ? "SPD " : "SPEED ") + speed,
+    paintText(framebuffer, (compact ? "" : "SPEED ") + speed + " MPH",
               margin, margin);
     paintText(framebuffer, (compact ? "L" : "LAP ") +
               Math.min(RACE_LAPS, player.lap + 1) + "/" + RACE_LAPS,
@@ -3087,12 +3284,14 @@ function drawModeHud(framebuffer) {
         }
     } else {
         var speed = Math.round(Math.sqrt(player.velocityX * player.velocityX +
-                                         player.velocityZ * player.velocityZ) * 6.2);
+                                         player.velocityZ * player.velocityZ) *
+                               METRES_PER_SECOND_TO_MPH);
         scale = textScale(framebuffer);
         lineAdvance = textLineAdvance(framebuffer);
         paintText(framebuffer, freeDriveAutoDrive ? "AUTO DRIVE" : "FREE DRIVE",
                   scale, scale);
-        paintText(framebuffer, "SPEED " + speed, scale, scale + lineAdvance);
+        paintText(framebuffer, "SPEED " + speed + " MPH",
+                  scale, scale + lineAdvance);
         if (player.powerSliding) {
             paintText(framebuffer, "POWER SLIDE", scale,
                       scale + lineAdvance * 2);
