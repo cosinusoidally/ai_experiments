@@ -4,14 +4,17 @@
         op = require("./bytecode.js");
     }
 
-    function Compiler(scopeBindings, outerScopes) {
+    function Compiler(scopeBindings, outerScopes, registerBindings) {
         this.code = [];
         this.constants = [];
         this.registerCount = 0;
         this.breakTargets = [];
         this.continueTargets = [];
         this.scopes = [];
-        if (scopeBindings) this.scopes.push(makeBindingMap(scopeBindings));
+        if (scopeBindings) {
+            this.scopes.push(makeCompileScope(this, scopeBindings,
+                                              !!registerBindings));
+        }
         var scopeIndex = 0;
         while (outerScopes && scopeIndex < outerScopes.length) {
             this.scopes.push(outerScopes[scopeIndex++]);
@@ -79,13 +82,16 @@
     Compiler.prototype.compileFunction = function (expression) {
         var locals = collectLocals(expression.body, expression.name);
         var bindings = makeFunctionBindings(expression.parameters, locals);
-        var nested = new Compiler(bindings, this.scopes);
+        var useRegisters = canUseRegisterBindings(expression.body);
+        var nested = new Compiler(bindings, this.scopes, useRegisters);
         var bodyProgram = {body: expression.body.body};
         var program = nested.compile(bodyProgram);
         program.parameters = expression.parameters.slice(0);
         program.locals = locals;
         program.bindings = bindings;
         program.bindingSlots = makeBindingMap(bindings);
+        program.bindingRegisters = useRegisters ?
+            bindingRegisters(bindings, nested.scopes[0]) : null;
         program.parameterSlots = bindingSlots(expression.parameters,
                                                program.bindingSlots);
         program.argumentsSlot = program.bindingSlots.$arguments;
@@ -328,6 +334,7 @@
     Compiler.prototype.referenceForName = function (name) {
         var binding = this.resolveBinding(name);
         if (binding) {
+            if (binding.kind === "register") return binding;
             return {kind: "local", depth: binding.depth, slot: binding.slot};
         }
         return {kind: "global", name: this.constant(name)};
@@ -336,11 +343,16 @@
     Compiler.prototype.resolveBinding = function (name) {
         var key = "$" + name;
         var depth = 0;
-        while (depth < this.scopes.length) {
-            if (this.scopes[depth][key] !== undefined) {
-                return {depth: depth, slot: this.scopes[depth][key]};
+        var scopeIndex = 0;
+        while (scopeIndex < this.scopes.length) {
+            var scope = this.scopes[scopeIndex];
+            var binding = scope.bindings[key];
+            if (binding !== undefined) {
+                if (binding.kind === "register") return binding;
+                return {kind: "environment", depth: depth, slot: binding.slot};
             }
-            depth++;
+            if (scope.createsEnvironment) depth++;
+            scopeIndex++;
         }
         return null;
     };
@@ -351,6 +363,8 @@
             this.emit(op.GET_GLOBAL, target, reference.name);
         } else if (reference.kind === "local") {
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
+        } else if (reference.kind === "register") {
+            this.emit(op.MOVE, target, reference.register);
         } else {
             this.emit(op.GET_PROPERTY, target, reference.object, reference.key);
         }
@@ -362,6 +376,8 @@
             this.emit(op.SET_GLOBAL, reference.name, value);
         } else if (reference.kind === "local") {
             this.emit(op.SET_LOCAL, reference.depth, reference.slot, value);
+        } else if (reference.kind === "register") {
+            if (reference.register !== value) this.emit(op.MOVE, reference.register, value);
         } else {
             this.emit(op.SET_PROPERTY, reference.object, reference.key, value);
         }
@@ -630,6 +646,53 @@
             index++;
         }
         return result;
+    }
+
+    function makeCompileScope(compiler, bindings, useRegisters) {
+        var map = {};
+        var index = 0;
+        while (index < bindings.length) {
+            map["$" + bindings[index]] = useRegisters ?
+                {kind: "register", register: compiler.allocate(), slot: index} :
+                {kind: "environment", slot: index};
+            index++;
+        }
+        return {bindings: map, createsEnvironment: !useRegisters};
+    }
+
+    function bindingRegisters(bindings, scope) {
+        var result = [];
+        var index = 0;
+        while (index < bindings.length) {
+            result[index] = scope.bindings["$" + bindings[index]].register;
+            index++;
+        }
+        return result;
+    }
+
+    function canUseRegisterBindings(body) {
+        return !containsNestedFunctionOrTry(body);
+    }
+
+    function containsNestedFunctionOrTry(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "FunctionDeclaration" ||
+            node.type === "FunctionExpression" || node.type === "TryStatement") {
+            return true;
+        }
+        if (typeof node.length === "number" && node.type === undefined) {
+            var arrayIndex = 0;
+            while (arrayIndex < node.length) {
+                if (containsNestedFunctionOrTry(node[arrayIndex++])) return true;
+            }
+            return false;
+        }
+        var key;
+        for (key in node) {
+            if (Object.prototype.hasOwnProperty.call(node, key) && key !== "type" &&
+                containsNestedFunctionOrTry(node[key])) return true;
+        }
+        return false;
     }
 
     function bindingSlots(names, map) {

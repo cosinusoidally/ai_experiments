@@ -73,6 +73,7 @@
 
     Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
                                                        closure, callable) {
+        if (program.bindingRegisters) return closure || null;
         if (!program.bindings && !closure && !callable) {
             return null;
         }
@@ -93,6 +94,27 @@
         slots[program.thisSlot] = receiver;
         if (program.functionNameSlot >= 0) slots[program.functionNameSlot] = callable;
         return environment;
+    };
+
+    Runtime.prototype.initializeFrameRegisters = function (program, registers,
+                                                            receiver, args, callable) {
+        var bindingRegisters = program.bindingRegisters;
+        if (!bindingRegisters) return;
+        var index = 0;
+        while (index < bindingRegisters.length) {
+            registers[bindingRegisters[index++]] = undefined;
+        }
+        index = 0;
+        while (index < program.parameterSlots.length) {
+            registers[bindingRegisters[program.parameterSlots[index]]] =
+                index < args.length ? args[index] : undefined;
+            index++;
+        }
+        registers[bindingRegisters[program.argumentsSlot]] = this.arrayFrom(args);
+        registers[bindingRegisters[program.thisSlot]] = receiver;
+        if (program.functionNameSlot >= 0) {
+            registers[bindingRegisters[program.functionNameSlot]] = callable;
+        }
     };
 
     Runtime.prototype.getBinding = function (context, environment, name) {

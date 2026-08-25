@@ -41,3 +41,16 @@ function argumentAt(index) {
     return arguments[index];
 }
 assertEqual(argumentAt(1, "second"), "second", "function arguments object");
+
+function registerLocalEvaluationOrder() {
+    var value = 3;
+    return value + (value = 7);
+}
+assertEqual(registerLocalEvaluationOrder(), 10,
+            "register local reads preserve expression snapshots");
+
+function leafRecursive(value) {
+    if (value <= 1) return 1;
+    return value * leafRecursive(value - 1);
+}
+assertEqual(leafRecursive(5), 120, "register local named-function recursion");

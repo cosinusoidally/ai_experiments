@@ -4,11 +4,14 @@
 
     function makeFrame(program, runtime, context, receiver, args, closure, callable,
                        returnRegister) {
+        args = args || [];
+        var registers = [];
+        runtime.initializeFrameRegisters(program, registers, receiver, args, callable);
         return {program: program, code: program.code, constants: program.constants,
-                registers: [], pc: 0,
+                registers: registers, pc: 0,
                 context: context,
                 environment: runtime.makeCallEnvironment(
-                    program, receiver, args || [], closure, callable),
+                    program, receiver, args, closure, callable),
                 returnRegister: returnRegister, handlers: []};
     }
 
