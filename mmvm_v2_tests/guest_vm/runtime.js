@@ -22,7 +22,6 @@
 
     function Runtime(options) {
         options = options || {};
-        this.globals = {};
         this.contexts = [];
         this.internedStrings = {};
         this.assertions = 0;
@@ -57,6 +56,8 @@
         this.profileNextReport = 1000000;
         this.threadedCompiler = options.threadedCompile ?
             new ThreadedCompiler(this) : null;
+        this.ensureLinearHeap();
+        this.globalObject = this.makeObject();
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
         if (options.rawFFI) this.installRawFFI();
@@ -579,8 +580,8 @@
 
     Runtime.prototype.installBuiltins = function () {
         var runtime = this;
-        this.globals.undefined = undefined;
-        this.globals.assertEqual = this.makeNativeFunction("assertEqual",
+        this.setGlobal("undefined", undefined);
+        this.setGlobal("assertEqual", this.makeNativeFunction("assertEqual",
             function (receiver, args) {
                 if (args[0] !== args[1]) {
                     throw new Error((args.length > 2 ? args[2] + ": " : "") +
@@ -588,27 +589,27 @@
                 }
                 runtime.assertions++;
                 return undefined;
-            });
-        this.globals.print = this.makeHostFunction("print",
+            }));
+        this.setGlobal("print", this.makeHostFunction("print",
             function (receiver, args) {
                 var text = args.length ? String(args[0]) : "";
                 if (typeof print === "function") print(text);
                 else console.log(text);
                 return undefined;
-            });
-        this.globals.guestCollect = this.makeNativeFunction("guestCollect",
+            }));
+        this.setGlobal("guestCollect", this.makeNativeFunction("guestCollect",
             function () {
                 return runtime.collect();
-            });
-        this.globals.guestBackingStoreCount = this.makeNativeFunction(
+            }));
+        this.setGlobal("guestBackingStoreCount", this.makeNativeFunction(
             "guestBackingStoreCount", function () {
                 return runtime.bufferSupport ?
                        runtime.bufferSupport.liveBackingCount() : 0;
-            });
-        this.globals.parseInt = this.makeNativeFunction("parseInt",
+            }));
+        this.setGlobal("parseInt", this.makeNativeFunction("parseInt",
             function (receiver, args) {
                 return parseInt(String(args[0]), args.length > 1 ? Number(args[1]) : undefined);
-            });
+            }));
         this.stringMethods = {};
         this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
             function (receiver, args) { return String(receiver).charAt(Number(args[0]) || 0); });
@@ -781,10 +782,10 @@
             "String.fromCharCode", function (receiver, args) {
                 return String.fromCharCode.apply(String, args);
             }));
-        this.globals.String = stringConstructor;
-        this.globals.Number = this.makeNativeFunction("Number",
-            function (receiver, args) { return args.length ? Number(args[0]) : 0; });
-        this.globals.Array = this.makeNativeFunction("Array",
+        this.setGlobal("String", stringConstructor);
+        this.setGlobal("Number", this.makeNativeFunction("Number",
+            function (receiver, args) { return args.length ? Number(args[0]) : 0; }));
+        this.setGlobal("Array", this.makeNativeFunction("Array",
             function (receiver, args) {
                 var array = runtime.makeArray();
                 if (args.length === 1 && typeof args[0] === "number") {
@@ -799,7 +800,7 @@
                     while (index < args.length) runtime.arraySet(array, index, args[index++]);
                 }
                 return array;
-            });
+            }));
         var math = this.makeObject();
         function mathMethod(name, callback) {
             runtime.setProperty(math, name,
@@ -835,7 +836,7 @@
         mathMethod("min", function (receiver, args) { return Math.min.apply(Math, args); });
         mathMethod("max", function (receiver, args) { return Math.max.apply(Math, args); });
         mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); });
-        this.globals.Math = math;
+        this.setGlobal("Math", math);
     };
 
     Runtime.prototype.installRawFFI = function () {
@@ -880,9 +881,11 @@
             name = context;
             context = this.contexts.length ? this.contexts[0] : null;
         }
-        var globals = context ? context.globals : this.globals;
-        if (!own(globals, name)) throw new ReferenceError(name + " is not defined");
-        return globals[name];
+        var globalObject = context ? context.globalObject : this.globalObject;
+        if (!this.hasOwnProperty(globalObject, name)) {
+            throw new ReferenceError(name + " is not defined");
+        }
+        return this.getProperty(globalObject, name);
     };
 
     Runtime.prototype.locateError = function (error, program, pc) {
@@ -931,7 +934,8 @@
             context = null;
         }
         this.assertOwned(value);
-        (context ? context.globals : this.globals)[name] = value;
+        this.setProperty(context ? context.globalObject : this.globalObject,
+                         name, value);
         return value;
     };
 
@@ -1213,9 +1217,7 @@
             this.gcGeneration++;
             var generation = this.gcGeneration;
             var key;
-            for (key in this.globals) {
-                if (own(this.globals, key)) this.markValue(this.globals[key], generation);
-            }
+            this.markValue(this.globalObject, generation);
             this.markValue(this.bufferSupport.prototype, generation);
             var hostRootIndex = 0;
             while (hostRootIndex < this.hostRoots.length) {
@@ -1241,11 +1243,7 @@
             var contextIndex = 0;
             while (contextIndex < this.contexts.length) {
                 var context = this.contexts[contextIndex];
-                for (key in context.globals) {
-                    if (own(context.globals, key)) {
-                        this.markValue(context.globals[key], generation);
-                    }
-                }
+                this.markValue(context.globalObject, generation);
                 if (context.execution) markExecution(context.execution, generation, this);
                 contextIndex++;
             }
@@ -1277,6 +1275,7 @@
         this.hostRoots = [];
         this.contexts = [];
         this.internedStrings = {};
+        this.globalObject = null;
         this.propertyAddressCache = {};
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];

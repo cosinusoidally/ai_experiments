@@ -712,7 +712,7 @@
                    (binding.depth - (this.useEnvironment ? 1 : 0)) + "," +
                    binding.slot + "," + value + ")";
         }
-        return "context.globals[" + quote(name) + "]=" + value;
+        return "runtime.setGlobal(context," + quote(name) + "," + value + ")";
     };
 
     StructuredEmitter.prototype.identifier = function (name) {
@@ -725,7 +725,7 @@
                    (binding.depth - (this.useEnvironment ? 1 : 0)) + "," +
                    binding.slot + ")";
         }
-        return "context.globals[" + quote(name) + "]";
+        return "runtime.getGlobal(context," + quote(name) + ")";
     };
 
     StructuredEmitter.prototype.environment = function (depth) {
@@ -851,10 +851,11 @@
                 return "(" + reference.source + node.operator + value + ")";
             }
             if (reference.kind === "global") {
-                if (node.operator === "=") return "(context.globals[" +
-                    quote(reference.name) + "]=" + value + ")";
-                return "(context.globals[" + quote(reference.name) + "]" +
-                       node.operator + value + ")";
+                if (node.operator === "=") return "runtime.setGlobal(context," +
+                    quote(reference.name) + "," + value + ")";
+                return "runtime.setGlobal(context," + quote(reference.name) +
+                       ",runtime.getGlobal(context," + quote(reference.name) + ")" +
+                       node.operator.substring(0, node.operator.length - 1) + value + ")";
             }
             if (reference.kind === "environment") {
                 if (node.operator === "=") return "runtime.setEnvironmentSlot(closure," +
@@ -884,8 +885,8 @@
             }
             var amount = node.operator === "++" ? 1 : -1;
             if (reference.kind === "global") {
-                var globalSource = "context.globals[" + quote(reference.name) + "]";
-                return node.prefix ? node.operator + globalSource : globalSource + node.operator;
+                return "hc.updateGlobal(context,null," + quote(reference.name) +
+                       "," + amount + "," + (node.prefix ? "true" : "false") + ")";
             }
             if (reference.kind === "environment") {
                 return "runtime.updateEnvironmentSlot(closure," + reference.depth +
@@ -1373,7 +1374,8 @@
             var compiler = emitter.threadedCompiler;
             var runtime = compiler && compiler.runtime;
             var context = runtime && runtime.contexts.length ? runtime.contexts[0] : null;
-            var callable = context && context.globals[name];
+            var callable = context && emitter.threadedCompiler.runtime.getGlobal(
+                context, name);
             return callable && callable.guestType === "bytecodeFunction" ?
                    callable.program.returnKind : null;
         }

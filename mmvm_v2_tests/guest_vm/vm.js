@@ -76,12 +76,16 @@
     function JSContext(jsRuntime) {
         this.jsRuntime = jsRuntime;
         this.runtime = jsRuntime.runtime;
-        this.globals = {};
+        this.globalObject = this.runtime.makeObject();
         this.execution = null;
         this.destroyed = false;
         var key;
-        for (key in this.runtime.globals) {
-            if (own(this.runtime.globals, key)) this.globals[key] = this.runtime.globals[key];
+        var keys = this.runtime.keys(this.runtime.globalObject);
+        var index = 0;
+        while (index < this.runtime.arrayLength(keys)) {
+            key = this.runtime.arrayGet(keys, index++);
+            this.runtime.setProperty(this.globalObject, key,
+                this.runtime.getProperty(this.runtime.globalObject, key));
         }
     }
 
@@ -156,7 +160,7 @@
             index++;
         }
         this.jsRuntime.contexts = survivors;
-        this.globals = {};
+        this.globalObject = null;
         this.destroyed = true;
     };
 
