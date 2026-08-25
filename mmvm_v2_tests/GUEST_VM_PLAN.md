@@ -30,7 +30,7 @@ Native compilation is deliberately not part of the correctness bootstrap:
 ES5 guest JavaScript source
             |
             v
-    lexer / parser / compiler
+ tokenizer / parser / compiler
             |
             v
       portable bytecode
@@ -84,6 +84,9 @@ not an accidental consequence of either host engine.
 - Write the bytecode interpreter dispatch core in the stricter kernel dialect
   from the beginning, while retaining a normal JavaScript execution path on
   both hosts.
+- Implement the source tokenizer without regular expressions. It must not use
+  regexp literals, `RegExp`, or regexp-backed `String` operations to recognize
+  tokens.
 - Keep raw `ffi_call` operations behind named host or libc wrappers.
 - Preserve the existing compatibility runner until the guest runner has
   passed equivalent tests.
@@ -179,7 +182,7 @@ Develop the new VM alongside the existing `node_compat` implementation:
 
 ```text
 guest_vm/
-    lexer.js
+    tokenizer.js
     parser.js
     compiler.js
     bytecode.js
@@ -224,7 +227,7 @@ the interpreter milestones.
 ## Frontend
 
 The host shell cannot expose its parser, AST, or bytecode to JavaScript, so the
-guest VM needs its own lexer and parser. The frontend should grow to support
+guest VM needs its own tokenizer and parser. The frontend should grow to support
 ECMAScript 5/5.1, with the existing demos determining the first useful
 implementation slice. This includes:
 
@@ -240,6 +243,33 @@ implementation slice. This includes:
 - unary, binary, comparison, and assignment operators;
 - CommonJS source wrapping.
 
+The tokenizer must be an explicit character-by-character state machine. It
+uses a source index, character-code classification, bounded lookahead, and
+small named scanners for identifiers, whitespace and line terminators,
+comments, numeric literals, strings and escapes, punctuators, and regexp
+literal text. Token recognition must not use:
+
+- JavaScript regexp literals;
+- the host `RegExp` constructor;
+- `String.prototype.match` or `search`;
+- regexp arguments to `replace` or `split`;
+- any helper that merely hides host regular-expression matching.
+
+This restriction applies to tokenization, not to the ES5 language feature.
+Guest source may contain regular-expression literals. The tokenizer must scan
+their pattern, backslash escapes, character classes, closing slash, and flags
+manually. The parser or tokenizer lexical-goal state must decide whether `/`
+begins a regular-expression literal or represents division/division-assignment;
+it must not guess by applying a host regexp to the remaining source.
+
+Character classification should be explicit and deterministic across the old
+SpiderMonkey and Node hosts. ASCII fast paths can use `charCodeAt`; ES5
+identifier and whitespace code points outside ASCII require tables or range
+checks derived from the language specification and checked into the repository.
+Every scanner must either advance the source index or report a located syntax
+error. Tokens record start/end offsets plus line and column information, with
+line tracking covering all ES5 line terminators and string/comment rules.
+
 Strict mode, ES5 object-literal details, automatic semicolon insertion,
 identifier and numeric grammar, and early errors must eventually follow ES5.1
 rather than the host parser. Features may be staged, but unsupported syntax
@@ -251,7 +281,11 @@ stack traces refer to the original file and line.
 Compilation must be deterministic across hosts. Given identical source, Node
 and MMVM should produce identical bytecode and constant-pool contents. Tests
 should compare serialized compiler output rather than relying only on program
-output.
+output. Token-stream tests must likewise compare token kind, source span,
+decoded literal value, line-break metadata, and errors on both hosts. Add a
+static source check for the tokenizer module so introducing a regexp literal,
+`RegExp` construction, or a regexp-backed string operation fails the frontend
+test suite.
 
 ## Register bytecode
 
@@ -704,8 +738,12 @@ both hosts, with result, exception, output, and heap summary compared.
 
 ### Milestone 1: compiler and primitive interpreter
 
-- Implement lexer, parser, AST, register allocator, bytecode emitter, and
-  verifier.
+- Implement the character-by-character, no-regular-expression tokenizer, then
+  the parser, AST, register allocator, bytecode emitter, and verifier.
+- Test ambiguous `/` lexical goals, comments and line terminators, longest
+  punctuator matching, numeric forms, string escapes, identifier boundaries,
+  regular-expression literal text, malformed tokens, and exact source spans
+  under both Node.js and `js_min.exe`.
 - Implement the fetch/decode/dispatch loop in the kernel dialect and execute it
   as ordinary JavaScript on both hosts.
 - Implement primitives, calls, call frames, branches, loops, and returns using
