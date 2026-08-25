@@ -3,6 +3,7 @@ var guestRunnerIsNode = typeof process !== "undefined" && process.argv &&
 var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
+var guestRunnerProfile = false;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -19,8 +20,13 @@ if (guestRunnerIsNode) {
     }
 }
 
+if (guestRunnerArguments[0] === "--vm-profile") {
+    guestRunnerProfile = true;
+    guestRunnerArguments.shift();
+}
+
 if (!guestRunnerArguments.length) {
-    var guestUsage = "usage: guest_runner.js program.js";
+    var guestUsage = "usage: guest_runner.js [--vm-profile] program.js";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -30,7 +36,8 @@ if (!guestRunnerArguments.length) {
 var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
-var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode});
+var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
+                                        profile: guestRunnerProfile});
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
     guestProgramVM, guestRunnerArguments);
 var guestRunnerDeferredCleanup = false;
@@ -39,6 +46,7 @@ var guestRunnerCleaned = false;
 function guestRunnerCleanup() {
     if (guestRunnerCleaned) return;
     guestRunnerCleaned = true;
+    if (guestRunnerProfile) guestProgramVM.runtime.reportProfile();
     guestNodeEnvironment.destroy();
     guestProgramVM.destroy();
 }

@@ -29,6 +29,9 @@
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
         this.interpretGuest = null;
+        this.profileOpcodeCounts = options.profile ? [] : null;
+        this.profileInstructionCount = 0;
+        this.profileNextReport = 1000000;
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
         if (options.rawFFI) this.installRawFFI();
@@ -98,6 +101,15 @@
 
     Runtime.prototype.initializeFrameRegisters = function (program, registers,
                                                             receiver, args, callable) {
+        var constantRegisters = program.constantRegisters || [];
+        var constantIndex = 0;
+        while (constantIndex < constantRegisters.length) {
+            if (constantRegisters[constantIndex] !== undefined) {
+                registers[constantRegisters[constantIndex]] =
+                    program.constants[constantIndex];
+            }
+            constantIndex++;
+        }
         var bindingRegisters = program.bindingRegisters;
         if (!bindingRegisters) return;
         var index = 0;
@@ -214,6 +226,36 @@
     Runtime.prototype.noteAllocation = function (units) {
         this.gcAllocationDebt += units > 0 ? units : 1;
         if (this.gcAllocationDebt >= this.gcThreshold) this.gcPending = true;
+    };
+
+    Runtime.prototype.countOpcode = function (opcode) {
+        var counts = this.profileOpcodeCounts;
+        if (!counts) return;
+        counts[opcode] = (counts[opcode] || 0) + 1;
+        this.profileInstructionCount++;
+        if (this.profileInstructionCount >= this.profileNextReport) {
+            this.reportProfile();
+            this.profileNextReport += 1000000;
+        }
+    };
+
+    Runtime.prototype.reportProfile = function () {
+        if (!this.profileOpcodeCounts) return;
+        var names = root.GuestVMBytecode && root.GuestVMBytecode.NAMES;
+        if (!names && typeof require === "function") names = require("./bytecode.js").NAMES;
+        var parts = [];
+        var opcode = 1;
+        while (opcode < this.profileOpcodeCounts.length) {
+            if (this.profileOpcodeCounts[opcode]) {
+                parts.push((names && names[opcode] ? names[opcode] : opcode) + "=" +
+                           this.profileOpcodeCounts[opcode]);
+            }
+            opcode++;
+        }
+        var line = "guest VM profile: instructions=" + this.profileInstructionCount +
+                   " " + parts.join(" ");
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
     };
 
     Runtime.prototype.gcSafePoint = function () {

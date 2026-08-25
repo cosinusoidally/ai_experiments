@@ -10,6 +10,7 @@
         this.registerCount = 0;
         this.breakTargets = [];
         this.continueTargets = [];
+        this.constantRegisters = [];
         this.scopes = [];
         if (scopeBindings) {
             this.scopes.push(makeCompileScope(this, scopeBindings,
@@ -76,6 +77,7 @@
         var undefinedRegister = this.emitConstant(undefined);
         this.emit(op.RETURN, undefinedRegister);
         return {code: this.code, constants: this.constants,
+                constantRegisters: this.constantRegisters,
                 registerCount: this.registerCount, parameters: [], locals: []};
     };
 
@@ -103,8 +105,12 @@
     };
 
     Compiler.prototype.emitConstant = function (value) {
-        var target = this.allocate();
-        this.emit(op.CONST, target, this.constant(value));
+        var constant = this.constant(value);
+        var target = this.constantRegisters[constant];
+        if (target === undefined) {
+            target = this.allocate();
+            this.constantRegisters[constant] = target;
+        }
         return target;
     };
 
@@ -227,7 +233,8 @@
             var forInObject = this.compileExpression(statement.right);
             var forInKeys = this.allocate();
             this.emit(op.GET_KEYS, forInKeys, forInObject);
-            var forInIndex = this.emitConstant(0);
+            var forInIndex = this.allocate();
+            this.emit(op.MOVE, forInIndex, this.emitConstant(0));
             var forInStart = this.code.length;
             var lengthKey = this.emitConstant("length");
             var forInLength = this.allocate();
@@ -319,14 +326,21 @@
         this.emit(opcode, target, left, right);
     };
 
-    Compiler.prototype.compileReference = function (expression) {
+    Compiler.prototype.compileReference = function (expression, future) {
         if (expression.type === "Identifier") {
             return this.referenceForName(expression.name);
         }
         if (expression.type === "MemberExpression") {
+            var objectFuture = expression.computed ?
+                [expression.property, future] : future;
+            var object = this.compileExpression(expression.object, objectFuture);
+            if (!expression.computed && expression.property.type === "Literal") {
+                return {kind: "constantProperty", object: object,
+                        key: this.constant(expression.property.value)};
+            }
             return {kind: "property",
-                    object: this.compileExpression(expression.object),
-                    key: this.compileExpression(expression.property)};
+                    object: object,
+                    key: this.compileExpression(expression.property, future)};
         }
         throw new SyntaxError("invalid assignment target");
     };
@@ -365,6 +379,8 @@
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
         } else if (reference.kind === "register") {
             this.emit(op.MOVE, target, reference.register);
+        } else if (reference.kind === "constantProperty") {
+            this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
         } else {
             this.emit(op.GET_PROPERTY, target, reference.object, reference.key);
         }
@@ -378,12 +394,14 @@
             this.emit(op.SET_LOCAL, reference.depth, reference.slot, value);
         } else if (reference.kind === "register") {
             if (reference.register !== value) this.emit(op.MOVE, reference.register, value);
+        } else if (reference.kind === "constantProperty") {
+            this.emit(op.SET_PROPERTY_CONST, reference.object, reference.key, value);
         } else {
             this.emit(op.SET_PROPERTY, reference.object, reference.key, value);
         }
     };
 
-    Compiler.prototype.compileExpression = function (expression) {
+    Compiler.prototype.compileExpression = function (expression, future) {
         if (expression.type === "Literal") return this.emitConstant(expression.value);
         if (expression.type === "FunctionExpression") {
             var functionRegister = this.allocate();
@@ -423,7 +441,13 @@
             return regexpRegister;
         }
         if (expression.type === "Identifier") {
-            return this.loadReference(this.referenceForName(expression.name));
+            var identifierReference = this.referenceForName(expression.name);
+            if (identifierReference.kind === "register" &&
+                !this.expressionWritesRegister(future,
+                                               identifierReference.register)) {
+                return identifierReference.register;
+            }
+            return this.loadReference(identifierReference);
         }
         if (expression.type === "ThisExpression") {
             return this.loadReference(this.referenceForName("this"));
@@ -447,7 +471,7 @@
                 }
                 return logicalResult;
             }
-            var left = this.compileExpression(expression.left);
+            var left = this.compileExpression(expression.left, expression.right);
             var right = this.compileExpression(expression.right);
             var binary = this.allocate();
             this.emitBinary(expression.operator, binary, left, right);
@@ -471,10 +495,15 @@
                 if (expression.argument.type !== "MemberExpression") {
                     return this.emitConstant(true);
                 }
-                var deleteReference = this.compileReference(expression.argument);
+                var deleteReference = this.compileReference(expression.argument, null);
                 var deleteResult = this.allocate();
-                this.emit(op.DELETE_PROPERTY, deleteResult,
-                          deleteReference.object, deleteReference.key);
+                if (deleteReference.kind === "constantProperty") {
+                    this.emit(op.DELETE_PROPERTY_CONST, deleteResult,
+                              deleteReference.object, deleteReference.key);
+                } else {
+                    this.emit(op.DELETE_PROPERTY, deleteResult,
+                              deleteReference.object, deleteReference.key);
+                }
                 return deleteResult;
             }
             var argument = this.compileExpression(expression.argument);
@@ -485,22 +514,23 @@
             else if (expression.operator === "~") this.emit(op.BIT_NOT, unary, argument);
             else if (expression.operator === "typeof") this.emit(op.TYPEOF, unary, argument);
             else if (expression.operator === "void") {
-                this.emit(op.CONST, unary, this.constant(undefined));
+                return this.emitConstant(undefined);
             } else throw new Error("unsupported unary operator: " + expression.operator);
             return unary;
         }
         if (expression.type === "MemberExpression") {
-            return this.loadReference(this.compileReference(expression));
+            return this.loadReference(this.compileReference(expression, future));
         }
         if (expression.type === "AssignmentExpression") {
-            var reference = this.compileReference(expression.left);
+            var reference = this.compileReference(expression.left, expression.right);
             var assigned;
             if (expression.operator === "=") {
                 assigned = this.compileExpression(expression.right);
             } else {
                 var current = this.loadReference(reference);
                 var assignmentRight = this.compileExpression(expression.right);
-                assigned = this.allocate();
+                assigned = reference.kind === "register" ?
+                    reference.register : this.allocate();
                 this.emitBinary(expression.operator.charAt(0), assigned,
                                 current, assignmentRight);
             }
@@ -508,10 +538,11 @@
             return assigned;
         }
         if (expression.type === "UpdateExpression") {
-            reference = this.compileReference(expression.argument);
+            reference = this.compileReference(expression.argument, null);
             current = this.loadReference(reference);
             var one = this.emitConstant(1);
-            var updated = this.allocate();
+            var updated = reference.kind === "register" ?
+                reference.register : this.allocate();
             this.emit(expression.operator === "++" ? op.ADD : op.SUBTRACT,
                       updated, current, one);
             this.storeReference(reference, updated);
@@ -521,49 +552,40 @@
             var callee;
             var receiver = -1;
             if (expression.callee.type === "MemberExpression") {
-                var callReference = this.compileReference(expression.callee);
+                var callReference = this.compileReference(expression.callee,
+                                                          expression.arguments);
                 callee = this.loadReference(callReference);
                 receiver = callReference.object;
             } else {
-                callee = this.compileExpression(expression.callee);
+                callee = this.compileExpression(expression.callee,
+                                                expression.arguments);
             }
             var values = [];
             var index = 0;
             while (index < expression.arguments.length) {
-                values.push(this.compileExpression(expression.arguments[index]));
-                index++;
-            }
-            var firstArgument = this.allocateBlock(values.length);
-            index = 0;
-            while (index < values.length) {
-                this.emit(op.MOVE, firstArgument + index, values[index]);
+                values.push(this.compileExpression(expression.arguments[index],
+                    expression.arguments.slice(index + 1)));
                 index++;
             }
             var callResult = this.allocate();
             this.emit(op.CALL, callResult, callee, receiver,
-                      firstArgument, values.length);
+                      this.constant(values));
             return callResult;
         }
         if (expression.type === "NewExpression") {
-            var constructor = this.compileExpression(expression.callee);
+            var constructor = this.compileExpression(expression.callee,
+                                                     expression.arguments);
             var constructorValues = [];
             var constructorIndex = 0;
             while (constructorIndex < expression.arguments.length) {
                 constructorValues.push(this.compileExpression(
-                    expression.arguments[constructorIndex]));
-                constructorIndex++;
-            }
-            var firstConstructorArgument = this.allocateBlock(
-                constructorValues.length);
-            constructorIndex = 0;
-            while (constructorIndex < constructorValues.length) {
-                this.emit(op.MOVE, firstConstructorArgument + constructorIndex,
-                          constructorValues[constructorIndex]);
+                    expression.arguments[constructorIndex],
+                    expression.arguments.slice(constructorIndex + 1)));
                 constructorIndex++;
             }
             var constructed = this.allocate();
             this.emit(op.CONSTRUCT, constructed, constructor,
-                      firstConstructorArgument, constructorValues.length);
+                      this.constant(constructorValues));
             return constructed;
         }
         if (expression.type === "SequenceExpression") {
@@ -571,6 +593,39 @@
             return this.compileExpression(expression.right);
         }
         throw new Error("unsupported expression: " + expression.type);
+    };
+
+    Compiler.prototype.expressionWritesRegister = function (node, register) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression") {
+            return false;
+        }
+        if ((node.type === "AssignmentExpression" ||
+             node.type === "UpdateExpression") &&
+            node.left && node.left.type === "Identifier") {
+            var assigned = this.resolveBinding(node.left.name);
+            if (assigned && assigned.kind === "register" &&
+                assigned.register === register) return true;
+        }
+        if (node.type === "UpdateExpression" && node.argument &&
+            node.argument.type === "Identifier") {
+            var updated = this.resolveBinding(node.argument.name);
+            if (updated && updated.kind === "register" &&
+                updated.register === register) return true;
+        }
+        if (typeof node.length === "number" && node.type === undefined) {
+            var arrayIndex = 0;
+            while (arrayIndex < node.length) {
+                if (this.expressionWritesRegister(node[arrayIndex++], register)) return true;
+            }
+            return false;
+        }
+        var key;
+        for (key in node) {
+            if (Object.prototype.hasOwnProperty.call(node, key) && key !== "type" &&
+                this.expressionWritesRegister(node[key], register)) return true;
+        }
+        return false;
     };
 
     function patchBreaks(compiler, breaks, target) {

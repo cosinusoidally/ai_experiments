@@ -25,6 +25,9 @@
                 opcode === op.GET_KEYS) width = 3;
             else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                      opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
+                     opcode === op.GET_PROPERTY_CONST ||
+                     opcode === op.SET_PROPERTY_CONST ||
+                     opcode === op.DELETE_PROPERTY_CONST ||
                      (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                      (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                      opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
@@ -34,8 +37,8 @@
             else if (opcode === op.PUSH_CATCH) width = 3;
             else if (opcode === op.POP_CATCH) width = 1;
             else if (opcode === op.JUMP_IF_FALSE) width = 3;
-            else if (opcode === op.CALL) width = 6;
-            else if (opcode === op.CONSTRUCT) width = 5;
+            else if (opcode === op.CALL) width = 5;
+            else if (opcode === op.CONSTRUCT) width = 4;
             else throw new Error("invalid opcode " + opcode + " at bytecode " + pc);
             if (pc + width > code.length) throw new Error("truncated bytecode at " + pc);
 
@@ -72,6 +75,21 @@
                 requireLexicalOperand(code[pc + 1], "depth", pc);
                 requireLexicalOperand(code[pc + 2], "slot", pc);
                 requireRegister(program, code[pc + 3], pc);
+            } else if (opcode === op.GET_PROPERTY_CONST ||
+                       opcode === op.SET_PROPERTY_CONST ||
+                       opcode === op.DELETE_PROPERTY_CONST) {
+                requireRegister(program, code[pc + 1], pc);
+                if (opcode === op.SET_PROPERTY_CONST) {
+                    if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
+                        throw new Error("invalid property constant at bytecode " + pc);
+                    }
+                    requireRegister(program, code[pc + 3], pc);
+                } else {
+                    requireRegister(program, code[pc + 2], pc);
+                    if (code[pc + 3] < 0 || code[pc + 3] >= program.constants.length) {
+                        throw new Error("invalid property constant at bytecode " + pc);
+                    }
+                }
             } else if (opcode === op.JUMP) {
                 jumps.push(code[pc + 1]);
             } else if (opcode === op.PUSH_CATCH) {
@@ -86,19 +104,11 @@
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
                 if (code[pc + 3] >= 0) requireRegister(program, code[pc + 3], pc);
-                var count = code[pc + 5];
-                if (count < 0 || code[pc + 4] < 0 ||
-                    code[pc + 4] + count > program.registerCount) {
-                    throw new Error("invalid call arguments at bytecode " + pc);
-                }
+                requireArgumentList(program, code[pc + 4], pc);
             } else if (opcode === op.CONSTRUCT) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
-                var constructCount = code[pc + 4];
-                if (constructCount < 0 || code[pc + 3] < 0 ||
-                    code[pc + 3] + constructCount > program.registerCount) {
-                    throw new Error("invalid constructor arguments at bytecode " + pc);
-                }
+                requireArgumentList(program, code[pc + 3], pc);
             } else if (opcode === op.MAKE_REGEXP) {
                 requireRegister(program, code[pc + 1], pc);
                 if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length ||
@@ -125,6 +135,20 @@
     function requireLexicalOperand(value, name, pc) {
         if (value < 0 || value !== Math.floor(value)) {
             throw new Error("invalid lexical " + name + " at bytecode " + pc);
+        }
+    }
+
+    function requireArgumentList(program, constantIndex, pc) {
+        if (constantIndex < 0 || constantIndex >= program.constants.length) {
+            throw new Error("invalid argument-list constant at bytecode " + pc);
+        }
+        var registers = program.constants[constantIndex];
+        if (!registers || typeof registers.length !== "number") {
+            throw new Error("invalid argument list at bytecode " + pc);
+        }
+        var index = 0;
+        while (index < registers.length) {
+            requireRegister(program, registers[index++], pc);
         }
     }
 

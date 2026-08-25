@@ -112,6 +112,7 @@
                 var registers = frame.registers;
                 var pc = frame.pc;
                 var opcode = code[pc];
+                if (this.runtime.profileOpcodeCounts) this.runtime.countOpcode(opcode);
                 var target;
                 var left;
                 var right;
@@ -141,8 +142,21 @@
                         code[pc + 1], code[pc + 2], registers[code[pc + 3]]);
                     frame.pc = pc + 4;
                 } else if (opcode === op.MOVE) {
-                    registers[code[pc + 1]] = registers[code[pc + 2]];
-                    frame.pc = pc + 3;
+                    /* Compiler temporaries and contiguous call arguments often
+                     * form long MOVE runs. Dispatch the run here while keeping
+                     * every bytecode visible to budgets and profiling. */
+                    while (true) {
+                        registers[code[pc + 1]] = registers[code[pc + 2]];
+                        pc += 3;
+                        if (budget === 0 || code[pc] !== op.MOVE) break;
+                        budget--;
+                        used++;
+                        this.totalInstructions++;
+                        if (this.runtime.profileOpcodeCounts) {
+                            this.runtime.countOpcode(op.MOVE);
+                        }
+                    }
+                    frame.pc = pc;
                 } else if (opcode === op.GET_PROPERTY) {
                     registers[code[pc + 1]] = this.runtime.getProperty(
                         registers[code[pc + 2]], registers[code[pc + 3]]);
@@ -150,6 +164,15 @@
                 } else if (opcode === op.SET_PROPERTY) {
                     this.runtime.setProperty(registers[code[pc + 1]],
                                              registers[code[pc + 2]],
+                                             registers[code[pc + 3]]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.GET_PROPERTY_CONST) {
+                    registers[code[pc + 1]] = this.runtime.getProperty(
+                        registers[code[pc + 2]], constants[code[pc + 3]]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.SET_PROPERTY_CONST) {
+                    this.runtime.setProperty(registers[code[pc + 1]],
+                                             constants[code[pc + 2]],
                                              registers[code[pc + 3]]);
                     frame.pc = pc + 4;
                 } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
@@ -194,6 +217,10 @@
                     registers[code[pc + 1]] = this.runtime.deleteProperty(
                         registers[code[pc + 2]], registers[code[pc + 3]]);
                     frame.pc = pc + 4;
+                } else if (opcode === op.DELETE_PROPERTY_CONST) {
+                    registers[code[pc + 1]] = this.runtime.deleteProperty(
+                        registers[code[pc + 2]], constants[code[pc + 3]]);
+                    frame.pc = pc + 4;
                 } else if (opcode === op.GET_KEYS) {
                     registers[code[pc + 1]] = this.runtime.keys(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
@@ -205,16 +232,17 @@
                                code[pc + 2] : pc + 3;
                 } else if (opcode === op.CALL) {
                     args = [];
+                    var argumentRegisters = constants[code[pc + 4]];
                     index = 0;
-                    while (index < code[pc + 5]) {
-                        args[index] = registers[code[pc + 4] + index];
+                    while (index < argumentRegisters.length) {
+                        args[index] = registers[argumentRegisters[index]];
                         index++;
                     }
                     var callableValue = registers[code[pc + 2]];
                     var receiver = code[pc + 3] < 0 ? undefined :
                                    registers[code[pc + 3]];
                     var destination = code[pc + 1];
-                    frame.pc = pc + 6;
+                    frame.pc = pc + 5;
                     if (callableValue && callableValue.guestType === "bytecodeFunction") {
                         this.frames.push(makeFrame(callableValue.program, this.runtime,
                             callableValue.homeContext || frame.context, receiver, args,
@@ -235,14 +263,15 @@
                     }
                 } else if (opcode === op.CONSTRUCT) {
                     args = [];
+                    var constructorArgumentRegisters = constants[code[pc + 3]];
                     index = 0;
-                    while (index < code[pc + 4]) {
-                        args[index] = registers[code[pc + 3] + index];
+                    while (index < constructorArgumentRegisters.length) {
+                        args[index] = registers[constructorArgumentRegisters[index]];
                         index++;
                     }
                     var constructorValue = registers[code[pc + 2]];
                     var constructDestination = code[pc + 1];
-                    frame.pc = pc + 5;
+                    frame.pc = pc + 4;
                     if (constructorValue && constructorValue.guestType === "function" &&
                         constructorValue.callMode === "host") {
                         this.pendingHostCall = {callable: constructorValue,

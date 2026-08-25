@@ -165,6 +165,10 @@ work. This is an interpreter-performance limitation, not X11 blocking or a
 frame-timing change. No artifacts directory or generated framebuffer image is
 required or stored in `mmvm_v2_tests`.
 
+Current benchmark commands, measured demo2 progress, and the optional
+`guest_runner.js --vm-profile` opcode profiler are documented in
+`PERFORMANCE.md`.
+
 The embedder provides on both hosts:
 
 - synchronous `fs.readFileSync` for Xauthority data;

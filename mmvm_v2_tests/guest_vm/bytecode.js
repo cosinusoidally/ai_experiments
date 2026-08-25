@@ -43,8 +43,19 @@
         DELETE_PROPERTY: 41,
         GET_KEYS: 42,
         GET_LOCAL: 43,
-        SET_LOCAL: 44
+        SET_LOCAL: 44,
+        GET_PROPERTY_CONST: 45,
+        SET_PROPERTY_CONST: 46,
+        DELETE_PROPERTY_CONST: 47
     };
+
+    op.NAMES = [];
+    var opcodeName;
+    for (opcodeName in op) {
+        if (opcodeName !== "NAMES" && typeof op[opcodeName] === "number") {
+            op.NAMES[op[opcodeName]] = opcodeName;
+        }
+    }
 
     root.GuestVMBytecode = op;
     if (typeof module !== "undefined" && module.exports) module.exports = op;

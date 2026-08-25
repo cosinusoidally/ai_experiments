@@ -54,3 +54,45 @@ function leafRecursive(value) {
     return value * leafRecursive(value - 1);
 }
 assertEqual(leafRecursive(5), 120, "register local named-function recursion");
+
+function pair(left, right) { return left * 10 + right; }
+function orderedRegisterArguments() {
+    var value = 1;
+    return pair(value, value = 2);
+}
+assertEqual(orderedRegisterArguments(), 12,
+            "earlier register arguments preserve their value");
+
+function methodReceiverBeforeArguments() {
+    var first = {value: 3, read: function () { return this.value; }};
+    var second = {value: 9};
+    return first.read(first = second);
+}
+assertEqual(methodReceiverBeforeArguments(), 3,
+            "method receiver is fixed before argument evaluation");
+
+function assignmentObjectBeforeValue() {
+    var first = {value: 1};
+    var second = {value: 2};
+    var original = first;
+    first.value = (first = second, 7);
+    return original.value + second.value;
+}
+assertEqual(assignmentObjectBeforeValue(), 9,
+            "assignment object is fixed before value evaluation");
+
+function registerCompoundEvaluationOrder() {
+    var value = 3;
+    value += (value = 7);
+    return value;
+}
+assertEqual(registerCompoundEvaluationOrder(), 10,
+            "register compound assignment preserves its old value");
+
+function registerPostfixValue() {
+    var value = 3;
+    var old = value++;
+    return old * 10 + value;
+}
+assertEqual(registerPostfixValue(), 34,
+            "register postfix update preserves its result value");
