@@ -112,3 +112,18 @@ generated framebuffer is stored in the repository.
 A Node 24.14.1 host running the same guest structured tier sustained about
 19.5 FPS for demo7 at 64x64. Direct Node execution of demos 1--7 remained at
 the configured 20 FPS cap in the same smoke sweep.
+
+## 2026-08-25: demo8 guest startup checkpoint
+
+The js_min-only demo8 command documented in `README.md` now opens its X11
+window, parses Xauthority through the inlined Buffer implementation, generates
+the 512x64 procedural skybox, initializes the 320x240 rally scene, and enters
+attract mode with the compiled-native triangle rasterizer selected. A timed
+smoke test established correct startup and continued execution; it did not
+produce a trustworthy steady-state FPS sample, so no new frame-rate claim is
+recorded here.
+
+Functions constructing guest-defined classes stay in the semantic interpreter
+to avoid a Firefox 1 generated-function receiver defect. Built-in construction
+and constructor-free renderer functions retain structured/native compilation.
+Demo8 is not a Node-host compatibility target.

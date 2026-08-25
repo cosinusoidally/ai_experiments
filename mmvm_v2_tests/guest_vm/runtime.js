@@ -30,6 +30,7 @@
         this.gcAllocationDebt = 0;
         this.gcPending = false;
         this.gcCollecting = false;
+        this.compiledDepth = 0;
         this.collectionCount = 0;
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
@@ -120,6 +121,7 @@
         var callable = this.trackObject({guestType: "bytecodeFunction", program: program,
                                  closure: closure, properties: {}, gcMark: 0,
                                  name: program.name || "",
+                                 source: program.source || null,
                                  homeContext: homeContext});
         callable.properties.$prototype = prototype;
         prototype.properties.$constructor = callable;
@@ -333,7 +335,9 @@
     };
 
     Runtime.prototype.gcSafePoint = function () {
-        if (this.gcPending && !this.gcCollecting) this.collect();
+        if (this.gcPending && !this.gcCollecting && this.compiledDepth === 0) {
+            this.collect();
+        }
     };
 
     Runtime.prototype.retain = function (value) {
@@ -411,6 +415,11 @@
                 return args.length > 1 ? String(receiver).substring(Number(args[0]), Number(args[1])) :
                                          String(receiver).substring(Number(args[0]));
             });
+        this.stringMethods.substr = this.makeNativeFunction("String.substr",
+            function (receiver, args) {
+                return args.length > 1 ? String(receiver).substr(Number(args[0]),
+                    Number(args[1])) : String(receiver).substr(Number(args[0]));
+            });
         this.stringMethods.toLowerCase = this.makeNativeFunction("String.toLowerCase",
             function (receiver) { return String(receiver).toLowerCase(); });
         this.stringMethods.split = this.makeNativeFunction("String.split",
@@ -451,16 +460,61 @@
                 while (index >= 0) receiver.elements.unshift(args[index--]);
                 return receiver.elements.length;
             });
+        this.arrayMethods.shift = this.makeNativeFunction("Array.shift",
+            function (receiver) { return receiver.elements.shift(); });
+        this.arrayMethods.pop = this.makeNativeFunction("Array.pop",
+            function (receiver) { return receiver.elements.pop(); });
+        this.arrayMethods.concat = this.makeNativeFunction("Array.concat",
+            function (receiver, args) {
+                var result = runtime.arrayFrom(receiver.elements);
+                var argumentIndex = 0;
+                while (argumentIndex < args.length) {
+                    var value = args[argumentIndex++];
+                    if (value && value.guestType === "array") {
+                        var elementIndex = 0;
+                        while (elementIndex < value.elements.length) {
+                            result.elements.push(value.elements[elementIndex++]);
+                        }
+                    } else result.elements.push(value);
+                }
+                return result;
+            });
         this.arrayMethods.slice = this.makeNativeFunction("Array.slice",
             function (receiver, args) {
                 var start = args.length ? Number(args[0]) : 0;
                 var end = args.length > 1 ? Number(args[1]) : receiver.elements.length;
                 return runtime.arrayFrom(receiver.elements.slice(start, end));
             });
+        this.arrayMethods.join = this.makeNativeFunction("Array.join",
+            function (receiver, args) {
+                var separator = args.length && args[0] !== undefined ?
+                                String(args[0]) : ",";
+                var result = "";
+                var index = 0;
+                while (index < receiver.elements.length) {
+                    if (index) result += separator;
+                    var value = receiver.elements[index++];
+                    if (value !== undefined && value !== null) result += String(value);
+                }
+                return result;
+            });
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
                 return runtime.hasOwnProperty(receiver, String(args[0]));
+            });
+        this.functionMethods = {};
+        this.functionMethods.apply = this.makeNativeFunction("Function.apply",
+            function () {
+                throw new Error("Function.apply must be dispatched by the VM");
+            });
+        this.functionMethods.apply.intrinsicKind = "functionApply";
+        this.functionMethods.toString = this.makeNativeFunction("Function.toString",
+            function (receiver) {
+                if (receiver.guestType === "bytecodeFunction" && receiver.source) {
+                    return receiver.source;
+                }
+                return "function " + (receiver.name || "") + "() { [native code] }";
             });
         this.numberMethods = {};
         this.numberMethods.toString = this.makeNativeFunction("Number.toString",
@@ -594,6 +648,45 @@
         return globals[name];
     };
 
+    Runtime.prototype.locateError = function (error, program, pc) {
+        if (!error || (typeof error !== "object" && typeof error !== "function") ||
+            error.guestFilename || (error.properties && error.properties.$fileName)) {
+            return error;
+        }
+        var location = null;
+        if (program && program.sourceLocations && pc !== undefined) {
+            var scan = pc;
+            while (scan >= 0 && !location) location = program.sourceLocations[scan--];
+        }
+        if (!location && program) location = program.location;
+        if (!location) return error;
+        if (error.guestType && error.properties) {
+            var guestFilename = location.filename || program.filename || "<source>";
+            var guestLine = location.line || 1;
+            var guestColumn = location.column || 1;
+            var guestName = error.properties.$name || "Error";
+            var guestMessage = error.properties.$message || "";
+            error.properties.$fileName = guestFilename;
+            error.properties.$lineNumber = guestLine;
+            error.properties.$columnNumber = guestColumn;
+            error.properties.$stack = guestFilename + ":" + guestLine + ":" +
+                guestColumn + ": " + guestName +
+                (guestMessage ? ": " + guestMessage : "");
+            return error;
+        }
+        error.guestFilename = location.filename || program.filename || "<source>";
+        error.guestLine = location.line || 1;
+        error.guestColumn = location.column || 1;
+        var label = error.guestFilename + ":" + error.guestLine + ":" +
+                    error.guestColumn;
+        var description = error.name ? error.name + ": " + error.message : String(error);
+        try {
+            error.stack = label + ": " + description +
+                (error.stack ? "\n" + error.stack : "");
+        } catch (ignored) {}
+        return error;
+    };
+
     Runtime.prototype.setGlobal = function (context, name, value) {
         if (arguments.length === 2) {
             value = name;
@@ -623,6 +716,16 @@
         if (object === null || object === undefined) {
             throw new TypeError("cannot read property '" + key + "'");
         }
+        if (!object.guestType && typeof object === "object" &&
+            (object.guestFilename || (object.name && object.message !== undefined))) {
+            key = this.propertyKey(key);
+            if (key === "fileName") return object.guestFilename;
+            if (key === "lineNumber") return object.guestLine;
+            if (key === "columnNumber") return object.guestColumn;
+            if (key === "name" || key === "message" || key === "stack") {
+                return object[key];
+            }
+        }
         if (object.guestType === "buffer") {
             return this.bufferSupport.getProperty(object, key);
         }
@@ -643,6 +746,9 @@
                 var inherited = this.getProperty(object.prototype, key);
                 if (inherited !== undefined) return inherited;
             }
+            if ((object.guestType === "function" ||
+                 object.guestType === "bytecodeFunction") &&
+                this.functionMethods[key]) return this.functionMethods[key];
             return this.objectMethods[key];
         }
         if (typeof object === "string") {

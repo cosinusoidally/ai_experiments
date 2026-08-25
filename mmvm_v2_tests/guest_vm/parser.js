@@ -40,10 +40,22 @@
     Parser.prototype.parseProgram = function () {
         var body = [];
         while (this.current.kind !== "eof") body.push(this.parseStatement());
-        return {type: "Program", body: body};
+        return {type: "Program", body: body, filename: this.tokenizer.filename,
+                location: body.length ? body[0].location :
+                    {filename: this.tokenizer.filename, line: 1, column: 1}};
     };
 
     Parser.prototype.parseStatement = function () {
+        var start = this.current;
+        var statement = this.parseStatementWithoutLocation();
+        if (!statement.location) {
+            statement.location = {filename: this.tokenizer.filename,
+                                  line: start.line, column: start.column + 1};
+        }
+        return statement;
+    };
+
+    Parser.prototype.parseStatementWithoutLocation = function () {
         if (this.isPunctuator(";")) {
             this.advance(true);
             return {type: "EmptyStatement"};
@@ -72,8 +84,8 @@
             if (this.current.kind === "eof") this.error("unterminated block");
             body.push(this.parseStatement());
         }
-        this.expectPunctuator("}", true);
-        return {type: "BlockStatement", body: body};
+        var close = this.expectPunctuator("}", true);
+        return {type: "BlockStatement", body: body, sourceEnd: close.end};
     };
 
     Parser.prototype.parseVariableStatement = function (consumeSemicolon) {
@@ -207,6 +219,7 @@
     };
 
     Parser.prototype.parseFunction = function (declaration) {
+        var start = this.current;
         this.advance(false);
         var name = null;
         if (this.current.kind === "identifier") name = this.advance(false).value;
@@ -223,7 +236,10 @@
         this.expectPunctuator(")", true);
         var body = this.parseBlock();
         return {type: declaration ? "FunctionDeclaration" : "FunctionExpression",
-                name: name, parameters: parameters, body: body};
+                name: name, parameters: parameters, body: body,
+                source: this.tokenizer.source.substring(start.start, body.sourceEnd),
+                location: {filename: this.tokenizer.filename,
+                           line: start.line, column: start.column + 1}};
     };
 
     Parser.prototype.parseExpression = function () {

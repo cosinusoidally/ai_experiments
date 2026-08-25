@@ -13,6 +13,7 @@
         var runAutomaticGCTest = require("./automatic_gc_test.js");
         var runRuntimeContextExecutionTest = require(
             "./runtime_context_execution_test.js");
+        var runErrorLocationTest = require("./error_location_test.js");
         var Heap = require("../heap.js");
         var ValueCells = require("../value_cell.js");
         var runHeapAccessTest = require("./heap_access_test.js");
@@ -30,6 +31,7 @@
         load("guest_vm/tests/embedding_api_test.js");
         load("guest_vm/tests/automatic_gc_test.js");
         load("guest_vm/tests/runtime_context_execution_test.js");
+        load("guest_vm/tests/error_location_test.js");
         load("guest_vm/tests/heap_access_test.js");
         load("guest_vm/tests/value_cell_test.js");
         load("guest_vm/tests/runtime_linear_heap_test.js");
@@ -38,6 +40,7 @@
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
         runAutomaticGCTest = GuestVMRunAutomaticGCTest;
         runRuntimeContextExecutionTest = GuestVMRunRuntimeContextExecutionTest;
+        runErrorLocationTest = GuestVMRunErrorLocationTest;
         Heap = GuestVMHeap;
         ValueCells = GuestVMValueCells;
         runHeapAccessTest = GuestVMRunHeapAccessTest;
@@ -56,6 +59,7 @@
         {path: "language/try_update.js"},
         {path: "language/object_control.js"},
         {path: "language/declaration_hoisting.js"},
+        {path: "language/closure_fallback.js"},
         {path: "buffer/buffer_guest.js"}
     ];
     var totalAssertions = 0;
@@ -86,6 +90,9 @@
     var runtimeContextResult = runRuntimeContextExecutionTest(VM);
     if (typeof print === "function") print(runtimeContextResult);
     else console.log(runtimeContextResult);
+    var errorLocationResult = runErrorLocationTest(VM);
+    if (typeof print === "function") print(errorLocationResult);
+    else console.log(errorLocationResult);
     var heapAccessResult = runHeapAccessTest(Heap);
     if (typeof print === "function") print(heapAccessResult);
     else console.log(heapAccessResult);
@@ -113,11 +120,11 @@
     var threadedVM = new VM({threadedCompile: true});
     threadedVM.run(readSource("language/functions_objects.js"),
                    "threaded_functions_objects.js");
-    if (threadedVM.runtime.assertions !== 19) {
+    if (threadedVM.runtime.assertions !== 22) {
         throw new Error("threaded compiler assertion count changed");
     }
     threadedVM.destroy();
-    var threadedResult = "structured compiler closures passed: 19 assertion(s)";
+    var threadedResult = "structured compiler closures passed: 22 assertion(s)";
     if (typeof print === "function") print(threadedResult);
     else console.log(threadedResult);
 

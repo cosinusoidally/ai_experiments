@@ -12,6 +12,9 @@
         this.continueTargets = [];
         this.constantRegisters = [];
         this.registerHints = [];
+        this.sourceLocations = [];
+        this.currentLocation = null;
+        this.filename = "<source>";
         this.scopes = [];
         if (scopeBindings) {
             this.scopes.push(makeCompileScope(this, scopeBindings,
@@ -47,6 +50,7 @@
 
     Compiler.prototype.emit = function () {
         var position = this.code.length;
+        if (this.currentLocation) this.sourceLocations[position] = this.currentLocation;
         var index = 0;
         while (index < arguments.length) {
             this.code.push(arguments[index]);
@@ -60,11 +64,13 @@
     };
 
     Compiler.prototype.compile = function (program) {
+        this.filename = program.filename || this.filename;
         var declarations = [];
         collectFunctionDeclarations(program.body, declarations);
         var declarationIndex = 0;
         while (declarationIndex < declarations.length) {
             var declaration = declarations[declarationIndex++];
+            this.currentLocation = declaration.location || program.location;
             var declaredFunction = this.allocate();
             var declarationProgram = this.compileFunction(declaration);
             var declarationConstant = this.constant(declarationProgram);
@@ -83,7 +89,11 @@
         return {code: this.code, constants: this.constants,
                 constantRegisters: this.constantRegisters,
                 registerHints: this.registerHints,
-                registerCount: this.registerCount, parameters: [], locals: []};
+                registerCount: this.registerCount, parameters: [], locals: [],
+                filename: this.filename,
+                location: program.location || {filename: this.filename,
+                                                line: 1, column: 1},
+                sourceLocations: this.sourceLocations};
     };
 
     Compiler.prototype.compileFunction = function (expression) {
@@ -91,7 +101,10 @@
         var bindings = makeFunctionBindings(expression.parameters, locals);
         var useRegisters = canUseRegisterBindings(expression.body);
         var nested = new Compiler(bindings, this.scopes, useRegisters);
-        var bodyProgram = {body: expression.body.body};
+        var bodyProgram = {body: expression.body.body,
+                           filename: expression.location ?
+                               expression.location.filename : this.filename,
+                           location: expression.location || null};
         var program = nested.compile(bodyProgram);
         program.parameters = expression.parameters.slice(0);
         program.locals = locals;
@@ -106,6 +119,7 @@
         program.functionNameSlot = expression.name ?
             program.bindingSlots["$" + expression.name] : -1;
         program.name = expression.name || "";
+        program.source = expression.source || null;
         program.astBody = expression.body;
         program.returnKind = inferReturnKind(expression.body);
         program.nonlocalBindings = describeNonlocalBindings(expression.body, nested);
@@ -123,6 +137,7 @@
     };
 
     Compiler.prototype.compileStatement = function (statement) {
+        if (statement.location) this.currentLocation = statement.location;
         var index;
         if (statement.type === "EmptyStatement") return;
         if (statement.type === "ExpressionStatement") {
@@ -565,6 +580,28 @@
             return expression.prefix ? updated : current;
         }
         if (expression.type === "CallExpression") {
+            if (expression.callee.type === "MemberExpression" &&
+                !expression.callee.computed &&
+                expression.callee.property.value === "call") {
+                var calledFunction = this.compileExpression(
+                    expression.callee.object, expression.arguments);
+                var explicitReceiver = expression.arguments.length ?
+                    this.compileExpression(expression.arguments[0],
+                        expression.arguments.slice(1)) :
+                    this.emitConstant(undefined);
+                var callValues = [];
+                var callArgumentIndex = 1;
+                while (callArgumentIndex < expression.arguments.length) {
+                    callValues.push(this.compileExpression(
+                        expression.arguments[callArgumentIndex],
+                        expression.arguments.slice(callArgumentIndex + 1)));
+                    callArgumentIndex++;
+                }
+                var explicitCallResult = this.allocate();
+                this.emit(op.CALL, explicitCallResult, calledFunction,
+                          explicitReceiver, this.constant(callValues));
+                return explicitCallResult;
+            }
             var callee;
             var receiver = -1;
             if (expression.callee.type === "MemberExpression") {

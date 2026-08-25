@@ -7,6 +7,7 @@ assertEqual(text.charAt(1), "e", "String.charAt");
 assertEqual(text.charCodeAt(0), 104, "String.charCodeAt");
 assertEqual(text.indexOf("lo"), 3, "String.indexOf");
 assertEqual(text.substring(1, 4), "ell", "String.substring");
+assertEqual(text.substr(1, 3), "ell", "String.substr");
 
 var parts = "/one/two".split("/");
 assertEqual(parts.length, 3, "String.split length");
@@ -53,3 +54,10 @@ ordered.reverse();
 assertEqual(ordered[0], 3, "Array.reverse");
 assertEqual(ordered.unshift(4), 4, "Array.unshift length");
 assertEqual(ordered.slice(1, 3)[1], 2, "Array.slice");
+assertEqual(["a", null, undefined, "b"].join("-"), "a---b", "Array.join");
+var queue = [1, 2, 3];
+assertEqual(queue.shift(), 1, "Array.shift returns the first item");
+assertEqual(queue.pop(), 3, "Array.pop returns the last item");
+assertEqual(queue.length, 1, "Array shift/pop update length");
+assertEqual(queue.concat([4, 5], 6).join(","), "2,4,5,6",
+            "Array.concat flattens array arguments once");

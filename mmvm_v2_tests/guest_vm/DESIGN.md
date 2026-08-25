@@ -32,6 +32,21 @@ Three language layers are kept separate:
 Host JavaScript semantics are not the guest object model. Guest property access,
 calls, Buffer indexing, and lifetime pass through `Runtime` methods.
 
+Guest parser statements retain filename, one-based line, and one-based column
+metadata. Bytecode instruction starts carry those locations into interpreted
+errors, and generated functions annotate exceptions before they cross back to
+the embedder. `guest_runner.js` therefore prints `filename:line:column` for both
+guest Error objects and VM implementation errors.
+
+The structured tier deliberately leaves functions constructing guest-defined
+classes in the semantic interpreter on the Firefox 1 host. Runtime intrinsics
+such as `Date`, `Array`, and `Error` remain compilable. The old engine does not
+reliably preserve a guest constructor receiver across a generated `Function`
+that recursively enters the compiler. This is a semantic boundary, not a
+demo-specific Buffer special case: affected setup functions are interpreted,
+while their leaf dependencies and rasterizer hot paths remain independently
+eligible for compilation.
+
 ## Runtime, context, and execution ownership
 
 The public embedding model has three levels:

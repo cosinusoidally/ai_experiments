@@ -470,6 +470,24 @@
                 return environment.loadModule(name, environment.runnerArguments[0]);
             }));
 
+        if (!this.nodeHost) {
+            publish("load", this.makeFunction("load", function (receiver, args) {
+                if (!args.length) throw new TypeError("load requires a filename");
+                var filename = String(args[0]);
+                var sourceBuffer = environment.hostFs.readFileSync(filename);
+                var source = sourceBuffer.toString("utf8");
+                var loadContext = environment.vm.jsRuntime.createContext();
+                /* SpiderMonkey shell load() executes against the caller's
+                 * global object. Sharing this binding table preserves that
+                 * observable behavior while retaining an independent active
+                 * execution slot for nested guest evaluation. */
+                loadContext.globals = environment.context.globals;
+                environment.moduleContexts.push(loadContext);
+                loadContext.run(source, filename);
+                return undefined;
+            }));
+        }
+
         var argv = ["artifacts/js_min.exe", this.runnerArguments[0]];
         var index = 1;
         while (index < this.runnerArguments.length) argv.push(this.runnerArguments[index++]);
@@ -558,10 +576,12 @@
         publish("Date", dateConstructor);
 
         var errorConstructor = this.makeFunction("Error", function (receiver, args) {
-            return environment.object({message: args.length ? String(args[0]) : ""});
+            return environment.object({name: "Error",
+                message: args.length ? String(args[0]) : ""});
         }, true);
         errorConstructor.constructCallback = function (args) {
-            return environment.object({message: args.length ? String(args[0]) : ""});
+            return environment.object({name: "Error",
+                message: args.length ? String(args[0]) : ""});
         };
         publish("Error", errorConstructor);
 

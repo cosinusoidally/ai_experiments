@@ -55,6 +55,22 @@ var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
     guestProgramVM, guestRunnerArguments);
 var guestRunnerDeferredCleanup = false;
 var guestRunnerCleaned = false;
+var guestRunnerFailure = null;
+
+function guestRunnerDescribeError(error) {
+    var properties = error && error.properties;
+    var filename = error && (error.guestFilename || error.fileName) ||
+                   properties && properties.$fileName || "<guest>";
+    var line = error && (error.guestLine || error.lineNumber) ||
+               properties && properties.$lineNumber || 1;
+    var column = error && (error.guestColumn || error.columnNumber) ||
+                 properties && properties.$columnNumber || 1;
+    var name = properties && properties.$name || error && error.name || "Error";
+    var message = properties && properties.$message || error && error.message ||
+                  String(error);
+    return filename + ":" + line + ":" + column + ": " + name +
+           (message ? ": " + message : "");
+}
 
 function guestRunnerCleanup() {
     if (guestRunnerCleaned) return;
@@ -92,8 +108,20 @@ try {
         guestRunnerDeferredCleanup = true;
         process.on("exit", guestRunnerCleanup);
     }
+} catch (guestRunnerError) {
+    guestRunnerFailure = guestRunnerError;
+    var guestRunnerDescription = guestRunnerDescribeError(guestRunnerError);
+    if (typeof print === "function") print(guestRunnerDescription);
+    else if (typeof console !== "undefined" && console.error) {
+        console.error(guestRunnerDescription);
+    }
 } finally {
     if (!guestRunnerDeferredCleanup) guestRunnerCleanup();
+}
+
+if (guestRunnerFailure) {
+    if (!guestRunnerIsNode && typeof quit === "function") quit(3);
+    throw guestRunnerFailure;
 }
 
 if (!guestRunnerIsNode) quit(guestNodeEnvironment.exitCode);

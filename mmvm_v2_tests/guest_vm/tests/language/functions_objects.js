@@ -19,6 +19,16 @@ var record = {
 };
 assertEqual(record.apply(record.value), 8, "object literal and method call");
 
+function addToThis(amount) {
+    return this.base + amount;
+}
+assertEqual(addToThis.call({base: 9}, 4), 13,
+            "Function.prototype.call supplies an explicit receiver");
+assertEqual(addToThis.apply({base: 8}, [5]), 13,
+            "Function.prototype.apply supplies a receiver and argument array");
+assertEqual(addToThis.toString().indexOf("function addToThis") === 0, true,
+            "Function.prototype.toString preserves guest source");
+
 var values = [9, 8, 7];
 values[1] = 6;
 assertEqual(values.length, 3, "array length");

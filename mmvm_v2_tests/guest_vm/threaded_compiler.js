@@ -14,6 +14,7 @@
         this.profileSamples = {};
         this.profileNextReport = 0;
         this.nativeMemmove = null;
+        this.constructionReceivers = [];
     }
 
     ThreadedCompiler.prototype.setFallback = function (callback) {
@@ -40,6 +41,13 @@
         }
         if ((!program.bindingRegisters && !program.astBody) ||
             !this.supports(program)) return null;
+        /* Old SpiderMonkey does not reliably preserve constructor receivers
+         * through a generated Function calling back into this compiler.  Keep
+         * construction-bearing functions in the semantic interpreter.  The
+         * functions they call remain independently compilable. */
+        if (program.astBody && containsGuestConstruction(program.astBody)) {
+            return null;
+        }
         var existing = this.find(program);
         if (existing >= 0) return this.compiled[existing];
         var source = program.astBody ? this.generateStructured(program) :
@@ -203,11 +211,35 @@
         this.runtime.assertOwned(callable);
         if (!callable) throw new TypeError("value is not a constructor");
         if (callable.guestType === "bytecodeFunction") {
-            var receiver = this.runtime.makeObject();
+            /* Keep this binding distinct from the generated function's
+             * `receiver` formal.  The Firefox 1 shell used by js_min.exe can
+             * otherwise reuse the caller's activation slot across this
+             * recursive host-JavaScript call. */
+            var constructedReceiver = this.runtime.makeObject();
             var prototype = this.runtime.getProperty(callable, "prototype");
-            if (prototype && prototype.guestType) receiver.prototype = prototype;
-            var result = this.call(callable, receiver, args, context);
-            return result && result.guestType ? result : receiver;
+            if (prototype && prototype.guestType) {
+                constructedReceiver.prototype = prototype;
+            }
+            /* Construction is uncommon and requires preserving an implicit
+             * receiver across a nested call.  Run the constructor body through
+             * the semantic fallback; leaf functions it calls can still use the
+             * compiled tier.  This also avoids an activation-aliasing defect in
+             * the Firefox 1 host used by js_min.exe. */
+            if (!this.fallback) {
+                throw new Error("compiled construction needs interpreter fallback");
+            }
+            var constructionIndex = this.constructionReceivers.length;
+            this.constructionReceivers[constructionIndex] = constructedReceiver;
+            var result;
+            try {
+                result = this.fallback(callable,
+                    this.constructionReceivers[constructionIndex], args,
+                    callable.homeContext || context);
+                return result && result.guestType ? result :
+                       this.constructionReceivers[constructionIndex];
+            } finally {
+                this.constructionReceivers.length = constructionIndex;
+            }
         }
         return this.runtime.construct(callable, args);
     };
@@ -222,6 +254,18 @@
 
     ThreadedCompiler.prototype.callMember = function (object, key, args, context) {
         return this.call(this.runtime.getProperty(object, key), object, args, context);
+    };
+
+    ThreadedCompiler.prototype.callApply = function (callable, receiver, argumentArray,
+                                                       context) {
+        var args = [];
+        if (argumentArray !== null && argumentArray !== undefined) {
+            if (!argumentArray.guestType || argumentArray.guestType !== "array") {
+                throw new TypeError("apply arguments must be array-like");
+            }
+            args = argumentArray.elements.slice(0);
+        }
+        return this.call(callable, receiver, args, context);
     };
 
     ThreadedCompiler.prototype.assignMember = function (object, key, value, operator) {
@@ -366,6 +410,8 @@
         emitRegisterInitialization(lines, program);
         lines.push("var env=closure||null;");
         lines.push("var pc=0;");
+        lines.push("runtime.compiledDepth++;");
+        lines.push("try{");
         lines.push("while(true){switch(pc){");
         var pc = 0;
         var open = false;
@@ -393,7 +439,10 @@
         }
         if (open) lines.push("return undefined;}");
         lines.push("default:throw new Error('invalid compiled pc '+pc);");
-        lines.push("}}};");
+        lines.push("}}");
+        lines.push("}catch(e){throw runtime.locateError(e,p,pc);}" +
+                   "finally{runtime.compiledDepth--;}");
+        lines.push("};");
         return lines.join("\n");
     };
 
@@ -615,6 +664,8 @@
             lines.push(this.slot(this.program.functionNameSlot) + "=callable;");
         }
         this.emitHoistedFunctions(lines, this.program.astBody);
+        lines.push("runtime.compiledDepth++;");
+        lines.push("try{");
         var plan = this.genericOnly ? null : analyzeFastPath(this.program, this);
         if (plan && plan.guards.length) {
             var fastEmitter = new StructuredEmitter(this.program, plan, true);
@@ -630,6 +681,8 @@
             lines.push(this.statement(this.program.astBody));
         }
         lines.push("return undefined;");
+        lines.push("}catch(e){throw runtime.locateError(e,p);}" +
+                   "finally{runtime.compiledDepth--;}");
         lines.push("};");
         return lines.join("\n");
     };
@@ -938,6 +991,27 @@
             return "hc.call(" + this.identifier(name) + ",undefined,[" + args + "],context)";
         }
         if (node.callee.type === "MemberExpression") {
+            if (!node.callee.computed && node.callee.property.value === "call") {
+                var explicitCallable = this.expression(node.callee.object);
+                var explicitReceiver = node.arguments.length ?
+                    argumentSources[0] : "undefined";
+                var explicitArguments = argumentSources.slice(1);
+                if (explicitArguments.length <= 8) {
+                    return "hc.callFixed(" + explicitCallable + "," +
+                           explicitReceiver + ",context," +
+                           explicitArguments.length +
+                           (explicitArguments.length ? "," +
+                            explicitArguments.join(",") : "") + ")";
+                }
+                return "hc.call(" + explicitCallable + "," + explicitReceiver +
+                       ",[" + explicitArguments.join(",") + "],context)";
+            }
+            if (!node.callee.computed && node.callee.property.value === "apply") {
+                return "hc.callApply(" + this.expression(node.callee.object) + "," +
+                       (argumentSources.length ? argumentSources[0] : "undefined") +
+                       "," + (argumentSources.length > 1 ? argumentSources[1] :
+                              "undefined") + ",context)";
+            }
             if (node.callee.object.type === "Identifier" &&
                 node.callee.object.name === "NodeLibc" &&
                 !node.callee.computed &&
@@ -1390,6 +1464,28 @@
                 }
             }
         }
+    }
+
+    function containsGuestConstruction(node) {
+        var found = false;
+        function visit(value) {
+            if (!value || typeof value !== "object" || found) return;
+            if (value.type === "NewExpression") {
+                var calleeName = value.callee && value.callee.type === "Identifier" ?
+                                 value.callee.name : null;
+                /* These constructors are runtime intrinsics and do not enter a
+                 * generated guest constructor activation. */
+                if (calleeName !== "Array" && calleeName !== "Date" &&
+                    calleeName !== "Error" && calleeName !== "Object" &&
+                    calleeName !== "String" && calleeName !== "Number") {
+                    found = true;
+                    return;
+                }
+            }
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+        return found;
     }
 
     function isPure(node) {

@@ -147,6 +147,19 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
 node guest_runner.js --vm-threaded demo7.js --size 160x120 --fps 20
 ```
 
+Demo8 is the deliberately MMVM-specific standalone rally build. It takes two
+guest source files and cannot run with a Node host:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo8_runner.js demo8.js --size 320x240 --fps 20
+```
+
+The guest `load()` binding is available on the MMVM host and evaluates the
+second file in the same guest global environment. The demo retains its normal
+resolution, FPS, menu, and rasterizer-selection options.
+
 The covered progression is demo1's bitmap framebuffer UI; demo2's software 3D
 renderer; demo3's full-frame blit; demo4's procedural normal mapping; demo5's
 normal-mapped 3D renderer; and the demo6/demo7 rally game. In particular, the
@@ -154,7 +167,8 @@ rally demos exercise `Math.PI`, track generation, loading-to-attract-mode
 transition, depth-buffered road/hillside/car drawing, and packed native output.
 The language suite checks the ES5.1 Math constants and methods used during
 track construction. A live X11 smoke test remains necessary to verify the
-framebuffer rather than just compilation.
+framebuffer rather than just compilation. Demo8 additionally exercises guest
+function source recovery for its JavaScript macro compiler.
 
 This is not direct Node execution: `guest_runner.js` still tokenizes and
 compiles every application module into guest execution. The embedder selects

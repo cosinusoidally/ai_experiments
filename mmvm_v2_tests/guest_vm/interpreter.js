@@ -112,7 +112,8 @@
                 this.runtime.gcSafePoint();
                 return this.finish("completed", compiledValue, 0);
             } catch (compiledError) {
-                return this.finish("threw", compiledError, 0);
+                return this.finish("threw", this.runtime.locateError(
+                    compiledError, entry.callable.program), 0);
             }
         }
         if (this.compiledEntry) this.compiledEntry = null;
@@ -267,6 +268,19 @@
                     var callableValue = registers[code[pc + 2]];
                     var receiver = code[pc + 3] < 0 ? undefined :
                                    registers[code[pc + 3]];
+                    if (callableValue &&
+                        callableValue.intrinsicKind === "functionApply") {
+                        callableValue = receiver;
+                        receiver = args.length ? args[0] : undefined;
+                        if (args.length > 1 && args[1] !== null &&
+                            args[1] !== undefined) {
+                            if (!args[1].guestType ||
+                                args[1].guestType !== "array") {
+                                throw new TypeError("apply arguments must be array-like");
+                            }
+                            args = args[1].elements.slice(0);
+                        } else args = [];
+                    }
                     var destination = code[pc + 1];
                     frame.pc = pc + 5;
                     if (callableValue && callableValue.guestType === "bytecodeFunction") {
@@ -302,7 +316,8 @@
                                callableValue.callMode === "host") {
                         this.pendingHostCall = {callable: callableValue,
                                                 receiver: receiver, args: args,
-                                                frame: frame, destination: destination};
+                                                frame: frame, destination: destination,
+                                                locationPc: pc};
                         this.status = "hostCall";
                         return this.result("hostCall", used);
                     } else {
@@ -327,7 +342,8 @@
                                                 receiver: undefined, args: args,
                                                 frame: frame,
                                                 destination: constructDestination,
-                                                construct: true};
+                                                construct: true,
+                                                locationPc: pc};
                         this.status = "hostCall";
                         return this.result("hostCall", used);
                     }
@@ -400,6 +416,7 @@
             }
             return this.finish("completed", undefined, used);
         } catch (error) {
+            error = this.runtime.locateError(error, frame && frame.program, pc);
             if (this.handleException(error)) {
                 var resumed = this.resume(budget);
                 resumed.instructions += used;
@@ -420,6 +437,8 @@
 
     Execution.prototype.failHostCall = function (error) {
         if (!this.pendingHostCall) throw new Error("execution has no pending host call");
+        var call = this.pendingHostCall;
+        error = this.runtime.locateError(error, call.frame.program, call.locationPc);
         this.pendingHostCall = null;
         this.status = "ready";
         this.injectedHostException = error;
