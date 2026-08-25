@@ -144,7 +144,9 @@
             gcResult = gcExecution.resume(12);
         } while (gcResult.status === "budget");
         assert(gcResult.status === "completed" &&
-               firstRuntime.runtime.getGlobal(firstContext, "suspendedBytes").backing.freed === false,
+               firstRuntime.runtime.bufferSupport.viewBacking(
+                   firstRuntime.runtime.getGlobal(firstContext,
+                                                  "suspendedBytes")).freed === false,
                "collection did not retain a suspended execution value");
 
         firstRuntime.destroy();

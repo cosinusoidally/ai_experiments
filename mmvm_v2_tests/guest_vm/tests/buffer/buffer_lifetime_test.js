@@ -5,7 +5,7 @@
         var support = runtime.bufferSupport;
         var initial = support.liveBackingCount();
         var parent = support.allocate(16);
-        var slice = support.makeView(parent.backing, 4, 8);
+        var slice = support.makeView(support.viewBacking(parent), 4, 8);
         var handle = vm.retain(slice);
         vm.collect();
         if (support.liveBackingCount() !== initial + 1) {
