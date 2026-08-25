@@ -54,6 +54,9 @@
         if (this.isKeyword("while")) return this.parseWhileStatement();
         if (this.isKeyword("if")) return this.parseIfStatement();
         if (this.isKeyword("return")) return this.parseReturnStatement();
+        if (this.isKeyword("function")) return this.parseFunction(true);
+        if (this.isKeyword("break")) return this.parseBreakStatement();
+        if (this.isKeyword("throw")) return this.parseThrowStatement();
         var expression = this.parseExpression();
         if (this.isPunctuator(";")) this.advance(true);
         return {type: "ExpressionStatement", expression: expression};
@@ -143,6 +146,43 @@
         return {type: "ReturnStatement", argument: argument};
     };
 
+    Parser.prototype.parseBreakStatement = function () {
+        this.advance(false);
+        if (this.current.kind === "identifier" && !this.current.lineBefore) {
+            this.error("labelled break is not implemented");
+        }
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "BreakStatement"};
+    };
+
+    Parser.prototype.parseThrowStatement = function () {
+        this.advance(true);
+        if (this.current.lineBefore) this.error("line terminator after throw");
+        var argument = this.parseExpression();
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "ThrowStatement", argument: argument};
+    };
+
+    Parser.prototype.parseFunction = function (declaration) {
+        this.advance(false);
+        var name = null;
+        if (this.current.kind === "identifier") name = this.advance(false).value;
+        else if (declaration) this.error("function declaration requires a name");
+        this.expectPunctuator("(", false);
+        var parameters = [];
+        if (!this.isPunctuator(")")) {
+            while (true) {
+                parameters.push(this.expectIdentifier().value);
+                if (!this.isPunctuator(",")) break;
+                this.advance(false);
+            }
+        }
+        this.expectPunctuator(")", true);
+        var body = this.parseBlock();
+        return {type: declaration ? "FunctionDeclaration" : "FunctionExpression",
+                name: name, parameters: parameters, body: body};
+    };
+
     Parser.prototype.parseExpression = function () {
         var expression = this.parseAssignment();
         while (this.isPunctuator(",")) {
@@ -154,7 +194,7 @@
     };
 
     Parser.prototype.parseAssignment = function () {
-        var left = this.parseLogicalOr();
+        var left = this.parseConditional();
         if (this.current.kind === "punctuator" &&
             (this.current.value === "=" || this.current.value === "+=" ||
              this.current.value === "-=" || this.current.value === "*=" ||
@@ -164,6 +204,16 @@
                     left: left, right: this.parseAssignment()};
         }
         return left;
+    };
+
+    Parser.prototype.parseConditional = function () {
+        var test = this.parseLogicalOr();
+        if (!this.isPunctuator("?")) return test;
+        this.advance(true);
+        var consequent = this.parseAssignment();
+        this.expectPunctuator(":", true);
+        return {type: "ConditionalExpression", test: test,
+                consequent: consequent, alternate: this.parseAssignment()};
     };
 
     Parser.prototype.parseBinary = function (next, operators) {
@@ -182,15 +232,28 @@
         return this.parseBinary(this.parseLogicalAnd, {"||": 1});
     };
     Parser.prototype.parseLogicalAnd = function () {
-        return this.parseBinary(this.parseEquality, {"&&": 1});
+        return this.parseBinary(this.parseBitwiseOr, {"&&": 1});
+    };
+    Parser.prototype.parseBitwiseOr = function () {
+        return this.parseBinary(this.parseBitwiseXor, {"|": 1});
+    };
+    Parser.prototype.parseBitwiseXor = function () {
+        return this.parseBinary(this.parseBitwiseAnd, {"^": 1});
+    };
+    Parser.prototype.parseBitwiseAnd = function () {
+        return this.parseBinary(this.parseEquality, {"&": 1});
     };
     Parser.prototype.parseEquality = function () {
         return this.parseBinary(this.parseRelational,
                                 {"==": 1, "!=": 1, "===": 1, "!==": 1});
     };
     Parser.prototype.parseRelational = function () {
-        return this.parseBinary(this.parseAdditive,
+        return this.parseBinary(this.parseShift,
                                 {"<": 1, "<=": 1, ">": 1, ">=": 1});
+    };
+    Parser.prototype.parseShift = function () {
+        return this.parseBinary(this.parseAdditive,
+                                {"<<": 1, ">>": 1, ">>>": 1});
     };
     Parser.prototype.parseAdditive = function () {
         return this.parseBinary(this.parseMultiplicative, {"+": 1, "-": 1});
@@ -259,6 +322,12 @@
 
     Parser.prototype.parsePrimary = function () {
         var token = this.current;
+        if (this.isKeyword("function")) return this.parseFunction(false);
+        if (token.kind === "regexp") {
+            this.advance(false);
+            return {type: "RegExpLiteral", pattern: token.value.pattern,
+                    flags: token.value.flags};
+        }
         if (token.kind === "number" || token.kind === "string") {
             this.advance(false);
             return {type: "Literal", value: token.value};
@@ -273,6 +342,36 @@
         if (token.kind === "identifier") {
             this.advance(false);
             return {type: "Identifier", name: token.value};
+        }
+        if (this.isPunctuator("[")) {
+            this.advance(true);
+            var elements = [];
+            while (!this.isPunctuator("]")) {
+                elements.push(this.parseAssignment());
+                if (!this.isPunctuator(",")) break;
+                this.advance(true);
+            }
+            this.expectPunctuator("]", false);
+            return {type: "ArrayExpression", elements: elements};
+        }
+        if (this.isPunctuator("{")) {
+            this.advance(true);
+            var properties = [];
+            while (!this.isPunctuator("}")) {
+                var keyToken = this.current;
+                if (keyToken.kind !== "identifier" && keyToken.kind !== "keyword" &&
+                    keyToken.kind !== "string" && keyToken.kind !== "number") {
+                    this.error("expected object property name");
+                }
+                this.advance(false);
+                this.expectPunctuator(":", true);
+                properties.push({key: String(keyToken.value),
+                                 value: this.parseAssignment()});
+                if (!this.isPunctuator(",")) break;
+                this.advance(true);
+            }
+            this.expectPunctuator("}", false);
+            return {type: "ObjectExpression", properties: properties};
         }
         if (this.isPunctuator("(")) {
             this.advance(true);

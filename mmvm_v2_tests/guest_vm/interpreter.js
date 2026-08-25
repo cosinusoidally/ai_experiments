@@ -7,7 +7,7 @@
     /* This dispatch loop is intentionally low-level kernel-dialect code: one
      * numeric pc, fixed opcode layouts, register arrays, and calls to named
      * semantic helpers on the runtime. */
-    function interpret(program, runtime) {
+    function interpret(program, runtime, receiver, callArguments, closure, callable) {
         var code = program.code;
         var constants = program.constants;
         var registers = [];
@@ -19,7 +19,9 @@
         var right;
         var index;
         var args;
-        runtime.activeRegisters = registers;
+        var environment = runtime.makeCallEnvironment(program, receiver,
+                                                      callArguments || [], closure, callable);
+        runtime.pushActiveRegisters(registers);
         while (pc < code.length) {
             budget = budget - 1;
             if (budget < 0) throw new Error("guest instruction budget exhausted");
@@ -28,10 +30,12 @@
                 registers[code[pc + 1]] = constants[code[pc + 2]];
                 pc = pc + 3;
             } else if (opcode === op.GET_GLOBAL) {
-                registers[code[pc + 1]] = runtime.getGlobal(constants[code[pc + 2]]);
+                registers[code[pc + 1]] = runtime.getBinding(environment,
+                                                             constants[code[pc + 2]]);
                 pc = pc + 3;
             } else if (opcode === op.SET_GLOBAL) {
-                runtime.setGlobal(constants[code[pc + 1]], registers[code[pc + 2]]);
+                runtime.setBinding(environment, constants[code[pc + 1]],
+                                   registers[code[pc + 2]]);
                 pc = pc + 3;
             } else if (opcode === op.MOVE) {
                 registers[code[pc + 1]] = registers[code[pc + 2]];
@@ -45,7 +49,8 @@
                                     registers[code[pc + 2]],
                                     registers[code[pc + 3]]);
                 pc = pc + 4;
-            } else if (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) {
+            } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
+                       (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
                 target = code[pc + 1];
                 left = registers[code[pc + 2]];
                 right = registers[code[pc + 3]];
@@ -59,7 +64,13 @@
                 else if (opcode === op.LESS) registers[target] = left < right;
                 else if (opcode === op.LESS_EQUAL) registers[target] = left <= right;
                 else if (opcode === op.GREATER) registers[target] = left > right;
-                else registers[target] = left >= right;
+                else if (opcode === op.GREATER_EQUAL) registers[target] = left >= right;
+                else if (opcode === op.BIT_AND) registers[target] = left & right;
+                else if (opcode === op.BIT_OR) registers[target] = left | right;
+                else if (opcode === op.BIT_XOR) registers[target] = left ^ right;
+                else if (opcode === op.SHIFT_LEFT) registers[target] = left << right;
+                else if (opcode === op.SHIFT_RIGHT) registers[target] = left >> right;
+                else registers[target] = left >>> right;
                 pc = pc + 4;
             } else if (opcode === op.NOT) {
                 registers[code[pc + 1]] = !runtime.truthy(registers[code[pc + 2]]);
@@ -86,15 +97,31 @@
                     registers[code[pc + 2]],
                     code[pc + 3] < 0 ? undefined : registers[code[pc + 3]], args);
                 pc = pc + 6;
+            } else if (opcode === op.MAKE_FUNCTION) {
+                registers[code[pc + 1]] = runtime.makeGuestFunction(
+                    constants[code[pc + 2]], environment);
+                pc = pc + 3;
+            } else if (opcode === op.MAKE_OBJECT) {
+                registers[code[pc + 1]] = runtime.makeObject();
+                pc = pc + 2;
+            } else if (opcode === op.MAKE_ARRAY) {
+                registers[code[pc + 1]] = runtime.makeArray();
+                pc = pc + 2;
+            } else if (opcode === op.MAKE_REGEXP) {
+                registers[code[pc + 1]] = runtime.makeRegExp(
+                    constants[code[pc + 2]], constants[code[pc + 3]]);
+                pc = pc + 4;
+            } else if (opcode === op.THROW) {
+                throw registers[code[pc + 1]];
             } else if (opcode === op.RETURN) {
                 var returnValue = registers[code[pc + 1]];
-                runtime.activeRegisters = null;
+                runtime.popActiveRegisters();
                 return returnValue;
             } else {
                 throw new Error("invalid guest opcode " + opcode + " at " + pc);
             }
         }
-        runtime.activeRegisters = null;
+        runtime.popActiveRegisters();
         return undefined;
     }
 

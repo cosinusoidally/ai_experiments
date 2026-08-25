@@ -23,7 +23,18 @@
         JUMP: 21,
         JUMP_IF_FALSE: 22,
         CALL: 23,
-        RETURN: 24
+        RETURN: 24,
+        MAKE_FUNCTION: 25,
+        MAKE_OBJECT: 26,
+        MAKE_ARRAY: 27,
+        MAKE_REGEXP: 28,
+        BIT_AND: 29,
+        BIT_OR: 30,
+        BIT_XOR: 31,
+        SHIFT_LEFT: 32,
+        SHIFT_RIGHT: 33,
+        SHIFT_UNSIGNED_RIGHT: 34,
+        THROW: 35
     };
 
     root.GuestVMBytecode = op;

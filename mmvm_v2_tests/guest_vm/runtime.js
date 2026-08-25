@@ -17,7 +17,9 @@
         this.heapObjects = [];
         this.hostRoots = [];
         this.gcGeneration = 0;
+        this.activeRegisterFrames = [];
         this.activeRegisters = null;
+        this.interpretGuest = null;
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
         if (options.rawFFI) this.installRawFFI();
@@ -32,6 +34,81 @@
         var object = {guestType: "object", properties: {}, gcMark: 0};
         this.trackObject(object);
         return object;
+    };
+
+    Runtime.prototype.makeArray = function () {
+        return this.trackObject({guestType: "array", elements: [],
+                                 properties: {}, gcMark: 0});
+    };
+
+    Runtime.prototype.makeRegExp = function (pattern, flags) {
+        return this.trackObject({guestType: "regexp", pattern: pattern,
+                                 flags: flags, properties: {}, gcMark: 0});
+    };
+
+    Runtime.prototype.makeGuestFunction = function (program, closure) {
+        return this.trackObject({guestType: "bytecodeFunction", program: program,
+                                 closure: closure, properties: {}, gcMark: 0,
+                                 name: program.name || ""});
+    };
+
+    Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
+                                                       closure, callable) {
+        if (!program.parameters.length && !program.locals.length && !closure && !callable) {
+            return null;
+        }
+        var environment = {bindings: {}, parent: closure || null};
+        var index = 0;
+        while (index < program.locals.length) {
+            environment.bindings["$" + program.locals[index]] = undefined;
+            index++;
+        }
+        index = 0;
+        while (index < program.parameters.length) {
+            environment.bindings["$" + program.parameters[index]] =
+                index < args.length ? args[index] : undefined;
+            index++;
+        }
+        environment.bindings.$arguments = this.arrayFrom(args);
+        if (program.name) environment.bindings["$" + program.name] = callable;
+        return environment;
+    };
+
+    Runtime.prototype.getBinding = function (environment, name) {
+        var current = environment;
+        while (current) {
+            if (own(current.bindings, "$" + name)) return current.bindings["$" + name];
+            current = current.parent;
+        }
+        return this.getGlobal(name);
+    };
+
+    Runtime.prototype.setBinding = function (environment, name, value) {
+        var current = environment;
+        while (current) {
+            if (own(current.bindings, "$" + name)) {
+                current.bindings["$" + name] = value;
+                return value;
+            }
+            current = current.parent;
+        }
+        return this.setGlobal(name, value);
+    };
+
+    Runtime.prototype.pushActiveRegisters = function (registers) {
+        this.activeRegisterFrames.push(registers);
+        this.activeRegisters = registers;
+    };
+
+    Runtime.prototype.popActiveRegisters = function () {
+        this.activeRegisterFrames.pop();
+        this.activeRegisters = this.activeRegisterFrames.length ?
+            this.activeRegisterFrames[this.activeRegisterFrames.length - 1] : null;
+    };
+
+    Runtime.prototype.clearActiveRegisters = function () {
+        this.activeRegisterFrames = [];
+        this.activeRegisters = null;
     };
 
     Runtime.prototype.trackObject = function (object) {
@@ -143,7 +220,13 @@
         if (object.guestType === "buffer") {
             return this.bufferSupport.getProperty(object, key);
         }
-        if (object.guestType === "object" || object.guestType === "function") {
+        if (object.guestType === "array") {
+            if (key === "length") return object.elements.length;
+            if (isArrayIndex(key)) return object.elements[Number(key)];
+            return own(object.properties, "$" + key) ? object.properties["$" + key] : undefined;
+        }
+        if (object.guestType === "object" || object.guestType === "function" ||
+            object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             return own(object.properties, "$" + key) ?
                    object.properties["$" + key] : undefined;
         }
@@ -159,7 +242,13 @@
         if (object.guestType === "buffer") {
             return this.bufferSupport.setProperty(object, key, value);
         }
-        if (object.guestType === "object" || object.guestType === "function") {
+        if (object.guestType === "array") {
+            if (isArrayIndex(key)) object.elements[Number(key)] = value;
+            else object.properties["$" + key] = value;
+            return value;
+        }
+        if (object.guestType === "object" || object.guestType === "function" ||
+            object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             object.properties["$" + key] = value;
             return value;
         }
@@ -189,6 +278,11 @@
     };
 
     Runtime.prototype.call = function (callable, receiver, args) {
+        if (callable && callable.guestType === "bytecodeFunction") {
+            if (!this.interpretGuest) throw new Error("guest interpreter is not attached");
+            return this.interpretGuest(callable.program, this, receiver, args,
+                                       callable.closure, callable);
+        }
         if (!callable || callable.guestType !== "function") {
             throw new TypeError("value is not callable");
         }
@@ -200,8 +294,9 @@
     };
 
     Runtime.prototype.markValue = function (value, generation) {
-        if (!value || (value.guestType !== "object" &&
+        if (!value || (value.guestType !== "object" && value.guestType !== "array" &&
                        value.guestType !== "function" &&
+                       value.guestType !== "bytecodeFunction" && value.guestType !== "regexp" &&
                        value.guestType !== "buffer")) return;
         if (value.gcMark === generation) return;
         value.gcMark = generation;
@@ -209,6 +304,14 @@
             this.bufferSupport.markView(value, generation);
             this.markValue(value.prototype, generation);
         }
+        if (value.guestType === "array") {
+            var elementIndex = 0;
+            while (elementIndex < value.elements.length) {
+                this.markValue(value.elements[elementIndex], generation);
+                elementIndex++;
+            }
+        }
+        if (value.guestType === "bytecodeFunction") this.markEnvironment(value.closure, generation);
         var properties = value.properties;
         var key;
         for (key in properties) {
@@ -231,12 +334,14 @@
             }
             hostRootIndex++;
         }
-        if (this.activeRegisters) {
+        var frameIndex = 0;
+        while (frameIndex < this.activeRegisterFrames.length) {
             var registerIndex = 0;
-            while (registerIndex < this.activeRegisters.length) {
-                this.markValue(this.activeRegisters[registerIndex], generation);
+            while (registerIndex < this.activeRegisterFrames[frameIndex].length) {
+                this.markValue(this.activeRegisterFrames[frameIndex][registerIndex], generation);
                 registerIndex++;
             }
+            frameIndex++;
         }
         var survivors = [];
         var index = 0;
@@ -255,8 +360,36 @@
         this.bufferSupport.destroy();
         this.heapObjects = [];
         this.hostRoots = [];
+        this.activeRegisterFrames = [];
         this.activeRegisters = null;
     };
+
+    Runtime.prototype.markEnvironment = function (environment, generation) {
+        var current = environment;
+        while (current) {
+            var key;
+            for (key in current.bindings) {
+                if (own(current.bindings, key)) this.markValue(current.bindings[key], generation);
+            }
+            current = current.parent;
+        }
+    };
+
+    Runtime.prototype.arrayFrom = function (values) {
+        var array = this.makeArray();
+        var index = 0;
+        while (index < values.length) {
+            array.elements[index] = values[index];
+            index++;
+        }
+        return array;
+    };
+
+    function isArrayIndex(key) {
+        if (key === "") return false;
+        var number = Number(key);
+        return number >= 0 && number === Math.floor(number) && String(number) === key;
+    }
 
     function integerHandle(handle, length) {
         handle = Number(handle);

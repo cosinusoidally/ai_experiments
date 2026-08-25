@@ -20,16 +20,21 @@
             if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
                 opcode === op.SET_GLOBAL || opcode === op.MOVE ||
                 opcode === op.NOT || opcode === op.NEGATE ||
-                opcode === op.POSITIVE) width = 3;
+                opcode === op.POSITIVE || opcode === op.MAKE_FUNCTION) width = 3;
             else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
-                     (opcode >= op.ADD && opcode <= op.GREATER_EQUAL)) width = 4;
-            else if (opcode === op.JUMP || opcode === op.RETURN) width = 2;
+                     (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
+                     (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
+                     opcode === op.MAKE_REGEXP) width = 4;
+            else if (opcode === op.JUMP || opcode === op.RETURN ||
+                     opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
+                     opcode === op.THROW) width = 2;
             else if (opcode === op.JUMP_IF_FALSE) width = 3;
             else if (opcode === op.CALL) width = 6;
             else throw new Error("invalid opcode " + opcode + " at bytecode " + pc);
             if (pc + width > code.length) throw new Error("truncated bytecode at " + pc);
 
-            if (opcode === op.CONST || opcode === op.GET_GLOBAL) {
+            if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
+                opcode === op.MAKE_FUNCTION) {
                 requireRegister(program, code[pc + 1], pc);
                 if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
                     throw new Error("invalid constant at bytecode " + pc);
@@ -43,8 +48,10 @@
                        opcode === op.NEGATE || opcode === op.POSITIVE) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
+                if (opcode === op.MAKE_FUNCTION) verify(program.constants[code[pc + 2]]);
             } else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
-                       (opcode >= op.ADD && opcode <= op.GREATER_EQUAL)) {
+                       (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
+                       (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
                 requireRegister(program, code[pc + 3], pc);
@@ -62,7 +69,14 @@
                     code[pc + 4] + count > program.registerCount) {
                     throw new Error("invalid call arguments at bytecode " + pc);
                 }
-            } else if (opcode === op.RETURN) {
+            } else if (opcode === op.MAKE_REGEXP) {
+                requireRegister(program, code[pc + 1], pc);
+                if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length ||
+                    code[pc + 3] < 0 || code[pc + 3] >= program.constants.length) {
+                    throw new Error("invalid regexp constant at bytecode " + pc);
+                }
+            } else if (opcode === op.RETURN || opcode === op.MAKE_OBJECT ||
+                       opcode === op.MAKE_ARRAY || opcode === op.THROW) {
                 requireRegister(program, code[pc + 1], pc);
             }
             pc += width;

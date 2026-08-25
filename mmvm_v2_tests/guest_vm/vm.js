@@ -14,6 +14,7 @@
 
     function VM(options) {
         this.runtime = new Runtime(options || {});
+        this.runtime.interpretGuest = interpret;
     }
 
     VM.prototype.compile = function (source, filename) {
@@ -29,7 +30,7 @@
         try {
             return interpret(program, this.runtime);
         } finally {
-            this.runtime.activeRegisters = null;
+            this.runtime.clearActiveRegisters();
         }
     };
 
