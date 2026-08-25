@@ -56,6 +56,8 @@
         if (this.isKeyword("return")) return this.parseReturnStatement();
         if (this.isKeyword("function")) return this.parseFunction(true);
         if (this.isKeyword("break")) return this.parseBreakStatement();
+        if (this.isKeyword("continue")) return this.parseContinueStatement();
+        if (this.isKeyword("do")) return this.parseDoWhileStatement();
         if (this.isKeyword("throw")) return this.parseThrowStatement();
         if (this.isKeyword("try")) return this.parseTryStatement();
         var expression = this.parseExpression();
@@ -102,6 +104,13 @@
         var initial = null;
         if (this.isKeyword("var")) initial = this.parseVariableStatement(false);
         else if (!this.isPunctuator(";")) initial = this.parseExpression();
+        if (this.isKeyword("in")) {
+            this.advance(true);
+            var right = this.parseExpression();
+            this.expectPunctuator(")", true);
+            return {type: "ForInStatement", left: initial, right: right,
+                    body: this.parseStatement()};
+        }
         this.expectPunctuator(";", true);
         var test = null;
         if (!this.isPunctuator(";")) test = this.parseExpression();
@@ -154,6 +163,27 @@
         }
         if (this.isPunctuator(";")) this.advance(true);
         return {type: "BreakStatement"};
+    };
+
+    Parser.prototype.parseContinueStatement = function () {
+        this.advance(false);
+        if (this.current.kind === "identifier" && !this.current.lineBefore) {
+            this.error("labelled continue is not implemented");
+        }
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "ContinueStatement"};
+    };
+
+    Parser.prototype.parseDoWhileStatement = function () {
+        this.advance(true);
+        var body = this.parseStatement();
+        if (!this.isKeyword("while")) this.error("do statement requires while");
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var test = this.parseExpression();
+        this.expectPunctuator(")", false);
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "DoWhileStatement", body: body, test: test};
     };
 
     Parser.prototype.parseThrowStatement = function () {
@@ -211,7 +241,9 @@
         if (this.current.kind === "punctuator" &&
             (this.current.value === "=" || this.current.value === "+=" ||
              this.current.value === "-=" || this.current.value === "*=" ||
-             this.current.value === "/=" || this.current.value === "%=")) {
+             this.current.value === "/=" || this.current.value === "%=" ||
+             this.current.value === "|=" || this.current.value === "&=" ||
+             this.current.value === "^=")) {
             var operator = this.advance(true).value;
             return {type: "AssignmentExpression", operator: operator,
                     left: left, right: this.parseAssignment()};
@@ -285,9 +317,10 @@
         if (this.isKeyword("new")) return this.parseNewExpression();
         if ((this.current.kind === "punctuator" &&
              (this.current.value === "!" || this.current.value === "+" ||
-              this.current.value === "-")) ||
+              this.current.value === "-" || this.current.value === "~")) ||
             (this.current.kind === "keyword" &&
-             (this.current.value === "typeof" || this.current.value === "void"))) {
+             (this.current.value === "typeof" || this.current.value === "void" ||
+              this.current.value === "delete"))) {
             var operator = this.advance(true).value;
             return {type: "UnaryExpression", operator: operator,
                     argument: this.parseUnary()};
@@ -316,7 +349,30 @@
             }
             this.expectPunctuator(")", false);
         }
-        return {type: "NewExpression", callee: callee, arguments: args};
+        var expression = {type: "NewExpression", callee: callee, arguments: args};
+        while (true) {
+            if (this.isPunctuator(".")) {
+                this.advance(false);
+                expression = {type: "MemberExpression", object: expression,
+                              property: {type: "Literal",
+                                         value: this.expectIdentifier().value},
+                              computed: false};
+            } else if (this.isPunctuator("(")) {
+                this.advance(true);
+                var callArgs = [];
+                if (!this.isPunctuator(")")) {
+                    while (true) {
+                        callArgs.push(this.parseAssignment());
+                        if (!this.isPunctuator(",")) break;
+                        this.advance(true);
+                    }
+                }
+                this.expectPunctuator(")", false);
+                expression = {type: "CallExpression", callee: expression,
+                              arguments: callArgs};
+            } else break;
+        }
+        return expression;
     };
 
     Parser.prototype.parsePostfix = function () {
@@ -386,6 +442,10 @@
         if (token.kind === "identifier") {
             this.advance(false);
             return {type: "Identifier", name: token.value};
+        }
+        if (this.isKeyword("this")) {
+            this.advance(false);
+            return {type: "ThisExpression"};
         }
         if (this.isPunctuator("[")) {
             this.advance(true);

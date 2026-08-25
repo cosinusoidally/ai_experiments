@@ -175,7 +175,8 @@
             }
             first = false;
         }
-        return this.makeToken(keywords[value] ? "keyword" : "identifier",
+        return this.makeToken(Object.prototype.hasOwnProperty.call(keywords, value) ?
+                              "keyword" : "identifier",
                               value, start, line, column, lineBefore);
     };
 

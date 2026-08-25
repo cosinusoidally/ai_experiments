@@ -37,7 +37,11 @@
         THROW: 35,
         CONSTRUCT: 36,
         PUSH_CATCH: 37,
-        POP_CATCH: 38
+        POP_CATCH: 38,
+        BIT_NOT: 39,
+        TYPEOF: 40,
+        DELETE_PROPERTY: 41,
+        GET_KEYS: 42
     };
 
     root.GuestVMBytecode = op;

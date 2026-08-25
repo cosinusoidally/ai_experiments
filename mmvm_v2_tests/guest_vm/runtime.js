@@ -61,10 +61,14 @@
     };
 
     Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
-        return this.trackObject({guestType: "bytecodeFunction", program: program,
+        var prototype = this.makeObject();
+        var callable = this.trackObject({guestType: "bytecodeFunction", program: program,
                                  closure: closure, properties: {}, gcMark: 0,
                                  name: program.name || "",
                                  homeContext: homeContext});
+        callable.properties.$prototype = prototype;
+        prototype.properties.$constructor = callable;
+        return callable;
     };
 
     Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
@@ -85,6 +89,7 @@
             index++;
         }
         environment.bindings.$arguments = this.arrayFrom(args);
+        environment.bindings.$this = receiver;
         if (program.name) environment.bindings["$" + program.name] = callable;
         return environment;
     };
@@ -256,6 +261,8 @@
                 }
                 return String(receiver).replace(search, String(args[1]));
             });
+        this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
+            function (receiver) { return String(receiver).toUpperCase(); });
         this.arrayMethods = {};
         this.arrayMethods.push = this.makeNativeFunction("Array.push",
             function (receiver, args) {
@@ -267,6 +274,20 @@
             function (receiver) {
                 receiver.elements.sort();
                 return receiver;
+            });
+        this.objectMethods = {};
+        this.objectMethods.hasOwnProperty = this.makeNativeFunction(
+            "Object.hasOwnProperty", function (receiver, args) {
+                return runtime.hasOwnProperty(receiver, String(args[0]));
+            });
+        this.numberMethods = {};
+        this.numberMethods.toString = this.makeNativeFunction("Number.toString",
+            function (receiver, args) {
+                return Number(receiver).toString(args.length ? Number(args[0]) : 10);
+            });
+        this.numberMethods.toFixed = this.makeNativeFunction("Number.toFixed",
+            function (receiver, args) {
+                return Number(receiver).toFixed(args.length ? Number(args[0]) : 0);
             });
         this.regexpMethods = {};
         this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
@@ -280,6 +301,22 @@
                 return String.fromCharCode.apply(String, args);
             });
         this.globals.String = stringConstructor;
+        var math = this.makeObject();
+        function mathMethod(name, callback) {
+            runtime.setProperty(math, name,
+                runtime.makeNativeFunction("Math." + name, callback));
+        }
+        mathMethod("floor", function (receiver, args) { return Math.floor(Number(args[0])); });
+        mathMethod("ceil", function (receiver, args) { return Math.ceil(Number(args[0])); });
+        mathMethod("round", function (receiver, args) { return Math.round(Number(args[0])); });
+        mathMethod("sqrt", function (receiver, args) { return Math.sqrt(Number(args[0])); });
+        mathMethod("abs", function (receiver, args) { return Math.abs(Number(args[0])); });
+        mathMethod("pow", function (receiver, args) {
+            return Math.pow(Number(args[0]), Number(args[1]));
+        });
+        mathMethod("min", function (receiver, args) { return Math.min.apply(Math, args); });
+        mathMethod("max", function (receiver, args) { return Math.max.apply(Math, args); });
+        this.globals.Math = math;
     };
 
     Runtime.prototype.installRawFFI = function () {
@@ -370,14 +407,72 @@
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             if (own(object.properties, "$" + key)) return object.properties["$" + key];
             if (object.guestType === "regexp") return this.regexpMethods[key];
-            return undefined;
+            if (object.prototype) {
+                var inherited = this.getProperty(object.prototype, key);
+                if (inherited !== undefined) return inherited;
+            }
+            return this.objectMethods[key];
         }
         if (typeof object === "string") {
             if (key === "length") return object.length;
             if (isArrayIndex(key)) return object.charAt(Number(key));
             return this.stringMethods[key];
         }
+        if (typeof object === "number") return this.numberMethods[key];
         return undefined;
+    };
+
+    Runtime.prototype.hasOwnProperty = function (object, key) {
+        key = this.propertyKey(key);
+        if (!object || !object.guestType) return false;
+        if (object.guestType === "array" && isArrayIndex(key)) {
+            return Number(key) < object.elements.length;
+        }
+        if (object.guestType === "buffer" && isArrayIndex(key)) {
+            return Number(key) < object.length;
+        }
+        return !!object.properties && own(object.properties, "$" + key);
+    };
+
+    Runtime.prototype.deleteProperty = function (object, key) {
+        this.assertOwned(object);
+        key = this.propertyKey(key);
+        if (!object || !object.guestType) return true;
+        if (object.guestType === "array" && isArrayIndex(key)) {
+            delete object.elements[Number(key)];
+            return true;
+        }
+        if (object.properties) delete object.properties["$" + key];
+        return true;
+    };
+
+    Runtime.prototype.keys = function (object) {
+        this.assertOwned(object);
+        var values = [];
+        var index;
+        if (object && object.guestType === "array") {
+            for (index = 0; index < object.elements.length; index++) {
+                if (index in object.elements) values.push(String(index));
+            }
+        }
+        var key;
+        if (object && object.properties) {
+            for (key in object.properties) {
+                if (own(object.properties, key) && key.charAt(0) === "$") {
+                    values.push(key.substring(1));
+                }
+            }
+        }
+        return this.arrayFrom(values);
+    };
+
+    Runtime.prototype.typeOf = function (value) {
+        if (value === undefined) return "undefined";
+        if (value === null) return "object";
+        if (value && (value.guestType === "function" ||
+                      value.guestType === "bytecodeFunction")) return "function";
+        if (value && value.guestType) return "object";
+        return typeof value;
     };
 
     Runtime.prototype.setProperty = function (object, key, value) {
@@ -474,6 +569,7 @@
             }
         }
         if (value.guestType === "bytecodeFunction") this.markEnvironment(value.closure, generation);
+        if (value.prototype) this.markValue(value.prototype, generation);
         var properties = value.properties;
         var key;
         for (key in properties) {

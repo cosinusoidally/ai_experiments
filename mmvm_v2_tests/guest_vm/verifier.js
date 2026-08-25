@@ -20,11 +20,13 @@
             if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
                 opcode === op.SET_GLOBAL || opcode === op.MOVE ||
                 opcode === op.NOT || opcode === op.NEGATE ||
-                opcode === op.POSITIVE || opcode === op.MAKE_FUNCTION) width = 3;
+                opcode === op.POSITIVE || opcode === op.MAKE_FUNCTION ||
+                opcode === op.BIT_NOT || opcode === op.TYPEOF ||
+                opcode === op.GET_KEYS) width = 3;
             else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                      (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                      (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
-                     opcode === op.MAKE_REGEXP) width = 4;
+                     opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
             else if (opcode === op.JUMP || opcode === op.RETURN ||
                      opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
                      opcode === op.THROW) width = 2;
@@ -48,13 +50,16 @@
                 }
                 requireRegister(program, code[pc + 2], pc);
             } else if (opcode === op.MOVE || opcode === op.NOT ||
-                       opcode === op.NEGATE || opcode === op.POSITIVE) {
+                       opcode === op.NEGATE || opcode === op.POSITIVE ||
+                       opcode === op.BIT_NOT || opcode === op.TYPEOF ||
+                       opcode === op.GET_KEYS) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
                 if (opcode === op.MAKE_FUNCTION) verify(program.constants[code[pc + 2]]);
             } else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                        (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
-                       (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
+                       (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
+                       opcode === op.DELETE_PROPERTY) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
                 requireRegister(program, code[pc + 3], pc);

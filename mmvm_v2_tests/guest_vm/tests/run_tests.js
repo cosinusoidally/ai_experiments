@@ -41,6 +41,7 @@
         {path: "language/functions_objects.js"},
         {path: "language/standard_library.js"},
         {path: "language/try_update.js"},
+        {path: "language/object_control.js"},
         {path: "buffer/buffer_guest.js"}
     ];
     var totalAssertions = 0;

@@ -142,7 +142,7 @@
                                              registers[code[pc + 3]]);
                     frame.pc = pc + 4;
                 } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
-                           (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
+                       (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
                     target = code[pc + 1];
                     left = registers[code[pc + 2]];
                     right = registers[code[pc + 3]];
@@ -172,6 +172,19 @@
                     frame.pc = pc + 3;
                 } else if (opcode === op.POSITIVE) {
                     registers[code[pc + 1]] = Number(registers[code[pc + 2]]);
+                    frame.pc = pc + 3;
+                } else if (opcode === op.BIT_NOT) {
+                    registers[code[pc + 1]] = ~registers[code[pc + 2]];
+                    frame.pc = pc + 3;
+                } else if (opcode === op.TYPEOF) {
+                    registers[code[pc + 1]] = this.runtime.typeOf(registers[code[pc + 2]]);
+                    frame.pc = pc + 3;
+                } else if (opcode === op.DELETE_PROPERTY) {
+                    registers[code[pc + 1]] = this.runtime.deleteProperty(
+                        registers[code[pc + 2]], registers[code[pc + 3]]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.GET_KEYS) {
+                    registers[code[pc + 1]] = this.runtime.keys(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.JUMP) {
                     if (code[pc + 1] <= pc) this.runtime.gcSafePoint();
@@ -229,9 +242,26 @@
                         this.status = "hostCall";
                         return this.result("hostCall", used);
                     }
-                    registers[constructDestination] = this.runtime.construct(
-                        constructorValue, args);
-                    this.runtime.gcSafePoint();
+                    if (constructorValue &&
+                        constructorValue.guestType === "bytecodeFunction") {
+                        var constructedReceiver = this.runtime.makeObject();
+                        var constructorPrototype = this.runtime.getProperty(
+                            constructorValue, "prototype");
+                        if (constructorPrototype && constructorPrototype.guestType) {
+                            constructedReceiver.prototype = constructorPrototype;
+                        }
+                        var constructorFrame = makeFrame(constructorValue.program,
+                            this.runtime, constructorValue.homeContext || frame.context,
+                            constructedReceiver, args, constructorValue.closure,
+                            constructorValue, constructDestination);
+                        constructorFrame.constructReceiver = constructedReceiver;
+                        this.frames.push(constructorFrame);
+                        this.runtime.gcSafePoint();
+                    } else {
+                        registers[constructDestination] = this.runtime.construct(
+                            constructorValue, args);
+                        this.runtime.gcSafePoint();
+                    }
                 } else if (opcode === op.MAKE_FUNCTION) {
                     registers[code[pc + 1]] = this.runtime.makeGuestFunction(
                         constants[code[pc + 2]], frame.environment, frame.context);
@@ -268,6 +298,10 @@
                 } else if (opcode === op.RETURN) {
                     var returnValue = registers[code[pc + 1]];
                     var returnedFrame = this.frames.pop();
+                    if (returnedFrame.constructReceiver &&
+                        (!returnValue || !returnValue.guestType)) {
+                        returnValue = returnedFrame.constructReceiver;
+                    }
                     if (!this.frames.length) return this.finish("completed", returnValue, used);
                     var caller = this.frames[this.frames.length - 1];
                     caller.registers[returnedFrame.returnRegister] = returnValue;

@@ -9,6 +9,7 @@
         this.constants = [];
         this.registerCount = 0;
         this.breakTargets = [];
+        this.continueTargets = [];
     }
 
     Compiler.prototype.allocate = function () {
@@ -129,7 +130,9 @@
             var whileEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
             var whileBreaks = [];
             this.breakTargets.push(whileBreaks);
+            this.continueTargets.push(whileStart);
             this.compileStatement(statement.body);
+            this.continueTargets.pop();
             this.breakTargets.pop();
             this.emit(op.JUMP, whileStart);
             this.patch(whileEnd + 2, this.code.length);
@@ -151,18 +154,86 @@
                 forEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
             }
             var forBreaks = [];
+            var forContinues = [];
             this.breakTargets.push(forBreaks);
+            this.continueTargets.push(forContinues);
             this.compileStatement(statement.body);
+            this.continueTargets.pop();
             this.breakTargets.pop();
+            patchBreaks(this, forContinues, this.code.length);
             if (statement.update) this.compileExpression(statement.update);
             this.emit(op.JUMP, forStart);
             if (forEnd >= 0) this.patch(forEnd + 2, this.code.length);
             patchBreaks(this, forBreaks, this.code.length);
             return;
         }
+        if (statement.type === "DoWhileStatement") {
+            var doStart = this.code.length;
+            var doBreaks = [];
+            var doContinues = [];
+            this.breakTargets.push(doBreaks);
+            this.continueTargets.push(doContinues);
+            this.compileStatement(statement.body);
+            this.continueTargets.pop();
+            this.breakTargets.pop();
+            patchBreaks(this, doContinues, this.code.length);
+            condition = this.compileExpression(statement.test);
+            var doEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
+            this.emit(op.JUMP, doStart);
+            this.patch(doEnd + 2, this.code.length);
+            patchBreaks(this, doBreaks, this.code.length);
+            return;
+        }
+        if (statement.type === "ForInStatement") {
+            var forInReference;
+            if (statement.left.type === "VariableStatement") {
+                if (statement.left.declarations.length !== 1) {
+                    throw new SyntaxError("for-in requires one variable");
+                }
+                forInReference = {kind: "global", name: this.constant(
+                    statement.left.declarations[0].name)};
+            } else {
+                forInReference = this.compileReference(statement.left);
+            }
+            var forInObject = this.compileExpression(statement.right);
+            var forInKeys = this.allocate();
+            this.emit(op.GET_KEYS, forInKeys, forInObject);
+            var forInIndex = this.emitConstant(0);
+            var forInStart = this.code.length;
+            var lengthKey = this.emitConstant("length");
+            var forInLength = this.allocate();
+            this.emit(op.GET_PROPERTY, forInLength, forInKeys, lengthKey);
+            var forInCondition = this.allocate();
+            this.emit(op.LESS, forInCondition, forInIndex, forInLength);
+            var forInEnd = this.emit(op.JUMP_IF_FALSE, forInCondition, 0);
+            var forInKey = this.allocate();
+            this.emit(op.GET_PROPERTY, forInKey, forInKeys, forInIndex);
+            this.storeReference(forInReference, forInKey);
+            var forInBreaks = [];
+            var forInContinues = [];
+            this.breakTargets.push(forInBreaks);
+            this.continueTargets.push(forInContinues);
+            this.compileStatement(statement.body);
+            this.continueTargets.pop();
+            this.breakTargets.pop();
+            patchBreaks(this, forInContinues, this.code.length);
+            var oneForIn = this.emitConstant(1);
+            this.emit(op.ADD, forInIndex, forInIndex, oneForIn);
+            this.emit(op.JUMP, forInStart);
+            this.patch(forInEnd + 2, this.code.length);
+            patchBreaks(this, forInBreaks, this.code.length);
+            return;
+        }
         if (statement.type === "BreakStatement") {
             if (!this.breakTargets.length) throw new SyntaxError("break outside loop");
             this.breakTargets[this.breakTargets.length - 1].push(this.emit(op.JUMP, 0));
+            return;
+        }
+        if (statement.type === "ContinueStatement") {
+            if (!this.continueTargets.length) throw new SyntaxError("continue outside loop");
+            var continueTarget = this.continueTargets[this.continueTargets.length - 1];
+            if (typeof continueTarget === "number") this.emit(op.JUMP, continueTarget);
+            else continueTarget.push(this.emit(op.JUMP, 0));
             return;
         }
         if (statement.type === "ThrowStatement") {
@@ -293,6 +364,11 @@
             this.emit(op.GET_GLOBAL, identifier, this.constant(expression.name));
             return identifier;
         }
+        if (expression.type === "ThisExpression") {
+            var thisRegister = this.allocate();
+            this.emit(op.GET_GLOBAL, thisRegister, this.constant("this"));
+            return thisRegister;
+        }
         if (expression.type === "BinaryExpression") {
             if (expression.operator === "&&" || expression.operator === "||") {
                 var logical = this.compileExpression(expression.left);
@@ -332,11 +408,23 @@
             return conditionalResult;
         }
         if (expression.type === "UnaryExpression") {
+            if (expression.operator === "delete") {
+                if (expression.argument.type !== "MemberExpression") {
+                    return this.emitConstant(true);
+                }
+                var deleteReference = this.compileReference(expression.argument);
+                var deleteResult = this.allocate();
+                this.emit(op.DELETE_PROPERTY, deleteResult,
+                          deleteReference.object, deleteReference.key);
+                return deleteResult;
+            }
             var argument = this.compileExpression(expression.argument);
             var unary = this.allocate();
             if (expression.operator === "!") this.emit(op.NOT, unary, argument);
             else if (expression.operator === "-") this.emit(op.NEGATE, unary, argument);
             else if (expression.operator === "+") this.emit(op.POSITIVE, unary, argument);
+            else if (expression.operator === "~") this.emit(op.BIT_NOT, unary, argument);
+            else if (expression.operator === "typeof") this.emit(op.TYPEOF, unary, argument);
             else if (expression.operator === "void") {
                 this.emit(op.CONST, unary, this.constant(undefined));
             } else throw new Error("unsupported unary operator: " + expression.operator);
@@ -456,7 +544,9 @@
             } else if (statement.type === "IfStatement") {
                 visit(statement.consequent);
                 if (statement.alternate) visit(statement.alternate);
-            } else if (statement.type === "WhileStatement" || statement.type === "ForStatement") {
+            } else if (statement.type === "WhileStatement" || statement.type === "ForStatement" ||
+                       statement.type === "DoWhileStatement" ||
+                       statement.type === "ForInStatement") {
                 if (statement.initial && statement.initial.type === "VariableStatement") visit(statement.initial);
                 visit(statement.body);
             } else if (statement.type === "TryStatement") {
