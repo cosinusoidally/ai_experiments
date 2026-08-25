@@ -11,6 +11,7 @@
         this.breakTargets = [];
         this.continueTargets = [];
         this.constantRegisters = [];
+        this.registerHints = [];
         this.scopes = [];
         if (scopeBindings) {
             this.scopes.push(makeCompileScope(this, scopeBindings,
@@ -78,6 +79,7 @@
         this.emit(op.RETURN, undefinedRegister);
         return {code: this.code, constants: this.constants,
                 constantRegisters: this.constantRegisters,
+                registerHints: this.registerHints,
                 registerCount: this.registerCount, parameters: [], locals: []};
     };
 
@@ -101,6 +103,8 @@
         program.functionNameSlot = expression.name ?
             program.bindingSlots["$" + expression.name] : -1;
         program.name = expression.name || "";
+        program.astBody = expression.body;
+        program.nonlocalBindings = describeNonlocalBindings(expression.body, nested);
         return program;
     };
 
@@ -375,12 +379,17 @@
         var target = this.allocate();
         if (reference.kind === "global") {
             this.emit(op.GET_GLOBAL, target, reference.name);
+            this.registerHints[target] = "global:" + this.constants[reference.name];
         } else if (reference.kind === "local") {
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
         } else if (reference.kind === "register") {
             this.emit(op.MOVE, target, reference.register);
         } else if (reference.kind === "constantProperty") {
             this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
+            var objectHint = this.registerHints[reference.object];
+            var propertyName = this.constants[reference.key];
+            this.registerHints[target] = objectHint === "global:Math" ?
+                "math:" + propertyName : "property:" + propertyName;
         } else {
             this.emit(op.GET_PROPERTY, target, reference.object, reference.key);
         }
@@ -757,6 +766,40 @@
             result[index] = map["$" + names[index]];
             index++;
         }
+        return result;
+    }
+
+    function describeNonlocalBindings(body, compiler) {
+        var result = {};
+        function visit(node) {
+            if (!node || typeof node !== "object") return;
+            if (node.type === "Identifier") {
+                var key = "$" + node.name;
+                if (result[key] === undefined) {
+                    var binding = compiler.resolveBinding(node.name);
+                    if (!binding) result[key] = {kind: "global"};
+                    else if (binding.kind === "environment") {
+                        result[key] = {kind: "environment", depth: binding.depth,
+                                       slot: binding.slot};
+                    }
+                }
+                return;
+            }
+            var property;
+            for (property in node) {
+                if (property !== "loc" &&
+                    Object.prototype.hasOwnProperty.call(node, property)) {
+                    var value = node[property];
+                    if (value && typeof value === "object") {
+                        if (typeof value.length === "number") {
+                            var index = 0;
+                            while (index < value.length) visit(value[index++]);
+                        } else visit(value);
+                    }
+                }
+            }
+        }
+        visit(body);
         return result;
     }
 

@@ -20,6 +20,21 @@
         this.runtime = new SemanticRuntime(options || {});
         this.contexts = [];
         this.destroyed = false;
+        if (this.runtime.threadedCompiler) {
+            var semanticRuntime = this.runtime;
+            this.runtime.threadedCompiler.setFallback(function (
+                    callable, receiver, args, context) {
+                var execution = Execution.fromFunction(
+                    callable, semanticRuntime, context, receiver, args);
+                while (true) {
+                    var result = execution.resume(Infinity);
+                    if (result.status === "hostCall") execution.serviceHostCall();
+                    else if (result.status === "completed") return result.value;
+                    else if (result.status === "threw") throw result.exception;
+                    else throw new Error("threaded fallback did not complete");
+                }
+            });
+        }
     }
 
     JSRuntime.prototype.createContext = function () {

@@ -153,7 +153,8 @@
                               callable.homeContext : this.context;
         var execution = callbackContext.startFunction(callable, receiver, args || []);
         while (true) {
-            var result = execution.resume(1000000);
+            var result = execution.resume(this.runtime.threadedCompiler ?
+                                          Infinity : 1000000);
             if (result.status === "budget") continue;
             if (result.status === "hostCall") {
                 execution.serviceHostCall();

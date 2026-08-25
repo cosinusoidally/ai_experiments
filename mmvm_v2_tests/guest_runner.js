@@ -4,6 +4,7 @@ var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
 var guestRunnerProfile = false;
+var guestRunnerThreaded = false;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -20,13 +21,15 @@ if (guestRunnerIsNode) {
     }
 }
 
-if (guestRunnerArguments[0] === "--vm-profile") {
-    guestRunnerProfile = true;
+while (guestRunnerArguments[0] === "--vm-profile" ||
+       guestRunnerArguments[0] === "--vm-threaded") {
+    if (guestRunnerArguments[0] === "--vm-profile") guestRunnerProfile = true;
+    else guestRunnerThreaded = true;
     guestRunnerArguments.shift();
 }
 
 if (!guestRunnerArguments.length) {
-    var guestUsage = "usage: guest_runner.js [--vm-profile] program.js";
+    var guestUsage = "usage: guest_runner.js [--vm-profile] [--vm-threaded] program.js";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -37,7 +40,9 @@ var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
-                                        profile: guestRunnerProfile});
+                                        profile: guestRunnerProfile,
+                                        threadedCompile: !guestRunnerIsNode ||
+                                                         guestRunnerThreaded});
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
     guestProgramVM, guestRunnerArguments);
 var guestRunnerDeferredCleanup = false;
@@ -56,7 +61,8 @@ try {
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
     var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
     while (true) {
-        var guestExecutionResult = guestExecution.resume(1000000);
+        var guestExecutionResult = guestExecution.resume(
+            guestProgramVM.runtime.threadedCompiler ? Infinity : 1000000);
         if (guestExecutionResult.status === "budget") {
             /* The command-line embedder grants another cooperative time slice. */
         } else if (guestExecutionResult.status === "hostCall") {

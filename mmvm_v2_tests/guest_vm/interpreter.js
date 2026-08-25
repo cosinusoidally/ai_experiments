@@ -112,7 +112,9 @@
                 var registers = frame.registers;
                 var pc = frame.pc;
                 var opcode = code[pc];
-                if (this.runtime.profileOpcodeCounts) this.runtime.countOpcode(opcode);
+                if (this.runtime.profileOpcodeCounts) {
+                    this.runtime.countOpcode(opcode, frame.program.name);
+                }
                 var target;
                 var left;
                 var right;
@@ -153,7 +155,7 @@
                         used++;
                         this.totalInstructions++;
                         if (this.runtime.profileOpcodeCounts) {
-                            this.runtime.countOpcode(op.MOVE);
+                            this.runtime.countOpcode(op.MOVE, frame.program.name);
                         }
                     }
                     frame.pc = pc;
@@ -244,10 +246,19 @@
                     var destination = code[pc + 1];
                     frame.pc = pc + 5;
                     if (callableValue && callableValue.guestType === "bytecodeFunction") {
-                        this.frames.push(makeFrame(callableValue.program, this.runtime,
-                            callableValue.homeContext || frame.context, receiver, args,
-                            callableValue.closure, callableValue,
-                            destination));
+                        var threaded = budget === Infinity &&
+                            this.runtime.threadedCompiler &&
+                            this.runtime.threadedCompiler.compile(callableValue.program);
+                        if (threaded) {
+                            registers[destination] = threaded(this.runtime,
+                                callableValue.homeContext || frame.context, receiver,
+                                args, callableValue.closure, callableValue);
+                        } else {
+                            this.frames.push(makeFrame(callableValue.program, this.runtime,
+                                callableValue.homeContext || frame.context, receiver, args,
+                                callableValue.closure, callableValue,
+                                destination));
+                        }
                         this.runtime.gcSafePoint();
                     } else if (callableValue && callableValue.guestType === "function" &&
                                callableValue.callMode === "host") {

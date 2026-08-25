@@ -3,11 +3,13 @@
     var HostFFI = root.GuestVMHostFFI;
     var Heap = root.GuestVMHeap;
     var ValueCells = root.GuestVMValueCells;
+    var ThreadedCompiler = root.GuestVMThreadedCompiler;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
+        ThreadedCompiler = require("./threaded_compiler.js");
     }
 
     function own(object, key) {
@@ -38,8 +40,11 @@
         this.linearHeapBytes = options.heapBytes === undefined ?
             16 * 1024 * 1024 : Number(options.heapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
+        this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;
         this.profileNextReport = 1000000;
+        this.threadedCompiler = options.threadedCompile ?
+            new ThreadedCompiler(this) : null;
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
         if (options.rawFFI) this.installRawFFI();
@@ -244,11 +249,14 @@
         if (this.gcAllocationDebt >= this.gcThreshold) this.gcPending = true;
     };
 
-    Runtime.prototype.countOpcode = function (opcode) {
+    Runtime.prototype.countOpcode = function (opcode, functionName) {
         var counts = this.profileOpcodeCounts;
         if (!counts) return;
         counts[opcode] = (counts[opcode] || 0) + 1;
         this.profileInstructionCount++;
+        functionName = functionName || "<program>";
+        this.profileFunctionCounts["$" + functionName] =
+            (this.profileFunctionCounts["$" + functionName] || 0) + 1;
         if (this.profileInstructionCount >= this.profileNextReport) {
             this.reportProfile();
             this.profileNextReport += 1000000;
@@ -272,6 +280,25 @@
                    " " + parts.join(" ");
         if (typeof print === "function") print(line);
         else if (typeof console !== "undefined" && console.log) console.log(line);
+        var functions = [];
+        var functionKey;
+        for (functionKey in this.profileFunctionCounts) {
+            if (own(this.profileFunctionCounts, functionKey)) {
+                functions.push({name: functionKey.substring(1),
+                                count: this.profileFunctionCounts[functionKey]});
+            }
+        }
+        functions.sort(function (left, right) { return right.count - left.count; });
+        var functionParts = [];
+        var functionIndex = 0;
+        while (functionIndex < functions.length && functionIndex < 12) {
+            functionParts.push(functions[functionIndex].name + "=" +
+                               functions[functionIndex].count);
+            functionIndex++;
+        }
+        var functionLine = "guest VM profile functions: " + functionParts.join(" ");
+        if (typeof print === "function") print(functionLine);
+        else if (typeof console !== "undefined" && console.log) console.log(functionLine);
     };
 
     Runtime.prototype.gcSafePoint = function () {
