@@ -84,3 +84,31 @@ bug initially made the FPS counter cumulative and falsely showed more than 20
 FPS.  Once corrected, the layout was substantially slower on old SpiderMonkey.
 Measurements must therefore be checked for stable per-interval frame counts,
 not merely a rising displayed number.
+
+## 2026-08-25: demo1--demo7 correctness sweep
+
+After completing the ES5.1 Math surface required by the later demos, a live
+64x64 structured-tier sweep under `js_min.exe` measured approximately:
+
+- demo1: 13.5 FPS;
+- demo2: 12.2 FPS;
+- demo3: 19.1 FPS;
+- demo4: 17.0 FPS;
+- demo5: 4.5 FPS.
+
+These results are stable with, or slightly above, the immediately preceding
+compiled-tier observations (12.8, 11.7, 18.9, 16.4, and 4.2 FPS respectively).
+They are smoke-test measurements on the development machine, not portable
+performance guarantees.
+
+At 160x120, demo6 rendered its complete road/hills/car scene at roughly
+0.8--1.0 FPS. Demo7 rendered its complete scene at roughly 0.4--0.6 FPS. An
+earlier demo6/demo7 observation around 1.3--1.6 FPS is invalid as a performance
+baseline: absent `Math.PI` made every generated track coordinate `NaN`, so that
+run drew the HUD and background but skipped all rasterized scene geometry.
+Correctness was confirmed by capturing the live X11 windows; no capture or
+generated framebuffer is stored in the repository.
+
+A Node 24.14.1 host running the same guest structured tier sustained about
+19.5 FPS for demo7 at 64x64. Direct Node execution of demos 1--7 remained at
+the configured 20 FPS cap in the same smoke sweep.

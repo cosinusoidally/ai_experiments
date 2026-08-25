@@ -108,6 +108,12 @@ also internal semantic operations rather than embedder host calls. Potentially
 blocking or externally observable services such as raw FFI, output, timers,
 filesystem, and sockets must yield.
 
+The MMVM Node profile also binds `NodeLibc.memmove` as an inline structured-tier
+intrinsic for demo7's already-allocated Buffer spans. The embedder supplies the
+native callback; the compiler contains no address or machine-code constant.
+A Node-hosted guest has no native Buffer pointer and stays on the ordinary
+Buffer-copy path, so it never invokes this intrinsic.
+
 ## Module boundaries and load order
 
 | Module | Responsibility |
@@ -362,7 +368,8 @@ stores but keep top-level variable environments isolated.
 
 `process`, `console`, `Buffer.byteLength`, the required `Date` methods, and URI
 component encoding functions are also installed. This is intentionally the
-smallest documented profile needed by `node_web.js`, `demo1.js`, and `demo2.js`, not a
+smallest documented profile needed by `node_web.js` and `demo1.js` through
+`demo7.js`, not a
 general Node.js implementation.
 
 ## Collector and roots

@@ -39,6 +39,12 @@
             this.hostNet = NodeNet;
             this.hostHttp = NodeHttp;
             this.HostBuffer = Buffer;
+            if (this.runtime.threadedCompiler) {
+                this.runtime.threadedCompiler.setNativeMemmove(
+                    function (destination, source, length) {
+                        return NodeLibc.memmove(destination, source, length);
+                    });
+            }
         }
         this.installGlobals();
     }
@@ -507,6 +513,23 @@
                     environment.HostBuffer.byteLength(String(args[0]), "utf8") :
                     NodeEncoding.utf8Bytes(String(args[0])).length;
             }, true));
+
+        /* MMVM's Node compatibility layer exposes this internal helper to
+         * renderers which batch native framebuffer writes.  Keep it an
+         * intrinsic: like peek/poke, copying already-validated native memory
+         * must not turn every raster span into a guest/host suspension.  A
+         * Node-hosted guest never takes this path because its Buffer backing
+         * stores have no native pointer. */
+        var libcObject = this.object({});
+        this.runtime.setProperty(libcObject, "memmove",
+            this.makeFunction("NodeLibc.memmove", function (receiver, args) {
+                if (environment.nodeHost) {
+                    throw new Error("NodeLibc.memmove requires native MMVM buffers");
+                }
+                NodeLibc.memmove(Number(args[0]), Number(args[1]), Number(args[2]));
+                return args[0];
+            }, true));
+        publish("NodeLibc", libcObject);
 
         publish("encodeURIComponent",
             this.makeFunction("encodeURIComponent", function (receiver, args) {

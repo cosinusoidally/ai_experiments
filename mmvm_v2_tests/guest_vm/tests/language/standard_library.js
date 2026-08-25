@@ -32,6 +32,14 @@ assertEqual(Math.min(7, 3), 3, "Math.min");
 assertEqual(Math.cos(0), 1, "Math.cos");
 assertEqual(Math.sin(0), 0, "Math.sin");
 assertEqual(Math.floor(Math.exp(1)), 2, "Math.exp");
+assertEqual(Math.PI > 3.1415 && Math.PI < 3.1416, true, "Math.PI constant");
+assertEqual(Math.SQRT2 > 1.4142 && Math.SQRT2 < 1.4143, true,
+            "Math.SQRT2 constant");
+assertEqual(Math.atan2(0, 1), 0, "Math.atan2");
+assertEqual(Math.log(Math.E), 1, "Math.log and Math.E");
+assertEqual(Math.tan(0), 0, "Math.tan");
+var randomValue = Math.random();
+assertEqual(randomValue >= 0 && randomValue < 1, true, "Math.random range");
 
 var names = ["z", "a", "m"];
 assertEqual(names.push("b"), 4, "Array.push length");

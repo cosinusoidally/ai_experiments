@@ -13,10 +13,15 @@
         this.profileTimes = {};
         this.profileSamples = {};
         this.profileNextReport = 0;
+        this.nativeMemmove = null;
     }
 
     ThreadedCompiler.prototype.setFallback = function (callback) {
         this.fallback = callback;
+    };
+
+    ThreadedCompiler.prototype.setNativeMemmove = function (callback) {
+        this.nativeMemmove = callback;
     };
 
     ThreadedCompiler.prototype.find = function (program) {
@@ -933,6 +938,13 @@
             return "hc.call(" + this.identifier(name) + ",undefined,[" + args + "],context)";
         }
         if (node.callee.type === "MemberExpression") {
+            if (node.callee.object.type === "Identifier" &&
+                node.callee.object.name === "NodeLibc" &&
+                !node.callee.computed &&
+                node.callee.property.value === "memmove" &&
+                node.arguments.length === 3) {
+                return "hc.nativeMemmove(" + args + ")";
+            }
             if (node.callee.object.type === "Identifier" &&
                 node.callee.object.name === "Math" && !node.callee.computed) {
                 return "Math." + node.callee.property.value + "(" + args + ")";

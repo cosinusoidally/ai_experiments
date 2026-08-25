@@ -514,19 +514,36 @@
             runtime.setProperty(math, name,
                 runtime.makeNativeFunction("Math." + name, callback));
         }
-        mathMethod("floor", function (receiver, args) { return Math.floor(Number(args[0])); });
+        this.setProperty(math, "E", Math.E);
+        this.setProperty(math, "LN2", Math.LN2);
+        this.setProperty(math, "LN10", Math.LN10);
+        this.setProperty(math, "LOG2E", Math.LOG2E);
+        this.setProperty(math, "LOG10E", Math.LOG10E);
+        this.setProperty(math, "PI", Math.PI);
+        this.setProperty(math, "SQRT1_2", Math.SQRT1_2);
+        this.setProperty(math, "SQRT2", Math.SQRT2);
+        mathMethod("abs", function (receiver, args) { return Math.abs(Number(args[0])); });
+        mathMethod("acos", function (receiver, args) { return Math.acos(Number(args[0])); });
+        mathMethod("asin", function (receiver, args) { return Math.asin(Number(args[0])); });
+        mathMethod("atan", function (receiver, args) { return Math.atan(Number(args[0])); });
+        mathMethod("atan2", function (receiver, args) {
+            return Math.atan2(Number(args[0]), Number(args[1]));
+        });
         mathMethod("ceil", function (receiver, args) { return Math.ceil(Number(args[0])); });
+        mathMethod("floor", function (receiver, args) { return Math.floor(Number(args[0])); });
         mathMethod("round", function (receiver, args) { return Math.round(Number(args[0])); });
         mathMethod("sqrt", function (receiver, args) { return Math.sqrt(Number(args[0])); });
         mathMethod("sin", function (receiver, args) { return Math.sin(Number(args[0])); });
         mathMethod("cos", function (receiver, args) { return Math.cos(Number(args[0])); });
         mathMethod("exp", function (receiver, args) { return Math.exp(Number(args[0])); });
-        mathMethod("abs", function (receiver, args) { return Math.abs(Number(args[0])); });
+        mathMethod("log", function (receiver, args) { return Math.log(Number(args[0])); });
         mathMethod("pow", function (receiver, args) {
             return Math.pow(Number(args[0]), Number(args[1]));
         });
+        mathMethod("random", function () { return Math.random(); });
         mathMethod("min", function (receiver, args) { return Math.min.apply(Math, args); });
         mathMethod("max", function (receiver, args) { return Math.max.apply(Math, args); });
+        mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); });
         this.globals.Math = math;
     };
 
