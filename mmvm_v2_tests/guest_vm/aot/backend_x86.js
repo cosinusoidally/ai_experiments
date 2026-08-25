@@ -19,14 +19,21 @@
         var instructionIndex = 0;
         while (instructionIndex < ir.instructions.length) {
             var instruction = ir.instructions[instructionIndex++];
-            if (instruction.op !== "store_u32") {
+            if (instruction.op === "store_f64") {
+                emitExpression(assembler, instruction.address);
+                assembler.pushEax();
+                emitF64Expression(assembler, instruction.value);
+                assembler.popEcx();
+                assembler.storeF64EcxPop();
+            } else if (instruction.op !== "store_u32") {
                 throw new Error("unsupported i386 kernel instruction " + instruction.op);
+            } else {
+                emitExpression(assembler, instruction.address);
+                assembler.pushEax();
+                emitExpression(assembler, instruction.value);
+                assembler.popEcx();
+                assembler.movDwordPtrEcxEax();
             }
-            emitExpression(assembler, instruction.address);
-            assembler.pushEax();
-            emitExpression(assembler, instruction.value);
-            assembler.popEcx();
-            assembler.movDwordPtrEcxEax();
         }
         emitExpression(assembler, ir.expression);
         assembler.ret();
@@ -85,6 +92,21 @@
             else if (node.op === "xor_i32") assembler.xorEaxEcx();
             else throw new Error("unsupported i386 kernel IR " + node.op);
         }
+    }
+
+    function emitF64Expression(assembler, node) {
+        if (node.op === "load_f64") {
+            emitExpression(assembler, node.address);
+            assembler.loadF64Eax();
+            return;
+        }
+        emitF64Expression(assembler, node.left);
+        emitF64Expression(assembler, node.right);
+        if (node.op === "add_f64") assembler.addF64Pop();
+        else if (node.op === "sub_f64") assembler.subtractF64Pop();
+        else if (node.op === "mul_f64") assembler.multiplyF64Pop();
+        else if (node.op === "div_f64") assembler.divideF64Pop();
+        else throw new Error("unsupported i386 f64 IR " + node.op);
     }
 
     root.GuestVMKernelX86Backend = X86Backend;

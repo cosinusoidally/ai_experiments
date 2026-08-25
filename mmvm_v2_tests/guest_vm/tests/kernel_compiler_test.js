@@ -60,11 +60,61 @@
                 heap.destroy();
                 recordX86.destroy();
             }
+            function binary64Kernel(base, left, right, output) {
+                storeF64(base + output,
+                    divideF64(multiplyF64(
+                        addF64(loadF64(base + left), loadF64(base + right)),
+                        subtractF64(loadF64(base + left), loadF64(base + right))),
+                        loadF64(base + right)));
+                return output;
+            }
+            var f64IR = compiler.compile(binary64Kernel);
+            var f64JS = new JSBackend().compile(f64IR);
+            var f64X86 = new X86Backend().compile(f64IR);
+            var f64Heap = new Heap({heapBytes: 4096});
+            try {
+                var f64Inputs = [[7.25, 2.5], [-11.75, 0.125],
+                                 [1.0e100, -3.0e99]];
+                var f64Index = 0;
+                while (f64Index < f64Inputs.length) {
+                    var f64Left = f64Inputs[f64Index][0];
+                    var f64Right = f64Inputs[f64Index][1];
+                    var f64Expected = ((f64Left + f64Right) *
+                                      (f64Left - f64Right)) / f64Right;
+                    f64Heap.memory.writeF64(64, f64Left);
+                    f64Heap.memory.writeF64(72, f64Right);
+                    f64JS.fn(f64Heap.memory, 0, 64, 72, 80);
+                    assertF64(f64Heap.memory.readF64(80), f64Expected,
+                              "JavaScript binary64 kernel");
+                    if (f64X86.fn) {
+                        f64X86.fn(f64Heap.memory.nativeAddress(0), 64, 72, 88);
+                        assertF64(f64Heap.memory.readF64(88), f64Expected,
+                                  "i386 binary64 kernel");
+                    }
+                    f64Index++;
+                }
+                if (f64X86.assembly.indexOf("fld_f64_ptr_eax()") < 0 ||
+                    f64X86.assembly.indexOf("fstp_f64_ptr_ecx()") < 0) {
+                    throw new Error("i386 binary64 backend did not use x87 macros");
+                }
+            } finally {
+                f64Heap.destroy();
+                f64X86.destroy();
+            }
             return "shared kernel IR passed on JS" +
                    (x86Result.fn ? " and native i386" :
                     "; i386 macro output validated");
         } finally {
             x86Result.destroy();
+        }
+    }
+
+    function assertF64(actual, expected, label) {
+        var scale = Math.abs(expected);
+        var error = Math.abs(actual - expected);
+        if (actual !== expected && error > (scale || 1) * 1e-12) {
+            throw new Error(label + " mismatch: expected " + expected +
+                            ", got " + actual);
         }
     }
 

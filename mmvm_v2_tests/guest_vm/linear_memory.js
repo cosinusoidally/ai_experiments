@@ -2,8 +2,10 @@
  * offsets into host-memory operations. Higher layers use Heap accessors. */
 (function (root) {
     var HostMemory = root.GuestVMHostMemory;
+    var Binary64 = root.GuestVMBinary64;
     if (typeof module !== "undefined" && module.exports) {
         HostMemory = require("./host_memory.js");
+        Binary64 = require("./binary64.js");
     }
 
     function LinearMemory(byteLength) {
@@ -59,6 +61,19 @@
     LinearMemory.prototype.writeU32 = function (address, value) {
         this.checkRange(address, 4);
         this.host.write32LE(this.allocation, address, value);
+    };
+
+    LinearMemory.prototype.readF64 = function (address) {
+        this.checkRange(address, 8);
+        return Binary64.decode(this.host.read32LE(this.allocation, address),
+            this.host.read32LE(this.allocation, address + 4));
+    };
+
+    LinearMemory.prototype.writeF64 = function (address, value) {
+        this.checkRange(address, 8);
+        var words = Binary64.encode(Number(value));
+        this.host.write32LE(this.allocation, address, words.low);
+        this.host.write32LE(this.allocation, address + 4, words.high);
     };
 
     LinearMemory.prototype.fill = function (address, length, value) {

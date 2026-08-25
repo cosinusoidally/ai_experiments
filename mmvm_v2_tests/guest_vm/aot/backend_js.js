@@ -9,11 +9,15 @@
         var index = 0;
         while (index < ir.instructions.length) {
             var instruction = ir.instructions[index++];
-            if (instruction.op !== "store_u32") {
+            if (instruction.op === "store_f64") {
+                body += "memory.writeF64(" + emit(instruction.address, parameters) +
+                        "," + emitF64(instruction.value, parameters) + ");";
+            } else if (instruction.op !== "store_u32") {
                 throw new Error("unsupported JS kernel instruction " + instruction.op);
+            } else {
+                body += "memory.writeU32(" + emit(instruction.address, parameters) +
+                        "," + emit(instruction.value, parameters) + ");";
             }
-            body += "memory.writeU32(" + emit(instruction.address, parameters) +
-                    "," + emit(instruction.value, parameters) + ");";
         }
         var source = "return function(memory," + parameters.join(",") + "){" +
                      body + "return (" + emit(ir.expression, parameters) + ")|0;};";
@@ -32,6 +36,16 @@
         if (!operators[node.op]) throw new Error("unsupported JS kernel IR " + node.op);
         return "((" + emit(node.left, parameters) + ")" + operators[node.op] +
                "(" + emit(node.right, parameters) + "))";
+    }
+
+    function emitF64(node, parameters) {
+        if (node.op === "load_f64") {
+            return "memory.readF64(" + emit(node.address, parameters) + ")";
+        }
+        var operators = {add_f64: "+", sub_f64: "-", mul_f64: "*", div_f64: "/"};
+        if (!operators[node.op]) throw new Error("unsupported JS f64 IR " + node.op);
+        return "((" + emitF64(node.left, parameters) + ")" + operators[node.op] +
+               "(" + emitF64(node.right, parameters) + "))";
     }
 
     root.GuestVMKernelJSBackend = JSBackend;

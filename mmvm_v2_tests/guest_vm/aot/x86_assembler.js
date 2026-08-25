@@ -68,6 +68,30 @@
         this.macros.push("mov_dword_ptr_ecx_eax()");
         this.emitByte(0x89); this.emitByte(0x01);
     };
+    Assembler.prototype.loadF64Eax = function () {
+        this.macros.push("fld_f64_ptr_eax()");
+        this.emitByte(0xdd); this.emitByte(0x00);
+    };
+    Assembler.prototype.storeF64EcxPop = function () {
+        this.macros.push("fstp_f64_ptr_ecx()");
+        this.emitByte(0xdd); this.emitByte(0x19);
+    };
+    Assembler.prototype.addF64Pop = function () {
+        this.macros.push("faddp_st1_st0()");
+        this.emitByte(0xde); this.emitByte(0xc1);
+    };
+    Assembler.prototype.subtractF64Pop = function () {
+        this.macros.push("fsubp_st1_st0()");
+        this.emitByte(0xde); this.emitByte(0xe9);
+    };
+    Assembler.prototype.multiplyF64Pop = function () {
+        this.macros.push("fmulp_st1_st0()");
+        this.emitByte(0xde); this.emitByte(0xc9);
+    };
+    Assembler.prototype.divideF64Pop = function () {
+        this.macros.push("fdivp_st1_st0()");
+        this.emitByte(0xde); this.emitByte(0xf9);
+    };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) throw new Error("unbalanced assembler stack");
         this.macros.push("ret()"); this.emitByte(0xc3);

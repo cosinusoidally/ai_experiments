@@ -14,6 +14,7 @@
         load("guest_vm/verifier.js");
         load("guest_vm/host_ffi.js");
         load("guest_vm/host_memory.js");
+        load("guest_vm/binary64.js");
         load("guest_vm/linear_memory.js");
         load("guest_vm/heap.js");
         load("guest_vm/value_cell.js");

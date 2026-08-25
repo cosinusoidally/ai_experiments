@@ -40,6 +40,14 @@
                 instructions.push({op: "store_u32",
                     address: lower(statement.expression.arguments[0], locals),
                     value: lower(statement.expression.arguments[1], locals)});
+            } else if (statement.type === "ExpressionStatement" &&
+                statement.expression.type === "CallExpression" &&
+                statement.expression.callee.type === "Identifier" &&
+                statement.expression.callee.name === "storeF64" &&
+                statement.expression.arguments.length === 2) {
+                instructions.push({op: "store_f64",
+                    address: lower(statement.expression.arguments[0], locals),
+                    value: lowerF64(statement.expression.arguments[1], locals)});
             } else if (statement.type === "ReturnStatement" && statement.argument &&
                        statementIndex === fn.body.body.length) {
                 resultExpression = lower(statement.argument, locals);
@@ -78,6 +86,26 @@
                     right: lower(node.right, locals), type: "i32"};
         }
         throw new SyntaxError("unsupported kernel expression " + node.type);
+    }
+
+    function lowerF64(node, locals) {
+        if (node.type !== "CallExpression" ||
+            node.callee.type !== "Identifier") {
+            throw new SyntaxError("binary64 kernel expression must be an intrinsic call");
+        }
+        var name = node.callee.name;
+        if (name === "loadF64" && node.arguments.length === 1) {
+            return {op: "load_f64", address: lower(node.arguments[0], locals),
+                    type: "f64"};
+        }
+        var operations = {addF64: "add_f64", subtractF64: "sub_f64",
+                          multiplyF64: "mul_f64", divideF64: "div_f64"};
+        if (operations[name] && node.arguments.length === 2) {
+            return {op: operations[name],
+                    left: lowerF64(node.arguments[0], locals),
+                    right: lowerF64(node.arguments[1], locals), type: "f64"};
+        }
+        throw new SyntaxError("unsupported binary64 kernel intrinsic " + name);
     }
 
     root.GuestVMKernelCompiler = KernelCompiler;
