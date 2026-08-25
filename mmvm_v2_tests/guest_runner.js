@@ -41,6 +41,7 @@ var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
+                                        gcThreshold: 16384,
                                         threadedCompile: !guestRunnerIsNode ||
                                                          guestRunnerThreaded});
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(

@@ -110,6 +110,17 @@
     if (typeof print === "function") print(nodeWebCompileResult);
     else console.log(nodeWebCompileResult);
 
+    var threadedVM = new VM({threadedCompile: true});
+    threadedVM.run(readSource("language/functions_objects.js"),
+                   "threaded_functions_objects.js");
+    if (threadedVM.runtime.assertions !== 19) {
+        throw new Error("threaded compiler assertion count changed");
+    }
+    threadedVM.destroy();
+    var threadedResult = "structured compiler closures passed: 19 assertion(s)";
+    if (typeof print === "function") print(threadedResult);
+    else console.log(threadedResult);
+
     var summary = "guest VM suite passed: " + guestTests.length +
                   " guest program(s), " + totalAssertions +
                   " guest assertion(s)";

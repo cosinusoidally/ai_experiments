@@ -27,6 +27,7 @@
         this.injectedHostException = undefined;
         this.hasInjectedHostException = false;
         this.totalInstructions = 0;
+        this.compiledEntry = null;
     }
 
     Execution.fromFunction = function (callable, runtime, context, receiver, args) {
@@ -38,6 +39,14 @@
         execution.frames = [makeFrame(callable.program, runtime,
             callable.homeContext || context, receiver, args || [], callable.closure,
             callable, -1)];
+        if (runtime.threadedCompiler) {
+            var compiled = runtime.threadedCompiler.compile(callable.program);
+            if (compiled) {
+                execution.compiledEntry = {fn: compiled, callable: callable,
+                    context: callable.homeContext || context, receiver: receiver,
+                    args: args || []};
+            }
+        }
         return execution;
     };
 
@@ -92,6 +101,21 @@
 
         this.status = "running";
         var used = 0;
+        if (this.compiledEntry && budget === Infinity) {
+            var entry = this.compiledEntry;
+            this.compiledEntry = null;
+            this.frames = [];
+            try {
+                var compiledValue = entry.fn(this.runtime, entry.context,
+                    entry.receiver, entry.args, entry.callable.closure,
+                    entry.callable);
+                this.runtime.gcSafePoint();
+                return this.finish("completed", compiledValue, 0);
+            } catch (compiledError) {
+                return this.finish("threw", compiledError, 0);
+            }
+        }
+        if (this.compiledEntry) this.compiledEntry = null;
         if (this.hasInjectedHostException) {
             var injected = this.injectedHostException;
             this.injectedHostException = undefined;
@@ -250,9 +274,23 @@
                             this.runtime.threadedCompiler &&
                             this.runtime.threadedCompiler.compile(callableValue.program);
                         if (threaded) {
-                            registers[destination] = threaded(this.runtime,
-                                callableValue.homeContext || frame.context, receiver,
-                                args, callableValue.closure, callableValue);
+                            if (this.runtime.profileOpcodeCounts) {
+                                var compiledStarted = new Date().getTime();
+                                try {
+                                    registers[destination] = threaded(this.runtime,
+                                        callableValue.homeContext || frame.context,
+                                        receiver, args, callableValue.closure,
+                                        callableValue);
+                                } finally {
+                                    this.runtime.threadedCompiler.recordProfile(
+                                        callableValue.name || "<anonymous>",
+                                        new Date().getTime() - compiledStarted);
+                                }
+                            } else {
+                                registers[destination] = threaded(this.runtime,
+                                    callableValue.homeContext || frame.context, receiver,
+                                    args, callableValue.closure, callableValue);
+                            }
                         } else {
                             this.frames.push(makeFrame(callableValue.program, this.runtime,
                                 callableValue.homeContext || frame.context, receiver, args,

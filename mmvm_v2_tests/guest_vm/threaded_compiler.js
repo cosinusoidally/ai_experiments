@@ -9,6 +9,10 @@
         this.programs = [];
         this.compiled = [];
         this.fallback = null;
+        this.profileSerial = 0;
+        this.profileTimes = {};
+        this.profileSamples = {};
+        this.profileNextReport = 0;
     }
 
     ThreadedCompiler.prototype.setFallback = function (callback) {
@@ -25,10 +29,12 @@
     };
 
     ThreadedCompiler.prototype.compile = function (program) {
-        if (!program || !program.bindingRegisters || !this.supports(program)) return null;
+        if (!program) return null;
         if (program.threadedCompiler === this && program.threadedFunction) {
             return program.threadedFunction;
         }
+        if ((!program.bindingRegisters && !program.astBody) ||
+            !this.supports(program)) return null;
         var existing = this.find(program);
         if (existing >= 0) return this.compiled[existing];
         var source = program.astBody ? this.generateStructured(program) :
@@ -47,8 +53,8 @@
         var pc = 0;
         while (pc < code.length) {
             var opcode = code[pc];
-            if (opcode === op.PUSH_CATCH || opcode === op.POP_CATCH ||
-                opcode === op.MAKE_FUNCTION) return false;
+            if (opcode === op.PUSH_CATCH || opcode === op.POP_CATCH) return false;
+            if (opcode === op.MAKE_FUNCTION && !program.astBody) return false;
             pc += width(opcode);
         }
         return true;
@@ -72,11 +78,32 @@
 
     ThreadedCompiler.prototype.callFixed = function (callable, receiver, context,
             count, a0, a1, a2, a3, a4, a5, a6, a7) {
+        if (!this.runtime.profileOpcodeCounts && callable &&
+            callable.threadedCompiler === this &&
+            callable.threadedFunction) {
+            return callable.threadedFunction(this.runtime,
+                callable.homeContext || context, receiver, null, callable.closure,
+                callable, a0, a1, a2, a3, a4, a5, a6, a7);
+        }
         this.runtime.assertOwned(callable);
         if (!callable) throw new TypeError("value is not callable");
         if (callable.guestType === "bytecodeFunction") {
             var compiled = this.compile(callable.program);
             if (compiled) {
+                callable.threadedCompiler = this;
+                callable.threadedFunction = compiled;
+                if (this.runtime.profileOpcodeCounts &&
+                    ((this.profileSerial++ & 63) === 0)) {
+                    var started = new Date().getTime();
+                    try {
+                        return compiled(this.runtime, callable.homeContext || context,
+                                        receiver, null, callable.closure, callable,
+                                        a0, a1, a2, a3, a4, a5, a6, a7);
+                    } finally {
+                        this.recordProfile(callable.name || "<anonymous>",
+                                           new Date().getTime() - started);
+                    }
+                }
                 return compiled(this.runtime, callable.homeContext || context,
                                 receiver, null, callable.closure, callable,
                                 a0, a1, a2, a3, a4, a5, a6, a7);
@@ -92,6 +119,36 @@
         if (count > 6) args[6] = a6;
         if (count > 7) args[7] = a7;
         return this.call(callable, receiver, args, context);
+    };
+
+    ThreadedCompiler.prototype.recordProfile = function (name, elapsed) {
+        var key = "$" + name;
+        this.profileTimes[key] = (this.profileTimes[key] || 0) + elapsed;
+        this.profileSamples[key] = (this.profileSamples[key] || 0) + 1;
+        var now = new Date().getTime();
+        if (!this.profileNextReport) this.profileNextReport = now + 5000;
+        if (now < this.profileNextReport) return;
+        var entries = [];
+        for (key in this.profileTimes) {
+            if (Object.prototype.hasOwnProperty.call(this.profileTimes, key)) {
+                entries.push({name: key.substring(1), time: this.profileTimes[key],
+                              samples: this.profileSamples[key]});
+            }
+        }
+        entries.sort(function (left, right) { return right.time - left.time; });
+        var parts = [];
+        var index = 0;
+        while (index < entries.length && index < 12) {
+            parts.push(entries[index].name + "=" + entries[index].time + "ms/" +
+                       entries[index].samples);
+            index++;
+        }
+        var line = "guest VM compiled profile (1/64 sampled): " + parts.join(" ");
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
+        this.profileTimes = {};
+        this.profileSamples = {};
+        this.profileNextReport = now + 5000;
     };
 
     ThreadedCompiler.prototype.callMemberFixed = function (object, key, context,
@@ -151,8 +208,36 @@
         return object;
     };
 
+    ThreadedCompiler.prototype.makeObjectLiteralFixed = function (count,
+            k0, v0, k1, v1, k2, v2, k3, v3, k4, v4, k5, v5, k6, v6, k7, v7) {
+        var object = this.runtime.makeObject();
+        if (count > 0) object.properties["$" + k0] = v0;
+        if (count > 1) object.properties["$" + k1] = v1;
+        if (count > 2) object.properties["$" + k2] = v2;
+        if (count > 3) object.properties["$" + k3] = v3;
+        if (count > 4) object.properties["$" + k4] = v4;
+        if (count > 5) object.properties["$" + k5] = v5;
+        if (count > 6) object.properties["$" + k6] = v6;
+        if (count > 7) object.properties["$" + k7] = v7;
+        return object;
+    };
+
     ThreadedCompiler.prototype.makeArrayLiteral = function (values) {
         return this.runtime.arrayFrom(values);
+    };
+
+    ThreadedCompiler.prototype.makeArrayLiteralFixed = function (count,
+            v0, v1, v2, v3, v4, v5, v6, v7) {
+        var array = this.runtime.makeArray();
+        if (count > 0) array.elements[0] = v0;
+        if (count > 1) array.elements[1] = v1;
+        if (count > 2) array.elements[2] = v2;
+        if (count > 3) array.elements[3] = v3;
+        if (count > 4) array.elements[4] = v4;
+        if (count > 5) array.elements[5] = v5;
+        if (count > 6) array.elements[6] = v6;
+        if (count > 7) array.elements[7] = v7;
+        return array;
     };
 
     ThreadedCompiler.prototype.updateGlobal = function (
@@ -368,9 +453,13 @@
         }
     }
 
-    function StructuredEmitter(program) {
+    function StructuredEmitter(program, fastPlan, genericOnly) {
         this.program = program;
         this.bindings = program.bindingSlots || {};
+        this.fastPlan = fastPlan || null;
+        this.genericOnly = !!genericOnly;
+        this.useEnvironment = !program.bindingRegisters;
+        this.callIndex = 0;
     }
 
     StructuredEmitter.prototype.generate = function () {
@@ -382,24 +471,48 @@
         while (index < this.program.bindings.length) {
             declarations.push("v" + index++);
         }
-        if (declarations.length) lines.push("var " + declarations.join(",") + ";");
+        if (!this.useEnvironment && declarations.length) {
+            lines.push("var " + declarations.join(",") + ";");
+        }
+        var callCount = countDirectCalls(this.program.astBody);
+        if (callCount) {
+            var callDeclarations = [];
+            index = 0;
+            while (index < callCount) callDeclarations.push("c" + index++);
+            lines.push("var " + callDeclarations.join(",") + ";");
+        }
+        if (this.useEnvironment) {
+            lines.push("var env={slots:[],bindingSlots:p.bindingSlots,parent:closure};");
+        } else lines.push("var env=closure;");
         index = 0;
         while (index < this.program.parameterSlots.length) {
-            lines.push("v" + this.program.parameterSlots[index] + "=args?(" + index +
+            lines.push(this.slot(this.program.parameterSlots[index]) + "=args?(" + index +
                        "<args.length?args[" + index + "]:undefined):" +
                        (index < 8 ? "a" + index : "undefined") + ";");
             index++;
         }
         if (usesIdentifier(this.program.astBody, "arguments")) {
-            lines.push("v" + this.program.argumentsSlot + "=runtime.arrayFrom(args||" +
+            lines.push(this.slot(this.program.argumentsSlot) + "=runtime.arrayFrom(args||" +
                        "[a0,a1,a2,a3,a4,a5,a6,a7].slice(0," +
                        this.program.parameters.length + "));");
         }
-        lines.push("v" + this.program.thisSlot + "=receiver;");
+        lines.push(this.slot(this.program.thisSlot) + "=receiver;");
         if (this.program.functionNameSlot >= 0) {
-            lines.push("v" + this.program.functionNameSlot + "=callable;");
+            lines.push(this.slot(this.program.functionNameSlot) + "=callable;");
         }
-        lines.push(this.statement(this.program.astBody));
+        this.emitHoistedFunctions(lines, this.program.astBody);
+        var plan = this.genericOnly ? null : analyzeFastPath(this.program, this);
+        if (plan && plan.guards.length) {
+            var fastEmitter = new StructuredEmitter(this.program, plan, true);
+            var genericEmitter = new StructuredEmitter(this.program, null, true);
+            lines.push("if(" + plan.guards.join("&&") + "){" +
+                       (plan.aliasDeclarations.length ? "var " +
+                        plan.aliasDeclarations.join(",") + ";" : "") +
+                       fastEmitter.statement(this.program.astBody) + "}else " +
+                       genericEmitter.statement(this.program.astBody));
+        } else {
+            lines.push(this.statement(this.program.astBody));
+        }
         lines.push("return undefined;");
         lines.push("};");
         return lines.join("\n");
@@ -407,7 +520,38 @@
 
     StructuredEmitter.prototype.local = function (name) {
         var slot = this.bindings["$" + name];
-        return slot === undefined ? null : "v" + slot;
+        return slot === undefined ? null : this.slot(slot);
+    };
+
+    StructuredEmitter.prototype.slot = function (slot) {
+        return this.useEnvironment ? "env.slots[" + slot + "]" : "v" + slot;
+    };
+
+    StructuredEmitter.prototype.emitHoistedFunctions = function (lines, node) {
+        var emitter = this;
+        function visit(value) {
+            if (!value || typeof value !== "object") return;
+            if (value.type === "FunctionDeclaration") {
+                lines.push(emitter.referenceStore(value.name,
+                    "runtime.makeGuestFunction(p.constants[" +
+                    value.guestProgramConstant + "],env,context)") + ";");
+                return;
+            }
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+    };
+
+    StructuredEmitter.prototype.referenceStore = function (name, value) {
+        var local = this.local(name);
+        if (local) return local + "=" + value;
+        var binding = this.program.nonlocalBindings &&
+                      this.program.nonlocalBindings["$" + name];
+        if (binding && binding.kind === "environment") {
+            return this.environment(binding.depth - (this.useEnvironment ? 1 : 0)) +
+                   ".slots[" + binding.slot + "]=" + value;
+        }
+        return "context.globals[" + quote(name) + "]=" + value;
     };
 
     StructuredEmitter.prototype.identifier = function (name) {
@@ -416,7 +560,8 @@
         var binding = this.program.nonlocalBindings &&
                       this.program.nonlocalBindings["$" + name];
         if (binding && binding.kind === "environment") {
-            return this.environment(binding.depth) + ".slots[" + binding.slot + "]";
+            return this.environment(binding.depth - (this.useEnvironment ? 1 : 0)) +
+                   ".slots[" + binding.slot + "]";
         }
         return "context.globals[" + quote(name) + "]";
     };
@@ -435,7 +580,8 @@
             index = 0;
             while (index < node.body.length) result.push(this.statement(node.body[index++]));
             result.push("}");
-        } else if (node.type === "EmptyStatement") result.push(";");
+        } else if (node.type === "EmptyStatement" ||
+                   node.type === "FunctionDeclaration") result.push(";");
         else if (node.type === "ExpressionStatement") result.push(this.expression(node.expression) + ";");
         else if (node.type === "VariableStatement") {
             index = 0;
@@ -495,7 +641,7 @@
     StructuredEmitter.prototype.expression = function (node) {
         if (node.type === "Literal") return literal(node.value);
         if (node.type === "Identifier") return this.identifier(node.name);
-        if (node.type === "ThisExpression") return "v" + this.program.thisSlot;
+        if (node.type === "ThisExpression") return this.slot(this.program.thisSlot);
         if (node.type === "BinaryExpression") {
             return "(" + this.expression(node.left) + node.operator +
                    this.expression(node.right) + ")";
@@ -564,6 +710,10 @@
             return "hc.construct(" + this.expression(node.callee) + ",[" +
                    this.expressionList(node.arguments) + "],context)";
         }
+        if (node.type === "FunctionExpression") {
+            return "runtime.makeGuestFunction(p.constants[" +
+                   node.guestProgramConstant + "],env,context)";
+        }
         if (node.type === "ObjectExpression") {
             var keys = [];
             var values = [];
@@ -573,11 +723,20 @@
                 values.push(this.expression(node.properties[propertyIndex].value));
                 propertyIndex++;
             }
-            return "hc.makeObjectLiteral([" + keys.join(",") + "],[" +
-                   values.join(",") + "])";
+            var directProperties = [];
+            propertyIndex = 0;
+            while (propertyIndex < keys.length) {
+                directProperties.push(quote("$" + node.properties[propertyIndex].key) +
+                                      ":" + values[propertyIndex]);
+                propertyIndex++;
+            }
+            return "runtime.trackObject({guestType:\"object\",properties:{" +
+                   directProperties.join(",") + "},gcMark:0})";
         }
         if (node.type === "ArrayExpression") {
-            return "hc.makeArrayLiteral([" + this.expressionList(node.elements) + "])";
+            return "runtime.trackObject({guestType:\"array\",elements:[" +
+                   this.expressionList(node.elements) +
+                   "],properties:{},gcMark:0})";
         }
         if (node.type === "RegExpLiteral") {
             return "runtime.makeRegExp(" + quote(node.pattern) + "," + quote(node.flags) + ")";
@@ -602,9 +761,17 @@
             if (name === "poke32" || name === "poke8" ||
                 name === "peek32" || name === "peek8") return name + "(" + args + ")";
             if (node.arguments.length <= 8) {
-                return "hc.callFixed(" + this.identifier(name) +
+                var callTemporary = "c" + this.callIndex++;
+                var directArgs = args ? "," + args : "";
+                return "((" + callTemporary + "=" + this.identifier(name) + ")," +
+                       callTemporary + "&&" + callTemporary +
+                       ".threadedCompiler===hc?" + callTemporary +
+                       ".threadedFunction(runtime," + callTemporary +
+                       ".homeContext||context,undefined,null," + callTemporary +
+                       ".closure," + callTemporary + directArgs + "):" +
+                       "hc.callFixed(" + callTemporary +
                        ",undefined,context," + node.arguments.length +
-                       (args ? "," + args : "") + ")";
+                       directArgs + "))";
             }
             return "hc.call(" + this.identifier(name) + ",undefined,[" + args + "],context)";
         }
@@ -633,7 +800,8 @@
                           this.program.nonlocalBindings["$" + node.name];
             if (binding && binding.kind === "environment") {
                 return {kind: "environment",
-                        source: this.environment(binding.depth) + ".slots[" +
+                        source: this.environment(binding.depth -
+                                (this.useEnvironment ? 1 : 0)) + ".slots[" +
                                 binding.slot + "]"};
             }
             return {kind: "global", name: node.name};
@@ -647,6 +815,18 @@
     };
 
     StructuredEmitter.prototype.memberRead = function (object, key, node) {
+        var fastKind = this.fastMemberKind(node);
+        var alias = this.fastMemberAlias(node);
+        if (fastKind === "array") {
+            if (!node.computed && node.property.value === "length") {
+                return (alias || object + ".elements") + ".length";
+            }
+            if (node.computed) return (alias || object + ".elements") + "[" + key + "]";
+        }
+        if (fastKind && !node.computed) {
+            return (alias || object + ".properties") + "[" +
+                   quote("$" + node.property.value) + "]";
+        }
         if (!node.computed) {
             var propertyName = node.property.value;
             if (propertyName === "length") {
@@ -671,6 +851,15 @@
     };
 
     StructuredEmitter.prototype.memberWrite = function (object, key, value, node) {
+        var fastKind = this.fastMemberKind(node);
+        var alias = this.fastMemberAlias(node);
+        if (fastKind === "array" && node.computed) {
+            return "(" + (alias || object + ".elements") + "[" + key + "]=" + value + ")";
+        }
+        if (fastKind && !node.computed) {
+            return "(" + (alias || object + ".properties") + "[" +
+                   quote("$" + node.property.value) + "]=" + value + ")";
+        }
         if (!node.computed) {
             var propertyName = node.property.value;
             return "(" + object + "&&" + object + ".properties?" +
@@ -684,6 +873,163 @@
                ":hc.assignMember(" + object + "," + key + "," + value +
                ",\"=\"))";
     };
+
+    StructuredEmitter.prototype.fastMemberKind = function (node) {
+        if (!this.fastPlan || !node.object || node.object.type !== "Identifier") {
+            return null;
+        }
+        return this.fastPlan.kinds["$" + node.object.name] || null;
+    };
+
+    StructuredEmitter.prototype.fastMemberAlias = function (node) {
+        if (!this.fastPlan || !node.object || node.object.type !== "Identifier") return null;
+        return this.fastPlan.memberAliases["$" + node.object.name] || null;
+    };
+
+    function analyzeFastPath(program, emitter) {
+        var aliases = {};
+        var known = {};
+        var kinds = {};
+        var roots = {};
+        var written = {};
+        var parameters = {};
+        var index = 0;
+        while (index < program.parameters.length) parameters["$" + program.parameters[index++]] = true;
+        known.$arguments = "array";
+
+        function writes(node) {
+            if (!node || typeof node !== "object") return;
+            if ((node.type === "AssignmentExpression" ||
+                 node.type === "UpdateExpression") &&
+                (node.left || node.argument).type === "Identifier") {
+                written["$" + (node.left || node.argument).name] = true;
+            }
+            visitChildren(node, writes, false);
+        }
+
+        function declarations(node) {
+            if (!node || typeof node !== "object") return;
+            if (node.type === "VariableStatement") {
+                var declarationIndex = 0;
+                while (declarationIndex < node.declarations.length) {
+                    var declaration = node.declarations[declarationIndex++];
+                    var initial = declaration.initial;
+                    if (initial && initial.type === "Identifier") {
+                        aliases["$" + declaration.name] = initial.name;
+                    } else if (initial && initial.type === "ArrayExpression") {
+                        known["$" + declaration.name] = "array";
+                    } else if (initial && initial.type === "ObjectExpression") {
+                        known["$" + declaration.name] = "properties";
+                    } else if (initial && initial.type === "NewExpression" &&
+                               initial.callee.type === "Identifier" &&
+                               initial.callee.name === "Array") {
+                        known["$" + declaration.name] = "array";
+                    }
+                }
+            }
+            visitChildren(node, declarations, false);
+        }
+
+        function rootName(name) {
+            var seen = {};
+            while (aliases["$" + name] && !seen["$" + name]) {
+                seen["$" + name] = true;
+                name = aliases["$" + name];
+            }
+            return name;
+        }
+
+        function members(node) {
+            if (!node || typeof node !== "object") return;
+            if (node.type === "CallExpression" &&
+                node.callee && node.callee.type === "MemberExpression") {
+                var argumentIndex = 0;
+                while (argumentIndex < node.arguments.length) members(node.arguments[argumentIndex++]);
+                members(node.callee.object);
+                if (node.callee.computed) members(node.callee.property);
+                return;
+            }
+            if (node.type === "MemberExpression" &&
+                node.object && node.object.type === "Identifier") {
+                var name = node.object.name;
+                var needed = node.computed || node.property.value === "length" ?
+                             "array" : "properties";
+                var localKnown = known["$" + name];
+                if (!localKnown || localKnown === needed ||
+                    (localKnown === "array" && needed === "properties")) {
+                    var root = rootName(name);
+                    var rootKnown = known["$" + root];
+                    var rootIsParameter = parameters["$" + root];
+                    var nonlocal = program.nonlocalBindings &&
+                                   program.nonlocalBindings["$" + root];
+                    if (localKnown || rootKnown || rootIsParameter || nonlocal) {
+                        if (kinds["$" + name] !== "array") kinds["$" + name] = needed;
+                        if (!rootKnown) {
+                            roots["$" + root] = roots["$" + root] === "array" ?
+                                                   "array" : needed;
+                        }
+                    }
+                }
+            }
+            visitChildren(node, members, true);
+        }
+
+        declarations(program.astBody);
+        writes(program.astBody);
+        members(program.astBody);
+        var guards = [];
+        var root;
+        for (root in roots) {
+            if (Object.prototype.hasOwnProperty.call(roots, root)) {
+                var name = root.substring(1);
+                var source = emitter.identifier(name);
+                guards.push(roots[root] === "array" ?
+                    "(" + source + "&&" + source + ".guestType==='array')" :
+                    "(" + source + "&&" + source + ".properties)");
+            }
+        }
+        var memberAliases = {};
+        var aliasDeclarations = [];
+        var aliasNumber = 0;
+        var memberName;
+        for (memberName in kinds) {
+            if (Object.prototype.hasOwnProperty.call(kinds, memberName) &&
+                !written[memberName]) {
+                var plainName = memberName.substring(1);
+                var rootNameValue = rootName(plainName);
+                if (parameters["$" + plainName] ||
+                    (plainName === rootNameValue &&
+                     program.nonlocalBindings &&
+                     program.nonlocalBindings["$" + plainName])) {
+                    var aliasName = "f" + aliasNumber++;
+                    var base = emitter.identifier(plainName);
+                    memberAliases[memberName] = aliasName;
+                    aliasDeclarations.push(aliasName + "=" + base +
+                        (kinds[memberName] === "array" ? ".elements" : ".properties"));
+                }
+            }
+        }
+        return guards.length ? {kinds: kinds, guards: guards,
+            memberAliases: memberAliases,
+            aliasDeclarations: aliasDeclarations} : null;
+    }
+
+    function visitChildren(node, callback, includeFunctionBodies) {
+        if (!includeFunctionBodies && (node.type === "FunctionExpression" ||
+                                       node.type === "FunctionDeclaration")) return;
+        var key;
+        for (key in node) {
+            if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key)) {
+                var value = node[key];
+                if (value && typeof value === "object") {
+                    if (typeof value.length === "number") {
+                        var index = 0;
+                        while (index < value.length) callback(value[index++]);
+                    } else callback(value);
+                }
+            }
+        }
+    }
 
     function isPure(node) {
         if (!node) return true;
@@ -712,6 +1058,21 @@
             }
         }
         return false;
+    }
+
+    function countDirectCalls(node) {
+        var count = 0;
+        function visit(value) {
+            if (!value || typeof value !== "object") return;
+            if (value.type === "CallExpression" &&
+                value.callee && value.callee.type === "Identifier" &&
+                value.callee.name !== "poke32" && value.callee.name !== "poke8" &&
+                value.callee.name !== "peek32" && value.callee.name !== "peek8" &&
+                value.arguments.length <= 8) count++;
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+        return count;
     }
 
     function quote(value) {

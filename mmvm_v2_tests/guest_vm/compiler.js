@@ -66,8 +66,11 @@
         while (declarationIndex < declarations.length) {
             var declaration = declarations[declarationIndex++];
             var declaredFunction = this.allocate();
+            var declarationProgram = this.compileFunction(declaration);
+            var declarationConstant = this.constant(declarationProgram);
+            declaration.guestProgramConstant = declarationConstant;
             this.emit(op.MAKE_FUNCTION, declaredFunction,
-                      this.constant(this.compileFunction(declaration)));
+                      declarationConstant);
             this.storeReference(this.referenceForName(declaration.name), declaredFunction);
         }
         var index = 0;
@@ -414,8 +417,11 @@
         if (expression.type === "Literal") return this.emitConstant(expression.value);
         if (expression.type === "FunctionExpression") {
             var functionRegister = this.allocate();
+            var functionProgram = this.compileFunction(expression);
+            var functionConstant = this.constant(functionProgram);
+            expression.guestProgramConstant = functionConstant;
             this.emit(op.MAKE_FUNCTION, functionRegister,
-                      this.constant(this.compileFunction(expression)));
+                      functionConstant);
             return functionRegister;
         }
         if (expression.type === "ObjectExpression") {
