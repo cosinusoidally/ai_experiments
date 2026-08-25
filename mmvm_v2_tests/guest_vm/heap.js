@@ -63,7 +63,10 @@
         var address = this.bump;
         if (address + size > this.byteLength) throw new RangeError("guest heap exhausted");
         this.bump += size;
-        this.memory.fill(address, size, 0);
+        /* Linear memory is zero-filled when created and bump allocation never
+         * reuses a range. Reuse/free-list allocation must clear a record before
+         * publishing it, but doing bytewise clearing here makes every small
+         * MMVM allocation cross the JSAPI once per byte. */
         this.memory.writeU32(address + HEADER_TYPE, type);
         this.memory.writeU32(address + HEADER_SIZE_FIELD, size);
         this.allocationCount++;

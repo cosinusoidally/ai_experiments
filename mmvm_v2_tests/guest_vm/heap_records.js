@@ -53,6 +53,22 @@
     var FRAME_REGISTER_COUNT = 20;
     var FRAME_REGISTERS = 24;
 
+    var REGEXP_PATTERN = 0;
+    var REGEXP_FLAGS = 4;
+    var REGEXP_PROTOTYPE = 8;
+    var REGEXP_BYTES = 16;
+
+    var BUFFER_VIEW_BACKING = 0;
+    var BUFFER_VIEW_OFFSET = 4;
+    var BUFFER_VIEW_LENGTH = 8;
+    var BUFFER_VIEW_PROTOTYPE = 12;
+    var BUFFER_VIEW_BYTES = 16;
+
+    var BUFFER_BACKING_POINTER = 0;
+    var BUFFER_BACKING_LENGTH = 4;
+    var BUFFER_BACKING_METADATA = 8;
+    var BUFFER_BACKING_BYTES = 16;
+
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
     var ATTR_CONFIGURABLE = 4;
@@ -303,6 +319,44 @@
         this.heap.writeFieldU32(address, FUNCTION_PROTOTYPE, prototype || 0, type);
         this.heap.writeFieldU32(address, FUNCTION_CLOSURE, closure || 0, type);
         this.heap.writeFieldU32(address, FUNCTION_METADATA, metadata || 0, type);
+        return address;
+    };
+
+    Records.prototype.allocateRegExp = function (pattern, flags, prototype) {
+        var address = this.heap.allocateRecord(Heap.Types.REGEXP, REGEXP_BYTES);
+        this.heap.writeFieldU32(address, REGEXP_PATTERN,
+            this.allocateString(pattern), Heap.Types.REGEXP);
+        this.heap.writeFieldU32(address, REGEXP_FLAGS,
+            this.allocateString(flags), Heap.Types.REGEXP);
+        this.heap.writeFieldU32(address, REGEXP_PROTOTYPE, prototype || 0,
+                                Heap.Types.REGEXP);
+        return address;
+    };
+
+    Records.prototype.allocateBufferBacking = function (pointer, length, metadata) {
+        var address = this.heap.allocateRecord(Heap.Types.BUFFER_BACKING,
+                                               BUFFER_BACKING_BYTES);
+        this.heap.writeFieldU32(address, BUFFER_BACKING_POINTER, pointer || 0,
+                                Heap.Types.BUFFER_BACKING);
+        this.heap.writeFieldU32(address, BUFFER_BACKING_LENGTH, length,
+                                Heap.Types.BUFFER_BACKING);
+        this.heap.writeFieldU32(address, BUFFER_BACKING_METADATA, metadata || 0,
+                                Heap.Types.BUFFER_BACKING);
+        return address;
+    };
+
+    Records.prototype.allocateBufferView = function (backing, offset, length,
+                                                       prototype) {
+        var address = this.heap.allocateRecord(Heap.Types.BUFFER_VIEW,
+                                               BUFFER_VIEW_BYTES);
+        this.heap.writeFieldU32(address, BUFFER_VIEW_BACKING, backing,
+                                Heap.Types.BUFFER_VIEW);
+        this.heap.writeFieldU32(address, BUFFER_VIEW_OFFSET, offset,
+                                Heap.Types.BUFFER_VIEW);
+        this.heap.writeFieldU32(address, BUFFER_VIEW_LENGTH, length,
+                                Heap.Types.BUFFER_VIEW);
+        this.heap.writeFieldU32(address, BUFFER_VIEW_PROTOTYPE, prototype || 0,
+                                Heap.Types.BUFFER_VIEW);
         return address;
     };
 
