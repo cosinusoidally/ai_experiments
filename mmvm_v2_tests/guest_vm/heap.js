@@ -164,6 +164,30 @@
         this.memory.writeU32(this.checkPayload(address, offset, 4, expectedType), value);
     };
 
+    /* Fixed-layout record accessors use these only after their public method
+     * has established the record/index invariant. Keeping the unchecked
+     * address arithmetic here preserves the layering boundary while avoiding
+     * repeated type/size header reads for every field in one semantic access. */
+    Heap.prototype.readTrustedFieldU8 = function (address, offset) {
+        return this.memory.readU8(address + HEADER_SIZE + offset);
+    };
+
+    Heap.prototype.writeTrustedFieldU8 = function (address, offset, value) {
+        this.memory.writeU8(address + HEADER_SIZE + offset, value);
+    };
+
+    Heap.prototype.readTrustedFieldU32 = function (address, offset) {
+        return this.memory.readU32(address + HEADER_SIZE + offset);
+    };
+
+    Heap.prototype.writeTrustedFieldU32 = function (address, offset, value) {
+        this.memory.writeU32(address + HEADER_SIZE + offset, value);
+    };
+
+    Heap.prototype.trustedPayloadAddress = function (address, offset) {
+        return address + HEADER_SIZE + offset;
+    };
+
     Heap.prototype.payloadAddress = function (address, offset, length, expectedType) {
         return this.checkPayload(address, offset, length, expectedType);
     };

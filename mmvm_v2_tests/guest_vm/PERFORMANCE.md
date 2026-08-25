@@ -140,3 +140,18 @@ The shared kernel IR now emits a bulk record initializer through JavaScript on
 Node and generated i386 macro assembly on MMVM. Both backends produce identical
 tested heap words. Live object migration must use this bulk path, rather than
 scattered per-field peek/poke calls, before it can pass the performance gate.
+
+## 2026-08-25: trusted fixed-layout accessor checkpoint
+
+After the live heap migration, a 64x64 demo1 run could not complete enough
+frames to print one five-second sample within 18 seconds. The common accessor
+path was re-reading and validating a record's type and size for every fixed
+field access, multiplying native `peek32` traffic throughout all demos.
+
+`HeapRecords` now performs fixed-layout accesses through trusted internal
+`Heap` primitives after its public accessor has established the relevant
+record/index invariant. This does not mirror guest values in host objects and
+does not expose raw heap addresses to guest code. The same 18-second command
+then reported 5 frames in 6.5 seconds, or 0.8 FPS. This is a working migration
+checkpoint, not an acceptable final result; the pre-migration demo1 reference
+remains approximately 13.5 FPS at this resolution.

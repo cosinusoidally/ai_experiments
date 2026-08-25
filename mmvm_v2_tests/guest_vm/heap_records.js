@@ -118,30 +118,30 @@
         value = String(value);
         var address = this.heap.allocateRecord(
             Heap.Types.STRING, STRING_CHARS + value.length * 2);
-        this.heap.writeFieldU32(address, STRING_LENGTH, value.length,
+        this.heap.writeTrustedFieldU32(address, STRING_LENGTH, value.length,
                                 Heap.Types.STRING);
         var hash = 2166136261;
         var index = 0;
         while (index < value.length) {
             var code = value.charCodeAt(index);
-            this.heap.writeFieldU8(address, STRING_CHARS + index * 2,
+            this.heap.writeTrustedFieldU8(address, STRING_CHARS + index * 2,
                                    code & 255, Heap.Types.STRING);
-            this.heap.writeFieldU8(address, STRING_CHARS + index * 2 + 1,
+            this.heap.writeTrustedFieldU8(address, STRING_CHARS + index * 2 + 1,
                                    code >>> 8, Heap.Types.STRING);
             hash ^= code;
             hash = (hash * 16777619) >>> 0;
             index++;
         }
-        this.heap.writeFieldU32(address, STRING_HASH, hash, Heap.Types.STRING);
+        this.heap.writeTrustedFieldU32(address, STRING_HASH, hash, Heap.Types.STRING);
         return address;
     };
 
     Records.prototype.stringLength = function (address) {
-        return this.heap.readFieldU32(address, STRING_LENGTH, Heap.Types.STRING);
+        return this.heap.readTrustedFieldU32(address, STRING_LENGTH, Heap.Types.STRING);
     };
 
     Records.prototype.stringHash = function (address) {
-        return this.heap.readFieldU32(address, STRING_HASH, Heap.Types.STRING);
+        return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
     };
 
     Records.prototype.readString = function (address) {
@@ -149,9 +149,9 @@
         var result = "";
         var index = 0;
         while (index < length) {
-            var low = this.heap.readFieldU8(address, STRING_CHARS + index * 2,
+            var low = this.heap.readTrustedFieldU8(address, STRING_CHARS + index * 2,
                                             Heap.Types.STRING);
-            var high = this.heap.readFieldU8(address, STRING_CHARS + index * 2 + 1,
+            var high = this.heap.readTrustedFieldU8(address, STRING_CHARS + index * 2 + 1,
                                              Heap.Types.STRING);
             result += String.fromCharCode(low | (high << 8));
             index++;
@@ -167,40 +167,40 @@
     Records.prototype.objectPrototype = function (address) {
         var type = this.heap.recordType(address);
         if (type === Heap.Types.REGEXP) {
-            return this.heap.readFieldU32(address, REGEXP_PROTOTYPE, type);
+            return this.heap.readTrustedFieldU32(address, REGEXP_PROTOTYPE, type);
         }
-        return this.heap.readFieldU32(address, OBJECT_PROTOTYPE, type);
+        return this.heap.readTrustedFieldU32(address, OBJECT_PROTOTYPE, type);
     };
 
     Records.prototype.setObjectPrototype = function (address, prototype) {
         if (prototype) this.heap.requireRecord(prototype);
         var type = this.heap.recordType(address);
-        this.heap.writeFieldU32(address,
+        this.heap.writeTrustedFieldU32(address,
             type === Heap.Types.REGEXP ? REGEXP_PROTOTYPE : OBJECT_PROTOTYPE,
             prototype || 0, type);
     };
 
     Records.prototype.objectPropertyHead = function (address) {
-        return this.heap.readFieldU32(address, propertyHeadOffset(
+        return this.heap.readTrustedFieldU32(address, propertyHeadOffset(
             this.heap.recordType(address)), this.heap.recordType(address));
     };
 
     Records.prototype.setObjectPropertyHead = function (address, property) {
         var type = this.heap.recordType(address);
-        this.heap.writeFieldU32(address, propertyHeadOffset(type), property || 0, type);
+        this.heap.writeTrustedFieldU32(address, propertyHeadOffset(type), property || 0, type);
     };
 
     Records.prototype.findOwnProperty = function (object, keyString) {
         var keyAddress = typeof keyString === "number" ? keyString : 0;
         var property = this.objectPropertyHead(object);
         while (property) {
-            var candidate = this.heap.readFieldU32(
+            var candidate = this.heap.readTrustedFieldU32(
                 property, PROPERTY_KEY, Heap.Types.PROPERTY);
             if ((keyAddress && candidate === keyAddress) ||
                 (!keyAddress && this.readString(candidate) === keyString)) {
                 return property;
             }
-            property = this.heap.readFieldU32(property, PROPERTY_NEXT,
+            property = this.heap.readTrustedFieldU32(property, PROPERTY_NEXT,
                                               Heap.Types.PROPERTY);
         }
         return 0;
@@ -216,28 +216,28 @@
             this.setObjectPropertyHead(object, property);
             return property;
         }
-        this.heap.writeFieldU32(property, PROPERTY_ATTRIBUTES,
+        this.heap.writeTrustedFieldU32(property, PROPERTY_ATTRIBUTES,
             attributes === undefined ? DEFAULT_ATTRIBUTES : attributes,
             Heap.Types.PROPERTY);
         return property;
     };
 
     Records.prototype.propertyValueCell = function (property) {
-        return this.heap.payloadAddress(property, PROPERTY_VALUE, CELL_BYTES,
+        return this.heap.trustedPayloadAddress(property, PROPERTY_VALUE, CELL_BYTES,
                                         Heap.Types.PROPERTY);
     };
 
     Records.prototype.propertyAttributes = function (property) {
-        return this.heap.readFieldU32(property, PROPERTY_ATTRIBUTES,
+        return this.heap.readTrustedFieldU32(property, PROPERTY_ATTRIBUTES,
                                       Heap.Types.PROPERTY);
     };
 
     Records.prototype.propertyKey = function (property) {
-        return this.heap.readFieldU32(property, PROPERTY_KEY, Heap.Types.PROPERTY);
+        return this.heap.readTrustedFieldU32(property, PROPERTY_KEY, Heap.Types.PROPERTY);
     };
 
     Records.prototype.propertyNext = function (property) {
-        return this.heap.readFieldU32(property, PROPERTY_NEXT, Heap.Types.PROPERTY);
+        return this.heap.readTrustedFieldU32(property, PROPERTY_NEXT, Heap.Types.PROPERTY);
     };
 
     Records.prototype.deleteOwnProperty = function (object, keyAddress) {
@@ -247,7 +247,7 @@
             var next = this.propertyNext(property);
             if (this.propertyKey(property) === keyAddress) {
                 if (previous) {
-                    this.heap.writeFieldU32(previous, PROPERTY_NEXT, next,
+                    this.heap.writeTrustedFieldU32(previous, PROPERTY_NEXT, next,
                                             Heap.Types.PROPERTY);
                 } else this.setObjectPropertyHead(object, next);
                 return true;
@@ -269,18 +269,18 @@
     };
 
     Records.prototype.vectorLength = function (vector) {
-        return this.heap.readFieldU32(vector, VECTOR_LENGTH, Heap.Types.VALUE_VECTOR);
+        return this.heap.readTrustedFieldU32(vector, VECTOR_LENGTH, Heap.Types.VALUE_VECTOR);
     };
 
     Records.prototype.setVectorLength = function (vector, length) {
         if (length < 0 || length > this.vectorCapacity(vector) ||
             length !== Math.floor(length)) throw new RangeError("invalid vector length");
-        this.heap.writeFieldU32(vector, VECTOR_LENGTH, length,
+        this.heap.writeTrustedFieldU32(vector, VECTOR_LENGTH, length,
                                 Heap.Types.VALUE_VECTOR);
     };
 
     Records.prototype.vectorCapacity = function (vector) {
-        return this.heap.readFieldU32(vector, VECTOR_CAPACITY,
+        return this.heap.readTrustedFieldU32(vector, VECTOR_CAPACITY,
                                       Heap.Types.VALUE_VECTOR);
     };
 
@@ -289,7 +289,7 @@
         if (index < 0 || index >= capacity || index !== Math.floor(index)) {
             throw new RangeError("value-vector index is out of bounds");
         }
-        return this.heap.payloadAddress(vector, VECTOR_CELLS + index * CELL_BYTES,
+        return this.heap.trustedPayloadAddress(vector, VECTOR_CELLS + index * CELL_BYTES,
                                         CELL_BYTES, Heap.Types.VALUE_VECTOR);
     };
 
@@ -300,7 +300,7 @@
     };
 
     Records.prototype.arrayElements = function (array) {
-        return this.heap.readFieldU32(array, ARRAY_ELEMENTS, Heap.Types.ARRAY);
+        return this.heap.readTrustedFieldU32(array, ARRAY_ELEMENTS, Heap.Types.ARRAY);
     };
 
     Records.prototype.arrayLength = function (array) {
@@ -313,7 +313,7 @@
 
     Records.prototype.setArrayElements = function (array, vector) {
         this.heap.requireRecord(vector, Heap.Types.VALUE_VECTOR);
-        this.heap.writeFieldU32(array, ARRAY_ELEMENTS, vector, Heap.Types.ARRAY);
+        this.heap.writeTrustedFieldU32(array, ARRAY_ELEMENTS, vector, Heap.Types.ARRAY);
     };
 
     Records.prototype.setArrayLength = function (array, length) {
@@ -338,12 +338,12 @@
     };
 
     Records.prototype.environmentParent = function (environment) {
-        return this.heap.readFieldU32(environment, ENVIRONMENT_PARENT,
+        return this.heap.readTrustedFieldU32(environment, ENVIRONMENT_PARENT,
                                       Heap.Types.ENVIRONMENT);
     };
 
     Records.prototype.environmentSlotCount = function (environment) {
-        return this.heap.readFieldU32(environment, ENVIRONMENT_COUNT,
+        return this.heap.readTrustedFieldU32(environment, ENVIRONMENT_COUNT,
                                       Heap.Types.ENVIRONMENT);
     };
 
@@ -352,7 +352,7 @@
         if (slot < 0 || slot >= count || slot !== Math.floor(slot)) {
             throw new RangeError("environment slot is out of bounds");
         }
-        return this.heap.payloadAddress(environment,
+        return this.heap.trustedPayloadAddress(environment,
             ENVIRONMENT_CELLS + slot * CELL_BYTES, CELL_BYTES,
             Heap.Types.ENVIRONMENT);
     };
@@ -373,12 +373,12 @@
     };
 
     Records.prototype.regexpPattern = function (regexp) {
-        return this.readString(this.heap.readFieldU32(
+        return this.readString(this.heap.readTrustedFieldU32(
             regexp, REGEXP_PATTERN, Heap.Types.REGEXP));
     };
 
     Records.prototype.regexpFlags = function (regexp) {
-        return this.readString(this.heap.readFieldU32(
+        return this.readString(this.heap.readTrustedFieldU32(
             regexp, REGEXP_FLAGS, Heap.Types.REGEXP));
     };
 
@@ -394,22 +394,22 @@
     };
 
     Records.prototype.bufferViewBacking = function (view) {
-        return this.heap.readFieldU32(view, BUFFER_VIEW_BACKING,
+        return this.heap.readTrustedFieldU32(view, BUFFER_VIEW_BACKING,
                                       Heap.Types.BUFFER_VIEW);
     };
 
     Records.prototype.bufferViewOffset = function (view) {
-        return this.heap.readFieldU32(view, BUFFER_VIEW_OFFSET,
+        return this.heap.readTrustedFieldU32(view, BUFFER_VIEW_OFFSET,
                                       Heap.Types.BUFFER_VIEW);
     };
 
     Records.prototype.bufferViewLength = function (view) {
-        return this.heap.readFieldU32(view, BUFFER_VIEW_LENGTH,
+        return this.heap.readTrustedFieldU32(view, BUFFER_VIEW_LENGTH,
                                       Heap.Types.BUFFER_VIEW);
     };
 
     Records.prototype.bufferBackingMetadata = function (backing) {
-        return this.heap.readFieldU32(backing, BUFFER_BACKING_METADATA,
+        return this.heap.readTrustedFieldU32(backing, BUFFER_BACKING_METADATA,
                                       Heap.Types.BUFFER_BACKING);
     };
 
@@ -419,7 +419,7 @@
             type !== Heap.Types.BYTECODE_FUNCTION) {
             throw new TypeError("record is not a function");
         }
-        return this.heap.readFieldU32(address, FUNCTION_CLOSURE, type);
+        return this.heap.readTrustedFieldU32(address, FUNCTION_CLOSURE, type);
     };
 
     Records.prototype.allocateFrame = function (program, environment, caller,
@@ -427,9 +427,9 @@
         var address = this.heap.allocateRecordWords(Heap.Types.FRAME,
             FRAME_REGISTERS + registerCount * CELL_BYTES,
             program || 0, environment || 0, caller || 0, 0);
-        this.heap.writeFieldU32(address, FRAME_RETURN_SLOT, returnSlot >>> 0,
+        this.heap.writeTrustedFieldU32(address, FRAME_RETURN_SLOT, returnSlot >>> 0,
                                 Heap.Types.FRAME);
-        this.heap.writeFieldU32(address, FRAME_REGISTER_COUNT, registerCount,
+        this.heap.writeTrustedFieldU32(address, FRAME_REGISTER_COUNT, registerCount,
                                 Heap.Types.FRAME);
         var index = 0;
         while (index < registerCount) {
@@ -440,15 +440,15 @@
     };
 
     Records.prototype.framePC = function (frame) {
-        return this.heap.readFieldU32(frame, FRAME_PC, Heap.Types.FRAME);
+        return this.heap.readTrustedFieldU32(frame, FRAME_PC, Heap.Types.FRAME);
     };
 
     Records.prototype.setFramePC = function (frame, pc) {
-        this.heap.writeFieldU32(frame, FRAME_PC, pc, Heap.Types.FRAME);
+        this.heap.writeTrustedFieldU32(frame, FRAME_PC, pc, Heap.Types.FRAME);
     };
 
     Records.prototype.frameRegisterCount = function (frame) {
-        return this.heap.readFieldU32(frame, FRAME_REGISTER_COUNT, Heap.Types.FRAME);
+        return this.heap.readTrustedFieldU32(frame, FRAME_REGISTER_COUNT, Heap.Types.FRAME);
     };
 
     Records.prototype.frameRegisterCell = function (frame, register) {
@@ -456,7 +456,7 @@
         if (register < 0 || register >= count || register !== Math.floor(register)) {
             throw new RangeError("frame register is out of bounds");
         }
-        return this.heap.payloadAddress(frame,
+        return this.heap.trustedPayloadAddress(frame,
             FRAME_REGISTERS + register * CELL_BYTES, CELL_BYTES, Heap.Types.FRAME);
     };
 
@@ -472,7 +472,7 @@
             BYTECODE_WORDS + code.length * 4, code.length, 0, 0, 0);
         var index = 0;
         while (index < code.length) {
-            this.heap.writeFieldU32(address, BYTECODE_WORDS + index * 4,
+            this.heap.writeTrustedFieldU32(address, BYTECODE_WORDS + index * 4,
                                     code[index] >>> 0, Heap.Types.BYTECODE);
             index++;
         }
@@ -480,14 +480,14 @@
     };
 
     Records.prototype.bytecodeLength = function (bytecode) {
-        return this.heap.readFieldU32(bytecode, BYTECODE_LENGTH,
+        return this.heap.readTrustedFieldU32(bytecode, BYTECODE_LENGTH,
                                       Heap.Types.BYTECODE);
     };
 
     Records.prototype.bytecodeWord = function (bytecode, index) {
         if (index < 0 || index >= this.bytecodeLength(bytecode) ||
             index !== Math.floor(index)) throw new RangeError("invalid bytecode index");
-        var word = this.heap.readFieldU32(bytecode,
+        var word = this.heap.readTrustedFieldU32(bytecode,
             BYTECODE_WORDS + index * 4, Heap.Types.BYTECODE);
         return word >= 2147483648 ? word - 4294967296 : word;
     };
@@ -499,11 +499,11 @@
     };
 
     Records.prototype.programBytecode = function (program) {
-        return this.heap.readFieldU32(program, PROGRAM_BYTECODE, Heap.Types.PROGRAM);
+        return this.heap.readTrustedFieldU32(program, PROGRAM_BYTECODE, Heap.Types.PROGRAM);
     };
 
     Records.prototype.programConstants = function (program) {
-        return this.heap.readFieldU32(program, PROGRAM_CONSTANTS, Heap.Types.PROGRAM);
+        return this.heap.readTrustedFieldU32(program, PROGRAM_CONSTANTS, Heap.Types.PROGRAM);
     };
 
     Records.prototype.allocateContext = function (globalObject) {
@@ -512,11 +512,11 @@
     };
 
     Records.prototype.contextGlobal = function (context) {
-        return this.heap.readFieldU32(context, CONTEXT_GLOBAL, Heap.Types.CONTEXT);
+        return this.heap.readTrustedFieldU32(context, CONTEXT_GLOBAL, Heap.Types.CONTEXT);
     };
 
     Records.prototype.setContextActiveFrame = function (context, frame) {
-        this.heap.writeFieldU32(context, CONTEXT_ACTIVE_FRAME, frame || 0,
+        this.heap.writeTrustedFieldU32(context, CONTEXT_ACTIVE_FRAME, frame || 0,
                                 Heap.Types.CONTEXT);
     };
 
