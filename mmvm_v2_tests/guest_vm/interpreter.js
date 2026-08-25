@@ -19,6 +19,7 @@
         var right;
         var index;
         var args;
+        runtime.activeRegisters = registers;
         while (pc < code.length) {
             budget = budget - 1;
             if (budget < 0) throw new Error("guest instruction budget exhausted");
@@ -86,11 +87,14 @@
                     code[pc + 3] < 0 ? undefined : registers[code[pc + 3]], args);
                 pc = pc + 6;
             } else if (opcode === op.RETURN) {
-                return registers[code[pc + 1]];
+                var returnValue = registers[code[pc + 1]];
+                runtime.activeRegisters = null;
+                return returnValue;
             } else {
                 throw new Error("invalid guest opcode " + opcode + " at " + pc);
             }
         }
+        runtime.activeRegisters = null;
         return undefined;
     }
 

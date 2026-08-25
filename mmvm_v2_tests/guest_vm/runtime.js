@@ -1,4 +1,9 @@
 (function (root) {
+    var BufferSupport = root.GuestVMBufferSupport;
+    if (typeof module !== "undefined" && module.exports) {
+        BufferSupport = require("./buffer.js");
+    }
+
     function own(object, key) {
         return Object.prototype.hasOwnProperty.call(object, key);
     }
@@ -6,7 +11,11 @@
     function Runtime() {
         this.globals = {};
         this.assertions = 0;
+        this.heapObjects = [];
+        this.gcGeneration = 0;
+        this.activeRegisters = null;
         this.installBuiltins();
+        this.bufferSupport = new BufferSupport(this);
     }
 
     Runtime.prototype.makeNativeFunction = function (name, callback) {
@@ -15,7 +24,14 @@
     };
 
     Runtime.prototype.makeObject = function () {
-        return {guestType: "object", properties: {}};
+        var object = {guestType: "object", properties: {}, gcMark: 0};
+        this.trackObject(object);
+        return object;
+    };
+
+    Runtime.prototype.trackObject = function (object) {
+        this.heapObjects.push(object);
+        return object;
     };
 
     Runtime.prototype.installBuiltins = function () {
@@ -36,6 +52,15 @@
                 if (typeof print === "function") print(text);
                 else console.log(text);
                 return undefined;
+            });
+        this.globals.guestCollect = this.makeNativeFunction("guestCollect",
+            function () {
+                return runtime.collect();
+            });
+        this.globals.guestBackingStoreCount = this.makeNativeFunction(
+            "guestBackingStoreCount", function () {
+                return runtime.bufferSupport ?
+                       runtime.bufferSupport.liveBackingCount() : 0;
             });
     };
 
@@ -58,6 +83,9 @@
         if (object === null || object === undefined) {
             throw new TypeError("cannot read property '" + key + "'");
         }
+        if (object.guestType === "buffer") {
+            return this.bufferSupport.getProperty(object, key);
+        }
         if (object.guestType === "object" || object.guestType === "function") {
             return own(object.properties, "$" + key) ?
                    object.properties["$" + key] : undefined;
@@ -70,6 +98,9 @@
         key = this.propertyKey(key);
         if (object === null || object === undefined) {
             throw new TypeError("cannot set property '" + key + "'");
+        }
+        if (object.guestType === "buffer") {
+            return this.bufferSupport.setProperty(object, key, value);
         }
         if (object.guestType === "object" || object.guestType === "function") {
             object.properties["$" + key] = value;
@@ -109,6 +140,57 @@
 
     Runtime.prototype.truthy = function (value) {
         return !!value;
+    };
+
+    Runtime.prototype.markValue = function (value, generation) {
+        if (!value || (value.guestType !== "object" &&
+                       value.guestType !== "function" &&
+                       value.guestType !== "buffer")) return;
+        if (value.gcMark === generation) return;
+        value.gcMark = generation;
+        if (value.guestType === "buffer") {
+            this.bufferSupport.markView(value, generation);
+            this.markValue(value.prototype, generation);
+        }
+        var properties = value.properties;
+        var key;
+        for (key in properties) {
+            if (own(properties, key)) this.markValue(properties[key], generation);
+        }
+    };
+
+    Runtime.prototype.collect = function () {
+        this.gcGeneration++;
+        var generation = this.gcGeneration;
+        var key;
+        for (key in this.globals) {
+            if (own(this.globals, key)) this.markValue(this.globals[key], generation);
+        }
+        this.markValue(this.bufferSupport.prototype, generation);
+        if (this.activeRegisters) {
+            var registerIndex = 0;
+            while (registerIndex < this.activeRegisters.length) {
+                this.markValue(this.activeRegisters[registerIndex], generation);
+                registerIndex++;
+            }
+        }
+        var survivors = [];
+        var index = 0;
+        while (index < this.heapObjects.length) {
+            if (this.heapObjects[index].gcMark === generation) {
+                survivors.push(this.heapObjects[index]);
+            }
+            index++;
+        }
+        this.heapObjects = survivors;
+        this.bufferSupport.sweep(generation);
+        return survivors.length;
+    };
+
+    Runtime.prototype.destroy = function () {
+        this.bufferSupport.destroy();
+        this.heapObjects = [];
+        this.activeRegisters = null;
     };
 
     root.GuestVMRuntime = Runtime;

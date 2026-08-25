@@ -8,6 +8,7 @@
     if (isNode) {
         require("./tokenizer_test.js");
         VM = require("../vm.js");
+        var runBufferLifetimeTest = require("./buffer/buffer_lifetime_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -19,10 +20,15 @@
         load("guest_vm/parser.js");
         load("guest_vm/bytecode.js");
         load("guest_vm/compiler.js");
+        load("guest_vm/verifier.js");
+        load("guest_vm/host_memory.js");
+        load("guest_vm/buffer.js");
         load("guest_vm/runtime.js");
         load("guest_vm/interpreter.js");
         load("guest_vm/vm.js");
+        load("guest_vm/tests/buffer/buffer_lifetime_test.js");
         VM = GuestVM;
+        runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -30,7 +36,8 @@
 
     var languageTests = [
         "language/arithmetic.js",
-        "language/for_loop.js"
+        "language/for_loop.js",
+        "buffer/buffer_guest.js"
     ];
     var totalAssertions = 0;
     var testIndex = 0;
@@ -43,8 +50,13 @@
                      " assertion(s)";
         if (typeof print === "function") print(result);
         else console.log(result);
+        vm.destroy();
         testIndex++;
     }
+
+    var lifetimeResult = runBufferLifetimeTest(VM);
+    if (typeof print === "function") print(lifetimeResult);
+    else console.log(lifetimeResult);
 
     var summary = "guest VM suite passed: " + languageTests.length +
                   " guest program(s), " + totalAssertions +
