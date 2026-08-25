@@ -13,6 +13,8 @@
         var runAutomaticGCTest = require("./automatic_gc_test.js");
         var runRuntimeContextExecutionTest = require(
             "./runtime_context_execution_test.js");
+        var Heap = require("../heap.js");
+        var runHeapAccessTest = require("./heap_access_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -25,11 +27,14 @@
         load("guest_vm/tests/embedding_api_test.js");
         load("guest_vm/tests/automatic_gc_test.js");
         load("guest_vm/tests/runtime_context_execution_test.js");
+        load("guest_vm/tests/heap_access_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
         runAutomaticGCTest = GuestVMRunAutomaticGCTest;
         runRuntimeContextExecutionTest = GuestVMRunRuntimeContextExecutionTest;
+        Heap = GuestVMHeap;
+        runHeapAccessTest = GuestVMRunHeapAccessTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -72,6 +77,9 @@
     var runtimeContextResult = runRuntimeContextExecutionTest(VM);
     if (typeof print === "function") print(runtimeContextResult);
     else console.log(runtimeContextResult);
+    var heapAccessResult = runHeapAccessTest(Heap);
+    if (typeof print === "function") print(heapAccessResult);
+    else console.log(heapAccessResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");

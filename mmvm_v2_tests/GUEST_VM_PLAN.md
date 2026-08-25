@@ -368,9 +368,13 @@ AOT compiler must accept only separately validated kernel input.
 
 ## Guest values and objects
 
-The interpreter does not need to encode all values in raw memory.
-It may use host JavaScript primitives for guest primitives while representing
-guest heap objects by internal records or integer handles.
+The runtime heap must be completely independent from the host JavaScript heap.
+Guest primitives and heap objects are represented by integer handles into a
+`JSRuntime`-owned linear memory; host objects are not authoritative guest
+records. All record access goes through named layout accessors, which delegate
+to one bounds-checked memory layer backed by peek/poke under `js_min.exe` and
+equivalent emulation under Node.js. Raw field offsets and scattered peek/poke
+calls are prohibited outside that memory/accessor boundary.
 
 Guest objects must not be exposed directly as ordinary host objects. All guest
 semantics pass through runtime operations such as:

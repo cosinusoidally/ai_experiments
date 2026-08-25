@@ -21,6 +21,8 @@ Read these documents before changing or embedding the VM:
   invariants, bytecode ABI, collector, Buffer ownership, and extension rules.
 - [`EMBEDDING.md`](EMBEDDING.md) documents the public bootstrap API, host loading,
   native functions, explicit roots, execution, errors, and shutdown.
+- [`LINEAR_HEAP.md`](LINEAR_HEAP.md) defines the mandatory runtime-owned heap,
+  record layouts, accessor boundary, and host-independent memory model.
 - [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md) records the intended route from
   this bootstrap to a conforming ES5.1 interpreter and later optional kernel AOT.
 

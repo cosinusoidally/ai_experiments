@@ -1,0 +1,151 @@
+/* Central guest-heap allocator and field accessor layer. No consumer may add
+ * a record offset to an address itself; layouts expose named accessors here. */
+(function (root) {
+    var LinearMemory = root.GuestVMLinearMemory;
+    if (typeof module !== "undefined" && module.exports) {
+        LinearMemory = require("./linear_memory.js");
+    }
+
+    var HEADER_SIZE = 16;
+    var HEADER_TYPE = 0;
+    var HEADER_SIZE_FIELD = 4;
+    var HEADER_MARK = 8;
+    var HEADER_FLAGS = 12;
+
+    var Types = {
+        FREE: 0,
+        OBJECT: 1,
+        ARRAY: 2,
+        NATIVE_FUNCTION: 3,
+        BYTECODE_FUNCTION: 4,
+        ENVIRONMENT: 5,
+        PROPERTY: 6,
+        STRING: 7,
+        NUMBER: 8,
+        REGEXP: 9,
+        BUFFER_VIEW: 10,
+        BUFFER_BACKING: 11,
+        ROOT_SLOT: 12
+    };
+
+    function align8(value) {
+        return (value + 7) & ~7;
+    }
+
+    function Heap(options) {
+        options = options || {};
+        this.byteLength = options.heapBytes === undefined ? 16 * 1024 * 1024 :
+                          Number(options.heapBytes);
+        this.memory = new LinearMemory(this.byteLength);
+        /* Zero is the null reference. Keep the first cache line inaccessible. */
+        this.bump = 64;
+        this.allocationCount = 0;
+        this.destroyed = false;
+    }
+
+    Heap.Types = Types;
+    Heap.HEADER_SIZE = HEADER_SIZE;
+
+    Heap.prototype.allocateRecord = function (type, payloadBytes) {
+        if (!Types || type <= Types.FREE || type > Types.ROOT_SLOT) {
+            throw new TypeError("invalid heap record type");
+        }
+        payloadBytes = Number(payloadBytes);
+        if (payloadBytes < 0 || payloadBytes !== Math.floor(payloadBytes)) {
+            throw new RangeError("invalid heap record payload size");
+        }
+        var size = align8(HEADER_SIZE + payloadBytes);
+        var address = this.bump;
+        if (address + size > this.byteLength) throw new RangeError("guest heap exhausted");
+        this.bump += size;
+        this.memory.fill(address, size, 0);
+        this.memory.writeU32(address + HEADER_TYPE, type);
+        this.memory.writeU32(address + HEADER_SIZE_FIELD, size);
+        this.allocationCount++;
+        return address;
+    };
+
+    Heap.prototype.requireRecord = function (address, expectedType) {
+        address = Number(address);
+        if (!address || address !== Math.floor(address) || address < 64 ||
+            address + HEADER_SIZE > this.bump) {
+            throw new TypeError("invalid guest heap reference");
+        }
+        var type = this.memory.readU32(address + HEADER_TYPE);
+        if (type === Types.FREE) throw new Error("guest heap reference is freed");
+        if (expectedType !== undefined && type !== expectedType) {
+            throw new TypeError("unexpected guest heap record type");
+        }
+        return address;
+    };
+
+    Heap.prototype.recordType = function (address) {
+        this.requireRecord(address);
+        return this.memory.readU32(address + HEADER_TYPE);
+    };
+
+    Heap.prototype.recordSize = function (address) {
+        this.requireRecord(address);
+        return this.memory.readU32(address + HEADER_SIZE_FIELD);
+    };
+
+    Heap.prototype.mark = function (address) {
+        this.requireRecord(address);
+        return this.memory.readU32(address + HEADER_MARK);
+    };
+
+    Heap.prototype.setMark = function (address, generation) {
+        this.requireRecord(address);
+        this.memory.writeU32(address + HEADER_MARK, generation);
+    };
+
+    Heap.prototype.flags = function (address) {
+        this.requireRecord(address);
+        return this.memory.readU32(address + HEADER_FLAGS);
+    };
+
+    Heap.prototype.setFlags = function (address, flags) {
+        this.requireRecord(address);
+        this.memory.writeU32(address + HEADER_FLAGS, flags);
+    };
+
+    Heap.prototype.checkPayload = function (address, offset, width, expectedType) {
+        this.requireRecord(address, expectedType);
+        offset = Number(offset);
+        if (offset < 0 || offset !== Math.floor(offset) ||
+            HEADER_SIZE + offset + width > this.recordSize(address)) {
+            throw new RangeError("guest heap field is outside its record");
+        }
+        return address + HEADER_SIZE + offset;
+    };
+
+    Heap.prototype.readFieldU8 = function (address, offset, expectedType) {
+        return this.memory.readU8(this.checkPayload(address, offset, 1, expectedType));
+    };
+
+    Heap.prototype.writeFieldU8 = function (address, offset, value, expectedType) {
+        this.memory.writeU8(this.checkPayload(address, offset, 1, expectedType), value);
+    };
+
+    Heap.prototype.readFieldU32 = function (address, offset, expectedType) {
+        return this.memory.readU32(this.checkPayload(address, offset, 4, expectedType));
+    };
+
+    Heap.prototype.writeFieldU32 = function (address, offset, value, expectedType) {
+        this.memory.writeU32(this.checkPayload(address, offset, 4, expectedType), value);
+    };
+
+    Heap.prototype.payloadAddress = function (address, offset, length, expectedType) {
+        return this.checkPayload(address, offset, length, expectedType);
+    };
+
+    Heap.prototype.destroy = function () {
+        if (this.destroyed) return;
+        this.memory.destroy();
+        this.destroyed = true;
+        this.bump = 0;
+    };
+
+    root.GuestVMHeap = Heap;
+    if (typeof module !== "undefined" && module.exports) module.exports = Heap;
+}(this));

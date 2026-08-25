@@ -14,6 +14,8 @@
         load("guest_vm/verifier.js");
         load("guest_vm/host_ffi.js");
         load("guest_vm/host_memory.js");
+        load("guest_vm/linear_memory.js");
+        load("guest_vm/heap.js");
         load("guest_vm/buffer.js");
         load("guest_vm/runtime.js");
         load("guest_vm/interpreter.js");
