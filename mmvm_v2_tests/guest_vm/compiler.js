@@ -678,6 +678,7 @@
                        statement.type === "DoWhileStatement" ||
                        statement.type === "ForInStatement") {
                 if (statement.initial && statement.initial.type === "VariableStatement") visit(statement.initial);
+                if (statement.left && statement.left.type === "VariableStatement") visit(statement.left);
                 visit(statement.body);
             } else if (statement.type === "TryStatement") {
                 add(statement.parameter);

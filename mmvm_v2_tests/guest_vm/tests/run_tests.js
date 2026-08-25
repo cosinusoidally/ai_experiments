@@ -121,6 +121,18 @@
     if (typeof print === "function") print(threadedResult);
     else console.log(threadedResult);
 
+    var threadedControlVM = new VM({threadedCompile: true});
+    threadedControlVM.run(readSource("language/object_control.js"),
+                          "threaded_object_control.js");
+    if (threadedControlVM.runtime.assertions !== 8) {
+        throw new Error("threaded compiler control-flow assertion count changed");
+    }
+    threadedControlVM.destroy();
+    var threadedControlResult =
+        "structured compiler object/control flow passed: 8 assertion(s)";
+    if (typeof print === "function") print(threadedControlResult);
+    else console.log(threadedControlResult);
+
     var summary = "guest VM suite passed: " + guestTests.length +
                   " guest program(s), " + totalAssertions +
                   " guest assertion(s)";
