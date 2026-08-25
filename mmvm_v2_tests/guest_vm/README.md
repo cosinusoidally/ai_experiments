@@ -2,7 +2,8 @@
 
 This directory contains the interpreter-first JavaScript guest VM described in
 [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md). It is intentionally a bootstrap,
-not yet a complete ECMAScript 5 implementation. The currently implemented
+not yet a complete ECMAScript 5.1 implementation. ECMAScript 5.1 is the fixed
+guest-language target; the currently implemented
 language and Buffer features are always exercised by checked-in tests under
 both Node.js and `js_min.exe`.
 
@@ -17,7 +18,7 @@ Read these documents before changing or embedding the VM:
 - [`EMBEDDING.md`](EMBEDDING.md) documents the public bootstrap API, host loading,
   native functions, explicit roots, execution, errors, and shutdown.
 - [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md) records the intended route from
-  this bootstrap to an ES5.1-capable interpreter and later optional kernel AOT.
+this bootstrap to a conforming ES5.1 interpreter and later optional kernel AOT.
 
 Run the complete current suite with either host or both:
 

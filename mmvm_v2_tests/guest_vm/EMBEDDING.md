@@ -3,13 +3,14 @@
 ## Current API status
 
 The API documented here is the supported bootstrap embedding surface. It is
-small on purpose and will grow as the VM implements more ES5 and Node behavior.
+small on purpose and will grow as the VM implements more ECMAScript 5.1 and
+Node behavior.
 The parser and AST records are internal; the `VM` facade, runtime value handles,
 and native-callback convention are the intended integration points.
 
 The VM is not a security sandbox. Guest bytecode is verified and interpreted
 with an instruction budget, but native callbacks are trusted, resource limits
-are incomplete, and the implemented language is not yet full ES5.
+are incomplete, and the implemented language is not yet full ECMAScript 5.1.
 
 ## Node.js embedding
 

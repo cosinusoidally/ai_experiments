@@ -3,19 +3,19 @@
 ## Status and contract
 
 The guest VM is an interpreter-first JavaScript-in-JavaScript implementation.
-It is designed to grow into ECMAScript 5/5.1 while remaining runnable under the
-old SpiderMonkey used by `js_min.exe` and under Node.js. The current checkpoint
-is deliberately smaller than ES5: it provides enough parsing, bytecode,
+Its guest-language target is ECMAScript 5.1 while its implementation remains
+runnable under the old SpiderMonkey used by `js_min.exe` and under Node.js. The
+current checkpoint is deliberately smaller than ES5.1: it provides enough parsing, bytecode,
 execution, object plumbing, collection, and Buffer behavior to establish the
 architecture and run the checked-in focused tests.
 
 Passing the current suite means only that the documented implemented subset is
-working. It does not imply general ES5 conformance. Unsupported syntax must be
+working. It does not imply general ES5.1 conformance. Unsupported syntax must be
 added with a focused test before another component relies on it.
 
 Three language layers are kept separate:
 
-1. Guest source is intended to have ES5 semantics.
+1. Guest source is defined to have ECMAScript 5.1 semantics.
 2. The VM implementation uses the ES3-like dialect accepted by `js_min.exe`.
 3. The interpreter dispatch loop uses a low-level kernel style: numeric program
    counter, fixed opcode layouts, register arrays, and named semantic helpers.

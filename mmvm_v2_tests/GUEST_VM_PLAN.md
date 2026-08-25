@@ -27,7 +27,7 @@ The initial system has one required execution path: a bytecode interpreter.
 Native compilation is deliberately not part of the correctness bootstrap:
 
 ```text
-ES5 guest JavaScript source
+ECMAScript 5.1 guest source
             |
             v
  tokenizer / parser / compiler
@@ -39,7 +39,7 @@ ES5 guest JavaScript source
  interpreter written in kernel JavaScript
             |
             v
-  ES5 guest runtime and host services
+ECMAScript 5.1 guest runtime and host services
 ```
 
 The interpreter and runtime establish all guest semantics. They run as ordinary
@@ -51,7 +51,7 @@ that an eventual ahead-of-time compiler can accelerate them.
 
 Three language levels must remain distinct:
 
-1. **Guest language:** ECMAScript 5/5.1 semantics implemented by the VM.
+1. **Guest language:** ECMAScript 5.1 semantics implemented by the VM.
 2. **Implementation dialect:** the ES3-like JavaScript accepted by
    `js_min.exe`, also kept compatible with Node.js. The complete VM is written
    in this dialect.
@@ -63,7 +63,7 @@ The kernel dialect is not required to reproduce every general JavaScript edge
 case. Its accepted programs avoid or define away those cases. For every valid
 kernel program, however, execution as ordinary source under Node.js, execution
 as ordinary source under `js_min.exe`, and eventual AOT execution must be
-observably equivalent for the kernel contract. Correct ES5 behavior remains a
+observably equivalent for the kernel contract. Correct ECMAScript 5.1 behavior remains a
 responsibility of the guest runtime operations invoked by the interpreter,
 not an accidental consequence of either host engine.
 
@@ -103,8 +103,8 @@ not an accidental consequence of either host engine.
 The first end-to-end application target is the unchanged `node_hello.js`.
 Later targets are `node_web.js`, the X11 modules, and selected demos.
 
-The guest VM target is ECMAScript 5, converging on ECMAScript 5.1 conformance.
-Implementation may be incremental and driven initially by the existing demos,
+The guest VM target is ECMAScript 5.1. Implementation is incremental and driven
+initially by the existing demos,
 but the architecture must implement guest semantics itself rather than borrow
 host behavior that differs between old SpiderMonkey and Node.js. The guest
 does not include classes, arrow functions, generators, promises, `let`,
@@ -228,7 +228,7 @@ the interpreter milestones.
 
 The host shell cannot expose its parser, AST, or bytecode to JavaScript, so the
 guest VM needs its own tokenizer and parser. The frontend should grow to support
-ECMAScript 5/5.1, with the existing demos determining the first useful
+ECMAScript 5.1, with the existing demos determining the first useful
 implementation slice. This includes:
 
 - primitive, regular-expression, array, and object literals as required;
@@ -595,7 +595,7 @@ The ordinary-JavaScript output provides a differential backend under Node.js
 and must also remain loadable by `js_min.exe` when that is useful. The i386
 output targets 32-bit cdecl and is entered through the existing FFI. Both are
 implementations of the narrow kernel contract; neither becomes an alternative
-source of guest ES5 semantics.
+source of guest ECMAScript 5.1 semantics.
 
 Executable memory management eventually uses `mmap`, emission through
 `poke8`/aligned `poke32`, label and relocation validation, an `mprotect`
@@ -727,7 +727,7 @@ before interpreting it, and separately validate kernel IR before compiling it.
 
 - Freeze the implementation-dialect and kernel-dialect contracts sufficiently
   to write portable source.
-- Finalize the ECMAScript 5/5.1 guest target and Buffer version profiles.
+- Fix the guest target at ECMAScript 5.1 and finalize the Buffer version profiles.
 - Define bytecode, runtime-value, and host-call ABIs. Defer native side-exit
   details.
 - Add host-neutral result recording and tests under Node.js and `js_min.exe`.
@@ -753,7 +753,7 @@ both hosts, with result, exception, output, and heap summary compared.
 Exit criterion: deterministic bytecode on Node and MMVM, with arithmetic,
 loops, recursion, and closure tests passing on both.
 
-### Milestone 2: ECMAScript 5 object and control semantics
+### Milestone 2: ECMAScript 5.1 object and control semantics
 
 - Implement ordinary objects, arrays, prototypes, functions, and constructors.
 - Implement descriptors, accessors, enumeration, and required standard
@@ -762,7 +762,7 @@ loops, recursion, and closure tests passing on both.
 - Implement strict-mode behavior and the ES5 standard-library surface needed
   by the growing tests.
 
-Exit criterion: meaningful ECMAScript 5 programs run without borrowing host
+Exit criterion: meaningful ECMAScript 5.1 programs run without borrowing host
 object semantics.
 
 ### Milestone 3: guest GC and native Buffer
