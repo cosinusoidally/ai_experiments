@@ -38,6 +38,8 @@ var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode});
 try {
+    guestProgramVM.installGlobal("arguments",
+        guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
     guestProgramVM.run(guestProgramSource, guestProgramPath);
 } finally {
     guestProgramVM.destroy();

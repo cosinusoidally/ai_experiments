@@ -172,6 +172,62 @@
                 return runtime.bufferSupport ?
                        runtime.bufferSupport.liveBackingCount() : 0;
             });
+        this.globals.parseInt = this.makeNativeFunction("parseInt",
+            function (receiver, args) {
+                return parseInt(String(args[0]), args.length > 1 ? Number(args[1]) : undefined);
+            });
+        this.stringMethods = {};
+        this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
+            function (receiver, args) { return String(receiver).charAt(Number(args[0]) || 0); });
+        this.stringMethods.charCodeAt = this.makeNativeFunction("String.charCodeAt",
+            function (receiver, args) { return String(receiver).charCodeAt(Number(args[0]) || 0); });
+        this.stringMethods.indexOf = this.makeNativeFunction("String.indexOf",
+            function (receiver, args) {
+                return String(receiver).indexOf(String(args[0]),
+                    args.length > 1 ? Number(args[1]) : 0);
+            });
+        this.stringMethods.substring = this.makeNativeFunction("String.substring",
+            function (receiver, args) {
+                return args.length > 1 ? String(receiver).substring(Number(args[0]), Number(args[1])) :
+                                         String(receiver).substring(Number(args[0]));
+            });
+        this.stringMethods.split = this.makeNativeFunction("String.split",
+            function (receiver, args) {
+                var parts = String(receiver).split(args.length ? String(args[0]) : undefined);
+                return runtime.arrayFrom(parts);
+            });
+        this.stringMethods.replace = this.makeNativeFunction("String.replace",
+            function (receiver, args) {
+                var search = args[0];
+                if (search && search.guestType === "regexp") {
+                    search = new RegExp(search.pattern, search.flags);
+                }
+                return String(receiver).replace(search, String(args[1]));
+            });
+        this.arrayMethods = {};
+        this.arrayMethods.push = this.makeNativeFunction("Array.push",
+            function (receiver, args) {
+                var index = 0;
+                while (index < args.length) receiver.elements.push(args[index++]);
+                return receiver.elements.length;
+            });
+        this.arrayMethods.sort = this.makeNativeFunction("Array.sort",
+            function (receiver) {
+                receiver.elements.sort();
+                return receiver;
+            });
+        this.regexpMethods = {};
+        this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
+            function (receiver, args) {
+                return new RegExp(receiver.pattern, receiver.flags).test(String(args[0]));
+            });
+        var stringConstructor = this.makeNativeFunction("String",
+            function (receiver, args) { return args.length ? String(args[0]) : ""; });
+        stringConstructor.properties.$fromCharCode = this.makeNativeFunction(
+            "String.fromCharCode", function (receiver, args) {
+                return String.fromCharCode.apply(String, args);
+            });
+        this.globals.String = stringConstructor;
     };
 
     Runtime.prototype.installRawFFI = function () {
@@ -195,6 +251,19 @@
                     index++;
                 }
                 return bridge.call(pointer, callArguments);
+            }));
+        this.setGlobal("peek8", this.makeNativeFunction("peek8",
+            function (receiver, args) { return bridge.peek8(args[0]); }));
+        this.setGlobal("poke8", this.makeNativeFunction("poke8",
+            function (receiver, args) { return bridge.poke8(args[0], args[1]); }));
+        this.setGlobal("peek32", this.makeNativeFunction("peek32",
+            function (receiver, args) { return bridge.peek32(args[0]); }));
+        this.setGlobal("poke32", this.makeNativeFunction("poke32",
+            function (receiver, args) { return bridge.poke32(args[0], args[1]); }));
+        this.setGlobal("quit", this.makeNativeFunction("quit",
+            function (receiver, args) {
+                quit(args.length ? Number(args[0]) : 0);
+                return undefined;
             }));
     };
 
@@ -223,14 +292,20 @@
         if (object.guestType === "array") {
             if (key === "length") return object.elements.length;
             if (isArrayIndex(key)) return object.elements[Number(key)];
-            return own(object.properties, "$" + key) ? object.properties["$" + key] : undefined;
+            if (own(object.properties, "$" + key)) return object.properties["$" + key];
+            return this.arrayMethods[key];
         }
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
-            return own(object.properties, "$" + key) ?
-                   object.properties["$" + key] : undefined;
+            if (own(object.properties, "$" + key)) return object.properties["$" + key];
+            if (object.guestType === "regexp") return this.regexpMethods[key];
+            return undefined;
         }
-        if (typeof object === "string" && key === "length") return object.length;
+        if (typeof object === "string") {
+            if (key === "length") return object.length;
+            if (isArrayIndex(key)) return object.charAt(Number(key));
+            return this.stringMethods[key];
+        }
         return undefined;
     };
 

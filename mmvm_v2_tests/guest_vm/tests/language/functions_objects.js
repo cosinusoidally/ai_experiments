@@ -27,6 +27,8 @@ assertEqual(values[1], 6, "array indexing");
 assertEqual((5 & 3) | 8, 9, "bitwise operators");
 assertEqual(255 >>> 4, 15, "unsigned shift");
 assertEqual(false ? 1 : 2, 2, "conditional expression");
+assertEqual(false || "right", "right", "logical or evaluates right when needed");
+assertEqual("left" || "right", "left", "logical or short circuits");
 
 var visits = 0;
 while (true) {

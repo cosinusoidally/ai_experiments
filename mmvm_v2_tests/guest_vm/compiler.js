@@ -289,10 +289,8 @@
                 this.emit(op.MOVE, logicalResult, logical);
                 var skip = this.emit(op.JUMP_IF_FALSE, logical, 0);
                 if (expression.operator === "||") {
-                    var evaluateRight = this.emit(op.JUMP, 0);
-                    this.patch(skip + 2, this.code.length);
                     var endTrue = this.emit(op.JUMP, 0);
-                    this.patch(evaluateRight + 1, this.code.length);
+                    this.patch(skip + 2, this.code.length);
                     var orRight = this.compileExpression(expression.right);
                     this.emit(op.MOVE, logicalResult, orRight);
                     this.patch(endTrue + 1, this.code.length);

@@ -40,6 +40,28 @@
         return pointer;
     };
 
+    HostFFI.prototype.peek8 = function (pointer) {
+        if (!this.isMMVM) throw new Error("raw memory is unavailable on this host");
+        return peek8(pointer);
+    };
+
+    HostFFI.prototype.poke8 = function (pointer, value) {
+        if (!this.isMMVM) throw new Error("raw memory is unavailable on this host");
+        poke8(pointer, value);
+        return undefined;
+    };
+
+    HostFFI.prototype.peek32 = function (pointer) {
+        if (!this.isMMVM) throw new Error("raw memory is unavailable on this host");
+        return peek32(pointer);
+    };
+
+    HostFFI.prototype.poke32 = function (pointer, value) {
+        if (!this.isMMVM) throw new Error("raw memory is unavailable on this host");
+        poke32(pointer, value);
+        return undefined;
+    };
+
     root.GuestVMHostFFI = HostFFI;
     if (typeof module !== "undefined" && module.exports) module.exports = HostFFI;
 }(this));
