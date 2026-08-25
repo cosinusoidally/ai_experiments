@@ -169,6 +169,17 @@
             this.emit(op.THROW, this.compileExpression(statement.argument));
             return;
         }
+        if (statement.type === "TryStatement") {
+            var catchPush = this.emit(op.PUSH_CATCH, 0,
+                                      this.constant(statement.parameter));
+            this.compileStatement(statement.block);
+            this.emit(op.POP_CATCH);
+            var catchEnd = this.emit(op.JUMP, 0);
+            this.patch(catchPush + 1, this.code.length);
+            this.compileStatement(statement.handler);
+            this.patch(catchEnd + 1, this.code.length);
+            return;
+        }
         if (statement.type === "ReturnStatement") {
             var returned = statement.argument ?
                 this.compileExpression(statement.argument) :
@@ -386,6 +397,28 @@
                       firstArgument, values.length);
             return callResult;
         }
+        if (expression.type === "NewExpression") {
+            var constructor = this.compileExpression(expression.callee);
+            var constructorValues = [];
+            var constructorIndex = 0;
+            while (constructorIndex < expression.arguments.length) {
+                constructorValues.push(this.compileExpression(
+                    expression.arguments[constructorIndex]));
+                constructorIndex++;
+            }
+            var firstConstructorArgument = this.allocateBlock(
+                constructorValues.length);
+            constructorIndex = 0;
+            while (constructorIndex < constructorValues.length) {
+                this.emit(op.MOVE, firstConstructorArgument + constructorIndex,
+                          constructorValues[constructorIndex]);
+                constructorIndex++;
+            }
+            var constructed = this.allocate();
+            this.emit(op.CONSTRUCT, constructed, constructor,
+                      firstConstructorArgument, constructorValues.length);
+            return constructed;
+        }
         if (expression.type === "SequenceExpression") {
             this.compileExpression(expression.left);
             return this.compileExpression(expression.right);
@@ -426,6 +459,10 @@
             } else if (statement.type === "WhileStatement" || statement.type === "ForStatement") {
                 if (statement.initial && statement.initial.type === "VariableStatement") visit(statement.initial);
                 visit(statement.body);
+            } else if (statement.type === "TryStatement") {
+                add(statement.parameter);
+                visit(statement.block);
+                visit(statement.handler);
             }
         }
         add(functionName);

@@ -34,7 +34,10 @@
         SHIFT_LEFT: 32,
         SHIFT_RIGHT: 33,
         SHIFT_UNSIGNED_RIGHT: 34,
-        THROW: 35
+        THROW: 35,
+        CONSTRUCT: 36,
+        PUSH_CATCH: 37,
+        POP_CATCH: 38
     };
 
     root.GuestVMBytecode = op;

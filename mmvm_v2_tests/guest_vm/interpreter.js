@@ -9,7 +9,7 @@
                 context: context,
                 environment: runtime.makeCallEnvironment(
                     program, receiver, args || [], closure, callable),
-                returnRegister: returnRegister};
+                returnRegister: returnRegister, handlers: []};
     }
 
     function Execution(program, runtime, context) {
@@ -59,6 +59,21 @@
         return this.result(status, used);
     };
 
+    Execution.prototype.handleException = function (error) {
+        while (this.frames.length) {
+            var frame = this.frames[this.frames.length - 1];
+            if (frame.handlers.length) {
+                var handler = frame.handlers.pop();
+                this.runtime.setBinding(frame.context, frame.environment,
+                                        handler.name, error);
+                frame.pc = handler.target;
+                return true;
+            }
+            this.frames.pop();
+        }
+        return false;
+    };
+
     Execution.prototype.resume = function (budget) {
         if (this.status === "completed" || this.status === "threw" ||
             this.status === "aborted") throw new Error("execution is no longer resumable");
@@ -78,7 +93,9 @@
             var injected = this.injectedHostException;
             this.injectedHostException = undefined;
             this.hasInjectedHostException = false;
-            return this.finish("threw", injected, 0);
+            if (!this.handleException(injected)) {
+                return this.finish("threw", injected, 0);
+            }
         }
         try {
             while (this.frames.length) {
@@ -192,6 +209,29 @@
                             callableValue, receiver, args);
                         this.runtime.gcSafePoint();
                     }
+                } else if (opcode === op.CONSTRUCT) {
+                    args = [];
+                    index = 0;
+                    while (index < code[pc + 4]) {
+                        args[index] = registers[code[pc + 3] + index];
+                        index++;
+                    }
+                    var constructorValue = registers[code[pc + 2]];
+                    var constructDestination = code[pc + 1];
+                    frame.pc = pc + 5;
+                    if (constructorValue && constructorValue.guestType === "function" &&
+                        constructorValue.callMode === "host") {
+                        this.pendingHostCall = {callable: constructorValue,
+                                                receiver: undefined, args: args,
+                                                frame: frame,
+                                                destination: constructDestination,
+                                                construct: true};
+                        this.status = "hostCall";
+                        return this.result("hostCall", used);
+                    }
+                    registers[constructDestination] = this.runtime.construct(
+                        constructorValue, args);
+                    this.runtime.gcSafePoint();
                 } else if (opcode === op.MAKE_FUNCTION) {
                     registers[code[pc + 1]] = this.runtime.makeGuestFunction(
                         constants[code[pc + 2]], frame.environment, frame.context);
@@ -211,7 +251,20 @@
                     this.runtime.gcSafePoint();
                     frame.pc = pc + 4;
                 } else if (opcode === op.THROW) {
-                    return this.finish("threw", registers[code[pc + 1]], used);
+                    var thrownValue = registers[code[pc + 1]];
+                    if (!this.handleException(thrownValue)) {
+                        return this.finish("threw", thrownValue, used);
+                    }
+                } else if (opcode === op.PUSH_CATCH) {
+                    frame.handlers.push({target: code[pc + 1],
+                                         name: constants[code[pc + 2]]});
+                    frame.pc = pc + 3;
+                } else if (opcode === op.POP_CATCH) {
+                    if (!frame.handlers.length) {
+                        throw new Error("catch-handler stack underflow");
+                    }
+                    frame.handlers.pop();
+                    frame.pc = pc + 1;
                 } else if (opcode === op.RETURN) {
                     var returnValue = registers[code[pc + 1]];
                     var returnedFrame = this.frames.pop();
@@ -224,6 +277,11 @@
             }
             return this.finish("completed", undefined, used);
         } catch (error) {
+            if (this.handleException(error)) {
+                var resumed = this.resume(budget);
+                resumed.instructions += used;
+                return resumed;
+            }
             return this.finish("threw", error, used);
         }
     };

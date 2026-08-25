@@ -435,6 +435,20 @@
         return callable.callback(receiver, args);
     };
 
+    Runtime.prototype.construct = function (callable, args) {
+        this.assertOwned(callable);
+        if (!callable || callable.guestType !== "function") {
+            throw new TypeError("value is not a constructor");
+        }
+        if (callable.callMode === "host") {
+            throw new Error("external host constructor must be serviced by the embedder");
+        }
+        var receiver = this.makeObject();
+        var value = callable.constructCallback ?
+            callable.constructCallback(args) : callable.callback(receiver, args);
+        return value && value.guestType ? value : receiver;
+    };
+
     Runtime.prototype.truthy = function (value) {
         return !!value;
     };

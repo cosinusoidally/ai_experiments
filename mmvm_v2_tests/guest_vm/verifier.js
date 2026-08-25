@@ -28,8 +28,11 @@
             else if (opcode === op.JUMP || opcode === op.RETURN ||
                      opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
                      opcode === op.THROW) width = 2;
+            else if (opcode === op.PUSH_CATCH) width = 3;
+            else if (opcode === op.POP_CATCH) width = 1;
             else if (opcode === op.JUMP_IF_FALSE) width = 3;
             else if (opcode === op.CALL) width = 6;
+            else if (opcode === op.CONSTRUCT) width = 5;
             else throw new Error("invalid opcode " + opcode + " at bytecode " + pc);
             if (pc + width > code.length) throw new Error("truncated bytecode at " + pc);
 
@@ -57,6 +60,11 @@
                 requireRegister(program, code[pc + 3], pc);
             } else if (opcode === op.JUMP) {
                 jumps.push(code[pc + 1]);
+            } else if (opcode === op.PUSH_CATCH) {
+                jumps.push(code[pc + 1]);
+                if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
+                    throw new Error("invalid catch binding at bytecode " + pc);
+                }
             } else if (opcode === op.JUMP_IF_FALSE) {
                 requireRegister(program, code[pc + 1], pc);
                 jumps.push(code[pc + 2]);
@@ -68,6 +76,14 @@
                 if (count < 0 || code[pc + 4] < 0 ||
                     code[pc + 4] + count > program.registerCount) {
                     throw new Error("invalid call arguments at bytecode " + pc);
+                }
+            } else if (opcode === op.CONSTRUCT) {
+                requireRegister(program, code[pc + 1], pc);
+                requireRegister(program, code[pc + 2], pc);
+                var constructCount = code[pc + 4];
+                if (constructCount < 0 || code[pc + 3] < 0 ||
+                    code[pc + 3] + constructCount > program.registerCount) {
+                    throw new Error("invalid constructor arguments at bytecode " + pc);
                 }
             } else if (opcode === op.MAKE_REGEXP) {
                 requireRegister(program, code[pc + 1], pc);
