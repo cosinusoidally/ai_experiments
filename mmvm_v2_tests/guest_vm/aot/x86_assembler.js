@@ -121,6 +121,11 @@
         this.emitByte(0x0f); this.emitByte(0x85);
         this.relativeFixup(name);
     };
+    Assembler.prototype.jumpEqual = function (name) {
+        this.macros.push("je(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x84);
+        this.relativeFixup(name);
+    };
 
     Assembler.prototype.relativeFixup = function (name) {
         this.fixups.push({name: name, displacement: this.bytes.length,
@@ -195,6 +200,39 @@
         this.emitByte(0xdd); this.emitByte(0x9e); this.word32(payloadOffset);
         this.emitByte(0xc7); this.emitByte(0x86); this.word32(payloadOffset + 8);
         this.word32(0);
+    };
+    Assembler.prototype.compareF64AboveToEax = function () {
+        this.macros.push("fucomip_st0_st1();fstp_st0();seta_al();movzx_eax_al()");
+        this.emitByte(0xdf); this.emitByte(0xe9);
+        this.emitByte(0xdd); this.emitByte(0xd8);
+        this.emitByte(0x0f); this.emitByte(0x97); this.emitByte(0xc0);
+        this.emitByte(0x0f); this.emitByte(0xb6); this.emitByte(0xc0);
+    };
+    Assembler.prototype.compareF64AboveOrEqualToEax = function () {
+        this.macros.push("fucomip_st0_st1();fstp_st0();setae_al();movzx_eax_al()");
+        this.emitByte(0xdf); this.emitByte(0xe9);
+        this.emitByte(0xdd); this.emitByte(0xd8);
+        this.emitByte(0x0f); this.emitByte(0x93); this.emitByte(0xc0);
+        this.emitByte(0x0f); this.emitByte(0xb6); this.emitByte(0xc0);
+    };
+    Assembler.prototype.compareF64EqualToEax = function () {
+        this.macros.push("fucomip_st0_st1();fstp_st0();sete_al();movzx_eax_al()");
+        this.emitByte(0xdf); this.emitByte(0xe9);
+        this.emitByte(0xdd); this.emitByte(0xd8);
+        this.emitByte(0x0f); this.emitByte(0x94); this.emitByte(0xc0);
+        this.emitByte(0x0f); this.emitByte(0xb6); this.emitByte(0xc0);
+    };
+    Assembler.prototype.xorEaxOne = function () {
+        this.macros.push("xor_eax_1()");
+        this.emitByte(0x83); this.emitByte(0xf0); this.emitByte(0x01);
+    };
+    Assembler.prototype.storeFrameBoolean = function (offset) {
+        this.macros.push("store_boolean_frame(" + offset + ")");
+        this.emitByte(0x83); this.emitByte(0xc0); this.emitByte(0x03);
+        this.emitByte(0x89); this.emitByte(0x86); this.word32(offset);
+        this.emitByte(0xc7); this.emitByte(0x86); this.word32(offset + 4); this.word32(0);
+        this.emitByte(0xc7); this.emitByte(0x86); this.word32(offset + 8); this.word32(0);
+        this.emitByte(0xc7); this.emitByte(0x86); this.word32(offset + 12); this.word32(0);
     };
 
     root.GuestVMX86Assembler = Assembler;

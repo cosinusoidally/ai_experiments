@@ -34,10 +34,44 @@
                 throw new Error("numeric backend did not use named x87 macros");
             }
         }
+        var loopProgram = {name: "numericLoopProbe", registerCount: 5,
+            constants: [0, 1, 5],
+            code: [op.CONST, 0, 0,
+                   op.CONST, 1, 0,
+                   op.CONST, 2, 1,
+                   op.CONST, 3, 2,
+                   op.LESS, 4, 1, 3,
+                   op.JUMP_IF_FALSE, 4, 29,
+                   op.ADD, 0, 0, 1,
+                   op.ADD, 1, 1, 2,
+                   op.JUMP, 12,
+                   op.RETURN, 0]};
+        var loopAddress = runtime.registerProgram(loopProgram);
+        var compiledLoop = backend.compile(loopProgram);
+        if (!compiledLoop) throw new Error("numeric control-flow probe did not compile");
+        var loopFrame = runtime.heapRecords.allocateFrame(
+            loopAddress, 0, 0, -1, loopProgram.registerCount);
+        compiledLoop.jsFn(0, loopFrame);
+        assertNumber(runtime.readHeapValue(runtime.heapRecords.frameRegisterCell(
+            loopFrame, compiledLoop.returnRegister)), 10,
+            "JavaScript numeric control-flow backend");
+        if (compiledLoop.backend === "i386") {
+            loopFrame = runtime.heapRecords.allocateFrame(
+                loopAddress, 0, 0, -1, loopProgram.registerCount);
+            compiledLoop.fn(runtime.linearHeap.memory.nativeAddress(0), loopFrame);
+            assertNumber(runtime.readHeapValue(runtime.heapRecords.frameRegisterCell(
+                loopFrame, compiledLoop.returnRegister)), 10,
+                "i386 numeric control-flow backend");
+            if (compiledLoop.assembly.indexOf("jne(bytecode_29)") < 0 ||
+                compiledLoop.assembly.indexOf("jmp(bytecode_12)") < 0) {
+                throw new Error("numeric loop did not use macro-assembler labels");
+            }
+        }
         var label = compiled.backend === "i386" ?
             "shared bytecode numeric backend passed on JS and native i386" :
             "shared bytecode numeric backend passed on JS; i386 output validated";
         compiled.destroy();
+        compiledLoop.destroy();
         vm.destroy();
         return label;
     }

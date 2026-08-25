@@ -27,9 +27,11 @@
         var assembler = new Assembler();
         var programAddress = this.runtime.programAddress(program);
         var constants = this.runtime.heapRecords.programConstants(programAddress);
+        var targets = branchTargets(program);
         assembler.beginFrameKernel();
         var pc = 0;
         while (pc < program.code.length) {
+            if (targets["$" + pc]) assembler.label("bytecode_" + pc);
             var opcode = program.code[pc];
             if (opcode === op.CONST) {
                 emitCopyConstant(assembler, this.runtime, constants,
@@ -48,15 +50,41 @@
                 else assembler.divideF64Pop();
                 emitStoreNumber(assembler, this.runtime, program.code[pc + 1]);
                 pc += 4;
+            } else if (isComparison(opcode)) {
+                var reverse = opcode === op.GREATER || opcode === op.GREATER_EQUAL;
+                emitLoadNumber(assembler, this.runtime,
+                    program.code[pc + (reverse ? 3 : 2)], pc, "compare_left");
+                emitLoadNumber(assembler, this.runtime,
+                    program.code[pc + (reverse ? 2 : 3)], pc, "compare_right");
+                if (opcode === op.STRICT_EQUAL) assembler.compareF64EqualToEax();
+                else if (opcode === op.LESS_EQUAL || opcode === op.GREATER_EQUAL) {
+                    assembler.compareF64AboveOrEqualToEax();
+                } else assembler.compareF64AboveToEax();
+                assembler.storeFrameBoolean(registerOffset(
+                    this.runtime, program.code[pc + 1]));
+                pc += 4;
             } else if (opcode === op.NEGATE || opcode === op.POSITIVE) {
                 emitLoadNumber(assembler, this.runtime, program.code[pc + 2], pc, "unary");
                 if (opcode === op.NEGATE) assembler.negateF64();
                 emitStoreNumber(assembler, this.runtime, program.code[pc + 1]);
                 pc += 3;
             } else if (opcode === op.RETURN) {
+                assembler.jump("numeric_epilogue");
                 pc += 2;
+            } else if (opcode === op.JUMP) {
+                assembler.jump("bytecode_" + program.code[pc + 1]);
+                pc += 2;
+            } else if (opcode === op.JUMP_IF_FALSE) {
+                assembler.compareFrameTag(registerOffset(this.runtime,
+                    program.code[pc + 1]), ValueCells.Tags.TRUE);
+                assembler.jumpNotEqual("bytecode_" + program.code[pc + 2]);
+                pc += 3;
             }
         }
+        if (targets["$" + program.code.length]) {
+            assembler.label("bytecode_" + program.code.length);
+        }
+        assembler.label("numeric_epilogue");
         assembler.movEaxImmediate(0);
         assembler.endFrameKernel();
         assembler.resolveLabels();
@@ -71,6 +99,7 @@
         var pc = 0;
         var returnRegister = -1;
         var numeric = {};
+        var booleanRegisters = {};
         var parameterIndex = 0;
         while (program.bindingRegisters &&
                parameterIndex < program.parameterSlots.length) {
@@ -96,12 +125,25 @@
                     !numeric["$" + program.code[pc + 3]]) return null;
                 numeric["$" + program.code[pc + 1]] = true;
                 pc += 4;
+            } else if (isComparison(opcode)) {
+                if (!numeric["$" + program.code[pc + 2]] ||
+                    !numeric["$" + program.code[pc + 3]]) return null;
+                booleanRegisters["$" + program.code[pc + 1]] = true;
+                pc += 4;
+            } else if (opcode === op.JUMP) {
+                pc += 2;
+            } else if (opcode === op.JUMP_IF_FALSE) {
+                if (!booleanRegisters["$" + program.code[pc + 1]]) return null;
+                pc += 3;
             }
             else if (opcode === op.RETURN) {
+                if (returnRegister >= 0 && returnRegister !== program.code[pc + 1]) {
+                    return null;
+                }
                 returnRegister = program.code[pc + 1];
-                if (!numeric["$" + returnRegister]) return null;
+                if (!numeric["$" + returnRegister] &&
+                    !booleanRegisters["$" + returnRegister]) return null;
                 pc += 2;
-                if (pc !== program.code.length) return null;
             } else return null;
         }
         return returnRegister >= 0 ? {returnRegister: returnRegister} : null;
@@ -110,6 +152,31 @@
     function isBinary(opcode) {
         return opcode === op.ADD || opcode === op.SUBTRACT ||
                opcode === op.MULTIPLY || opcode === op.DIVIDE;
+    }
+
+    function isComparison(opcode) {
+        return opcode === op.STRICT_EQUAL || opcode === op.LESS ||
+               opcode === op.LESS_EQUAL || opcode === op.GREATER ||
+               opcode === op.GREATER_EQUAL;
+    }
+
+    function branchTargets(program) {
+        var targets = {};
+        var pc = 0;
+        while (pc < program.code.length) {
+            var opcode = program.code[pc];
+            if (opcode === op.JUMP) {
+                targets["$" + program.code[pc + 1]] = true;
+                pc += 2;
+            } else if (opcode === op.JUMP_IF_FALSE) {
+                targets["$" + program.code[pc + 2]] = true;
+                pc += 3;
+            } else if (opcode === op.CONST || opcode === op.MOVE ||
+                       opcode === op.NEGATE || opcode === op.POSITIVE) pc += 3;
+            else if (isBinary(opcode) || isComparison(opcode)) pc += 4;
+            else pc += 2;
+        }
+        return targets;
     }
 
     function registerOffset(runtime, register) {
@@ -185,6 +252,17 @@
                         runtime.heapRecords.frameRegisterCell(
                             frameAddress, program.code[pc + 1]), value);
                     pc += 4;
+                } else if (isComparison(opcode)) {
+                    left = readNumber(runtime, frameAddress, program.code[pc + 2]);
+                    right = readNumber(runtime, frameAddress, program.code[pc + 3]);
+                    value = opcode === op.STRICT_EQUAL ? left === right :
+                            opcode === op.LESS ? left < right :
+                            opcode === op.LESS_EQUAL ? left <= right :
+                            opcode === op.GREATER ? left > right : left >= right;
+                    runtime.valueCells.writePrimitiveAt(
+                        runtime.heapRecords.frameRegisterCell(
+                            frameAddress, program.code[pc + 1]), value);
+                    pc += 4;
                 } else if (opcode === op.NEGATE || opcode === op.POSITIVE) {
                     value = readNumber(runtime, frameAddress, program.code[pc + 2]);
                     runtime.valueCells.writePrimitiveAt(
@@ -192,6 +270,14 @@
                             frameAddress, program.code[pc + 1]),
                         opcode === op.NEGATE ? -value : value);
                     pc += 3;
+                } else if (opcode === op.JUMP) {
+                    pc = program.code[pc + 1];
+                } else if (opcode === op.JUMP_IF_FALSE) {
+                    pc = runtime.readHeapValue(runtime.heapRecords.frameRegisterCell(
+                        frameAddress, program.code[pc + 1])) ?
+                        pc + 3 : program.code[pc + 2];
+                } else if (opcode === op.RETURN) {
+                    break;
                 } else pc += 2;
             }
             return returnRegister;
