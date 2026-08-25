@@ -32,6 +32,9 @@
         /* Derived lookup metadata only: cached entries name heap records and
          * never contain property values. */
         this.propertyAddressCache = {};
+        this.programObjects = [];
+        this.programAddresses = [];
+        this.programMetadata = {};
         this.hostRoots = [];
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
@@ -456,6 +459,39 @@
 
     Runtime.prototype.registerContext = function (context) {
         this.contexts.push(context);
+    };
+
+    Runtime.prototype.registerProgram = function (program) {
+        var index = 0;
+        while (index < this.programObjects.length) {
+            if (this.programObjects[index] === program) return this.programAddresses[index];
+            index++;
+        }
+        this.ensureLinearHeap();
+        var bytecode = this.heapRecords.allocateBytecode(program.code || []);
+        var constants = this.heapRecords.allocateValueVector(
+            program.constants ? program.constants.length : 0);
+        var metadataId = this.programObjects.length + 1;
+        var address = this.heapRecords.allocateProgram(bytecode, constants,
+            metadataId, program.registerCount || 0);
+        this.programObjects.push(program);
+        this.programAddresses.push(address);
+        this.programMetadata["$" + address] = program;
+        index = 0;
+        while (program.constants && index < program.constants.length) {
+            var value = program.constants[index];
+            var cell = this.heapRecords.vectorCell(constants, index);
+            if (value && typeof value === "object" && value.code && value.constants) {
+                this.valueCells.writeReferenceAt(cell, this.registerProgram(value));
+            } else if (value && typeof value === "object" &&
+                       typeof value.length === "number") {
+                this.writeHeapValue(cell, this.arrayFrom(value));
+            } else this.writeHeapValue(cell, value);
+            index++;
+        }
+        this.heapRecords.setVectorLength(constants,
+            program.constants ? program.constants.length : 0);
+        return address;
     };
 
     Runtime.prototype.unregisterContext = function (context) {

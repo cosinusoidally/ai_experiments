@@ -53,6 +53,20 @@
     var FRAME_REGISTER_COUNT = 20;
     var FRAME_REGISTERS = 24;
 
+    var BYTECODE_LENGTH = 0;
+    var BYTECODE_WORDS = 8;
+
+    var PROGRAM_BYTECODE = 0;
+    var PROGRAM_CONSTANTS = 4;
+    var PROGRAM_METADATA = 8;
+    var PROGRAM_REGISTER_COUNT = 12;
+    var PROGRAM_BYTES = 16;
+
+    var CONTEXT_GLOBAL = 0;
+    var CONTEXT_ACTIVE_FRAME = 4;
+    var CONTEXT_FLAGS = 8;
+    var CONTEXT_BYTES = 16;
+
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
     var REGEXP_PROTOTYPE = 8;
@@ -444,6 +458,59 @@
         }
         return this.heap.payloadAddress(frame,
             FRAME_REGISTERS + register * CELL_BYTES, CELL_BYTES, Heap.Types.FRAME);
+    };
+
+    Records.prototype.allocateBytecode = function (code) {
+        var address = this.heap.allocateRecordWords(Heap.Types.BYTECODE,
+            BYTECODE_WORDS + code.length * 4, code.length, 0, 0, 0);
+        var index = 0;
+        while (index < code.length) {
+            this.heap.writeFieldU32(address, BYTECODE_WORDS + index * 4,
+                                    code[index] >>> 0, Heap.Types.BYTECODE);
+            index++;
+        }
+        return address;
+    };
+
+    Records.prototype.bytecodeLength = function (bytecode) {
+        return this.heap.readFieldU32(bytecode, BYTECODE_LENGTH,
+                                      Heap.Types.BYTECODE);
+    };
+
+    Records.prototype.bytecodeWord = function (bytecode, index) {
+        if (index < 0 || index >= this.bytecodeLength(bytecode) ||
+            index !== Math.floor(index)) throw new RangeError("invalid bytecode index");
+        var word = this.heap.readFieldU32(bytecode,
+            BYTECODE_WORDS + index * 4, Heap.Types.BYTECODE);
+        return word >= 2147483648 ? word - 4294967296 : word;
+    };
+
+    Records.prototype.allocateProgram = function (
+            bytecode, constants, metadata, registerCount) {
+        return this.heap.allocateRecordWords(Heap.Types.PROGRAM, PROGRAM_BYTES,
+            bytecode, constants, metadata, registerCount);
+    };
+
+    Records.prototype.programBytecode = function (program) {
+        return this.heap.readFieldU32(program, PROGRAM_BYTECODE, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programConstants = function (program) {
+        return this.heap.readFieldU32(program, PROGRAM_CONSTANTS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.allocateContext = function (globalObject) {
+        return this.heap.allocateRecordWords(Heap.Types.CONTEXT, CONTEXT_BYTES,
+                                              globalObject, 0, 0, 0);
+    };
+
+    Records.prototype.contextGlobal = function (context) {
+        return this.heap.readFieldU32(context, CONTEXT_GLOBAL, Heap.Types.CONTEXT);
+    };
+
+    Records.prototype.setContextActiveFrame = function (context, frame) {
+        this.heap.writeFieldU32(context, CONTEXT_ACTIVE_FRAME, frame || 0,
+                                Heap.Types.CONTEXT);
     };
 
     function propertyHeadOffset(type) {

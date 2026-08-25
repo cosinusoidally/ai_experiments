@@ -77,6 +77,8 @@
         this.jsRuntime = jsRuntime;
         this.runtime = jsRuntime.runtime;
         this.globalObject = this.runtime.makeObject();
+        this.heapAddress = this.runtime.heapRecords.allocateContext(
+            this.globalObject.heapAddress);
         this.execution = null;
         this.destroyed = false;
         var key;
@@ -92,7 +94,9 @@
     JSContext.prototype.compile = function (source, filename) {
         if (this.destroyed) throw new Error("context has been destroyed");
         var ast = new Parser(source, filename).parseProgram();
-        return verify(new Compiler().compile(ast));
+        var program = verify(new Compiler().compile(ast));
+        this.runtime.registerProgram(program);
+        return program;
     };
 
     JSContext.prototype.start = function (source, filename) {
