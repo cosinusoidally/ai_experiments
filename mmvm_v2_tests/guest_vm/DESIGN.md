@@ -298,17 +298,18 @@ conformance-qualified where the two supported hosts differ.
 ## Guest Node embedding profile
 
 `node_environment.js` is an embedder adapter, not guest library source and not
-part of ES5.1 semantics. The shell runner loads it after the single VM
-bootstrap. It then loads the existing host-side `node_compat` libc, event,
-process, network, filesystem, and HTTP layers and installs guest objects for
-the narrow API used by unchanged `node_web.js`.
+part of ES5.1 semantics. `guest_runner.js` installs it under both supported
+hosts. Under `js_min.exe` it loads the existing host-side `node_compat` libc,
+event, process, network, filesystem, and HTTP layers. Under Node.js it selects
+only built-in Node modules. Both backends install the same guest objects.
 
 The boundary has three layers:
 
-1. `node_compat/libc.js` is the only layer in this profile which issues raw
-   libc FFI calls. It wraps allocation, file, socket, and poll operations.
-2. The host-side Node compatibility stack owns file descriptors, nonblocking
-   clients, HTTP parsing/serialization, filesystem work queues, and `poll(2)`.
+1. On `js_min.exe`, `node_compat/libc.js` is the only layer in this profile
+   which issues raw libc FFI calls. It wraps allocation, file, socket, and poll
+   operations. On Node, built-in `fs`, `net`, and `http` replace that layer.
+2. The selected host stack owns file descriptors, nonblocking clients, HTTP
+   parsing/serialization, filesystem work queues, and event dispatch.
 3. `GuestNodeEnvironment` translates guest objects to those host APIs. Its
    properties are external host functions, so ordinary guest execution yields
    before the adapter performs an operation.
@@ -334,6 +335,13 @@ and file bytes become guest Buffer backing stores. Response output converts a
 guest Buffer back to the host compatibility buffer byte-for-byte; strings use
 UTF-8. HTTP sockets remain nonblocking even though the current file adapters
 perform their libc file work when their queued host task runs.
+
+Node-hosted guest Buffer storage continues to use `host_memory.js` array
+emulation. It does not substitute a host Node Buffer into guest semantics.
+Byte and little-endian word operations implement the same private memory API
+as MMVM's peek/poke-backed allocation. A Node-hosted guest receives no forged
+numeric address, so code branches to guest Buffer access; MMVM-native backing
+may expose its real address for the optimized path.
 
 The installed CommonJS surface resolves `http`, `fs`, and `net`, and a relative
 module loader executes JavaScript modules in separate contexts belonging to the

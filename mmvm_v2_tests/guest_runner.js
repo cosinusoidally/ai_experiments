@@ -1,15 +1,18 @@
 var guestRunnerIsNode = typeof process !== "undefined" && process.argv &&
                         typeof require === "function";
 var GuestRunnerVM;
+var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
+    GuestRunnerNodeEnvironment = require("./guest_vm/node_environment.js");
     guestRunnerArguments = process.argv.slice(2);
 } else {
     load("guest_vm/guest_vm.js");
     load("guest_vm/node_environment.js");
     GuestRunnerVM = GuestVM;
+    GuestRunnerNodeEnvironment = GuestNodeEnvironment;
     for (var guestArgumentIndex = 0;
          guestArgumentIndex < arguments.length; guestArgumentIndex++) {
         guestRunnerArguments.push(arguments[guestArgumentIndex]);
@@ -28,12 +31,19 @@ var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode});
-var guestNodeEnvironment = null;
+var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
+    guestProgramVM, guestRunnerArguments);
+var guestRunnerDeferredCleanup = false;
+var guestRunnerCleaned = false;
+
+function guestRunnerCleanup() {
+    if (guestRunnerCleaned) return;
+    guestRunnerCleaned = true;
+    guestNodeEnvironment.destroy();
+    guestProgramVM.destroy();
+}
+
 try {
-    if (!guestRunnerIsNode) {
-        guestNodeEnvironment = new GuestNodeEnvironment(
-            guestProgramVM, guestRunnerArguments);
-    }
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
     var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
@@ -46,20 +56,22 @@ try {
         } else if (guestExecutionResult.status === "completed") {
             break;
         } else if (guestExecutionResult.status === "threw") {
-            if (guestNodeEnvironment &&
-                NodeProcess.isExit(guestExecutionResult.exception)) break;
+            if (guestNodeEnvironment.isExit(guestExecutionResult.exception)) break;
             throw guestExecutionResult.exception;
         } else {
             throw new Error("unknown guest execution status: " +
                             guestExecutionResult.status);
         }
     }
-    if (guestNodeEnvironment && !NodeProcess.exiting) {
+    if (!guestNodeEnvironment.exiting) {
         guestNodeEnvironment.run();
     }
+    if (guestRunnerIsNode) {
+        guestRunnerDeferredCleanup = true;
+        process.on("exit", guestRunnerCleanup);
+    }
 } finally {
-    if (guestNodeEnvironment) guestNodeEnvironment.destroy();
-    guestProgramVM.destroy();
+    if (!guestRunnerDeferredCleanup) guestRunnerCleanup();
 }
 
-if (guestNodeEnvironment) quit(NodeProcess.exitCode);
+if (!guestRunnerIsNode) quit(guestNodeEnvironment.exitCode);

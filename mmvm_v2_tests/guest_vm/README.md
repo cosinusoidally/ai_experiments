@@ -127,6 +127,17 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   guest_runner.js demo1.js --size 64x64 --fps 5
 ```
 
+The identical guest module graph can be hosted by Node.js:
+
+```sh
+node guest_runner.js demo1.js --size 64x64 --fps 5
+```
+
+This is not a direct Node execution of `demo1.js`: `guest_runner.js` still
+tokenizes, compiles, and interprets all three application modules. The
+embedder selects built-in `fs`, `net`, `http`, timers, and process streams
+under Node, while `js_min.exe` selects the libc-backed compatibility versions.
+
 The default `256x192` resolution and `20` FPS limit are also accepted. The
 current interpreter is functionally correct on this path but is not yet fast:
 the pixel-at-a-time demo measured roughly 0.2–0.4 FPS at 64×64 during this
@@ -134,7 +145,7 @@ checkpoint. This is an interpreter-performance limitation, not X11 blocking or
 a frame-timing change. No artifacts directory or generated framebuffer image
 is required or stored in `mmvm_v2_tests`.
 
-The embedder provides:
+The embedder provides on both hosts:
 
 - synchronous `fs.readFileSync` for Xauthority data;
 - Unix-domain `net.createConnection` with nonblocking socket events;
@@ -142,6 +153,15 @@ The embedder provides:
 - zero-copy native guest Buffer writes to the host socket queue when possible;
 - `setTimeout`, `clearTimeout`, and `requestAnimationFrame` scheduling;
 - `process.env.DISPLAY`, `XAUTHORITY`, and `HOME`.
+
+Guest Buffer storage does not become a host Node Buffer. Under Node, the same
+guest Buffer implementation uses the array-backed memory adapter in
+`host_memory.js`; its byte and 32-bit operations are the portable equivalent of
+the `peek8`/`poke8`/`peek32`/`poke32` native-memory operations. Consequently
+`demo1.js` sees no native pixel address under Node and correctly uses
+`Buffer.writeUInt32LE`. Under `js_min.exe`, native backing exposes a pointer and
+the unchanged demo may use `poke32`. Direct arbitrary-address FFI remains
+intentionally unavailable to a Node-hosted guest.
 
 The X11 socket remains the standardized local path selected by `DISPLAY`, such
 as `/tmp/.X11-unix/X1`; `node_x11.js` derives the display number rather than

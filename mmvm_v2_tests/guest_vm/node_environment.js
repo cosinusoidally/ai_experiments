@@ -15,16 +15,73 @@
         this.moduleCache = {};
         this.moduleContexts = [];
         this.runnerArguments = runnerArguments;
+        this.nodeHost = typeof module !== "undefined" && module.exports &&
+                        typeof require === "function";
+        this.exitCode = 0;
+        this.exiting = false;
+        this.exitMarker = {guestNodeExit: true};
 
-        load("node_compat/libc.js");
-        load("node_compat/events.js");
-        load("node_compat/process.js");
-        load("node_compat/net.js");
-        load("node_compat/fs.js");
-        load("node_compat/http.js");
-        NodeProcess.install(runnerArguments);
+        if (this.nodeHost) {
+            this.hostFs = require("fs");
+            this.hostNet = require("net");
+            this.hostHttp = require("http");
+            this.HostBuffer = require("buffer").Buffer;
+            this.hostProcess = process;
+        } else {
+            load("node_compat/libc.js");
+            load("node_compat/events.js");
+            load("node_compat/process.js");
+            load("node_compat/net.js");
+            load("node_compat/fs.js");
+            load("node_compat/http.js");
+            NodeProcess.install(runnerArguments);
+            this.hostFs = NodeFs;
+            this.hostNet = NodeNet;
+            this.hostHttp = NodeHttp;
+            this.HostBuffer = Buffer;
+        }
         this.installGlobals();
     }
+
+    GuestNodeEnvironment.prototype.environmentValue = function (name) {
+        if (this.nodeHost) return this.hostProcess.env[name];
+        return NodeMemory.cString(NodeLibc.getenv(name));
+    };
+
+    GuestNodeEnvironment.prototype.writeOutput = function (fd, args) {
+        var parts = [];
+        var index = 0;
+        while (index < args.length) parts.push(String(args[index++]));
+        var text = parts.join(" ") + "\n";
+        if (this.nodeHost) {
+            if (fd === 2) this.hostProcess.stderr.write(text);
+            else this.hostProcess.stdout.write(text);
+        } else NodeMemory.writeAll(fd, text);
+    };
+
+    GuestNodeEnvironment.prototype.enqueueHost = function (callback) {
+        if (this.nodeHost) setTimeout(callback, 0);
+        else NodeRuntime.enqueue(callback);
+    };
+
+    GuestNodeEnvironment.prototype.setHostTimeout = function (callback, delay) {
+        return this.nodeHost ? setTimeout(callback, delay) :
+                               NodeRuntime.setTimeout(callback, delay);
+    };
+
+    GuestNodeEnvironment.prototype.clearHostTimeout = function (id) {
+        if (this.nodeHost) clearTimeout(id);
+        else NodeRuntime.clearTimeout(id);
+    };
+
+    GuestNodeEnvironment.prototype.hostNow = function () {
+        return this.nodeHost ? new Date().getTime() : NodeRuntime.now();
+    };
+
+    GuestNodeEnvironment.prototype.isExit = function (value) {
+        return value === this.exitMarker ||
+               (!this.nodeHost && NodeProcess.isExit(value));
+    };
 
     GuestNodeEnvironment.prototype.keep = function (value) {
         this.retained.push(this.vm.retain(value));
@@ -69,7 +126,8 @@
     };
 
     GuestNodeEnvironment.prototype.guestBuffer = function (hostBuffer) {
-        var bytes = hostBuffer && hostBuffer._nodeBytes ? hostBuffer._nodeBytes : [];
+        var bytes = hostBuffer && hostBuffer._nodeBytes ? hostBuffer._nodeBytes : hostBuffer;
+        if (!bytes) bytes = [];
         var result = this.runtime.bufferSupport.allocate(bytes.length);
         var index = 0;
         while (index < bytes.length) {
@@ -87,7 +145,7 @@
             bytes.push(this.runtime.bufferSupport.read(value, index));
             index++;
         }
-        return new Buffer(bytes);
+        return this.nodeHost ? this.HostBuffer.from(bytes) : new this.HostBuffer(bytes);
     };
 
     GuestNodeEnvironment.prototype.invoke = function (callable, receiver, args) {
@@ -119,7 +177,7 @@
             }
             index++;
         }
-        NodeRuntime.enqueue(function () {
+        this.enqueueHost(function () {
             try {
                 environment.invoke(callable, receiver, args);
             } finally {
@@ -153,7 +211,7 @@
                 var path = String(args[0]);
                 var callback = args[1];
                 var callbackRoot = environment.vm.retain(callback);
-                NodeFs.stat(path, function (error, stats) {
+                environment.hostFs.stat(path, function (error, stats) {
                     environment.enqueueGuest(callback, undefined,
                         [environment.error(error), error ? undefined : environment.makeStats(stats)]);
                     environment.vm.release(callbackRoot);
@@ -165,7 +223,7 @@
                 var path = String(args[0]);
                 var callback = args[1];
                 var callbackRoot = environment.vm.retain(callback);
-                NodeFs.readdir(path, function (error, names) {
+                environment.hostFs.readdir(path, function (error, names) {
                     environment.enqueueGuest(callback, undefined,
                         [environment.error(error), error ? undefined :
                          environment.runtime.arrayFrom(names)]);
@@ -178,7 +236,7 @@
                 var path = String(args[0]);
                 var callback = args[1];
                 var callbackRoot = environment.vm.retain(callback);
-                NodeFs.readFile(path, function (error, data) {
+                environment.hostFs.readFile(path, function (error, data) {
                     environment.enqueueGuest(callback, undefined,
                         [environment.error(error), error ? undefined :
                          environment.guestBuffer(data)]);
@@ -188,7 +246,7 @@
             }));
         this.runtime.setProperty(fs, "readFileSync", this.makeFunction("fs.readFileSync",
             function (receiver, args) {
-                return environment.guestBuffer(NodeFs.readFileSync(String(args[0])));
+                return environment.guestBuffer(environment.hostFs.readFileSync(String(args[0])));
             }));
         return fs;
     };
@@ -243,7 +301,8 @@
         var net = this.object({});
         this.runtime.setProperty(net, "createConnection",
             this.makeFunction("net.createConnection", function (receiver, args) {
-                return environment.makeSocket(NodeNet.createConnection(String(args[0])));
+                return environment.makeSocket(
+                    environment.hostNet.createConnection(String(args[0])));
             }));
         return net;
     };
@@ -279,7 +338,7 @@
             this.dirname(parentFilename) + "/" + request);
         if (own(this.moduleCache, filename)) return this.moduleCache[filename].exports;
 
-        var source = NodeFs.readFileSync(filename).toString("utf8");
+        var source = this.hostFs.readFileSync(filename).toString("utf8");
         var context = this.vm.jsRuntime.createContext();
         this.moduleContexts.push(context);
         var moduleRecord = {exports: this.object({}), context: context};
@@ -337,7 +396,7 @@
         var environment = this;
         var server = this.object({});
         var listeners = {};
-        var hostServer = NodeHttp.createServer(function (request, response) {
+        var hostServer = this.hostHttp.createServer(function (request, response) {
             environment.enqueueGuest(listener, server,
                 [environment.makeRequest(request), environment.makeResponse(response)]);
         });
@@ -410,35 +469,42 @@
         var processObject = this.object({
             argv: this.runtime.arrayFrom(argv),
             env: this.object({
-                DISPLAY: NodeMemory.cString(NodeLibc.getenv("DISPLAY")),
-                XAUTHORITY: NodeMemory.cString(NodeLibc.getenv("XAUTHORITY")),
-                HOME: NodeMemory.cString(NodeLibc.getenv("HOME"))
+                DISPLAY: this.environmentValue("DISPLAY"),
+                XAUTHORITY: this.environmentValue("XAUTHORITY"),
+                HOME: this.environmentValue("HOME")
             }),
             exitCode: 0
         });
         this.runtime.setProperty(processObject, "exit", this.makeFunction("process.exit",
             function (receiver, args) {
-                NodeProcess.exitCode = args.length ? Number(args[0]) | 0 : 0;
-                NodeProcess.exiting = true;
-                throw NodeProcess.exitMarker;
+                environment.exitCode = args.length ? Number(args[0]) | 0 : 0;
+                environment.exiting = true;
+                if (environment.nodeHost) environment.hostProcess.exitCode = environment.exitCode;
+                else {
+                    NodeProcess.exitCode = environment.exitCode;
+                    NodeProcess.exiting = true;
+                }
+                throw environment.exitMarker;
             }));
         publish("process", processObject);
 
         var consoleObject = this.object({});
         this.runtime.setProperty(consoleObject, "log", this.makeFunction("console.log",
             function (receiver, args) {
-                NodeMemory.writeAll(1, NodeProcess.formatArguments(args) + "\n");
+                environment.writeOutput(1, args);
             }));
         this.runtime.setProperty(consoleObject, "error", this.makeFunction("console.error",
             function (receiver, args) {
-                NodeMemory.writeAll(2, NodeProcess.formatArguments(args) + "\n");
+                environment.writeOutput(2, args);
             }));
         publish("console", consoleObject);
 
         var bufferConstructor = this.runtime.getGlobal(this.context, "Buffer");
         this.runtime.setProperty(bufferConstructor, "byteLength",
             this.makeFunction("Buffer.byteLength", function (receiver, args) {
-                return NodeEncoding.utf8Bytes(String(args[0])).length;
+                return environment.nodeHost ?
+                    environment.HostBuffer.byteLength(String(args[0]), "utf8") :
+                    NodeEncoding.utf8Bytes(String(args[0])).length;
             }, true));
 
         publish("encodeURIComponent",
@@ -478,28 +544,31 @@
         publish("setTimeout", this.makeFunction("setTimeout", function (receiver, args) {
             var callback = args[0];
             var callbackRoot = environment.vm.retain(callback);
-            return NodeRuntime.setTimeout(function () {
+            return environment.setHostTimeout(function () {
                 try { environment.invoke(callback, undefined, []); }
                 finally { environment.vm.release(callbackRoot); }
             }, Number(args[1]) || 0);
         }));
         publish("clearTimeout", this.makeFunction("clearTimeout", function (receiver, args) {
-            NodeRuntime.clearTimeout(Number(args[0]));
+            environment.clearHostTimeout(args[0]);
         }));
         publish("requestAnimationFrame", this.makeFunction("requestAnimationFrame",
             function (receiver, args) {
                 var callback = args[0];
                 var callbackRoot = environment.vm.retain(callback);
-                return NodeRuntime.setTimeout(function () {
-                    try { environment.invoke(callback, undefined, [NodeRuntime.now()]); }
+                return environment.setHostTimeout(function () {
+                    try { environment.invoke(callback, undefined, [environment.hostNow()]); }
                     finally { environment.vm.release(callbackRoot); }
                 }, 16);
             }));
     };
 
     GuestNodeEnvironment.prototype.run = function () {
-        NodeRuntime.run();
-        return NodeProcess.exitCode;
+        if (!this.nodeHost) {
+            NodeRuntime.run();
+            this.exitCode = NodeProcess.exitCode;
+        }
+        return this.exitCode;
     };
 
     GuestNodeEnvironment.prototype.destroy = function () {
@@ -512,4 +581,7 @@
     };
 
     root.GuestNodeEnvironment = GuestNodeEnvironment;
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = GuestNodeEnvironment;
+    }
 }(this));

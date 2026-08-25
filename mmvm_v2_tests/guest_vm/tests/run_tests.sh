@@ -39,6 +39,16 @@ validate_context_demo() {
 run_node_tests() {
     echo "guest VM host: node ($node_binary)"
     "$node_binary" guest_vm/tests/run_tests.js
+    node_demo1_help_output=$("$node_binary" ./guest_runner.js demo1.js --help)
+    case "$node_demo1_help_output" in
+        *"usage: node demo1.js"*"--size WIDTHxHEIGHT"*) ;;
+        *)
+            echo "Node-hosted guest demo1.js --help emitted unexpected stdout:" >&2
+            echo "$node_demo1_help_output" >&2
+            exit 1
+            ;;
+    esac
+    echo "Node-hosted guest_runner.js demo1.js path passed"
     validate_context_demo "$("$node_binary" guest_vm/demos/three_contexts.js)"
 }
 
