@@ -4,12 +4,18 @@
         op = require("./bytecode.js");
     }
 
-    function Compiler() {
+    function Compiler(scopeBindings, outerScopes) {
         this.code = [];
         this.constants = [];
         this.registerCount = 0;
         this.breakTargets = [];
         this.continueTargets = [];
+        this.scopes = [];
+        if (scopeBindings) this.scopes.push(makeBindingMap(scopeBindings));
+        var scopeIndex = 0;
+        while (outerScopes && scopeIndex < outerScopes.length) {
+            this.scopes.push(outerScopes[scopeIndex++]);
+        }
     }
 
     Compiler.prototype.allocate = function () {
@@ -57,7 +63,7 @@
             var declaredFunction = this.allocate();
             this.emit(op.MAKE_FUNCTION, declaredFunction,
                       this.constant(this.compileFunction(declaration)));
-            this.emit(op.SET_GLOBAL, this.constant(declaration.name), declaredFunction);
+            this.storeReference(this.referenceForName(declaration.name), declaredFunction);
         }
         var index = 0;
         while (index < program.body.length) {
@@ -71,11 +77,21 @@
     };
 
     Compiler.prototype.compileFunction = function (expression) {
-        var nested = new Compiler();
+        var locals = collectLocals(expression.body, expression.name);
+        var bindings = makeFunctionBindings(expression.parameters, locals);
+        var nested = new Compiler(bindings, this.scopes);
         var bodyProgram = {body: expression.body.body};
         var program = nested.compile(bodyProgram);
         program.parameters = expression.parameters.slice(0);
-        program.locals = collectLocals(expression.body, expression.name);
+        program.locals = locals;
+        program.bindings = bindings;
+        program.bindingSlots = makeBindingMap(bindings);
+        program.parameterSlots = bindingSlots(expression.parameters,
+                                               program.bindingSlots);
+        program.argumentsSlot = program.bindingSlots.$arguments;
+        program.thisSlot = program.bindingSlots.$this;
+        program.functionNameSlot = expression.name ?
+            program.bindingSlots["$" + expression.name] : -1;
         program.name = expression.name || "";
         return program;
     };
@@ -108,7 +124,7 @@
                 var value = declaration.initial ?
                     this.compileExpression(declaration.initial) :
                     this.emitConstant(undefined);
-                this.emit(op.SET_GLOBAL, this.constant(declaration.name), value);
+                this.storeReference(this.referenceForName(declaration.name), value);
                 index++;
             }
             return;
@@ -197,8 +213,8 @@
                 if (statement.left.declarations.length !== 1) {
                     throw new SyntaxError("for-in requires one variable");
                 }
-                forInReference = {kind: "global", name: this.constant(
-                    statement.left.declarations[0].name)};
+                forInReference = this.referenceForName(
+                    statement.left.declarations[0].name);
             } else {
                 forInReference = this.compileReference(statement.left);
             }
@@ -299,7 +315,7 @@
 
     Compiler.prototype.compileReference = function (expression) {
         if (expression.type === "Identifier") {
-            return {kind: "global", name: this.constant(expression.name)};
+            return this.referenceForName(expression.name);
         }
         if (expression.type === "MemberExpression") {
             return {kind: "property",
@@ -309,10 +325,32 @@
         throw new SyntaxError("invalid assignment target");
     };
 
+    Compiler.prototype.referenceForName = function (name) {
+        var binding = this.resolveBinding(name);
+        if (binding) {
+            return {kind: "local", depth: binding.depth, slot: binding.slot};
+        }
+        return {kind: "global", name: this.constant(name)};
+    };
+
+    Compiler.prototype.resolveBinding = function (name) {
+        var key = "$" + name;
+        var depth = 0;
+        while (depth < this.scopes.length) {
+            if (this.scopes[depth][key] !== undefined) {
+                return {depth: depth, slot: this.scopes[depth][key]};
+            }
+            depth++;
+        }
+        return null;
+    };
+
     Compiler.prototype.loadReference = function (reference) {
         var target = this.allocate();
         if (reference.kind === "global") {
             this.emit(op.GET_GLOBAL, target, reference.name);
+        } else if (reference.kind === "local") {
+            this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
         } else {
             this.emit(op.GET_PROPERTY, target, reference.object, reference.key);
         }
@@ -322,6 +360,8 @@
     Compiler.prototype.storeReference = function (reference, value) {
         if (reference.kind === "global") {
             this.emit(op.SET_GLOBAL, reference.name, value);
+        } else if (reference.kind === "local") {
+            this.emit(op.SET_LOCAL, reference.depth, reference.slot, value);
         } else {
             this.emit(op.SET_PROPERTY, reference.object, reference.key, value);
         }
@@ -367,14 +407,10 @@
             return regexpRegister;
         }
         if (expression.type === "Identifier") {
-            var identifier = this.allocate();
-            this.emit(op.GET_GLOBAL, identifier, this.constant(expression.name));
-            return identifier;
+            return this.loadReference(this.referenceForName(expression.name));
         }
         if (expression.type === "ThisExpression") {
-            var thisRegister = this.allocate();
-            this.emit(op.GET_GLOBAL, thisRegister, this.constant("this"));
-            return thisRegister;
+            return this.loadReference(this.referenceForName("this"));
         }
         if (expression.type === "BinaryExpression") {
             if (expression.operator === "&&" || expression.operator === "||") {
@@ -564,6 +600,45 @@
         }
         add(functionName);
         visit(body);
+        return result;
+    }
+
+    function makeFunctionBindings(parameters, locals) {
+        var result = [];
+        var seen = {};
+        function add(name) {
+            var key = "$" + name;
+            if (!seen[key]) {
+                seen[key] = true;
+                result.push(name);
+            }
+        }
+        var index = 0;
+        while (index < parameters.length) add(parameters[index++]);
+        index = 0;
+        while (index < locals.length) add(locals[index++]);
+        add("arguments");
+        add("this");
+        return result;
+    }
+
+    function makeBindingMap(bindings) {
+        var result = {};
+        var index = 0;
+        while (index < bindings.length) {
+            result["$" + bindings[index]] = index;
+            index++;
+        }
+        return result;
+    }
+
+    function bindingSlots(names, map) {
+        var result = [];
+        var index = 0;
+        while (index < names.length) {
+            result[index] = map["$" + names[index]];
+            index++;
+        }
         return result;
     }
 

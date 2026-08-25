@@ -1,5 +1,9 @@
 # JavaScript guest VM and Node compatibility plan
 
+See `guest_vm/SELF_HOSTED_EXECUTION.md` for the bootstrap-only relationship
+targeted for `js_min.exe`, the explicit non-NaN-boxed value-cell representation,
+and the staged native execution-engine boundary.
+
 ## Objective
 
 Build a JavaScript-in-JavaScript guest virtual machine that can run unchanged

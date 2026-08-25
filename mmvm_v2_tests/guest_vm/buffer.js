@@ -11,6 +11,9 @@
     }
 
     function canonicalIndex(key) {
+        if (typeof key === "number") {
+            return key >= 0 && key < 4294967295 && key === Math.floor(key) ? key : -1;
+        }
         if (key === "0") return 0;
         if (!key || key.charCodeAt(0) === 48) return -1;
         var value = Number(key);

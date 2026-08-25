@@ -41,7 +41,9 @@
         BIT_NOT: 39,
         TYPEOF: 40,
         DELETE_PROPERTY: 41,
-        GET_KEYS: 42
+        GET_KEYS: 42,
+        GET_LOCAL: 43,
+        SET_LOCAL: 44
     };
 
     root.GuestVMBytecode = op;

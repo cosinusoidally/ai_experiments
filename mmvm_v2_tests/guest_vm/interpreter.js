@@ -122,13 +122,21 @@
                     registers[code[pc + 1]] = constants[code[pc + 2]];
                     frame.pc = pc + 3;
                 } else if (opcode === op.GET_GLOBAL) {
-                    registers[code[pc + 1]] = this.runtime.getBinding(
-                        frame.context, frame.environment, constants[code[pc + 2]]);
+                    registers[code[pc + 1]] = this.runtime.getGlobal(
+                        frame.context, constants[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.SET_GLOBAL) {
-                    this.runtime.setBinding(frame.context, frame.environment,
+                    this.runtime.setGlobal(frame.context,
                         constants[code[pc + 1]], registers[code[pc + 2]]);
                     frame.pc = pc + 3;
+                } else if (opcode === op.GET_LOCAL) {
+                    registers[code[pc + 1]] = this.runtime.getEnvironmentSlot(
+                        frame.environment, code[pc + 2], code[pc + 3]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.SET_LOCAL) {
+                    this.runtime.setEnvironmentSlot(frame.environment,
+                        code[pc + 1], code[pc + 2], registers[code[pc + 3]]);
+                    frame.pc = pc + 4;
                 } else if (opcode === op.MOVE) {
                     registers[code[pc + 1]] = registers[code[pc + 2]];
                     frame.pc = pc + 3;

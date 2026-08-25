@@ -1,5 +1,9 @@
 # Guest VM design
 
+The long-term MMVM execution boundary and the staged path away from host-VM
+state are specified in `SELF_HOSTED_EXECUTION.md`. That document is normative
+for new frame, value, platform-service, and native-engine work.
+
 ## Status and contract
 
 The guest VM is an interpreter-first JavaScript-in-JavaScript implementation.

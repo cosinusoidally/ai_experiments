@@ -24,6 +24,7 @@
                 opcode === op.BIT_NOT || opcode === op.TYPEOF ||
                 opcode === op.GET_KEYS) width = 3;
             else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
+                     opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
                      (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                      (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                      opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
@@ -62,6 +63,14 @@
                        opcode === op.DELETE_PROPERTY) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
+                requireRegister(program, code[pc + 3], pc);
+            } else if (opcode === op.GET_LOCAL) {
+                requireRegister(program, code[pc + 1], pc);
+                requireLexicalOperand(code[pc + 2], "depth", pc);
+                requireLexicalOperand(code[pc + 3], "slot", pc);
+            } else if (opcode === op.SET_LOCAL) {
+                requireLexicalOperand(code[pc + 1], "depth", pc);
+                requireLexicalOperand(code[pc + 2], "slot", pc);
                 requireRegister(program, code[pc + 3], pc);
             } else if (opcode === op.JUMP) {
                 jumps.push(code[pc + 1]);
@@ -111,6 +120,12 @@
             index++;
         }
         return program;
+    }
+
+    function requireLexicalOperand(value, name, pc) {
+        if (value < 0 || value !== Math.floor(value)) {
+            throw new Error("invalid lexical " + name + " at bytecode " + pc);
+        }
     }
 
     root.GuestVMVerify = verify;

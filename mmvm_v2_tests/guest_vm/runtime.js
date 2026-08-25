@@ -73,31 +73,33 @@
 
     Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
                                                        closure, callable) {
-        if (!program.parameters.length && !program.locals.length && !closure && !callable) {
+        if (!program.bindings && !closure && !callable) {
             return null;
         }
-        var environment = {bindings: {}, parent: closure || null};
+        var bindings = program.bindings || [];
+        var slots = [];
         var index = 0;
-        while (index < program.locals.length) {
-            environment.bindings["$" + program.locals[index]] = undefined;
-            index++;
-        }
+        while (index < bindings.length) slots[index++] = undefined;
+        var environment = {slots: slots,
+                           bindingSlots: program.bindingSlots || {},
+                           parent: closure || null};
         index = 0;
         while (index < program.parameters.length) {
-            environment.bindings["$" + program.parameters[index]] =
+            slots[program.parameterSlots[index]] =
                 index < args.length ? args[index] : undefined;
             index++;
         }
-        environment.bindings.$arguments = this.arrayFrom(args);
-        environment.bindings.$this = receiver;
-        if (program.name) environment.bindings["$" + program.name] = callable;
+        slots[program.argumentsSlot] = this.arrayFrom(args);
+        slots[program.thisSlot] = receiver;
+        if (program.functionNameSlot >= 0) slots[program.functionNameSlot] = callable;
         return environment;
     };
 
     Runtime.prototype.getBinding = function (context, environment, name) {
         var current = environment;
         while (current) {
-            if (own(current.bindings, "$" + name)) return current.bindings["$" + name];
+            var slot = current.bindingSlots["$" + name];
+            if (slot !== undefined) return current.slots[slot];
             current = current.parent;
         }
         return this.getGlobal(context, name);
@@ -106,13 +108,38 @@
     Runtime.prototype.setBinding = function (context, environment, name, value) {
         var current = environment;
         while (current) {
-            if (own(current.bindings, "$" + name)) {
-                current.bindings["$" + name] = value;
+            var slot = current.bindingSlots["$" + name];
+            if (slot !== undefined) {
+                current.slots[slot] = value;
                 return value;
             }
             current = current.parent;
         }
         return this.setGlobal(context, name, value);
+    };
+
+    Runtime.prototype.getEnvironmentSlot = function (environment, depth, slot) {
+        while (depth > 0) {
+            environment = environment.parent;
+            depth--;
+        }
+        if (!environment || slot < 0 || slot >= environment.slots.length) {
+            throw new Error("invalid lexical environment slot");
+        }
+        return environment.slots[slot];
+    };
+
+    Runtime.prototype.setEnvironmentSlot = function (environment, depth, slot, value) {
+        this.assertOwned(value);
+        while (depth > 0) {
+            environment = environment.parent;
+            depth--;
+        }
+        if (!environment || slot < 0 || slot >= environment.slots.length) {
+            throw new Error("invalid lexical environment slot");
+        }
+        environment.slots[slot] = value;
+        return value;
     };
 
     Runtime.prototype.pushActiveRegisters = function (registers, environment) {
@@ -431,12 +458,13 @@
     };
 
     Runtime.prototype.propertyKey = function (value) {
-        return this.internString(value);
+        /* Primitive strings have value identity. Avoid re-interning the already
+         * canonical string constants used by almost every property opcode. */
+        return typeof value === "string" ? value : String(value);
     };
 
     Runtime.prototype.getProperty = function (object, key) {
         this.assertOwned(object);
-        key = this.propertyKey(key);
         if (object === null || object === undefined) {
             throw new TypeError("cannot read property '" + key + "'");
         }
@@ -444,11 +472,14 @@
             return this.bufferSupport.getProperty(object, key);
         }
         if (object.guestType === "array") {
+            if (isDirectArrayIndex(key)) return object.elements[key];
+            key = this.propertyKey(key);
             if (key === "length") return object.elements.length;
             if (isArrayIndex(key)) return object.elements[Number(key)];
             if (own(object.properties, "$" + key)) return object.properties["$" + key];
             return this.arrayMethods[key];
         }
+        key = this.propertyKey(key);
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             if (own(object.properties, "$" + key)) return object.properties["$" + key];
@@ -524,7 +555,6 @@
     Runtime.prototype.setProperty = function (object, key, value) {
         this.assertOwned(object);
         this.assertOwned(value);
-        key = this.propertyKey(key);
         if (object === null || object === undefined) {
             throw new TypeError("cannot set property '" + key + "'");
         }
@@ -532,10 +562,16 @@
             return this.bufferSupport.setProperty(object, key, value);
         }
         if (object.guestType === "array") {
+            if (isDirectArrayIndex(key)) {
+                object.elements[key] = value;
+                return value;
+            }
+            key = this.propertyKey(key);
             if (isArrayIndex(key)) object.elements[Number(key)] = value;
             else object.properties["$" + key] = value;
             return value;
         }
+        key = this.propertyKey(key);
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             object.properties["$" + key] = value;
@@ -701,9 +737,10 @@
     Runtime.prototype.markEnvironment = function (environment, generation) {
         var current = environment;
         while (current) {
-            var key;
-            for (key in current.bindings) {
-                if (own(current.bindings, key)) this.markValue(current.bindings[key], generation);
+            var index = 0;
+            while (index < current.slots.length) {
+                this.markValue(current.slots[index], generation);
+                index++;
             }
             current = current.parent;
         }
@@ -720,9 +757,15 @@
     };
 
     function isArrayIndex(key) {
+        if (isDirectArrayIndex(key)) return true;
         if (key === "") return false;
         var number = Number(key);
         return number >= 0 && number === Math.floor(number) && String(number) === key;
+    }
+
+    function isDirectArrayIndex(key) {
+        return typeof key === "number" && key >= 0 &&
+               key < 4294967295 && key === Math.floor(key);
     }
 
     function integerHandle(handle, length) {
