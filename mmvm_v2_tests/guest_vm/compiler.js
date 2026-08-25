@@ -818,6 +818,8 @@
         var result = {};
         function visit(node) {
             if (!node || typeof node !== "object") return;
+            if (node.type === "FunctionExpression" ||
+                node.type === "FunctionDeclaration") return;
             if (node.type === "Identifier") {
                 var key = "$" + node.name;
                 if (result[key] === undefined) {

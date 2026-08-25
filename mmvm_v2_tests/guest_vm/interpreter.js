@@ -128,9 +128,24 @@
             this.compiledEntry = null;
             this.frames = [];
             try {
-                var compiledValue = entry.fn(this.runtime, entry.context,
-                    entry.receiver, entry.args, this.runtime.functionClosure(entry.callable),
-                    entry.callable);
+                var compiledValue;
+                if (this.runtime.profileOpcodeCounts) {
+                    var compiledStarted = new Date().getTime();
+                    try {
+                        compiledValue = entry.fn(this.runtime, entry.context,
+                            entry.receiver, entry.args,
+                            this.runtime.functionClosure(entry.callable),
+                            entry.callable);
+                    } finally {
+                        this.runtime.threadedCompiler.recordProfile(
+                            entry.callable.name || "<anonymous>",
+                            new Date().getTime() - compiledStarted);
+                    }
+                } else {
+                    compiledValue = entry.fn(this.runtime, entry.context,
+                        entry.receiver, entry.args,
+                        this.runtime.functionClosure(entry.callable), entry.callable);
+                }
                 this.runtime.gcSafePoint();
                 return this.finish("completed", compiledValue, 0);
             } catch (compiledError) {

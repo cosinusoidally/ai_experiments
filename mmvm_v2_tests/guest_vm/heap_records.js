@@ -293,6 +293,11 @@
                                         CELL_BYTES, Heap.Types.VALUE_VECTOR);
     };
 
+    Records.prototype.vectorCellWithinLength = function (vector, index) {
+        return this.heap.trustedPayloadAddress(vector,
+            VECTOR_CELLS + index * CELL_BYTES);
+    };
+
     Records.prototype.allocateArray = function (prototype, capacity) {
         var elements = this.allocateValueVector(capacity || 0);
         return this.heap.allocateRecordWords(Heap.Types.ARRAY, ARRAY_BYTES,

@@ -26,6 +26,9 @@
         options = options || {};
         this.contexts = [];
         this.internedStrings = {};
+        /* Strings are immutable. This is a decoded representation cache keyed
+         * only by the authoritative heap address, never semantic storage. */
+        this.decodedStrings = {};
         this.assertions = 0;
         this.heapObjects = [];
         this.heapHandles = {};
@@ -257,6 +260,23 @@
             this.heapRecords.environmentCell(environment.heapAddress, slot));
     };
 
+    Runtime.prototype.environmentCellAddress = function (environment, depth, slot) {
+        var requestedDepth = depth;
+        while (depth > 0) {
+            environment = this.environmentParent(environment);
+            depth--;
+        }
+        if (!environment || slot < 0 ||
+            slot >= this.heapRecords.environmentSlotCount(environment.heapAddress)) {
+            throw new Error("invalid lexical environment slot depth=" +
+                requestedDepth + " slot=" + slot +
+                (environment ? " count=" +
+                 this.heapRecords.environmentSlotCount(environment.heapAddress) :
+                 " without environment"));
+        }
+        return this.heapRecords.environmentCell(environment.heapAddress, slot);
+    };
+
     Runtime.prototype.setEnvironmentSlot = function (environment, depth, slot, value) {
         this.assertOwned(value);
         while (depth > 0) {
@@ -328,7 +348,8 @@
         var existing = this.heapHandles[key];
         if (existing) return existing;
         var handle = {guestType: guestType, ownerRuntime: this,
-                      heapAddress: address, gcMark: 0};
+                      heapAddress: address, gcMark: 0, propertyVersion: 0,
+                      valueVersion: 0};
         this.heapHandles[key] = handle;
         return handle;
     };
@@ -343,12 +364,13 @@
     };
 
     Runtime.prototype.readHeapValue = function (cell) {
-        if (this.valueCells.tagAt(cell) !== ValueCells.Tags.REFERENCE) {
-            return this.valueCells.readPrimitiveAt(cell);
+        var tag = this.valueCells.tagAt(cell);
+        if (tag !== ValueCells.Tags.REFERENCE) {
+            return this.valueCells.readPrimitiveTaggedAt(cell, tag);
         }
-        var address = this.valueCells.readReferenceAt(cell);
+        var address = this.valueCells.referenceAddressAt(cell);
         if (this.linearHeap.recordType(address) === Heap.Types.STRING) {
-            return this.heapRecords.readString(address);
+            return this.readHeapString(address);
         }
         var handle = this.heapHandles["$" + address];
         if (!handle) throw new Error("guest heap reference has no runtime handle");
@@ -368,6 +390,7 @@
                 object.heapAddress, keyAddress,
                 HeapRecords.Attributes.DEFAULT);
             this.propertyAddressCache[cacheKey] = property;
+            object.propertyVersion++;
         }
         return property;
     };
@@ -377,6 +400,8 @@
         this.assertOwned(prototype);
         this.heapRecords.setObjectPrototype(object.heapAddress,
             prototype ? prototype.heapAddress : 0);
+        object.propertyVersion++;
+        object.valueVersion++;
     };
 
     Runtime.prototype.arrayLength = function (array) {
@@ -390,9 +415,12 @@
     };
 
     Runtime.prototype.arrayGet = function (array, index) {
-        if (!this.arrayHas(array, index)) return undefined;
-        return this.readHeapValue(
-            this.heapRecords.arrayElementCell(array.heapAddress, index));
+        if (index < 0 || index !== Math.floor(index)) return undefined;
+        var vector = this.heapRecords.arrayElements(array.heapAddress);
+        if (index >= this.heapRecords.vectorLength(vector)) return undefined;
+        var cell = this.heapRecords.vectorCellWithinLength(vector, index);
+        if (this.valueCells.tagAt(cell) === 0) return undefined;
+        return this.readHeapValue(cell);
     };
 
     Runtime.prototype.ensureArrayCapacity = function (array, required) {
@@ -533,8 +561,19 @@
             this.ensureLinearHeap();
             address = this.heapRecords.allocateString(value);
             this.internedStrings[key] = address;
+            this.decodedStrings["$" + address] = value;
         }
-        return this.heapRecords.readString(address);
+        return this.readHeapString(address);
+    };
+
+    Runtime.prototype.readHeapString = function (address) {
+        var key = "$" + address;
+        var value = this.decodedStrings[key];
+        if (value === undefined) {
+            value = this.heapRecords.readString(address);
+            this.decodedStrings[key] = value;
+        }
+        return value;
     };
 
     Runtime.prototype.internStringAddress = function (value) {
@@ -996,6 +1035,12 @@
         return value;
     };
 
+    Runtime.prototype.globalCellAddress = function (context, name) {
+        var object = context ? context.globalObject : this.globalObject;
+        var property = this.heapOwnProperty(object, this.propertyKey(name), false);
+        return property ? this.heapRecords.propertyValueCell(property) : 0;
+    };
+
     Runtime.prototype.assertOwned = function (value) {
         if (value && value.guestType && value.ownerRuntime &&
             value.ownerRuntime !== this) {
@@ -1094,7 +1139,11 @@
             var keyAddress = this.internStringAddress(key);
             delete this.propertyAddressCache[
                 "$" + object.heapAddress + ":" + keyAddress];
-            return this.heapRecords.deleteOwnProperty(object.heapAddress, keyAddress);
+            var deleted = this.heapRecords.deleteOwnProperty(
+                object.heapAddress, keyAddress);
+            if (deleted) object.propertyVersion++;
+            if (deleted) object.valueVersion++;
+            return deleted;
         }
         if (object.properties) delete object.properties["$" + key];
         return true;
@@ -1156,6 +1205,7 @@
             if (isArrayIndex(key)) return this.arraySet(object, Number(key), value);
             var arrayProperty = this.heapOwnProperty(object, key, true);
             this.writeHeapValue(this.heapRecords.propertyValueCell(arrayProperty), value);
+            object.valueVersion++;
             return value;
         }
         key = this.propertyKey(key);
@@ -1163,6 +1213,7 @@
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             var property = this.heapOwnProperty(object, key, true);
             this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
+            object.valueVersion++;
             return value;
         }
         throw new TypeError("property target is not an object");
@@ -1332,6 +1383,7 @@
         this.hostRoots = [];
         this.contexts = [];
         this.internedStrings = {};
+        this.decodedStrings = {};
         this.globalObject = null;
         this.propertyAddressCache = {};
         var compilationIndex = 0;

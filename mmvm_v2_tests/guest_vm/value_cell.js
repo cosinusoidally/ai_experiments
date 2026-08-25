@@ -57,27 +57,29 @@
     };
 
     ValueCells.prototype.writePrimitiveAt = function (address, value) {
-        this.clearPayloadAt(address);
         if (value === undefined) this.setTagAt(address, Tags.UNDEFINED);
         else if (value === null) this.setTagAt(address, Tags.NULL);
         else if (value === false) this.setTagAt(address, Tags.FALSE);
         else if (value === true) this.setTagAt(address, Tags.TRUE);
         else if (typeof value === "number") {
             if (isInt32(value)) {
-                this.setTagAt(address, Tags.INT32);
                 this.heap.memory.writeU32(address + LOW_OFFSET, value >>> 0);
+                this.setTagAt(address, Tags.INT32);
             } else {
                 var words = Binary64.encode(value);
-                this.setTagAt(address, Tags.DOUBLE);
                 this.heap.memory.writeU32(address + LOW_OFFSET, words.low);
                 this.heap.memory.writeU32(address + HIGH_OFFSET, words.high);
+                this.setTagAt(address, Tags.DOUBLE);
             }
         } else throw new TypeError("value is not a primitive value-cell value");
         return address;
     };
 
     ValueCells.prototype.readPrimitiveAt = function (address) {
-        var tag = this.tagAt(address);
+        return this.readPrimitiveTaggedAt(address, this.tagAt(address));
+    };
+
+    ValueCells.prototype.readPrimitiveTaggedAt = function (address, tag) {
         if (tag === 0 || tag === Tags.UNDEFINED) return undefined;
         if (tag === Tags.NULL) return null;
         if (tag === Tags.FALSE) return false;
@@ -94,10 +96,13 @@
 
     ValueCells.prototype.writeReferenceAt = function (address, reference) {
         this.heap.requireRecord(reference);
-        this.clearPayloadAt(address);
-        this.setTagAt(address, Tags.REFERENCE);
         this.heap.memory.writeU32(address + LOW_OFFSET, reference);
+        this.setTagAt(address, Tags.REFERENCE);
         return address;
+    };
+
+    ValueCells.prototype.referenceAddressAt = function (address) {
+        return this.heap.memory.readU32(address + LOW_OFFSET);
     };
 
     ValueCells.prototype.readReferenceAt = function (address, expectedType) {

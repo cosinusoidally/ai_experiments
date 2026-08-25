@@ -155,3 +155,12 @@ does not expose raw heap addresses to guest code. The same 18-second command
 then reported 5 frames in 6.5 seconds, or 0.8 FPS. This is a working migration
 checkpoint, not an acceptable final result; the pre-migration demo1 reference
 remains approximately 13.5 FPS at this resolution.
+
+The next compiler checkpoint caches module-global and closure-cell values in
+the generated activation, writes mutations through to the heap, spills local
+environment registers before re-entrant guest calls, and reloads synchronized
+state afterwards. Functions which require heap environments because they
+contain nested callbacks now use this compiled path instead of unconditionally
+falling back to the interpreter. Demo1 consequently improved to approximately
+1.6--1.8 FPS at 64x64. This remains an intermediate result well below the
+pre-migration reference; no parity claim is made.

@@ -15,6 +15,12 @@
         this.profileNextReport = 0;
         this.nativeMemmove = null;
         this.constructionReceivers = [];
+        this.pixelObject = null;
+        this.pixelVersion = -1;
+        this.pixelFormat = null;
+        this.pixelAddress = 0;
+        this.pixelWidth = 0;
+        this.pixelHeight = 0;
     }
 
     ThreadedCompiler.prototype.setFallback = function (callback) {
@@ -36,11 +42,8 @@
 
     ThreadedCompiler.prototype.compile = function (program) {
         if (!program) return null;
-        /* Heap environments require accessor-based generated code. Until that
-         * backend lands, keep environment-bearing functions in the semantic
-         * interpreter; register-resident programs remain compilable. */
-        if (!program.bindingRegisters) return null;
-        var numeric = this.runtime.numericBytecodeBackend &&
+        var numeric = program.bindingRegisters &&
+                      this.runtime.numericBytecodeBackend &&
                       this.runtime.numericBytecodeBackend.compile(program);
         if (numeric) {
             var numericFunction = this.makeNumericFunction(program, numeric);
@@ -49,31 +52,58 @@
             program.threadedCompiler = this;
             program.threadedFunction = numericFunction;
             this.runtime.nativeCompilations.push(numeric);
+            this.reportCompileDecision(program, "numeric " + numeric.backend);
             return numericFunction;
         }
         if (program.threadedCompiler === this && program.threadedFunction) {
             return program.threadedFunction;
         }
-        if ((!program.bindingRegisters && !program.astBody) ||
+        if (!program.astBody ||
             !this.supports(program)) return null;
         /* Old SpiderMonkey does not reliably preserve constructor receivers
          * through a generated Function calling back into this compiler.  Keep
          * construction-bearing functions in the semantic interpreter.  The
          * functions they call remain independently compilable. */
         if (program.astBody && containsGuestConstruction(program.astBody)) {
+            this.reportCompileDecision(program, "interpreter: guest construction");
             return null;
         }
         var existing = this.find(program);
         if (existing >= 0) return this.compiled[existing];
         var source = program.astBody ? this.generateStructured(program) :
                                       this.generate(program);
-        var factory = Function("hc", "p", source);
-        var compiled = factory(this, program);
+        var factory = Function("hc", "p", "ic", source);
+        var compiled = factory(this, program,
+            {objects: [], versions: [], cells: []});
         this.programs.push(program);
         this.compiled.push(compiled);
         program.threadedCompiler = this;
         program.threadedFunction = compiled;
+        this.reportCompileDecision(program, "structured");
         return compiled;
+    };
+
+    ThreadedCompiler.prototype.reportCompileDecision = function (program, decision) {
+        if (this.runtime.profileOpcodeCounts) {
+            var compileLine = "guest VM compile: " +
+                (program.name || "<anonymous>") + " -> " + decision;
+            if (program.name === "draw") {
+                var bindingParts = [];
+                var bindingKey;
+                for (bindingKey in program.nonlocalBindings) {
+                    if (Object.prototype.hasOwnProperty.call(
+                            program.nonlocalBindings, bindingKey)) {
+                        bindingParts.push(bindingKey + ":" +
+                            program.nonlocalBindings[bindingKey].kind);
+                    }
+                }
+                compileLine += " [" + bindingParts.join(",") + "]";
+            }
+            if (typeof print === "function") print(compileLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(compileLine);
+            }
+        }
     };
 
     ThreadedCompiler.prototype.makeNumericFunction = function (program, compiled) {
@@ -185,8 +215,7 @@
             if (compiled) {
                 callable.threadedCompiler = this;
                 callable.threadedFunction = compiled;
-                if (this.runtime.profileOpcodeCounts &&
-                    ((this.profileSerial++ & 63) === 0)) {
+                if (this.runtime.profileOpcodeCounts) {
                     var started = new Date().getTime();
                     try {
                         return compiled(this.runtime, callable.homeContext || context,
@@ -215,6 +244,11 @@
     };
 
     ThreadedCompiler.prototype.recordProfile = function (name, elapsed) {
+        if (elapsed >= 100) {
+            var slowLine = "guest VM slow compiled call: " + name + "=" + elapsed + "ms";
+            if (typeof print === "function") print(slowLine);
+            else if (typeof console !== "undefined" && console.log) console.log(slowLine);
+        }
         var key = "$" + name;
         this.profileTimes[key] = (this.profileTimes[key] || 0) + elapsed;
         this.profileSamples[key] = (this.profileSamples[key] || 0) + 1;
@@ -236,7 +270,7 @@
                        entries[index].samples);
             index++;
         }
-        var line = "guest VM compiled profile (1/64 sampled): " + parts.join(" ");
+        var line = "guest VM compiled profile: " + parts.join(" ");
         if (typeof print === "function") print(line);
         else if (typeof console !== "undefined" && console.log) console.log(line);
         this.profileTimes = {};
@@ -253,16 +287,27 @@
     ThreadedCompiler.prototype.setPixelFast = function (
             framebuffer, x, y, red, green, blue, context) {
         if (framebuffer && framebuffer.guestType === "object" &&
-            this.runtime.getProperty(framebuffer, "pixelFormat") === "bgrx32le" &&
-            this.runtime.getProperty(framebuffer, "pixelAddress") &&
             typeof poke32 === "function") {
+            if (this.pixelObject !== framebuffer ||
+                this.pixelVersion !== framebuffer.valueVersion) {
+                this.pixelObject = framebuffer;
+                this.pixelVersion = framebuffer.valueVersion;
+                this.pixelFormat = this.runtime.getProperty(
+                    framebuffer, "pixelFormat");
+                this.pixelAddress = this.runtime.getProperty(
+                    framebuffer, "pixelAddress");
+                this.pixelWidth = this.runtime.getProperty(framebuffer, "width");
+                this.pixelHeight = this.runtime.getProperty(framebuffer, "height");
+            }
+            if (this.pixelFormat !== "bgrx32le" || !this.pixelAddress) {
+                return this.callMemberFixed(framebuffer, "setPixel", context, 5,
+                                            x, y, red, green, blue);
+            }
             x = Number(x);
             y = Number(y);
-            var width = this.runtime.getProperty(framebuffer, "width");
-            if (x < 0 || y < 0 || x >= width ||
-                y >= this.runtime.getProperty(framebuffer, "height")) return undefined;
-            poke32(this.runtime.getProperty(framebuffer, "pixelAddress") +
-                   (y * width + x) * 4,
+            if (x < 0 || y < 0 || x >= this.pixelWidth ||
+                y >= this.pixelHeight) return undefined;
+            poke32(this.pixelAddress + (y * this.pixelWidth + x) * 4,
                    ((Number(red) & 255) << 16) |
                    ((Number(green) & 255) << 8) | (Number(blue) & 255));
             return undefined;
@@ -330,6 +375,73 @@
         return this.runtime.getProperty(object, key);
     };
 
+    ThreadedCompiler.prototype.getConstantCached = function (
+            cache, site, object, key) {
+        if (object && object.heapAddress && object.guestType !== "array" &&
+            object.guestType !== "buffer") {
+            if (cache.objects[site] === object &&
+                cache.versions[site] === object.propertyVersion) {
+                return this.runtime.readHeapValue(cache.cells[site]);
+            }
+            var property = this.runtime.heapOwnProperty(object, key, false);
+            if (property) {
+                cache.objects[site] = object;
+                cache.versions[site] = object.propertyVersion;
+                cache.cells[site] = this.runtime.heapRecords.propertyValueCell(property);
+                return this.runtime.readHeapValue(cache.cells[site]);
+            }
+        }
+        if (object && object.guestType === "array" && key === "length") {
+            return this.runtime.arrayLength(object);
+        }
+        return this.runtime.getProperty(object, key);
+    };
+
+    ThreadedCompiler.prototype.getComputed = function (object, key) {
+        if (object && object.guestType === "array" && typeof key === "number" &&
+            key >= 0 && key === Math.floor(key)) {
+            return this.runtime.arrayGet(object, key);
+        }
+        return this.runtime.getProperty(object, key);
+    };
+
+    ThreadedCompiler.prototype.assignMemberCached = function (
+            cache, site, object, key, value, operator) {
+        if (operator && operator !== "=") {
+            value = applyAssignment(operator,
+                this.getConstantCached(cache, site, object, key), value,
+                this.runtime);
+        }
+        if (object && object.heapAddress && object.guestType !== "array" &&
+            object.guestType !== "buffer") {
+            if (cache.objects[site] === object &&
+                cache.versions[site] === object.propertyVersion) {
+                this.runtime.writeHeapValue(cache.cells[site], value);
+                object.valueVersion++;
+                return value;
+            }
+            var property = this.runtime.heapOwnProperty(object, key, true);
+            cache.objects[site] = object;
+            cache.versions[site] = object.propertyVersion;
+            cache.cells[site] = this.runtime.heapRecords.propertyValueCell(property);
+            this.runtime.writeHeapValue(cache.cells[site], value);
+            object.valueVersion++;
+            return value;
+        }
+        this.runtime.setProperty(object, key, value);
+        return value;
+    };
+
+    ThreadedCompiler.prototype.assignComputed = function (
+            object, key, value, operator) {
+        if (operator && operator !== "=") {
+            value = applyAssignment(operator, this.getComputed(object, key),
+                                    value, this.runtime);
+        }
+        this.runtime.setProperty(object, key, value);
+        return value;
+    };
+
     ThreadedCompiler.prototype.set = function (object, key, value) {
         return this.runtime.setProperty(object, key, value);
     };
@@ -363,6 +475,13 @@
         var old = Number(this.runtime.getProperty(object, key));
         var value = old + amount;
         this.runtime.setProperty(object, key, value);
+        return prefix ? value : old;
+    };
+
+    ThreadedCompiler.prototype.updateHeapCell = function (cell, amount, prefix) {
+        var old = Number(this.runtime.readHeapValue(cell));
+        var value = old + amount;
+        this.runtime.writeHeapValue(cell, value);
         return prefix ? value : old;
     };
 
@@ -667,6 +786,34 @@
         this.callIndex = 0;
         this.memberIndex = 0;
         this.pixelIndex = 0;
+        this.environmentCells = {};
+        this.environmentValues = {};
+        this.globalCells = {};
+        this.globalValues = {};
+        this.environmentCellCount = 0;
+        this.globalCellCount = 0;
+        this.reloadIndex = 0;
+        var bindingName;
+        var nonlocalBindings = program.nonlocalBindings || {};
+        for (bindingName in nonlocalBindings) {
+            if (Object.prototype.hasOwnProperty.call(
+                    nonlocalBindings, bindingName) &&
+                (!program.bindingSlots ||
+                 program.bindingSlots[bindingName] === undefined) &&
+                nonlocalBindings[bindingName].kind === "environment") {
+                this.environmentCells[bindingName] =
+                    "e" + this.environmentCellCount;
+                this.environmentValues[bindingName] =
+                    "n" + this.environmentCellCount++;
+            } else if (Object.prototype.hasOwnProperty.call(
+                    nonlocalBindings, bindingName) &&
+                (!program.bindingSlots ||
+                 program.bindingSlots[bindingName] === undefined) &&
+                nonlocalBindings[bindingName].kind === "global") {
+                this.globalCells[bindingName] = "g" + this.globalCellCount;
+                this.globalValues[bindingName] = "u" + this.globalCellCount++;
+            }
+        }
     }
 
     StructuredEmitter.prototype.generate = function () {
@@ -678,7 +825,7 @@
         while (index < this.program.bindings.length) {
             declarations.push("v" + index++);
         }
-        if (!this.useEnvironment && declarations.length) {
+        if (declarations.length) {
             lines.push("var " + declarations.join(",") + ";");
         }
         var callCount = countDirectCalls(this.program.astBody);
@@ -687,6 +834,14 @@
             index = 0;
             while (index < callCount) callDeclarations.push("c" + index++);
             lines.push("var " + callDeclarations.join(",") + ";");
+        }
+        var reloadCount = countReloadSites(this.program.astBody);
+        if (reloadCount && (this.useEnvironment || this.environmentCellCount ||
+                            this.globalCellCount)) {
+            var reloadDeclarations = [];
+            index = 0;
+            while (index < reloadCount) reloadDeclarations.push("q" + index++);
+            lines.push("var " + reloadDeclarations.join(",") + ";");
         }
         var memberCount = countMemberReads(this.program.astBody);
         if (memberCount) {
@@ -712,8 +867,68 @@
             lines.push("var " + pixelDeclarations.join(",") + ";");
         }
         if (this.useEnvironment) {
-            lines.push("var env={slots:[],bindingSlots:p.bindingSlots,parent:closure};");
+            lines.push("var callArgs=args||[a0,a1,a2,a3,a4,a5,a6,a7].slice(0,argc);");
+            lines.push("var env=runtime.makeCallEnvironment(p,receiver,callArgs," +
+                       "closure,callable);");
+            var localCellDeclarations = [];
+            var localCellInitializers = [];
+            index = 0;
+            while (index < this.program.bindings.length) {
+                localCellDeclarations.push("l" + index);
+                localCellInitializers.push("l" + index +
+                    "=runtime.heapRecords.environmentCell(env.heapAddress," +
+                    index + ")");
+                index++;
+            }
+            if (localCellDeclarations.length) {
+                lines.push("var " + localCellDeclarations.join(",") + ";");
+                lines.push(localCellInitializers.join(";") + ";");
+            }
         } else lines.push("var env=closure;");
+        if (this.environmentCellCount) {
+            var environmentDeclarations = [];
+            var environmentInitializers = [];
+            var environmentName;
+            for (environmentName in this.environmentCells) {
+                if (Object.prototype.hasOwnProperty.call(
+                        this.environmentCells, environmentName)) {
+                    var environmentBinding =
+                        this.program.nonlocalBindings[environmentName];
+                    var environmentCell = this.environmentCells[environmentName];
+                    var environmentValue = this.environmentValues[environmentName];
+                    environmentDeclarations.push(environmentCell, environmentValue);
+                    environmentInitializers.push(environmentCell +
+                        "=runtime.environmentCellAddress(closure," +
+                        environmentBinding.depth +
+                        "," + environmentBinding.slot + ")");
+                    environmentInitializers.push(environmentValue +
+                        "=runtime.readHeapValue(" + environmentCell + ")");
+                }
+            }
+            lines.push("var " + environmentDeclarations.join(",") + ";");
+            lines.push(environmentInitializers.join(";") + ";");
+        }
+        if (this.globalCellCount) {
+            var globalDeclarations = [];
+            var globalInitializers = [];
+            var globalName;
+            for (globalName in this.globalCells) {
+                if (Object.prototype.hasOwnProperty.call(this.globalCells, globalName)) {
+                    var globalCell = this.globalCells[globalName];
+                    var globalValue = this.globalValues[globalName];
+                    var plainGlobalName = globalName.substring(1);
+                    globalDeclarations.push(globalCell, globalValue);
+                    globalInitializers.push(globalCell +
+                        "=runtime.globalCellAddress(context," +
+                        quote(plainGlobalName) + ")");
+                    globalInitializers.push(globalValue + "=" + globalCell +
+                        "?runtime.readHeapValue(" + globalCell +
+                        "):runtime.getGlobal(context," + quote(plainGlobalName) + ")");
+                }
+            }
+            lines.push("var " + globalDeclarations.join(",") + ";");
+            lines.push(globalInitializers.join(";") + ";");
+        }
         index = 0;
         while (index < this.program.parameterSlots.length) {
             lines.push(this.slot(this.program.parameterSlots[index]) + "=args?(" + index +
@@ -748,7 +963,7 @@
         }
         lines.push("return undefined;");
         lines.push("}catch(e){throw runtime.locateError(e,p);}" +
-                   "finally{runtime.compiledDepth--;}");
+                   "finally{" + this.spillLocals() + "runtime.compiledDepth--;}");
         lines.push("};");
         return lines.join("\n");
     };
@@ -759,7 +974,7 @@
     };
 
     StructuredEmitter.prototype.slot = function (slot) {
-        return this.useEnvironment ? "env.slots[" + slot + "]" : "v" + slot;
+        return "v" + slot;
     };
 
     StructuredEmitter.prototype.emitHoistedFunctions = function (lines, node) {
@@ -783,9 +998,16 @@
         var binding = this.program.nonlocalBindings &&
                       this.program.nonlocalBindings["$" + name];
         if (binding && binding.kind === "environment") {
-            return "runtime.setEnvironmentSlot(closure," +
-                   (binding.depth - (this.useEnvironment ? 1 : 0)) + "," +
-                   binding.slot + "," + value + ")";
+            var storedValue = this.environmentValues["$" + name];
+            return "((" + storedValue + "=" + value + ")," +
+                   "runtime.writeHeapValue(" + this.environmentCells["$" + name] +
+                   "," + storedValue + ")," + storedValue + ")";
+        }
+        var globalValue = this.globalValues["$" + name];
+        if (globalValue) {
+            return "((" + globalValue + "=" + value + ")," +
+                "runtime.setGlobal(context," + quote(name) + "," + globalValue +
+                ")," + globalValue + ")";
         }
         return "runtime.setGlobal(context," + quote(name) + "," + value + ")";
     };
@@ -796,17 +1018,74 @@
         var binding = this.program.nonlocalBindings &&
                       this.program.nonlocalBindings["$" + name];
         if (binding && binding.kind === "environment") {
-            return "runtime.getEnvironmentSlot(closure," +
-                   (binding.depth - (this.useEnvironment ? 1 : 0)) + "," +
-                   binding.slot + ")";
+            return this.environmentValues["$" + name];
         }
-        return "runtime.getGlobal(context," + quote(name) + ")";
+        return this.globalValues["$" + name] ||
+               "runtime.getGlobal(context," + quote(name) + ")";
     };
 
     StructuredEmitter.prototype.environment = function (depth) {
         var result = "closure";
         while (depth-- > 0) result += ".parent";
         return result;
+    };
+
+    StructuredEmitter.prototype.spillLocals = function () {
+        if (!this.useEnvironment) return "";
+        var parts = [];
+        var index = 0;
+        while (index < this.program.bindings.length) {
+            parts.push("runtime.writeHeapValue(l" + index + ",v" + index + ");");
+            index++;
+        }
+        return parts.join("");
+    };
+
+    StructuredEmitter.prototype.spillLocalExpressions = function () {
+        if (!this.useEnvironment) return [];
+        var parts = [];
+        var index = 0;
+        while (index < this.program.bindings.length) {
+            parts.push("runtime.writeHeapValue(l" + index + ",v" + index + ")");
+            index++;
+        }
+        return parts;
+    };
+
+    StructuredEmitter.prototype.reloadLocalExpressions = function () {
+        if (!this.useEnvironment) return [];
+        var parts = [];
+        var index = 0;
+        while (index < this.program.bindings.length) {
+            parts.push("v" + index + "=runtime.readHeapValue(l" + index + ")");
+            index++;
+        }
+        return parts;
+    };
+
+    StructuredEmitter.prototype.reloadAfter = function (expression) {
+        if (!this.useEnvironment && !this.environmentCellCount &&
+            !this.globalCellCount) return expression;
+        var temporary = "q" + this.reloadIndex++;
+        var reloads = this.reloadLocalExpressions();
+        var spills = this.spillLocalExpressions();
+        var name;
+        for (name in this.environmentCells) {
+            if (Object.prototype.hasOwnProperty.call(this.environmentCells, name)) {
+                reloads.push(this.environmentValues[name] +
+                    "=runtime.readHeapValue(" + this.environmentCells[name] + ")");
+            }
+        }
+        for (name in this.globalCells) {
+            if (Object.prototype.hasOwnProperty.call(this.globalCells, name)) {
+                reloads.push(this.globalValues[name] + "=" + this.globalCells[name] +
+                    "?runtime.readHeapValue(" + this.globalCells[name] +
+                    "):runtime.getGlobal(context," + quote(name.substring(1)) + ")");
+            }
+        }
+        return "(" + (spills.length ? spills.join(",") + "," : "") +
+               "(" + temporary + "=" + expression + ")," +
+               reloads.join(",") + "," + temporary + ")";
     };
 
     StructuredEmitter.prototype.statement = function (node) {
@@ -926,6 +1205,15 @@
                 return "(" + reference.source + node.operator + value + ")";
             }
             if (reference.kind === "global") {
+                if (reference.value) {
+                    var globalOperator = node.operator.substring(
+                        0, node.operator.length - 1);
+                    return "((" + reference.value + "=" +
+                        (node.operator === "=" ? value : reference.value +
+                         globalOperator + value) + "),runtime.setGlobal(context," +
+                        quote(reference.name) + "," + reference.value + ")," +
+                        reference.value + ")";
+                }
                 if (node.operator === "=") return "runtime.setGlobal(context," +
                     quote(reference.name) + "," + value + ")";
                 return "runtime.setGlobal(context," + quote(reference.name) +
@@ -933,11 +1221,13 @@
                        node.operator.substring(0, node.operator.length - 1) + value + ")";
             }
             if (reference.kind === "environment") {
-                if (node.operator === "=") return "runtime.setEnvironmentSlot(closure," +
-                    reference.depth + "," + reference.slot + "," + value + ")";
-                return "runtime.setEnvironmentSlot(closure," + reference.depth +
-                    "," + reference.slot + "," + reference.source +
-                    node.operator.substring(0, node.operator.length - 1) + value + ")";
+                var environmentOperator = node.operator.substring(
+                    0, node.operator.length - 1);
+                return "((" + reference.value + "=" +
+                    (node.operator === "=" ? value : reference.source +
+                     environmentOperator + value) + ")," +
+                    "runtime.writeHeapValue(" + reference.cell + "," +
+                    reference.value + ")," + reference.value + ")";
             }
             var fastAssignmentTarget = this.fastMemberTarget(node.left,
                 reference.object, reference.key);
@@ -960,13 +1250,24 @@
             }
             var amount = node.operator === "++" ? 1 : -1;
             if (reference.kind === "global") {
+                if (reference.value) {
+                    return node.prefix ? "((" + reference.value + "+=" + amount +
+                        "),runtime.setGlobal(context," + quote(reference.name) + "," +
+                        reference.value + ")," + reference.value + ")" :
+                        "((" + reference.value + "+=" + amount +
+                        "),runtime.setGlobal(context," + quote(reference.name) + "," +
+                        reference.value + ")," + reference.value + "-(" + amount + "))";
+                }
                 return "hc.updateGlobal(context,null," + quote(reference.name) +
                        "," + amount + "," + (node.prefix ? "true" : "false") + ")";
             }
             if (reference.kind === "environment") {
-                return "runtime.updateEnvironmentSlot(closure," + reference.depth +
-                       "," + reference.slot + "," + amount + "," +
-                       (node.prefix ? "true" : "false") + ")";
+                return node.prefix ? "((" + reference.value + "+=" + amount + ")," +
+                    "runtime.writeHeapValue(" + reference.cell + "," +
+                    reference.value + ")," + reference.value + ")" :
+                    "((" + reference.value + "+=" + amount + ")," +
+                    "runtime.writeHeapValue(" + reference.cell + "," +
+                    reference.value + ")," + reference.value + "-(" + amount + "))";
             }
             var fastUpdateTarget = this.fastMemberTarget(node.argument,
                 reference.object, reference.key);
@@ -979,8 +1280,8 @@
         }
         if (node.type === "CallExpression") return this.callExpression(node);
         if (node.type === "NewExpression") {
-            return "hc.construct(" + this.expression(node.callee) + ",[" +
-                   this.expressionList(node.arguments) + "],context)";
+            return this.reloadAfter("hc.construct(" + this.expression(node.callee) +
+                   ",[" + this.expressionList(node.arguments) + "],context)");
         }
         if (node.type === "FunctionExpression") {
             return "runtime.makeGuestFunction(p.constants[" +
@@ -1050,7 +1351,7 @@
             if (node.arguments.length <= 8) {
                 var callTemporary = "c" + this.callIndex++;
                 var directArgs = args ? "," + args : "";
-                return "((" + callTemporary + "=" + this.identifier(name) + ")," +
+                var directCall = "((" + callTemporary + "=" + this.identifier(name) + ")," +
                        callTemporary + "&&" + callTemporary +
                        ".threadedCompiler===hc?" + callTemporary +
                        ".threadedFunction(runtime," + callTemporary +
@@ -1060,8 +1361,13 @@
                        "hc.callFixed(" + callTemporary +
                        ",undefined,context," + node.arguments.length +
                        directArgs + "))";
+                return isSafeIntrinsicName(name) ? directCall :
+                       this.reloadAfter(directCall);
             }
-            return "hc.call(" + this.identifier(name) + ",undefined,[" + args + "],context)";
+            var arrayCall = "hc.call(" + this.identifier(name) +
+                ",undefined,[" + args + "],context)";
+            return isSafeIntrinsicName(name) ? arrayCall :
+                   this.reloadAfter(arrayCall);
         }
         if (node.callee.type === "MemberExpression") {
             if (!node.callee.computed && node.callee.property.value === "call") {
@@ -1070,20 +1376,22 @@
                     argumentSources[0] : "undefined";
                 var explicitArguments = argumentSources.slice(1);
                 if (explicitArguments.length <= 8) {
-                    return "hc.callFixed(" + explicitCallable + "," +
+                    return this.reloadAfter("hc.callFixed(" + explicitCallable + "," +
                            explicitReceiver + ",context," +
                            explicitArguments.length +
                            (explicitArguments.length ? "," +
-                            explicitArguments.join(",") : "") + ")";
+                            explicitArguments.join(",") : "") + ")");
                 }
-                return "hc.call(" + explicitCallable + "," + explicitReceiver +
-                       ",[" + explicitArguments.join(",") + "],context)";
+                return this.reloadAfter("hc.call(" + explicitCallable + "," +
+                       explicitReceiver + ",[" + explicitArguments.join(",") +
+                       "],context)");
             }
             if (!node.callee.computed && node.callee.property.value === "apply") {
-                return "hc.callApply(" + this.expression(node.callee.object) + "," +
+                return this.reloadAfter("hc.callApply(" +
+                       this.expression(node.callee.object) + "," +
                        (argumentSources.length ? argumentSources[0] : "undefined") +
                        "," + (argumentSources.length > 1 ? argumentSources[1] :
-                              "undefined") + ",context)";
+                              "undefined") + ",context)");
             }
             if (node.callee.object.type === "Identifier" &&
                 node.callee.object.name === "NodeLibc" &&
@@ -1093,8 +1401,11 @@
                 return "hc.nativeMemmove(" + args + ")";
             }
             if (node.callee.object.type === "Identifier" &&
-                node.callee.object.name === "Math" && !node.callee.computed) {
-                return "Math." + node.callee.property.value + "(" + args + ")";
+                (node.callee.object.name === "Math" ||
+                 node.callee.object.name === "String" ||
+                 node.callee.object.name === "Number") && !node.callee.computed) {
+                return node.callee.object.name + "." +
+                       node.callee.property.value + "(" + args + ")";
             }
             var member = this.reference(node.callee);
             if (!node.callee.computed && node.callee.property.value === "setPixel" &&
@@ -1138,14 +1449,16 @@
                        ".push(" + args + ")";
             }
             if (node.arguments.length <= 8) {
-                return "hc.callMemberFixed(" + member.object + "," + member.key +
+                return this.reloadAfter("hc.callMemberFixed(" + member.object +
+                       "," + member.key +
                        ",context," + node.arguments.length +
-                       (args ? "," + args : "") + ")";
+                       (args ? "," + args : "") + ")");
             }
-            return "hc.callMember(" + member.object + "," + member.key + ",[" +
-                   args + "],context)";
+            return this.reloadAfter("hc.callMember(" + member.object + "," +
+                   member.key + ",[" + args + "],context)");
         }
-        return "hc.call(" + this.expression(node.callee) + ",undefined,[" + args + "],context)";
+        return this.reloadAfter("hc.call(" + this.expression(node.callee) +
+               ",undefined,[" + args + "],context)");
     };
 
     StructuredEmitter.prototype.reference = function (node) {
@@ -1155,12 +1468,15 @@
             var binding = this.program.nonlocalBindings &&
                           this.program.nonlocalBindings["$" + node.name];
             if (binding && binding.kind === "environment") {
-                var depth = binding.depth - (this.useEnvironment ? 1 : 0);
+                var depth = binding.depth;
                 return {kind: "environment", depth: depth, slot: binding.slot,
-                        source: "runtime.getEnvironmentSlot(closure," + depth +
-                                "," + binding.slot + ")"};
+                        cell: this.environmentCells["$" + node.name],
+                        value: this.environmentValues["$" + node.name],
+                        source: this.environmentValues["$" + node.name]};
             }
-            return {kind: "global", name: node.name};
+            return {kind: "global", name: node.name,
+                    cell: this.globalCells["$" + node.name],
+                    value: this.globalValues["$" + node.name]};
         }
         if (node.type === "MemberExpression") {
             return {kind: "member", object: this.expression(node.object),
@@ -1171,7 +1487,10 @@
     };
 
     StructuredEmitter.prototype.memberRead = function (object, key, node) {
-        return "hc.get(" + object + "," + key + ")";
+        var heapSite = this.memberIndex++;
+        return node.computed ?
+            "hc.getComputed(" + object + "," + key + ")" :
+            "hc.getConstantCached(ic," + heapSite + "," + object + "," + key + ")";
         /* The specializations below are retained as design history while the
          * heap backends gain equivalent checked fast paths. */
         if (this.fastPlan && node.object.type === "MemberExpression" &&
@@ -1247,7 +1566,11 @@
     };
 
     StructuredEmitter.prototype.memberWrite = function (object, key, value, node) {
-        return "hc.assignMember(" + object + "," + key + "," + value + ",\"=\")";
+        var heapSite = this.memberIndex++;
+        return node.computed ?
+            "hc.assignComputed(" + object + "," + key + "," + value + ",\"=\")" :
+            "hc.assignMemberCached(ic," + heapSite + "," + object + "," + key +
+                "," + value + ",\"=\")";
         /* See memberRead: direct host-object fields are no longer semantic. */
         var fastKind = this.fastMemberKind(node);
         var alias = this.fastMemberAlias(node);
@@ -1611,6 +1934,25 @@
         }
         visit(node);
         return count;
+    }
+
+    function countReloadSites(node) {
+        var count = 0;
+        function visit(value) {
+            if (!value || typeof value !== "object") return;
+            if (value.type === "CallExpression" || value.type === "NewExpression") {
+                count++;
+            }
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+        return count;
+    }
+
+    function isSafeIntrinsicName(name) {
+        return name === "Number" || name === "String" || name === "Boolean" ||
+               name === "parseInt" || name === "parseFloat" ||
+               name === "isNaN" || name === "isFinite";
     }
 
     function countMemberReads(node) {
