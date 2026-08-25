@@ -26,6 +26,7 @@
                     callable, receiver, args, context) {
                 var execution = Execution.fromFunction(
                     callable, semanticRuntime, context, receiver, args);
+                execution.compiledEntry = null;
                 while (true) {
                     var result = execution.resume(Infinity);
                     if (result.status === "hostCall") execution.serviceHostCall();

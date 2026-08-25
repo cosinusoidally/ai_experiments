@@ -107,6 +107,7 @@
             program.bindingSlots["$" + expression.name] : -1;
         program.name = expression.name || "";
         program.astBody = expression.body;
+        program.returnKind = inferReturnKind(expression.body);
         program.nonlocalBindings = describeNonlocalBindings(expression.body, nested);
         return program;
     };
@@ -807,6 +808,37 @@
         }
         visit(body);
         return result;
+    }
+
+    function inferReturnKind(body) {
+        var kind = null;
+        var invalid = false;
+        function visit(node) {
+            if (!node || typeof node !== "object" || invalid) return;
+            if (node.type === "FunctionExpression" ||
+                node.type === "FunctionDeclaration") return;
+            if (node.type === "ReturnStatement" && node.argument) {
+                var current = node.argument.type === "ObjectExpression" ? "properties" :
+                              node.argument.type === "ArrayExpression" ? "array" : null;
+                if (!current || (kind && kind !== current)) invalid = true;
+                else kind = current;
+                return;
+            }
+            var key;
+            for (key in node) {
+                if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key)) {
+                    var value = node[key];
+                    if (value && typeof value === "object") {
+                        if (typeof value.length === "number") {
+                            var index = 0;
+                            while (index < value.length) visit(value[index++]);
+                        } else visit(value);
+                    }
+                }
+            }
+        }
+        visit(body);
+        return invalid ? null : kind;
     }
 
     function collectFunctionDeclarations(statements, result) {

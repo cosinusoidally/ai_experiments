@@ -21,12 +21,19 @@ if (guestRunnerIsNode) {
     }
 }
 
-while (guestRunnerArguments[0] === "--vm-profile" ||
-       guestRunnerArguments[0] === "--vm-threaded") {
-    if (guestRunnerArguments[0] === "--vm-profile") guestRunnerProfile = true;
-    else guestRunnerThreaded = true;
-    guestRunnerArguments.shift();
+var guestRunnerProgramArguments = [];
+for (var guestRunnerOptionIndex = 0;
+     guestRunnerOptionIndex < guestRunnerArguments.length;
+     guestRunnerOptionIndex++) {
+    if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
+        guestRunnerProfile = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-threaded") {
+        guestRunnerThreaded = true;
+    } else {
+        guestRunnerProgramArguments.push(guestRunnerArguments[guestRunnerOptionIndex]);
+    }
 }
+guestRunnerArguments = guestRunnerProgramArguments;
 
 if (!guestRunnerArguments.length) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] [--vm-threaded] program.js";

@@ -79,6 +79,37 @@
                                  properties: {}, gcMark: 0});
     };
 
+    Runtime.prototype.makeObjectLiteral3 = function (
+            k0, v0, k1, v1, k2, v2) {
+        var object = {guestType: "object", properties: {}, gcMark: 0};
+        object.properties["$" + k0] = v0;
+        object.properties["$" + k1] = v1;
+        object.properties["$" + k2] = v2;
+        this.heapObjects[this.heapObjects.length] = object;
+        this.noteAllocation(1);
+        return object;
+    };
+
+    Runtime.prototype.makeObjectLiteral5 = function (
+            k0, v0, k1, v1, k2, v2, k3, v3, k4, v4) {
+        var object = {guestType: "object", properties: {}, gcMark: 0};
+        object.properties["$" + k0] = v0;
+        object.properties["$" + k1] = v1;
+        object.properties["$" + k2] = v2;
+        object.properties["$" + k3] = v3;
+        object.properties["$" + k4] = v4;
+        this.heapObjects[this.heapObjects.length] = object;
+        this.noteAllocation(1);
+        return object;
+    };
+
+    Runtime.prototype.makeArrayLiteral0 = function () {
+        var array = {guestType: "array", elements: [], properties: {}, gcMark: 0};
+        this.heapObjects[this.heapObjects.length] = array;
+        this.noteAllocation(1);
+        return array;
+    };
+
     Runtime.prototype.makeRegExp = function (pattern, flags) {
         return this.trackObject({guestType: "regexp", pattern: pattern,
                                  flags: flags, properties: {}, gcMark: 0});
@@ -456,10 +487,10 @@
             });
         var stringConstructor = this.makeNativeFunction("String",
             function (receiver, args) { return args.length ? String(args[0]) : ""; });
-        stringConstructor.properties.$fromCharCode = this.makeNativeFunction(
+        this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
                 return String.fromCharCode.apply(String, args);
-            });
+            }));
         this.globals.String = stringConstructor;
         this.globals.Number = this.makeNativeFunction("Number",
             function (receiver, args) { return args.length ? Number(args[0]) : 0; });

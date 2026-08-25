@@ -176,7 +176,7 @@
         var constructor = this.makeNative("Buffer", function (receiver, args) {
             return support.fromValue(args[0], args[1]);
         });
-        constructor.properties.$alloc = this.makeNative("Buffer.alloc",
+        this.runtime.setProperty(constructor, "alloc", this.makeNative("Buffer.alloc",
             function (receiver, args) {
                 var buffer = support.allocate(args[0]);
                 if (args.length > 1) {
@@ -184,14 +184,14 @@
                     support.runtime.call(fill, buffer, [args[1]]);
                 }
                 return buffer;
-            });
-        constructor.properties.$isBuffer = this.makeNative("Buffer.isBuffer",
+            }));
+        this.runtime.setProperty(constructor, "isBuffer", this.makeNative("Buffer.isBuffer",
             function (receiver, args) {
                 return !!args[0] && args[0].guestType === "buffer";
-            });
-        constructor.properties.$from = this.makeNative("Buffer.from",
-            function (receiver, args) { return support.fromValue(args[0], args[1]); });
-        constructor.properties.$allocNative = this.makeNative("Buffer.allocNative",
+            }));
+        this.runtime.setProperty(constructor, "from", this.makeNative("Buffer.from",
+            function (receiver, args) { return support.fromValue(args[0], args[1]); }));
+        this.runtime.setProperty(constructor, "allocNative", this.makeNative("Buffer.allocNative",
             function (receiver, args) {
                 var buffer = support.allocate(args[0]);
                 var allocation = buffer.backing.allocation;
@@ -199,8 +199,8 @@
                     buffer.properties.$_nodePointer = allocation.pointer + buffer.offset;
                 }
                 return buffer;
-            });
-        constructor.properties.$prototype = this.prototype;
+            }));
+        this.runtime.setProperty(constructor, "prototype", this.prototype);
         this.constructor = constructor;
         this.runtime.setGlobal("Buffer", constructor);
     };

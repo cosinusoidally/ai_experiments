@@ -83,7 +83,7 @@
             callable.threadedFunction) {
             return callable.threadedFunction(this.runtime,
                 callable.homeContext || context, receiver, null, callable.closure,
-                callable, a0, a1, a2, a3, a4, a5, a6, a7);
+                callable, count, a0, a1, a2, a3, a4, a5, a6, a7);
         }
         this.runtime.assertOwned(callable);
         if (!callable) throw new TypeError("value is not callable");
@@ -98,7 +98,7 @@
                     try {
                         return compiled(this.runtime, callable.homeContext || context,
                                         receiver, null, callable.closure, callable,
-                                        a0, a1, a2, a3, a4, a5, a6, a7);
+                                        count, a0, a1, a2, a3, a4, a5, a6, a7);
                     } finally {
                         this.recordProfile(callable.name || "<anonymous>",
                                            new Date().getTime() - started);
@@ -106,7 +106,7 @@
                 }
                 return compiled(this.runtime, callable.homeContext || context,
                                 receiver, null, callable.closure, callable,
-                                a0, a1, a2, a3, a4, a5, a6, a7);
+                                count, a0, a1, a2, a3, a4, a5, a6, a7);
             }
         }
         var args = [];
@@ -155,6 +155,43 @@
             count, a0, a1, a2, a3, a4, a5, a6, a7) {
         return this.callFixed(this.runtime.getProperty(object, key), object, context,
                               count, a0, a1, a2, a3, a4, a5, a6, a7);
+    };
+
+    ThreadedCompiler.prototype.setPixelFast = function (
+            framebuffer, x, y, red, green, blue, context) {
+        if (framebuffer && framebuffer.guestType === "object" &&
+            framebuffer.properties.$pixelFormat === "bgrx32le" &&
+            framebuffer.properties.$pixelAddress && typeof poke32 === "function") {
+            x = Number(x);
+            y = Number(y);
+            if (x < 0 || y < 0 || x >= framebuffer.properties.$width ||
+                y >= framebuffer.properties.$height) return undefined;
+            poke32(framebuffer.properties.$pixelAddress +
+                   (y * framebuffer.properties.$width + x) * 4,
+                   ((Number(red) & 255) << 16) |
+                   ((Number(green) & 255) << 8) | (Number(blue) & 255));
+            return undefined;
+        }
+        return this.callMemberFixed(framebuffer, "setPixel", context, 5,
+                                    x, y, red, green, blue);
+    };
+
+    ThreadedCompiler.prototype.fallbackCompiled = function (callable, receiver, args,
+            argumentCount, a0, a1, a2, a3, a4, a5, a6, a7) {
+        if (!this.fallback) throw new Error("compiled specialization needs interpreter fallback");
+        if (!args) {
+            args = [];
+            if (argumentCount > 0) args[0] = a0;
+            if (argumentCount > 1) args[1] = a1;
+            if (argumentCount > 2) args[2] = a2;
+            if (argumentCount > 3) args[3] = a3;
+            if (argumentCount > 4) args[4] = a4;
+            if (argumentCount > 5) args[5] = a5;
+            if (argumentCount > 6) args[6] = a6;
+            if (argumentCount > 7) args[7] = a7;
+        }
+        return this.fallback(callable, receiver, args,
+                             callable.homeContext || null);
     };
 
     ThreadedCompiler.prototype.construct = function (callable, args, context) {
@@ -222,6 +259,28 @@
         return object;
     };
 
+    ThreadedCompiler.prototype.makeObjectLiteral3 = function (
+            k0, v0, k1, v1, k2, v2) {
+        var object = {guestType: "object", properties: {}, gcMark: 0};
+        this.runtime.trackObject(object);
+        object.properties["$" + k0] = v0;
+        object.properties["$" + k1] = v1;
+        object.properties["$" + k2] = v2;
+        return object;
+    };
+
+    ThreadedCompiler.prototype.makeObjectLiteral5 = function (
+            k0, v0, k1, v1, k2, v2, k3, v3, k4, v4) {
+        var object = {guestType: "object", properties: {}, gcMark: 0};
+        this.runtime.trackObject(object);
+        object.properties["$" + k0] = v0;
+        object.properties["$" + k1] = v1;
+        object.properties["$" + k2] = v2;
+        object.properties["$" + k3] = v3;
+        object.properties["$" + k4] = v4;
+        return object;
+    };
+
     ThreadedCompiler.prototype.makeArrayLiteral = function (values) {
         return this.runtime.arrayFrom(values);
     };
@@ -240,6 +299,11 @@
         return array;
     };
 
+    ThreadedCompiler.prototype.makeArrayLiteral0 = function () {
+        return this.runtime.trackObject({guestType: "array", elements: [],
+                                         properties: {}, gcMark: 0});
+    };
+
     ThreadedCompiler.prototype.updateGlobal = function (
             context, closure, name, amount, prefix) {
         var old = Number(this.runtime.getBinding(context, closure, name));
@@ -256,8 +320,29 @@
         return result;
     };
 
+    ThreadedCompiler.prototype.arrayElementsHaveProperties = function (array) {
+        if (!array || array.guestType !== "array") return false;
+        var index = 0;
+        while (index < array.elements.length) {
+            var value = array.elements[index++];
+            if (!value || !value.properties) return false;
+        }
+        return true;
+    };
+
+    ThreadedCompiler.prototype.arrayElementPropertiesAreArrays = function (array, key) {
+        if (!this.arrayElementsHaveProperties(array)) return false;
+        var index = 0;
+        while (index < array.elements.length) {
+            var value = array.elements[index++].properties["$" + key];
+            if (!value || value.guestType !== "array") return false;
+        }
+        return true;
+    };
+
     ThreadedCompiler.prototype.generateStructured = function (program) {
         var emitter = new StructuredEmitter(program);
+        emitter.threadedCompiler = this;
         return emitter.generate();
     };
 
@@ -460,11 +545,13 @@
         this.genericOnly = !!genericOnly;
         this.useEnvironment = !program.bindingRegisters;
         this.callIndex = 0;
+        this.memberIndex = 0;
+        this.pixelIndex = 0;
     }
 
     StructuredEmitter.prototype.generate = function () {
         var lines = [];
-        lines.push("return function(runtime,context,receiver,args,closure,callable," +
+        lines.push("return function(runtime,context,receiver,args,closure,callable,argc," +
                    "a0,a1,a2,a3,a4,a5,a6,a7){");
         var declarations = [];
         var index = 0;
@@ -481,6 +568,29 @@
             while (index < callCount) callDeclarations.push("c" + index++);
             lines.push("var " + callDeclarations.join(",") + ";");
         }
+        var memberCount = countMemberReads(this.program.astBody);
+        if (memberCount) {
+            var memberDeclarations = [];
+            index = 0;
+            while (index < memberCount) {
+                memberDeclarations.push("m" + index, "k" + index);
+                index++;
+            }
+            lines.push("var " + memberDeclarations.join(",") + ";");
+        }
+        var pixelCount = countSetPixelCalls(this.program.astBody);
+        if (pixelCount) {
+            var pixelDeclarations = [];
+            index = 0;
+            while (index < pixelCount) {
+                var pixelPart = 0;
+                while (pixelPart < 6) {
+                    pixelDeclarations.push("s" + index + "_" + pixelPart++);
+                }
+                index++;
+            }
+            lines.push("var " + pixelDeclarations.join(",") + ";");
+        }
         if (this.useEnvironment) {
             lines.push("var env={slots:[],bindingSlots:p.bindingSlots,parent:closure};");
         } else lines.push("var env=closure;");
@@ -493,8 +603,7 @@
         }
         if (usesIdentifier(this.program.astBody, "arguments")) {
             lines.push(this.slot(this.program.argumentsSlot) + "=runtime.arrayFrom(args||" +
-                       "[a0,a1,a2,a3,a4,a5,a6,a7].slice(0," +
-                       this.program.parameters.length + "));");
+                       "[a0,a1,a2,a3,a4,a5,a6,a7].slice(0,argc));");
         }
         lines.push(this.slot(this.program.thisSlot) + "=receiver;");
         if (this.program.functionNameSlot >= 0) {
@@ -504,12 +613,14 @@
         var plan = this.genericOnly ? null : analyzeFastPath(this.program, this);
         if (plan && plan.guards.length) {
             var fastEmitter = new StructuredEmitter(this.program, plan, true);
-            var genericEmitter = new StructuredEmitter(this.program, null, true);
-            lines.push("if(" + plan.guards.join("&&") + "){" +
-                       (plan.aliasDeclarations.length ? "var " +
-                        plan.aliasDeclarations.join(",") + ";" : "") +
-                       fastEmitter.statement(this.program.astBody) + "}else " +
-                       genericEmitter.statement(this.program.astBody));
+            fastEmitter.threadedCompiler = this.threadedCompiler;
+            lines.push("if(!(" + plan.guards.join("&&") + "))return " +
+                       "hc.fallbackCompiled(callable,receiver,args,argc," +
+                       "a0,a1,a2,a3,a4,a5,a6,a7);");
+            if (plan.aliasDeclarations.length) {
+                lines.push("var " + plan.aliasDeclarations.join(",") + ";");
+            }
+            lines.push(fastEmitter.statement(this.program.astBody));
         } else {
             lines.push(this.statement(this.program.astBody));
         }
@@ -590,6 +701,15 @@
                 if (declaration.initial) {
                     result.push(this.local(declaration.name) + "=" +
                                 this.expression(declaration.initial) + ";");
+                    if (this.fastPlan && this.fastPlan.memberAliases[
+                            "$" + declaration.name]) {
+                        var declarationKind = this.fastPlan.kinds[
+                            "$" + declaration.name];
+                        result.push(this.fastPlan.memberAliases["$" + declaration.name] +
+                                    "=" + this.local(declaration.name) +
+                                    (declarationKind === "array" ? ".elements" :
+                                     ".properties") + ";");
+                    }
                 }
             }
         } else if (node.type === "IfStatement") {
@@ -667,8 +787,18 @@
         if (node.type === "AssignmentExpression") {
             var reference = this.reference(node.left);
             var value = this.expression(node.right);
-            if (reference.kind === "local") return "(" + reference.source +
-                node.operator + value + ")";
+            if (reference.kind === "local") {
+                var localAlias = this.fastPlan && node.left.type === "Identifier" &&
+                    this.fastPlan.memberAliases["$" + node.left.name];
+                if (localAlias && node.operator === "=") {
+                    var localKind = this.fastPlan.kinds["$" + node.left.name];
+                    return "((" + reference.source + "=" + value + "),(" +
+                           localAlias + "=" + reference.source +
+                           (localKind === "array" ? ".elements" : ".properties") +
+                           ")," + reference.source + ")";
+                }
+                return "(" + reference.source + node.operator + value + ")";
+            }
             if (reference.kind === "global") {
                 if (node.operator === "=") return "(context.globals[" +
                     quote(reference.name) + "]=" + value + ")";
@@ -678,6 +808,11 @@
             if (reference.kind === "environment") {
                 if (node.operator === "=") return "(" + reference.source + "=" + value + ")";
                 return "(" + reference.source + node.operator + value + ")";
+            }
+            var fastAssignmentTarget = this.fastMemberTarget(node.left,
+                reference.object, reference.key);
+            if (fastAssignmentTarget) {
+                return "(" + fastAssignmentTarget + node.operator + value + ")";
             }
             if (node.operator === "=" && isPure(node.left.object) &&
                 (!node.left.computed || isPure(node.left.property))) {
@@ -702,6 +837,12 @@
                 return node.prefix ? node.operator + reference.source :
                                      reference.source + node.operator;
             }
+            var fastUpdateTarget = this.fastMemberTarget(node.argument,
+                reference.object, reference.key);
+            if (fastUpdateTarget) {
+                return node.prefix ? node.operator + fastUpdateTarget :
+                                     fastUpdateTarget + node.operator;
+            }
             return "hc.updateMember(" + reference.object + "," + reference.key + "," +
                    amount + "," + (node.prefix ? "true" : "false") + ")";
         }
@@ -723,20 +864,30 @@
                 values.push(this.expression(node.properties[propertyIndex].value));
                 propertyIndex++;
             }
-            var directProperties = [];
-            propertyIndex = 0;
-            while (propertyIndex < keys.length) {
-                directProperties.push(quote("$" + node.properties[propertyIndex].key) +
-                                      ":" + values[propertyIndex]);
-                propertyIndex++;
+            if (keys.length <= 8) {
+                var fixed = [];
+                propertyIndex = 0;
+                while (propertyIndex < keys.length) {
+                    fixed.push(keys[propertyIndex], values[propertyIndex]);
+                    propertyIndex++;
+                }
+                var exactArity = keys.length === 3 || keys.length === 5;
+                return (exactArity ? "runtime.makeObjectLiteral" + keys.length :
+                        "hc.makeObjectLiteralFixed") + "(" +
+                       (exactArity ? fixed.join(",") : keys.length +
+                        (fixed.length ? "," + fixed.join(",") : "")) + ")";
             }
-            return "runtime.trackObject({guestType:\"object\",properties:{" +
-                   directProperties.join(",") + "},gcMark:0})";
+            return "hc.makeObjectLiteral([" + keys.join(",") + "],[" +
+                   values.join(",") + "])";
         }
         if (node.type === "ArrayExpression") {
-            return "runtime.trackObject({guestType:\"array\",elements:[" +
-                   this.expressionList(node.elements) +
-                   "],properties:{},gcMark:0})";
+            if (node.elements.length <= 8) {
+                if (node.elements.length === 0) return "runtime.makeArrayLiteral0()";
+                return "hc.makeArrayLiteralFixed(" + node.elements.length +
+                       (node.elements.length ? "," +
+                        this.expressionList(node.elements) : "") + ")";
+            }
+            return "hc.makeArrayLiteral([" + this.expressionList(node.elements) + "])";
         }
         if (node.type === "RegExpLiteral") {
             return "runtime.makeRegExp(" + quote(node.pattern) + "," + quote(node.flags) + ")";
@@ -755,7 +906,12 @@
     };
 
     StructuredEmitter.prototype.callExpression = function (node) {
-        var args = this.expressionList(node.arguments);
+        var argumentSources = [];
+        var sourceArgumentIndex = 0;
+        while (sourceArgumentIndex < node.arguments.length) {
+            argumentSources.push(this.expression(node.arguments[sourceArgumentIndex++]));
+        }
+        var args = argumentSources.join(",");
         if (node.callee.type === "Identifier") {
             var name = node.callee.name;
             if (name === "poke32" || name === "poke8" ||
@@ -768,7 +924,8 @@
                        ".threadedCompiler===hc?" + callTemporary +
                        ".threadedFunction(runtime," + callTemporary +
                        ".homeContext||context,undefined,null," + callTemporary +
-                       ".closure," + callTemporary + directArgs + "):" +
+                       ".closure," + callTemporary + "," + node.arguments.length +
+                       directArgs + "):" +
                        "hc.callFixed(" + callTemporary +
                        ",undefined,context," + node.arguments.length +
                        directArgs + "))";
@@ -781,6 +938,44 @@
                 return "Math." + node.callee.property.value + "(" + args + ")";
             }
             var member = this.reference(node.callee);
+            if (!node.callee.computed && node.callee.property.value === "setPixel" &&
+                node.arguments.length === 5) {
+                var pixelSite = this.pixelIndex++;
+                var pixelArguments = argumentSources;
+                var pixelObject = "s" + pixelSite + "_0";
+                var pixelX = "s" + pixelSite + "_1";
+                var pixelY = "s" + pixelSite + "_2";
+                var pixelRed = "s" + pixelSite + "_3";
+                var pixelGreen = "s" + pixelSite + "_4";
+                var pixelBlue = "s" + pixelSite + "_5";
+                return "((" + pixelObject + "=" + member.object + "),(" +
+                       pixelX + "=" + pixelArguments[0] + "),(" + pixelY + "=" +
+                       pixelArguments[1] + "),(" + pixelRed + "=" + pixelArguments[2] +
+                       "),(" + pixelGreen + "=" + pixelArguments[3] + "),(" +
+                       pixelBlue + "=" + pixelArguments[4] + "),(" + pixelObject +
+                       "&&" + pixelObject + ".guestType==='object'&&" + pixelObject +
+                       ".properties.$pixelFormat==='bgrx32le'&&" + pixelObject +
+                       ".properties.$pixelAddress&&typeof poke32==='function'?((" +
+                       pixelX + "=Number(" + pixelX + ")),(" + pixelY + "=Number(" +
+                       pixelY + ")),(" + pixelX + "<0||" + pixelY + "<0||" +
+                       pixelX + ">=" + pixelObject + ".properties.$width||" + pixelY +
+                       ">=" + pixelObject + ".properties.$height?undefined:poke32(" +
+                       pixelObject + ".properties.$pixelAddress+(" + pixelY + "*" +
+                       pixelObject + ".properties.$width+" + pixelX + ")*4,((Number(" +
+                       pixelRed + ")&255)<<16)|((Number(" + pixelGreen +
+                       ")&255)<<8)|(Number(" + pixelBlue + ")&255)))):" +
+                       "hc.callMemberFixed(" + pixelObject + ",\"setPixel\",context,5," +
+                       pixelX + "," + pixelY + "," + pixelRed + "," + pixelGreen +
+                       "," + pixelBlue + ")))";
+            }
+            if (!node.callee.computed && node.callee.property.value === "push" &&
+                node.callee.object.type === "Identifier" && this.fastPlan &&
+                this.fastPlan.kinds["$" + node.callee.object.name] === "array") {
+                var arrayAlias = this.fastPlan.memberAliases[
+                    "$" + node.callee.object.name];
+                return (arrayAlias || member.object + ".elements") +
+                       ".push(" + args + ")";
+            }
             if (node.arguments.length <= 8) {
                 return "hc.callMemberFixed(" + member.object + "," + member.key +
                        ",context," + node.arguments.length +
@@ -815,6 +1010,23 @@
     };
 
     StructuredEmitter.prototype.memberRead = function (object, key, node) {
+        if (this.fastPlan && node.object.type === "MemberExpression" &&
+            node.object.computed && node.object.object.type === "Identifier" &&
+            !node.computed && this.fastPlan.arrayElementKinds[
+                "$" + node.object.object.name] === "properties") {
+            return object + ".properties[" + quote("$" + node.property.value) + "]";
+        }
+        if (this.fastPlan && node.object.type === "MemberExpression" &&
+            !node.object.computed && node.object.object.type === "Identifier") {
+            var nestedKey = "$" + node.object.object.name + ":$" +
+                            node.object.property.value;
+            if (this.fastPlan.nestedArrays[nestedKey]) {
+                if (!node.computed && node.property.value === "length") {
+                    return object + ".elements.length";
+                }
+                if (node.computed) return object + ".elements[" + key + "]";
+            }
+        }
         var fastKind = this.fastMemberKind(node);
         var alias = this.fastMemberAlias(node);
         if (fastKind === "array") {
@@ -827,27 +1039,47 @@
             return (alias || object + ".properties") + "[" +
                    quote("$" + node.property.value) + "]";
         }
+        var memberNumber = this.memberIndex++;
+        if (node.object.type !== "Identifier") {
+            var objectTemporary = "m" + memberNumber;
+            return "((" + objectTemporary + "=" + object + ")," +
+                   this.genericMemberRead(objectTemporary, key, node, memberNumber) + ")";
+        }
+        return this.genericMemberRead(object, key, node, memberNumber);
+    };
+
+    StructuredEmitter.prototype.genericMemberRead = function (object, key, node,
+                                                                memberNumber) {
+        var keyPrefix = "";
+        var keySuffix = "";
+        if (node.computed && node.property.type !== "Identifier" &&
+            node.property.type !== "Literal") {
+            var keyTemporary = "k" + memberNumber;
+            keyPrefix = "((" + keyTemporary + "=" + key + "),";
+            keySuffix = ")";
+            key = keyTemporary;
+        }
         if (!node.computed) {
             var propertyName = node.property.value;
             if (propertyName === "length") {
-                return "(" + object + "&&" + object + ".guestType==='array'?" +
+                return keyPrefix + "(" + object + "&&" + object + ".guestType==='array'?" +
                        object + ".elements.length:(" + object + "&&" + object +
                        ".properties&&" + object + ".properties[" +
                        quote("$" + propertyName) + "]!==undefined?" + object +
                        ".properties[" + quote("$" + propertyName) +
-                       "]:hc.get(" + object + "," + key + ")))";
+                       "]:hc.get(" + object + "," + key + ")))" + keySuffix;
             }
-            return "(" + object + "&&" + object + ".properties?" +
+            return keyPrefix + "(" + object + "&&" + object + ".properties?" +
                    object + ".properties[" + quote("$" + propertyName) +
-                   "]:hc.get(" + object + "," + key + "))";
+                   "]:hc.get(" + object + "," + key + "))" + keySuffix;
         }
         if (isPure(node.object) && (!node.computed || isPure(node.property))) {
-            return "(" + object + "&&" + object + ".guestType==='array'&&typeof (" +
+            return keyPrefix + "(" + object + "&&" + object + ".guestType==='array'&&typeof (" +
                    key + ")==='number'&&(" + key + ")>=0&&((" + key + ")|0)===(" +
                    key + ")?" + object + ".elements[" + key + "]:hc.get(" +
-                   object + "," + key + "))";
+                   object + "," + key + "))" + keySuffix;
         }
-        return "hc.get(" + object + "," + key + ")";
+        return keyPrefix + "hc.get(" + object + "," + key + ")" + keySuffix;
     };
 
     StructuredEmitter.prototype.memberWrite = function (object, key, value, node) {
@@ -886,12 +1118,30 @@
         return this.fastPlan.memberAliases["$" + node.object.name] || null;
     };
 
+    StructuredEmitter.prototype.fastMemberTarget = function (node, object, key) {
+        var kind = this.fastMemberKind(node);
+        var alias = this.fastMemberAlias(node);
+        if (kind === "array" && node.computed) {
+            return (alias || object + ".elements") + "[" + key + "]";
+        }
+        if (kind && !node.computed) {
+            return (alias || object + ".properties") + "[" +
+                   quote("$" + node.property.value) + "]";
+        }
+        return null;
+    };
+
     function analyzeFastPath(program, emitter) {
         var aliases = {};
         var known = {};
         var kinds = {};
         var roots = {};
         var written = {};
+        var unsafeWritten = {};
+        var elementSources = {};
+        var nestedArrays = {};
+        var arrayElementKinds = {};
+        var callableKindGuards = {};
         var parameters = {};
         var index = 0;
         while (index < program.parameters.length) parameters["$" + program.parameters[index++]] = true;
@@ -902,7 +1152,17 @@
             if ((node.type === "AssignmentExpression" ||
                  node.type === "UpdateExpression") &&
                 (node.left || node.argument).type === "Identifier") {
-                written["$" + (node.left || node.argument).name] = true;
+                var writtenName = (node.left || node.argument).name;
+                written["$" + writtenName] = true;
+                if (node.type !== "AssignmentExpression" ||
+                    node.operator !== "=" || node.right.type !== "Identifier") {
+                    unsafeWritten["$" + writtenName] = true;
+                } else {
+                    var assignedRoot = rootName(node.right.name);
+                    if (!parameters["$" + assignedRoot] && !known["$" + assignedRoot]) {
+                        unsafeWritten["$" + writtenName] = true;
+                    }
+                }
             }
             visitChildren(node, writes, false);
         }
@@ -924,6 +1184,20 @@
                                initial.callee.type === "Identifier" &&
                                initial.callee.name === "Array") {
                         known["$" + declaration.name] = "array";
+                    } else if (initial && initial.type === "MemberExpression" &&
+                               initial.computed &&
+                               initial.object.type === "Identifier") {
+                        known["$" + declaration.name] = "properties";
+                        elementSources["$" + declaration.name] =
+                            initial.object.name;
+                    } else if (initial && initial.type === "CallExpression" &&
+                               initial.callee.type === "Identifier") {
+                        var initialKind = knownFunctionReturnKind(
+                            initial.callee.name);
+                        if (initialKind) {
+                            known["$" + declaration.name] = initialKind;
+                            callableKindGuards["$" + initial.callee.name] = initialKind;
+                        }
                     }
                 }
             }
@@ -943,6 +1217,23 @@
             if (!node || typeof node !== "object") return;
             if (node.type === "CallExpression" &&
                 node.callee && node.callee.type === "MemberExpression") {
+                if (!node.callee.computed &&
+                    node.callee.property.value === "push" &&
+                    node.callee.object.type === "Identifier") {
+                    markMember(node.callee.object.name, "array");
+                    if (node.arguments.length === 1 &&
+                        node.arguments[0].type === "CallExpression" &&
+                        node.arguments[0].callee.type === "Identifier") {
+                        var pushedKind = knownFunctionReturnKind(
+                            node.arguments[0].callee.name);
+                        if (pushedKind) {
+                            arrayElementKinds["$" + node.callee.object.name] =
+                                pushedKind;
+                            callableKindGuards["$" +
+                                node.arguments[0].callee.name] = pushedKind;
+                        }
+                    }
+                }
                 var argumentIndex = 0;
                 while (argumentIndex < node.arguments.length) members(node.arguments[argumentIndex++]);
                 members(node.callee.object);
@@ -951,9 +1242,25 @@
             }
             if (node.type === "MemberExpression" &&
                 node.object && node.object.type === "Identifier") {
-                var name = node.object.name;
                 var needed = node.computed || node.property.value === "length" ?
                              "array" : "properties";
+                markMember(node.object.name, needed);
+            } else if (node.type === "MemberExpression" &&
+                       node.object && node.object.type === "MemberExpression" &&
+                       !node.object.computed &&
+                       node.object.object.type === "Identifier" &&
+                       (node.computed || node.property.value === "length")) {
+                var baseName = node.object.object.name;
+                if (elementSources["$" + baseName]) {
+                    nestedArrays["$" + baseName + ":$" +
+                                 node.object.property.value] = true;
+                    markMember(baseName, "properties");
+                }
+            }
+            visitChildren(node, members, true);
+        }
+
+        function markMember(name, needed) {
                 var localKnown = known["$" + name];
                 if (!localKnown || localKnown === needed ||
                     (localKnown === "array" && needed === "properties")) {
@@ -970,8 +1277,15 @@
                         }
                     }
                 }
-            }
-            visitChildren(node, members, true);
+        }
+
+        function knownFunctionReturnKind(name) {
+            var compiler = emitter.threadedCompiler;
+            var runtime = compiler && compiler.runtime;
+            var context = runtime && runtime.contexts.length ? runtime.contexts[0] : null;
+            var callable = context && context.globals[name];
+            return callable && callable.guestType === "bytecodeFunction" ?
+                   callable.program.returnKind : null;
         }
 
         declarations(program.astBody);
@@ -988,13 +1302,42 @@
                     "(" + source + "&&" + source + ".properties)");
             }
         }
+        var derivedName;
+        for (derivedName in elementSources) {
+            if (Object.prototype.hasOwnProperty.call(elementSources, derivedName) &&
+                kinds[derivedName]) {
+                guards.push("hc.arrayElementsHaveProperties(" +
+                    emitter.identifier(elementSources[derivedName]) + ")");
+            }
+        }
+        var nestedName;
+        for (nestedName in nestedArrays) {
+            if (Object.prototype.hasOwnProperty.call(nestedArrays, nestedName)) {
+                var separator = nestedName.indexOf(":$");
+                var nestedBase = nestedName.substring(1, separator);
+                var nestedProperty = nestedName.substring(separator + 2);
+                guards.push("hc.arrayElementPropertiesAreArrays(" +
+                    emitter.identifier(elementSources["$" + nestedBase]) + "," +
+                    quote(nestedProperty) + ")");
+            }
+        }
+        var callableName;
+        for (callableName in callableKindGuards) {
+            if (Object.prototype.hasOwnProperty.call(callableKindGuards, callableName)) {
+                var globalName = callableName.substring(1);
+                var callableSource = emitter.identifier(globalName);
+                guards.push("(" + callableSource + "&&" + callableSource +
+                    ".guestType==='bytecodeFunction'&&" + callableSource +
+                    ".program.returnKind===" + quote(callableKindGuards[callableName]) + ")");
+            }
+        }
         var memberAliases = {};
         var aliasDeclarations = [];
         var aliasNumber = 0;
         var memberName;
         for (memberName in kinds) {
             if (Object.prototype.hasOwnProperty.call(kinds, memberName) &&
-                !written[memberName]) {
+                !unsafeWritten[memberName]) {
                 var plainName = memberName.substring(1);
                 var rootNameValue = rootName(plainName);
                 if (parameters["$" + plainName] ||
@@ -1006,12 +1349,18 @@
                     memberAliases[memberName] = aliasName;
                     aliasDeclarations.push(aliasName + "=" + base +
                         (kinds[memberName] === "array" ? ".elements" : ".properties"));
+                } else if (known[memberName]) {
+                    aliasName = "f" + aliasNumber++;
+                    memberAliases[memberName] = aliasName;
+                    aliasDeclarations.push(aliasName);
                 }
             }
         }
         return guards.length ? {kinds: kinds, guards: guards,
             memberAliases: memberAliases,
-            aliasDeclarations: aliasDeclarations} : null;
+            aliasDeclarations: aliasDeclarations,
+            nestedArrays: nestedArrays,
+            arrayElementKinds: arrayElementKinds} : null;
     }
 
     function visitChildren(node, callback, includeFunctionBodies) {
@@ -1069,6 +1418,31 @@
                 value.callee.name !== "poke32" && value.callee.name !== "poke8" &&
                 value.callee.name !== "peek32" && value.callee.name !== "peek8" &&
                 value.arguments.length <= 8) count++;
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+        return count;
+    }
+
+    function countMemberReads(node) {
+        var count = 0;
+        function visit(value) {
+            if (!value || typeof value !== "object") return;
+            if (value.type === "MemberExpression") count++;
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+        return count;
+    }
+
+    function countSetPixelCalls(node) {
+        var count = 0;
+        function visit(value) {
+            if (!value || typeof value !== "object") return;
+            if (value.type === "CallExpression" && value.callee &&
+                value.callee.type === "MemberExpression" &&
+                !value.callee.computed && value.callee.property.value === "setPixel" &&
+                value.arguments.length === 5) count++;
             visitChildren(value, visit, false);
         }
         visit(node);
