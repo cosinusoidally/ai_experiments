@@ -88,6 +88,42 @@
         assert(firstRuntime.runtime.getGlobal(firstContext, "servicedAnswer") === 7,
                "serviced host return value was incorrect");
 
+        firstContext.installGlobal("inlineAdd", firstRuntime.runtime.makeNativeFunction(
+            "inlineAdd", function (receiver, args) { return args[0] + args[1]; }));
+        var inlineExecution = firstContext.start(
+            "var inlineAnswer = inlineAdd(8, 9);", "inline_intrinsic.js");
+        var inlineResult = inlineExecution.resume(Infinity);
+        assert(inlineResult.status === "completed" &&
+               firstRuntime.runtime.getGlobal(firstContext, "inlineAnswer") === 17,
+               "explicit inline intrinsic unexpectedly yielded");
+
+        firstContext.installGlobal("hostFailure", firstContext.makeHostFunction(
+            "hostFailure", function () { throw new Error("host failed"); }));
+        var failedExecution = firstContext.start(
+            "hostFailure();", "failed_host.js");
+        var failedResult = failedExecution.resume(Infinity);
+        assert(failedResult.status === "hostCall", "failing host call did not yield first");
+        failedExecution.serviceHostCall();
+        failedResult = failedExecution.resume(Infinity);
+        assert(failedResult.status === "threw" &&
+               String(failedResult.exception).indexOf("host failed") >= 0,
+               "host failure was not injected when execution resumed");
+
+        var gcExecution = firstContext.start(
+            "var suspendedBytes = Buffer.alloc(4);" +
+            "suspendedBytes[0] = 63;" +
+            "for (var k = 0; k < 8; k++) suspendedBytes[1] = k;",
+            "suspended_gc.js");
+        var gcResult = gcExecution.resume(12);
+        assert(gcResult.status === "budget", "GC continuation test did not suspend");
+        firstRuntime.collect();
+        do {
+            gcResult = gcExecution.resume(12);
+        } while (gcResult.status === "budget");
+        assert(gcResult.status === "completed" &&
+               firstRuntime.runtime.getGlobal(firstContext, "suspendedBytes").backing.freed === false,
+               "collection did not retain a suspended execution value");
+
         firstRuntime.destroy();
         otherRuntime.destroy();
         return "runtime/context isolation and resumable execution passed";

@@ -213,6 +213,7 @@
 
     Execution.prototype.completeHostCall = function (value) {
         if (!this.pendingHostCall) throw new Error("execution has no pending host call");
+        this.runtime.assertOwned(value);
         this.pendingHostCall.frame.registers[this.pendingHostCall.destination] = value;
         this.pendingHostCall = null;
         this.status = "ready";

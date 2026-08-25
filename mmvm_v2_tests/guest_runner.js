@@ -40,7 +40,22 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode});
 try {
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
-    guestProgramVM.run(guestProgramSource, guestProgramPath);
+    var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
+    while (true) {
+        var guestExecutionResult = guestExecution.resume(1000000);
+        if (guestExecutionResult.status === "budget") {
+            /* The command-line embedder grants another cooperative time slice. */
+        } else if (guestExecutionResult.status === "hostCall") {
+            guestExecution.serviceHostCall();
+        } else if (guestExecutionResult.status === "completed") {
+            break;
+        } else if (guestExecutionResult.status === "threw") {
+            throw guestExecutionResult.exception;
+        } else {
+            throw new Error("unknown guest execution status: " +
+                            guestExecutionResult.status);
+        }
+    }
 } finally {
     guestProgramVM.destroy();
 }
