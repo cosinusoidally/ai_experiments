@@ -40,7 +40,7 @@
                    op.CONST, 1, 0,
                    op.CONST, 2, 1,
                    op.CONST, 3, 2,
-                   op.LESS, 4, 1, 3,
+                   op.LESS_EQUAL, 4, 1, 3,
                    op.JUMP_IF_FALSE, 4, 29,
                    op.ADD, 0, 0, 1,
                    op.ADD, 1, 1, 2,
@@ -53,18 +53,25 @@
             loopAddress, 0, 0, -1, loopProgram.registerCount);
         compiledLoop.jsFn(0, loopFrame);
         assertNumber(runtime.readHeapValue(runtime.heapRecords.frameRegisterCell(
-            loopFrame, compiledLoop.returnRegister)), 10,
+            loopFrame, compiledLoop.returnRegister)), 15,
             "JavaScript numeric control-flow backend");
         if (compiledLoop.backend === "i386") {
             loopFrame = runtime.heapRecords.allocateFrame(
                 loopAddress, 0, 0, -1, loopProgram.registerCount);
             compiledLoop.fn(runtime.linearHeap.memory.nativeAddress(0), loopFrame);
             assertNumber(runtime.readHeapValue(runtime.heapRecords.frameRegisterCell(
-                loopFrame, compiledLoop.returnRegister)), 10,
+                loopFrame, compiledLoop.returnRegister)), 15,
                 "i386 numeric control-flow backend");
             if (compiledLoop.assembly.indexOf("jne(bytecode_29)") < 0 ||
                 compiledLoop.assembly.indexOf("jmp(bytecode_12)") < 0) {
                 throw new Error("numeric loop did not use macro-assembler labels");
+            }
+            if (compiledLoop.assembly.indexOf(
+                    "fucomip_st0_st1()\nfstp_st0()\n" +
+                    "setae_al()\nmovzx_eax_al()") < 0 ||
+                compiledLoop.assembly.indexOf(";") >= 0) {
+                throw new Error("numeric comparison was not composed from " +
+                    "individual instruction macros");
             }
         }
         var label = compiled.backend === "i386" ?

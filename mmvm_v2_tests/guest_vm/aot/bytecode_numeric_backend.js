@@ -28,7 +28,7 @@
         var programAddress = this.runtime.programAddress(program);
         var constants = this.runtime.heapRecords.programConstants(programAddress);
         var targets = branchTargets(program);
-        assembler.beginFrameKernel();
+        emitFrameKernelPrologue(assembler);
         var pc = 0;
         while (pc < program.code.length) {
             if (targets["$" + pc]) assembler.label("bytecode_" + pc);
@@ -56,11 +56,11 @@
                     program.code[pc + (reverse ? 3 : 2)], pc, "compare_left");
                 emitLoadNumber(assembler, this.runtime,
                     program.code[pc + (reverse ? 2 : 3)], pc, "compare_right");
-                if (opcode === op.STRICT_EQUAL) assembler.compareF64EqualToEax();
+                if (opcode === op.STRICT_EQUAL) emitCompareF64EqualToEax(assembler);
                 else if (opcode === op.LESS_EQUAL || opcode === op.GREATER_EQUAL) {
-                    assembler.compareF64AboveOrEqualToEax();
-                } else assembler.compareF64AboveToEax();
-                assembler.storeFrameBoolean(registerOffset(
+                    emitCompareF64AboveOrEqualToEax(assembler);
+                } else emitCompareF64AboveToEax(assembler);
+                emitStoreFrameBoolean(assembler, registerOffset(
                     this.runtime, program.code[pc + 1]));
                 pc += 4;
             } else if (opcode === op.NEGATE || opcode === op.POSITIVE) {
@@ -86,7 +86,7 @@
         }
         assembler.label("numeric_epilogue");
         assembler.movEaxImmediate(0);
-        assembler.endFrameKernel();
+        emitFrameKernelEpilogue(assembler);
         assembler.resolveLabels();
         var nativeResult = install(this, assembler);
         return {backend: nativeResult.fn ? "i386" : "js",
@@ -183,13 +183,61 @@
         return runtime.heapRecords.frameRegisterDisplacement(register);
     }
 
+    /* These are backend programs expressed entirely in instruction-sized
+     * assembler operations. Encoding bytes belong only in x86_assembler.js. */
+    function emitFrameKernelPrologue(assembler) {
+        assembler.pushEbp();
+        assembler.movEbpEsp();
+        assembler.pushEbx();
+        assembler.pushEsi();
+        assembler.movEbxEbpDisplacement(8);
+        assembler.movEsiEbpDisplacement(12);
+        assembler.addEsiEbx();
+    }
+
+    function emitFrameKernelEpilogue(assembler) {
+        assembler.popEsi();
+        assembler.popEbx();
+        assembler.leave();
+        assembler.ret();
+    }
+
+    function emitCompareF64AboveToEax(assembler) {
+        assembler.fucomipSt0St1();
+        assembler.fstpSt0();
+        assembler.setAboveAl();
+        assembler.movzxEaxAl();
+    }
+
+    function emitCompareF64AboveOrEqualToEax(assembler) {
+        assembler.fucomipSt0St1();
+        assembler.fstpSt0();
+        assembler.setAboveOrEqualAl();
+        assembler.movzxEaxAl();
+    }
+
+    function emitCompareF64EqualToEax(assembler) {
+        assembler.fucomipSt0St1();
+        assembler.fstpSt0();
+        assembler.setEqualAl();
+        assembler.movzxEaxAl();
+    }
+
+    function emitStoreFrameBoolean(assembler, offset) {
+        assembler.addEaxImmediate8(3);
+        assembler.movFrameWordEax(offset);
+        assembler.movFrameImmediate(offset + 4, 0);
+        assembler.movFrameImmediate(offset + 8, 0);
+        assembler.movFrameImmediate(offset + 12, 0);
+    }
+
     function emitCopyConstant(assembler, runtime, vector, constant, target) {
         var source = runtime.heapRecords.vectorCell(vector, constant);
         var targetOffset = registerOffset(runtime, target);
         var word = 0;
         while (word < 4) {
-            assembler.copyHeapWordToFrame(source + word * 4,
-                                           targetOffset + word * 4);
+            assembler.movEaxHeapWord(source + word * 4);
+            assembler.movFrameWordEax(targetOffset + word * 4);
             word++;
         }
     }
@@ -199,8 +247,8 @@
         var targetOffset = registerOffset(runtime, target);
         var word = 0;
         while (word < 4) {
-            assembler.copyFrameWord(sourceOffset + word * 4,
-                                    targetOffset + word * 4);
+            assembler.movEaxFrameWord(sourceOffset + word * 4);
+            assembler.movFrameWordEax(targetOffset + word * 4);
             word++;
         }
     }
@@ -220,7 +268,9 @@
 
     function emitStoreNumber(assembler, runtime, register) {
         var offset = registerOffset(runtime, register);
-        assembler.storeFrameF64(offset, offset + 4);
+        assembler.movFrameImmediate(offset, ValueCells.Tags.DOUBLE);
+        assembler.fstpFrameF64(offset + 4);
+        assembler.movFrameImmediate(offset + 12, 0);
     }
 
     function makeJS(runtime, program, returnRegister) {
