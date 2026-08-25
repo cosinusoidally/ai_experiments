@@ -18,6 +18,10 @@
         load("guest_vm/heap.js");
         load("guest_vm/value_cell.js");
         load("guest_vm/heap_records.js");
+        load("guest_vm/aot/kernel_compiler.js");
+        load("guest_vm/aot/backend_js.js");
+        load("guest_vm/aot/x86_assembler.js");
+        load("guest_vm/aot/backend_x86.js");
         load("guest_vm/threaded_compiler.js");
         load("guest_vm/buffer.js");
         load("guest_vm/runtime.js");

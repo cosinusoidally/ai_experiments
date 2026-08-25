@@ -17,6 +17,10 @@ contracts.
 This is a direction and a migration contract. The current interpreter has not
 yet reached this endpoint.
 
+The concrete authoritative record layouts, handle/cache rules, shared compiler
+IR, dual-backend boundary, and migration gates are specified in
+`HEAP_AND_COMPILER_DESIGN.md`.
+
 ## Current migration checkpoint
 
 The current implementation has completed these preparatory steps:

@@ -21,6 +21,10 @@
         var runValueCellTest = require("./value_cell_test.js");
         var runRuntimeLinearHeapTest = require("./runtime_linear_heap_test.js");
         var runHeapRecordsTest = require("./heap_records_test.js");
+        var KernelCompiler = require("../aot/kernel_compiler.js");
+        var KernelJSBackend = require("../aot/backend_js.js");
+        var KernelX86Backend = require("../aot/backend_x86.js");
+        var runKernelCompilerTest = require("./kernel_compiler_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -38,6 +42,7 @@
         load("guest_vm/tests/value_cell_test.js");
         load("guest_vm/tests/runtime_linear_heap_test.js");
         load("guest_vm/tests/heap_records_test.js");
+        load("guest_vm/tests/kernel_compiler_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
@@ -51,6 +56,10 @@
         runValueCellTest = GuestVMRunValueCellTest;
         runRuntimeLinearHeapTest = GuestVMRunRuntimeLinearHeapTest;
         runHeapRecordsTest = GuestVMRunHeapRecordsTest;
+        KernelCompiler = GuestVMKernelCompiler;
+        KernelJSBackend = GuestVMKernelJSBackend;
+        KernelX86Backend = GuestVMKernelX86Backend;
+        runKernelCompilerTest = GuestVMRunKernelCompilerTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -110,6 +119,10 @@
     var heapRecordsResult = runHeapRecordsTest(Heap, ValueCells, HeapRecords);
     if (typeof print === "function") print(heapRecordsResult);
     else console.log(heapRecordsResult);
+    var kernelCompilerResult = runKernelCompilerTest(
+        KernelCompiler, KernelJSBackend, KernelX86Backend);
+    if (typeof print === "function") print(kernelCompilerResult);
+    else console.log(kernelCompilerResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");
