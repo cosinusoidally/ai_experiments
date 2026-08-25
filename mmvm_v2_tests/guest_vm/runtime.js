@@ -30,6 +30,9 @@
         this.heapHandles = {};
         this.functionMetadata = {};
         this.environmentMetadata = {};
+        /* Derived lookup metadata only: cached entries name heap records and
+         * never contain property values. */
+        this.propertyAddressCache = {};
         this.hostRoots = [];
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
@@ -338,11 +341,17 @@
 
     Runtime.prototype.heapOwnProperty = function (object, key, create) {
         var keyAddress = this.internStringAddress(key);
-        var property = this.heapRecords.findOwnProperty(object.heapAddress, keyAddress);
+        var cacheKey = "$" + object.heapAddress + ":" + keyAddress;
+        var property = this.propertyAddressCache[cacheKey] || 0;
+        if (!property) {
+            property = this.heapRecords.findOwnProperty(object.heapAddress, keyAddress);
+            if (property) this.propertyAddressCache[cacheKey] = property;
+        }
         if (!property && create) {
             property = this.heapRecords.defineOwnProperty(
                 object.heapAddress, keyAddress,
                 HeapRecords.Attributes.DEFAULT);
+            this.propertyAddressCache[cacheKey] = property;
         }
         return property;
     };
@@ -1014,8 +1023,10 @@
             return true;
         }
         if (object.heapAddress) {
-            return this.heapRecords.deleteOwnProperty(object.heapAddress,
-                this.internStringAddress(key));
+            var keyAddress = this.internStringAddress(key);
+            delete this.propertyAddressCache[
+                "$" + object.heapAddress + ":" + keyAddress];
+            return this.heapRecords.deleteOwnProperty(object.heapAddress, keyAddress);
         }
         if (object.properties) delete object.properties["$" + key];
         return true;
@@ -1257,6 +1268,7 @@
         this.hostRoots = [];
         this.contexts = [];
         this.internedStrings = {};
+        this.propertyAddressCache = {};
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
