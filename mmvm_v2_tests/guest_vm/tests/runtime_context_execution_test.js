@@ -67,6 +67,16 @@
         var budgetResult = budgetExecution.resume(0);
         assert(budgetResult.status === "budget" && budgetResult.instructions === 0,
                "zero budget did not yield without executing");
+        var heapTypes = firstRuntime.runtime.linearHeap.constructor.Types;
+        assert(firstRuntime.runtime.linearHeap.recordType(
+                   budgetExecution.frames[0].heapAddress) === heapTypes.FRAME,
+               "suspended activation is not represented by a guest frame record");
+        assert(firstRuntime.runtime.heapRecords.framePC(
+                   budgetExecution.frames[0].heapAddress) === 0,
+               "suspended frame PC was not spilled to the guest heap");
+        assert(firstRuntime.runtime.heapRecords.contextGlobal(
+                   firstContext.heapAddress) === firstContext.globalObject.heapAddress,
+               "context record does not own its global object");
         var budgetYields = 0;
         do {
             budgetResult = budgetExecution.resume(3);
@@ -88,6 +98,9 @@
             "host_yield.js");
         var hostResult = hostExecution.resume(Infinity);
         assert(hostResult.status === "hostCall", "external host function did not yield");
+        assert(firstRuntime.runtime.heapRecords.framePC(
+                   hostExecution.frames[0].heapAddress) > 0,
+               "host-call yield did not spill its frame PC");
         assert(hostCalls === 0, "host callback ran before the embedder serviced it");
         assert(hostResult.call.name === "hostAdd" &&
                hostResult.call.arguments[0] === 20 &&

@@ -494,6 +494,22 @@
         return address;
     };
 
+    Runtime.prototype.programAddress = function (program) {
+        return this.registerProgram(program);
+    };
+
+    Runtime.prototype.spillFrame = function (frame) {
+        if (!frame || !frame.heapAddress) return;
+        this.heapRecords.setFramePC(frame.heapAddress, frame.pc);
+        var count = this.heapRecords.frameRegisterCount(frame.heapAddress);
+        var index = 0;
+        while (index < count) {
+            this.writeHeapValue(this.heapRecords.frameRegisterCell(
+                frame.heapAddress, index), frame.registers[index]);
+            index++;
+        }
+    };
+
     Runtime.prototype.unregisterContext = function (context) {
         var survivors = [];
         var index = 0;

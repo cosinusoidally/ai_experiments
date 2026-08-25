@@ -3,16 +3,23 @@
     if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
 
     function makeFrame(program, runtime, context, receiver, args, closure, callable,
-                       returnRegister) {
+                       returnRegister, caller) {
         args = args || [];
         var registers = [];
         runtime.initializeFrameRegisters(program, registers, receiver, args, callable);
-        return {program: program, code: program.code, constants: program.constants,
+        var environment = runtime.makeCallEnvironment(
+            program, receiver, args, closure, callable);
+        var frame = {program: program, code: program.code, constants: program.constants,
                 registers: registers, pc: 0,
                 context: context,
-                environment: runtime.makeCallEnvironment(
-                    program, receiver, args, closure, callable),
+                environment: environment,
                 returnRegister: returnRegister, handlers: []};
+        frame.heapAddress = runtime.heapRecords.allocateFrame(
+            runtime.programAddress(program), environment ? environment.heapAddress : 0,
+            caller ? caller.heapAddress : 0, returnRegister,
+            program.registerCount || 0);
+        runtime.spillFrame(frame);
+        return frame;
     }
 
     function Execution(program, runtime, context) {
@@ -28,6 +35,8 @@
         this.hasInjectedHostException = false;
         this.totalInstructions = 0;
         this.compiledEntry = null;
+        runtime.heapRecords.setContextActiveFrame(context.heapAddress,
+                                                  this.frames[0].heapAddress);
     }
 
     Execution.fromFunction = function (callable, runtime, context, receiver, args) {
@@ -39,6 +48,9 @@
         execution.frames = [makeFrame(callable.program, runtime,
             callable.homeContext || context, receiver, args || [], runtime.functionClosure(callable),
             callable, -1)];
+        runtime.heapRecords.setContextActiveFrame(
+            (callable.homeContext || context).heapAddress,
+            execution.frames[0].heapAddress);
         if (runtime.threadedCompiler) {
             var compiled = runtime.threadedCompiler.compile(callable.program);
             if (compiled) {
@@ -51,6 +63,9 @@
     };
 
     Execution.prototype.result = function (status, used) {
+        this.spillFrames();
+        this.runtime.heapRecords.setContextActiveFrame(this.context.heapAddress,
+            this.frames.length ? this.frames[this.frames.length - 1].heapAddress : 0);
         var result = {status: status, instructions: used,
                       totalInstructions: this.totalInstructions};
         if (status === "completed") result.value = this.value;
@@ -61,6 +76,13 @@
                            arguments: this.pendingHostCall.args};
         }
         return result;
+    };
+
+    Execution.prototype.spillFrames = function () {
+        var index = 0;
+        while (index < this.frames.length) {
+            this.runtime.spillFrame(this.frames[index++]);
+        }
     };
 
     Execution.prototype.finish = function (status, value, used) {
@@ -309,7 +331,7 @@
                             this.frames.push(makeFrame(callableValue.program, this.runtime,
                                 callableValue.homeContext || frame.context, receiver, args,
                                 this.runtime.functionClosure(callableValue), callableValue,
-                                destination));
+                                destination, frame));
                         }
                         this.runtime.gcSafePoint();
                     } else if (callableValue && callableValue.guestType === "function" &&
@@ -359,7 +381,7 @@
                         var constructorFrame = makeFrame(constructorValue.program,
                             this.runtime, constructorValue.homeContext || frame.context,
                             constructedReceiver, args, this.runtime.functionClosure(constructorValue),
-                            constructorValue, constructDestination);
+                            constructorValue, constructDestination, frame);
                         constructorFrame.constructReceiver = constructedReceiver;
                         this.frames.push(constructorFrame);
                         this.runtime.gcSafePoint();
