@@ -127,3 +127,16 @@ Functions constructing guest-defined classes stay in the semantic interpreter
 to avoid a Firefox 1 generated-function receiver defect. Built-in construction
 and constructor-free renderer functions retain structured/native compilation.
 Demo8 is not a Node-host compatibility target.
+
+## 2026-08-25: authoritative-heap migration gate
+
+An experimental live handle-to-heap shadow allocation was tested and reverted.
+With bytewise record clearing it reduced demo2 at 64x64 from roughly 11 FPS to
+3.8 FPS. Relying on the bump heap's already-zeroed memory improved that to
+about 5--6 FPS, still below the accepted baseline. No slow live switch is
+present in the committed runtime; demo2 returned to 11.0--11.4 FPS.
+
+The shared kernel IR now emits a bulk record initializer through JavaScript on
+Node and generated i386 macro assembly on MMVM. Both backends produce identical
+tested heap words. Live object migration must use this bulk path, rather than
+scattered per-field peek/poke calls, before it can pass the performance gate.

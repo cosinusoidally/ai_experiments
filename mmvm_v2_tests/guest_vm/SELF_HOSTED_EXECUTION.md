@@ -30,6 +30,10 @@ The current implementation has completed these preparatory steps:
 - `JSRuntime` lazily owns a private `Heap` and `ValueCells` accessor;
 - explicit 16-byte non-NaN-boxed cells round-trip primitive values and heap
   references through Node-emulated and MMVM-native linear memory;
+- fixed authoritative layouts cover strings, properties, arrays, environments,
+  functions, frames, registers, regexps, and Buffer records;
+- one kernel front/middle end emits executable JavaScript and native i386, with
+  a bulk heap-store kernel tested against identical heap results;
 - high-bit word writes are normalized at the central `HostMemory` boundary;
 - opcode profiling spans asynchronous callback executions;
 - a portable structured backend compiles bytecode/AST metadata to JavaScript
