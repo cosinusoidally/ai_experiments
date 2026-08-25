@@ -36,6 +36,10 @@
 
     ThreadedCompiler.prototype.compile = function (program) {
         if (!program) return null;
+        /* Heap environments require accessor-based generated code. Until that
+         * backend lands, keep environment-bearing functions in the semantic
+         * interpreter; register-resident programs remain compilable. */
+        if (!program.bindingRegisters) return null;
         if (program.threadedCompiler === this && program.threadedFunction) {
             return program.threadedFunction;
         }
@@ -703,8 +707,9 @@
         var binding = this.program.nonlocalBindings &&
                       this.program.nonlocalBindings["$" + name];
         if (binding && binding.kind === "environment") {
-            return this.environment(binding.depth - (this.useEnvironment ? 1 : 0)) +
-                   ".slots[" + binding.slot + "]=" + value;
+            return "runtime.setEnvironmentSlot(closure," +
+                   (binding.depth - (this.useEnvironment ? 1 : 0)) + "," +
+                   binding.slot + "," + value + ")";
         }
         return "context.globals[" + quote(name) + "]=" + value;
     };
@@ -715,8 +720,9 @@
         var binding = this.program.nonlocalBindings &&
                       this.program.nonlocalBindings["$" + name];
         if (binding && binding.kind === "environment") {
-            return this.environment(binding.depth - (this.useEnvironment ? 1 : 0)) +
-                   ".slots[" + binding.slot + "]";
+            return "runtime.getEnvironmentSlot(closure," +
+                   (binding.depth - (this.useEnvironment ? 1 : 0)) + "," +
+                   binding.slot + ")";
         }
         return "context.globals[" + quote(name) + "]";
     };
@@ -850,8 +856,11 @@
                        node.operator + value + ")";
             }
             if (reference.kind === "environment") {
-                if (node.operator === "=") return "(" + reference.source + "=" + value + ")";
-                return "(" + reference.source + node.operator + value + ")";
+                if (node.operator === "=") return "runtime.setEnvironmentSlot(closure," +
+                    reference.depth + "," + reference.slot + "," + value + ")";
+                return "runtime.setEnvironmentSlot(closure," + reference.depth +
+                    "," + reference.slot + "," + reference.source +
+                    node.operator.substring(0, node.operator.length - 1) + value + ")";
             }
             var fastAssignmentTarget = this.fastMemberTarget(node.left,
                 reference.object, reference.key);
@@ -878,8 +887,9 @@
                 return node.prefix ? node.operator + globalSource : globalSource + node.operator;
             }
             if (reference.kind === "environment") {
-                return node.prefix ? node.operator + reference.source :
-                                     reference.source + node.operator;
+                return "runtime.updateEnvironmentSlot(closure," + reference.depth +
+                       "," + reference.slot + "," + amount + "," +
+                       (node.prefix ? "true" : "false") + ")";
             }
             var fastUpdateTarget = this.fastMemberTarget(node.argument,
                 reference.object, reference.key);
@@ -1068,10 +1078,10 @@
             var binding = this.program.nonlocalBindings &&
                           this.program.nonlocalBindings["$" + node.name];
             if (binding && binding.kind === "environment") {
-                return {kind: "environment",
-                        source: this.environment(binding.depth -
-                                (this.useEnvironment ? 1 : 0)) + ".slots[" +
-                                binding.slot + "]"};
+                var depth = binding.depth - (this.useEnvironment ? 1 : 0);
+                return {kind: "environment", depth: depth, slot: binding.slot,
+                        source: "runtime.getEnvironmentSlot(closure," + depth +
+                                "," + binding.slot + ")"};
             }
             return {kind: "global", name: node.name};
         }

@@ -29,6 +29,7 @@
         this.heapObjects = [];
         this.heapHandles = {};
         this.functionMetadata = {};
+        this.environmentMetadata = {};
         this.hostRoots = [];
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
@@ -130,7 +131,8 @@
         var prototype = this.makeObject();
         this.ensureLinearHeap();
         var callable = this.trackObject(this.makeHeapHandle(
-            this.heapRecords.allocateFunction(false, 0, 0, 0),
+            this.heapRecords.allocateFunction(false, 0,
+                closure ? closure.heapAddress : 0, 0),
             "bytecodeFunction"));
         callable.program = program;
         callable.closure = closure;
@@ -150,21 +152,27 @@
             return null;
         }
         var bindings = program.bindings || [];
-        var slots = [];
+        this.ensureLinearHeap();
+        var environment = {heapAddress: this.heapRecords.allocateEnvironment(
+                               closure ? closure.heapAddress : 0, bindings.length),
+                           ownerRuntime: this};
+        this.environmentMetadata["$" + environment.heapAddress] = {
+            handle: environment, bindingSlots: program.bindingSlots || {}};
         var index = 0;
-        while (index < bindings.length) slots[index++] = undefined;
-        var environment = {slots: slots,
-                           bindingSlots: program.bindingSlots || {},
-                           parent: closure || null};
         index = 0;
         while (index < program.parameters.length) {
-            slots[program.parameterSlots[index]] =
-                index < args.length ? args[index] : undefined;
+            this.writeHeapValue(this.heapRecords.environmentCell(
+                environment.heapAddress, program.parameterSlots[index]),
+                index < args.length ? args[index] : undefined);
             index++;
         }
-        slots[program.argumentsSlot] = this.arrayFrom(args);
-        slots[program.thisSlot] = receiver;
-        if (program.functionNameSlot >= 0) slots[program.functionNameSlot] = callable;
+        this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
+            program.argumentsSlot), this.arrayFrom(args));
+        this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
+            program.thisSlot), receiver);
+        if (program.functionNameSlot >= 0) this.writeHeapValue(
+            this.heapRecords.environmentCell(environment.heapAddress,
+                program.functionNameSlot), callable);
         return environment;
     };
 
@@ -201,9 +209,11 @@
     Runtime.prototype.getBinding = function (context, environment, name) {
         var current = environment;
         while (current) {
-            var slot = current.bindingSlots["$" + name];
-            if (slot !== undefined) return current.slots[slot];
-            current = current.parent;
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            var slot = metadata.bindingSlots["$" + name];
+            if (slot !== undefined) return this.readHeapValue(
+                this.heapRecords.environmentCell(current.heapAddress, slot));
+            current = this.environmentParent(current);
         }
         return this.getGlobal(context, name);
     };
@@ -211,38 +221,61 @@
     Runtime.prototype.setBinding = function (context, environment, name, value) {
         var current = environment;
         while (current) {
-            var slot = current.bindingSlots["$" + name];
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            var slot = metadata.bindingSlots["$" + name];
             if (slot !== undefined) {
-                current.slots[slot] = value;
+                this.writeHeapValue(this.heapRecords.environmentCell(
+                    current.heapAddress, slot), value);
                 return value;
             }
-            current = current.parent;
+            current = this.environmentParent(current);
         }
         return this.setGlobal(context, name, value);
     };
 
     Runtime.prototype.getEnvironmentSlot = function (environment, depth, slot) {
         while (depth > 0) {
-            environment = environment.parent;
+            environment = this.environmentParent(environment);
             depth--;
         }
-        if (!environment || slot < 0 || slot >= environment.slots.length) {
+        if (!environment || slot < 0 ||
+            slot >= this.heapRecords.environmentSlotCount(environment.heapAddress)) {
             throw new Error("invalid lexical environment slot");
         }
-        return environment.slots[slot];
+        return this.readHeapValue(
+            this.heapRecords.environmentCell(environment.heapAddress, slot));
     };
 
     Runtime.prototype.setEnvironmentSlot = function (environment, depth, slot, value) {
         this.assertOwned(value);
         while (depth > 0) {
-            environment = environment.parent;
+            environment = this.environmentParent(environment);
             depth--;
         }
-        if (!environment || slot < 0 || slot >= environment.slots.length) {
+        if (!environment || slot < 0 ||
+            slot >= this.heapRecords.environmentSlotCount(environment.heapAddress)) {
             throw new Error("invalid lexical environment slot");
         }
-        environment.slots[slot] = value;
+        this.writeHeapValue(
+            this.heapRecords.environmentCell(environment.heapAddress, slot), value);
         return value;
+    };
+
+    Runtime.prototype.updateEnvironmentSlot = function (
+            environment, depth, slot, amount, prefix) {
+        var old = Number(this.getEnvironmentSlot(environment, depth, slot));
+        var value = old + amount;
+        this.setEnvironmentSlot(environment, depth, slot, value);
+        return prefix ? value : old;
+    };
+
+    Runtime.prototype.environmentParent = function (environment) {
+        if (!environment) return null;
+        var address = this.heapRecords.environmentParent(environment.heapAddress);
+        if (!address) return null;
+        var metadata = this.environmentMetadata["$" + address];
+        if (!metadata) throw new Error("guest environment has no runtime metadata");
+        return metadata.handle;
     };
 
     Runtime.prototype.pushActiveRegisters = function (registers, environment) {
@@ -1235,11 +1268,14 @@
         var current = environment;
         while (current) {
             var index = 0;
-            while (index < current.slots.length) {
-                this.markValue(current.slots[index], generation);
+            var count = this.heapRecords.environmentSlotCount(current.heapAddress);
+            while (index < count) {
+                this.markValue(this.readHeapValue(
+                    this.heapRecords.environmentCell(current.heapAddress, index)),
+                    generation);
                 index++;
             }
-            current = current.parent;
+            current = this.environmentParent(current);
         }
     };
 
