@@ -3,12 +3,14 @@
     var HostFFI = root.GuestVMHostFFI;
     var Heap = root.GuestVMHeap;
     var ValueCells = root.GuestVMValueCells;
+    var HeapRecords = root.GuestVMHeapRecords;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
+        HeapRecords = require("./heap_records.js");
         ThreadedCompiler = require("./threaded_compiler.js");
     }
 
@@ -38,6 +40,7 @@
         this.interpretGuest = null;
         this.linearHeap = null;
         this.valueCells = null;
+        this.heapRecords = null;
         this.linearHeapBytes = options.heapBytes === undefined ?
             16 * 1024 * 1024 : Number(options.heapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
@@ -55,6 +58,7 @@
         if (!this.linearHeap) {
             this.linearHeap = new Heap({heapBytes: this.linearHeapBytes});
             this.valueCells = new ValueCells(this.linearHeap);
+            this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);
         }
         return this.linearHeap;
     };

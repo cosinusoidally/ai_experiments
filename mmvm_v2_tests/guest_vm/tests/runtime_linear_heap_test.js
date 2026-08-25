@@ -19,6 +19,12 @@
             if (firstHeap.memory.allocation === secondHeap.memory.allocation) {
                 throw new Error("runtimes share a host-memory allocation");
             }
+            var firstObject = first.runtime.heapRecords.allocateObject(0);
+            var secondObject = second.runtime.heapRecords.allocateObject(0);
+            if (firstObject !== secondObject ||
+                first.runtime.heapRecords === second.runtime.heapRecords) {
+                throw new Error("runtime-owned record accessors are not isolated");
+            }
             return "JSRuntime-owned value-cell heaps are isolated on " +
                    firstHeap.memory.host.hostName();
         } finally {

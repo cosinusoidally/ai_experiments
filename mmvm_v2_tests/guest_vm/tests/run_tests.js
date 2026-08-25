@@ -16,9 +16,11 @@
         var runErrorLocationTest = require("./error_location_test.js");
         var Heap = require("../heap.js");
         var ValueCells = require("../value_cell.js");
+        var HeapRecords = require("../heap_records.js");
         var runHeapAccessTest = require("./heap_access_test.js");
         var runValueCellTest = require("./value_cell_test.js");
         var runRuntimeLinearHeapTest = require("./runtime_linear_heap_test.js");
+        var runHeapRecordsTest = require("./heap_records_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -35,6 +37,7 @@
         load("guest_vm/tests/heap_access_test.js");
         load("guest_vm/tests/value_cell_test.js");
         load("guest_vm/tests/runtime_linear_heap_test.js");
+        load("guest_vm/tests/heap_records_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
@@ -43,9 +46,11 @@
         runErrorLocationTest = GuestVMRunErrorLocationTest;
         Heap = GuestVMHeap;
         ValueCells = GuestVMValueCells;
+        HeapRecords = GuestVMHeapRecords;
         runHeapAccessTest = GuestVMRunHeapAccessTest;
         runValueCellTest = GuestVMRunValueCellTest;
         runRuntimeLinearHeapTest = GuestVMRunRuntimeLinearHeapTest;
+        runHeapRecordsTest = GuestVMRunHeapRecordsTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -102,6 +107,9 @@
     var runtimeLinearHeapResult = runRuntimeLinearHeapTest(VM);
     if (typeof print === "function") print(runtimeLinearHeapResult);
     else console.log(runtimeLinearHeapResult);
+    var heapRecordsResult = runHeapRecordsTest(Heap, ValueCells, HeapRecords);
+    if (typeof print === "function") print(heapRecordsResult);
+    else console.log(heapRecordsResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");

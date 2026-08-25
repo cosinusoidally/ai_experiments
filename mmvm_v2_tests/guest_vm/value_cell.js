@@ -32,14 +32,82 @@
         return this.heap.readFieldU32(cell, TAG_OFFSET, Heap.Types.ROOT_SLOT);
     };
 
+    ValueCells.prototype.tagAt = function (address) {
+        return this.heap.memory.readU32(address + TAG_OFFSET);
+    };
+
     ValueCells.prototype.setTag = function (cell, tag) {
         this.heap.writeFieldU32(cell, TAG_OFFSET, tag, Heap.Types.ROOT_SLOT);
+    };
+
+    ValueCells.prototype.setTagAt = function (address, tag) {
+        this.heap.memory.writeU32(address + TAG_OFFSET, tag);
     };
 
     ValueCells.prototype.clearPayload = function (cell) {
         this.heap.writeFieldU32(cell, LOW_OFFSET, 0, Heap.Types.ROOT_SLOT);
         this.heap.writeFieldU32(cell, HIGH_OFFSET, 0, Heap.Types.ROOT_SLOT);
         this.heap.writeFieldU32(cell, AUX_OFFSET, 0, Heap.Types.ROOT_SLOT);
+    };
+
+    ValueCells.prototype.clearPayloadAt = function (address) {
+        this.heap.memory.writeU32(address + LOW_OFFSET, 0);
+        this.heap.memory.writeU32(address + HIGH_OFFSET, 0);
+        this.heap.memory.writeU32(address + AUX_OFFSET, 0);
+    };
+
+    ValueCells.prototype.writePrimitiveAt = function (address, value) {
+        this.clearPayloadAt(address);
+        if (value === undefined) this.setTagAt(address, Tags.UNDEFINED);
+        else if (value === null) this.setTagAt(address, Tags.NULL);
+        else if (value === false) this.setTagAt(address, Tags.FALSE);
+        else if (value === true) this.setTagAt(address, Tags.TRUE);
+        else if (typeof value === "number") {
+            if (isInt32(value)) {
+                this.setTagAt(address, Tags.INT32);
+                this.heap.memory.writeU32(address + LOW_OFFSET, value >>> 0);
+            } else {
+                var words = encodeDouble(value);
+                this.setTagAt(address, Tags.DOUBLE);
+                this.heap.memory.writeU32(address + LOW_OFFSET, words.low);
+                this.heap.memory.writeU32(address + HIGH_OFFSET, words.high);
+            }
+        } else throw new TypeError("value is not a primitive value-cell value");
+        return address;
+    };
+
+    ValueCells.prototype.readPrimitiveAt = function (address) {
+        var tag = this.tagAt(address);
+        if (tag === Tags.UNDEFINED) return undefined;
+        if (tag === Tags.NULL) return null;
+        if (tag === Tags.FALSE) return false;
+        if (tag === Tags.TRUE) return true;
+        if (tag === Tags.INT32) {
+            var word = this.heap.memory.readU32(address + LOW_OFFSET);
+            return word >= 2147483648 ? word - 4294967296 : word;
+        }
+        if (tag === Tags.DOUBLE) {
+            return decodeDouble(this.heap.memory.readU32(address + LOW_OFFSET),
+                                this.heap.memory.readU32(address + HIGH_OFFSET));
+        }
+        throw new TypeError("value cell does not contain a primitive");
+    };
+
+    ValueCells.prototype.writeReferenceAt = function (address, reference) {
+        this.heap.requireRecord(reference);
+        this.clearPayloadAt(address);
+        this.setTagAt(address, Tags.REFERENCE);
+        this.heap.memory.writeU32(address + LOW_OFFSET, reference);
+        return address;
+    };
+
+    ValueCells.prototype.readReferenceAt = function (address, expectedType) {
+        if (this.tagAt(address) !== Tags.REFERENCE) {
+            throw new TypeError("value cell does not contain a reference");
+        }
+        var reference = this.heap.memory.readU32(address + LOW_OFFSET);
+        this.heap.requireRecord(reference, expectedType);
+        return reference;
     };
 
     ValueCells.prototype.writePrimitive = function (cell, value) {

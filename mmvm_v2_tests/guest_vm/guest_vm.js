@@ -17,6 +17,7 @@
         load("guest_vm/linear_memory.js");
         load("guest_vm/heap.js");
         load("guest_vm/value_cell.js");
+        load("guest_vm/heap_records.js");
         load("guest_vm/threaded_compiler.js");
         load("guest_vm/buffer.js");
         load("guest_vm/runtime.js");

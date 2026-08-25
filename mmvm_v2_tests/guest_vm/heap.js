@@ -25,7 +25,12 @@
         REGEXP: 9,
         BUFFER_VIEW: 10,
         BUFFER_BACKING: 11,
-        ROOT_SLOT: 12
+        ROOT_SLOT: 12,
+        VALUE_VECTOR: 13,
+        FRAME: 14,
+        PROGRAM: 15,
+        BYTECODE: 16,
+        CONTEXT: 17
     };
 
     function align8(value) {
@@ -47,7 +52,7 @@
     Heap.HEADER_SIZE = HEADER_SIZE;
 
     Heap.prototype.allocateRecord = function (type, payloadBytes) {
-        if (!Types || type <= Types.FREE || type > Types.ROOT_SLOT) {
+        if (!Types || type <= Types.FREE || type > Types.CONTEXT) {
             throw new TypeError("invalid heap record type");
         }
         payloadBytes = Number(payloadBytes);
