@@ -23,6 +23,70 @@ Three language layers are kept separate:
 Host JavaScript semantics are not the guest object model. Guest property access,
 calls, Buffer indexing, and lifetime pass through `Runtime` methods.
 
+## Runtime, context, and execution ownership
+
+The public embedding model has three levels:
+
+```text
+JSRuntime
+    runtime-owned heap and collector
+    interned strings and shared implementation metadata
+    host-function definitions
+    zero or more JSContexts
+        independent global environment
+        zero or one active Execution
+            explicit guest call-frame stack
+            pending host call, completion, or exception
+```
+
+A `JSRuntime` is one complete VM ownership domain. Guest objects, Buffer backing
+stores, interned strings, and collector metadata never move between runtimes.
+Multiple runtimes are fully independent. A runtime may own multiple
+`JSContext`s; their globals and executions are independent, but every object
+reachable from those contexts is allocated and collected by their common
+runtime.
+
+A context can retain a completed global environment and execute later programs
+against it. Creating another context produces fresh globals and fresh built-in
+bindings. Passing guest implementation records between runtimes is invalid.
+
+`VM` remains a compatibility facade containing one runtime and one default
+context. New embedders should use `JSRuntime.createContext()` explicitly.
+
+## Resumable execution and host-call boundary
+
+Interpreter state is represented by an `Execution`, not by recursion on the
+host JavaScript stack. Each guest activation is an explicit frame containing
+its program, program counter, registers, lexical environment, receiver, and the
+caller destination register. Guest calls push frames and returns pop them.
+
+`Execution.resume(budget)` runs until exactly one of these boundaries:
+
+```text
+completed   top-level guest execution returned
+budget      the supplied instruction allowance reached zero
+hostCall    guest code invoked an external host function
+threw       an uncaught guest or implementation exception escaped
+```
+
+Budget exhaustion is an embedder scheduling result, not a guest exception. It
+does not unwind frames and cannot be caught by guest code. A later `resume`
+continues at the same bytecode instruction with a newly supplied budget. The
+budget is shared by every frame executed during that resume call.
+
+An external host call also preserves all frames and returns a request record to
+the embedder. The embedder supplies either a return value or a failure, then
+resumes execution. Arbitrary host callbacks are never executed implicitly by
+the core dispatch loop.
+
+Very small, explicitly classified implementation intrinsics may run inline.
+The raw aligned and byte `peek`/`poke` primitives are the initial exception
+because yielding for every framebuffer or memory byte would make their intended
+use impractical. String, object, Buffer, and operator implementation helpers are
+also internal semantic operations rather than embedder host calls. Potentially
+blocking or externally observable services such as raw FFI, output, timers,
+filesystem, and sockets must yield.
+
 ## Module boundaries and load order
 
 | Module | Responsibility |

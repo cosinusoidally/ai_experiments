@@ -8,6 +8,37 @@ Node behavior.
 The parser and AST records are internal; the `VM` facade, runtime value handles,
 and native-callback convention are the intended integration points.
 
+The primary API is moving to explicit runtime and context ownership:
+
+```js
+var GuestVM = require("./guest_vm/vm.js");
+var runtime = new GuestVM.JSRuntime();
+var context = runtime.createContext();
+```
+
+`JSRuntime` owns the heap, garbage collector, Buffer backing stores, interned
+strings, and every object created by its contexts. `JSContext` owns a fresh
+global environment and its current resumable execution. A runtime can own many
+contexts, and a process can own many independent runtimes. The legacy
+`new GuestVM()` form remains a one-runtime/one-context convenience facade.
+
+The resumable API is:
+
+```js
+var execution = context.start(source, "program.js");
+var result = execution.resume(100000);
+
+while (result.status === "budget") {
+    result = execution.resume(100000);
+}
+```
+
+Execution stops with `completed`, `budget`, `hostCall`, or `threw`. Exhausting
+budget preserves the complete continuation and is not an ECMAScript exception.
+A `hostCall` result must be completed or failed by the embedder before the next
+resume. Inline low-level intrinsics are explicitly classified exceptions to
+host-call yielding; arbitrary native callbacks are not.
+
 The VM is not a security sandbox. Guest bytecode is verified and interpreted
 with an instruction budget, but native callbacks are trusted, resource limits
 are incomplete, and the implemented language is not yet full ECMAScript 5.1.
