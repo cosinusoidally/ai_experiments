@@ -335,12 +335,18 @@ guest Buffer back to the host compatibility buffer byte-for-byte; strings use
 UTF-8. HTTP sockets remain nonblocking even though the current file adapters
 perform their libc file work when their queued host task runs.
 
-The installed CommonJS surface currently resolves only `http` and `fs`.
+The installed CommonJS surface resolves `http`, `fs`, and `net`, and a relative
+module loader executes JavaScript modules in separate contexts belonging to the
+same runtime. A module is cached before execution for circular-reference
+safety; its context receives `module`, `exports`, `require`, `__filename`, and
+`__dirname`. Exported guest functions retain their home context and callbacks
+resume there. Module contexts share runtime-owned objects and Buffer backing
+stores but keep top-level variable environments isolated.
+
 `process`, `console`, `Buffer.byteLength`, the required `Date` methods, and URI
 component encoding functions are also installed. This is intentionally the
-smallest documented profile needed by `node_web.js`, not a general Node.js
-implementation. Relative module loading belongs in a future guest-aware module
-loader rather than in ad-hoc special cases here.
+smallest documented profile needed by `node_web.js` and `demo1.js`, not a
+general Node.js implementation.
 
 ## Collector and roots
 

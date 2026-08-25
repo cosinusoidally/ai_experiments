@@ -77,6 +77,17 @@ run_js_min_tests() {
             ;;
     esac
     echo "guest node_web.js command-line path passed"
+    demo1_help_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$js_min_binary" ./guest_runner.js demo1.js --help)
+    case "$demo1_help_output" in
+        *"usage: node demo1.js"*"--size WIDTHxHEIGHT"*) ;;
+        *)
+            echo "guest demo1.js --help emitted unexpected stdout:" >&2
+            echo "$demo1_help_output" >&2
+            exit 1
+            ;;
+    esac
+    echo "guest demo1.js CommonJS command-line path passed"
     context_demo_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$js_min_binary" guest_vm/demos/three_contexts.js)
     validate_context_demo "$context_demo_output"

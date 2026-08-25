@@ -106,9 +106,46 @@ native output queue without string conversion.
 
 The guest Node environment is deliberately a narrow embedding profile, not a
 claim that the VM already implements Node.js. At this checkpoint `require`
-accepts only the built-in names `http` and `fs`; relative CommonJS modules and
-the rest of Node's standard library remain future work. Run `node_web.js`
-directly with Node.js when testing the unchanged source against real Node.
+accepts the built-in names `http`, `fs`, and `net`, plus relative JavaScript
+modules. The rest of Node's standard library remains future work. Run
+`node_web.js` directly with Node.js when testing the unchanged source against
+real Node.
+
+## X11 framebuffer demo through the guest VM
+
+The guest VM can run unchanged `demo1.js`. Its relative dependencies,
+`demo_common.js` and `node_x11.js`, execute as guest CommonJS modules in their
+own `JSContext` instances. Only the Node built-ins and timers cross into the
+embedder; the X11 wire protocol, framebuffer drawing, bitmap font, and event
+handling remain interpreted guest JavaScript.
+
+Run it from `mmvm_v2_tests` with the existing local X display environment:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo1.js --size 64x64 --fps 5
+```
+
+The default `256x192` resolution and `20` FPS limit are also accepted. The
+current interpreter is functionally correct on this path but is not yet fast:
+the pixel-at-a-time demo measured roughly 0.2–0.4 FPS at 64×64 during this
+checkpoint. This is an interpreter-performance limitation, not X11 blocking or
+a frame-timing change. No artifacts directory or generated framebuffer image
+is required or stored in `mmvm_v2_tests`.
+
+The embedder provides:
+
+- synchronous `fs.readFileSync` for Xauthority data;
+- Unix-domain `net.createConnection` with nonblocking socket events;
+- byte-accurate Buffer slicing, copying, integer access, and ASCII conversion;
+- zero-copy native guest Buffer writes to the host socket queue when possible;
+- `setTimeout`, `clearTimeout`, and `requestAnimationFrame` scheduling;
+- `process.env.DISPLAY`, `XAUTHORITY`, and `HOME`.
+
+The X11 socket remains the standardized local path selected by `DISPLAY`, such
+as `/tmp/.X11-unix/X1`; `node_x11.js` derives the display number rather than
+depending on a machine-specific absolute socket name.
 
 ## Three-context multiplexing demo
 

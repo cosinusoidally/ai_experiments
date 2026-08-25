@@ -110,12 +110,68 @@
                 support.write32LE(receiver, offset, args[0]);
                 return offset + 4;
             });
+        properties.$readUInt16LE = this.makeNative("Buffer.prototype.readUInt16LE",
+            function (receiver, args) {
+                support.requireBuffer(receiver);
+                var offset = integer(args[0]);
+                return support.read(receiver, offset) |
+                       (support.read(receiver, offset + 1) << 8);
+            });
+        properties.$readUInt16BE = this.makeNative("Buffer.prototype.readUInt16BE",
+            function (receiver, args) {
+                support.requireBuffer(receiver);
+                var offset = integer(args[0]);
+                return (support.read(receiver, offset) << 8) |
+                       support.read(receiver, offset + 1);
+            });
+        properties.$readInt16LE = this.makeNative("Buffer.prototype.readInt16LE",
+            function (receiver, args) {
+                support.requireBuffer(receiver);
+                var offset = integer(args[0]);
+                var value = support.read(receiver, offset) |
+                            (support.read(receiver, offset + 1) << 8);
+                return value & 32768 ? value - 65536 : value;
+            });
+        properties.$writeUInt16LE = this.makeNative("Buffer.prototype.writeUInt16LE",
+            function (receiver, args) {
+                support.requireBuffer(receiver);
+                var offset = integer(args[1]);
+                support.write(receiver, offset, args[0]);
+                support.write(receiver, offset + 1, Number(args[0]) >>> 8);
+                return offset + 2;
+            });
+        properties.$writeInt16LE = this.makeNative("Buffer.prototype.writeInt16LE",
+            function (receiver, args) {
+                support.requireBuffer(receiver);
+                var offset = integer(args[1]);
+                support.write(receiver, offset, args[0]);
+                support.write(receiver, offset + 1, Number(args[0]) >>> 8);
+                return offset + 2;
+            });
+        properties.$toString = this.makeNative("Buffer.prototype.toString",
+            function (receiver, args) {
+                support.requireBuffer(receiver);
+                var encoding = args.length && args[0] !== undefined ?
+                    String(args[0]).toLowerCase() : "utf8";
+                var start = args.length > 1 ? integer(args[1]) : 0;
+                var end = args.length > 2 ? integer(args[2]) : receiver.length;
+                if (encoding !== "ascii" && encoding !== "binary" &&
+                    encoding !== "utf8" && encoding !== "utf-8") {
+                    throw new Error("unsupported Buffer encoding: " + encoding);
+                }
+                var result = "";
+                var index = start;
+                while (index < end && index < receiver.length) {
+                    result += String.fromCharCode(support.read(receiver, index++));
+                }
+                return result;
+            });
     };
 
     BufferSupport.prototype.installConstructor = function () {
         var support = this;
         var constructor = this.makeNative("Buffer", function (receiver, args) {
-            return support.allocate(args[0]);
+            return support.fromValue(args[0], args[1]);
         });
         constructor.properties.$alloc = this.makeNative("Buffer.alloc",
             function (receiver, args) {
@@ -130,9 +186,59 @@
             function (receiver, args) {
                 return !!args[0] && args[0].guestType === "buffer";
             });
+        constructor.properties.$from = this.makeNative("Buffer.from",
+            function (receiver, args) { return support.fromValue(args[0], args[1]); });
+        constructor.properties.$allocNative = this.makeNative("Buffer.allocNative",
+            function (receiver, args) {
+                var buffer = support.allocate(args[0]);
+                var allocation = buffer.backing.allocation;
+                if (allocation.isNative) {
+                    buffer.properties.$_nodePointer = allocation.pointer + buffer.offset;
+                }
+                return buffer;
+            });
         constructor.properties.$prototype = this.prototype;
         this.constructor = constructor;
         this.runtime.setGlobal("Buffer", constructor);
+    };
+
+    BufferSupport.prototype.fromValue = function (value, encoding) {
+        if (typeof value === "number") return this.allocate(value);
+        var bytes = [];
+        var index = 0;
+        if (typeof value === "string") {
+            encoding = encoding === undefined ? "utf8" : String(encoding).toLowerCase();
+            if (encoding !== "ascii" && encoding !== "binary" &&
+                encoding !== "utf8" && encoding !== "utf-8") {
+                throw new Error("unsupported Buffer encoding: " + encoding);
+            }
+            if (encoding === "ascii" || encoding === "binary") {
+                while (index < value.length) bytes.push(value.charCodeAt(index++) & 255);
+            } else {
+                while (index < value.length) {
+                    var code = value.charCodeAt(index++);
+                    if (code < 128) bytes.push(code);
+                    else if (code < 2048) {
+                        bytes.push(192 | (code >>> 6), 128 | (code & 63));
+                    } else {
+                        bytes.push(224 | (code >>> 12),
+                                   128 | ((code >>> 6) & 63), 128 | (code & 63));
+                    }
+                }
+            }
+        } else if (value && value.guestType === "buffer") {
+            while (index < value.length) bytes.push(this.read(value, index++));
+        } else if (value && value.guestType === "array") {
+            while (index < value.elements.length) bytes.push(Number(value.elements[index++]) & 255);
+        } else if (value === undefined) {
+            return this.allocate(0);
+        } else {
+            throw new TypeError("unsupported Buffer input");
+        }
+        var buffer = this.allocate(bytes.length);
+        index = 0;
+        while (index < bytes.length) this.write(buffer, index, bytes[index++]);
+        return buffer;
     };
 
     BufferSupport.prototype.normalizeSliceIndex = function (value, length) {

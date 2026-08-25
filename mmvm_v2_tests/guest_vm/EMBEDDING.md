@@ -211,10 +211,11 @@ retains guest callbacks while libc work is pending, invokes each callback via
 `JSContext.startFunction`, and releases one-shot roots automatically.
 
 This adapter is shell-only: it calls `load`, depends on the MMVM raw FFI, and
-is not loaded by Node-hosted VM tests. Under Node.js, run unchanged
-`node_web.js` directly to use Node's real built-ins. The current guest profile
-supports only `require("http")` and `require("fs")`; embedders must not assume
-general CommonJS or Node compatibility.
+is not loaded by Node-hosted VM tests. Under Node.js, run unchanged application
+files directly to use Node's real built-ins. The current guest profile supports
+`require("http")`, `require("fs")`, `require("net")`, and relative `.js`
+modules. It is sufficient for `node_web.js` and the X11 module chain used by
+`demo1.js`; embedders must not assume general Node compatibility.
 
 ## Compile, execute, and run
 

@@ -21,6 +21,17 @@ assertEqual(bytes.readUInt32LE(4), 2018915346, "little-endian 32-bit access");
 assertEqual(bytes[4], 18, "little-endian low byte");
 assertEqual(bytes[7], 120, "little-endian high byte");
 
+bytes.writeUInt16LE(43981, 0);
+assertEqual(bytes.readUInt16LE(0), 43981, "little-endian 16-bit access");
+assertEqual(bytes.readUInt16BE(0), 52651, "big-endian 16-bit read");
+bytes.writeInt16LE(-1234, 0);
+assertEqual(bytes.readInt16LE(0), -1234, "signed little-endian 16-bit access");
+
+var ascii = new Buffer("ABC", "ascii");
+assertEqual(ascii.length, 3, "Buffer string construction");
+assertEqual(ascii.toString("ascii"), "ABC", "Buffer ASCII conversion");
+assertEqual(Buffer.from("xy", "ascii").toString("ascii"), "xy", "Buffer.from");
+
 bytes.fill(5, 8, 12);
 assertEqual(bytes[8], 5, "fill start");
 assertEqual(bytes[11], 5, "fill end");

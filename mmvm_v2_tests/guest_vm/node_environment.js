@@ -12,6 +12,8 @@
         this.context = vm.context;
         this.retained = [];
         this.servers = [];
+        this.moduleCache = {};
+        this.moduleContexts = [];
         this.runnerArguments = runnerArguments;
 
         load("node_compat/libc.js");
@@ -89,7 +91,9 @@
     };
 
     GuestNodeEnvironment.prototype.invoke = function (callable, receiver, args) {
-        var execution = this.context.startFunction(callable, receiver, args || []);
+        var callbackContext = callable && callable.homeContext ?
+                              callable.homeContext : this.context;
+        var execution = callbackContext.startFunction(callable, receiver, args || []);
         while (true) {
             var result = execution.resume(1000000);
             if (result.status === "budget") continue;
@@ -182,7 +186,123 @@
                 });
                 return undefined;
             }));
+        this.runtime.setProperty(fs, "readFileSync", this.makeFunction("fs.readFileSync",
+            function (receiver, args) {
+                return environment.guestBuffer(NodeFs.readFileSync(String(args[0])));
+            }));
         return fs;
+    };
+
+    GuestNodeEnvironment.prototype.makeSocket = function (hostSocket) {
+        var environment = this;
+        var socket = this.object({});
+        this.keep(socket);
+        this.runtime.setProperty(socket, "on", this.makeFunction("Socket.on",
+            function (receiver, args) {
+                var name = String(args[0]);
+                var callback = args[1];
+                environment.keep(callback);
+                hostSocket.on(name, function (value) {
+                    var callbackArgs = [];
+                    if (name === "data") callbackArgs.push(environment.guestBuffer(value));
+                    else if (value !== undefined) callbackArgs.push(environment.error(value));
+                    environment.enqueueGuest(callback, socket, callbackArgs);
+                });
+                return socket;
+            }));
+        this.runtime.setProperty(socket, "write", this.makeFunction("Socket.write",
+            function (receiver, args) {
+                var value = args[0];
+                var callback = args.length > 1 ? args[1] : undefined;
+                var valueRoot = value && value.guestType ? environment.vm.retain(value) : 0;
+                var callbackRoot = callback ? environment.vm.retain(callback) : 0;
+                var hostValue;
+                if (value && value.guestType === "buffer" &&
+                    value.backing.allocation.isNative) {
+                    hostValue = {_nodePointer: value.backing.allocation.pointer + value.offset,
+                                 length: value.length};
+                } else hostValue = environment.hostBody(value);
+                return hostSocket.write(hostValue, function () {
+                    if (callback) environment.enqueueGuest(callback, socket, []);
+                    if (callbackRoot) environment.vm.release(callbackRoot);
+                    if (valueRoot) environment.vm.release(valueRoot);
+                });
+            }));
+        this.runtime.setProperty(socket, "end", this.makeFunction("Socket.end",
+            function (receiver, args) {
+                hostSocket.end(args.length ? environment.hostBody(args[0]) : undefined);
+                return socket;
+            }));
+        this.runtime.setProperty(socket, "close", this.makeFunction("Socket.close",
+            function () { hostSocket.destroy(); return socket; }));
+        return socket;
+    };
+
+    GuestNodeEnvironment.prototype.makeNet = function () {
+        var environment = this;
+        var net = this.object({});
+        this.runtime.setProperty(net, "createConnection",
+            this.makeFunction("net.createConnection", function (receiver, args) {
+                return environment.makeSocket(NodeNet.createConnection(String(args[0])));
+            }));
+        return net;
+    };
+
+    GuestNodeEnvironment.prototype.dirname = function (path) {
+        var slash = path.lastIndexOf("/");
+        return slash < 0 ? "." : path.substring(0, slash) || ".";
+    };
+
+    GuestNodeEnvironment.prototype.normalizeModulePath = function (path) {
+        var parts = path.split("/");
+        var normalized = [];
+        var index = 0;
+        while (index < parts.length) {
+            var part = parts[index++];
+            if (!part || part === ".") continue;
+            if (part === "..") {
+                if (!normalized.length) throw new Error("module path escapes test directory");
+                normalized.pop();
+            } else normalized.push(part);
+        }
+        path = normalized.join("/");
+        if (path.substring(path.length - 3) !== ".js") path += ".js";
+        return path;
+    };
+
+    GuestNodeEnvironment.prototype.loadModule = function (request, parentFilename) {
+        if (own(this.builtinModules, request)) return this.builtinModules[request];
+        if (request.substring(0, 2) !== "./" && request.substring(0, 3) !== "../") {
+            throw new Error("unsupported guest module: " + request);
+        }
+        var filename = this.normalizeModulePath(
+            this.dirname(parentFilename) + "/" + request);
+        if (own(this.moduleCache, filename)) return this.moduleCache[filename].exports;
+
+        var source = NodeFs.readFileSync(filename).toString("utf8");
+        var context = this.vm.jsRuntime.createContext();
+        this.moduleContexts.push(context);
+        var moduleRecord = {exports: this.object({}), context: context};
+        this.moduleCache[filename] = moduleRecord;
+        var moduleObject = this.object({exports: moduleRecord.exports,
+                                        filename: filename});
+        var environment = this;
+        context.installGlobal("module", moduleObject);
+        context.installGlobal("exports", moduleRecord.exports);
+        context.installGlobal("__filename", filename);
+        context.installGlobal("__dirname", this.dirname(filename));
+        context.installGlobal("require", this.makeFunction("require", function (receiver, args) {
+            return environment.loadModule(String(args[0]), filename);
+        }));
+        try {
+            context.run(source, filename);
+            moduleRecord.exports = this.runtime.getProperty(moduleObject, "exports");
+            return moduleRecord.exports;
+        } catch (error) {
+            delete this.moduleCache[filename];
+            context.destroy();
+            throw error;
+        }
     };
 
     GuestNodeEnvironment.prototype.makeResponse = function (hostResponse) {
@@ -270,26 +390,39 @@
         var environment = this;
         var fs = this.makeFs();
         var http = this.makeHttp();
-        var modules = {fs: fs, http: http};
+        var net = this.makeNet();
+        this.builtinModules = {fs: fs, http: http, net: net};
 
-        this.vm.installGlobal("require", this.makeFunction("require",
+        function publish(name, value) {
+            environment.runtime.setGlobal(name, value);
+            environment.context.installGlobal(name, value);
+        }
+
+        publish("require", this.makeFunction("require",
             function (receiver, args) {
                 var name = String(args[0]);
-                if (!own(modules, name)) throw new Error("unsupported guest module: " + name);
-                return modules[name];
+                return environment.loadModule(name, environment.runnerArguments[0]);
             }));
 
         var argv = ["artifacts/js_min.exe", this.runnerArguments[0]];
         var index = 1;
         while (index < this.runnerArguments.length) argv.push(this.runnerArguments[index++]);
-        var processObject = this.object({argv: this.runtime.arrayFrom(argv)});
+        var processObject = this.object({
+            argv: this.runtime.arrayFrom(argv),
+            env: this.object({
+                DISPLAY: NodeMemory.cString(NodeLibc.getenv("DISPLAY")),
+                XAUTHORITY: NodeMemory.cString(NodeLibc.getenv("XAUTHORITY")),
+                HOME: NodeMemory.cString(NodeLibc.getenv("HOME"))
+            }),
+            exitCode: 0
+        });
         this.runtime.setProperty(processObject, "exit", this.makeFunction("process.exit",
             function (receiver, args) {
                 NodeProcess.exitCode = args.length ? Number(args[0]) | 0 : 0;
                 NodeProcess.exiting = true;
                 throw NodeProcess.exitMarker;
             }));
-        this.vm.installGlobal("process", processObject);
+        publish("process", processObject);
 
         var consoleObject = this.object({});
         this.runtime.setProperty(consoleObject, "log", this.makeFunction("console.log",
@@ -300,7 +433,7 @@
             function (receiver, args) {
                 NodeMemory.writeAll(2, NodeProcess.formatArguments(args) + "\n");
             }));
-        this.vm.installGlobal("console", consoleObject);
+        publish("console", consoleObject);
 
         var bufferConstructor = this.runtime.getGlobal(this.context, "Buffer");
         this.runtime.setProperty(bufferConstructor, "byteLength",
@@ -308,11 +441,11 @@
                 return NodeEncoding.utf8Bytes(String(args[0])).length;
             }, true));
 
-        this.vm.installGlobal("encodeURIComponent",
+        publish("encodeURIComponent",
             this.makeFunction("encodeURIComponent", function (receiver, args) {
                 return encodeURIComponent(String(args[0]));
             }, true));
-        this.vm.installGlobal("decodeURIComponent",
+        publish("decodeURIComponent",
             this.makeFunction("decodeURIComponent", function (receiver, args) {
                 return decodeURIComponent(String(args[0]));
             }, true));
@@ -329,9 +462,39 @@
             }
             method("getDate"); method("getMonth"); method("getFullYear");
             method("getHours"); method("getMinutes"); method("getSeconds");
+            method("getTime");
             return date;
         };
-        this.vm.installGlobal("Date", dateConstructor);
+        publish("Date", dateConstructor);
+
+        var errorConstructor = this.makeFunction("Error", function (receiver, args) {
+            return environment.object({message: args.length ? String(args[0]) : ""});
+        }, true);
+        errorConstructor.constructCallback = function (args) {
+            return environment.object({message: args.length ? String(args[0]) : ""});
+        };
+        publish("Error", errorConstructor);
+
+        publish("setTimeout", this.makeFunction("setTimeout", function (receiver, args) {
+            var callback = args[0];
+            var callbackRoot = environment.vm.retain(callback);
+            return NodeRuntime.setTimeout(function () {
+                try { environment.invoke(callback, undefined, []); }
+                finally { environment.vm.release(callbackRoot); }
+            }, Number(args[1]) || 0);
+        }));
+        publish("clearTimeout", this.makeFunction("clearTimeout", function (receiver, args) {
+            NodeRuntime.clearTimeout(Number(args[0]));
+        }));
+        publish("requestAnimationFrame", this.makeFunction("requestAnimationFrame",
+            function (receiver, args) {
+                var callback = args[0];
+                var callbackRoot = environment.vm.retain(callback);
+                return NodeRuntime.setTimeout(function () {
+                    try { environment.invoke(callback, undefined, [NodeRuntime.now()]); }
+                    finally { environment.vm.release(callbackRoot); }
+                }, 16);
+            }));
     };
 
     GuestNodeEnvironment.prototype.run = function () {

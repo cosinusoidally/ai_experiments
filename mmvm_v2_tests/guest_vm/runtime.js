@@ -294,6 +294,15 @@
             function (receiver, args) {
                 return new RegExp(receiver.pattern, receiver.flags).test(String(args[0]));
             });
+        this.regexpMethods.exec = this.makeNativeFunction("RegExp.exec",
+            function (receiver, args) {
+                var match = new RegExp(receiver.pattern, receiver.flags).exec(String(args[0]));
+                if (!match) return null;
+                var result = runtime.arrayFrom(match);
+                result.properties.$index = match.index;
+                result.properties.$input = match.input;
+                return result;
+            });
         var stringConstructor = this.makeNativeFunction("String",
             function (receiver, args) { return args.length ? String(args[0]) : ""; });
         stringConstructor.properties.$fromCharCode = this.makeNativeFunction(
@@ -301,6 +310,8 @@
                 return String.fromCharCode.apply(String, args);
             });
         this.globals.String = stringConstructor;
+        this.globals.Number = this.makeNativeFunction("Number",
+            function (receiver, args) { return args.length ? Number(args[0]) : 0; });
         var math = this.makeObject();
         function mathMethod(name, callback) {
             runtime.setProperty(math, name,

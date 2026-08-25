@@ -16,6 +16,19 @@ assertEqual("<&".replace(/</g, "&lt;").replace(/&/g, "&amp;"),
 
 assertEqual(/^[0-9]+$/.test("65535"), true, "RegExp.test match");
 assertEqual(/^[0-9]+$/.test("65x"), false, "RegExp.test rejection");
+var sizeMatch = /^([0-9]+)x([0-9]+)$/.exec("320x240");
+assertEqual(sizeMatch[1], "320", "RegExp.exec first capture");
+assertEqual(sizeMatch[2], "240", "RegExp.exec second capture");
+
+assertEqual("mixed".toUpperCase(), "MIXED", "String.toUpperCase");
+assertEqual(Number("12"), 12, "Number conversion");
+assertEqual((15).toString(16), "f", "Number.toString radix");
+assertEqual((1.25).toFixed(1), "1.3", "Number.toFixed");
+assertEqual(Math.floor(2.9), 2, "Math.floor");
+assertEqual(Math.ceil(2.1), 3, "Math.ceil");
+assertEqual(Math.round(2.6), 3, "Math.round");
+assertEqual(Math.sqrt(81), 9, "Math.sqrt");
+assertEqual(Math.min(7, 3), 3, "Math.min");
 
 var names = ["z", "a", "m"];
 assertEqual(names.push("b"), 4, "Array.push length");
