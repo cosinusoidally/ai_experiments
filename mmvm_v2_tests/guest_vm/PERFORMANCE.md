@@ -21,13 +21,14 @@ FPS. These are development-machine observations, not portable guarantees. The
 change is approximately a 40% reduction in steady frame time, but demo2 remains
 far from interactive under the guest interpreter.
 
-Use the host-side opcode profiler by placing `--vm-profile` before the guest
-program path:
+Use the host-side opcode profiler as a reserved runner option.  With
+`js_min.exe`, place it after the guest program path because the shell consumes
+leading options itself:
 
 ```sh
 LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   ../../mmvm_v2/artifacts/js_min.exe \
-  guest_runner.js --vm-profile demo2.js --size 64x64 --fps 20 \
+  guest_runner.js demo2.js --vm-profile --size 64x64 --fps 20 \
   --no-fps-counter --no-debug-events
 ```
 
@@ -49,3 +50,37 @@ The benchmark deliberately uses a small framebuffer to expose interpreter
 costs without waiting minutes for each sample. Higher resolutions still work
 but are not yet practical through the guest interpreter.
 
+## 2026-08-25: portable structured backend checkpoint
+
+The portable bytecode-to-JavaScript backend now emits structured control flow,
+compiles closure-backed callbacks, uses fixed-arity calls, caches compiled
+programs and call sites, guards object/array shapes once per function, and
+propagates proven return and array-element shapes.  It does not evaluate the
+original guest source.  Finite-budget execution and failed specialization
+guards retain the general interpreter path.
+
+At the same 64x64, 20 FPS settings, steady `js_min.exe` observations are:
+
+- direct `node_runner.js demo2.js`: approximately 19.6--19.8 FPS;
+- `guest_runner.js demo2.js`: approximately 11.0--11.9 FPS;
+- the earlier structured backend before the cache-order correction: about
+  2.1 FPS;
+- the opcode interpreter before the structured backend: about 0.3 FPS.
+
+The large gain from 2.1 FPS came from fixing the compiled-program cache order:
+the old path rescanned all 1,148 rasterizer bytecode words on every call before
+checking the cache.  Guarded compound property writes and direct guarded array
+`push` operations produced the next largest portable improvements.
+
+Two diagnostic builds were measured and then reverted: omitting only
+`rasterTriangle` and `clearFramebuffer` reached about 17.5 FPS, while omitting
+the entire draw callback reached about 20.2 FPS.  These no-op substitutions are
+not present in the repository.  They establish that parity now requires both a
+native numeric/pixel kernel and further reduction of geometry/object overhead;
+optimizing only the rasterizer cannot honestly meet the target.
+
+An attempted mirrored/direct host-property cache is also absent.  A coherence
+bug initially made the FPS counter cumulative and falsely showed more than 20
+FPS.  Once corrected, the layout was substantially slower on old SpiderMonkey.
+Measurements must therefore be checked for stable per-interval frame counts,
+not merely a rising displayed number.

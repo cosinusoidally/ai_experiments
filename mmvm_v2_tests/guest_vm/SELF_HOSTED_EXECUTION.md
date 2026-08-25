@@ -27,12 +27,19 @@ The current implementation has completed these preparatory steps:
 - explicit 16-byte non-NaN-boxed cells round-trip primitive values and heap
   references through Node-emulated and MMVM-native linear memory;
 - high-bit word writes are normalized at the central `HostMemory` boundary;
-- opcode profiling spans asynchronous callback executions.
+- opcode profiling spans asynchronous callback executions;
+- a portable structured backend compiles bytecode/AST metadata to JavaScript
+  without evaluating original guest source, including environment-backed
+  closures and guarded shape-specialized paths;
+- finite instruction budgets continue to select the resumable interpreter,
+  while the command runner's unlimited slices may use compiled callbacks.
 
 The live semantic runtime still stores objects, arrays, frames, and most values
 in transitional host JavaScript records. Therefore it is not yet independent
 of the host VM, and the MMVM runner still returns for host calls and event-loop
-work. The next representation milestone is to put frame/register and lexical
+work. The portable compiler is a reference backend and performance bridge, not
+the self-hosting endpoint. The next representation milestone is to put
+frame/register and lexical
 environment cells in the runtime heap, followed by objects/properties/arrays
 and a heap-tracing collector. Native kernel dispatch follows those layouts; it
 must not attempt to call back into transitional host objects.
