@@ -78,7 +78,7 @@
 
     ValueCells.prototype.readPrimitiveAt = function (address) {
         var tag = this.tagAt(address);
-        if (tag === Tags.UNDEFINED) return undefined;
+        if (tag === 0 || tag === Tags.UNDEFINED) return undefined;
         if (tag === Tags.NULL) return null;
         if (tag === Tags.FALSE) return false;
         if (tag === Tags.TRUE) return true;

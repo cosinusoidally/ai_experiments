@@ -278,7 +278,7 @@
                                 args[1].guestType !== "array") {
                                 throw new TypeError("apply arguments must be array-like");
                             }
-                            args = args[1].elements.slice(0);
+                            args = this.runtime.arrayToHost(args[1]);
                         } else args = [];
                     }
                     var destination = code[pc + 1];
@@ -353,7 +353,8 @@
                         var constructorPrototype = this.runtime.getProperty(
                             constructorValue, "prototype");
                         if (constructorPrototype && constructorPrototype.guestType) {
-                            constructedReceiver.prototype = constructorPrototype;
+                            this.runtime.setPrototype(constructedReceiver,
+                                                      constructorPrototype);
                         }
                         var constructorFrame = makeFrame(constructorValue.program,
                             this.runtime, constructorValue.homeContext || frame.context,

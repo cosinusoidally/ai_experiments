@@ -173,14 +173,16 @@
     ThreadedCompiler.prototype.setPixelFast = function (
             framebuffer, x, y, red, green, blue, context) {
         if (framebuffer && framebuffer.guestType === "object" &&
-            framebuffer.properties.$pixelFormat === "bgrx32le" &&
-            framebuffer.properties.$pixelAddress && typeof poke32 === "function") {
+            this.runtime.getProperty(framebuffer, "pixelFormat") === "bgrx32le" &&
+            this.runtime.getProperty(framebuffer, "pixelAddress") &&
+            typeof poke32 === "function") {
             x = Number(x);
             y = Number(y);
-            if (x < 0 || y < 0 || x >= framebuffer.properties.$width ||
-                y >= framebuffer.properties.$height) return undefined;
-            poke32(framebuffer.properties.$pixelAddress +
-                   (y * framebuffer.properties.$width + x) * 4,
+            var width = this.runtime.getProperty(framebuffer, "width");
+            if (x < 0 || y < 0 || x >= width ||
+                y >= this.runtime.getProperty(framebuffer, "height")) return undefined;
+            poke32(this.runtime.getProperty(framebuffer, "pixelAddress") +
+                   (y * width + x) * 4,
                    ((Number(red) & 255) << 16) |
                    ((Number(green) & 255) << 8) | (Number(blue) & 255));
             return undefined;
@@ -218,7 +220,7 @@
             var constructedReceiver = this.runtime.makeObject();
             var prototype = this.runtime.getProperty(callable, "prototype");
             if (prototype && prototype.guestType) {
-                constructedReceiver.prototype = prototype;
+                this.runtime.setPrototype(constructedReceiver, prototype);
             }
             /* Construction is uncommon and requires preserving an implicit
              * receiver across a nested call.  Run the constructor body through
@@ -263,7 +265,7 @@
             if (!argumentArray.guestType || argumentArray.guestType !== "array") {
                 throw new TypeError("apply arguments must be array-like");
             }
-            args = argumentArray.elements.slice(0);
+            args = this.runtime.arrayToHost(argumentArray);
         }
         return this.call(callable, receiver, args, context);
     };
@@ -297,36 +299,34 @@
     ThreadedCompiler.prototype.makeObjectLiteralFixed = function (count,
             k0, v0, k1, v1, k2, v2, k3, v3, k4, v4, k5, v5, k6, v6, k7, v7) {
         var object = this.runtime.makeObject();
-        if (count > 0) object.properties["$" + k0] = v0;
-        if (count > 1) object.properties["$" + k1] = v1;
-        if (count > 2) object.properties["$" + k2] = v2;
-        if (count > 3) object.properties["$" + k3] = v3;
-        if (count > 4) object.properties["$" + k4] = v4;
-        if (count > 5) object.properties["$" + k5] = v5;
-        if (count > 6) object.properties["$" + k6] = v6;
-        if (count > 7) object.properties["$" + k7] = v7;
+        if (count > 0) this.runtime.setProperty(object, k0, v0);
+        if (count > 1) this.runtime.setProperty(object, k1, v1);
+        if (count > 2) this.runtime.setProperty(object, k2, v2);
+        if (count > 3) this.runtime.setProperty(object, k3, v3);
+        if (count > 4) this.runtime.setProperty(object, k4, v4);
+        if (count > 5) this.runtime.setProperty(object, k5, v5);
+        if (count > 6) this.runtime.setProperty(object, k6, v6);
+        if (count > 7) this.runtime.setProperty(object, k7, v7);
         return object;
     };
 
     ThreadedCompiler.prototype.makeObjectLiteral3 = function (
             k0, v0, k1, v1, k2, v2) {
-        var object = {guestType: "object", properties: {}, gcMark: 0};
-        this.runtime.trackObject(object);
-        object.properties["$" + k0] = v0;
-        object.properties["$" + k1] = v1;
-        object.properties["$" + k2] = v2;
+        var object = this.runtime.makeObject();
+        this.runtime.setProperty(object, k0, v0);
+        this.runtime.setProperty(object, k1, v1);
+        this.runtime.setProperty(object, k2, v2);
         return object;
     };
 
     ThreadedCompiler.prototype.makeObjectLiteral5 = function (
             k0, v0, k1, v1, k2, v2, k3, v3, k4, v4) {
-        var object = {guestType: "object", properties: {}, gcMark: 0};
-        this.runtime.trackObject(object);
-        object.properties["$" + k0] = v0;
-        object.properties["$" + k1] = v1;
-        object.properties["$" + k2] = v2;
-        object.properties["$" + k3] = v3;
-        object.properties["$" + k4] = v4;
+        var object = this.runtime.makeObject();
+        this.runtime.setProperty(object, k0, v0);
+        this.runtime.setProperty(object, k1, v1);
+        this.runtime.setProperty(object, k2, v2);
+        this.runtime.setProperty(object, k3, v3);
+        this.runtime.setProperty(object, k4, v4);
         return object;
     };
 
@@ -337,20 +337,19 @@
     ThreadedCompiler.prototype.makeArrayLiteralFixed = function (count,
             v0, v1, v2, v3, v4, v5, v6, v7) {
         var array = this.runtime.makeArray();
-        if (count > 0) array.elements[0] = v0;
-        if (count > 1) array.elements[1] = v1;
-        if (count > 2) array.elements[2] = v2;
-        if (count > 3) array.elements[3] = v3;
-        if (count > 4) array.elements[4] = v4;
-        if (count > 5) array.elements[5] = v5;
-        if (count > 6) array.elements[6] = v6;
-        if (count > 7) array.elements[7] = v7;
+        if (count > 0) this.runtime.arraySet(array, 0, v0);
+        if (count > 1) this.runtime.arraySet(array, 1, v1);
+        if (count > 2) this.runtime.arraySet(array, 2, v2);
+        if (count > 3) this.runtime.arraySet(array, 3, v3);
+        if (count > 4) this.runtime.arraySet(array, 4, v4);
+        if (count > 5) this.runtime.arraySet(array, 5, v5);
+        if (count > 6) this.runtime.arraySet(array, 6, v6);
+        if (count > 7) this.runtime.arraySet(array, 7, v7);
         return array;
     };
 
     ThreadedCompiler.prototype.makeArrayLiteral0 = function () {
-        return this.runtime.trackObject({guestType: "array", elements: [],
-                                         properties: {}, gcMark: 0});
+        return this.runtime.makeArray();
     };
 
     ThreadedCompiler.prototype.updateGlobal = function (
@@ -365,16 +364,18 @@
         var keys = this.runtime.keys(object);
         var result = {};
         var index = 0;
-        while (index < keys.elements.length) result[keys.elements[index++]] = true;
+        while (index < this.runtime.arrayLength(keys)) {
+            result[this.runtime.arrayGet(keys, index++)] = true;
+        }
         return result;
     };
 
     ThreadedCompiler.prototype.arrayElementsHaveProperties = function (array) {
         if (!array || array.guestType !== "array") return false;
         var index = 0;
-        while (index < array.elements.length) {
-            var value = array.elements[index++];
-            if (!value || !value.properties) return false;
+        while (index < this.runtime.arrayLength(array)) {
+            var value = this.runtime.arrayGet(array, index++);
+            if (!value || !value.heapAddress) return false;
         }
         return true;
     };
@@ -382,15 +383,16 @@
     ThreadedCompiler.prototype.arrayElementPropertiesAreArrays = function (array, key) {
         if (!this.arrayElementsHaveProperties(array)) return false;
         var index = 0;
-        while (index < array.elements.length) {
-            var value = array.elements[index++].properties["$" + key];
+        while (index < this.runtime.arrayLength(array)) {
+            var value = this.runtime.getProperty(
+                this.runtime.arrayGet(array, index++), key);
             if (!value || value.guestType !== "array") return false;
         }
         return true;
     };
 
     ThreadedCompiler.prototype.generateStructured = function (program) {
-        var emitter = new StructuredEmitter(program);
+        var emitter = new StructuredEmitter(program, null, true);
         emitter.threadedCompiler = this;
         return emitter.generate();
     };
@@ -463,31 +465,15 @@
                        c[pc + 2] + "," + rr(3) + ");");
         } else if (opcode === op.MOVE) lines.push(rr(1) + "=" + rr(2) + ";");
         else if (opcode === op.GET_PROPERTY) {
-            lines.push(rr(1) + "=(" + rr(2) + "&&" + rr(2) +
-                       ".guestType==='array'&&typeof " + rr(3) +
-                       "==='number'&&" + rr(3) + ">=0&&(" + rr(3) + "|0)===" + rr(3) +
-                       ")?" + rr(2) + ".elements[" + rr(3) + "]:runtime.getProperty(" +
-                       rr(2) + "," + rr(3) + ");");
+            lines.push(rr(1) + "=runtime.getProperty(" + rr(2) + "," + rr(3) + ");");
         } else if (opcode === op.SET_PROPERTY) {
-            lines.push("if(" + rr(1) + "&&" + rr(1) +
-                       ".guestType==='array'&&typeof " + rr(2) +
-                       "==='number'&&" + rr(2) + ">=0&&(" + rr(2) + "|0)===" + rr(2) +
-                       "){" + rr(1) + ".elements[" + rr(2) + "]=" + rr(3) +
-                       ";}else{runtime.setProperty(" + rr(1) + "," + rr(2) + "," + rr(3) + ");}");
+            lines.push("runtime.setProperty(" + rr(1) + "," + rr(2) + "," + rr(3) + ");");
         } else if (opcode === op.GET_PROPERTY_CONST) {
-            lines.push(rr(1) + "=(" + rr(2) + "&&" + rr(2) +
-                       ".guestType==='array'&&" + constant(3) + "==='length')?" + rr(2) +
-                       ".elements.length:(" + rr(2) + "&&" + rr(2) +
-                       ".guestType==='buffer'&&" + constant(3) + "==='length')?" + rr(2) +
-                       ".length:(" + rr(2) + "&&" + rr(2) + ".properties&&" + rr(2) +
-                       ".properties['$'+" + constant(3) + "]!==undefined)?" + rr(2) +
-                       ".properties['$'+" + constant(3) + "]:runtime.getProperty(" + rr(2) +
+            lines.push(rr(1) + "=runtime.getProperty(" + rr(2) +
                        "," + constant(3) + ");");
         } else if (opcode === op.SET_PROPERTY_CONST) {
-            lines.push("if(" + rr(1) + "&&" + rr(1) + ".properties){" + rr(1) +
-                       ".properties['$'+" + constant(2) + "]=" + rr(3) +
-                       ";}else{runtime.setProperty(" + rr(1) + "," + constant(2) +
-                       "," + rr(3) + ");}");
+            lines.push("runtime.setProperty(" + rr(1) + "," + constant(2) +
+                       "," + rr(3) + ");");
         } else if (opcode === op.ADD) {
             lines.push(rr(1) + "=(typeof " + rr(2) + "==='number'&&typeof " + rr(3) +
                        "==='number')?" + rr(2) + "+" + rr(3) + ":runtime.add(" +
@@ -1026,6 +1012,8 @@
             var member = this.reference(node.callee);
             if (!node.callee.computed && node.callee.property.value === "setPixel" &&
                 node.arguments.length === 5) {
+                return "hc.setPixelFast(" + member.object + "," + args +
+                       ",context)";
                 var pixelSite = this.pixelIndex++;
                 var pixelArguments = argumentSources;
                 var pixelObject = "s" + pixelSite + "_0";
@@ -1096,6 +1084,9 @@
     };
 
     StructuredEmitter.prototype.memberRead = function (object, key, node) {
+        return "hc.get(" + object + "," + key + ")";
+        /* The specializations below are retained as design history while the
+         * heap backends gain equivalent checked fast paths. */
         if (this.fastPlan && node.object.type === "MemberExpression" &&
             node.object.computed && node.object.object.type === "Identifier" &&
             !node.computed && this.fastPlan.arrayElementKinds[
@@ -1169,6 +1160,8 @@
     };
 
     StructuredEmitter.prototype.memberWrite = function (object, key, value, node) {
+        return "hc.assignMember(" + object + "," + key + "," + value + ",\"=\")";
+        /* See memberRead: direct host-object fields are no longer semantic. */
         var fastKind = this.fastMemberKind(node);
         var alias = this.fastMemberAlias(node);
         if (fastKind === "array" && node.computed) {

@@ -62,7 +62,8 @@
     var BUFFER_VIEW_OFFSET = 4;
     var BUFFER_VIEW_LENGTH = 8;
     var BUFFER_VIEW_PROTOTYPE = 12;
-    var BUFFER_VIEW_BYTES = 16;
+    var BUFFER_VIEW_PROPERTIES = 16;
+    var BUFFER_VIEW_BYTES = 20;
 
     var BUFFER_BACKING_POINTER = 0;
     var BUFFER_BACKING_LENGTH = 4;
@@ -150,24 +151,39 @@
     };
 
     Records.prototype.objectPrototype = function (address) {
-        return this.heap.readFieldU32(address, OBJECT_PROTOTYPE, Heap.Types.OBJECT);
+        var type = this.heap.recordType(address);
+        if (type === Heap.Types.REGEXP) {
+            return this.heap.readFieldU32(address, REGEXP_PROTOTYPE, type);
+        }
+        return this.heap.readFieldU32(address, OBJECT_PROTOTYPE, type);
     };
 
     Records.prototype.setObjectPrototype = function (address, prototype) {
         if (prototype) this.heap.requireRecord(prototype);
-        this.heap.writeFieldU32(address, OBJECT_PROTOTYPE, prototype || 0,
-                                Heap.Types.OBJECT);
+        var type = this.heap.recordType(address);
+        this.heap.writeFieldU32(address,
+            type === Heap.Types.REGEXP ? REGEXP_PROTOTYPE : OBJECT_PROTOTYPE,
+            prototype || 0, type);
     };
 
     Records.prototype.objectPropertyHead = function (address) {
-        return this.heap.readFieldU32(address, OBJECT_PROPERTIES, Heap.Types.OBJECT);
+        return this.heap.readFieldU32(address, propertyHeadOffset(
+            this.heap.recordType(address)), this.heap.recordType(address));
+    };
+
+    Records.prototype.setObjectPropertyHead = function (address, property) {
+        var type = this.heap.recordType(address);
+        this.heap.writeFieldU32(address, propertyHeadOffset(type), property || 0, type);
     };
 
     Records.prototype.findOwnProperty = function (object, keyString) {
+        var keyAddress = typeof keyString === "number" ? keyString : 0;
         var property = this.objectPropertyHead(object);
         while (property) {
-            if (this.readString(this.heap.readFieldU32(
-                    property, PROPERTY_KEY, Heap.Types.PROPERTY)) === keyString) {
+            var candidate = this.heap.readFieldU32(
+                property, PROPERTY_KEY, Heap.Types.PROPERTY);
+            if ((keyAddress && candidate === keyAddress) ||
+                (!keyAddress && this.readString(candidate) === keyString)) {
                 return property;
             }
             property = this.heap.readFieldU32(property, PROPERTY_NEXT,
@@ -178,14 +194,12 @@
 
     Records.prototype.defineOwnProperty = function (object, keyAddress, attributes) {
         this.heap.requireRecord(keyAddress, Heap.Types.STRING);
-        var key = this.readString(keyAddress);
-        var property = this.findOwnProperty(object, key);
+        var property = this.findOwnProperty(object, keyAddress);
         if (!property) {
             property = this.heap.allocateRecordWords(Heap.Types.PROPERTY,
                 PROPERTY_BYTES, this.objectPropertyHead(object), keyAddress,
                 attributes === undefined ? DEFAULT_ATTRIBUTES : attributes, 0);
-            this.heap.writeFieldU32(object, OBJECT_PROPERTIES, property,
-                                    Heap.Types.OBJECT);
+            this.setObjectPropertyHead(object, property);
             return property;
         }
         this.heap.writeFieldU32(property, PROPERTY_ATTRIBUTES,
@@ -204,6 +218,32 @@
                                       Heap.Types.PROPERTY);
     };
 
+    Records.prototype.propertyKey = function (property) {
+        return this.heap.readFieldU32(property, PROPERTY_KEY, Heap.Types.PROPERTY);
+    };
+
+    Records.prototype.propertyNext = function (property) {
+        return this.heap.readFieldU32(property, PROPERTY_NEXT, Heap.Types.PROPERTY);
+    };
+
+    Records.prototype.deleteOwnProperty = function (object, keyAddress) {
+        var previous = 0;
+        var property = this.objectPropertyHead(object);
+        while (property) {
+            var next = this.propertyNext(property);
+            if (this.propertyKey(property) === keyAddress) {
+                if (previous) {
+                    this.heap.writeFieldU32(previous, PROPERTY_NEXT, next,
+                                            Heap.Types.PROPERTY);
+                } else this.setObjectPropertyHead(object, next);
+                return true;
+            }
+            previous = property;
+            property = next;
+        }
+        return true;
+    };
+
     Records.prototype.allocateValueVector = function (capacity) {
         capacity = Number(capacity) || 0;
         if (capacity < 0 || capacity !== Math.floor(capacity)) {
@@ -211,11 +251,6 @@
         }
         var address = this.heap.allocateRecordWords(Heap.Types.VALUE_VECTOR,
             VECTOR_CELLS + capacity * CELL_BYTES, 0, capacity, 0, 0);
-        var index = 0;
-        while (index < capacity) {
-            this.cells.writePrimitiveAt(this.vectorCell(address, index), undefined);
-            index++;
-        }
         return address;
     };
 
@@ -260,6 +295,15 @@
 
     Records.prototype.arrayElementCell = function (array, index) {
         return this.vectorCell(this.arrayElements(array), index);
+    };
+
+    Records.prototype.setArrayElements = function (array, vector) {
+        this.heap.requireRecord(vector, Heap.Types.VALUE_VECTOR);
+        this.heap.writeFieldU32(array, ARRAY_ELEMENTS, vector, Heap.Types.ARRAY);
+    };
+
+    Records.prototype.setArrayLength = function (array, length) {
+        this.setVectorLength(this.arrayElements(array), length);
     };
 
     Records.prototype.allocateEnvironment = function (parent, slotCount) {
@@ -314,6 +358,16 @@
             patternAddress, flagsAddress, prototype || 0, 0);
     };
 
+    Records.prototype.regexpPattern = function (regexp) {
+        return this.readString(this.heap.readFieldU32(
+            regexp, REGEXP_PATTERN, Heap.Types.REGEXP));
+    };
+
+    Records.prototype.regexpFlags = function (regexp) {
+        return this.readString(this.heap.readFieldU32(
+            regexp, REGEXP_FLAGS, Heap.Types.REGEXP));
+    };
+
     Records.prototype.allocateBufferBacking = function (pointer, length, metadata) {
         return this.heap.allocateRecordWords(Heap.Types.BUFFER_BACKING,
             BUFFER_BACKING_BYTES, pointer || 0, length, metadata || 0, 0);
@@ -323,6 +377,26 @@
                                                        prototype) {
         return this.heap.allocateRecordWords(Heap.Types.BUFFER_VIEW,
             BUFFER_VIEW_BYTES, backing, offset, length, prototype || 0);
+    };
+
+    Records.prototype.bufferViewBacking = function (view) {
+        return this.heap.readFieldU32(view, BUFFER_VIEW_BACKING,
+                                      Heap.Types.BUFFER_VIEW);
+    };
+
+    Records.prototype.bufferViewOffset = function (view) {
+        return this.heap.readFieldU32(view, BUFFER_VIEW_OFFSET,
+                                      Heap.Types.BUFFER_VIEW);
+    };
+
+    Records.prototype.bufferViewLength = function (view) {
+        return this.heap.readFieldU32(view, BUFFER_VIEW_LENGTH,
+                                      Heap.Types.BUFFER_VIEW);
+    };
+
+    Records.prototype.bufferBackingMetadata = function (backing) {
+        return this.heap.readFieldU32(backing, BUFFER_BACKING_METADATA,
+                                      Heap.Types.BUFFER_BACKING);
     };
 
     Records.prototype.functionClosure = function (address) {
@@ -371,6 +445,15 @@
         return this.heap.payloadAddress(frame,
             FRAME_REGISTERS + register * CELL_BYTES, CELL_BYTES, Heap.Types.FRAME);
     };
+
+    function propertyHeadOffset(type) {
+        if (type === Heap.Types.OBJECT || type === Heap.Types.ARRAY ||
+            type === Heap.Types.NATIVE_FUNCTION ||
+            type === Heap.Types.BYTECODE_FUNCTION) return OBJECT_PROPERTIES;
+        if (type === Heap.Types.REGEXP) return 12;
+        if (type === Heap.Types.BUFFER_VIEW) return BUFFER_VIEW_PROPERTIES;
+        throw new TypeError("record cannot contain object properties");
+    }
 
     root.GuestVMHeapRecords = Records;
     if (typeof module !== "undefined" && module.exports) module.exports = Records;

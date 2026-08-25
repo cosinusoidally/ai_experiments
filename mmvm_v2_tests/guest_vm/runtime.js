@@ -27,6 +27,8 @@
         this.internedStrings = {};
         this.assertions = 0;
         this.heapObjects = [];
+        this.heapHandles = {};
+        this.functionMetadata = {};
         this.hostRoots = [];
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
@@ -68,9 +70,14 @@
     };
 
     Runtime.prototype.makeNativeFunction = function (name, callback, callMode) {
-        return {guestType: "function", name: name, callback: callback,
-                callMode: callMode || "intrinsic", properties: {},
-                ownerRuntime: this};
+        this.ensureLinearHeap();
+        var address = this.heapRecords.allocateFunction(true, 0, 0, 0);
+        var callable = this.makeHeapHandle(address, "function");
+        callable.name = name;
+        callable.callback = callback;
+        callable.callMode = callMode || "intrinsic";
+        this.functionMetadata["$" + address] = callable;
+        return callable;
     };
 
     Runtime.prototype.makeHostFunction = function (name, callback) {
@@ -78,61 +85,61 @@
     };
 
     Runtime.prototype.makeObject = function () {
-        var object = {guestType: "object", properties: {}, gcMark: 0};
-        this.trackObject(object);
-        return object;
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateObject(0), "object"));
     };
 
     Runtime.prototype.makeArray = function () {
-        return this.trackObject({guestType: "array", elements: [],
-                                 properties: {}, gcMark: 0});
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateArray(0, 4), "array"));
     };
 
     Runtime.prototype.makeObjectLiteral3 = function (
             k0, v0, k1, v1, k2, v2) {
-        var object = {guestType: "object", properties: {}, gcMark: 0};
-        object.properties["$" + k0] = v0;
-        object.properties["$" + k1] = v1;
-        object.properties["$" + k2] = v2;
-        this.heapObjects[this.heapObjects.length] = object;
-        this.noteAllocation(1);
+        var object = this.makeObject();
+        this.setProperty(object, k0, v0);
+        this.setProperty(object, k1, v1);
+        this.setProperty(object, k2, v2);
         return object;
     };
 
     Runtime.prototype.makeObjectLiteral5 = function (
             k0, v0, k1, v1, k2, v2, k3, v3, k4, v4) {
-        var object = {guestType: "object", properties: {}, gcMark: 0};
-        object.properties["$" + k0] = v0;
-        object.properties["$" + k1] = v1;
-        object.properties["$" + k2] = v2;
-        object.properties["$" + k3] = v3;
-        object.properties["$" + k4] = v4;
-        this.heapObjects[this.heapObjects.length] = object;
-        this.noteAllocation(1);
+        var object = this.makeObject();
+        this.setProperty(object, k0, v0);
+        this.setProperty(object, k1, v1);
+        this.setProperty(object, k2, v2);
+        this.setProperty(object, k3, v3);
+        this.setProperty(object, k4, v4);
         return object;
     };
 
     Runtime.prototype.makeArrayLiteral0 = function () {
-        var array = {guestType: "array", elements: [], properties: {}, gcMark: 0};
-        this.heapObjects[this.heapObjects.length] = array;
-        this.noteAllocation(1);
-        return array;
+        return this.makeArray();
     };
 
     Runtime.prototype.makeRegExp = function (pattern, flags) {
-        return this.trackObject({guestType: "regexp", pattern: pattern,
-                                 flags: flags, properties: {}, gcMark: 0});
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateRegExp(pattern, flags, 0), "regexp"));
     };
 
     Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
         var prototype = this.makeObject();
-        var callable = this.trackObject({guestType: "bytecodeFunction", program: program,
-                                 closure: closure, properties: {}, gcMark: 0,
-                                 name: program.name || "",
-                                 source: program.source || null,
-                                 homeContext: homeContext});
-        callable.properties.$prototype = prototype;
-        prototype.properties.$constructor = callable;
+        this.ensureLinearHeap();
+        var callable = this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateFunction(false, 0, 0, 0),
+            "bytecodeFunction"));
+        callable.program = program;
+        callable.closure = closure;
+        callable.name = program.name || "";
+        callable.source = program.source || null;
+        callable.homeContext = homeContext;
+        this.functionMetadata["$" + callable.heapAddress] = callable;
+        this.setProperty(callable, "prototype", prototype);
+        this.setProperty(prototype, "constructor", callable);
         return callable;
     };
 
@@ -262,6 +269,139 @@
         this.heapObjects.push(object);
         this.noteAllocation(1);
         return object;
+    };
+
+    Runtime.prototype.makeHeapHandle = function (address, guestType) {
+        var key = "$" + address;
+        var existing = this.heapHandles[key];
+        if (existing) return existing;
+        var handle = {guestType: guestType, ownerRuntime: this,
+                      heapAddress: address, gcMark: 0};
+        this.heapHandles[key] = handle;
+        return handle;
+    };
+
+    Runtime.prototype.writeHeapValue = function (cell, value) {
+        this.assertOwned(value);
+        if (typeof value === "string") {
+            this.valueCells.writeReferenceAt(cell, this.internStringAddress(value));
+        } else if (value && value.guestType && value.heapAddress) {
+            this.valueCells.writeReferenceAt(cell, value.heapAddress);
+        } else this.valueCells.writePrimitiveAt(cell, value);
+    };
+
+    Runtime.prototype.readHeapValue = function (cell) {
+        if (this.valueCells.tagAt(cell) !== ValueCells.Tags.REFERENCE) {
+            return this.valueCells.readPrimitiveAt(cell);
+        }
+        var address = this.valueCells.readReferenceAt(cell);
+        if (this.linearHeap.recordType(address) === Heap.Types.STRING) {
+            return this.heapRecords.readString(address);
+        }
+        var handle = this.heapHandles["$" + address];
+        if (!handle) throw new Error("guest heap reference has no runtime handle");
+        return handle;
+    };
+
+    Runtime.prototype.heapOwnProperty = function (object, key, create) {
+        var keyAddress = this.internStringAddress(key);
+        var property = this.heapRecords.findOwnProperty(object.heapAddress, keyAddress);
+        if (!property && create) {
+            property = this.heapRecords.defineOwnProperty(
+                object.heapAddress, keyAddress,
+                HeapRecords.Attributes.DEFAULT);
+        }
+        return property;
+    };
+
+    Runtime.prototype.setPrototype = function (object, prototype) {
+        this.assertOwned(object);
+        this.assertOwned(prototype);
+        this.heapRecords.setObjectPrototype(object.heapAddress,
+            prototype ? prototype.heapAddress : 0);
+    };
+
+    Runtime.prototype.arrayLength = function (array) {
+        return this.heapRecords.arrayLength(array.heapAddress);
+    };
+
+    Runtime.prototype.arrayHas = function (array, index) {
+        if (index < 0 || index >= this.arrayLength(array)) return false;
+        return this.valueCells.tagAt(
+            this.heapRecords.arrayElementCell(array.heapAddress, index)) !== 0;
+    };
+
+    Runtime.prototype.arrayGet = function (array, index) {
+        if (!this.arrayHas(array, index)) return undefined;
+        return this.readHeapValue(
+            this.heapRecords.arrayElementCell(array.heapAddress, index));
+    };
+
+    Runtime.prototype.ensureArrayCapacity = function (array, required) {
+        var oldVector = this.heapRecords.arrayElements(array.heapAddress);
+        var oldCapacity = this.heapRecords.vectorCapacity(oldVector);
+        if (required <= oldCapacity) return oldVector;
+        var capacity = oldCapacity || 4;
+        while (capacity < required) capacity *= 2;
+        var newVector = this.heapRecords.allocateValueVector(capacity);
+        var length = this.heapRecords.vectorLength(oldVector);
+        var index = 0;
+        while (index < length) {
+            var oldCell = this.heapRecords.vectorCell(oldVector, index);
+            var newCell = this.heapRecords.vectorCell(newVector, index);
+            this.linearHeap.memory.writeU32(newCell,
+                this.linearHeap.memory.readU32(oldCell));
+            this.linearHeap.memory.writeU32(newCell + 4,
+                this.linearHeap.memory.readU32(oldCell + 4));
+            this.linearHeap.memory.writeU32(newCell + 8,
+                this.linearHeap.memory.readU32(oldCell + 8));
+            this.linearHeap.memory.writeU32(newCell + 12,
+                this.linearHeap.memory.readU32(oldCell + 12));
+            index++;
+        }
+        this.heapRecords.setVectorLength(newVector, length);
+        this.heapRecords.setArrayElements(array.heapAddress, newVector);
+        return newVector;
+    };
+
+    Runtime.prototype.arraySet = function (array, index, value) {
+        this.assertOwned(value);
+        index = Number(index);
+        if (index < 0 || index >= 4294967295 || index !== Math.floor(index)) {
+            throw new RangeError("invalid array index");
+        }
+        this.ensureArrayCapacity(array, index + 1);
+        this.writeHeapValue(this.heapRecords.arrayElementCell(array.heapAddress, index),
+                            value);
+        if (index >= this.arrayLength(array)) {
+            this.heapRecords.setArrayLength(array.heapAddress, index + 1);
+        }
+        return value;
+    };
+
+    Runtime.prototype.arrayToHost = function (array) {
+        var result = [];
+        var length = this.arrayLength(array);
+        var index = 0;
+        while (index < length) {
+            if (this.arrayHas(array, index)) result[index] = this.arrayGet(array, index);
+            index++;
+        }
+        return result;
+    };
+
+    Runtime.prototype.replaceArray = function (array, values) {
+        var capacity = values.length < 4 ? 4 : values.length;
+        var vector = this.heapRecords.allocateValueVector(capacity);
+        this.heapRecords.setArrayElements(array.heapAddress, vector);
+        var index = 0;
+        while (index < values.length) {
+            if (index in values) this.writeHeapValue(
+                this.heapRecords.vectorCell(vector, index), values[index]);
+            index++;
+        }
+        this.heapRecords.setVectorLength(vector, values.length);
+        return array;
     };
 
     Runtime.prototype.registerContext = function (context) {
@@ -451,7 +591,9 @@
             function (receiver, args) {
                 var search = args[0];
                 if (search && search.guestType === "regexp") {
-                    search = new RegExp(search.pattern, search.flags);
+                    search = new RegExp(runtime.heapRecords.regexpPattern(
+                        search.heapAddress), runtime.heapRecords.regexpFlags(
+                        search.heapAddress));
                 }
                 return String(receiver).replace(search, String(args[1]));
             });
@@ -461,49 +603,70 @@
         this.arrayMethods.push = this.makeNativeFunction("Array.push",
             function (receiver, args) {
                 var index = 0;
-                while (index < args.length) receiver.elements.push(args[index++]);
-                return receiver.elements.length;
+                while (index < args.length) {
+                    runtime.arraySet(receiver, runtime.arrayLength(receiver),
+                                     args[index++]);
+                }
+                return runtime.arrayLength(receiver);
             });
         this.arrayMethods.sort = this.makeNativeFunction("Array.sort",
             function (receiver) {
-                receiver.elements.sort();
+                var values = runtime.arrayToHost(receiver);
+                values.sort();
+                runtime.replaceArray(receiver, values);
                 return receiver;
             });
         this.arrayMethods.reverse = this.makeNativeFunction("Array.reverse",
             function (receiver) {
-                receiver.elements.reverse();
+                var values = runtime.arrayToHost(receiver);
+                values.reverse();
+                runtime.replaceArray(receiver, values);
                 return receiver;
             });
         this.arrayMethods.unshift = this.makeNativeFunction("Array.unshift",
             function (receiver, args) {
+                var values = runtime.arrayToHost(receiver);
                 var index = args.length - 1;
-                while (index >= 0) receiver.elements.unshift(args[index--]);
-                return receiver.elements.length;
+                while (index >= 0) values.unshift(args[index--]);
+                runtime.replaceArray(receiver, values);
+                return runtime.arrayLength(receiver);
             });
         this.arrayMethods.shift = this.makeNativeFunction("Array.shift",
-            function (receiver) { return receiver.elements.shift(); });
+            function (receiver) {
+                var values = runtime.arrayToHost(receiver);
+                var result = values.shift();
+                runtime.replaceArray(receiver, values);
+                return result;
+            });
         this.arrayMethods.pop = this.makeNativeFunction("Array.pop",
-            function (receiver) { return receiver.elements.pop(); });
+            function (receiver) {
+                var values = runtime.arrayToHost(receiver);
+                var result = values.pop();
+                runtime.replaceArray(receiver, values);
+                return result;
+            });
         this.arrayMethods.concat = this.makeNativeFunction("Array.concat",
             function (receiver, args) {
-                var result = runtime.arrayFrom(receiver.elements);
+                var result = runtime.arrayFrom(runtime.arrayToHost(receiver));
                 var argumentIndex = 0;
                 while (argumentIndex < args.length) {
                     var value = args[argumentIndex++];
                     if (value && value.guestType === "array") {
                         var elementIndex = 0;
-                        while (elementIndex < value.elements.length) {
-                            result.elements.push(value.elements[elementIndex++]);
+                        while (elementIndex < runtime.arrayLength(value)) {
+                            runtime.arraySet(result, runtime.arrayLength(result),
+                                runtime.arrayGet(value, elementIndex++));
                         }
-                    } else result.elements.push(value);
+                    } else runtime.arraySet(result, runtime.arrayLength(result), value);
                 }
                 return result;
             });
         this.arrayMethods.slice = this.makeNativeFunction("Array.slice",
             function (receiver, args) {
                 var start = args.length ? Number(args[0]) : 0;
-                var end = args.length > 1 ? Number(args[1]) : receiver.elements.length;
-                return runtime.arrayFrom(receiver.elements.slice(start, end));
+                var values = runtime.arrayToHost(receiver);
+                var end = args.length > 1 ? Number(args[1]) : values.length;
+                return runtime.arrayFrom(values.slice(start, end));
             });
         this.arrayMethods.join = this.makeNativeFunction("Array.join",
             function (receiver, args) {
@@ -511,9 +674,9 @@
                                 String(args[0]) : ",";
                 var result = "";
                 var index = 0;
-                while (index < receiver.elements.length) {
+                while (index < runtime.arrayLength(receiver)) {
                     if (index) result += separator;
-                    var value = receiver.elements[index++];
+                    var value = runtime.arrayGet(receiver, index++);
                     if (value !== undefined && value !== null) result += String(value);
                 }
                 return result;
@@ -548,15 +711,19 @@
         this.regexpMethods = {};
         this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
             function (receiver, args) {
-                return new RegExp(receiver.pattern, receiver.flags).test(String(args[0]));
+                return new RegExp(runtime.heapRecords.regexpPattern(
+                    receiver.heapAddress), runtime.heapRecords.regexpFlags(
+                    receiver.heapAddress)).test(String(args[0]));
             });
         this.regexpMethods.exec = this.makeNativeFunction("RegExp.exec",
             function (receiver, args) {
-                var match = new RegExp(receiver.pattern, receiver.flags).exec(String(args[0]));
+                var match = new RegExp(runtime.heapRecords.regexpPattern(
+                    receiver.heapAddress), runtime.heapRecords.regexpFlags(
+                    receiver.heapAddress)).exec(String(args[0]));
                 if (!match) return null;
                 var result = runtime.arrayFrom(match);
-                result.properties.$index = match.index;
-                result.properties.$input = match.input;
+                runtime.setProperty(result, "index", match.index);
+                runtime.setProperty(result, "input", match.input);
                 return result;
             });
         var stringConstructor = this.makeNativeFunction("String",
@@ -576,10 +743,11 @@
                     if (length < 0 || length !== Math.floor(length)) {
                         throw new RangeError("invalid array length");
                     }
-                    array.elements.length = length;
+                    runtime.ensureArrayCapacity(array, length);
+                    runtime.heapRecords.setArrayLength(array.heapAddress, length);
                 } else {
                     var index = 0;
-                    while (index < args.length) array.elements[index] = args[index++];
+                    while (index < args.length) runtime.arraySet(array, index, args[index++]);
                 }
                 return array;
             });
@@ -750,21 +918,27 @@
             return this.bufferSupport.getProperty(object, key);
         }
         if (object.guestType === "array") {
-            if (isDirectArrayIndex(key)) return object.elements[key];
+            if (isDirectArrayIndex(key)) return this.arrayGet(object, key);
             key = this.propertyKey(key);
-            if (key === "length") return object.elements.length;
-            if (isArrayIndex(key)) return object.elements[Number(key)];
-            if (own(object.properties, "$" + key)) return object.properties["$" + key];
+            if (key === "length") return this.arrayLength(object);
+            if (isArrayIndex(key)) return this.arrayGet(object, Number(key));
+            var arrayProperty = this.heapOwnProperty(object, key, false);
+            if (arrayProperty) return this.readHeapValue(
+                this.heapRecords.propertyValueCell(arrayProperty));
             return this.arrayMethods[key];
         }
         key = this.propertyKey(key);
         this.internStringAddress(key);
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
-            if (own(object.properties, "$" + key)) return object.properties["$" + key];
+            var property = this.heapOwnProperty(object, key, false);
+            if (property) return this.readHeapValue(
+                this.heapRecords.propertyValueCell(property));
             if (object.guestType === "regexp") return this.regexpMethods[key];
-            if (object.prototype) {
-                var inherited = this.getProperty(object.prototype, key);
+            var prototypeAddress = this.heapRecords.objectPrototype(object.heapAddress);
+            if (prototypeAddress) {
+                var inherited = this.getProperty(
+                    this.heapHandles["$" + prototypeAddress], key);
                 if (inherited !== undefined) return inherited;
             }
             if ((object.guestType === "function" ||
@@ -785,10 +959,13 @@
         key = this.propertyKey(key);
         if (!object || !object.guestType) return false;
         if (object.guestType === "array" && isArrayIndex(key)) {
-            return Number(key) < object.elements.length;
+            return this.arrayHas(object, Number(key));
         }
         if (object.guestType === "buffer" && isArrayIndex(key)) {
             return Number(key) < object.length;
+        }
+        if (object.heapAddress) {
+            return !!this.heapOwnProperty(object, key, false);
         }
         return !!object.properties && own(object.properties, "$" + key);
     };
@@ -798,8 +975,14 @@
         key = this.propertyKey(key);
         if (!object || !object.guestType) return true;
         if (object.guestType === "array" && isArrayIndex(key)) {
-            delete object.elements[Number(key)];
+            var arrayCell = this.heapRecords.arrayElementCell(
+                object.heapAddress, Number(key));
+            this.linearHeap.memory.writeU32(arrayCell, 0);
             return true;
+        }
+        if (object.heapAddress) {
+            return this.heapRecords.deleteOwnProperty(object.heapAddress,
+                this.internStringAddress(key));
         }
         if (object.properties) delete object.properties["$" + key];
         return true;
@@ -810,12 +993,22 @@
         var values = [];
         var index;
         if (object && object.guestType === "array") {
-            for (index = 0; index < object.elements.length; index++) {
-                if (index in object.elements) values.push(String(index));
+            for (index = 0; index < this.arrayLength(object); index++) {
+                if (this.arrayHas(object, index)) values.push(String(index));
             }
         }
         var key;
-        if (object && object.properties) {
+        if (object && object.heapAddress) {
+            var property = this.heapRecords.objectPropertyHead(object.heapAddress);
+            var heapKeys = [];
+            while (property) {
+                heapKeys.push(this.heapRecords.readString(
+                    this.heapRecords.propertyKey(property)));
+                property = this.heapRecords.propertyNext(property);
+            }
+            var heapKeyIndex = heapKeys.length - 1;
+            while (heapKeyIndex >= 0) values.push(heapKeys[heapKeyIndex--]);
+        } else if (object && object.properties) {
             for (key in object.properties) {
                 if (own(object.properties, key) && key.charAt(0) === "$") {
                     values.push(key.substring(1));
@@ -845,18 +1038,19 @@
         }
         if (object.guestType === "array") {
             if (isDirectArrayIndex(key)) {
-                object.elements[key] = value;
-                return value;
+                return this.arraySet(object, key, value);
             }
             key = this.propertyKey(key);
-            if (isArrayIndex(key)) object.elements[Number(key)] = value;
-            else object.properties["$" + key] = value;
+            if (isArrayIndex(key)) return this.arraySet(object, Number(key), value);
+            var arrayProperty = this.heapOwnProperty(object, key, true);
+            this.writeHeapValue(this.heapRecords.propertyValueCell(arrayProperty), value);
             return value;
         }
         key = this.propertyKey(key);
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
-            object.properties["$" + key] = value;
+            var property = this.heapOwnProperty(object, key, true);
+            this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
             return value;
         }
         throw new TypeError("property target is not an object");
@@ -927,17 +1121,35 @@
         }
         if (value.guestType === "array") {
             var elementIndex = 0;
-            while (elementIndex < value.elements.length) {
-                this.markValue(value.elements[elementIndex], generation);
+            while (elementIndex < this.arrayLength(value)) {
+                if (this.arrayHas(value, elementIndex)) {
+                    this.markValue(this.arrayGet(value, elementIndex), generation);
+                }
                 elementIndex++;
             }
         }
         if (value.guestType === "bytecodeFunction") this.markEnvironment(value.closure, generation);
-        if (value.prototype) this.markValue(value.prototype, generation);
-        var properties = value.properties;
-        var key;
-        for (key in properties) {
-            if (own(properties, key)) this.markValue(properties[key], generation);
+        if (value.heapAddress) {
+            var prototypeAddress = value.guestType === "buffer" ?
+                this.linearHeap.readFieldU32(value.heapAddress, 12,
+                                             Heap.Types.BUFFER_VIEW) :
+                this.heapRecords.objectPrototype(value.heapAddress);
+            if (prototypeAddress) {
+                this.markValue(this.heapHandles["$" + prototypeAddress], generation);
+            }
+            var property = this.heapRecords.objectPropertyHead(value.heapAddress);
+            while (property) {
+                this.markValue(this.readHeapValue(
+                    this.heapRecords.propertyValueCell(property)), generation);
+                property = this.heapRecords.propertyNext(property);
+            }
+        } else {
+            if (value.prototype) this.markValue(value.prototype, generation);
+            var properties = value.properties;
+            var key;
+            for (key in properties) {
+                if (own(properties, key)) this.markValue(properties[key], generation);
+            }
         }
     };
 
@@ -1035,8 +1247,12 @@
         var array = this.makeArray();
         var index = 0;
         while (index < values.length) {
-            array.elements[index] = values[index];
+            if (index in values) this.arraySet(array, index, values[index]);
             index++;
+        }
+        if (values.length && this.arrayLength(array) < values.length) {
+            this.ensureArrayCapacity(array, values.length);
+            this.heapRecords.setArrayLength(array.heapAddress, values.length);
         }
         return array;
     };

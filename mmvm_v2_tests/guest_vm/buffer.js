@@ -25,8 +25,7 @@
         this.runtime = runtime;
         this.memory = new HostMemory();
         this.backings = [];
-        this.prototype = {guestType: "object", properties: {},
-                          ownerRuntime: runtime};
+        this.prototype = runtime.makeObject();
         this.installPrototype();
         this.installConstructor();
     }
@@ -37,7 +36,7 @@
 
     BufferSupport.prototype.installPrototype = function () {
         var support = this;
-        var properties = this.prototype.properties;
+        var properties = {};
         properties.$slice = this.makeNative("Buffer.prototype.slice",
             function (receiver, args) {
                 support.requireBuffer(receiver);
@@ -169,6 +168,13 @@
                 }
                 return result;
             });
+        var property;
+        for (property in properties) {
+            if (Object.prototype.hasOwnProperty.call(properties, property)) {
+                this.runtime.setProperty(this.prototype, property.substring(1),
+                                         properties[property]);
+            }
+        }
     };
 
     BufferSupport.prototype.installConstructor = function () {
@@ -196,7 +202,8 @@
                 var buffer = support.allocate(args[0]);
                 var allocation = buffer.backing.allocation;
                 if (allocation.isNative) {
-                    buffer.properties.$_nodePointer = allocation.pointer + buffer.offset;
+                    support.runtime.setProperty(buffer, "_nodePointer",
+                        allocation.pointer + buffer.offset);
                 }
                 return buffer;
             }));
@@ -232,7 +239,9 @@
         } else if (value && value.guestType === "buffer") {
             while (index < value.length) bytes.push(this.read(value, index++));
         } else if (value && value.guestType === "array") {
-            while (index < value.elements.length) bytes.push(Number(value.elements[index++]) & 255);
+            while (index < this.runtime.arrayLength(value)) {
+                bytes.push(Number(this.runtime.arrayGet(value, index++)) & 255);
+            }
         } else if (value === undefined) {
             return this.allocate(0);
         } else {
@@ -258,14 +267,21 @@
         var backing = {allocation: this.memory.allocate(size), length: size,
                        freed: false, gcMark: 0};
         this.backings.push(backing);
+        backing.heapAddress = this.runtime.heapRecords.allocateBufferBacking(
+            backing.allocation.isNative ? backing.allocation.pointer : 0,
+            size, this.backings.length);
         this.runtime.noteAllocation(Math.max(1, Math.ceil(size / 64)));
         return this.makeView(backing, 0, size);
     };
 
     BufferSupport.prototype.makeView = function (backing, offset, length) {
         if (backing.freed) throw new Error("cannot view a freed backing store");
-        var view = {guestType: "buffer", properties: {}, prototype: this.prototype,
-                    backing: backing, offset: offset, length: length, gcMark: 0};
+        var viewAddress = this.runtime.heapRecords.allocateBufferView(
+            backing.heapAddress, offset, length, this.prototype.heapAddress);
+        var view = this.runtime.makeHeapHandle(viewAddress, "buffer");
+        view.backing = backing;
+        view.offset = offset;
+        view.length = length;
         this.runtime.trackObject(view);
         return view;
     };
@@ -300,11 +316,10 @@
         if (key === "length") return view.length;
         var index = canonicalIndex(key);
         if (index >= 0) return index < view.length ? this.read(view, index) : undefined;
-        if (Object.prototype.hasOwnProperty.call(view.properties, "$" + key)) {
-            return view.properties["$" + key];
-        }
-        return Object.prototype.hasOwnProperty.call(this.prototype.properties, "$" + key) ?
-               this.prototype.properties["$" + key] : undefined;
+        var property = this.runtime.heapOwnProperty(view, key, false);
+        if (property) return this.runtime.readHeapValue(
+            this.runtime.heapRecords.propertyValueCell(property));
+        return this.runtime.getProperty(this.prototype, key);
     };
 
     BufferSupport.prototype.setProperty = function (view, key, value) {
@@ -314,7 +329,9 @@
             return value;
         }
         if (key === "length") return value;
-        view.properties["$" + key] = value;
+        var property = this.runtime.heapOwnProperty(view, key, true);
+        this.runtime.writeHeapValue(
+            this.runtime.heapRecords.propertyValueCell(property), value);
         return value;
     };
 
