@@ -47,6 +47,7 @@
         {path: "language/standard_library.js"},
         {path: "language/try_update.js"},
         {path: "language/object_control.js"},
+        {path: "language/declaration_hoisting.js"},
         {path: "buffer/buffer_guest.js"}
     ];
     var totalAssertions = 0;

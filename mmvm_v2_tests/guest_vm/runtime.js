@@ -275,6 +275,23 @@
                 receiver.elements.sort();
                 return receiver;
             });
+        this.arrayMethods.reverse = this.makeNativeFunction("Array.reverse",
+            function (receiver) {
+                receiver.elements.reverse();
+                return receiver;
+            });
+        this.arrayMethods.unshift = this.makeNativeFunction("Array.unshift",
+            function (receiver, args) {
+                var index = args.length - 1;
+                while (index >= 0) receiver.elements.unshift(args[index--]);
+                return receiver.elements.length;
+            });
+        this.arrayMethods.slice = this.makeNativeFunction("Array.slice",
+            function (receiver, args) {
+                var start = args.length ? Number(args[0]) : 0;
+                var end = args.length > 1 ? Number(args[1]) : receiver.elements.length;
+                return runtime.arrayFrom(receiver.elements.slice(start, end));
+            });
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
@@ -312,6 +329,21 @@
         this.globals.String = stringConstructor;
         this.globals.Number = this.makeNativeFunction("Number",
             function (receiver, args) { return args.length ? Number(args[0]) : 0; });
+        this.globals.Array = this.makeNativeFunction("Array",
+            function (receiver, args) {
+                var array = runtime.makeArray();
+                if (args.length === 1 && typeof args[0] === "number") {
+                    var length = Number(args[0]);
+                    if (length < 0 || length !== Math.floor(length)) {
+                        throw new RangeError("invalid array length");
+                    }
+                    array.elements.length = length;
+                } else {
+                    var index = 0;
+                    while (index < args.length) array.elements[index] = args[index++];
+                }
+                return array;
+            });
         var math = this.makeObject();
         function mathMethod(name, callback) {
             runtime.setProperty(math, name,
@@ -321,6 +353,9 @@
         mathMethod("ceil", function (receiver, args) { return Math.ceil(Number(args[0])); });
         mathMethod("round", function (receiver, args) { return Math.round(Number(args[0])); });
         mathMethod("sqrt", function (receiver, args) { return Math.sqrt(Number(args[0])); });
+        mathMethod("sin", function (receiver, args) { return Math.sin(Number(args[0])); });
+        mathMethod("cos", function (receiver, args) { return Math.cos(Number(args[0])); });
+        mathMethod("exp", function (receiver, args) { return Math.exp(Number(args[0])); });
         mathMethod("abs", function (receiver, args) { return Math.abs(Number(args[0])); });
         mathMethod("pow", function (receiver, args) {
             return Math.pow(Number(args[0]), Number(args[1]));

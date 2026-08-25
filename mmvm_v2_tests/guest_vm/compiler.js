@@ -49,6 +49,16 @@
     };
 
     Compiler.prototype.compile = function (program) {
+        var declarations = [];
+        collectFunctionDeclarations(program.body, declarations);
+        var declarationIndex = 0;
+        while (declarationIndex < declarations.length) {
+            var declaration = declarations[declarationIndex++];
+            var declaredFunction = this.allocate();
+            this.emit(op.MAKE_FUNCTION, declaredFunction,
+                      this.constant(this.compileFunction(declaration)));
+            this.emit(op.SET_GLOBAL, this.constant(declaration.name), declaredFunction);
+        }
         var index = 0;
         while (index < program.body.length) {
             this.compileStatement(program.body[index]);
@@ -104,10 +114,7 @@
             return;
         }
         if (statement.type === "FunctionDeclaration") {
-            var declaredFunction = this.allocate();
-            this.emit(op.MAKE_FUNCTION, declaredFunction,
-                      this.constant(this.compileFunction(statement)));
-            this.emit(op.SET_GLOBAL, this.constant(statement.name), declaredFunction);
+            /* Function declarations are instantiated at scope entry. */
             return;
         }
         if (statement.type === "IfStatement") {
@@ -558,6 +565,31 @@
         add(functionName);
         visit(body);
         return result;
+    }
+
+    function collectFunctionDeclarations(statements, result) {
+        var index = 0;
+        while (index < statements.length) {
+            var statement = statements[index++];
+            if (statement.type === "FunctionDeclaration") {
+                result.push(statement);
+            } else if (statement.type === "BlockStatement") {
+                collectFunctionDeclarations(statement.body, result);
+            } else if (statement.type === "IfStatement") {
+                collectFunctionDeclarations([statement.consequent], result);
+                if (statement.alternate) {
+                    collectFunctionDeclarations([statement.alternate], result);
+                }
+            } else if (statement.type === "WhileStatement" ||
+                       statement.type === "DoWhileStatement" ||
+                       statement.type === "ForStatement" ||
+                       statement.type === "ForInStatement") {
+                collectFunctionDeclarations([statement.body], result);
+            } else if (statement.type === "TryStatement") {
+                collectFunctionDeclarations(statement.block.body, result);
+                collectFunctionDeclarations(statement.handler.body, result);
+            }
+        }
     }
 
     root.GuestVMCompiler = Compiler;
