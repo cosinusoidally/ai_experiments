@@ -29,6 +29,16 @@ The primary embedder model is `JSRuntime` -> `JSContext` -> resumable
 external host call. The legacy `VM` facade retains one default context and
 auto-services host callbacks for existing tests and examples.
 
+Load the complete VM into the minimal shell with one call:
+
+```js
+load("guest_vm/guest_vm.js");
+```
+
+The bootstrap owns all internal module ordering. Node code can use the same
+entry point with `require("./guest_vm/guest_vm.js")`; direct `vm.js` requires
+remain compatible.
+
 Run the complete current suite with either host or both:
 
 ```sh

@@ -162,21 +162,11 @@ same guest Buffer view and property logic.
 
 ## `js_min.exe` embedding
 
-The minimal shell has no CommonJS loader. Load the implementation in dependency
-order:
+The minimal shell has no CommonJS loader. Load the complete implementation
+through its single public bootstrap:
 
 ```js
-load("guest_vm/tokenizer.js");
-load("guest_vm/parser.js");
-load("guest_vm/bytecode.js");
-load("guest_vm/compiler.js");
-load("guest_vm/verifier.js");
-load("guest_vm/host_ffi.js");
-load("guest_vm/host_memory.js");
-load("guest_vm/buffer.js");
-load("guest_vm/runtime.js");
-load("guest_vm/interpreter.js");
-load("guest_vm/vm.js");
+load("guest_vm/guest_vm.js");
 
 var vm = new GuestVM();
 try {
@@ -185,6 +175,10 @@ try {
     vm.destroy();
 }
 ```
+
+The bootstrap owns the internal dependency order and installs `GuestVM`,
+`GuestVMJSRuntime`, and `GuestVMJSContext`. Embedders should not load the
+individual implementation modules themselves.
 
 Run the shell with the Firefox library directory supplied through
 `LD_LIBRARY_PATH`; do not add an rpath. `host_memory.js` resolves `calloc` and

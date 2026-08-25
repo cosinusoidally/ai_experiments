@@ -114,28 +114,22 @@ filesystem, and sockets must yield.
 | `host_memory.js` | Native or emulated byte storage over the host FFI boundary. |
 | `buffer.js` | Buffer views, methods, backing stores, and Buffer GC integration. |
 | `vm.js` | Embedder facade tying compilation, execution, roots, and shutdown together. |
+| `guest_vm.js` | Single public bootstrap which loads internal modules in dependency order. |
 | `guest_runner.js` | Quiet command-line source reader and one-program runner. |
 
-Node modules load dependencies with relative `require`. Under `js_min.exe`, an
-embedder must load them in this order:
+Node modules load dependencies with relative `require`. A shell embedder loads
+the complete VM with one public call:
 
-```text
-tokenizer.js
-parser.js
-bytecode.js
-compiler.js
-verifier.js
-host_ffi.js
-host_memory.js
-buffer.js
-runtime.js
-interpreter.js
-vm.js
+```js
+load("guest_vm/guest_vm.js");
 ```
 
-Each module exports through CommonJS when available and otherwise installs a
-single `GuestVM...` name on the shell global object. Modules do not depend on
-npm packages.
+`guest_vm.js` owns the internal load order shown in the module table. Consumers
+must not repeat that dependency list. CommonJS users may likewise require
+`guest_vm.js`; requiring `vm.js` directly remains compatible. Each internal
+module exports through CommonJS when available and otherwise installs a single
+`GuestVM...` name on the shell global object. Modules do not depend on npm
+packages.
 
 ## Tokenizer
 

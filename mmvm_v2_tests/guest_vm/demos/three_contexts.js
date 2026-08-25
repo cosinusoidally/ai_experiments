@@ -12,19 +12,9 @@
     var isNode = typeof module !== "undefined" && module.exports;
     var VM;
     if (isNode) {
-        VM = require("../vm.js");
+        VM = require("../guest_vm.js");
     } else {
-        load("guest_vm/tokenizer.js");
-        load("guest_vm/parser.js");
-        load("guest_vm/bytecode.js");
-        load("guest_vm/compiler.js");
-        load("guest_vm/verifier.js");
-        load("guest_vm/host_ffi.js");
-        load("guest_vm/host_memory.js");
-        load("guest_vm/buffer.js");
-        load("guest_vm/runtime.js");
-        load("guest_vm/interpreter.js");
-        load("guest_vm/vm.js");
+        load("guest_vm/guest_vm.js");
         VM = GuestVM;
     }
 

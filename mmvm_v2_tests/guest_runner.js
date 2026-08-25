@@ -7,17 +7,7 @@ if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
     guestRunnerArguments = process.argv.slice(2);
 } else {
-    load("guest_vm/tokenizer.js");
-    load("guest_vm/parser.js");
-    load("guest_vm/bytecode.js");
-    load("guest_vm/compiler.js");
-    load("guest_vm/verifier.js");
-    load("guest_vm/host_ffi.js");
-    load("guest_vm/host_memory.js");
-    load("guest_vm/buffer.js");
-    load("guest_vm/runtime.js");
-    load("guest_vm/interpreter.js");
-    load("guest_vm/vm.js");
+    load("guest_vm/guest_vm.js");
     GuestRunnerVM = GuestVM;
     for (var guestArgumentIndex = 0;
          guestArgumentIndex < arguments.length; guestArgumentIndex++) {
