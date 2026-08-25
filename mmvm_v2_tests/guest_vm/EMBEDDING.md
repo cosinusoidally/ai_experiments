@@ -8,7 +8,7 @@ Node behavior.
 The parser and AST records are internal; the `VM` facade, runtime value handles,
 and native-callback convention are the intended integration points.
 
-The primary API is moving to explicit runtime and context ownership:
+The primary API uses explicit runtime and context ownership:
 
 ```js
 var GuestVM = require("./guest_vm/vm.js");
@@ -38,6 +38,92 @@ budget preserves the complete continuation and is not an ECMAScript exception.
 A `hostCall` result must be completed or failed by the embedder before the next
 resume. Inline low-level intrinsics are explicitly classified exceptions to
 host-call yielding; arbitrary native callbacks are not.
+
+## Resuming and scheduling execution
+
+`context.start` compiles source and returns an execution without running guest
+bytecode:
+
+```js
+var execution = context.start("work();", "work.js");
+var result = execution.resume(50000);
+```
+
+The result records are:
+
+```text
+{status: "budget",    instructions, totalInstructions}
+{status: "hostCall", instructions, totalInstructions, call}
+{status: "completed", instructions, totalInstructions, value}
+{status: "threw",    instructions, totalInstructions, exception}
+```
+
+Budget is local to one `resume` call and shared by every guest frame executed
+during that call. A zero budget executes nothing. Exhaustion preserves the next
+program counter, all registers, environments, and frames. It is not injected as
+a guest exception:
+
+```js
+while (result.status === "budget") {
+    result = execution.resume(50000);
+}
+```
+
+Only one execution may be active in a context at present. Different contexts,
+including contexts in the same runtime, can hold independent suspended
+executions. `execution.abort()` discards a continuation and releases it as a GC
+root.
+
+## Servicing host calls
+
+Create an external host function on the context and install it in that
+context's globals:
+
+```js
+var readClock = context.makeHostFunction("readClock", function (receiver, args) {
+    return hostClockMilliseconds();
+});
+context.installGlobal("readClock", readClock);
+```
+
+Calling it does not invoke the callback inside the interpreter. `resume`
+returns first:
+
+```js
+var result = execution.resume(50000);
+if (result.status === "hostCall") {
+    result.call.name;       // "readClock"
+    result.call.receiver;   // guest method receiver or undefined
+    result.call.arguments;  // guest values
+}
+```
+
+An embedder can dispatch by the public request fields and supply a result:
+
+```js
+execution.completeHostCall(clockValue);
+result = execution.resume(50000);
+```
+
+Or inject a host failure on the next resume:
+
+```js
+execution.failHostCall(hostError);
+result = execution.resume(50000); // currently returns `threw`
+```
+
+`execution.serviceHostCall()` is a trusted convenience that invokes the
+callback registered in the host-function record and completes or fails the
+request. `guest_runner.js` uses it as its host dispatcher. A more isolated
+embedder can ignore the stored callback and dispatch solely from `result.call`.
+
+Internal semantic functions have `callMode: "intrinsic"` and execute inline.
+The raw `peek8`, `poke8`, `peek32`, and `poke32` bindings are deliberately
+inline intrinsics. `get_dlsym`, `ffi_call`, output, and `quit` are external host
+calls and yield before the command-line embedder invokes them. A synchronous
+FFI callback such as libc `accept` can still block while the embedder services
+that yielded call; continuation support does not make an arbitrary native
+function asynchronous.
 
 The VM is not a security sandbox. Guest bytecode is verified and interpreted
 with an instruction budget, but native callbacks are trusted, resource limits
@@ -94,9 +180,12 @@ Run the shell with the Firefox library directory supplied through
 
 ## Compile, execute, and run
 
-`VM.run(source, filename)` is the convenience path. It tokenizes, parses,
-compiles, verifies, and executes source against the VM's persistent runtime.
-Globals therefore survive subsequent `run` calls on the same VM.
+`VM.run(source, filename)` is the backwards-compatible convenience path. It
+tokenizes, parses, compiles, verifies, automatically services yielded registered
+host callbacks, and runs with unlimited budget against its one default context.
+Globals therefore survive subsequent `run` calls on the same facade. Embedders
+that need scheduling or host-call control use `JSContext.start` and
+`Execution.resume` instead.
 
 For caching or inspection, split the operations:
 
@@ -109,10 +198,10 @@ var result = vm.execute(program);
 constants, and a register count. Treat it as immutable. Bytecode has no stable
 serialization/version contract yet; do not persist it between VM revisions.
 
-The compiler currently appends an implicit `return undefined`. `execute`
-returns the value of the executed `RETURN`, normally `undefined` for top-level
-test programs. Runtime and guest errors propagate as JavaScript exceptions to
-the embedder. `execute` always clears its active-frame GC roots in `finally`.
+The compiler currently appends an implicit `return undefined`. Compatibility
+`execute` returns that value and throws an uncaught execution failure. The
+resumable API instead returns `completed` or `threw` records without losing the
+continuation before a terminal state.
 
 ## Installing globals and native functions
 
@@ -122,7 +211,7 @@ Install a primitive or existing guest value with:
 vm.installGlobal("hostVersion", "bootstrap-1");
 ```
 
-Create a callable guest function with:
+Create an external host function with the compatibility facade:
 
 ```js
 var add = vm.makeNativeFunction("hostAdd", function (receiver, args) {
@@ -141,8 +230,9 @@ callback(receiver, argumentsArray) -> guest-compatible value
 For a method call, `receiver` is the guest object before the dot or brackets.
 For a plain call it is currently `undefined`. Arguments are guest values.
 Callbacks may return guest primitives or guest objects created by the runtime.
-Throwing propagates out of guest execution; guest `try/catch` is not implemented
-yet.
+With the resumable API the call yields before this callback runs. A callback
+failure is injected when the execution resumes; because guest `try`/`catch` is
+not implemented yet, it currently becomes a terminal `threw` result.
 
 Native callbacks are trusted. They must use runtime property operations rather
 than reading arbitrary implementation fields when implementing guest-visible

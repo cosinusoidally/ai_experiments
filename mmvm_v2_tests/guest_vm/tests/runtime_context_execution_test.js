@@ -22,6 +22,13 @@
 
         var firstObject = firstRuntime.runtime.makeObject();
         firstContext.installGlobal("owned", firstObject);
+        secondContext.installGlobal("sharedOwned", firstObject);
+        firstRuntime.runtime.setProperty(firstObject, "value", 37);
+        secondContext.run("var sharedObjectValue = sharedOwned.value;",
+                          "shared_runtime_object.js");
+        assert(firstRuntime.runtime.getGlobal(secondContext,
+                                              "sharedObjectValue") === 37,
+               "contexts in one runtime did not share a runtime-owned object");
         var rejectedForeignObject = false;
         try {
             otherContext.installGlobal("foreign", firstObject);

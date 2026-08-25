@@ -48,7 +48,12 @@ runtime.
 
 A context can retain a completed global environment and execute later programs
 against it. Creating another context produces fresh globals and fresh built-in
-bindings. Passing guest implementation records between runtimes is invalid.
+bindings. Contexts in one runtime may deliberately share guest objects; passing
+guest implementation records between runtimes is invalid and rejected at the
+global, property, call, and host-completion boundaries. The current bootstrap
+shares some runtime-owned intrinsic function objects between context binding
+tables; completing independent ES5.1 realm intrinsics remains part of the
+prototype/object-model work.
 
 `VM` remains a compatibility facade containing one runtime and one default
 context. New embedders should use `JSRuntime.createContext()` explicitly.
@@ -227,22 +232,27 @@ same committed change.
 
 ## Interpreter and semantics boundary
 
-`interpret(program, runtime, receiver, arguments, closure, callable)` owns one
-call frame's register array, environment, numeric `pc`, and a 10,000,000-
-instruction safety budget. The dispatch loop performs representation
-movement and control flow directly. Semantically observable operations call the
-runtime, notably globals, properties, calls, truthiness, addition, and loose
-equality.
+`Execution` owns an explicit array of call frames. The last frame is active;
+each frame owns its register array, lexical environment, numeric `pc`, and
+caller destination register. The dispatch loop performs representation movement
+and control flow directly. Guest calls push frames without invoking the host
+interpreter recursively. Returns pop frames and place their value in the saved
+caller register.
+
+Each `resume(budget)` call uses one counter shared across all frames it runs.
+Zero budget returns immediately, finite exhaustion returns `budget`, and
+`Infinity` is accepted for trusted compatibility execution. No fixed lifetime
+budget exists inside a frame.
 
 Several primitive operators still use host numeric operations after explicit
 `Number` conversion. This is sufficient for the current tests but is not a
 claim of complete ES5 conversion semantics. As object coercion is implemented,
 these operations must move behind complete guest helpers.
 
-`VM.execute` clears the active-register root set in a `finally` block, including
-when parsing-independent runtime execution throws. The lower-level interpreter
-also clears it on normal return. Embedders should call the facade, not invoke
-`interpret` directly.
+Suspended executions remain attached to their context and are collector roots.
+Completed, failed, and aborted executions detach from the context. Embedders
+must use `Execution.resume`, `completeHostCall`, `failHostCall`, and `abort`
+rather than invoking dispatch internals.
 
 ## Guest values and properties
 
@@ -292,8 +302,9 @@ roots are:
 
 - every value in the guest global table;
 - opaque values retained in the embedder host-root table;
-- every active interpreter register;
-- every active call environment and each captured closure environment;
+- every register in every live or suspended execution frame;
+- every live or suspended frame environment and captured closure environment;
+- each pending host-call receiver and argument;
 - the internal Buffer prototype and objects reachable through marked property
   maps.
 

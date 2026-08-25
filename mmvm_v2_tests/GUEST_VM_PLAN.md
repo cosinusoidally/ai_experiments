@@ -67,6 +67,24 @@ observably equivalent for the kernel contract. Correct ECMAScript 5.1 behavior r
 responsibility of the guest runtime operations invoked by the interpreter,
 not an accidental consequence of either host engine.
 
+Execution ownership is additionally split into three explicit levels:
+
+1. `JSRuntime` owns one heap, collector, intern/atom tables, Buffer backing
+   stores, runtime metadata, and all guest objects in that ownership domain.
+2. `JSContext` is nested under one runtime and owns an independent global
+   environment plus at most one active execution. Runtimes and contexts may
+   both have multiple instances.
+3. `Execution` owns a resumable explicit guest frame stack. It runs until
+   completion, uncaught failure, finite budget exhaustion, or an external host
+   call. Budget exhaustion and host calls preserve the continuation and return
+   control to the embedder.
+
+Guest calls must not rely on recursive host-interpreter calls. External host
+calls yield a request which the embedder completes or fails before resumption.
+Explicitly classified low-level implementation intrinsics may execute inline;
+the initial exceptions include byte and aligned-word peek/poke operations so
+memory-intensive guest code does not cross the scheduling boundary per access.
+
 ## Hard constraints
 
 - Do not change `js_min.c`, `js.c`, `js_min_linux.c`, `js_min_win32.c`, or any

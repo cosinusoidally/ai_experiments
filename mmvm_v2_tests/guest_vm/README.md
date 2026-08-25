@@ -22,7 +22,12 @@ Read these documents before changing or embedding the VM:
 - [`EMBEDDING.md`](EMBEDDING.md) documents the public bootstrap API, host loading,
   native functions, explicit roots, execution, errors, and shutdown.
 - [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md) records the intended route from
-this bootstrap to a conforming ES5.1 interpreter and later optional kernel AOT.
+  this bootstrap to a conforming ES5.1 interpreter and later optional kernel AOT.
+
+The primary embedder model is `JSRuntime` -> `JSContext` -> resumable
+`Execution`. An execution yields on finite budget exhaustion and before every
+external host call. The legacy `VM` facade retains one default context and
+auto-services host callbacks for existing tests and examples.
 
 Run the complete current suite with either host or both:
 

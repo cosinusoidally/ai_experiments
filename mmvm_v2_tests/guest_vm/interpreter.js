@@ -19,7 +19,8 @@
         this.status = "ready";
         this.value = undefined;
         this.exception = undefined;
-        this.injectedHostException = null;
+        this.injectedHostException = undefined;
+        this.hasInjectedHostException = false;
         this.totalInstructions = 0;
     }
 
@@ -59,9 +60,10 @@
 
         this.status = "running";
         var used = 0;
-        if (this.injectedHostException !== null) {
+        if (this.hasInjectedHostException) {
             var injected = this.injectedHostException;
-            this.injectedHostException = null;
+            this.injectedHostException = undefined;
+            this.hasInjectedHostException = false;
             return this.finish("threw", injected, 0);
         }
         try {
@@ -225,6 +227,7 @@
         this.pendingHostCall = null;
         this.status = "ready";
         this.injectedHostException = error;
+        this.hasInjectedHostException = true;
     };
 
     Execution.prototype.serviceHostCall = function () {
