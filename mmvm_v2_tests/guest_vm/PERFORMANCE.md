@@ -164,3 +164,10 @@ contain nested callbacks now use this compiled path instead of unconditionally
 falling back to the interpreter. Demo1 consequently improved to approximately
 1.6--1.8 FPS at 64x64. This remains an intermediate result well below the
 pre-migration reference; no parity claim is made.
+
+Trusted value-cell operations now also bypass the duplicate generic
+`LinearMemory.checkRange` pass while retaining the host allocation bounds
+check. Heap-native array inline caches retain vector addresses and structural
+versions, but never element values. After these changes, demo1 measured about
+2.1--2.2 FPS at 64x64 and demo2 measured about 0.6 FPS at 64x64. The accepted
+pre-migration references remain 13.5 and 12.2 FPS respectively.

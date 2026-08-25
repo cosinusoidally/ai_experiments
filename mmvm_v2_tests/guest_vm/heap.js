@@ -169,19 +169,19 @@
      * address arithmetic here preserves the layering boundary while avoiding
      * repeated type/size header reads for every field in one semantic access. */
     Heap.prototype.readTrustedFieldU8 = function (address, offset) {
-        return this.memory.readU8(address + HEADER_SIZE + offset);
+        return this.memory.readU8Trusted(address + HEADER_SIZE + offset);
     };
 
     Heap.prototype.writeTrustedFieldU8 = function (address, offset, value) {
-        this.memory.writeU8(address + HEADER_SIZE + offset, value);
+        this.memory.writeU8Trusted(address + HEADER_SIZE + offset, value);
     };
 
     Heap.prototype.readTrustedFieldU32 = function (address, offset) {
-        return this.memory.readU32(address + HEADER_SIZE + offset);
+        return this.memory.readU32Trusted(address + HEADER_SIZE + offset);
     };
 
     Heap.prototype.writeTrustedFieldU32 = function (address, offset, value) {
-        this.memory.writeU32(address + HEADER_SIZE + offset, value);
+        this.memory.writeU32Trusted(address + HEADER_SIZE + offset, value);
     };
 
     Heap.prototype.trustedPayloadAddress = function (address, offset) {

@@ -74,7 +74,8 @@
                                       this.generate(program);
         var factory = Function("hc", "p", "ic", source);
         var compiled = factory(this, program,
-            {objects: [], versions: [], cells: []});
+            {objects: [], versions: [], cells: [], arrayObjects: [],
+             arrayVersions: [], arrayVectors: [], arrayLengths: []});
         this.programs.push(program);
         this.compiled.push(compiled);
         program.threadedCompiler = this;
@@ -397,10 +398,24 @@
         return this.runtime.getProperty(object, key);
     };
 
-    ThreadedCompiler.prototype.getComputed = function (object, key) {
+    ThreadedCompiler.prototype.getComputedCached = function (
+            cache, site, object, key) {
         if (object && object.guestType === "array" && typeof key === "number" &&
             key >= 0 && key === Math.floor(key)) {
-            return this.runtime.arrayGet(object, key);
+            if (cache.arrayObjects[site] !== object ||
+                cache.arrayVersions[site] !== object.arrayStructureVersion) {
+                var vector = this.runtime.heapRecords.arrayElements(object.heapAddress);
+                cache.arrayObjects[site] = object;
+                cache.arrayVersions[site] = object.arrayStructureVersion;
+                cache.arrayVectors[site] = vector;
+                cache.arrayLengths[site] =
+                    this.runtime.heapRecords.vectorLength(vector);
+            }
+            if (key >= cache.arrayLengths[site]) return undefined;
+            var cell = this.runtime.heapRecords.vectorCellWithinLength(
+                cache.arrayVectors[site], key);
+            if (this.runtime.valueCells.tagAt(cell) === 0) return undefined;
+            return this.runtime.readHeapValue(cell);
         }
         return this.runtime.getProperty(object, key);
     };
@@ -437,6 +452,30 @@
         if (operator && operator !== "=") {
             value = applyAssignment(operator, this.getComputed(object, key),
                                     value, this.runtime);
+        }
+        this.runtime.setProperty(object, key, value);
+        return value;
+    };
+
+    ThreadedCompiler.prototype.assignComputedCached = function (
+            cache, site, object, key, value, operator) {
+        if (operator && operator !== "=") {
+            value = applyAssignment(operator,
+                this.getComputedCached(cache, site, object, key), value,
+                this.runtime);
+        }
+        if (object && object.guestType === "array" && typeof key === "number" &&
+            key >= 0 && key === Math.floor(key)) {
+            if (cache.arrayObjects[site] !== object ||
+                cache.arrayVersions[site] !== object.arrayStructureVersion ||
+                key >= cache.arrayLengths[site]) {
+                this.runtime.arraySet(object, key, value);
+                return value;
+            }
+            this.runtime.writeHeapValue(
+                this.runtime.heapRecords.vectorCellWithinLength(
+                    cache.arrayVectors[site], key), value);
+            return value;
         }
         this.runtime.setProperty(object, key, value);
         return value;
@@ -1489,7 +1528,7 @@
     StructuredEmitter.prototype.memberRead = function (object, key, node) {
         var heapSite = this.memberIndex++;
         return node.computed ?
-            "hc.getComputed(" + object + "," + key + ")" :
+            "hc.getComputedCached(ic," + heapSite + "," + object + "," + key + ")" :
             "hc.getConstantCached(ic," + heapSite + "," + object + "," + key + ")";
         /* The specializations below are retained as design history while the
          * heap backends gain equivalent checked fast paths. */
@@ -1568,7 +1607,8 @@
     StructuredEmitter.prototype.memberWrite = function (object, key, value, node) {
         var heapSite = this.memberIndex++;
         return node.computed ?
-            "hc.assignComputed(" + object + "," + key + "," + value + ",\"=\")" :
+            "hc.assignComputedCached(ic," + heapSite + "," + object + "," + key +
+                "," + value + ",\"=\")" :
             "hc.assignMemberCached(ic," + heapSite + "," + object + "," + key +
                 "," + value + ",\"=\")";
         /* See memberRead: direct host-object fields are no longer semantic. */

@@ -349,7 +349,7 @@
         if (existing) return existing;
         var handle = {guestType: guestType, ownerRuntime: this,
                       heapAddress: address, gcMark: 0, propertyVersion: 0,
-                      valueVersion: 0};
+                      valueVersion: 0, arrayStructureVersion: 0};
         this.heapHandles[key] = handle;
         return handle;
     };
@@ -447,6 +447,7 @@
         }
         this.heapRecords.setVectorLength(newVector, length);
         this.heapRecords.setArrayElements(array.heapAddress, newVector);
+        array.arrayStructureVersion++;
         return newVector;
     };
 
@@ -461,6 +462,7 @@
                             value);
         if (index >= this.arrayLength(array)) {
             this.heapRecords.setArrayLength(array.heapAddress, index + 1);
+            array.arrayStructureVersion++;
         }
         return value;
     };
@@ -480,6 +482,7 @@
         var capacity = values.length < 4 ? 4 : values.length;
         var vector = this.heapRecords.allocateValueVector(capacity);
         this.heapRecords.setArrayElements(array.heapAddress, vector);
+        array.arrayStructureVersion++;
         var index = 0;
         while (index < values.length) {
             if (index in values) this.writeHeapValue(
