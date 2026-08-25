@@ -13,6 +13,8 @@
     function Runtime(options) {
         options = options || {};
         this.globals = {};
+        this.contexts = [];
+        this.internedStrings = {};
         this.assertions = 0;
         this.heapObjects = [];
         this.hostRoots = [];
@@ -32,9 +34,14 @@
         if (options.rawFFI) this.installRawFFI();
     }
 
-    Runtime.prototype.makeNativeFunction = function (name, callback) {
+    Runtime.prototype.makeNativeFunction = function (name, callback, callMode) {
         return {guestType: "function", name: name, callback: callback,
-                properties: {}};
+                callMode: callMode || "intrinsic", properties: {},
+                ownerRuntime: this};
+    };
+
+    Runtime.prototype.makeHostFunction = function (name, callback) {
+        return this.makeNativeFunction(name, callback, "host");
     };
 
     Runtime.prototype.makeObject = function () {
@@ -81,16 +88,16 @@
         return environment;
     };
 
-    Runtime.prototype.getBinding = function (environment, name) {
+    Runtime.prototype.getBinding = function (context, environment, name) {
         var current = environment;
         while (current) {
             if (own(current.bindings, "$" + name)) return current.bindings["$" + name];
             current = current.parent;
         }
-        return this.getGlobal(name);
+        return this.getGlobal(context, name);
     };
 
-    Runtime.prototype.setBinding = function (environment, name, value) {
+    Runtime.prototype.setBinding = function (context, environment, name, value) {
         var current = environment;
         while (current) {
             if (own(current.bindings, "$" + name)) {
@@ -99,7 +106,7 @@
             }
             current = current.parent;
         }
-        return this.setGlobal(name, value);
+        return this.setGlobal(context, name, value);
     };
 
     Runtime.prototype.pushActiveRegisters = function (registers, environment) {
@@ -122,9 +129,31 @@
     };
 
     Runtime.prototype.trackObject = function (object) {
+        object.ownerRuntime = this;
         this.heapObjects.push(object);
         this.noteAllocation(1);
         return object;
+    };
+
+    Runtime.prototype.registerContext = function (context) {
+        this.contexts.push(context);
+    };
+
+    Runtime.prototype.unregisterContext = function (context) {
+        var survivors = [];
+        var index = 0;
+        while (index < this.contexts.length) {
+            if (this.contexts[index] !== context) survivors.push(this.contexts[index]);
+            index++;
+        }
+        this.contexts = survivors;
+    };
+
+    Runtime.prototype.internString = function (value) {
+        value = String(value);
+        var key = "$" + value;
+        if (!own(this.internedStrings, key)) this.internedStrings[key] = value;
+        return this.internedStrings[key];
     };
 
     Runtime.prototype.noteAllocation = function (units) {
@@ -176,7 +205,7 @@
                 runtime.assertions++;
                 return undefined;
             });
-        this.globals.print = this.makeNativeFunction("print",
+        this.globals.print = this.makeHostFunction("print",
             function (receiver, args) {
                 var text = args.length ? String(args[0]) : "";
                 if (typeof print === "function") print(text);
@@ -256,11 +285,11 @@
             throw new Error("raw guest FFI requires the js_min.exe host");
         }
         this.hostFFI = bridge;
-        this.setGlobal("get_dlsym", this.makeNativeFunction("get_dlsym",
+        this.setGlobal("get_dlsym", this.makeHostFunction("get_dlsym",
             function () {
                 return bridge.getDlsym();
             }));
-        this.setGlobal("ffi_call", this.makeNativeFunction("ffi_call",
+        this.setGlobal("ffi_call", this.makeHostFunction("ffi_call",
             function (receiver, args) {
                 if (!args.length) throw new TypeError("ffi_call requires a pointer");
                 var pointer = args[0];
@@ -280,28 +309,47 @@
             function (receiver, args) { return bridge.peek32(args[0]); }));
         this.setGlobal("poke32", this.makeNativeFunction("poke32",
             function (receiver, args) { return bridge.poke32(args[0], args[1]); }));
-        this.setGlobal("quit", this.makeNativeFunction("quit",
+        this.setGlobal("quit", this.makeHostFunction("quit",
             function (receiver, args) {
                 quit(args.length ? Number(args[0]) : 0);
                 return undefined;
             }));
     };
 
-    Runtime.prototype.getGlobal = function (name) {
-        if (!own(this.globals, name)) throw new ReferenceError(name + " is not defined");
-        return this.globals[name];
+    Runtime.prototype.getGlobal = function (context, name) {
+        if (arguments.length === 1) {
+            name = context;
+            context = this.contexts.length ? this.contexts[0] : null;
+        }
+        var globals = context ? context.globals : this.globals;
+        if (!own(globals, name)) throw new ReferenceError(name + " is not defined");
+        return globals[name];
     };
 
-    Runtime.prototype.setGlobal = function (name, value) {
-        this.globals[name] = value;
+    Runtime.prototype.setGlobal = function (context, name, value) {
+        if (arguments.length === 2) {
+            value = name;
+            name = context;
+            context = null;
+        }
+        this.assertOwned(value);
+        (context ? context.globals : this.globals)[name] = value;
         return value;
     };
 
+    Runtime.prototype.assertOwned = function (value) {
+        if (value && value.guestType && value.ownerRuntime &&
+            value.ownerRuntime !== this) {
+            throw new TypeError("guest value belongs to a different JSRuntime");
+        }
+    };
+
     Runtime.prototype.propertyKey = function (value) {
-        return String(value);
+        return this.internString(value);
     };
 
     Runtime.prototype.getProperty = function (object, key) {
+        this.assertOwned(object);
         key = this.propertyKey(key);
         if (object === null || object === undefined) {
             throw new TypeError("cannot read property '" + key + "'");
@@ -330,6 +378,8 @@
     };
 
     Runtime.prototype.setProperty = function (object, key, value) {
+        this.assertOwned(object);
+        this.assertOwned(value);
         key = this.propertyKey(key);
         if (object === null || object === undefined) {
             throw new TypeError("cannot set property '" + key + "'");
@@ -373,13 +423,13 @@
     };
 
     Runtime.prototype.call = function (callable, receiver, args) {
-        if (callable && callable.guestType === "bytecodeFunction") {
-            if (!this.interpretGuest) throw new Error("guest interpreter is not attached");
-            return this.interpretGuest(callable.program, this, receiver, args,
-                                       callable.closure, callable);
-        }
+        this.assertOwned(callable);
+        this.assertOwned(receiver);
         if (!callable || callable.guestType !== "function") {
             throw new TypeError("value is not callable");
+        }
+        if (callable.callMode === "host") {
+            throw new Error("external host function must be serviced by the embedder");
         }
         return callable.callback(receiver, args);
     };
@@ -446,6 +496,17 @@
                 this.markEnvironment(this.activeEnvironmentFrames[frameIndex], generation);
                 frameIndex++;
             }
+            var contextIndex = 0;
+            while (contextIndex < this.contexts.length) {
+                var context = this.contexts[contextIndex];
+                for (key in context.globals) {
+                    if (own(context.globals, key)) {
+                        this.markValue(context.globals[key], generation);
+                    }
+                }
+                if (context.execution) markExecution(context.execution, generation, this);
+                contextIndex++;
+            }
             var survivors = [];
             var index = 0;
             while (index < this.heapObjects.length) {
@@ -469,6 +530,8 @@
         this.bufferSupport.destroy();
         this.heapObjects = [];
         this.hostRoots = [];
+        this.contexts = [];
+        this.internedStrings = {};
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
@@ -518,6 +581,28 @@
             throw new RangeError("gcThreshold must be a positive integer");
         }
         return value;
+    }
+
+    function markExecution(execution, generation, runtime) {
+        var frameIndex = 0;
+        while (frameIndex < execution.frames.length) {
+            var frame = execution.frames[frameIndex];
+            var registerIndex = 0;
+            while (registerIndex < frame.registers.length) {
+                runtime.markValue(frame.registers[registerIndex], generation);
+                registerIndex++;
+            }
+            runtime.markEnvironment(frame.environment, generation);
+            frameIndex++;
+        }
+        if (execution.pendingHostCall) {
+            runtime.markValue(execution.pendingHostCall.receiver, generation);
+            var index = 0;
+            while (index < execution.pendingHostCall.args.length) {
+                runtime.markValue(execution.pendingHostCall.args[index], generation);
+                index++;
+            }
+        }
     }
 
     root.GuestVMRuntime = Runtime;

@@ -22,7 +22,8 @@
         this.runtime = runtime;
         this.memory = new HostMemory();
         this.backings = [];
-        this.prototype = {guestType: "object", properties: {}};
+        this.prototype = {guestType: "object", properties: {},
+                          ownerRuntime: runtime};
         this.installPrototype();
         this.installConstructor();
     }

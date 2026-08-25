@@ -1,67 +1,186 @@
 (function (root) {
     var Parser = root.GuestVMParser;
     var Compiler = root.GuestVMCompiler;
-    var Runtime = root.GuestVMRuntime;
-    var interpret = root.GuestVMInterpret;
+    var SemanticRuntime = root.GuestVMRuntime;
+    var Execution = root.GuestVMExecution;
     var verify = root.GuestVMVerify;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("./parser.js");
         Compiler = require("./compiler.js");
-        Runtime = require("./runtime.js");
-        interpret = require("./interpreter.js");
+        SemanticRuntime = require("./runtime.js");
+        Execution = require("./interpreter.js");
         verify = require("./verifier.js");
     }
 
-    function VM(options) {
-        this.runtime = new Runtime(options || {});
-        this.runtime.interpretGuest = interpret;
+    function own(object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
     }
 
-    VM.prototype.compile = function (source, filename) {
+    function JSRuntime(options) {
+        this.runtime = new SemanticRuntime(options || {});
+        this.contexts = [];
+        this.destroyed = false;
+    }
+
+    JSRuntime.prototype.createContext = function () {
+        if (this.destroyed) throw new Error("runtime has been destroyed");
+        var context = new JSContext(this);
+        this.contexts.push(context);
+        this.runtime.registerContext(context);
+        return context;
+    };
+
+    JSRuntime.prototype.internString = function (value) {
+        return this.runtime.internString(value);
+    };
+
+    JSRuntime.prototype.retain = function (value) {
+        return this.runtime.retain(value);
+    };
+
+    JSRuntime.prototype.retained = function (handle) {
+        return this.runtime.retained(handle);
+    };
+
+    JSRuntime.prototype.release = function (handle) {
+        return this.runtime.release(handle);
+    };
+
+    JSRuntime.prototype.collect = function () {
+        return this.runtime.collect();
+    };
+
+    JSRuntime.prototype.destroy = function () {
+        if (this.destroyed) return;
+        while (this.contexts.length) this.contexts[0].destroy();
+        this.runtime.destroy();
+        this.destroyed = true;
+    };
+
+    function JSContext(jsRuntime) {
+        this.jsRuntime = jsRuntime;
+        this.runtime = jsRuntime.runtime;
+        this.globals = {};
+        this.execution = null;
+        this.destroyed = false;
+        var key;
+        for (key in this.runtime.globals) {
+            if (own(this.runtime.globals, key)) this.globals[key] = this.runtime.globals[key];
+        }
+    }
+
+    JSContext.prototype.compile = function (source, filename) {
+        if (this.destroyed) throw new Error("context has been destroyed");
         var ast = new Parser(source, filename).parseProgram();
         return verify(new Compiler().compile(ast));
     };
 
-    VM.prototype.run = function (source, filename) {
-        return this.execute(this.compile(source, filename));
+    JSContext.prototype.start = function (source, filename) {
+        return this.startProgram(this.compile(source, filename));
     };
 
-    VM.prototype.execute = function (program) {
-        try {
-            return interpret(program, this.runtime);
-        } finally {
-            this.runtime.clearActiveRegisters();
+    JSContext.prototype.startProgram = function (program) {
+        if (this.destroyed) throw new Error("context has been destroyed");
+        if (this.execution) throw new Error("context already has an active execution");
+        this.execution = new Execution(program, this.runtime, this);
+        return this.execution;
+    };
+
+    JSContext.prototype.runProgram = function (program) {
+        return this.runExecutionToCompletion(this.startProgram(program));
+    };
+
+    JSContext.prototype.run = function (source, filename) {
+        return this.runExecutionToCompletion(this.start(source, filename));
+    };
+
+    JSContext.prototype.runExecutionToCompletion = function (execution) {
+        while (true) {
+            var result = execution.resume(Infinity);
+            if (result.status === "hostCall") {
+                execution.serviceHostCall();
+                if (execution.status === "threw") throw execution.exception;
+            } else if (result.status === "completed") {
+                return result.value;
+            } else if (result.status === "threw") {
+                throw result.exception;
+            } else {
+                throw new Error("unlimited execution unexpectedly exhausted budget");
+            }
         }
     };
 
+    JSContext.prototype.installGlobal = function (name, value) {
+        if (this.destroyed) throw new Error("context has been destroyed");
+        return this.runtime.setGlobal(this, name, value);
+    };
+
+    JSContext.prototype.makeHostFunction = function (name, callback) {
+        return this.runtime.makeHostFunction(name, callback);
+    };
+
+    JSContext.prototype.destroy = function () {
+        if (this.destroyed) return;
+        if (this.execution) this.execution.abort();
+        this.runtime.unregisterContext(this);
+        var survivors = [];
+        var index = 0;
+        while (index < this.jsRuntime.contexts.length) {
+            if (this.jsRuntime.contexts[index] !== this) {
+                survivors.push(this.jsRuntime.contexts[index]);
+            }
+            index++;
+        }
+        this.jsRuntime.contexts = survivors;
+        this.globals = {};
+        this.destroyed = true;
+    };
+
+    function VM(options) {
+        this.jsRuntime = new JSRuntime(options || {});
+        this.context = this.jsRuntime.createContext();
+        this.runtime = this.jsRuntime.runtime;
+    }
+
+    VM.prototype.compile = function (source, filename) {
+        return this.context.compile(source, filename);
+    };
+
+    VM.prototype.run = function (source, filename) {
+        return this.context.run(source, filename);
+    };
+
+    VM.prototype.execute = function (program) {
+        return this.context.runProgram(program);
+    };
+
+    VM.prototype.start = function (source, filename) {
+        return this.context.start(source, filename);
+    };
+
+    VM.prototype.startProgram = function (program) {
+        return this.context.startProgram(program);
+    };
+
     VM.prototype.installGlobal = function (name, value) {
-        return this.runtime.setGlobal(name, value);
+        return this.context.installGlobal(name, value);
     };
 
     VM.prototype.makeNativeFunction = function (name, callback) {
-        return this.runtime.makeNativeFunction(name, callback);
+        return this.context.makeHostFunction(name, callback);
     };
 
-    VM.prototype.retain = function (value) {
-        return this.runtime.retain(value);
-    };
+    VM.prototype.retain = function (value) { return this.jsRuntime.retain(value); };
+    VM.prototype.retained = function (handle) { return this.jsRuntime.retained(handle); };
+    VM.prototype.release = function (handle) { return this.jsRuntime.release(handle); };
+    VM.prototype.collect = function () { return this.jsRuntime.collect(); };
+    VM.prototype.destroy = function () { this.jsRuntime.destroy(); };
 
-    VM.prototype.retained = function (handle) {
-        return this.runtime.retained(handle);
-    };
-
-    VM.prototype.release = function (handle) {
-        return this.runtime.release(handle);
-    };
-
-    VM.prototype.collect = function () {
-        return this.runtime.collect();
-    };
-
-    VM.prototype.destroy = function () {
-        this.runtime.destroy();
-    };
-
+    VM.JSRuntime = JSRuntime;
+    VM.JSContext = JSContext;
+    VM.Execution = Execution;
     root.GuestVM = VM;
+    root.GuestVMJSRuntime = JSRuntime;
+    root.GuestVMJSContext = JSContext;
     if (typeof module !== "undefined" && module.exports) module.exports = VM;
 }(this));
