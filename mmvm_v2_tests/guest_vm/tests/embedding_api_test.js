@@ -21,6 +21,19 @@
             throw new Error("exceptional execution retained active frame roots");
         }
         vm.destroy();
+        var rawFFIAvailable = typeof ffi_call === "function" &&
+                              typeof get_dlsym === "function";
+        var rawVM = null;
+        var rawError = null;
+        try { rawVM = new VM({rawFFI: true}); }
+        catch (error2) { rawError = error2; }
+        if (rawFFIAvailable && !rawVM) {
+            throw new Error("MMVM host did not allow explicit raw FFI opt-in");
+        }
+        if (!rawFFIAvailable && !rawError) {
+            throw new Error("non-MMVM host unexpectedly emulated raw FFI");
+        }
+        if (rawVM) rawVM.destroy();
         return "embedding API passed";
     }
 

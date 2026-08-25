@@ -34,7 +34,8 @@ calls, Buffer indexing, and lifetime pass through `Runtime` methods.
 | `verifier.js` | Opcode, width, register, constant, call, and jump validation. |
 | `interpreter.js` | Kernel-style bytecode dispatch loop. |
 | `runtime.js` | Guest globals, calls, semantic helpers, objects, roots, and GC. |
-| `host_memory.js` | The sole raw FFI boundary; native or emulated byte storage. |
+| `host_ffi.js` | The sole raw FFI boundary and optional guest compatibility binding. |
+| `host_memory.js` | Native or emulated byte storage over the host FFI boundary. |
 | `buffer.js` | Buffer views, methods, backing stores, and Buffer GC integration. |
 | `vm.js` | Embedder facade tying compilation, execution, roots, and shutdown together. |
 | `guest_runner.js` | Command-line source reader and one-program runner. |
@@ -48,6 +49,7 @@ parser.js
 bytecode.js
 compiler.js
 verifier.js
+host_ffi.js
 host_memory.js
 buffer.js
 runtime.js
@@ -249,11 +251,19 @@ This is not yet the complete Node.js 0.10 Buffer profile. Encoding methods,
 constructor compatibility, signed values, other endian widths, enumeration,
 descriptors, and exact error variations remain future work.
 
-Under `js_min.exe`, `host_memory.js` resolves `calloc` and `free`, uses named
-wrappers around the only raw `ffi_call` sites in `guest_vm`, and accesses data
+Under `js_min.exe`, `host_memory.js` asks `host_ffi.js` to resolve and call
+`calloc` and `free`. `host_ffi.js` owns the only raw `ffi_call` sites in
+`guest_vm`; the memory adapter accesses data
 with `peek8`/`poke8` or aligned `peek32`/`poke32`. Under Node it uses a zero-filled
 ordinary array behind the identical private interface; it does not substitute a
 Node Buffer into guest semantics.
+
+`get_dlsym` and `ffi_call` are not ordinary guest globals. Constructing a VM
+with `{rawFFI: true}` installs compatibility functions so the unchanged
+top-level `hello.js` example can run through the interpreter when hosted by
+`js_min.exe`. Node cannot emulate this facility and rejects raw-FFI enablement.
+Direct embedders are FFI-disabled by default because exposing arbitrary process
+symbols is a powerful trusted-host capability, not an ES5 language feature.
 
 `VM.destroy` explicitly frees every still-live backing store. It is required
 even when the embedder believes collection has reclaimed everything.
@@ -287,6 +297,7 @@ free for one shared allocation.
    bytecode change.
 6. Register every guest heap record and trace every new reference-bearing field.
 7. Retain guest values held by host asynchronous work with opaque host roots.
-8. Keep raw FFI inside the host boundary.
+8. Keep raw FFI inside `host_ffi.js` and require explicit embedder opt-in before
+   exposing it to guest source.
 9. Preserve shared Buffer backing identity and one-owner freeing.
 10. Measure the interpreter before adding kernel AOT or representation shortcuts.

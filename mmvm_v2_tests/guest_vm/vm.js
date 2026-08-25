@@ -12,8 +12,8 @@
         verify = require("./verifier.js");
     }
 
-    function VM() {
-        this.runtime = new Runtime();
+    function VM(options) {
+        this.runtime = new Runtime(options || {});
     }
 
     VM.prototype.compile = function (source, filename) {

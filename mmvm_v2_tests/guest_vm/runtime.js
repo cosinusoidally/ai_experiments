@@ -1,14 +1,17 @@
 (function (root) {
     var BufferSupport = root.GuestVMBufferSupport;
+    var HostFFI = root.GuestVMHostFFI;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
+        HostFFI = require("./host_ffi.js");
     }
 
     function own(object, key) {
         return Object.prototype.hasOwnProperty.call(object, key);
     }
 
-    function Runtime() {
+    function Runtime(options) {
+        options = options || {};
         this.globals = {};
         this.assertions = 0;
         this.heapObjects = [];
@@ -17,6 +20,7 @@
         this.activeRegisters = null;
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
+        if (options.rawFFI) this.installRawFFI();
     }
 
     Runtime.prototype.makeNativeFunction = function (name, callback) {
@@ -91,6 +95,30 @@
                 return runtime.bufferSupport ?
                        runtime.bufferSupport.liveBackingCount() : 0;
             });
+    };
+
+    Runtime.prototype.installRawFFI = function () {
+        var bridge = new HostFFI();
+        if (!bridge.isMMVM) {
+            throw new Error("raw guest FFI requires the js_min.exe host");
+        }
+        this.hostFFI = bridge;
+        this.setGlobal("get_dlsym", this.makeNativeFunction("get_dlsym",
+            function () {
+                return bridge.getDlsym();
+            }));
+        this.setGlobal("ffi_call", this.makeNativeFunction("ffi_call",
+            function (receiver, args) {
+                if (!args.length) throw new TypeError("ffi_call requires a pointer");
+                var pointer = args[0];
+                var callArguments = [];
+                var index = 1;
+                while (index < args.length) {
+                    callArguments.push(args[index]);
+                    index++;
+                }
+                return bridge.call(pointer, callArguments);
+            }));
     };
 
     Runtime.prototype.getGlobal = function (name) {

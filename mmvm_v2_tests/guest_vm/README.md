@@ -6,6 +6,10 @@ not yet a complete ECMAScript 5 implementation. The currently implemented
 language and Buffer features are always exercised by checked-in tests under
 both Node.js and `js_min.exe`.
 
+`guest_runner.js` enables the opt-in raw-FFI compatibility binding so the
+existing unchanged `hello.js` example works. Direct embedders are FFI-disabled
+by default; see the embedding guide before enabling that trusted capability.
+
 Read these documents before changing or embedding the VM:
 
 - [`DESIGN.md`](DESIGN.md) defines the architecture, internal representations,

@@ -1,23 +1,15 @@
-/* Host memory boundary. This is the only guest_vm module allowed to call the
- * MMVM FFI directly. Node uses an ordinary-array emulation with the same API. */
+/* Host memory boundary. Node uses an ordinary-array emulation with the same API. */
 (function (root) {
-    var isMMVM = typeof ffi_call === "function" && typeof get_dlsym === "function";
-    var callocPointer = 0;
-    var freePointer = 0;
-
-    function resolveMMVMSymbol(name) {
-        var dlsymPointer = get_dlsym();
-        var pointer = ffi_call(dlsymPointer, 0, name);
-        if (!pointer) throw new Error("could not resolve libc symbol: " + name);
-        return pointer;
-    }
-
-    if (isMMVM) {
-        callocPointer = resolveMMVMSymbol("calloc");
-        freePointer = resolveMMVMSymbol("free");
+    var HostFFI = root.GuestVMHostFFI;
+    if (typeof module !== "undefined" && module.exports) {
+        HostFFI = require("./host_ffi.js");
     }
 
     function HostMemory() {
+        this.ffi = new HostFFI();
+        this.isMMVM = this.ffi.isMMVM;
+        this.callocPointer = this.isMMVM ? this.ffi.resolve("calloc") : 0;
+        this.freePointer = this.isMMVM ? this.ffi.resolve("free") : 0;
         this.allocations = 0;
         this.frees = 0;
     }
@@ -25,8 +17,8 @@
     HostMemory.prototype.allocate = function (length) {
         var actualLength = length > 0 ? length : 1;
         this.allocations++;
-        if (isMMVM) {
-            var pointer = ffi_call(callocPointer, actualLength, 1);
+        if (this.isMMVM) {
+            var pointer = this.ffi.call(this.callocPointer, [actualLength, 1]);
             if (!pointer) throw new Error("native buffer allocation failed");
             return {isNative: true, pointer: pointer, length: length, freed: false};
         }
@@ -89,7 +81,7 @@
 
     HostMemory.prototype.free = function (allocation) {
         if (!allocation || allocation.freed) return;
-        if (allocation.isNative) ffi_call(freePointer, allocation.pointer);
+        if (allocation.isNative) this.ffi.call(this.freePointer, [allocation.pointer]);
         allocation.freed = true;
         allocation.pointer = 0;
         allocation.bytes = null;
@@ -97,7 +89,7 @@
     };
 
     HostMemory.prototype.hostName = function () {
-        return isMMVM ? "mmvm-native" : "node-array-emulation";
+        return this.isMMVM ? "mmvm-native" : "node-array-emulation";
     };
 
     root.GuestVMHostMemory = HostMemory;

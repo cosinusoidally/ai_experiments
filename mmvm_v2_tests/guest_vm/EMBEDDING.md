@@ -41,6 +41,7 @@ load("guest_vm/parser.js");
 load("guest_vm/bytecode.js");
 load("guest_vm/compiler.js");
 load("guest_vm/verifier.js");
+load("guest_vm/host_ffi.js");
 load("guest_vm/host_memory.js");
 load("guest_vm/buffer.js");
 load("guest_vm/runtime.js");
@@ -123,6 +124,29 @@ vm.runtime.setProperty(guestObject, "name", "updated");
 `Runtime.makeObject()` creates and registers an ordinary guest object. The
 ordinary prototype/descriptor model is incomplete, so embedders should keep
 custom objects simple until that milestone lands.
+
+## Optional raw FFI compatibility
+
+The VM does not expose process symbols by default. The unchanged repository
+`hello.js` is a shell-FFI integration example, so `guest_runner.js` explicitly
+constructs its VM with:
+
+```js
+var vm = new VM({rawFFI: true});
+```
+
+This installs guest-callable `get_dlsym` and `ffi_call`. Under `js_min.exe` they
+delegate through `host_ffi.js` to the real shell primitives. Node cannot emulate
+arbitrary process symbols or MMVM's pointer-shaped call ABI; constructing a
+Node-hosted VM with `rawFFI: true` therefore throws immediately. `hello.js` is
+an MMVM-only integration test, while the language and Buffer suites run on both
+hosts.
+
+Raw FFI is a trusted embedding capability. An MMVM guest with it can resolve
+and call arbitrary process symbols subject only to the shell's eight-argument
+FFI shape. It is not a sandbox-safe API and should not be enabled for untrusted
+guest source. The Buffer implementation can still use its private host-memory
+boundary when raw FFI is not exposed to the guest.
 
 ## Retaining values across host work
 

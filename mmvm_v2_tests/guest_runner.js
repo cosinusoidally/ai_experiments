@@ -12,6 +12,7 @@ if (guestRunnerIsNode) {
     load("guest_vm/bytecode.js");
     load("guest_vm/compiler.js");
     load("guest_vm/verifier.js");
+    load("guest_vm/host_ffi.js");
     load("guest_vm/host_memory.js");
     load("guest_vm/buffer.js");
     load("guest_vm/runtime.js");
@@ -35,7 +36,7 @@ if (!guestRunnerArguments.length) {
 var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
-var guestProgramVM = new GuestRunnerVM();
+var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode});
 guestProgramVM.run(guestProgramSource, guestProgramPath);
 var guestResultText = guestProgramPath + ": passed " +
                       guestProgramVM.runtime.assertions + " assertion(s)";
