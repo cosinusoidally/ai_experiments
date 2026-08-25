@@ -49,6 +49,16 @@ run_node_tests() {
             ;;
     esac
     echo "Node-hosted guest_runner.js demo1.js path passed"
+    node_demo2_help_output=$("$node_binary" ./guest_runner.js demo2.js --help)
+    case "$node_demo2_help_output" in
+        *"usage: node demo2.js"*"--size WIDTHxHEIGHT"*) ;;
+        *)
+            echo "Node-hosted guest demo2.js --help emitted unexpected stdout:" >&2
+            echo "$node_demo2_help_output" >&2
+            exit 1
+            ;;
+    esac
+    echo "Node-hosted guest_runner.js demo2.js path passed"
     validate_context_demo "$("$node_binary" guest_vm/demos/three_contexts.js)"
 }
 
@@ -98,6 +108,17 @@ run_js_min_tests() {
             ;;
     esac
     echo "guest demo1.js CommonJS command-line path passed"
+    demo2_help_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$js_min_binary" ./guest_runner.js demo2.js --help)
+    case "$demo2_help_output" in
+        *"usage: node demo2.js"*"--size WIDTHxHEIGHT"*) ;;
+        *)
+            echo "guest demo2.js --help emitted unexpected stdout:" >&2
+            echo "$demo2_help_output" >&2
+            exit 1
+            ;;
+    esac
+    echo "guest demo2.js CommonJS command-line path passed"
     context_demo_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$js_min_binary" guest_vm/demos/three_contexts.js)
     validate_context_demo "$context_demo_output"

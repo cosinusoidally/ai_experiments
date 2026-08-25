@@ -189,7 +189,7 @@ Run the shell with the Firefox library directory supplied through
 The checked-in `guest_runner.js` additionally loads `node_environment.js` on
 both Node.js and `js_min.exe`. This is a runner policy, not something performed
 by the public VM bootstrap. It installs the limited host API required by
-`node_web.js` and `demo1.js`. The MMVM backend transfers control to its
+`node_web.js`, `demo1.js`, and `demo2.js`. The MMVM backend transfers control to its
 libc-backed event loop after main guest execution; the Node backend leaves its
 built-in asynchronous handles registered with Node's event loop.
 
@@ -215,8 +215,8 @@ The adapter selects its backend at construction. A CommonJS embedder requires
 it normally; a minimal-shell embedder loads it after `guest_vm.js`. The current
 guest profile supports
 `require("http")`, `require("fs")`, `require("net")`, and relative `.js`
-modules. It is sufficient for `node_web.js` and the X11 module chain used by
-`demo1.js`; embedders must not assume general Node compatibility.
+modules. It is sufficient for `node_web.js` and the X11 module chains used by
+`demo1.js` and `demo2.js`; embedders must not assume general Node compatibility.
 
 ## Compile, execute, and run
 

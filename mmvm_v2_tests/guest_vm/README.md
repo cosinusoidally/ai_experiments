@@ -113,9 +113,9 @@ modules. The rest of Node's standard library remains future work. Run
 `node_web.js` directly with Node.js when testing the unchanged source against
 real Node.
 
-## X11 framebuffer demo through the guest VM
+## X11 framebuffer demos through the guest VM
 
-The guest VM can run unchanged `demo1.js`. Its relative dependencies,
+The guest VM can run unchanged `demo1.js` and `demo2.js`. Their relative dependencies,
 `demo_common.js` and `node_x11.js`, execute as guest CommonJS modules in their
 own `JSContext` instances. Only the Node built-ins and timers cross into the
 embedder; the X11 wire protocol, framebuffer drawing, bitmap font, and event
@@ -135,17 +135,35 @@ The identical guest module graph can be hosted by Node.js:
 node guest_runner.js demo1.js --size 64x64 --fps 5
 ```
 
+The software-rasterized 3D demo uses the same command form:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo2.js --size 64x64 --fps 2
+
+node guest_runner.js demo2.js --size 64x64 --fps 2
+```
+
+`demo2.js` exercises function-declaration instantiation, sized `Array`
+construction, array slicing/reversal/insertion, and the trigonometric and
+exponential `Math` functions in addition to the demo1 path. The automated suite
+checks that its complete CommonJS graph compiles and that its command-line
+entry point works on both hosts. A live X11 smoke test is still required to
+verify rendering because `--help` deliberately exits before opening a window.
+
 This is not a direct Node execution of `demo1.js`: `guest_runner.js` still
 tokenizes, compiles, and interprets all three application modules. The
 embedder selects built-in `fs`, `net`, `http`, timers, and process streams
 under Node, while `js_min.exe` selects the libc-backed compatibility versions.
 
 The default `256x192` resolution and `20` FPS limit are also accepted. The
-current interpreter is functionally correct on this path but is not yet fast:
-the pixel-at-a-time demo measured roughly 0.2–0.4 FPS at 64×64 during this
-checkpoint. This is an interpreter-performance limitation, not X11 blocking or
-a frame-timing change. No artifacts directory or generated framebuffer image
-is required or stored in `mmvm_v2_tests`.
+current interpreter is functionally correct on these paths but is not yet
+fast: the pixel-at-a-time demo1 measured roughly 0.2–0.4 FPS at 64×64 during
+this checkpoint, while demo2 has substantially more interpreted rendering
+work. This is an interpreter-performance limitation, not X11 blocking or a
+frame-timing change. No artifacts directory or generated framebuffer image is
+required or stored in `mmvm_v2_tests`.
 
 The embedder provides on both hosts:
 

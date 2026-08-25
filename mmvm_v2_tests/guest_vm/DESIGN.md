@@ -353,7 +353,7 @@ stores but keep top-level variable environments isolated.
 
 `process`, `console`, `Buffer.byteLength`, the required `Date` methods, and URI
 component encoding functions are also installed. This is intentionally the
-smallest documented profile needed by `node_web.js` and `demo1.js`, not a
+smallest documented profile needed by `node_web.js`, `demo1.js`, and `demo2.js`, not a
 general Node.js implementation.
 
 ## Collector and roots
