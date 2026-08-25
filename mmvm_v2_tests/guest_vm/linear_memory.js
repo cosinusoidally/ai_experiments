@@ -12,7 +12,9 @@
             throw new RangeError("linear memory size must be an integer of at least 4096 bytes");
         }
         this.host = new HostMemory();
-        this.allocation = this.host.allocate(byteLength);
+        /* Node represents the large, sparsely touched guest heap as a zero-on-
+         * read dictionary. Ordinary Buffer allocations retain dense arrays. */
+        this.allocation = this.host.allocate(byteLength, true);
         this.byteLength = byteLength;
         this.destroyed = false;
     }

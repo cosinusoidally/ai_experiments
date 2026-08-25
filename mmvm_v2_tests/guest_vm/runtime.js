@@ -277,7 +277,19 @@
     Runtime.prototype.internString = function (value) {
         value = String(value);
         var key = "$" + value;
-        if (!own(this.internedStrings, key)) this.internedStrings[key] = value;
+        var address = this.internedStrings[key];
+        if (!address) {
+            this.ensureLinearHeap();
+            address = this.heapRecords.allocateString(value);
+            this.internedStrings[key] = address;
+        }
+        return this.heapRecords.readString(address);
+    };
+
+    Runtime.prototype.internStringAddress = function (value) {
+        value = String(value);
+        var key = "$" + value;
+        if (!this.internedStrings[key]) this.internString(value);
         return this.internedStrings[key];
     };
 
@@ -742,6 +754,7 @@
             return this.arrayMethods[key];
         }
         key = this.propertyKey(key);
+        this.internStringAddress(key);
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             if (own(object.properties, "$" + key)) return object.properties["$" + key];

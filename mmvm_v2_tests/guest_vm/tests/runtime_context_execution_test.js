@@ -51,6 +51,10 @@
         assert(firstRuntime.internString("shared-name") ===
                firstRuntime.internString("shared-name"),
                "runtime did not intern repeated strings");
+        var atomAddress = firstRuntime.runtime.internStringAddress("shared-name");
+        assert(firstRuntime.runtime.linearHeap.recordType(atomAddress) ===
+               firstRuntime.runtime.linearHeap.constructor.Types.STRING,
+               "runtime atom is not an authoritative heap string");
         assert(firstRuntime.runtime.internedStrings !==
                otherRuntime.runtime.internedStrings,
                "independent runtimes shared an intern table");

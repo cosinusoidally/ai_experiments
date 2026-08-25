@@ -14,7 +14,7 @@
         this.frees = 0;
     }
 
-    HostMemory.prototype.allocate = function (length) {
+    HostMemory.prototype.allocate = function (length, sparse) {
         var actualLength = length > 0 ? length : 1;
         this.allocations++;
         if (this.isMMVM) {
@@ -22,13 +22,13 @@
             if (!pointer) throw new Error("native buffer allocation failed");
             return {isNative: true, pointer: pointer, length: length, freed: false};
         }
-        var bytes = [];
-        var index = 0;
-        while (index < actualLength) {
-            bytes[index] = 0;
-            index++;
+        var bytes = sparse ? {} : [];
+        if (!sparse) {
+            var index = 0;
+            while (index < actualLength) bytes[index++] = 0;
         }
-        return {isNative: false, bytes: bytes, length: length, freed: false};
+        return {isNative: false, bytes: bytes, length: length, freed: false,
+                sparse: !!sparse};
     };
 
     HostMemory.prototype.check = function (allocation, offset) {
@@ -40,8 +40,9 @@
 
     HostMemory.prototype.read8 = function (allocation, offset) {
         this.check(allocation, offset);
-        return allocation.isNative ? peek8(allocation.pointer + offset) :
-                                     allocation.bytes[offset];
+        if (allocation.isNative) return peek8(allocation.pointer + offset);
+        var value = allocation.bytes[offset];
+        return value === undefined ? 0 : value;
     };
 
     HostMemory.prototype.write8 = function (allocation, offset, value) {
