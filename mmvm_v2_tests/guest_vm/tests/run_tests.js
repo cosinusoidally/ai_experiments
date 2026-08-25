@@ -10,6 +10,7 @@
         VM = require("../vm.js");
         var runBufferLifetimeTest = require("./buffer/buffer_lifetime_test.js");
         var runEmbeddingAPITest = require("./embedding_api_test.js");
+        var runAutomaticGCTest = require("./automatic_gc_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -30,9 +31,11 @@
         load("guest_vm/vm.js");
         load("guest_vm/tests/buffer/buffer_lifetime_test.js");
         load("guest_vm/tests/embedding_api_test.js");
+        load("guest_vm/tests/automatic_gc_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
+        runAutomaticGCTest = GuestVMRunAutomaticGCTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -67,6 +70,9 @@
     var embeddingResult = runEmbeddingAPITest(VM);
     if (typeof print === "function") print(embeddingResult);
     else console.log(embeddingResult);
+    var automaticGCResult = runAutomaticGCTest(VM);
+    if (typeof print === "function") print(automaticGCResult);
+    else console.log(automaticGCResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");

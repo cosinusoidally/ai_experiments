@@ -477,6 +477,12 @@ Collection should initially be triggered by guest allocation thresholds. Add
 stress modes that collect after every eligible allocation and vary thresholds
 reproducibly; these are essential for exposing missing roots.
 
+The bootstrap interpreter now implements this policy: allocation debt requests
+collection, safe points perform it automatically, and configurable threshold
+and collect-at-every-safe-point stress modes run in the portable test suite.
+Explicit collection remains an embedder control for deterministic tests and
+memory-pressure signals, not an application requirement.
+
 ## Host service boundary
 
 Retain the working libc, polling, socket, filesystem, and X11 mechanisms as

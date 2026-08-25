@@ -148,6 +148,7 @@
         var backing = {allocation: this.memory.allocate(size), length: size,
                        freed: false, gcMark: 0};
         this.backings.push(backing);
+        this.runtime.noteAllocation(Math.max(1, Math.ceil(size / 64)));
         return this.makeView(backing, 0, size);
     };
 
@@ -212,7 +213,7 @@
     };
 
     BufferSupport.prototype.sweep = function (generation) {
-        var live = 0;
+        var survivors = [];
         var index = 0;
         while (index < this.backings.length) {
             var backing = this.backings[index];
@@ -220,10 +221,11 @@
                 this.memory.free(backing.allocation);
                 backing.freed = true;
             }
-            if (!backing.freed) live++;
+            if (!backing.freed) survivors.push(backing);
             index++;
         }
-        return live;
+        this.backings = survivors;
+        return survivors.length;
     };
 
     BufferSupport.prototype.liveBackingCount = function () {

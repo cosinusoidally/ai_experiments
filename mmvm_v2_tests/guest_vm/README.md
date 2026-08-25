@@ -7,6 +7,10 @@ guest-language target; the currently implemented
 language and Buffer features are always exercised by checked-in tests under
 both Node.js and `js_min.exe`.
 
+Guest garbage collection is automatic at allocation-triggered interpreter safe
+points. `VM.collect()` remains available for deterministic tests and explicit
+memory-pressure handling, but applications do not need to call it.
+
 `guest_runner.js` enables the opt-in raw-FFI compatibility binding so the
 existing unchanged `hello.js` example works. Direct embedders are FFI-disabled
 by default; see the embedding guide before enabling that trusted capability.

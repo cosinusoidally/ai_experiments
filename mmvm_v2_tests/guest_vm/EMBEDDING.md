@@ -186,9 +186,27 @@ For asynchronous I/O, retain the callback and every Buffer/view whose native
 pointer may be used by the pending operation. Release them only after completion
 or cancellation has removed every native use.
 
-## Collection
+## Automatic collection
 
-Request collection with:
+Guest garbage collection is automatic. Guest-object and Buffer allocations
+accumulate allocation units; after the default 1,024-unit threshold, the
+interpreter performs a mark-and-sweep collection at a safe point. Embedders and
+ordinary guest programs do not need to call the collector.
+
+An embedder may tune the threshold or enable the root-stress mode while testing:
+
+```js
+var tuned = new VM({gcThreshold: 256});
+var stressed = new VM({gcStress: true});
+```
+
+`gcStress` requests collection after every eligible allocation and is intended
+to expose missing roots, not for normal execution. Thresholds are positive
+allocation-unit counts; each guest object costs one unit and Buffer backing
+memory additionally costs one unit per 64 bytes, rounded up.
+
+An embedder can still request an immediate full collection when useful for a
+test, memory-pressure notification, or deterministic resource release:
 
 ```js
 vm.collect();
@@ -196,9 +214,8 @@ vm.collect();
 
 Globals, active registers, internal runtime roots, and explicit host handles are
 traced. A Buffer backing allocation remains alive while any marked view refers
-to it. Collection is currently explicit; there is no automatic allocation
-threshold. The guest `guestCollect` and `guestBackingStoreCount` globals exist
-for bootstrap testing and should not be considered application APIs.
+to it. The guest `guestCollect` and `guestBackingStoreCount` globals exist for
+bootstrap testing and should not be considered application APIs.
 
 Because current bytecode lacks liveness maps, every active register is retained
 until execution returns. Collection during one top-level program can therefore

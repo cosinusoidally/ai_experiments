@@ -238,10 +238,25 @@ Sweep first removes unmarked guest object records, then asks `BufferSupport` to
 free each unmarked backing store. Multiple views therefore do not cause multiple
 frees, and one reachable slice retains the allocation.
 
-Collection is currently explicit through `VM.collect`, `Runtime.collect`, or
-the test global `guestCollect`. There is not yet an allocation threshold or
-stress-every-allocation mode. Registers are conservatively rooted for an entire
-active program because bytecode liveness is not yet available.
+Collection is automatic. Every tracked guest object charges one allocation
+unit; a native Buffer backing additionally charges one unit per 64 bytes,
+rounded up. The default threshold is 1,024 units. Reaching the threshold marks
+collection pending, and the interpreter collects at the next safe point after
+an allocation-producing instruction or native call, or at a backward branch.
+Deferring collection to a safe point ensures that a newly returned object is in
+an active guest register before marking begins.
+
+`VM.collect`, `Runtime.collect`, and the test-only `guestCollect` global request
+an immediate full collection, but normal guest programs and embedders do not
+need to call them. `new VM({gcThreshold: n})` selects a positive allocation-unit
+threshold. `new VM({gcStress: true})` makes every eligible allocation request a
+collection at the next safe point. The portable suite runs threshold and stress
+modes under both hosts to expose missing roots.
+
+Registers are conservatively rooted for an entire active program because
+bytecode liveness is not yet available. Sweep compacts both the guest heap table
+and the Buffer backing table so repeated automatic collections do not retain an
+ever-growing list of dead records.
 
 Host code must not retain a raw guest value across a point where collection may
 occur. It calls `VM.retain(value)` and stores the returned integer handle, then

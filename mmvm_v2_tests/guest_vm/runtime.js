@@ -17,6 +17,12 @@
         this.heapObjects = [];
         this.hostRoots = [];
         this.gcGeneration = 0;
+        this.gcThreshold = options.gcStress ? 1 :
+            normalizeGCThreshold(options.gcThreshold);
+        this.gcAllocationDebt = 0;
+        this.gcPending = false;
+        this.gcCollecting = false;
+        this.collectionCount = 0;
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
@@ -117,7 +123,17 @@
 
     Runtime.prototype.trackObject = function (object) {
         this.heapObjects.push(object);
+        this.noteAllocation(1);
         return object;
+    };
+
+    Runtime.prototype.noteAllocation = function (units) {
+        this.gcAllocationDebt += units > 0 ? units : 1;
+        if (this.gcAllocationDebt >= this.gcThreshold) this.gcPending = true;
+    };
+
+    Runtime.prototype.gcSafePoint = function () {
+        if (this.gcPending && !this.gcCollecting) this.collect();
     };
 
     Runtime.prototype.retain = function (value) {
@@ -399,45 +415,54 @@
     };
 
     Runtime.prototype.collect = function () {
-        this.gcGeneration++;
-        var generation = this.gcGeneration;
-        var key;
-        for (key in this.globals) {
-            if (own(this.globals, key)) this.markValue(this.globals[key], generation);
-        }
-        this.markValue(this.bufferSupport.prototype, generation);
-        var hostRootIndex = 0;
-        while (hostRootIndex < this.hostRoots.length) {
-            if (this.hostRoots[hostRootIndex] !== null) {
-                this.markValue(this.hostRoots[hostRootIndex], generation);
+        if (this.gcCollecting) return this.heapObjects.length;
+        this.gcCollecting = true;
+        try {
+            this.gcGeneration++;
+            var generation = this.gcGeneration;
+            var key;
+            for (key in this.globals) {
+                if (own(this.globals, key)) this.markValue(this.globals[key], generation);
             }
-            hostRootIndex++;
-        }
-        var frameIndex = 0;
-        while (frameIndex < this.activeRegisterFrames.length) {
-            var registerIndex = 0;
-            while (registerIndex < this.activeRegisterFrames[frameIndex].length) {
-                this.markValue(this.activeRegisterFrames[frameIndex][registerIndex], generation);
-                registerIndex++;
+            this.markValue(this.bufferSupport.prototype, generation);
+            var hostRootIndex = 0;
+            while (hostRootIndex < this.hostRoots.length) {
+                if (this.hostRoots[hostRootIndex] !== null) {
+                    this.markValue(this.hostRoots[hostRootIndex], generation);
+                }
+                hostRootIndex++;
             }
-            frameIndex++;
-        }
-        frameIndex = 0;
-        while (frameIndex < this.activeEnvironmentFrames.length) {
-            this.markEnvironment(this.activeEnvironmentFrames[frameIndex], generation);
-            frameIndex++;
-        }
-        var survivors = [];
-        var index = 0;
-        while (index < this.heapObjects.length) {
-            if (this.heapObjects[index].gcMark === generation) {
-                survivors.push(this.heapObjects[index]);
+            var frameIndex = 0;
+            while (frameIndex < this.activeRegisterFrames.length) {
+                var registerIndex = 0;
+                while (registerIndex < this.activeRegisterFrames[frameIndex].length) {
+                    this.markValue(this.activeRegisterFrames[frameIndex][registerIndex], generation);
+                    registerIndex++;
+                }
+                frameIndex++;
             }
-            index++;
+            frameIndex = 0;
+            while (frameIndex < this.activeEnvironmentFrames.length) {
+                this.markEnvironment(this.activeEnvironmentFrames[frameIndex], generation);
+                frameIndex++;
+            }
+            var survivors = [];
+            var index = 0;
+            while (index < this.heapObjects.length) {
+                if (this.heapObjects[index].gcMark === generation) {
+                    survivors.push(this.heapObjects[index]);
+                }
+                index++;
+            }
+            this.heapObjects = survivors;
+            this.bufferSupport.sweep(generation);
+            this.gcAllocationDebt = 0;
+            this.gcPending = false;
+            this.collectionCount++;
+            return survivors.length;
+        } finally {
+            this.gcCollecting = false;
         }
-        this.heapObjects = survivors;
-        this.bufferSupport.sweep(generation);
-        return survivors.length;
     };
 
     Runtime.prototype.destroy = function () {
@@ -447,6 +472,8 @@
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
+        this.gcPending = false;
+        this.gcCollecting = false;
     };
 
     Runtime.prototype.markEnvironment = function (environment, generation) {
@@ -482,6 +509,15 @@
             throw new Error("invalid guest host root handle");
         }
         return handle - 1;
+    }
+
+    function normalizeGCThreshold(value) {
+        if (value === undefined) return 1024;
+        value = Number(value);
+        if (value < 1 || value !== Math.floor(value)) {
+            throw new RangeError("gcThreshold must be a positive integer");
+        }
+        return value;
     }
 
     root.GuestVMRuntime = Runtime;

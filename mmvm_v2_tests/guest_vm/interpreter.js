@@ -82,6 +82,7 @@
                 registers[code[pc + 1]] = Number(registers[code[pc + 2]]);
                 pc = pc + 3;
             } else if (opcode === op.JUMP) {
+                if (code[pc + 1] <= pc) runtime.gcSafePoint();
                 pc = code[pc + 1];
             } else if (opcode === op.JUMP_IF_FALSE) {
                 if (!runtime.truthy(registers[code[pc + 1]])) pc = code[pc + 2];
@@ -96,20 +97,25 @@
                 registers[code[pc + 1]] = runtime.call(
                     registers[code[pc + 2]],
                     code[pc + 3] < 0 ? undefined : registers[code[pc + 3]], args);
+                runtime.gcSafePoint();
                 pc = pc + 6;
             } else if (opcode === op.MAKE_FUNCTION) {
                 registers[code[pc + 1]] = runtime.makeGuestFunction(
                     constants[code[pc + 2]], environment);
+                runtime.gcSafePoint();
                 pc = pc + 3;
             } else if (opcode === op.MAKE_OBJECT) {
                 registers[code[pc + 1]] = runtime.makeObject();
+                runtime.gcSafePoint();
                 pc = pc + 2;
             } else if (opcode === op.MAKE_ARRAY) {
                 registers[code[pc + 1]] = runtime.makeArray();
+                runtime.gcSafePoint();
                 pc = pc + 2;
             } else if (opcode === op.MAKE_REGEXP) {
                 registers[code[pc + 1]] = runtime.makeRegExp(
                     constants[code[pc + 2]], constants[code[pc + 3]]);
+                runtime.gcSafePoint();
                 pc = pc + 4;
             } else if (opcode === op.THROW) {
                 throw registers[code[pc + 1]];
