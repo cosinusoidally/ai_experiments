@@ -74,6 +74,18 @@ including contexts in the same runtime, can hold independent suspended
 executions. `execution.abort()` discards a continuation and releases it as a GC
 root.
 
+A bytecode function records the context in which it was created. Its free
+global names continue to resolve in that home context even when the function is
+shared with and called from another context in the same runtime. An embedder can
+also enter a bytecode function directly in its context:
+
+```js
+var execution = context.startFunction(callable, receiver, argumentsArray);
+```
+
+This is useful for routing a yielded call from one context into a handler owned
+by another. See `demos/three_contexts.js` for a complete round-robin example.
+
 ## Servicing host calls
 
 Create an external host function on the context and install it in that

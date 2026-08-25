@@ -71,3 +71,37 @@ Add `--bind 127.0.0.1` to restrict it to localhost. Program arguments after
 `net.js` become the guest's top-level `arguments` object. `artifacts/www/` is
 ignored by Git and remains a disposable test directory; do not commit its
 contents.
+
+## Three-context multiplexing demo
+
+`demos/three_contexts.js` creates one `JSRuntime` containing `cx_a`, `cx_b`, and
+`cx_c`. The first two contexts run infinite guest loops which yield `c_call`
+host requests. A round-robin embedder routes each request into the real guest
+`c_call` function in `cx_c`. After printing 100 alternating calls, `cx_c`
+requests shutdown, returns from `c_call`, and the embedder aborts both producer
+continuations.
+
+Run it under Node with no dependencies:
+
+```sh
+node guest_vm/demos/three_contexts.js
+```
+
+Or run the same file directly under `js_min.exe`:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_vm/demos/three_contexts.js
+```
+
+The output is deterministic and starts like this:
+
+```text
+[embedder] starting round-robin execution of cx_a and cx_b
+[cx_c] hi from cx_a | call 1/100
+[cx_c] hi from cx_b | call 2/100
+```
+
+It ends only after `cx_c` has processed call 100, requested shutdown, and
+returned from that invocation.

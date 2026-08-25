@@ -60,10 +60,11 @@
                                  flags: flags, properties: {}, gcMark: 0});
     };
 
-    Runtime.prototype.makeGuestFunction = function (program, closure) {
+    Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
         return this.trackObject({guestType: "bytecodeFunction", program: program,
                                  closure: closure, properties: {}, gcMark: 0,
-                                 name: program.name || ""});
+                                 name: program.name || "",
+                                 homeContext: homeContext});
     };
 
     Runtime.prototype.makeCallEnvironment = function (program, receiver, args,

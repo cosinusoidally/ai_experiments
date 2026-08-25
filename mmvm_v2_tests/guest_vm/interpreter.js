@@ -2,10 +2,11 @@
     var op = root.GuestVMBytecode;
     if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
 
-    function makeFrame(program, runtime, receiver, args, closure, callable,
+    function makeFrame(program, runtime, context, receiver, args, closure, callable,
                        returnRegister) {
         return {program: program, code: program.code, constants: program.constants,
                 registers: [], pc: 0,
+                context: context,
                 environment: runtime.makeCallEnvironment(
                     program, receiver, args || [], closure, callable),
                 returnRegister: returnRegister};
@@ -14,7 +15,8 @@
     function Execution(program, runtime, context) {
         this.runtime = runtime;
         this.context = context;
-        this.frames = [makeFrame(program, runtime, undefined, [], null, null, -1)];
+        this.frames = [makeFrame(program, runtime, context,
+                                 undefined, [], null, null, -1)];
         this.pendingHostCall = null;
         this.status = "ready";
         this.value = undefined;
@@ -23,6 +25,18 @@
         this.hasInjectedHostException = false;
         this.totalInstructions = 0;
     }
+
+    Execution.fromFunction = function (callable, runtime, context, receiver, args) {
+        if (!callable || callable.guestType !== "bytecodeFunction") {
+            throw new TypeError("entry value is not a guest bytecode function");
+        }
+        runtime.assertOwned(callable);
+        var execution = new Execution(callable.program, runtime, context);
+        execution.frames = [makeFrame(callable.program, runtime,
+            callable.homeContext || context, receiver, args || [], callable.closure,
+            callable, -1)];
+        return execution;
+    };
 
     Execution.prototype.result = function (status, used) {
         var result = {status: status, instructions: used,
@@ -92,10 +106,10 @@
                     frame.pc = pc + 3;
                 } else if (opcode === op.GET_GLOBAL) {
                     registers[code[pc + 1]] = this.runtime.getBinding(
-                        this.context, frame.environment, constants[code[pc + 2]]);
+                        frame.context, frame.environment, constants[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.SET_GLOBAL) {
-                    this.runtime.setBinding(this.context, frame.environment,
+                    this.runtime.setBinding(frame.context, frame.environment,
                         constants[code[pc + 1]], registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.MOVE) {
@@ -162,7 +176,8 @@
                     frame.pc = pc + 6;
                     if (callableValue && callableValue.guestType === "bytecodeFunction") {
                         this.frames.push(makeFrame(callableValue.program, this.runtime,
-                            receiver, args, callableValue.closure, callableValue,
+                            callableValue.homeContext || frame.context, receiver, args,
+                            callableValue.closure, callableValue,
                             destination));
                         this.runtime.gcSafePoint();
                     } else if (callableValue && callableValue.guestType === "function" &&
@@ -179,7 +194,7 @@
                     }
                 } else if (opcode === op.MAKE_FUNCTION) {
                     registers[code[pc + 1]] = this.runtime.makeGuestFunction(
-                        constants[code[pc + 2]], frame.environment);
+                        constants[code[pc + 2]], frame.environment, frame.context);
                     this.runtime.gcSafePoint();
                     frame.pc = pc + 3;
                 } else if (opcode === op.MAKE_OBJECT) {

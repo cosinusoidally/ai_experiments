@@ -86,6 +86,14 @@
         return this.execution;
     };
 
+    JSContext.prototype.startFunction = function (callable, receiver, args) {
+        if (this.destroyed) throw new Error("context has been destroyed");
+        if (this.execution) throw new Error("context already has an active execution");
+        this.execution = Execution.fromFunction(
+            callable, this.runtime, this, receiver, args || []);
+        return this.execution;
+    };
+
     JSContext.prototype.runProgram = function (program) {
         return this.runExecutionToCompletion(this.startProgram(program));
     };

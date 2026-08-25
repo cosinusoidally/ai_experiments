@@ -55,6 +55,13 @@ shares some runtime-owned intrinsic function objects between context binding
 tables; completing independent ES5.1 realm intrinsics remains part of the
 prototype/object-model work.
 
+Each guest bytecode function records its home context as well as its lexical
+closure. A frame uses that home context for global resolution, including when
+the callable is installed in another context belonging to the same runtime.
+`JSContext.startFunction` creates a resumable entry execution for a runtime-owned
+bytecode function, which lets an embedder route a yielded cross-context request
+without borrowing the caller's global environment.
+
 `VM` remains a compatibility facade containing one runtime and one default
 context. New embedders should use `JSRuntime.createContext()` explicitly.
 

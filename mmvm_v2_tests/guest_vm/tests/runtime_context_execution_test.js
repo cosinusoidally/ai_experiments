@@ -29,6 +29,18 @@
         assert(firstRuntime.runtime.getGlobal(secondContext,
                                               "sharedObjectValue") === 37,
                "contexts in one runtime did not share a runtime-owned object");
+        firstContext.run(
+            "var homeValue = 40;" +
+            "function exportedAdd(amount) { homeValue += amount; return homeValue; }",
+            "cross_context_function_owner.js");
+        var exportedAdd = firstRuntime.runtime.getGlobal(firstContext, "exportedAdd");
+        secondContext.installGlobal("exportedAdd", exportedAdd);
+        secondContext.run("var exportedResult = exportedAdd(2);",
+                          "cross_context_function_caller.js");
+        assert(firstRuntime.runtime.getGlobal(firstContext, "homeValue") === 42 &&
+               firstRuntime.runtime.getGlobal(secondContext,
+                                              "exportedResult") === 42,
+               "cross-context function did not use its home context globals");
         var rejectedForeignObject = false;
         try {
             otherContext.installGlobal("foreign", firstObject);
