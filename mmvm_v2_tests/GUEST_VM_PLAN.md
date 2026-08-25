@@ -376,6 +376,10 @@ to one bounds-checked memory layer backed by peek/poke under `js_min.exe` and
 equivalent emulation under Node.js. Raw field offsets and scattered peek/poke
 calls are prohibited outside that memory/accessor boundary.
 
+Do not use NaN boxing. Registers and heap fields contain ordinary 32-bit heap
+references. Numbers are dedicated records containing two explicit 32-bit words
+of IEEE-754 binary64 payload; special values use canonical dedicated records.
+
 Guest objects must not be exposed directly as ordinary host objects. All guest
 semantics pass through runtime operations such as:
 

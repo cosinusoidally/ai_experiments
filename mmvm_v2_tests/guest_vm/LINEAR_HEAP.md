@@ -45,6 +45,11 @@ arguments hold 32-bit heap references only. Primitive guest values are records
 too; this deliberately avoids confusing an immediate guest number with an
 address in a host Number slot.
 
+NaN boxing is explicitly prohibited. No floating-point bit pattern is also a
+tag or reference, and semantic NaN payloads never participate in value-kind
+dispatch. The interpreter determines a value's kind only by following its
+32-bit reference and reading the record-type field through `Heap.recordType`.
+
 The value record types are undefined, null, Boolean, number, interned UTF-16
 string, object, array, native function, bytecode function, regexp, Buffer view,
 and Buffer backing. Canonical singleton references are used for undefined,
