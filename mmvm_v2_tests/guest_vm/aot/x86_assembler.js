@@ -5,6 +5,8 @@
         this.bytes = [];
         this.macros = [];
         this.stackWords = 0;
+        this.labels = {};
+        this.fixups = [];
     }
 
     Assembler.prototype.emitByte = function (value) {
@@ -92,11 +94,108 @@
         this.macros.push("fdivp_st1_st0()");
         this.emitByte(0xde); this.emitByte(0xf9);
     };
+    Assembler.prototype.negateF64 = function () {
+        this.macros.push("fchs()");
+        this.emitByte(0xd9); this.emitByte(0xe0);
+    };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) throw new Error("unbalanced assembler stack");
         this.macros.push("ret()"); this.emitByte(0xc3);
     };
     Assembler.prototype.dump = function () { return this.macros.join("\n"); };
+
+    Assembler.prototype.label = function (name) {
+        if (this.labels[name] !== undefined) throw new Error("duplicate x86 label " + name);
+        this.macros.push("label(" + name + ")");
+        this.labels[name] = this.bytes.length;
+    };
+
+    Assembler.prototype.jump = function (name) {
+        this.macros.push("jmp(" + name + ")");
+        this.emitByte(0xe9);
+        this.relativeFixup(name);
+    };
+
+    Assembler.prototype.jumpNotEqual = function (name) {
+        this.macros.push("jne(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x85);
+        this.relativeFixup(name);
+    };
+
+    Assembler.prototype.relativeFixup = function (name) {
+        this.fixups.push({name: name, displacement: this.bytes.length,
+                          end: this.bytes.length + 4});
+        this.word32(0);
+    };
+
+    Assembler.prototype.resolveLabels = function () {
+        var index = 0;
+        while (index < this.fixups.length) {
+            var fixup = this.fixups[index++];
+            var target = this.labels[fixup.name];
+            if (target === undefined) throw new Error("undefined x86 label " + fixup.name);
+            var value = (target - fixup.end) >>> 0;
+            this.bytes[fixup.displacement] = value & 255;
+            this.bytes[fixup.displacement + 1] = (value >>> 8) & 255;
+            this.bytes[fixup.displacement + 2] = (value >>> 16) & 255;
+            this.bytes[fixup.displacement + 3] = (value >>> 24) & 255;
+        }
+        this.fixups = [];
+        return this.bytes;
+    };
+
+    Assembler.prototype.beginFrameKernel = function () {
+        this.macros.push("prologue_frame_kernel()");
+        this.emitByte(0x55);                         /* push ebp */
+        this.emitByte(0x89); this.emitByte(0xe5);   /* mov ebp,esp */
+        this.emitByte(0x53);                         /* push ebx */
+        this.emitByte(0x56);                         /* push esi */
+        this.emitByte(0x8b); this.emitByte(0x5d); this.emitByte(0x08); /* ebx=arg0 */
+        this.emitByte(0x8b); this.emitByte(0x75); this.emitByte(0x0c); /* esi=arg1 */
+        this.emitByte(0x01); this.emitByte(0xde);   /* add esi,ebx */
+    };
+
+    Assembler.prototype.endFrameKernel = function () {
+        this.macros.push("epilogue_frame_kernel()");
+        this.emitByte(0x5e); this.emitByte(0x5b);   /* pop esi; pop ebx */
+        this.emitByte(0xc9); this.emitByte(0xc3);   /* leave; ret */
+    };
+
+    Assembler.prototype.copyHeapWordToFrame = function (heapOffset, frameOffset) {
+        this.macros.push("copy_heap_word_to_frame(" + heapOffset + "," + frameOffset + ")");
+        this.emitByte(0x8b); this.emitByte(0x83); this.word32(heapOffset); /* eax=[ebx+] */
+        this.emitByte(0x89); this.emitByte(0x86); this.word32(frameOffset); /* [esi+]=eax */
+    };
+
+    Assembler.prototype.copyFrameWord = function (sourceOffset, targetOffset) {
+        this.macros.push("copy_frame_word(" + sourceOffset + "," + targetOffset + ")");
+        this.emitByte(0x8b); this.emitByte(0x86); this.word32(sourceOffset);
+        this.emitByte(0x89); this.emitByte(0x86); this.word32(targetOffset);
+    };
+
+    Assembler.prototype.compareFrameTag = function (offset, tag) {
+        this.macros.push("cmp_frame_tag(" + offset + "," + tag + ")");
+        this.emitByte(0x83); this.emitByte(0xbe); this.word32(offset);
+        this.emitByte(tag);
+    };
+
+    Assembler.prototype.loadFrameInt32AsF64 = function (offset) {
+        this.macros.push("fild_i32_frame(" + offset + ")");
+        this.emitByte(0xdb); this.emitByte(0x86); this.word32(offset);
+    };
+
+    Assembler.prototype.loadFrameF64 = function (offset) {
+        this.macros.push("fld_f64_frame(" + offset + ")");
+        this.emitByte(0xdd); this.emitByte(0x86); this.word32(offset);
+    };
+
+    Assembler.prototype.storeFrameF64 = function (tagOffset, payloadOffset) {
+        this.macros.push("store_f64_frame(" + tagOffset + "," + payloadOffset + ")");
+        this.emitByte(0xc7); this.emitByte(0x86); this.word32(tagOffset); this.word32(6);
+        this.emitByte(0xdd); this.emitByte(0x9e); this.word32(payloadOffset);
+        this.emitByte(0xc7); this.emitByte(0x86); this.word32(payloadOffset + 8);
+        this.word32(0);
+    };
 
     root.GuestVMX86Assembler = Assembler;
     if (typeof module !== "undefined" && module.exports) module.exports = Assembler;

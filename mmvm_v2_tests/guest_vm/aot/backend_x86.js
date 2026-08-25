@@ -37,6 +37,7 @@
         }
         emitExpression(assembler, ir.expression);
         assembler.ret();
+        assembler.resolveLabels();
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       ir: ir, backend: "i386", destroy: function () {}};

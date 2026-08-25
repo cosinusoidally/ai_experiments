@@ -460,6 +460,13 @@
             FRAME_REGISTERS + register * CELL_BYTES, CELL_BYTES, Heap.Types.FRAME);
     };
 
+    Records.prototype.frameRegisterDisplacement = function (register) {
+        if (register < 0 || register !== Math.floor(register)) {
+            throw new RangeError("invalid frame register");
+        }
+        return Heap.HEADER_SIZE + FRAME_REGISTERS + register * CELL_BYTES;
+    };
+
     Records.prototype.allocateBytecode = function (code) {
         var address = this.heap.allocateRecordWords(Heap.Types.BYTECODE,
             BYTECODE_WORDS + code.length * 4, code.length, 0, 0, 0);

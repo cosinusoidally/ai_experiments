@@ -25,6 +25,11 @@
         var KernelJSBackend = require("../aot/backend_js.js");
         var KernelX86Backend = require("../aot/backend_x86.js");
         var runKernelCompilerTest = require("./kernel_compiler_test.js");
+        var NumericBytecodeBackend = require(
+            "../aot/bytecode_numeric_backend.js");
+        var bytecode = require("../bytecode.js");
+        var runNumericBytecodeBackendTest = require(
+            "./numeric_bytecode_backend_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -43,6 +48,7 @@
         load("guest_vm/tests/runtime_linear_heap_test.js");
         load("guest_vm/tests/heap_records_test.js");
         load("guest_vm/tests/kernel_compiler_test.js");
+        load("guest_vm/tests/numeric_bytecode_backend_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
@@ -60,6 +66,9 @@
         KernelJSBackend = GuestVMKernelJSBackend;
         KernelX86Backend = GuestVMKernelX86Backend;
         runKernelCompilerTest = GuestVMRunKernelCompilerTest;
+        NumericBytecodeBackend = GuestVMNumericBytecodeBackend;
+        bytecode = GuestVMBytecode;
+        runNumericBytecodeBackendTest = GuestVMRunNumericBytecodeBackendTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -123,6 +132,10 @@
         KernelCompiler, KernelJSBackend, KernelX86Backend, Heap);
     if (typeof print === "function") print(kernelCompilerResult);
     else console.log(kernelCompilerResult);
+    var numericBackendResult = runNumericBytecodeBackendTest(
+        VM, NumericBytecodeBackend, bytecode);
+    if (typeof print === "function") print(numericBackendResult);
+    else console.log(numericBackendResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");
