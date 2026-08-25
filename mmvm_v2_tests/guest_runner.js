@@ -37,8 +37,8 @@ var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode});
-guestProgramVM.run(guestProgramSource, guestProgramPath);
-var guestResultText = guestProgramPath + ": passed " +
-                      guestProgramVM.runtime.assertions + " assertion(s)";
-if (typeof print === "function") print(guestResultText);
-else console.log(guestResultText);
+try {
+    guestProgramVM.run(guestProgramSource, guestProgramPath);
+} finally {
+    guestProgramVM.destroy();
+}

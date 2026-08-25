@@ -27,6 +27,15 @@ run_js_min_tests() {
     echo "guest VM host: js_min ($js_min_binary)"
     LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$js_min_binary" guest_vm/tests/run_tests.js
+    hello_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$js_min_binary" ./guest_runner.js hello.js)
+    if [ "$hello_output" != "Hello, world!" ]; then
+        echo "guest_runner.js emitted unexpected stdout:" >&2
+        echo "$hello_output" >&2
+        exit 1
+    fi
+    echo "$hello_output"
+    echo "guest runner stdout passed"
 }
 
 cd "$suite_directory"

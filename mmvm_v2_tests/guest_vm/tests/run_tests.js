@@ -43,7 +43,6 @@
         {path: "language/for_loop.js"},
         {path: "buffer/buffer_guest.js"}
     ];
-    if (!isNode) guestTests.push({path: "../../hello.js", options: {rawFFI: true}});
     var totalAssertions = 0;
     var testIndex = 0;
     while (testIndex < guestTests.length) {

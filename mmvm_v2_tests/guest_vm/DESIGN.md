@@ -38,7 +38,7 @@ calls, Buffer indexing, and lifetime pass through `Runtime` methods.
 | `host_memory.js` | Native or emulated byte storage over the host FFI boundary. |
 | `buffer.js` | Buffer views, methods, backing stores, and Buffer GC integration. |
 | `vm.js` | Embedder facade tying compilation, execution, roots, and shutdown together. |
-| `guest_runner.js` | Command-line source reader and one-program runner. |
+| `guest_runner.js` | Quiet command-line source reader and one-program runner. |
 
 Node modules load dependencies with relative `require`. Under `js_min.exe`, an
 embedder must load them in this order:
@@ -273,6 +273,11 @@ even when the embedder believes collection has reclaimed everything.
 `tests/run_tests.js` is portable implementation-dialect JavaScript loaded by
 either host. `tests/run_tests.sh` selects `node`, `js_min`, or `both` and supports
 environment overrides for the executables and Firefox library directory.
+Pass/fail and assertion-count reporting belongs exclusively to these test
+runners. The general `guest_runner.js` prints no success banner or assertion
+count; its stdout is the guest program's stdout. The `js_min` host launcher
+captures the complete output of `guest_runner.js hello.js` and requires it to
+equal exactly `Hello, world!`, making this boundary a regression test.
 
 Focused guest files live under `tests/language` and `tests/buffer`. They contain
 only features already implemented and must pass in every commit. When adding a

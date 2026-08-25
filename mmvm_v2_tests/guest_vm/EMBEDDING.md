@@ -228,7 +228,8 @@ safe because backing stores track whether they have already been freed.
 Tokenizer errors include filename, line, and column. Parser errors currently
 reuse the current token location. Runtime errors and verifier failures propagate
 to the host. `guest_runner.js` intentionally leaves exception reporting to the
-host shell at this stage.
+host shell at this stage. On success it emits no runner-generated banner,
+filename, pass status, or assertion count; stdout belongs to the guest program.
 
 Embedders should supply a stable logical filename to `compile`/`run`; it need not
 be an absolute path. Avoid exposing machine-specific paths in guest diagnostics
