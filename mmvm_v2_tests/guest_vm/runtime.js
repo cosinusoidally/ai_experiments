@@ -241,6 +241,8 @@
                 return args.length > 1 ? String(receiver).substring(Number(args[0]), Number(args[1])) :
                                          String(receiver).substring(Number(args[0]));
             });
+        this.stringMethods.toLowerCase = this.makeNativeFunction("String.toLowerCase",
+            function (receiver) { return String(receiver).toLowerCase(); });
         this.stringMethods.split = this.makeNativeFunction("String.split",
             function (receiver, args) {
                 var parts = String(receiver).split(args.length ? String(args[0]) : undefined);

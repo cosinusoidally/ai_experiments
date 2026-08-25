@@ -82,6 +82,34 @@ Add `--bind 127.0.0.1` to restrict it to localhost. Program arguments after
 ignored by Git and remains a disposable test directory; do not commit its
 contents.
 
+The unchanged Node-compatible server also runs through the guest interpreter.
+Unlike `net.js`, it does not make raw FFI calls itself. `guest_runner.js`
+installs an embedder-side subset of Node's `require`, `process`, `console`,
+`Buffer`, `Date`, `http`, and `fs` APIs, then services the resulting host-call
+yields with the existing libc-backed, nonblocking poll loop:
+
+```sh
+mkdir -p artifacts/www
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js node_web.js \
+  --bind 127.0.0.1 --directory artifacts/www 8000
+```
+
+Omit `--bind 127.0.0.1` to listen on all IPv4 interfaces. The port,
+`--bind`/`-b`, and `--directory`/`-d` behavior belongs to unchanged
+`node_web.js` and matches its direct Node.js invocation. The filesystem calls
+are asynchronous guest callbacks; the socket is nonblocking and driven by
+`poll(2)`. Binary files remain guest `Buffer` values and are copied to the
+native output queue without string conversion.
+
+The guest Node environment is deliberately a narrow embedding profile, not a
+claim that the VM already implements Node.js. At this checkpoint `require`
+accepts only the built-in names `http` and `fs`; relative CommonJS modules and
+the rest of Node's standard library remain future work. Run `node_web.js`
+directly with Node.js when testing the unchanged source against real Node.
+
 ## Three-context multiplexing demo
 
 `demos/three_contexts.js` creates one `JSRuntime` containing `cx_a`, `cx_b`, and

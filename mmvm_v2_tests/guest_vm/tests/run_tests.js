@@ -79,6 +79,13 @@
     if (typeof print === "function") print(netCompileResult);
     else console.log(netCompileResult);
 
+    var nodeWebCompileVM = new VM();
+    nodeWebCompileVM.compile(readSource("../../node_web.js"), "node_web.js");
+    nodeWebCompileVM.destroy();
+    var nodeWebCompileResult = "unchanged node_web.js compiled";
+    if (typeof print === "function") print(nodeWebCompileResult);
+    else console.log(nodeWebCompileResult);
+
     var summary = "guest VM suite passed: " + guestTests.length +
                   " guest program(s), " + totalAssertions +
                   " guest assertion(s)";

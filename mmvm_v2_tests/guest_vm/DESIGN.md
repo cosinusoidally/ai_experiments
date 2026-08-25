@@ -295,6 +295,53 @@ objects currently delegates matching to the host regexp engine; this is not a
 claim of complete ES5.1 RegExp semantics and must eventually be replaced or
 conformance-qualified where the two supported hosts differ.
 
+## Guest Node embedding profile
+
+`node_environment.js` is an embedder adapter, not guest library source and not
+part of ES5.1 semantics. The shell runner loads it after the single VM
+bootstrap. It then loads the existing host-side `node_compat` libc, event,
+process, network, filesystem, and HTTP layers and installs guest objects for
+the narrow API used by unchanged `node_web.js`.
+
+The boundary has three layers:
+
+1. `node_compat/libc.js` is the only layer in this profile which issues raw
+   libc FFI calls. It wraps allocation, file, socket, and poll operations.
+2. The host-side Node compatibility stack owns file descriptors, nonblocking
+   clients, HTTP parsing/serialization, filesystem work queues, and `poll(2)`.
+3. `GuestNodeEnvironment` translates guest objects to those host APIs. Its
+   properties are external host functions, so ordinary guest execution yields
+   before the adapter performs an operation.
+
+Guest callbacks never execute re-entrantly inside the interpreter frame that
+registered them. A host operation first returns through its pending host call.
+When an event or filesystem result is ready, the adapter queues a task in
+`NodeRuntime`; that task calls `JSContext.startFunction` and resumes a new
+`Execution`. Any host calls made by the callback are serviced through the same
+yield boundary before the callback continues. This preserves the VM rule that
+a context has at most one active execution.
+
+Values held across asynchronous work are registered with `JSRuntime.retain`.
+Long-lived server/listener values remain rooted until environment shutdown.
+Request arguments and one-shot callbacks use temporary handles released in a
+`finally` block after callback execution. Adding an asynchronous binding
+without the corresponding root is a collector correctness bug; making every
+callback permanent is a server-lifetime leak.
+
+Filesystem errors are copied into ordinary guest objects. Directory entries
+become guest arrays, stats become guest objects with intrinsic query methods,
+and file bytes become guest Buffer backing stores. Response output converts a
+guest Buffer back to the host compatibility buffer byte-for-byte; strings use
+UTF-8. HTTP sockets remain nonblocking even though the current file adapters
+perform their libc file work when their queued host task runs.
+
+The installed CommonJS surface currently resolves only `http` and `fs`.
+`process`, `console`, `Buffer.byteLength`, the required `Date` methods, and URI
+component encoding functions are also installed. This is intentionally the
+smallest documented profile needed by `node_web.js`, not a general Node.js
+implementation. Relative module loading belongs in a future guest-aware module
+loader rather than in ad-hoc special cases here.
+
 ## Collector and roots
 
 The collector is a non-moving mark/sweep collector over `Runtime.heapObjects`.

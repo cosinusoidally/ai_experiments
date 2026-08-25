@@ -184,6 +184,38 @@ Run the shell with the Firefox library directory supplied through
 `LD_LIBRARY_PATH`; do not add an rpath. `host_memory.js` resolves `calloc` and
 `free` when it detects the MMVM FFI primitives.
 
+### Command-line Node compatibility profile
+
+The checked-in `guest_runner.js` additionally loads `node_environment.js` when
+hosted by `js_min.exe`. This is a runner policy, not something performed by
+the public VM bootstrap. It installs the limited host API required by
+`node_web.js` and transfers control to its libc-backed event loop after the
+main guest execution completes.
+
+An embedder wanting the same policy constructs the environment after its VM
+and before compiling the program:
+
+```js
+load("guest_vm/guest_vm.js");
+load("guest_vm/node_environment.js");
+
+var vm = new GuestVM({rawFFI: true});
+var environment = new GuestNodeEnvironment(vm,
+    ["node_web.js", "--directory", "artifacts/www", "8000"]);
+```
+
+Run the main program with the ordinary resumable API, servicing each yielded
+host call. Once it completes, call `environment.run()` to enter the event loop.
+On shutdown call `environment.destroy()` before `vm.destroy()`. The environment
+retains guest callbacks while libc work is pending, invokes each callback via
+`JSContext.startFunction`, and releases one-shot roots automatically.
+
+This adapter is shell-only: it calls `load`, depends on the MMVM raw FFI, and
+is not loaded by Node-hosted VM tests. Under Node.js, run unchanged
+`node_web.js` directly to use Node's real built-ins. The current guest profile
+supports only `require("http")` and `require("fs")`; embedders must not assume
+general CommonJS or Node compatibility.
+
 ## Compile, execute, and run
 
 `VM.run(source, filename)` is the backwards-compatible convenience path. It
