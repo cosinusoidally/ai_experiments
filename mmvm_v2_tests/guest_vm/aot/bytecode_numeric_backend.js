@@ -70,13 +70,36 @@
     function analyze(program) {
         var pc = 0;
         var returnRegister = -1;
+        var numeric = {};
+        var parameterIndex = 0;
+        while (program.bindingRegisters &&
+               parameterIndex < program.parameterSlots.length) {
+            numeric["$" + program.bindingRegisters[
+                program.parameterSlots[parameterIndex++]]] = true;
+        }
         while (pc < program.code.length) {
             var opcode = program.code[pc];
-            if (opcode === op.CONST || opcode === op.MOVE ||
-                opcode === op.NEGATE || opcode === op.POSITIVE) pc += 3;
-            else if (isBinary(opcode)) pc += 4;
+            if (opcode === op.CONST) {
+                if (typeof program.constants[program.code[pc + 2]] !== "number") return null;
+                numeric["$" + program.code[pc + 1]] = true;
+                pc += 3;
+            } else if (opcode === op.MOVE) {
+                if (!numeric["$" + program.code[pc + 2]]) return null;
+                numeric["$" + program.code[pc + 1]] = true;
+                pc += 3;
+            } else if (opcode === op.NEGATE || opcode === op.POSITIVE) {
+                if (!numeric["$" + program.code[pc + 2]]) return null;
+                numeric["$" + program.code[pc + 1]] = true;
+                pc += 3;
+            } else if (isBinary(opcode)) {
+                if (!numeric["$" + program.code[pc + 2]] ||
+                    !numeric["$" + program.code[pc + 3]]) return null;
+                numeric["$" + program.code[pc + 1]] = true;
+                pc += 4;
+            }
             else if (opcode === op.RETURN) {
                 returnRegister = program.code[pc + 1];
+                if (!numeric["$" + returnRegister]) return null;
                 pc += 2;
                 if (pc !== program.code.length) return null;
             } else return null;

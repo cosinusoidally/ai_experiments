@@ -6,6 +6,7 @@
     var HeapRecords = root.GuestVMHeapRecords;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     var RecordInitializer = root.GuestVMRecordInitializer;
+    var NumericBytecodeBackend = root.GuestVMNumericBytecodeBackend;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
@@ -14,6 +15,7 @@
         HeapRecords = require("./heap_records.js");
         ThreadedCompiler = require("./threaded_compiler.js");
         RecordInitializer = require("./aot/record_initializer.js");
+        NumericBytecodeBackend = require("./aot/bytecode_numeric_backend.js");
     }
 
     function own(object, key) {
@@ -61,6 +63,9 @@
             new ThreadedCompiler(this) : null;
         this.ensureLinearHeap();
         this.globalObject = this.makeObject();
+        this.numericBytecodeBackend = options.threadedCompile ?
+            new NumericBytecodeBackend(this) : null;
+        this.nativeCompilations = [];
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
         if (options.rawFFI) this.installRawFFI();
@@ -1329,6 +1334,11 @@
         this.internedStrings = {};
         this.globalObject = null;
         this.propertyAddressCache = {};
+        var compilationIndex = 0;
+        while (compilationIndex < this.nativeCompilations.length) {
+            this.nativeCompilations[compilationIndex++].destroy();
+        }
+        this.nativeCompilations = [];
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;

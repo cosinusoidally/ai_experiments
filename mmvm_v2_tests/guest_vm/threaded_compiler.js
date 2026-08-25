@@ -40,6 +40,17 @@
          * backend lands, keep environment-bearing functions in the semantic
          * interpreter; register-resident programs remain compilable. */
         if (!program.bindingRegisters) return null;
+        var numeric = this.runtime.numericBytecodeBackend &&
+                      this.runtime.numericBytecodeBackend.compile(program);
+        if (numeric) {
+            var numericFunction = this.makeNumericFunction(program, numeric);
+            this.programs.push(program);
+            this.compiled.push(numericFunction);
+            program.threadedCompiler = this;
+            program.threadedFunction = numericFunction;
+            this.runtime.nativeCompilations.push(numeric);
+            return numericFunction;
+        }
         if (program.threadedCompiler === this && program.threadedFunction) {
             return program.threadedFunction;
         }
@@ -64,6 +75,70 @@
         program.threadedFunction = compiled;
         return compiled;
     };
+
+    ThreadedCompiler.prototype.makeNumericFunction = function (program, compiled) {
+        var compiler = this;
+        var frames = [];
+        var depth = 0;
+        return function (runtime, context, receiver, args, closure, callable, argc,
+                         a0, a1, a2, a3, a4, a5, a6, a7) {
+            var guardIndex = 0;
+            while (guardIndex < program.parameterSlots.length) {
+                var guardValue = args ?
+                    (guardIndex < args.length ? args[guardIndex] : undefined) :
+                    (guardIndex < argc ? fixedArgument(guardIndex,
+                        a0, a1, a2, a3, a4, a5, a6, a7) : undefined);
+                if (typeof guardValue !== "number") {
+                    return compiler.fallbackCompiled(callable, receiver, args, argc,
+                        a0, a1, a2, a3, a4, a5, a6, a7);
+                }
+                guardIndex++;
+            }
+            var frame = frames[depth];
+            if (!frame) {
+                frame = runtime.heapRecords.allocateFrame(
+                    runtime.programAddress(program), 0, 0, -1,
+                    program.registerCount || 0);
+                frames[depth] = frame;
+            }
+            depth++;
+            try {
+                var parameterIndex = 0;
+                while (parameterIndex < program.parameterSlots.length) {
+                    var argument = args ?
+                        (parameterIndex < args.length ? args[parameterIndex] : undefined) :
+                        (parameterIndex < argc ? fixedArgument(parameterIndex,
+                            a0, a1, a2, a3, a4, a5, a6, a7) : undefined);
+                    runtime.writeHeapValue(runtime.heapRecords.frameRegisterCell(
+                        frame, program.bindingRegisters[
+                            program.parameterSlots[parameterIndex]]), argument);
+                    parameterIndex++;
+                }
+                runtime.writeHeapValue(runtime.heapRecords.frameRegisterCell(frame,
+                    program.bindingRegisters[program.thisSlot]), receiver);
+                if (program.functionNameSlot >= 0) {
+                    runtime.writeHeapValue(runtime.heapRecords.frameRegisterCell(frame,
+                        program.bindingRegisters[program.functionNameSlot]), callable);
+                }
+                compiled.fn(runtime.linearHeap.memory.nativeAddress(0), frame);
+                return runtime.readHeapValue(runtime.heapRecords.frameRegisterCell(
+                    frame, compiled.returnRegister));
+            } finally {
+                depth--;
+            }
+        };
+    };
+
+    function fixedArgument(index, a0, a1, a2, a3, a4, a5, a6, a7) {
+        if (index === 0) return a0;
+        if (index === 1) return a1;
+        if (index === 2) return a2;
+        if (index === 3) return a3;
+        if (index === 4) return a4;
+        if (index === 5) return a5;
+        if (index === 6) return a6;
+        return a7;
+    }
 
     ThreadedCompiler.prototype.supports = function (program) {
         var code = program.code;
