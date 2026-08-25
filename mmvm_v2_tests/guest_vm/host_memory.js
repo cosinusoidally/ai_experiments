@@ -68,9 +68,13 @@
         if (offset < 0 || offset + 4 > allocation.length) {
             throw new RangeError("32-bit write is out of bounds");
         }
-        value = Number(value) >>> 0;
+        value = Number(value) % 4294967296;
+        if (value < 0) value += 4294967296;
         if (allocation.isNative && ((allocation.pointer + offset) & 3) === 0) {
-            poke32(allocation.pointer + offset, value);
+            /* Old SpiderMonkey saturates some uint32-to-native-int argument
+             * conversions. Pass the identical bits through the signed range. */
+            poke32(allocation.pointer + offset,
+                   value >= 2147483648 ? value - 4294967296 : value);
             return;
         }
         this.write8(allocation, offset, value);

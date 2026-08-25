@@ -41,20 +41,27 @@ add a field offset to a record address themselves.
 Zero is the null heap reference. Valid records begin at offset 64 and are
 eight-byte aligned. During the completed migration, interpreter registers,
 roots, properties, array slots, environment bindings, and pending host-call
-arguments hold 32-bit heap references only. Primitive guest values are records
-too; this deliberately avoids confusing an immediate guest number with an
-address in a host Number slot.
+arguments are explicit value cells in runtime-owned memory. A value cell is 16
+bytes: a 32-bit tag, two 32-bit payload words, and one reserved auxiliary word.
+The payload holds an unboxed IEEE-754 double, a signed integer, an immediate
+Boolean/null/undefined value, or a 32-bit heap-record offset.
 
-NaN boxing is explicitly prohibited. No floating-point bit pattern is also a
-tag or reference, and semantic NaN payloads never participate in value-kind
-dispatch. The interpreter determines a value's kind only by following its
-32-bit reference and reading the record-type field through `Heap.recordType`.
+NaN boxing is explicitly prohibited. The tag is a physically separate word;
+no floating-point bit pattern is also a tag or reference, and semantic NaN
+payloads never participate in value-kind dispatch. Reference-valued cells are
+validated with `Heap.recordType` before their target layout is accessed.
 
-The value record types are undefined, null, Boolean, number, interned UTF-16
-string, object, array, native function, bytecode function, regexp, Buffer view,
-and Buffer backing. Canonical singleton references are used for undefined,
-null, true, and false. Numbers store IEEE-754 binary64 as two little-endian
-words. Strings store a character count followed by UTF-16 code units.
+Undefined, null, false, true, signed int32, and double have distinct cell tags.
+Numbers do not allocate heap records. Strings, objects, arrays, native
+functions, bytecode functions, regexps, Buffer views, and Buffer backings use
+reference-valued cells. Strings store a character count followed by UTF-16 code
+units in their referenced record. The old `NUMBER` heap type is reserved during
+migration and is not the destination numeric representation.
+
+`value_cell.js` implements the first executable form of this contract. It uses
+only named `Heap` field accessors and has portable Node/MMVM tests for int32,
+normal and subnormal doubles, infinities, NaN, negative zero, and references.
+The live interpreter has not yet switched its frames to these cells.
 
 Conversion to a host primitive is restricted to explicit embedder
 ingress/egress helpers and semantic operations that call a host service; it is
@@ -93,9 +100,10 @@ commit. Consumers must not duplicate these offsets.
 | Payload offset | Field |
 |---:|---|
 | 0 | interned key-string reference |
-| 4 | value reference |
-| 8 | next property-entry reference |
-| 12 | attributes |
+| 4 | next property-entry reference |
+| 8 | attributes |
+| 12 | reserved/alignment |
+| 16 | 16-byte value cell |
 
 Properties initially use an insertion-ordered linked list. A later hash index
 must itself live in linear memory and remain an optimization behind the same
@@ -111,8 +119,8 @@ accessor API.
 | 12 | element-vector reference |
 | 16 | element capacity |
 
-The element vector contains 32-bit value references. Holes use a dedicated
-singleton distinct from guest undefined.
+The element vector contains 16-byte value cells. A dedicated tag or array-slot
+flag represents a hole distinctly from guest undefined.
 
 ### Function
 
@@ -133,10 +141,11 @@ bindings, strings, or other guest values.
 
 ### Environment and binding
 
-An environment stores its parent reference and first binding-entry reference.
-Each binding entry stores an interned name reference, value reference, and next
-entry reference. Closures therefore retain environments using heap references;
-there is no host `{bindings: ...}` object.
+Compilation resolves lexical bindings to numeric `(environment depth, slot)`
+pairs. An environment stores its parent reference, slot count, and a contiguous
+vector of 16-byte value cells. Closure access therefore needs no name lookup.
+Debug/name metadata belongs to immutable program metadata rather than the
+semantic environment. There is no host `{bindings: ...}` object.
 
 ### Buffer
 
@@ -153,15 +162,15 @@ validated before collector migration. The completed allocator adds free-block
 reuse and coalescing. Exhaustion triggers collection before reporting an
 out-of-memory error.
 
-Marking starts from 32-bit references in runtime globals, context globals,
+Marking starts from reference-tagged cells in runtime globals, context globals,
 explicit root slots, active interpreter registers, pending calls, and execution
-frames. Type-specific tracing reads child references through layout accessors.
+frames. Type-specific tracing reads child cells and references through layout accessors.
 Sweep walks record headers in address order, changes unreachable records to
 `FREE`, and links/coalesces free blocks. It never consults host object identity.
 
 ## Host boundary
 
-`retain` stores a guest value reference in a heap root-slot record and returns
+`retain` stores a guest value cell in a heap root-slot record and returns
 an opaque host handle which is not itself a guest address. Asynchronous host
 work may retain that opaque handle, but not a host representation of a guest
 object. Callback ingress converts host primitives and byte sequences into heap

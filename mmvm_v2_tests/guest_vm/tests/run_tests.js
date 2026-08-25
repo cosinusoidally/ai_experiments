@@ -14,7 +14,10 @@
         var runRuntimeContextExecutionTest = require(
             "./runtime_context_execution_test.js");
         var Heap = require("../heap.js");
+        var ValueCells = require("../value_cell.js");
         var runHeapAccessTest = require("./heap_access_test.js");
+        var runValueCellTest = require("./value_cell_test.js");
+        var runRuntimeLinearHeapTest = require("./runtime_linear_heap_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -28,13 +31,18 @@
         load("guest_vm/tests/automatic_gc_test.js");
         load("guest_vm/tests/runtime_context_execution_test.js");
         load("guest_vm/tests/heap_access_test.js");
+        load("guest_vm/tests/value_cell_test.js");
+        load("guest_vm/tests/runtime_linear_heap_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
         runAutomaticGCTest = GuestVMRunAutomaticGCTest;
         runRuntimeContextExecutionTest = GuestVMRunRuntimeContextExecutionTest;
         Heap = GuestVMHeap;
+        ValueCells = GuestVMValueCells;
         runHeapAccessTest = GuestVMRunHeapAccessTest;
+        runValueCellTest = GuestVMRunValueCellTest;
+        runRuntimeLinearHeapTest = GuestVMRunRuntimeLinearHeapTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -81,6 +89,12 @@
     var heapAccessResult = runHeapAccessTest(Heap);
     if (typeof print === "function") print(heapAccessResult);
     else console.log(heapAccessResult);
+    var valueCellResult = runValueCellTest(Heap, ValueCells);
+    if (typeof print === "function") print(valueCellResult);
+    else console.log(valueCellResult);
+    var runtimeLinearHeapResult = runRuntimeLinearHeapTest(VM);
+    if (typeof print === "function") print(runtimeLinearHeapResult);
+    else console.log(runtimeLinearHeapResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");

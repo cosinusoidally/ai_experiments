@@ -17,6 +17,26 @@ contracts.
 This is a direction and a migration contract. The current interpreter has not
 yet reached this endpoint.
 
+## Current migration checkpoint
+
+The current implementation has completed these preparatory steps:
+
+- function locals are resolved to numeric lexical slots;
+- non-capturing leaf bindings and constants have fixed VM register numbers;
+- `JSRuntime` lazily owns a private `Heap` and `ValueCells` accessor;
+- explicit 16-byte non-NaN-boxed cells round-trip primitive values and heap
+  references through Node-emulated and MMVM-native linear memory;
+- high-bit word writes are normalized at the central `HostMemory` boundary;
+- opcode profiling spans asynchronous callback executions.
+
+The live semantic runtime still stores objects, arrays, frames, and most values
+in transitional host JavaScript records. Therefore it is not yet independent
+of the host VM, and the MMVM runner still returns for host calls and event-loop
+work. The next representation milestone is to put frame/register and lexical
+environment cells in the runtime heap, followed by objects/properties/arrays
+and a heap-tracing collector. Native kernel dispatch follows those layouts; it
+must not attempt to call back into transitional host objects.
+
 ## Execution boundary
 
 The intended MMVM startup sequence is:
@@ -118,4 +138,3 @@ special-case a demo. Priorities are:
 
 Every optimization needs focused semantic tests, full Node and MMVM regression
 runs, and a before/after demo measurement at the same resolution and frame cap.
-

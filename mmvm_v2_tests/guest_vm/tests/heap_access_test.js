@@ -14,6 +14,10 @@
             if (second.readFieldU32(otherObject, 0, Heap.Types.OBJECT) !== 0x76543210) {
                 throw new Error("runtime heaps are not isolated");
             }
+            first.writeFieldU32(object, 4, 0xffffffff, Heap.Types.OBJECT);
+            if (first.readFieldU32(object, 4, Heap.Types.OBJECT) !== 0xffffffff) {
+                throw new Error("high-bit 32-bit field access failed");
+            }
             first.writeFieldU8(object, 7, 211, Heap.Types.OBJECT);
             if (first.readFieldU8(object, 7, Heap.Types.OBJECT) !== 211) {
                 throw new Error("byte field accessor failed");

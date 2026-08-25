@@ -1,9 +1,13 @@
 (function (root) {
     var BufferSupport = root.GuestVMBufferSupport;
     var HostFFI = root.GuestVMHostFFI;
+    var Heap = root.GuestVMHeap;
+    var ValueCells = root.GuestVMValueCells;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
+        Heap = require("./heap.js");
+        ValueCells = require("./value_cell.js");
     }
 
     function own(object, key) {
@@ -29,6 +33,10 @@
         this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
         this.interpretGuest = null;
+        this.linearHeap = null;
+        this.valueCells = null;
+        this.linearHeapBytes = options.heapBytes === undefined ?
+            16 * 1024 * 1024 : Number(options.heapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.profileInstructionCount = 0;
         this.profileNextReport = 1000000;
@@ -36,6 +44,14 @@
         this.bufferSupport = new BufferSupport(this);
         if (options.rawFFI) this.installRawFFI();
     }
+
+    Runtime.prototype.ensureLinearHeap = function () {
+        if (!this.linearHeap) {
+            this.linearHeap = new Heap({heapBytes: this.linearHeapBytes});
+            this.valueCells = new ValueCells(this.linearHeap);
+        }
+        return this.linearHeap;
+    };
 
     Runtime.prototype.makeNativeFunction = function (name, callback, callMode) {
         return {guestType: "function", name: name, callback: callback,
@@ -787,6 +803,9 @@
 
     Runtime.prototype.destroy = function () {
         this.bufferSupport.destroy();
+        if (this.linearHeap) this.linearHeap.destroy();
+        this.linearHeap = null;
+        this.valueCells = null;
         this.heapObjects = [];
         this.hostRoots = [];
         this.contexts = [];

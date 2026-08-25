@@ -13,6 +13,11 @@ current checkpoint is deliberately smaller than ES5.1: it provides enough
 parsing, bytecode, execution, object plumbing, collection, standard-library
 behavior, and Buffer behavior to run the focused tests plus unchanged `net.js`.
 
+The runtime-owned value-cell heap now has an executable, dual-host-tested
+representation, but the live interpreter remains on the documented
+transitional host-record representation. See `SELF_HOSTED_EXECUTION.md` for the
+exact completed and outstanding migration boundaries.
+
 Passing the current suite means only that the documented implemented subset is
 working. It does not imply general ES5.1 conformance. Unsupported syntax must be
 added with a focused test before another component relies on it.
