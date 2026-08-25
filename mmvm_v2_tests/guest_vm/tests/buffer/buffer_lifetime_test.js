@@ -6,13 +6,16 @@
         var initial = support.liveBackingCount();
         var parent = support.allocate(16);
         var slice = support.makeView(parent.backing, 4, 8);
-        runtime.setGlobal("retainedSlice", slice);
-        runtime.collect();
+        var handle = vm.retain(slice);
+        vm.collect();
         if (support.liveBackingCount() !== initial + 1) {
-            throw new Error("a rooted slice did not retain its shared backing store");
+            throw new Error("a host-rooted slice did not retain its shared backing store");
         }
-        runtime.setGlobal("retainedSlice", null);
-        runtime.collect();
+        if (vm.retained(handle) !== slice) {
+            throw new Error("host root handle did not resolve the retained slice");
+        }
+        vm.release(handle);
+        vm.collect();
         if (support.liveBackingCount() !== initial) {
             throw new Error("unreachable final Buffer view did not release backing store");
         }

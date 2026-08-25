@@ -12,6 +12,7 @@
         this.globals = {};
         this.assertions = 0;
         this.heapObjects = [];
+        this.hostRoots = [];
         this.gcGeneration = 0;
         this.activeRegisters = null;
         this.installBuiltins();
@@ -32,6 +33,34 @@
     Runtime.prototype.trackObject = function (object) {
         this.heapObjects.push(object);
         return object;
+    };
+
+    Runtime.prototype.retain = function (value) {
+        var index = 0;
+        while (index < this.hostRoots.length) {
+            if (this.hostRoots[index] === null) {
+                this.hostRoots[index] = value;
+                return index + 1;
+            }
+            index++;
+        }
+        this.hostRoots.push(value);
+        return this.hostRoots.length;
+    };
+
+    Runtime.prototype.retained = function (handle) {
+        var index = integerHandle(handle, this.hostRoots.length);
+        var value = this.hostRoots[index];
+        if (value === null) throw new Error("guest host root has been released");
+        return value;
+    };
+
+    Runtime.prototype.release = function (handle) {
+        var index = integerHandle(handle, this.hostRoots.length);
+        if (this.hostRoots[index] === null) {
+            throw new Error("guest host root has already been released");
+        }
+        this.hostRoots[index] = null;
     };
 
     Runtime.prototype.installBuiltins = function () {
@@ -167,6 +196,13 @@
             if (own(this.globals, key)) this.markValue(this.globals[key], generation);
         }
         this.markValue(this.bufferSupport.prototype, generation);
+        var hostRootIndex = 0;
+        while (hostRootIndex < this.hostRoots.length) {
+            if (this.hostRoots[hostRootIndex] !== null) {
+                this.markValue(this.hostRoots[hostRootIndex], generation);
+            }
+            hostRootIndex++;
+        }
         if (this.activeRegisters) {
             var registerIndex = 0;
             while (registerIndex < this.activeRegisters.length) {
@@ -190,8 +226,17 @@
     Runtime.prototype.destroy = function () {
         this.bufferSupport.destroy();
         this.heapObjects = [];
+        this.hostRoots = [];
         this.activeRegisters = null;
     };
+
+    function integerHandle(handle, length) {
+        handle = Number(handle);
+        if (handle !== Math.floor(handle) || handle < 1 || handle > length) {
+            throw new Error("invalid guest host root handle");
+        }
+        return handle - 1;
+    }
 
     root.GuestVMRuntime = Runtime;
     if (typeof module !== "undefined" && module.exports) module.exports = Runtime;

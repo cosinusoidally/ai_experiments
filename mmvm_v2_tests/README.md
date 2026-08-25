@@ -5,9 +5,12 @@ framebuffer benchmark developed against `mmvm_v2`. The interpreter and its C
 sources remain in the separate `mmvm_v2` repository.
 
 The existing JavaScript-only Node compatibility implementation is described in
-`NODE_COMPAT_PLAN.md`. The proposed guest JavaScript VM, guest-owned garbage
-collector and Buffer lifetime model, portable bytecode, generated-JavaScript
-backend, and optional i386 JIT are described in `GUEST_VM_PLAN.md`.
+`NODE_COMPAT_PLAN.md`. `GUEST_VM_PLAN.md` describes the interpreter-first guest
+JavaScript VM and later optional kernel AOT work. The implemented bootstrap now
+lives in `guest_vm/`; its `README.md` links to the maintainer design and embedder
+guide. It includes a regexp-free tokenizer, parser/compiler/verifier, register
+bytecode interpreter, explicit guest roots and collection, and guest Buffer
+views backed by native memory under `js_min.exe`.
 
 ## Required checkout layout
 

@@ -9,6 +9,7 @@
         require("./tokenizer_test.js");
         VM = require("../vm.js");
         var runBufferLifetimeTest = require("./buffer/buffer_lifetime_test.js");
+        var runEmbeddingAPITest = require("./embedding_api_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -27,8 +28,10 @@
         load("guest_vm/interpreter.js");
         load("guest_vm/vm.js");
         load("guest_vm/tests/buffer/buffer_lifetime_test.js");
+        load("guest_vm/tests/embedding_api_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
+        runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -57,6 +60,9 @@
     var lifetimeResult = runBufferLifetimeTest(VM);
     if (typeof print === "function") print(lifetimeResult);
     else console.log(lifetimeResult);
+    var embeddingResult = runEmbeddingAPITest(VM);
+    if (typeof print === "function") print(embeddingResult);
+    else console.log(embeddingResult);
 
     var summary = "guest VM suite passed: " + languageTests.length +
                   " guest program(s), " + totalAssertions +

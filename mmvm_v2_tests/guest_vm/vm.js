@@ -22,7 +22,39 @@
     };
 
     VM.prototype.run = function (source, filename) {
-        return interpret(this.compile(source, filename), this.runtime);
+        return this.execute(this.compile(source, filename));
+    };
+
+    VM.prototype.execute = function (program) {
+        try {
+            return interpret(program, this.runtime);
+        } finally {
+            this.runtime.activeRegisters = null;
+        }
+    };
+
+    VM.prototype.installGlobal = function (name, value) {
+        return this.runtime.setGlobal(name, value);
+    };
+
+    VM.prototype.makeNativeFunction = function (name, callback) {
+        return this.runtime.makeNativeFunction(name, callback);
+    };
+
+    VM.prototype.retain = function (value) {
+        return this.runtime.retain(value);
+    };
+
+    VM.prototype.retained = function (handle) {
+        return this.runtime.retained(handle);
+    };
+
+    VM.prototype.release = function (handle) {
+        return this.runtime.release(handle);
+    };
+
+    VM.prototype.collect = function () {
+        return this.runtime.collect();
     };
 
     VM.prototype.destroy = function () {
