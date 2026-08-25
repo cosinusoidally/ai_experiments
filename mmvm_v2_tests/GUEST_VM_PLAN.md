@@ -23,29 +23,49 @@ separate entry point so that the two implementations can be compared:
 artifacts/js_min.exe guest_runner.js node_hello.js
 ```
 
-The guest compiler will have one portable bytecode format and three execution
-paths:
+The initial system has one required execution path: a bytecode interpreter.
+Native compilation is deliberately not part of the correctness bootstrap:
 
 ```text
-guest JavaScript source
-          |
-          v
-  lexer / parser / compiler
-          |
-          v
-    portable bytecode
-          |
-          +------> reference bytecode interpreter in JavaScript
-          |
-          +------> bytecode-to-JavaScript compiler under Node.js
-          |
-          +------> mixed bytecode/i386 execution under js_min.exe
+ES5 guest JavaScript source
+            |
+            v
+    lexer / parser / compiler
+            |
+            v
+      portable bytecode
+            |
+            v
+ interpreter written in kernel JavaScript
+            |
+            v
+  ES5 guest runtime and host services
 ```
 
-The reference interpreter establishes semantics. The generated-JavaScript
-backend tests the compilation pipeline and permits V8 to optimize it. The i386
-backend accelerates suitable hot regions without making native compilation a
-prerequisite for correctness.
+The interpreter and runtime establish all guest semantics. They run as ordinary
+JavaScript under both Node.js and `js_min.exe`; no generated code is required.
+The first performance work refines the interpreter, bytecode, value
+representations, object paths, and allocation behavior. Only measured hot
+helpers are then moved into or further restricted to the kernel dialect so
+that an eventual ahead-of-time compiler can accelerate them.
+
+Three language levels must remain distinct:
+
+1. **Guest language:** ECMAScript 5/5.1 semantics implemented by the VM.
+2. **Implementation dialect:** the ES3-like JavaScript accepted by
+   `js_min.exe`, also kept compatible with Node.js. The complete VM is written
+   in this dialect.
+3. **Kernel dialect:** a strict, statically analyzable subset of the
+   implementation dialect. The interpreter dispatch core is written in this
+   subset from the start. Later it may be AOT-compiled to i386.
+
+The kernel dialect is not required to reproduce every general JavaScript edge
+case. Its accepted programs avoid or define away those cases. For every valid
+kernel program, however, execution as ordinary source under Node.js, execution
+as ordinary source under `js_min.exe`, and eventual AOT execution must be
+observably equivalent for the kernel contract. Correct ES5 behavior remains a
+responsibility of the guest runtime operations invoked by the interpreter,
+not an accidental consequence of either host engine.
 
 ## Hard constraints
 
@@ -57,8 +77,13 @@ prerequisite for correctness.
 - Do not use npm packages or other third-party JavaScript dependencies.
 - Do not fetch anything from the Internet. Ask the user to provide any
   external material that becomes necessary.
-- Keep implementation-source syntax compatible with the old SpiderMonkey
-  host and theoretically with Node.js 0.10.
+- Write the complete VM in the `js_min.exe` implementation dialect: roughly
+  ES3 syntax and behavior, with any relied-upon host extensions explicitly
+  identified and tested. Keep the same source runnable under Node.js 0.10 and
+  current Node.js.
+- Write the bytecode interpreter dispatch core in the stricter kernel dialect
+  from the beginning, while retaining a normal JavaScript execution path on
+  both hosts.
 - Keep raw `ffi_call` operations behind named host or libc wrappers.
 - Preserve the existing compatibility runner until the guest runner has
   passed equivalent tests.
@@ -75,10 +100,12 @@ prerequisite for correctness.
 The first end-to-end application target is the unchanged `node_hello.js`.
 Later targets are `node_web.js`, the X11 modules, and selected demos.
 
-The first guest language target is the useful ECMAScript 5-era subset needed
-by those programs. It does not initially include classes, arrow functions,
-generators, promises, `let`, `const`, destructuring, ES modules, or other later
-syntax.
+The guest VM target is ECMAScript 5, converging on ECMAScript 5.1 conformance.
+Implementation may be incremental and driven initially by the existing demos,
+but the architecture must implement guest semantics itself rather than borrow
+host behavior that differs between old SpiderMonkey and Node.js. The guest
+does not include classes, arrow functions, generators, promises, `let`,
+`const`, destructuring, ES modules, or other post-ES5 syntax.
 
 Node versions do not have one timeless Buffer contract. Node.js 0.10 legacy
 Buffer behavior and modern Buffer/Uint8Array behavior differ. The runtime must
@@ -128,8 +155,8 @@ typedef int (*ffi_entry)(
 );
 ```
 
-This is sufficient to enter generated machine code. A future JIT entry can be
-shaped as:
+This is sufficient to enter generated machine code. A future AOT kernel entry
+can be shaped as:
 
 ```js
 var exitReason = ffi_call(codeAddress,
@@ -168,12 +195,8 @@ guest_vm/
     gc.js
     buffer.js
 
+    kernel.js
     interpreter.js
-
-    backend_js.js
-    backend_x86.js
-    x86_assembler.js
-    x86_runtime.js
 
     host.js
     host_node.js
@@ -183,15 +206,27 @@ guest_vm/
     commonjs.js
 
 guest_runner.js
+
+guest_vm/aot/                  # deferred until the interpreter is mature
+    kernel_parser.js
+    kernel_ir.js
+    backend_js.js
+    backend_x86.js
+    x86_assembler.js
+    x86_runtime.js
 ```
 
 Files may be combined while bootstrapping if the old shell's loading behavior
-makes that useful, but the architectural boundaries must remain explicit.
+makes that useful, but the architectural boundaries must remain explicit. The
+presence of a proposed `aot` layout does not authorize implementing it during
+the interpreter milestones.
 
 ## Frontend
 
 The host shell cannot expose its parser, AST, or bytecode to JavaScript, so the
-guest VM needs its own lexer and parser. The initial frontend should support:
+guest VM needs its own lexer and parser. The frontend should grow to support
+ECMAScript 5/5.1, with the existing demos determining the first useful
+implementation slice. This includes:
 
 - primitive, regular-expression, array, and object literals as required;
 - expression precedence and short-circuit evaluation;
@@ -204,6 +239,11 @@ guest VM needs its own lexer and parser. The initial frontend should support:
 - `return`, `throw`, `try`, `catch`, and `finally` as required;
 - unary, binary, comparison, and assignment operators;
 - CommonJS source wrapping.
+
+Strict mode, ES5 object-literal details, automatic semicolon insertion,
+identifier and numeric grammar, and early errors must eventually follow ES5.1
+rather than the host parser. Features may be staged, but unsupported syntax
+must fail explicitly instead of silently inheriting host behavior.
 
 The parser should retain source locations so that syntax errors and guest
 stack traces refer to the original file and line.
@@ -251,14 +291,15 @@ HOST_CALL        destination, binding, call-info
 ```
 
 A register VM performs fewer dispatches than a basic stack machine, exposes
-temporary lifetimes, maps naturally to generated JavaScript and x86 registers,
-and makes numeric hot regions easier to recognize.
+temporary lifetimes, and makes numeric hot regions easier to recognize. It also
+leaves an uncomplicated path to later kernel AOT compilation without requiring
+that backend during bootstrap.
 
 Initially store bytecode in ordinary host arrays. Do not assume a packed
 native bytecode stream is faster for the JavaScript interpreter: every
 `peek32` crosses a C/JSAPI boundary and converts a number. Benchmark array
 indexing against `peek32` before changing the interpreter representation. A
-packed native copy will still be required by the x86 backend.
+packed native copy can be introduced later if an AOT backend requires it.
 
 Every function should carry:
 
@@ -267,16 +308,15 @@ Every function should carry:
 - exception-handler ranges;
 - source-location metadata;
 - nested-function descriptors;
-- profiling counters;
-- optional generated-JavaScript and generated-x86 entries.
+- optional profiling counters.
 
 A verifier must reject invalid opcodes, register indices, constants, branches,
-exception ranges, and malformed call descriptors before execution or native
-compilation.
+exception ranges, and malformed call descriptors before execution. A future
+AOT compiler must accept only separately validated kernel input.
 
 ## Guest values and objects
 
-The reference interpreter does not need to encode all values in raw memory.
+The interpreter does not need to encode all values in raw memory.
 It may use host JavaScript primitives for guest primitives while representing
 guest heap objects by internal records or integer handles.
 
@@ -454,105 +494,15 @@ The module loader initially needs relative JavaScript files and selected
 built-in names only. npm and general `node_modules` resolution remain outside
 the first target.
 
-## Generated-JavaScript backend
+## Kernel-JavaScript implementation dialect
 
-Under Node.js, translate verified bytecode into JavaScript functions which
-operate on the same guest runtime. The initial output may use a dispatch loop:
+The kernel dialect is a deliberately restricted subset of the ES3-like
+implementation language. It is not guest JavaScript and does not promise the
+full dynamic semantics of either ES3 or ES5. The bytecode interpreter's main
+fetch/decode/dispatch loop must be written in this dialect from the start, even
+while it is executed as ordinary JavaScript.
 
-```js
-function compiledGuestFunction(vm, frame) {
-    var registers = frame.registers;
-    var pc = frame.pc;
-    while (true) {
-        switch (pc) {
-        case 0:
-            registers[0] = 1;
-            pc = 1;
-            continue;
-        case 1:
-            registers[2] = vm.add(registers[0], registers[1]);
-            pc = 2;
-            continue;
-        case 2:
-            return vm.complete(registers[2]);
-        }
-    }
-}
-```
-
-Later output may use structured control flow and guarded primitive fast paths.
-It must continue to use guest object and Buffer operations; substituting the
-host Node Buffer would invalidate semantic comparisons.
-
-The reference interpreter is the oracle. For identical source and input, the
-interpreter and generated-JavaScript backend must agree on results,
-exceptions, output, side effects, and guest heap state.
-
-## i386 machine-code backend
-
-The first native backend targets 32-bit i386 cdecl, matching the current MMVM
-executable and FFI. Executable memory management should be:
-
-1. Allocate pages read/write with `mmap`.
-2. Emit code with `poke8` and aligned `poke32` operations.
-3. Resolve labels and relocations.
-4. Validate block boundaries and branch targets.
-5. change the mapping to read/execute with `mprotect`.
-6. Enter it through `ffi_call`.
-7. Release it with `munmap` on invalidation or VM shutdown.
-
-Do not leave pages writable and executable. x86 has coherent instruction and
-data caches for this purpose, so the protection transition does not require an
-instruction-cache flush.
-
-Generated functions preserve the i386 callee-saved registers `EBX`, `ESI`,
-`EDI`, and `EBP`, return an exit reason in `EAX`, and treat all pointers as
-32-bit values. Address conversion must account for the host FFI converting
-arguments through signed 32-bit integers even though JavaScript can represent
-all 32-bit addresses exactly.
-
-The initial native subset should support:
-
-- signed and unsigned 32-bit arithmetic;
-- integer comparisons and branches;
-- pointer arithmetic;
-- fixed-layout byte and word loads and stores;
-- checked Buffer byte and word operations;
-- numeric loops;
-- selected framebuffer and rasterizer kernels.
-
-It should not initially compile arbitrary property access, strings, closures,
-exceptions, allocation, or fully polymorphic arithmetic.
-
-Because generated x86 cannot call JavaScript directly, guards and complex
-operations return side exits:
-
-```text
-EXIT_COMPLETE
-EXIT_BUDGET
-EXIT_TYPE_GUARD
-EXIT_PROPERTY
-EXIT_ALLOCATION
-EXIT_HOST_CALL
-EXIT_EXCEPTION
-EXIT_DEOPTIMIZE
-```
-
-The JavaScript dispatcher performs the requested slow operation, updates VM
-state, and may re-enter generated code.
-
-## Compilable kernel-JavaScript subset
-
-Permit performance-sensitive runtime routines to be written in a deliberately
-restricted subset of guest JavaScript and compiled through both portable
-backends:
-
-```text
-kernel JavaScript -> bytecode -> generated JavaScript
-kernel JavaScript -> bytecode -> i386 machine code
-```
-
-The initial kernel subset permits:
+The initial kernel dialect permits:
 
 - statically resolved functions;
 - integer and pointer locals;
@@ -562,6 +512,20 @@ The initial kernel subset permits:
 - no closures or dynamic property names;
 - no allocation or exceptions in compiled regions;
 - explicit signed and unsigned coercions.
+
+It must also define the behavior of its accepted numeric operations,
+overflows, shifts, comparisons, memory accesses, and control flow precisely
+enough that all implementations agree. Constructs whose Node and old
+SpiderMonkey behavior could diverge are rejected or normalized explicitly.
+The contract is observational equivalence for valid kernel programs, not full
+JavaScript reflection. For example, the contract need not preserve source
+formatting, function prototype details, `arguments` aliasing, dynamic property
+insertion, or coercion edge cases that kernel programs are forbidden to use.
+
+The interpreter remains semantically complete because bytecodes delegate
+guest operations to ES5 runtime helpers. A low-level kernel dispatch loop can
+call a statically resolved `guestAdd` helper; that helper, not the host `+`
+operator and not the kernel compiler, implements ES5 addition and coercion.
 
 For example:
 
@@ -576,33 +540,51 @@ function copyWords(destination, source, count) {
 }
 ```
 
-Candidate kernel routines include Buffer copy/fill, encoders and decoders,
-framebuffer clears and blits, rasterizer spans, hashing, fixed-layout GC mark
-scans, and selected bytecode helpers.
+After profiling the interpreter, candidate routines for further kernelization
+include bytecode decode/dispatch helpers, register moves, fixed-layout frame
+access, Buffer copy/fill, encoders and decoders, hashing, and fixed-layout GC
+mark scans. Object semantics, strings, coercion, allocation, and exceptions can
+remain ordinary implementation-dialect helpers behind stable calls.
 
-Do not begin by compiling the whole interpreter. The restricted kernel can
-deliver useful native speed while keeping the trusted compiler small.
+## Deferred AOT compilation
+
+Only after the interpreter is correct, capable of running the existing demos,
+and refined using measurements should the kernel compiler be implemented. Its
+pipeline may be:
+
+```text
+kernel JavaScript source -> kernel IR/bytecode -> ordinary JavaScript
+kernel JavaScript source -> kernel IR/bytecode -> i386 machine code
+```
+
+The ordinary-JavaScript output provides a differential backend under Node.js
+and must also remain loadable by `js_min.exe` when that is useful. The i386
+output targets 32-bit cdecl and is entered through the existing FFI. Both are
+implementations of the narrow kernel contract; neither becomes an alternative
+source of guest ES5 semantics.
+
+Executable memory management eventually uses `mmap`, emission through
+`poke8`/aligned `poke32`, label and relocation validation, an `mprotect`
+read/write-to-read/execute transition, `ffi_call` entry, and `munmap` release.
+Pages must not remain writable and executable. Generated functions preserve
+the i386 callee-saved registers and use checked side exits for operations that
+remain in JavaScript.
 
 ## General performance strategy
 
-The optimization path is:
+The required optimization order is:
 
 ```text
-dynamic and object-heavy guest code
-    reference interpreter
-        +-- specialized bytecodes
-        +-- hidden shapes and structure identifiers
-        +-- monomorphic inline caches
-        +-- generated JavaScript under Node
-
-numeric and Buffer-heavy guest code
-    specialized bytecodes
-        +-- fused operations
-        +-- guarded native loops
-        +-- i386 hot blocks under MMVM
+correct ES5 interpreter
+    -> measure complete demo workloads
+    -> refine bytecode and interpreter dispatch
+    -> remove avoidable allocation and host/FFI crossings
+    -> specialize common object, array, and Buffer paths
+    -> port measured helpers to the kernel dialect
+    -> AOT-compile selected kernel helpers only when justified
 ```
 
-Early optimizations that do not require a JIT include:
+Interpreter-first optimizations include:
 
 - register bytecode;
 - dense-array element instructions;
@@ -612,7 +594,7 @@ Early optimizations that do not require a JIT include:
 - specialized integer arithmetic;
 - direct Buffer bytecodes;
 - fused common instruction sequences;
-- per-function and per-loop profiling counters;
+- lightweight per-opcode, per-function, and per-loop profiling counters;
 - allocation-free interpreter dispatch paths.
 
 For example, a generic indexed read can specialize after observing a Buffer:
@@ -627,9 +609,10 @@ becomes:
 BUFFER_GET_U8   result, object, index, expected-shape
 ```
 
-The interpreter can execute the specialized form, the JavaScript backend can
-emit a direct guarded helper, and the x86 backend can emit a bounds check and
-native byte load.
+The interpreter executes the specialized form first. If profiling later shows
+that this handler is important, its checked fast path can be expressed in the
+kernel dialect and eventually AOT-compiled without changing the bytecode's
+fallback semantics.
 
 Do not assume that native memory access is always the fastest representation
 for the interpreter. `peek` and `poke` are valuable when data must already be
@@ -639,15 +622,19 @@ interpreter. Benchmark each boundary.
 
 ## Validation strategy
 
-Run every semantic test through all available execution paths:
+During the interpreter phase, run every applicable semantic test through the
+same required execution path on both hosts:
 
 ```text
 guest source
     +-- interpreter under Node.js
     +-- interpreter under js_min.exe
-    +-- generated JavaScript under Node.js
-    +-- mixed interpreter/i386 under js_min.exe
 ```
+
+The VM, including its kernel-dialect interpreter, must produce the same guest
+result on both. Host adapters may differ only at their documented service
+boundary. There is no requirement to build a generated-JavaScript or native
+backend before this comparison is useful.
 
 Compare:
 
@@ -677,40 +664,65 @@ Where a selected Node runtime is locally available, run the same public API
 tests against real Node and the guest. Record deliberate version-profile
 differences and the permitted zero-filled allocation difference.
 
-Add deterministic compiler fuzzing without external dependencies: generate
-small programs from fixed seeds and compare the interpreter,
-generated-JavaScript, and native results. Add a native-code instruction budget
-and validate bytecode before compiling it so malformed guest input cannot emit
-unchecked arbitrary control flow.
+For the bootstrap phase, the checked-in programs under `mmvm_v2_tests` are the
+integration test suite. Bring them up incrementally: start with `hello.js` and
+`node_hello.js`, then `node_web.js`, the X11 modules, and increasingly demanding
+demos. A demo counts only when its observable output, files/network behavior,
+event ordering, framebuffer behavior where applicable, and clean shutdown have
+been compared with the existing execution path. Small focused parser/runtime
+tests should be added alongside them for failures that a demo exposes.
+
+Later, the user will provide the Test262 ECMAScript 5.1 tests from the Mozilla
+SpiderMonkey source tree. Do not download or vendor that corpus now. When it is
+provided, preserve its provenance, select the ES5.1-relevant tests with a
+documented manifest, implement the required harness includes, and record
+expected exclusions individually. Test262 then becomes the language
+conformance suite; the existing demos remain the end-to-end host, Node API,
+Buffer, event-loop, networking, filesystem, and graphics regression suite.
+
+Add deterministic compiler and runtime fuzzing without external dependencies:
+generate small ES5 programs from fixed seeds and compare the interpreter under
+Node.js and `js_min.exe`. Once an AOT backend exists, add kernel-dialect
+differential tests among ordinary Node execution, ordinary `js_min.exe`
+execution, generated JavaScript, and emitted i386. Validate guest bytecode
+before interpreting it, and separately validate kernel IR before compiling it.
 
 ## Implementation milestones
 
 ### Milestone 0: specification and harness
 
-- Finalize the guest language and Buffer version profiles.
-- Define bytecode, runtime-value, host-call, and native side-exit ABIs.
-- Add backend-neutral result recording and tests.
+- Freeze the implementation-dialect and kernel-dialect contracts sufficiently
+  to write portable source.
+- Finalize the ECMAScript 5/5.1 guest target and Buffer version profiles.
+- Define bytecode, runtime-value, and host-call ABIs. Defer native side-exit
+  details.
+- Add host-neutral result recording and tests under Node.js and `js_min.exe`.
 - Keep the existing runner unchanged.
 
-Exit criterion: a source test can be routed to multiple backends and its
-result, exception, output, and heap summary can be compared.
+Exit criterion: one source test can be compiled once and interpreted under
+both hosts, with result, exception, output, and heap summary compared.
 
 ### Milestone 1: compiler and primitive interpreter
 
 - Implement lexer, parser, AST, register allocator, bytecode emitter, and
   verifier.
-- Implement primitives, calls, call frames, branches, loops, and returns.
+- Implement the fetch/decode/dispatch loop in the kernel dialect and execute it
+  as ordinary JavaScript on both hosts.
+- Implement primitives, calls, call frames, branches, loops, and returns using
+  explicit guest-semantic helpers.
 - Add closures and basic source-mapped errors.
 
 Exit criterion: deterministic bytecode on Node and MMVM, with arithmetic,
 loops, recursion, and closure tests passing on both.
 
-### Milestone 2: object semantics
+### Milestone 2: ECMAScript 5 object and control semantics
 
 - Implement ordinary objects, arrays, prototypes, functions, and constructors.
 - Implement descriptors, accessors, enumeration, and required standard
   built-ins.
 - Implement exceptions and exception-handler tables.
+- Implement strict-mode behavior and the ES5 standard-library surface needed
+  by the growing tests.
 
 Exit criterion: meaningful ECMAScript 5 programs run without borrowing host
 object semantics.
@@ -729,12 +741,12 @@ Exit criterion: indexed access and aliases are correct, asynchronous roots
 retain buffers, and backing stores are reclaimed without host finalizers. This
 milestone proves the original Buffer semantics and lifetime approach.
 
-### Milestone 4: CommonJS and hello server
+### Milestone 4: CommonJS and initial existing demos
 
 - Implement CommonJS wrapping, relative modules, built-in lookup, and cache.
 - Bridge timers and the readiness event loop through rooted guest handles.
 - Expose minimal guest `events`, `net`, `http`, `process`, and `console` APIs.
-- Run unchanged `node_hello.js`.
+- Run unchanged `hello.js` and `node_hello.js` through the interpreter.
 
 Exit criterion:
 
@@ -745,63 +757,70 @@ artifacts/js_min.exe guest_runner.js node_hello.js
 serves the expected response with guest-executed application and compatibility
 code.
 
-### Milestone 5: generated-JavaScript backend
-
-- Translate verified bytecode to executable JavaScript.
-- Preserve the same guest runtime and object semantics.
-- Add primitive fast paths, structured output, and side exits.
-- Differentially test it against the interpreter.
-
-Exit criterion: interpreter and generated-JavaScript execution are
-behaviorally identical and compiled execution is materially faster under
-Node.js.
-
-### Milestone 6: i386 assembler and kernel compiler
-
-- Implement the read/write to read/execute code allocator.
-- Implement an i386 byte emitter, labels, relocations, and ABI tests.
-- Define native VM-state, frame, and exit records.
-- Compile integer, branch, memory, and Buffer kernels.
-- Test bytecode, generated JavaScript, and emitted x86 against one another.
-
-Exit criterion: the same kernel programs execute correctly through all three
-backends and invalid inputs take checked side exits.
-
-### Milestone 7: profiling and mixed-mode JIT
-
-- Add function and loop hotness counters.
-- Compile eligible hot regions.
-- Add type, shape, bounds, and generation guards.
-- Cache native code by bytecode identity and assumptions.
-- Resume interpreted execution after deoptimization or runtime exits.
-
-Exit criterion: suitable Buffer and framebuffer loops spend most of their time
-in generated x86 while dynamic code continues correctly in the interpreter.
-
-### Milestone 8: broader Node compatibility
+### Milestone 5: existing-demo breadth
 
 - Move more compatibility code into guest JavaScript over small host bindings.
 - Add the asynchronous and synchronous filesystem APIs required by
   `node_web.js`.
 - Run `node_web.js`, then the X11 modules and selected demos.
-- Extend the language and standard library only in response to concrete tests.
+- Extend ES5 language and standard-library coverage in response to both focused
+  semantic tests and concrete demo failures.
 
 Exit criterion: existing examples execute through the guest VM without
 weakening Buffer ownership, GC, or host-root rules.
 
+### Milestone 6: ES5.1 conformance corpus
+
+- After the user supplies it, integrate the Test262 ES5.1 corpus from the
+  Mozilla SpiderMonkey source tree without fetching external material.
+- Add the Test262 harness, a reproducible ES5.1 manifest, negative-test
+  handling, and per-test timeout/isolation.
+- Classify every failure as a VM defect, harness defect, explicitly unsupported
+  host facility, or documented test exclusion.
+
+Exit criterion: the selected ES5.1 suite has reproducible results under both
+Node-hosted and `js_min.exe`-hosted interpreters, with no unexplained failures.
+
+### Milestone 7: interpreter refinement
+
+- Profile complete demo workloads before choosing optimization targets.
+- Improve dispatch, bytecode density, frame/register representation, property
+  shapes, inline caches, allocation behavior, and Buffer fast paths.
+- Keep the interpreter as the only required guest execution engine.
+- Move measured runtime helpers into the kernel dialect where its restrictions
+  improve predictability or prepare a genuine hot path for AOT compilation.
+
+Exit criterion: representative demos show material, repeatable improvement on
+`js_min.exe` without semantic divergence or a Node-hosted regression.
+
+### Milestone 8: optional kernel AOT compiler
+
+- Implement the kernel parser/validator and a small typed kernel IR.
+- Generate ordinary JavaScript for differential testing.
+- Implement the read/write-to-read/execute allocator, i386 macro assembler,
+  labels, relocations, ABI checks, and checked exits.
+- Compile only measured kernel helpers initially; do not compile arbitrary
+  guest JavaScript or make native execution necessary for correctness.
+
+Exit criterion: valid kernel functions are observably equivalent as ordinary
+source under Node.js and `js_min.exe`, generated JavaScript, and emitted i386;
+selected helpers produce a measured end-to-end improvement.
+
 ## Recommended execution order
 
-Implement through Milestone 3 before starting native-code generation. That is
-the decisive semantic proof: the VM parses source itself, controls all property
-access, implements indexed native Buffers, traces shared views, and frees the
-backing allocation correctly with no C changes.
+Implement Milestones 0 through 5 entirely with the interpreter. This is the
+decisive semantic and integration proof: the VM parses source itself, controls
+all property access, implements indexed native Buffers, traces shared views,
+frees backing allocations correctly, and runs real programs with no C changes.
 
-Then complete Milestone 4 so the unchanged hello server runs. Add the
-generated-JavaScript backend before the x86 backend; it tests compiler lowering
-and specialization on a mature engine while retaining the interpreter as an
-oracle. Only then add executable-memory and i386 work.
+Integrate the user-provided ES5.1 corpus when it becomes available, but do not
+block early demo progress on material that is not yet in the repository. When
+performance becomes the focus, refine the interpreter first and use workload
+profiles rather than assumptions. Port only targeted runtime pieces to the
+kernel dialect, even though the central interpreter dispatch loop already
+obeys it.
 
-The JIT should accelerate a correct VM rather than be required to make the VM
-correct. This ordering provides a portable reference implementation, a fast
-Node test backend, and an incremental path to useful `js_min.exe` performance
-from the same source compiler and bytecode.
+AOT compilation is an optional later optimization of the kernel dialect. It is
+not a guest-language backend, is not needed to establish ES5 correctness, and
+must not displace a maintainable interpreter with a collection of ad hoc
+native paths.
