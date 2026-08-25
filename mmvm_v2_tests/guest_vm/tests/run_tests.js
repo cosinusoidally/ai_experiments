@@ -120,7 +120,7 @@
     if (typeof print === "function") print(heapRecordsResult);
     else console.log(heapRecordsResult);
     var kernelCompilerResult = runKernelCompilerTest(
-        KernelCompiler, KernelJSBackend, KernelX86Backend);
+        KernelCompiler, KernelJSBackend, KernelX86Backend, Heap);
     if (typeof print === "function") print(kernelCompilerResult);
     else console.log(kernelCompilerResult);
 

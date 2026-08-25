@@ -16,6 +16,18 @@
 
     X86Backend.prototype.compile = function (ir) {
         var assembler = new Assembler();
+        var instructionIndex = 0;
+        while (instructionIndex < ir.instructions.length) {
+            var instruction = ir.instructions[instructionIndex++];
+            if (instruction.op !== "store_u32") {
+                throw new Error("unsupported i386 kernel instruction " + instruction.op);
+            }
+            emitExpression(assembler, instruction.address);
+            assembler.pushEax();
+            emitExpression(assembler, instruction.value);
+            assembler.popEcx();
+            assembler.movDwordPtrEcxEax();
+        }
         emitExpression(assembler, ir.expression);
         assembler.ret();
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,

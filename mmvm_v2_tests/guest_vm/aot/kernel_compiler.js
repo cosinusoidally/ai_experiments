@@ -27,13 +27,28 @@
             locals["$" + fn.parameters[parameterIndex]] = parameterIndex;
             parameterIndex++;
         }
-        if (fn.body.body.length !== 1 ||
-            fn.body.body[0].type !== "ReturnStatement" ||
-            !fn.body.body[0].argument) {
-            throw new SyntaxError("kernel function must contain one return expression");
+        var instructions = [];
+        var resultExpression = null;
+        var statementIndex = 0;
+        while (statementIndex < fn.body.body.length) {
+            var statement = fn.body.body[statementIndex++];
+            if (statement.type === "ExpressionStatement" &&
+                statement.expression.type === "CallExpression" &&
+                statement.expression.callee.type === "Identifier" &&
+                statement.expression.callee.name === "store32" &&
+                statement.expression.arguments.length === 2) {
+                instructions.push({op: "store_u32",
+                    address: lower(statement.expression.arguments[0], locals),
+                    value: lower(statement.expression.arguments[1], locals)});
+            } else if (statement.type === "ReturnStatement" && statement.argument &&
+                       statementIndex === fn.body.body.length) {
+                resultExpression = lower(statement.argument, locals);
+            } else throw new SyntaxError("unsupported kernel statement " + statement.type);
         }
+        if (!resultExpression) throw new SyntaxError("kernel function must return a value");
         return {name: fn.name || "kernel", parameters: fn.parameters.slice(0),
-                resultType: "i32", expression: lower(fn.body.body[0].argument, locals),
+                resultType: "i32", instructions: instructions,
+                expression: resultExpression,
                 source: source};
     };
 

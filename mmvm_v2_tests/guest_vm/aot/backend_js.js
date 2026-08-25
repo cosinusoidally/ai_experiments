@@ -5,8 +5,18 @@
 
     JSBackend.prototype.compile = function (ir) {
         var parameters = ir.parameters.slice(0);
-        var source = "return function(" + parameters.join(",") + "){return (" +
-                     emit(ir.expression, parameters) + ")|0;};";
+        var body = "";
+        var index = 0;
+        while (index < ir.instructions.length) {
+            var instruction = ir.instructions[index++];
+            if (instruction.op !== "store_u32") {
+                throw new Error("unsupported JS kernel instruction " + instruction.op);
+            }
+            body += "memory.writeU32(" + emit(instruction.address, parameters) +
+                    "," + emit(instruction.value, parameters) + ");";
+        }
+        var source = "return function(memory," + parameters.join(",") + "){" +
+                     body + "return (" + emit(ir.expression, parameters) + ")|0;};";
         return {fn: Function(source)(), source: source, ir: ir, backend: "js"};
     };
 

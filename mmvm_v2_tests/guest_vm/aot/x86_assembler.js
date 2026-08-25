@@ -64,6 +64,10 @@
     Assembler.prototype.notEax = function () {
         this.macros.push("not_eax()"); this.emitByte(0xf7); this.emitByte(0xd0);
     };
+    Assembler.prototype.movDwordPtrEcxEax = function () {
+        this.macros.push("mov_dword_ptr_ecx_eax()");
+        this.emitByte(0x89); this.emitByte(0x01);
+    };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) throw new Error("unbalanced assembler stack");
         this.macros.push("ret()"); this.emitByte(0xc3);
