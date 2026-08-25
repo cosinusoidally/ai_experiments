@@ -138,7 +138,6 @@
                 closure ? closure.heapAddress : 0, 0),
             "bytecodeFunction"));
         callable.program = program;
-        callable.closure = closure;
         callable.name = program.name || "";
         callable.source = program.source || null;
         callable.homeContext = homeContext;
@@ -278,6 +277,14 @@
         if (!address) return null;
         var metadata = this.environmentMetadata["$" + address];
         if (!metadata) throw new Error("guest environment has no runtime metadata");
+        return metadata.handle;
+    };
+
+    Runtime.prototype.functionClosure = function (callable) {
+        var address = this.heapRecords.functionClosure(callable.heapAddress);
+        if (!address) return null;
+        var metadata = this.environmentMetadata["$" + address];
+        if (!metadata) throw new Error("guest function closure has no environment metadata");
         return metadata.handle;
     };
 
@@ -1172,7 +1179,9 @@
                 elementIndex++;
             }
         }
-        if (value.guestType === "bytecodeFunction") this.markEnvironment(value.closure, generation);
+        if (value.guestType === "bytecodeFunction") {
+            this.markEnvironment(this.functionClosure(value), generation);
+        }
         if (value.heapAddress) {
             var prototypeAddress = value.guestType === "buffer" ?
                 this.linearHeap.readFieldU32(value.heapAddress, 12,

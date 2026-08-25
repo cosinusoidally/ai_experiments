@@ -37,7 +37,7 @@
         runtime.assertOwned(callable);
         var execution = new Execution(callable.program, runtime, context);
         execution.frames = [makeFrame(callable.program, runtime,
-            callable.homeContext || context, receiver, args || [], callable.closure,
+            callable.homeContext || context, receiver, args || [], runtime.functionClosure(callable),
             callable, -1)];
         if (runtime.threadedCompiler) {
             var compiled = runtime.threadedCompiler.compile(callable.program);
@@ -107,7 +107,7 @@
             this.frames = [];
             try {
                 var compiledValue = entry.fn(this.runtime, entry.context,
-                    entry.receiver, entry.args, entry.callable.closure,
+                    entry.receiver, entry.args, this.runtime.functionClosure(entry.callable),
                     entry.callable);
                 this.runtime.gcSafePoint();
                 return this.finish("completed", compiledValue, 0);
@@ -293,7 +293,7 @@
                                 try {
                                     registers[destination] = threaded(this.runtime,
                                         callableValue.homeContext || frame.context,
-                                        receiver, args, callableValue.closure,
+                                        receiver, args, this.runtime.functionClosure(callableValue),
                                         callableValue);
                                 } finally {
                                     this.runtime.threadedCompiler.recordProfile(
@@ -303,12 +303,12 @@
                             } else {
                                 registers[destination] = threaded(this.runtime,
                                     callableValue.homeContext || frame.context, receiver,
-                                    args, callableValue.closure, callableValue);
+                                    args, this.runtime.functionClosure(callableValue), callableValue);
                             }
                         } else {
                             this.frames.push(makeFrame(callableValue.program, this.runtime,
                                 callableValue.homeContext || frame.context, receiver, args,
-                                callableValue.closure, callableValue,
+                                this.runtime.functionClosure(callableValue), callableValue,
                                 destination));
                         }
                         this.runtime.gcSafePoint();
@@ -358,7 +358,7 @@
                         }
                         var constructorFrame = makeFrame(constructorValue.program,
                             this.runtime, constructorValue.homeContext || frame.context,
-                            constructedReceiver, args, constructorValue.closure,
+                            constructedReceiver, args, this.runtime.functionClosure(constructorValue),
                             constructorValue, constructDestination);
                         constructorFrame.constructReceiver = constructedReceiver;
                         this.frames.push(constructorFrame);

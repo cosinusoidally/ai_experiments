@@ -84,7 +84,7 @@
             var compiled = this.compile(callable.program);
             if (compiled) {
                 return compiled(this.runtime, callable.homeContext || context,
-                                receiver, args, callable.closure, callable);
+                                receiver, args, this.runtime.functionClosure(callable), callable);
             }
             if (!this.fallback) throw new Error("compiled call needs interpreter fallback");
             return this.fallback(callable, receiver, args, context);
@@ -99,7 +99,8 @@
             callable.threadedCompiler === this &&
             callable.threadedFunction) {
             return callable.threadedFunction(this.runtime,
-                callable.homeContext || context, receiver, null, callable.closure,
+                callable.homeContext || context, receiver, null,
+                this.runtime.functionClosure(callable),
                 callable, count, a0, a1, a2, a3, a4, a5, a6, a7);
         }
         this.runtime.assertOwned(callable);
@@ -114,7 +115,7 @@
                     var started = new Date().getTime();
                     try {
                         return compiled(this.runtime, callable.homeContext || context,
-                                        receiver, null, callable.closure, callable,
+                                        receiver, null, this.runtime.functionClosure(callable), callable,
                                         count, a0, a1, a2, a3, a4, a5, a6, a7);
                     } finally {
                         this.recordProfile(callable.name || "<anonymous>",
@@ -122,7 +123,7 @@
                     }
                 }
                 return compiled(this.runtime, callable.homeContext || context,
-                                receiver, null, callable.closure, callable,
+                                receiver, null, this.runtime.functionClosure(callable), callable,
                                 count, a0, a1, a2, a3, a4, a5, a6, a7);
             }
         }
@@ -978,7 +979,7 @@
                        ".threadedCompiler===hc?" + callTemporary +
                        ".threadedFunction(runtime," + callTemporary +
                        ".homeContext||context,undefined,null," + callTemporary +
-                       ".closure," + callTemporary + "," + node.arguments.length +
+                       "?runtime.functionClosure(" + callTemporary + "):null," + callTemporary + "," + node.arguments.length +
                        directArgs + "):" +
                        "hc.callFixed(" + callTemporary +
                        ",undefined,context," + node.arguments.length +
