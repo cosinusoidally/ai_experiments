@@ -145,11 +145,8 @@
     };
 
     Records.prototype.allocateObject = function (prototype) {
-        var address = this.heap.allocateRecord(Heap.Types.OBJECT, OBJECT_BYTES);
-        this.heap.writeFieldU32(address, OBJECT_PROTOTYPE, prototype || 0,
-                                Heap.Types.OBJECT);
-        this.heap.writeFieldU32(address, OBJECT_EXTENSIBLE, 1, Heap.Types.OBJECT);
-        return address;
+        return this.heap.allocateRecordWords(Heap.Types.OBJECT, OBJECT_BYTES,
+                                              prototype || 0, 0, 1, 0);
     };
 
     Records.prototype.objectPrototype = function (address) {
@@ -184,13 +181,12 @@
         var key = this.readString(keyAddress);
         var property = this.findOwnProperty(object, key);
         if (!property) {
-            property = this.heap.allocateRecord(Heap.Types.PROPERTY, PROPERTY_BYTES);
-            this.heap.writeFieldU32(property, PROPERTY_NEXT,
-                this.objectPropertyHead(object), Heap.Types.PROPERTY);
-            this.heap.writeFieldU32(property, PROPERTY_KEY, keyAddress,
-                                    Heap.Types.PROPERTY);
+            property = this.heap.allocateRecordWords(Heap.Types.PROPERTY,
+                PROPERTY_BYTES, this.objectPropertyHead(object), keyAddress,
+                attributes === undefined ? DEFAULT_ATTRIBUTES : attributes, 0);
             this.heap.writeFieldU32(object, OBJECT_PROPERTIES, property,
                                     Heap.Types.OBJECT);
+            return property;
         }
         this.heap.writeFieldU32(property, PROPERTY_ATTRIBUTES,
             attributes === undefined ? DEFAULT_ATTRIBUTES : attributes,
@@ -213,10 +209,8 @@
         if (capacity < 0 || capacity !== Math.floor(capacity)) {
             throw new RangeError("invalid value-vector capacity");
         }
-        var address = this.heap.allocateRecord(Heap.Types.VALUE_VECTOR,
-            VECTOR_CELLS + capacity * CELL_BYTES);
-        this.heap.writeFieldU32(address, VECTOR_CAPACITY, capacity,
-                                Heap.Types.VALUE_VECTOR);
+        var address = this.heap.allocateRecordWords(Heap.Types.VALUE_VECTOR,
+            VECTOR_CELLS + capacity * CELL_BYTES, 0, capacity, 0, 0);
         var index = 0;
         while (index < capacity) {
             this.cells.writePrimitiveAt(this.vectorCell(address, index), undefined);
@@ -252,11 +246,8 @@
 
     Records.prototype.allocateArray = function (prototype, capacity) {
         var elements = this.allocateValueVector(capacity || 0);
-        var address = this.heap.allocateRecord(Heap.Types.ARRAY, ARRAY_BYTES);
-        this.heap.writeFieldU32(address, ARRAY_PROTOTYPE, prototype || 0,
-                                Heap.Types.ARRAY);
-        this.heap.writeFieldU32(address, ARRAY_ELEMENTS, elements, Heap.Types.ARRAY);
-        return address;
+        return this.heap.allocateRecordWords(Heap.Types.ARRAY, ARRAY_BYTES,
+                                              prototype || 0, 0, elements, 0);
     };
 
     Records.prototype.arrayElements = function (array) {
@@ -277,12 +268,9 @@
         if (slotCount < 0 || slotCount !== Math.floor(slotCount)) {
             throw new RangeError("invalid environment slot count");
         }
-        var address = this.heap.allocateRecord(Heap.Types.ENVIRONMENT,
-            ENVIRONMENT_CELLS + slotCount * CELL_BYTES);
-        this.heap.writeFieldU32(address, ENVIRONMENT_PARENT, parent || 0,
-                                Heap.Types.ENVIRONMENT);
-        this.heap.writeFieldU32(address, ENVIRONMENT_COUNT, slotCount,
-                                Heap.Types.ENVIRONMENT);
+        var address = this.heap.allocateRecordWords(Heap.Types.ENVIRONMENT,
+            ENVIRONMENT_CELLS + slotCount * CELL_BYTES,
+            parent || 0, slotCount, 0, 0);
         var index = 0;
         while (index < slotCount) {
             this.cells.writePrimitiveAt(this.environmentCell(address, index), undefined);
@@ -315,49 +303,26 @@
                                                      closure, metadata) {
         var type = nativeFunction ? Heap.Types.NATIVE_FUNCTION :
                                     Heap.Types.BYTECODE_FUNCTION;
-        var address = this.heap.allocateRecord(type, FUNCTION_BYTES);
-        this.heap.writeFieldU32(address, FUNCTION_PROTOTYPE, prototype || 0, type);
-        this.heap.writeFieldU32(address, FUNCTION_CLOSURE, closure || 0, type);
-        this.heap.writeFieldU32(address, FUNCTION_METADATA, metadata || 0, type);
-        return address;
+        return this.heap.allocateRecordWords(type, FUNCTION_BYTES,
+            prototype || 0, 0, closure || 0, metadata || 0);
     };
 
     Records.prototype.allocateRegExp = function (pattern, flags, prototype) {
-        var address = this.heap.allocateRecord(Heap.Types.REGEXP, REGEXP_BYTES);
-        this.heap.writeFieldU32(address, REGEXP_PATTERN,
-            this.allocateString(pattern), Heap.Types.REGEXP);
-        this.heap.writeFieldU32(address, REGEXP_FLAGS,
-            this.allocateString(flags), Heap.Types.REGEXP);
-        this.heap.writeFieldU32(address, REGEXP_PROTOTYPE, prototype || 0,
-                                Heap.Types.REGEXP);
-        return address;
+        var patternAddress = this.allocateString(pattern);
+        var flagsAddress = this.allocateString(flags);
+        return this.heap.allocateRecordWords(Heap.Types.REGEXP, REGEXP_BYTES,
+            patternAddress, flagsAddress, prototype || 0, 0);
     };
 
     Records.prototype.allocateBufferBacking = function (pointer, length, metadata) {
-        var address = this.heap.allocateRecord(Heap.Types.BUFFER_BACKING,
-                                               BUFFER_BACKING_BYTES);
-        this.heap.writeFieldU32(address, BUFFER_BACKING_POINTER, pointer || 0,
-                                Heap.Types.BUFFER_BACKING);
-        this.heap.writeFieldU32(address, BUFFER_BACKING_LENGTH, length,
-                                Heap.Types.BUFFER_BACKING);
-        this.heap.writeFieldU32(address, BUFFER_BACKING_METADATA, metadata || 0,
-                                Heap.Types.BUFFER_BACKING);
-        return address;
+        return this.heap.allocateRecordWords(Heap.Types.BUFFER_BACKING,
+            BUFFER_BACKING_BYTES, pointer || 0, length, metadata || 0, 0);
     };
 
     Records.prototype.allocateBufferView = function (backing, offset, length,
                                                        prototype) {
-        var address = this.heap.allocateRecord(Heap.Types.BUFFER_VIEW,
-                                               BUFFER_VIEW_BYTES);
-        this.heap.writeFieldU32(address, BUFFER_VIEW_BACKING, backing,
-                                Heap.Types.BUFFER_VIEW);
-        this.heap.writeFieldU32(address, BUFFER_VIEW_OFFSET, offset,
-                                Heap.Types.BUFFER_VIEW);
-        this.heap.writeFieldU32(address, BUFFER_VIEW_LENGTH, length,
-                                Heap.Types.BUFFER_VIEW);
-        this.heap.writeFieldU32(address, BUFFER_VIEW_PROTOTYPE, prototype || 0,
-                                Heap.Types.BUFFER_VIEW);
-        return address;
+        return this.heap.allocateRecordWords(Heap.Types.BUFFER_VIEW,
+            BUFFER_VIEW_BYTES, backing, offset, length, prototype || 0);
     };
 
     Records.prototype.functionClosure = function (address) {
@@ -371,12 +336,9 @@
 
     Records.prototype.allocateFrame = function (program, environment, caller,
                                                   returnSlot, registerCount) {
-        var address = this.heap.allocateRecord(Heap.Types.FRAME,
-            FRAME_REGISTERS + registerCount * CELL_BYTES);
-        this.heap.writeFieldU32(address, FRAME_PROGRAM, program || 0, Heap.Types.FRAME);
-        this.heap.writeFieldU32(address, FRAME_ENVIRONMENT, environment || 0,
-                                Heap.Types.FRAME);
-        this.heap.writeFieldU32(address, FRAME_CALLER, caller || 0, Heap.Types.FRAME);
+        var address = this.heap.allocateRecordWords(Heap.Types.FRAME,
+            FRAME_REGISTERS + registerCount * CELL_BYTES,
+            program || 0, environment || 0, caller || 0, 0);
         this.heap.writeFieldU32(address, FRAME_RETURN_SLOT, returnSlot >>> 0,
                                 Heap.Types.FRAME);
         this.heap.writeFieldU32(address, FRAME_REGISTER_COUNT, registerCount,

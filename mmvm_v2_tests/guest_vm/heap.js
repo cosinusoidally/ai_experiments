@@ -46,12 +46,22 @@
         this.bump = 64;
         this.allocationCount = 0;
         this.destroyed = false;
+        this.recordInitializer = null;
     }
 
     Heap.Types = Types;
     Heap.HEADER_SIZE = HEADER_SIZE;
 
     Heap.prototype.allocateRecord = function (type, payloadBytes) {
+        return this.allocateRecordWords(type, payloadBytes, 0, 0, 0, 0);
+    };
+
+    Heap.prototype.setRecordInitializer = function (initializer) {
+        this.recordInitializer = initializer;
+    };
+
+    Heap.prototype.allocateRecordWords = function (
+            type, payloadBytes, word0, word1, word2, word3) {
         if (!Types || type <= Types.FREE || type > Types.CONTEXT) {
             throw new TypeError("invalid heap record type");
         }
@@ -67,8 +77,19 @@
          * reuses a range. Reuse/free-list allocation must clear a record before
          * publishing it, but doing bytewise clearing here makes every small
          * MMVM allocation cross the JSAPI once per byte. */
-        this.memory.writeU32(address + HEADER_TYPE, type);
-        this.memory.writeU32(address + HEADER_SIZE_FIELD, size);
+        if (this.recordInitializer && size >= HEADER_SIZE + 16) {
+            this.recordInitializer.initialize(address, type, size,
+                word0, word1, word2, word3);
+        } else {
+            this.memory.writeU32(address + HEADER_TYPE, type);
+            this.memory.writeU32(address + HEADER_SIZE_FIELD, size);
+            if (size >= HEADER_SIZE + 16) {
+                this.memory.writeU32(address + HEADER_SIZE, word0 || 0);
+                this.memory.writeU32(address + HEADER_SIZE + 4, word1 || 0);
+                this.memory.writeU32(address + HEADER_SIZE + 8, word2 || 0);
+                this.memory.writeU32(address + HEADER_SIZE + 12, word3 || 0);
+            }
+        }
         this.allocationCount++;
         return address;
     };

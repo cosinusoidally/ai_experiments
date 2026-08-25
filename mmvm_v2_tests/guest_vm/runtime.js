@@ -5,6 +5,7 @@
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
+    var RecordInitializer = root.GuestVMRecordInitializer;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
@@ -12,6 +13,7 @@
         ValueCells = require("./value_cell.js");
         HeapRecords = require("./heap_records.js");
         ThreadedCompiler = require("./threaded_compiler.js");
+        RecordInitializer = require("./aot/record_initializer.js");
     }
 
     function own(object, key) {
@@ -59,6 +61,8 @@
             this.linearHeap = new Heap({heapBytes: this.linearHeapBytes});
             this.valueCells = new ValueCells(this.linearHeap);
             this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);
+            this.linearHeap.setRecordInitializer(
+                new RecordInitializer(this.linearHeap));
         }
         return this.linearHeap;
     };
