@@ -45,3 +45,20 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
 The exact relative paths in the second example assume the current working
 directory is `mmvm_v2_tests` and the Firefox and MMVM directories are siblings
 of the repository containing it.
+
+The unchanged libc-only HTTP server is now an end-to-end guest-VM integration
+target. Prepare the ignored, temporary document root and run it with:
+
+```sh
+mkdir -p artifacts/www
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js net.js --directory artifacts/www 8000
+```
+
+It listens on all interfaces by default, matching `python3 -m http.server`.
+Add `--bind 127.0.0.1` to restrict it to localhost. Program arguments after
+`net.js` become the guest's top-level `arguments` object. `artifacts/www/` is
+ignored by Git and remains a disposable test directory; do not commit its
+contents.

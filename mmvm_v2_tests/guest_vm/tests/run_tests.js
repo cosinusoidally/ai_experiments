@@ -68,6 +68,13 @@
     if (typeof print === "function") print(embeddingResult);
     else console.log(embeddingResult);
 
+    var netCompileVM = new VM();
+    netCompileVM.compile(readSource("../../net.js"), "net.js");
+    netCompileVM.destroy();
+    var netCompileResult = "unchanged net.js compiled";
+    if (typeof print === "function") print(netCompileResult);
+    else console.log(netCompileResult);
+
     var summary = "guest VM suite passed: " + guestTests.length +
                   " guest program(s), " + totalAssertions +
                   " guest assertion(s)";

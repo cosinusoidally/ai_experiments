@@ -18,6 +18,7 @@
         this.hostRoots = [];
         this.gcGeneration = 0;
         this.activeRegisterFrames = [];
+        this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
         this.interpretGuest = null;
         this.installBuiltins();
@@ -95,19 +96,22 @@
         return this.setGlobal(name, value);
     };
 
-    Runtime.prototype.pushActiveRegisters = function (registers) {
+    Runtime.prototype.pushActiveRegisters = function (registers, environment) {
         this.activeRegisterFrames.push(registers);
+        this.activeEnvironmentFrames.push(environment);
         this.activeRegisters = registers;
     };
 
     Runtime.prototype.popActiveRegisters = function () {
         this.activeRegisterFrames.pop();
+        this.activeEnvironmentFrames.pop();
         this.activeRegisters = this.activeRegisterFrames.length ?
             this.activeRegisterFrames[this.activeRegisterFrames.length - 1] : null;
     };
 
     Runtime.prototype.clearActiveRegisters = function () {
         this.activeRegisterFrames = [];
+        this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
     };
 
@@ -418,6 +422,11 @@
             }
             frameIndex++;
         }
+        frameIndex = 0;
+        while (frameIndex < this.activeEnvironmentFrames.length) {
+            this.markEnvironment(this.activeEnvironmentFrames[frameIndex], generation);
+            frameIndex++;
+        }
         var survivors = [];
         var index = 0;
         while (index < this.heapObjects.length) {
@@ -436,6 +445,7 @@
         this.heapObjects = [];
         this.hostRoots = [];
         this.activeRegisterFrames = [];
+        this.activeEnvironmentFrames = [];
         this.activeRegisters = null;
     };
 

@@ -36,6 +36,17 @@ run_js_min_tests() {
     fi
     echo "$hello_output"
     echo "guest runner stdout passed"
+    net_help_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$js_min_binary" ./guest_runner.js net.js --help)
+    case "$net_help_output" in
+        *"usage: net.js"*"--directory DIRECTORY"*) ;;
+        *)
+            echo "guest net.js --help emitted unexpected stdout:" >&2
+            echo "$net_help_output" >&2
+            exit 1
+            ;;
+    esac
+    echo "guest net.js command-line path passed"
 }
 
 cd "$suite_directory"

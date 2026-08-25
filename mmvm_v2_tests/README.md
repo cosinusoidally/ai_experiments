@@ -218,6 +218,18 @@ Then request `http://127.0.0.1:8000/`. It supports GET and HEAD, binary files,
 `index.html`, generated directory listings, redirects, common MIME types, and
 Python-style access logs on stdout.
 
+The same unchanged server now runs inside the ECMAScript 5.1 guest VM:
+
+```sh
+mkdir -p artifacts/www
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  guest_runner.js net.js --directory artifacts/www 8000
+```
+
+`artifacts/www/` is an ignored temporary document root. Add `--bind
+127.0.0.1` when the server should accept only local connections.
+
 ### Node-compatible hello server
 
 ```sh

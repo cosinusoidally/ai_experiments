@@ -2,6 +2,7 @@
 *.exe
 *.out
 *.swp
+/mmvm_v2_tests/artifacts/www/
 /artifacts/*
 !artifacts/placeholder
 /mawkcc/artifacts/*

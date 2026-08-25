@@ -21,7 +21,7 @@
         var args;
         var environment = runtime.makeCallEnvironment(program, receiver,
                                                       callArguments || [], closure, callable);
-        runtime.pushActiveRegisters(registers);
+        runtime.pushActiveRegisters(registers, environment);
         while (pc < code.length) {
             budget = budget - 1;
             if (budget < 0) throw new Error("guest instruction budget exhausted");

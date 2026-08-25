@@ -136,7 +136,8 @@ constructs its VM with:
 var vm = new VM({rawFFI: true});
 ```
 
-This installs guest-callable `get_dlsym` and `ffi_call`. Under `js_min.exe` they
+This installs guest-callable `get_dlsym`, `ffi_call`, `peek8`, `poke8`,
+`peek32`, `poke32`, and `quit`. Under `js_min.exe` they
 delegate through `host_ffi.js` to the real shell primitives. Node cannot emulate
 arbitrary process symbols or MMVM's pointer-shaped call ABI; constructing a
 Node-hosted VM with `rawFFI: true` therefore throws immediately. `hello.js` is
@@ -148,6 +149,18 @@ and call arbitrary process symbols subject only to the shell's eight-argument
 FFI shape. It is not a sandbox-safe API and should not be enabled for untrusted
 guest source. The Buffer implementation can still use its private host-memory
 boundary when raw FFI is not exposed to the guest.
+
+`guest_runner.js` also converts every command-line value after the program path
+to a guest array and installs it as the top-level `arguments` binding. Direct
+embedders that want shell-style arguments can do the equivalent explicitly:
+
+```js
+vm.installGlobal("arguments", vm.runtime.arrayFrom(["--flag", "value"]));
+```
+
+`arrayFrom` is currently a bootstrap runtime helper rather than a frozen public
+API; embedders should isolate this call so it can follow a later stable value
+conversion API.
 
 ## Retaining values across host work
 

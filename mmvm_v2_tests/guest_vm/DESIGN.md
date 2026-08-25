@@ -5,9 +5,9 @@
 The guest VM is an interpreter-first JavaScript-in-JavaScript implementation.
 Its guest-language target is ECMAScript 5.1 while its implementation remains
 runnable under the old SpiderMonkey used by `js_min.exe` and under Node.js. The
-current checkpoint is deliberately smaller than ES5.1: it provides enough parsing, bytecode,
-execution, object plumbing, collection, and Buffer behavior to establish the
-architecture and run the checked-in focused tests.
+current checkpoint is deliberately smaller than ES5.1: it provides enough
+parsing, bytecode, execution, object plumbing, collection, standard-library
+behavior, and Buffer behavior to run the focused tests plus unchanged `net.js`.
 
 Passing the current suite means only that the documented implemented subset is
 working. It does not imply general ES5.1 conformance. Unsupported syntax must be
@@ -96,21 +96,26 @@ The parser is recursive descent with precedence climbing through named methods.
 It currently supports:
 
 - numeric, string, boolean, and null literals;
-- global identifiers;
+- identifiers resolved through function environments and then globals;
+- function declarations and expressions, parameters, closures, local `var`,
+  return values, and function `arguments` objects;
+- object and array literals;
+- regexp literals (scanned without regular expressions in the tokenizer);
 - parentheses;
 - member access with `.` and `[]`;
 - calls and method receiver preservation;
 - unary `!`, unary `+`, unary `-`, and `void`;
-- arithmetic, remainder, equality, relational, `&&`, and `||` expressions;
+- arithmetic, remainder, equality, relational, bitwise, shift, conditional,
+  `&&`, and `||` expressions;
 - simple and arithmetic compound assignments;
 - postfix increment and decrement;
-- `var`, blocks, expression statements, `if`/`else`, `while`, `for`, and
-  `return` at the compiled-program level.
+- `var`, blocks, expression statements, `if`/`else`, `while`, `for`, `break`,
+  `throw`, and `return`.
 
-It does not yet support guest function declarations/expressions, lexical
-environments, arrays/objects as literals, constructors, exceptions, switch,
-break/continue, labels, strict mode, or full automatic semicolon insertion.
-Those are milestones, not permitted host fallbacks.
+It does not yet support constructors, `try`/`catch`/`finally`, switch,
+continue, labels, strict mode, declaration hoisting in every ES5.1 case, or
+full automatic semicolon insertion. Those are milestones, not permitted host
+fallbacks.
 
 AST nodes are internal records. They are not a public API and may change while
 the parser grows. Source locations currently live on tokens; propagating ranges
@@ -128,8 +133,8 @@ Current instruction layouts are:
 | Instruction | Operands | Width |
 | --- | --- | ---: |
 | `CONST` | destination, constant index | 3 |
-| `GET_GLOBAL` | destination, name constant | 3 |
-| `SET_GLOBAL` | name constant, source | 3 |
+| `GET_GLOBAL` | destination, name constant (environment-aware) | 3 |
+| `SET_GLOBAL` | name constant, source (environment-aware) | 3 |
 | `MOVE` | destination, source | 3 |
 | `GET_PROPERTY` | destination, object, key | 4 |
 | `SET_PROPERTY` | object, key, value | 4 |
@@ -139,6 +144,11 @@ Current instruction layouts are:
 | `JUMP_IF_FALSE` | condition, absolute target | 3 |
 | `CALL` | destination, callable, receiver-or--1, first argument, count | 6 |
 | `RETURN` | source | 2 |
+| `MAKE_FUNCTION` | destination, nested-program constant | 3 |
+| `MAKE_OBJECT`, `MAKE_ARRAY` | destination | 2 |
+| `MAKE_REGEXP` | destination, pattern constant, flags constant | 4 |
+| bitwise/shift | destination, left, right | 4 |
+| `THROW` | source | 2 |
 
 Registers are allocated monotonically during bootstrap compilation. Call
 arguments are copied into a contiguous register block. There is no register
@@ -153,8 +163,9 @@ same committed change.
 
 ## Interpreter and semantics boundary
 
-`interpret(program, runtime)` owns the register array, numeric `pc`, and a
-10,000,000-instruction safety budget. The dispatch loop performs representation
+`interpret(program, runtime, receiver, arguments, closure, callable)` owns one
+call frame's register array, environment, numeric `pc`, and a 10,000,000-
+instruction safety budget. The dispatch loop performs representation
 movement and control flow directly. Semantically observable operations call the
 runtime, notably globals, properties, calls, truthiness, addition, and loose
 equality.
@@ -179,6 +190,9 @@ and strings. Guest heap values are implementation records identified by
 | --- | --- |
 | `object` | `properties`, `gcMark` |
 | `function` | `callback`, `properties`, name |
+| `bytecodeFunction` | nested program, captured environment, properties, name |
+| `array` | indexed elements, named properties, `gcMark` |
+| `regexp` | pattern, flags, named properties, `gcMark` |
 | `buffer` | `properties`, prototype, backing, offset, length, `gcMark` |
 
 Named own properties are stored as `$` plus the guest property key. This avoids
@@ -186,10 +200,25 @@ collisions with the host object's prototype without requiring `Object.create`,
 which the old host cannot be assumed to provide. All lookup uses an explicit
 own-property check. Buffer numeric keys bypass this map.
 
+Function calls create an environment whose bindings contain parameters,
+function-scoped `var` names, and a guest array used as `arguments`. Identifier
+lookup walks captured parent environments before the global table. Assignments
+update an existing binding or create a non-strict global when none exists.
+
 The current ordinary object model has no guest prototypes or descriptors yet.
 The Buffer prototype is an explicit internal object used by the Buffer exotic
 lookup. Native functions are trusted implementation records whose callbacks
 receive `(receiver, argumentsArray)`.
+
+## Current standard-library bridge
+
+The current application-driven subset includes `String`,
+`String.fromCharCode`, the String methods used by `net.js`, `parseInt`, array
+`push`/`sort`, regexp `test`, and regexp-backed String `replace`. Guest regexp
+literals are always tokenized manually. Execution of the provisional regexp
+objects currently delegates matching to the host regexp engine; this is not a
+claim of complete ES5.1 RegExp semantics and must eventually be replaced or
+conformance-qualified where the two supported hosts differ.
 
 ## Collector and roots
 
@@ -200,6 +229,7 @@ roots are:
 - every value in the guest global table;
 - opaque values retained in the embedder host-root table;
 - every active interpreter register;
+- every active call environment and each captured closure environment;
 - the internal Buffer prototype and objects reachable through marked property
   maps.
 
