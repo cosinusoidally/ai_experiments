@@ -1566,6 +1566,7 @@
             result.pc = this.heapRecords.framePC(address);
             result.returnSlot = this.heapRecords.frameReturnSlot(address);
             result.registerCount = this.heapRecords.frameRegisterCount(address);
+            result.context = this.heapRecords.frameContext(address);
         } else if (type === Heap.Types.PROGRAM) {
             result.bytecode = this.heapRecords.programBytecode(address);
             result.constants = this.heapRecords.programConstants(address);

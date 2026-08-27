@@ -17,7 +17,7 @@
         frame.heapAddress = runtime.heapRecords.allocateFrame(
             runtime.programAddress(program), environment ? environment.heapAddress : 0,
             caller ? caller.heapAddress : 0, returnRegister,
-            program.registerCount || 0);
+            program.registerCount || 0, context ? context.heapAddress : 0);
         if (runtime.nativeInterpreter) {
             runtime.heapRecords.setFramePC(frame.heapAddress, 0);
             var initializedRegister = 0;
@@ -230,6 +230,62 @@
         this.runtime.linearHeap.freeRecord(frame.heapAddress);
     };
 
+    Execution.prototype.synchronizeNativeFrames = function (currentFrameAddress) {
+        var existing = {};
+        var index = 0;
+        while (index < this.frames.length) {
+            existing["$" + this.frames[index].heapAddress] = this.frames[index];
+            index++;
+        }
+        var addresses = [];
+        var address = currentFrameAddress;
+        while (address) {
+            addresses.push(address);
+            address = this.runtime.heapRecords.frameCaller(address);
+        }
+        var synchronizedFrames = [];
+        index = addresses.length - 1;
+        while (index >= 0) {
+            address = addresses[index--];
+            var frame = existing["$" + address];
+            if (!frame) {
+                var programAddress = this.runtime.heapRecords.frameProgram(address);
+                var program = this.runtime.programMetadata["$" + programAddress];
+                if (!program) {
+                    throw new Error("native frame references unknown guest program " +
+                                    programAddress);
+                }
+                var contextAddress = this.runtime.heapRecords.frameContext(address);
+                var context = null;
+                var contextIndex = 0;
+                while (contextIndex < this.runtime.contexts.length) {
+                    if (this.runtime.contexts[contextIndex].heapAddress ===
+                        contextAddress) {
+                        context = this.runtime.contexts[contextIndex];
+                        break;
+                    }
+                    contextIndex++;
+                }
+                var environmentAddress =
+                    this.runtime.heapRecords.frameEnvironment(address);
+                var environmentMetadata = environmentAddress ?
+                    this.runtime.environmentMetadata["$" + environmentAddress] : null;
+                frame = {program: program, code: program.code,
+                         constants: program.constants, registers: [],
+                         pc: this.runtime.heapRecords.framePC(address),
+                         context: context || this.context,
+                         environment: environmentMetadata ?
+                                      environmentMetadata.handle : null,
+                         returnRegister:
+                            this.runtime.heapRecords.frameReturnSlot(address),
+                         heapAddress: address, nativeHeapCurrent: true};
+            }
+            synchronizedFrames.push(frame);
+        }
+        this.frames = synchronizedFrames;
+        return synchronizedFrames[synchronizedFrames.length - 1];
+    };
+
     Execution.prototype.resume = function (budget) {
         if (this.status === "completed" || this.status === "threw" ||
             this.status === "aborted") throw new Error("execution is no longer resumable");
@@ -303,6 +359,7 @@
                     var nativeResult = this.runtime.nativeInterpreter.run(
                         nativeFrame.heapAddress, nativeFrame.program, nativeBudget,
                         nativeFrame.context);
+                    nativeFrame = this.synchronizeNativeFrames(nativeResult.frame);
                     nativeFrame.pc = nativeResult.pc;
                     used += nativeResult.instructions;
                     this.totalInstructions += nativeResult.instructions;

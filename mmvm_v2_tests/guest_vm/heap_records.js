@@ -53,6 +53,7 @@
     var FRAME_RETURN_SLOT = 16;
     var FRAME_REGISTER_COUNT = 20;
     var FRAME_HANDLER = 24;
+    var FRAME_CONTEXT = 28;
     var FRAME_REGISTERS = 32;
 
     var HANDLER_NEXT = 0;
@@ -86,7 +87,8 @@
     var ENGINE_INSTRUCTIONS = 12;
     var ENGINE_HEAP_BUMP = 16;
     var ENGINE_HEAP_LIMIT = 20;
-    var ENGINE_STATE_BYTES = 24;
+    var ENGINE_CURRENT_FRAME = 24;
+    var ENGINE_STATE_BYTES = 32;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -472,13 +474,16 @@
     };
 
     Records.prototype.allocateFrame = function (program, environment, caller,
-                                                  returnSlot, registerCount) {
+                                                  returnSlot, registerCount,
+                                                  context) {
         var address = this.heap.allocateRecordWords(Heap.Types.FRAME,
             FRAME_REGISTERS + registerCount * CELL_BYTES,
             program || 0, environment || 0, caller || 0, 0);
         this.heap.writeTrustedFieldU32(address, FRAME_RETURN_SLOT, returnSlot >>> 0,
                                 Heap.Types.FRAME);
         this.heap.writeTrustedFieldU32(address, FRAME_REGISTER_COUNT, registerCount,
+                                Heap.Types.FRAME);
+        this.heap.writeTrustedFieldU32(address, FRAME_CONTEXT, context || 0,
                                 Heap.Types.FRAME);
         var index = 0;
         while (index < registerCount) {
@@ -519,6 +524,11 @@
     Records.prototype.frameEnvironment = function (frame) {
         return this.heap.readTrustedFieldU32(
             frame, FRAME_ENVIRONMENT, Heap.Types.FRAME);
+    };
+
+    Records.prototype.frameContext = function (frame) {
+        return this.heap.readTrustedFieldU32(
+            frame, FRAME_CONTEXT, Heap.Types.FRAME);
     };
 
     Records.prototype.frameRegisterCell = function (frame, register) {
@@ -733,6 +743,11 @@
     Records.prototype.engineHeapBump = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_HEAP_BUMP, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineCurrentFrame = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_CURRENT_FRAME, Heap.Types.ENGINE_STATE);
     };
 
     function propertyHeadOffset(type) {
