@@ -13,7 +13,8 @@
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3};
 
     function interpreterKernel(heapBase, frame, bytecodeWords,
-                               constantCells, globalObject, budget, state) {
+                               constantCells, globalObject, arrayLengthKey,
+                               budget, state) {
         /* Upper-case integer declarations are compile-time kernel constants.
          * These names mirror bytecode.js, value_cell.js, and heap_records.js;
          * the compiler substitutes their values rather than allocating locals. */
@@ -56,6 +57,10 @@
         var REGEXP_PROTOTYPE = 24;
         var BUFFER_VIEW_PROPERTY_HEAD = 32;
         var BUFFER_VIEW_PROTOTYPE = 28;
+        var ARRAY_ELEMENTS = 24;
+        var VECTOR_LENGTH = 16;
+        var VECTOR_CAPACITY = 20;
+        var VECTOR_CELLS = 24;
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
         var PROPERTY_VALUE = 32;
@@ -76,6 +81,8 @@
         var OP_GET_GLOBAL = 2;
         var OP_SET_GLOBAL = 3;
         var OP_MOVE = 4;
+        var OP_GET_PROPERTY = 5;
+        var OP_SET_PROPERTY = 6;
         var OP_ADD = 7;
         var OP_SUBTRACT = 8;
         var OP_MULTIPLY = 9;
@@ -236,6 +243,142 @@
                 store32(moveDestination + VALUE_CELL_AUX,
                         load32(moveSource + VALUE_CELL_AUX));
                 pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_GET_PROPERTY) {
+                var arrayGetTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var arrayGetObjectIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var arrayGetKeyIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                var arrayGetObjectCell = heapBase + registerCells +
+                    arrayGetObjectIndex * VALUE_CELL_BYTES;
+                var arrayGetKeyCell = heapBase + registerCells +
+                    arrayGetKeyIndex * VALUE_CELL_BYTES;
+                var arrayGetSupported = 1;
+                if (load32(arrayGetObjectCell) !== VALUE_TAG_REFERENCE) {
+                    arrayGetSupported = 0;
+                }
+                if (load32(arrayGetKeyCell) !== VALUE_TAG_INT32) {
+                    arrayGetSupported = 0;
+                }
+                var arrayGetObject = load32(
+                    arrayGetObjectCell + VALUE_CELL_LOW);
+                if (arrayGetSupported === 1) {
+                    if (load32(heapBase + arrayGetObject) !== HEAP_TYPE_ARRAY) {
+                        arrayGetSupported = 0;
+                    }
+                }
+                var arrayGetIndex = load32(arrayGetKeyCell + VALUE_CELL_LOW);
+                if (arrayGetIndex < 0) arrayGetSupported = 0;
+                if (arrayGetSupported === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var arrayGetVector = load32(
+                    heapBase + arrayGetObject + ARRAY_ELEMENTS);
+                var arrayGetLength = load32(
+                    heapBase + arrayGetVector + VECTOR_LENGTH);
+                var arrayGetTarget = heapBase + registerCells +
+                    arrayGetTargetIndex * VALUE_CELL_BYTES;
+                if (arrayGetIndex >= arrayGetLength) {
+                    store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
+                    store32(arrayGetTarget + VALUE_CELL_LOW, 0);
+                    store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
+                    store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                } else {
+                    var arrayGetSource = heapBase + arrayGetVector +
+                        VECTOR_CELLS + arrayGetIndex * VALUE_CELL_BYTES;
+                    var arrayGetTag = load32(arrayGetSource);
+                    if (arrayGetTag === 0) {
+                        store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
+                        store32(arrayGetTarget + VALUE_CELL_LOW, 0);
+                        store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
+                        store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                    } else {
+                        store32(arrayGetTarget, arrayGetTag);
+                        store32(arrayGetTarget + VALUE_CELL_LOW,
+                                load32(arrayGetSource + VALUE_CELL_LOW));
+                        store32(arrayGetTarget + VALUE_CELL_HIGH,
+                                load32(arrayGetSource + VALUE_CELL_HIGH));
+                        store32(arrayGetTarget + VALUE_CELL_AUX,
+                                load32(arrayGetSource + VALUE_CELL_AUX));
+                    }
+                }
+                pc = pc + FOUR_WORD_INSTRUCTION;
+            } else if (opcode === OP_SET_PROPERTY) {
+                var arraySetObjectIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var arraySetKeyIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var arraySetSourceIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                var arraySetObjectCell = heapBase + registerCells +
+                    arraySetObjectIndex * VALUE_CELL_BYTES;
+                var arraySetKeyCell = heapBase + registerCells +
+                    arraySetKeyIndex * VALUE_CELL_BYTES;
+                var arraySetSupported = 1;
+                if (load32(arraySetObjectCell) !== VALUE_TAG_REFERENCE) {
+                    arraySetSupported = 0;
+                }
+                if (load32(arraySetKeyCell) !== VALUE_TAG_INT32) {
+                    arraySetSupported = 0;
+                }
+                var arraySetObject = load32(
+                    arraySetObjectCell + VALUE_CELL_LOW);
+                if (arraySetSupported === 1) {
+                    if (load32(heapBase + arraySetObject) !== HEAP_TYPE_ARRAY) {
+                        arraySetSupported = 0;
+                    }
+                }
+                var arraySetIndex = load32(arraySetKeyCell + VALUE_CELL_LOW);
+                if (arraySetIndex < 0) arraySetSupported = 0;
+                var arraySetVector = 0;
+                if (arraySetSupported === 1) {
+                    arraySetVector = load32(
+                        heapBase + arraySetObject + ARRAY_ELEMENTS);
+                    if (arraySetIndex >= load32(
+                        heapBase + arraySetVector + VECTOR_CAPACITY)) {
+                        arraySetSupported = 0;
+                    }
+                }
+                if (arraySetSupported === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var arraySetDestination = heapBase + arraySetVector +
+                    VECTOR_CELLS + arraySetIndex * VALUE_CELL_BYTES;
+                var arraySetSource = heapBase + registerCells +
+                    arraySetSourceIndex * VALUE_CELL_BYTES;
+                store32(arraySetDestination, load32(arraySetSource));
+                store32(arraySetDestination + VALUE_CELL_LOW,
+                        load32(arraySetSource + VALUE_CELL_LOW));
+                store32(arraySetDestination + VALUE_CELL_HIGH,
+                        load32(arraySetSource + VALUE_CELL_HIGH));
+                store32(arraySetDestination + VALUE_CELL_AUX,
+                        load32(arraySetSource + VALUE_CELL_AUX));
+                var arraySetLength = load32(
+                    heapBase + arraySetVector + VECTOR_LENGTH);
+                if (arraySetIndex >= arraySetLength) {
+                    store32(heapBase + arraySetVector + VECTOR_LENGTH,
+                            arraySetIndex + 1);
+                }
+                pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode < OP_REMAINDER) {
                 if (opcode >= OP_ADD) {
                     var arithmeticTargetIndex = load32(
@@ -706,6 +849,21 @@
                     propertyObjectCell + VALUE_CELL_LOW);
                 var propertyKey = load32(propertyKeyCell + VALUE_CELL_LOW);
                 var propertyRecord = 0;
+                if (load32(heapBase + propertyObject) === HEAP_TYPE_ARRAY) {
+                    if (propertyKey === arrayLengthKey) {
+                        var propertyArrayVector = load32(
+                            heapBase + propertyObject + ARRAY_ELEMENTS);
+                        var propertyLengthTarget = heapBase + registerCells +
+                            propertyTargetIndex * VALUE_CELL_BYTES;
+                        store32(propertyLengthTarget, VALUE_TAG_INT32);
+                        store32(propertyLengthTarget + VALUE_CELL_LOW,
+                            load32(heapBase + propertyArrayVector + VECTOR_LENGTH));
+                        store32(propertyLengthTarget + VALUE_CELL_HIGH, 0);
+                        store32(propertyLengthTarget + VALUE_CELL_AUX, 0);
+                        propertyRecord = PROPERTY_FOUND_SENTINEL;
+                        propertyObject = 0;
+                    }
+                }
                 while (propertyObject !== 0) {
                     var propertyObjectType = load32(heapBase + propertyObject);
                     var propertyHead = 0;
@@ -763,16 +921,18 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                var propertySource = heapBase + propertyRecord + PROPERTY_VALUE;
-                var propertyTarget = heapBase + registerCells +
-                    propertyTargetIndex * VALUE_CELL_BYTES;
-                store32(propertyTarget, load32(propertySource));
-                store32(propertyTarget + VALUE_CELL_LOW,
-                        load32(propertySource + VALUE_CELL_LOW));
-                store32(propertyTarget + VALUE_CELL_HIGH,
-                        load32(propertySource + VALUE_CELL_HIGH));
-                store32(propertyTarget + VALUE_CELL_AUX,
-                        load32(propertySource + VALUE_CELL_AUX));
+                if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
+                    var propertySource = heapBase + propertyRecord + PROPERTY_VALUE;
+                    var propertyTarget = heapBase + registerCells +
+                        propertyTargetIndex * VALUE_CELL_BYTES;
+                    store32(propertyTarget, load32(propertySource));
+                    store32(propertyTarget + VALUE_CELL_LOW,
+                            load32(propertySource + VALUE_CELL_LOW));
+                    store32(propertyTarget + VALUE_CELL_HIGH,
+                            load32(propertySource + VALUE_CELL_HIGH));
+                    store32(propertyTarget + VALUE_CELL_AUX,
+                            load32(propertySource + VALUE_CELL_AUX));
+                }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_PROPERTY_CONST) {
                 var setPropertyObjectIndex = load32(
@@ -898,12 +1058,14 @@
         var bytecodeWords = records.bytecodeWordsAddress(bytecode);
         var constantCells = records.vectorCellsAddress(constants);
         var globalObject = context ? records.contextGlobal(context.heapAddress) : 0;
+        var arrayLengthKey = this.runtime.internStringAddress("length");
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var reason = this.nativeResult.fn ? this.nativeResult.fn(
             heapBase, frame, bytecodeWords, constantCells, globalObject,
-            budget, this.statePayload) : this.js.fn(
+            arrayLengthKey, budget, this.statePayload) : this.js.fn(
             this.runtime.linearHeap.memory, 0, frame, bytecodeWords,
-            constantCells, globalObject, budget, this.statePayload);
+            constantCells, globalObject, arrayLengthKey, budget,
+            this.statePayload);
         var instructionCount = records.engineInstructionCount(this.stateAddress);
         this.runCount++;
         this.instructionCount += instructionCount;

@@ -228,6 +228,26 @@
                     integratedVM.runtime.getProperty(propertyObject, "own") !== 15) {
                     throw new Error("native constant property access mismatch");
                 }
+
+                var arrayContext = integratedVM.jsRuntime.createContext();
+                var propertyArray = integratedVM.runtime.makeArray();
+                var arrayProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.CONST, 2, 2,
+                           bytecode.SET_PROPERTY, 0, 1, 2,
+                           bytecode.GET_PROPERTY, 3, 0, 1,
+                           bytecode.GET_PROPERTY_CONST, 4, 0, 3,
+                           bytecode.ADD, 5, 3, 4,
+                           bytecode.RETURN, 5],
+                    constants: [propertyArray, 1, 77, "length"],
+                    registerCount: 6
+                };
+                if (arrayContext.runProgram(arrayProgram) !== 79 ||
+                    integratedVM.runtime.arrayGet(propertyArray, 1) !== 77 ||
+                    integratedVM.runtime.arrayLength(propertyArray) !== 2) {
+                    throw new Error("native indexed array access mismatch");
+                }
             } finally {
                 integratedVM.destroy();
             }
