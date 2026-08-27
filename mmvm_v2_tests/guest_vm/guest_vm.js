@@ -10,6 +10,7 @@
         load("guest_vm/tokenizer.js");
         load("guest_vm/parser.js");
         load("guest_vm/bytecode.js");
+        load("guest_vm/native_intrinsics.js");
         load("guest_vm/compiler.js");
         load("guest_vm/verifier.js");
         load("guest_vm/host_ffi.js");

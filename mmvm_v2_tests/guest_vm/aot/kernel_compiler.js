@@ -218,6 +218,18 @@
                     address: lowerKernelExpression(expression.arguments[0], symbols),
                     value: lowerKernelF64Expression(expression.arguments[1], symbols)};
             }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
+                (expression.callee.name === "storeRaw8" ||
+                 expression.callee.name === "storeRaw32") &&
+                expression.arguments.length === 2) {
+                return {op: expression.callee.name === "storeRaw8" ?
+                            "store_raw_u8" : "store_raw_u32",
+                    address: lowerKernelExpression(
+                        expression.arguments[0], symbols),
+                    value: lowerKernelExpression(
+                        expression.arguments[1], symbols)};
+            }
             throw new SyntaxError("unsupported kernel expression statement");
         }
         if (statement.type === "IfStatement") {
@@ -265,6 +277,15 @@
             node.callee.type === "Identifier" &&
             node.callee.name === "load32" && node.arguments.length === 1) {
             return {op: "load_u32",
+                    address: lowerKernelExpression(node.arguments[0], symbols),
+                    type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            (node.callee.name === "loadRaw8" ||
+             node.callee.name === "loadRaw32") && node.arguments.length === 1) {
+            return {op: node.callee.name === "loadRaw8" ?
+                        "load_raw_u8" : "load_raw_u32",
                     address: lowerKernelExpression(node.arguments[0], symbols),
                     type: "i32"};
         }

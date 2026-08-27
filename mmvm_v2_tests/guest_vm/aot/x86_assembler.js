@@ -191,6 +191,14 @@
         this.macros.push("mov_dword_ptr_ecx_eax()");
         this.emitByte(0x89); this.emitByte(0x01);
     };
+    Assembler.prototype.movBytePtrEcxAl = function () {
+        this.macros.push("mov_byte_ptr_ecx_al()");
+        this.emitByte(0x88); this.emitByte(0x01);
+    };
+    Assembler.prototype.movzxEaxBytePtrEax = function () {
+        this.macros.push("movzx_eax_byte_ptr_eax()");
+        this.emitByte(0x0f); this.emitByte(0xb6); this.emitByte(0x00);
+    };
     Assembler.prototype.loadF64Eax = function () {
         this.macros.push("fld_f64_ptr_eax()");
         this.emitByte(0xdd); this.emitByte(0x00);

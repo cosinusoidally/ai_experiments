@@ -272,6 +272,47 @@
             } finally {
                 integratedVM.destroy();
             }
+            if (typeof get_dlsym === "function") {
+                var rawVM = new VM({heapBytes: 256 * 1024,
+                                    nativeInterpreter: true, rawFFI: true});
+                var rawPointer = 0;
+                try {
+                    var callocPointer = rawVM.runtime.hostFFI.resolve("calloc");
+                    var freePointer = rawVM.runtime.hostFFI.resolve("free");
+                    rawPointer = rawVM.runtime.hostFFI.call(
+                        callocPointer, [1, 4]);
+                    if (!rawPointer) throw new Error("native intrinsic test calloc failed");
+                    var rawProgram = {
+                        code: [bytecode.GET_GLOBAL, 0, 0,
+                               bytecode.CONST, 1, 1,
+                               bytecode.CONST, 2, 2,
+                               bytecode.CALL, 3, 0, -1, 3,
+                               bytecode.GET_GLOBAL, 4, 4,
+                               bytecode.CALL, 5, 4, -1, 5,
+                               bytecode.RETURN, 5],
+                        constants: ["poke32", rawPointer, 0x12345678,
+                                    [1, 2], "peek32", [1]],
+                        registerCount: 6
+                    };
+                    var rawFallbacks =
+                        rawVM.runtime.nativeInterpreter.unsupportedExitCount;
+                    if (rawVM.execute(rawProgram) !== 0x12345678) {
+                        throw new Error("native raw-memory intrinsic mismatch");
+                    }
+                    if (rawVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                        rawFallbacks) {
+                        throw new Error("native raw-memory call used semantic fallback");
+                    }
+                    rawVM.runtime.hostFFI.call(freePointer, [rawPointer]);
+                    rawPointer = 0;
+                } finally {
+                    if (rawPointer) {
+                        rawVM.runtime.hostFFI.call(
+                            rawVM.runtime.hostFFI.resolve("free"), [rawPointer]);
+                    }
+                    rawVM.destroy();
+                }
+            }
             return "kernel-compiled bytecode interpreter passed on " +
                    second.backend;
         } finally {

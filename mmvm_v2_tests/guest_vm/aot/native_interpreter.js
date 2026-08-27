@@ -27,6 +27,7 @@
         var TWO_WORD_INSTRUCTION = 2;
         var THREE_WORD_INSTRUCTION = 3;
         var FOUR_WORD_INSTRUCTION = 4;
+        var FIVE_WORD_INSTRUCTION = 5;
         var VALUE_CELL_BYTES = 16;
         var VALUE_CELL_LOW = 4;
         var VALUE_CELL_HIGH = 8;
@@ -63,6 +64,7 @@
         var VECTOR_LENGTH = 16;
         var VECTOR_CAPACITY = 20;
         var VECTOR_CELLS = 24;
+        var NATIVE_FUNCTION_METADATA = 28;
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
         var PROPERTY_VALUE = 32;
@@ -101,6 +103,7 @@
         var OP_POSITIVE = 20;
         var OP_JUMP = 21;
         var OP_JUMP_IF_FALSE = 22;
+        var OP_CALL = 23;
         var OP_RETURN = 24;
         var OP_BIT_AND = 29;
         var OP_BIT_OR = 30;
@@ -113,6 +116,12 @@
         var OP_SET_LOCAL = 44;
         var OP_GET_PROPERTY_CONST = 45;
         var OP_SET_PROPERTY_CONST = 46;
+
+        /* Stable IDs from native_intrinsics.js. */
+        var INTRINSIC_PEEK8 = 1;
+        var INTRINSIC_POKE8 = 2;
+        var INTRINSIC_PEEK32 = 3;
+        var INTRINSIC_POKE32 = 4;
 
         var framePC = frame + FRAME_PC;
         var registerCells = frame + FRAME_REGISTERS;
@@ -732,6 +741,161 @@
                 if (falseCondition === 1) {
                     pc = load32(heapBase + bytecodeWords + (pc + SECOND_OPERAND) * WORD_BYTES);
                 } else pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_CALL) {
+                var callTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var callFunctionIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var callArgumentsIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FOUR_WORD_INSTRUCTION) * WORD_BYTES);
+                var callFunctionCell = heapBase + registerCells +
+                    callFunctionIndex * VALUE_CELL_BYTES;
+                var callArgumentsCell = heapBase + constantCells +
+                    callArgumentsIndex * VALUE_CELL_BYTES;
+                var intrinsicCallValid = 1;
+                if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
+                    intrinsicCallValid = 0;
+                }
+                if (load32(callArgumentsCell) !== VALUE_TAG_REFERENCE) {
+                    intrinsicCallValid = 0;
+                }
+                var intrinsicFunction = load32(
+                    callFunctionCell + VALUE_CELL_LOW);
+                if (intrinsicCallValid === 1) {
+                    if (load32(heapBase + intrinsicFunction) !==
+                        HEAP_TYPE_NATIVE_FUNCTION) intrinsicCallValid = 0;
+                }
+                var intrinsicId = 0;
+                if (intrinsicCallValid === 1) {
+                    intrinsicId = load32(
+                        heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
+                    if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
+                    else if (intrinsicId > INTRINSIC_POKE32) {
+                        intrinsicCallValid = 0;
+                    }
+                }
+                var intrinsicArgumentsArray = load32(
+                    callArgumentsCell + VALUE_CELL_LOW);
+                var intrinsicArgumentsVector = 0;
+                var intrinsicArgumentCount = 0;
+                if (intrinsicCallValid === 1) {
+                    if (load32(heapBase + intrinsicArgumentsArray) !==
+                        HEAP_TYPE_ARRAY) intrinsicCallValid = 0;
+                    else {
+                        intrinsicArgumentsVector = load32(
+                            heapBase + intrinsicArgumentsArray + ARRAY_ELEMENTS);
+                        intrinsicArgumentCount = load32(
+                            heapBase + intrinsicArgumentsVector + VECTOR_LENGTH);
+                    }
+                }
+                var requiredIntrinsicArguments = 1;
+                if (intrinsicId === INTRINSIC_POKE8) {
+                    requiredIntrinsicArguments = 2;
+                } else if (intrinsicId === INTRINSIC_POKE32) {
+                    requiredIntrinsicArguments = 2;
+                }
+                if (intrinsicArgumentCount < requiredIntrinsicArguments) {
+                    intrinsicCallValid = 0;
+                }
+                if (intrinsicCallValid === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var intrinsicPointerRegisterCell = heapBase +
+                    intrinsicArgumentsVector + VECTOR_CELLS;
+                if (load32(intrinsicPointerRegisterCell) !== VALUE_TAG_INT32) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var intrinsicPointerRegister = load32(
+                    intrinsicPointerRegisterCell + VALUE_CELL_LOW);
+                var intrinsicPointerCell = heapBase + registerCells +
+                    intrinsicPointerRegister * VALUE_CELL_BYTES;
+                var intrinsicPointerTag = load32(intrinsicPointerCell);
+                if (intrinsicPointerTag !== VALUE_TAG_INT32) {
+                    if (intrinsicPointerTag !== VALUE_TAG_DOUBLE) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                }
+                var intrinsicPointer = toInt32F64(loadNumberF64(
+                    intrinsicPointerCell + VALUE_CELL_LOW,
+                    intrinsicPointerTag));
+                var intrinsicTarget = heapBase + registerCells +
+                    callTargetIndex * VALUE_CELL_BYTES;
+                if (intrinsicId === INTRINSIC_PEEK8) {
+                    store32(intrinsicTarget, VALUE_TAG_INT32);
+                    store32(intrinsicTarget + VALUE_CELL_LOW,
+                            loadRaw8(intrinsicPointer));
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                } else if (intrinsicId === INTRINSIC_PEEK32) {
+                    store32(intrinsicTarget, VALUE_TAG_INT32);
+                    store32(intrinsicTarget + VALUE_CELL_LOW,
+                            loadRaw32(intrinsicPointer));
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                } else {
+                    var intrinsicValueRegisterCell =
+                        intrinsicPointerRegisterCell + VALUE_CELL_BYTES;
+                    if (load32(intrinsicValueRegisterCell) !== VALUE_TAG_INT32) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    var intrinsicValueRegister = load32(
+                        intrinsicValueRegisterCell + VALUE_CELL_LOW);
+                    var intrinsicValueCell = heapBase + registerCells +
+                        intrinsicValueRegister * VALUE_CELL_BYTES;
+                    var intrinsicValueTag = load32(intrinsicValueCell);
+                    if (intrinsicValueTag !== VALUE_TAG_INT32) {
+                        if (intrinsicValueTag !== VALUE_TAG_DOUBLE) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                    }
+                    var intrinsicValue = toInt32F64(loadNumberF64(
+                        intrinsicValueCell + VALUE_CELL_LOW,
+                        intrinsicValueTag));
+                    if (intrinsicId === INTRINSIC_POKE8) {
+                        storeRaw8(intrinsicPointer, intrinsicValue);
+                    } else storeRaw32(intrinsicPointer, intrinsicValue);
+                    store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
+                    store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                }
+                pc = pc + FIVE_WORD_INSTRUCTION;
             } else if (opcode === OP_RETURN) {
                 var returnIndex = load32(heapBase + bytecodeWords + (pc + FIRST_OPERAND) * WORD_BYTES);
                 store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_RETURN);

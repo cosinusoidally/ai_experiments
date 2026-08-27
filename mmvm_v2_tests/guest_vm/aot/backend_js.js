@@ -66,6 +66,12 @@
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlF64(node.value, parameters, locals) + ");";
         }
+        if (node.op === "store_raw_u8" || node.op === "store_raw_u32") {
+            return "memory." + (node.op === "store_raw_u8" ?
+                "writeRawU8" : "writeRawU32") + "(" +
+                emitControlExpression(node.address, parameters, locals) + "," +
+                emitControlExpression(node.value, parameters, locals) + ");";
+        }
         if (node.op === "if") {
             return "if(" + emitControlExpression(node.test, parameters, locals) + "){" +
                    emitNested(node.consequent, parameters, locals) + "}else{" +
@@ -92,6 +98,11 @@
         if (node.op === "local_i32") return "(" + locals[node.index] + "|0)";
         if (node.op === "load_u32") return "(memory.readU32(" +
             emitControlExpression(node.address, parameters, locals) + ")|0)";
+        if (node.op === "load_raw_u8" || node.op === "load_raw_u32") {
+            return "(memory." + (node.op === "load_raw_u8" ?
+                "readRawU8" : "readRawU32") + "(" +
+                emitControlExpression(node.address, parameters, locals) + ")|0)";
+        }
         if (node.op === "logical_not_i32") return "(!" +
             emitControlExpression(node.value, parameters, locals) + "|0)";
         if (node.op === "arg_i32") return "(" + parameters[node.index] + "|0)";

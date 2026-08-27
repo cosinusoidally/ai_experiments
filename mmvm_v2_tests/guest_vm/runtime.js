@@ -8,6 +8,7 @@
     var RecordInitializer = root.GuestVMRecordInitializer;
     var NumericBytecodeBackend = root.GuestVMNumericBytecodeBackend;
     var NativeInterpreter = root.GuestVMNativeInterpreter;
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
@@ -18,6 +19,7 @@
         RecordInitializer = require("./aot/record_initializer.js");
         NumericBytecodeBackend = require("./aot/bytecode_numeric_backend.js");
         NativeInterpreter = require("./aot/native_interpreter.js");
+        NativeIntrinsics = require("./native_intrinsics.js");
     }
 
     function own(object, key) {
@@ -89,13 +91,16 @@
         return this.linearHeap;
     };
 
-    Runtime.prototype.makeNativeFunction = function (name, callback, callMode) {
+    Runtime.prototype.makeNativeFunction = function (name, callback, callMode,
+                                                      intrinsicId) {
         this.ensureLinearHeap();
-        var address = this.heapRecords.allocateFunction(true, 0, 0, 0);
+        var address = this.heapRecords.allocateFunction(
+            true, 0, 0, intrinsicId || NativeIntrinsics.NONE);
         var callable = this.makeHeapHandle(address, "function");
         callable.name = name;
         callable.callback = callback;
         callable.callMode = callMode || "intrinsic";
+        callable.nativeIntrinsic = intrinsicId || NativeIntrinsics.NONE;
         this.functionMetadata["$" + address] = callable;
         return callable;
     };
@@ -1001,13 +1006,17 @@
                 return bridge.call(pointer, callArguments);
             }));
         this.setGlobal("peek8", this.makeNativeFunction("peek8",
-            function (receiver, args) { return bridge.peek8(args[0]); }));
+            function (receiver, args) { return bridge.peek8(args[0]); },
+            "intrinsic", NativeIntrinsics.PEEK8));
         this.setGlobal("poke8", this.makeNativeFunction("poke8",
-            function (receiver, args) { return bridge.poke8(args[0], args[1]); }));
+            function (receiver, args) { return bridge.poke8(args[0], args[1]); },
+            "intrinsic", NativeIntrinsics.POKE8));
         this.setGlobal("peek32", this.makeNativeFunction("peek32",
-            function (receiver, args) { return bridge.peek32(args[0]); }));
+            function (receiver, args) { return bridge.peek32(args[0]); },
+            "intrinsic", NativeIntrinsics.PEEK32));
         this.setGlobal("poke32", this.makeNativeFunction("poke32",
-            function (receiver, args) { return bridge.poke32(args[0], args[1]); }));
+            function (receiver, args) { return bridge.poke32(args[0], args[1]); },
+            "intrinsic", NativeIntrinsics.POKE32));
         this.setGlobal("quit", this.makeHostFunction("quit",
             function (receiver, args) {
                 quit(args.length ? Number(args[0]) : 0);

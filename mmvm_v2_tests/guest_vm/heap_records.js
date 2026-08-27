@@ -439,6 +439,15 @@
         return this.heap.readTrustedFieldU32(address, FUNCTION_CLOSURE, type);
     };
 
+    Records.prototype.functionMetadata = function (address) {
+        var type = this.heap.recordType(address);
+        if (type !== Heap.Types.NATIVE_FUNCTION &&
+            type !== Heap.Types.BYTECODE_FUNCTION) {
+            throw new TypeError("record is not a function");
+        }
+        return this.heap.readTrustedFieldU32(address, FUNCTION_METADATA, type);
+    };
+
     Records.prototype.allocateFrame = function (program, environment, caller,
                                                   returnSlot, registerCount) {
         var address = this.heap.allocateRecordWords(Heap.Types.FRAME,
