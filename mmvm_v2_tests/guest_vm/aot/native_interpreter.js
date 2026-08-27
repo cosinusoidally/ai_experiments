@@ -179,6 +179,8 @@
         var INTRINSIC_POKE32 = 4;
         var INTRINSIC_BUFFER_READ_U32_LE = 5;
         var INTRINSIC_BUFFER_WRITE_U32_LE = 6;
+        var INTRINSIC_MATH_SQRT = 7;
+        var INTRINSIC_MATH_MIN = 8;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -1138,7 +1140,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_BUFFER_WRITE_U32_LE) {
+                    else if (intrinsicId > INTRINSIC_MATH_MIN) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -1179,6 +1181,94 @@
                 var intrinsicTarget = heapBase + registerCells +
                     callTargetIndex * VALUE_CELL_BYTES;
                 var intrinsicHandled = 0;
+                if (intrinsicId >= INTRINSIC_MATH_SQRT) {
+                    var mathArgumentsValid = 1;
+                    var mathArgumentIndex = 0;
+                    var minimumCell = 0;
+                    while (mathArgumentIndex < intrinsicArgumentCount) {
+                        var mathRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS +
+                            mathArgumentIndex * VALUE_CELL_BYTES;
+                        if (load32(mathRegisterCell) !== VALUE_TAG_INT32) {
+                            mathArgumentsValid = 0;
+                        }
+                        var mathRegister = load32(
+                            mathRegisterCell + VALUE_CELL_LOW);
+                        var mathValueCell = heapBase + registerCells +
+                            mathRegister * VALUE_CELL_BYTES;
+                        var mathValueTag = load32(mathValueCell);
+                        if (mathValueTag !== VALUE_TAG_INT32) {
+                            if (mathValueTag !== VALUE_TAG_DOUBLE) {
+                                mathArgumentsValid = 0;
+                            }
+                        }
+                        if (intrinsicId === INTRINSIC_MATH_MIN) {
+                            if (mathValueTag === VALUE_TAG_INT32) {
+                                if (load32(mathValueCell + VALUE_CELL_LOW) === 0) {
+                                    mathArgumentsValid = 0;
+                                }
+                            } else {
+                                if (load32(mathValueCell + VALUE_CELL_LOW) === 0) {
+                                    if ((load32(mathValueCell + VALUE_CELL_HIGH) &
+                                        IEEE754_ABSOLUTE_MASK) === 0) {
+                                        mathArgumentsValid = 0;
+                                    }
+                                }
+                            }
+                            if (mathArgumentIndex === 0) {
+                                minimumCell = mathValueCell;
+                            } else {
+                                var minimumTag = load32(minimumCell);
+                                if (equalF64(loadNumberF64(
+                                        mathValueCell + VALUE_CELL_LOW,
+                                        mathValueTag), loadNumberF64(
+                                        mathValueCell + VALUE_CELL_LOW,
+                                        mathValueTag)) === 0) {
+                                    minimumCell = mathValueCell;
+                                } else if (lessF64(loadNumberF64(
+                                        mathValueCell + VALUE_CELL_LOW,
+                                        mathValueTag), loadNumberF64(
+                                        minimumCell + VALUE_CELL_LOW,
+                                        minimumTag)) === 1) {
+                                    minimumCell = mathValueCell;
+                                }
+                            }
+                        }
+                        mathArgumentIndex = mathArgumentIndex + 1;
+                    }
+                    if (mathArgumentsValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    if (intrinsicId === INTRINSIC_MATH_SQRT) {
+                        var sqrtRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS;
+                        var sqrtRegister = load32(
+                            sqrtRegisterCell + VALUE_CELL_LOW);
+                        var sqrtValueCell = heapBase + registerCells +
+                            sqrtRegister * VALUE_CELL_BYTES;
+                        var sqrtValueTag = load32(sqrtValueCell);
+                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                            sqrtF64(loadNumberF64(
+                                sqrtValueCell + VALUE_CELL_LOW, sqrtValueTag)));
+                    } else {
+                        store32(intrinsicTarget, load32(minimumCell));
+                        store32(intrinsicTarget + VALUE_CELL_LOW,
+                                load32(minimumCell + VALUE_CELL_LOW));
+                        store32(intrinsicTarget + VALUE_CELL_HIGH,
+                                load32(minimumCell + VALUE_CELL_HIGH));
+                    }
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                if (intrinsicHandled === 0) {
                 if (intrinsicId >= INTRINSIC_BUFFER_READ_U32_LE) {
                     var bufferReceiverIndex = load32(
                         heapBase + bytecodeWords +
@@ -1298,6 +1388,7 @@
                     }
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
+                }
                 }
                 if (intrinsicHandled === 0) {
                 var intrinsicPointerRegisterCell = heapBase +

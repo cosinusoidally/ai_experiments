@@ -293,6 +293,11 @@
     }
 
     function emitControlF64(assembler, node, state) {
+        if (node.op === "sqrt_f64") {
+            emitControlF64(assembler, node.value, state);
+            assembler.sqrtF64();
+            return;
+        }
         if (node.op === "load_f64" || node.op === "load_i32_f64") {
             emitControlExpression(assembler, node.address, state);
             if (node.op === "load_f64") assembler.loadF64Eax();

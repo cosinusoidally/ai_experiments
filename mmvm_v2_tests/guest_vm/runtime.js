@@ -997,9 +997,10 @@
                 return array;
             }));
         var math = this.makeObject();
-        function mathMethod(name, callback) {
+        function mathMethod(name, callback, intrinsicId) {
             runtime.setProperty(math, name,
-                runtime.makeNativeFunction("Math." + name, callback));
+                runtime.makeNativeFunction("Math." + name, callback,
+                    "intrinsic", intrinsicId || NativeIntrinsics.NONE));
         }
         this.setProperty(math, "E", Math.E);
         this.setProperty(math, "LN2", Math.LN2);
@@ -1019,7 +1020,9 @@
         mathMethod("ceil", function (receiver, args) { return Math.ceil(Number(args[0])); });
         mathMethod("floor", function (receiver, args) { return Math.floor(Number(args[0])); });
         mathMethod("round", function (receiver, args) { return Math.round(Number(args[0])); });
-        mathMethod("sqrt", function (receiver, args) { return Math.sqrt(Number(args[0])); });
+        mathMethod("sqrt", function (receiver, args) {
+            return Math.sqrt(Number(args[0]));
+        }, NativeIntrinsics.MATH_SQRT);
         mathMethod("sin", function (receiver, args) { return Math.sin(Number(args[0])); });
         mathMethod("cos", function (receiver, args) { return Math.cos(Number(args[0])); });
         mathMethod("exp", function (receiver, args) { return Math.exp(Number(args[0])); });
@@ -1028,7 +1031,9 @@
             return Math.pow(Number(args[0]), Number(args[1]));
         });
         mathMethod("random", function () { return Math.random(); });
-        mathMethod("min", function (receiver, args) { return Math.min.apply(Math, args); });
+        mathMethod("min", function (receiver, args) {
+            return Math.min.apply(Math, args);
+        }, NativeIntrinsics.MATH_MIN);
         mathMethod("max", function (receiver, args) { return Math.max.apply(Math, args); });
         mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); });
         this.setGlobal("Math", math);

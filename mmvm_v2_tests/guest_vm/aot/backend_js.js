@@ -136,6 +136,10 @@
     }
 
     function emitControlF64(node, parameters, locals) {
+        if (node.op === "sqrt_f64") {
+            return "Math.sqrt(" +
+                emitControlF64(node.value, parameters, locals) + ")";
+        }
         if (node.op === "load_f64") {
             return "memory.readF64(" +
                 emitControlExpression(node.address, parameters, locals) + ")";

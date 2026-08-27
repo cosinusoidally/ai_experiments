@@ -231,6 +231,10 @@
         this.macros.push("fchs()");
         this.emitByte(0xd9); this.emitByte(0xe0);
     };
+    Assembler.prototype.sqrtF64 = function () {
+        this.macros.push("fsqrt()");
+        this.emitByte(0xd9); this.emitByte(0xfa);
+    };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) throw new Error("unbalanced assembler stack");
         this.macros.push("ret()"); this.emitByte(0xc3);

@@ -349,6 +349,11 @@
                     tag: lowerKernelExpression(node.arguments[1], symbols),
                     type: "f64"};
         }
+        if (name === "sqrtF64" && node.arguments.length === 1) {
+            return {op: "sqrt_f64",
+                    value: lowerKernelF64Expression(node.arguments[0], symbols),
+                    type: "f64"};
+        }
         var operations = {addF64: "add_f64", subtractF64: "sub_f64",
                           multiplyF64: "mul_f64", divideF64: "div_f64"};
         if (operations[name] && node.arguments.length === 2) {
