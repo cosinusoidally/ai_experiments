@@ -18,7 +18,16 @@
             runtime.programAddress(program), environment ? environment.heapAddress : 0,
             caller ? caller.heapAddress : 0, returnRegister,
             program.registerCount || 0);
-        runtime.spillFrame(frame);
+        if (runtime.nativeInterpreter) {
+            runtime.heapRecords.setFramePC(frame.heapAddress, 0);
+            var initializedRegister = 0;
+            while (initializedRegister < frame.registers.length) {
+                if (frame.registers[initializedRegister] !== undefined) {
+                    runtime.spillFrameRegister(frame, initializedRegister);
+                }
+                initializedRegister++;
+            }
+        } else runtime.spillFrame(frame);
         frame.nativeHeapCurrent = true;
         return frame;
     }
