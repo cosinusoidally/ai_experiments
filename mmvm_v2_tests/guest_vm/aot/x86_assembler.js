@@ -115,6 +115,13 @@
         this.macros.push("imul_eax_ecx()");
         this.emitByte(0x0f); this.emitByte(0xaf); this.emitByte(0xc1);
     };
+    Assembler.prototype.remainderEcxEax = function () {
+        this.macros.push("signed_remainder_ecx_eax()");
+        this.emitByte(0x91);
+        this.emitByte(0x99);
+        this.emitByte(0xf7); this.emitByte(0xf9);
+        this.emitByte(0x89); this.emitByte(0xd0);
+    };
     Assembler.prototype.andEaxEcx = function () {
         this.macros.push("and_eax_ecx()"); this.emitByte(0x21); this.emitByte(0xc8);
     };
@@ -234,6 +241,10 @@
     Assembler.prototype.sqrtF64 = function () {
         this.macros.push("fsqrt()");
         this.emitByte(0xd9); this.emitByte(0xfa);
+    };
+    Assembler.prototype.absF64 = function () {
+        this.macros.push("fabs()");
+        this.emitByte(0xd9); this.emitByte(0xe1);
     };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) throw new Error("unbalanced assembler stack");

@@ -318,6 +318,7 @@
         }
         if (node.type === "BinaryExpression") {
             var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
+                "%": "rem_i32",
                 "&": "and_i32", "|": "or_i32", "^": "xor_i32",
                 "<<": "shl_i32", ">>": "shr_i32", ">>>": "ushr_i32",
                 "===": "eq_i32", "!==": "ne_i32", "<": "lt_i32",
@@ -354,6 +355,11 @@
                     value: lowerKernelF64Expression(node.arguments[0], symbols),
                     type: "f64"};
         }
+        if (name === "absF64" && node.arguments.length === 1) {
+            return {op: "abs_f64",
+                    value: lowerKernelF64Expression(node.arguments[0], symbols),
+                    type: "f64"};
+        }
         var operations = {addF64: "add_f64", subtractF64: "sub_f64",
                           multiplyF64: "mul_f64", divideF64: "div_f64"};
         if (operations[name] && node.arguments.length === 2) {
@@ -382,6 +388,7 @@
         }
         if (node.type === "BinaryExpression") {
             var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
+                "%": "rem_i32",
                               "&": "and_i32", "|": "or_i32", "^": "xor_i32",
                               "<<": "shl_i32", ">>": "shr_i32"};
             var operation = operations[node.operator];

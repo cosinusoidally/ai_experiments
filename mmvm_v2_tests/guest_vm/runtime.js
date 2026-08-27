@@ -873,7 +873,7 @@
                                      args[index++]);
                 }
                 return runtime.arrayLength(receiver);
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_PUSH);
         this.arrayMethods.sort = this.makeNativeFunction("Array.sort",
             function (receiver) {
                 var values = runtime.arrayToHost(receiver);
@@ -1030,7 +1030,9 @@
         this.setProperty(math, "PI", Math.PI);
         this.setProperty(math, "SQRT1_2", Math.SQRT1_2);
         this.setProperty(math, "SQRT2", Math.SQRT2);
-        mathMethod("abs", function (receiver, args) { return Math.abs(Number(args[0])); });
+        mathMethod("abs", function (receiver, args) {
+            return Math.abs(Number(args[0]));
+        }, NativeIntrinsics.MATH_ABS);
         mathMethod("acos", function (receiver, args) { return Math.acos(Number(args[0])); });
         mathMethod("asin", function (receiver, args) { return Math.asin(Number(args[0])); });
         mathMethod("atan", function (receiver, args) { return Math.atan(Number(args[0])); });
@@ -1054,7 +1056,9 @@
         mathMethod("min", function (receiver, args) {
             return Math.min.apply(Math, args);
         }, NativeIntrinsics.MATH_MIN);
-        mathMethod("max", function (receiver, args) { return Math.max.apply(Math, args); });
+        mathMethod("max", function (receiver, args) {
+            return Math.max.apply(Math, args);
+        }, NativeIntrinsics.MATH_MAX);
         mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); });
         this.setGlobal("Math", math);
     };

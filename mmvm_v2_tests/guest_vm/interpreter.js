@@ -415,6 +415,11 @@
                     }
                     this.reloadNativeOperands(
                         nativeFrame, nativeResult.pc, nativeResult.opcode);
+                    if (this.runtime.profileOpcodeCounts &&
+                        nativeResult.opcode === op.SET_PROPERTY) {
+                        this.runtime.nativeInterpreter.notePropertyFallback(
+                            nativeFrame, nativeResult.pc);
+                    }
                 }
                 var frame = this.frames[this.frames.length - 1];
                 var code = frame.code;
