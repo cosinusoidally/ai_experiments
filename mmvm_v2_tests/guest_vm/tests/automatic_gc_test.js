@@ -34,6 +34,22 @@
             throw new Error("stress GC did not collect at allocation safe points");
         }
         stressVM.destroy();
+
+        var reuseVM = new VM({gcThreshold: 8, heapBytes: 128 * 1024});
+        reuseVM.run(
+            "var retained = {answer: 42};" +
+            "for (var k = 0; k < 2000; k++) {" +
+            "    var transient = {x: k, y: k + 1, z: k + 2};" +
+            "}" +
+            "assertEqual(retained.answer, 42, 'record reuse retained live object');",
+            "automatic_gc_record_reuse.js");
+        if (reuseVM.runtime.collectionCount < 10) {
+            throw new Error("record reuse test did not trigger repeated collections");
+        }
+        if (!reuseVM.runtime.linearHeap.freeBlocks.length) {
+            throw new Error("automatic GC did not return records to the guest heap");
+        }
+        reuseVM.destroy();
         return "automatic GC threshold and stress modes passed";
     }
 

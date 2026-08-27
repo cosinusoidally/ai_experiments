@@ -30,7 +30,8 @@
         FRAME: 14,
         PROGRAM: 15,
         BYTECODE: 16,
-        CONTEXT: 17
+        CONTEXT: 17,
+        HANDLER: 18
     };
 
     function align8(value) {
@@ -44,6 +45,7 @@
         this.memory = new LinearMemory(this.byteLength);
         /* Zero is the null reference. Keep the first cache line inaccessible. */
         this.bump = 64;
+        this.freeBlocks = [];
         this.allocationCount = 0;
         this.destroyed = false;
         this.recordInitializer = null;
@@ -62,7 +64,7 @@
 
     Heap.prototype.allocateRecordWords = function (
             type, payloadBytes, word0, word1, word2, word3) {
-        if (!Types || type <= Types.FREE || type > Types.CONTEXT) {
+        if (!Types || type <= Types.FREE || type > Types.HANDLER) {
             throw new TypeError("invalid heap record type");
         }
         payloadBytes = Number(payloadBytes);
@@ -70,13 +72,45 @@
             throw new RangeError("invalid heap record payload size");
         }
         var size = align8(HEADER_SIZE + payloadBytes);
-        var address = this.bump;
-        if (address + size > this.byteLength) throw new RangeError("guest heap exhausted");
-        this.bump += size;
-        /* Linear memory is zero-filled when created and bump allocation never
-         * reuses a range. Reuse/free-list allocation must clear a record before
-         * publishing it, but doing bytewise clearing here makes every small
-         * MMVM allocation cross the JSAPI once per byte. */
+        var address = 0;
+        var freeIndex = 0;
+        while (freeIndex < this.freeBlocks.length) {
+            var candidate = this.freeBlocks[freeIndex];
+            var candidateSize = this.memory.readU32Trusted(
+                candidate + HEADER_SIZE_FIELD);
+            if (candidateSize >= size) {
+                address = candidate;
+                this.freeBlocks.splice(freeIndex, 1);
+                var remainder = candidateSize - size;
+                if (remainder >= HEADER_SIZE + 8) {
+                    var remainderAddress = address + size;
+                    this.memory.writeU32Trusted(remainderAddress + HEADER_TYPE,
+                                                Types.FREE);
+                    this.memory.writeU32Trusted(remainderAddress + HEADER_SIZE_FIELD,
+                                                remainder);
+                    this.memory.writeU32Trusted(remainderAddress + HEADER_MARK, 0);
+                    this.memory.writeU32Trusted(remainderAddress + HEADER_FLAGS, 0);
+                    this.freeBlocks.push(remainderAddress);
+                } else size = candidateSize;
+                break;
+            }
+            freeIndex++;
+        }
+        if (!address) {
+            address = this.bump;
+            if (address + size > this.byteLength) {
+                throw new RangeError("guest heap exhausted");
+            }
+            this.bump += size;
+        } else {
+            var clearOffset = 0;
+            while (clearOffset < size) {
+                this.memory.writeU32Trusted(address + clearOffset, 0);
+                clearOffset += 4;
+            }
+        }
+        /* Fresh bump ranges are already zero-filled. Reused ranges were
+         * cleared a word at a time above before the record was published. */
         if (this.recordInitializer && size >= HEADER_SIZE + 16) {
             this.recordInitializer.initialize(address, type, size,
                 word0, word1, word2, word3);
@@ -92,6 +126,22 @@
         }
         this.allocationCount++;
         return address;
+    };
+
+    Heap.prototype.freeRecord = function (address) {
+        address = Number(address);
+        if (!address || address !== Math.floor(address) || address < 64 ||
+            address + HEADER_SIZE > this.bump) {
+            throw new TypeError("invalid guest heap reference");
+        }
+        if (this.memory.readU32Trusted(address + HEADER_TYPE) === Types.FREE) {
+            throw new Error("guest heap record is already freed");
+        }
+        var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+        this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
+        this.memory.writeU32Trusted(address + HEADER_MARK, 0);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
+        this.freeBlocks.push(address);
     };
 
     Heap.prototype.requireRecord = function (address, expectedType) {

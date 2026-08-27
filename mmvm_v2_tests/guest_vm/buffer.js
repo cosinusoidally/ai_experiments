@@ -373,7 +373,11 @@
         while (index < this.backings.length) {
             var backing = this.backings[index];
             if (!backing.freed && backing.gcMark !== generation) {
+                var backingId = this.runtime.heapRecords.bufferBackingMetadata(
+                    backing.heapAddress);
                 this.memory.free(backing.allocation);
+                this.runtime.linearHeap.freeRecord(backing.heapAddress);
+                delete this.backingById["$" + backingId];
                 backing.freed = true;
             }
             if (!backing.freed) survivors.push(backing);

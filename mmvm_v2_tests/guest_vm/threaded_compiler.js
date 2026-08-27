@@ -88,18 +88,6 @@
         if (this.runtime.profileOpcodeCounts) {
             var compileLine = "guest VM compile: " +
                 (program.name || "<anonymous>") + " -> " + decision;
-            if (program.name === "draw") {
-                var bindingParts = [];
-                var bindingKey;
-                for (bindingKey in program.nonlocalBindings) {
-                    if (Object.prototype.hasOwnProperty.call(
-                            program.nonlocalBindings, bindingKey)) {
-                        bindingParts.push(bindingKey + ":" +
-                            program.nonlocalBindings[bindingKey].kind);
-                    }
-                }
-                compileLine += " [" + bindingParts.join(",") + "]";
-            }
             if (typeof print === "function") print(compileLine);
             else if (typeof console !== "undefined" && console.log) {
                 console.log(compileLine);
@@ -938,7 +926,7 @@
                     environmentDeclarations.push(environmentCell, environmentValue);
                     environmentInitializers.push(environmentCell +
                         "=runtime.environmentCellAddress(closure," +
-                        environmentBinding.depth +
+                        (environmentBinding.depth - (this.useEnvironment ? 1 : 0)) +
                         "," + environmentBinding.slot + ")");
                     environmentInitializers.push(environmentValue +
                         "=runtime.readHeapValue(" + environmentCell + ")");
@@ -962,7 +950,7 @@
                         quote(plainGlobalName) + ")");
                     globalInitializers.push(globalValue + "=" + globalCell +
                         "?runtime.readHeapValue(" + globalCell +
-                        "):runtime.getGlobal(context," + quote(plainGlobalName) + ")");
+                        "):undefined");
                 }
             }
             lines.push("var " + globalDeclarations.join(",") + ";");
@@ -1046,7 +1034,9 @@
         if (globalValue) {
             return "((" + globalValue + "=" + value + ")," +
                 "runtime.setGlobal(context," + quote(name) + "," + globalValue +
-                ")," + globalValue + ")";
+                "),(" + this.globalCells["$" + name] +
+                "=runtime.globalCellAddress(context," + quote(name) + "))," +
+                globalValue + ")";
         }
         return "runtime.setGlobal(context," + quote(name) + "," + value + ")";
     };
@@ -1059,7 +1049,9 @@
         if (binding && binding.kind === "environment") {
             return this.environmentValues["$" + name];
         }
-        return this.globalValues["$" + name] ||
+        var cachedGlobal = this.globalValues["$" + name];
+        return cachedGlobal ? "(" + this.globalCells["$" + name] + "?" +
+               cachedGlobal + ":runtime.getGlobal(context," + quote(name) + "))" :
                "runtime.getGlobal(context," + quote(name) + ")";
     };
 
@@ -1119,7 +1111,7 @@
             if (Object.prototype.hasOwnProperty.call(this.globalCells, name)) {
                 reloads.push(this.globalValues[name] + "=" + this.globalCells[name] +
                     "?runtime.readHeapValue(" + this.globalCells[name] +
-                    "):runtime.getGlobal(context," + quote(name.substring(1)) + ")");
+                    "):undefined");
             }
         }
         return "(" + (spills.length ? spills.join(",") + "," : "") +
@@ -1248,9 +1240,11 @@
                     var globalOperator = node.operator.substring(
                         0, node.operator.length - 1);
                     return "((" + reference.value + "=" +
-                        (node.operator === "=" ? value : reference.value +
+                        (node.operator === "=" ? value : reference.source +
                          globalOperator + value) + "),runtime.setGlobal(context," +
                         quote(reference.name) + "," + reference.value + ")," +
+                        "(" + reference.cell + "=runtime.globalCellAddress(context," +
+                        quote(reference.name) + "))," +
                         reference.value + ")";
                 }
                 if (node.operator === "=") return "runtime.setGlobal(context," +
@@ -1290,12 +1284,17 @@
             var amount = node.operator === "++" ? 1 : -1;
             if (reference.kind === "global") {
                 if (reference.value) {
-                    return node.prefix ? "((" + reference.value + "+=" + amount +
+                    return node.prefix ? "((" + reference.value + "=" +
+                        reference.source + "+(" + amount + ")" +
                         "),runtime.setGlobal(context," + quote(reference.name) + "," +
-                        reference.value + ")," + reference.value + ")" :
-                        "((" + reference.value + "+=" + amount +
+                        reference.value + "),(" + reference.cell +
+                        "=runtime.globalCellAddress(context," + quote(reference.name) +
+                        "))," + reference.value + ")" :
+                        "((" + reference.value + "=" + reference.source + "+(" + amount + ")" +
                         "),runtime.setGlobal(context," + quote(reference.name) + "," +
-                        reference.value + ")," + reference.value + "-(" + amount + "))";
+                        reference.value + "),(" + reference.cell +
+                        "=runtime.globalCellAddress(context," + quote(reference.name) +
+                        "))," + reference.value + "-(" + amount + "))";
                 }
                 return "hc.updateGlobal(context,null," + quote(reference.name) +
                        "," + amount + "," + (node.prefix ? "true" : "false") + ")";
@@ -1507,7 +1506,7 @@
             var binding = this.program.nonlocalBindings &&
                           this.program.nonlocalBindings["$" + node.name];
             if (binding && binding.kind === "environment") {
-                var depth = binding.depth;
+                var depth = binding.depth - (this.useEnvironment ? 1 : 0);
                 return {kind: "environment", depth: depth, slot: binding.slot,
                         cell: this.environmentCells["$" + node.name],
                         value: this.environmentValues["$" + node.name],
@@ -1515,7 +1514,12 @@
             }
             return {kind: "global", name: node.name,
                     cell: this.globalCells["$" + node.name],
-                    value: this.globalValues["$" + node.name]};
+                    value: this.globalValues["$" + node.name],
+                    source: this.globalValues["$" + node.name] ?
+                        "(" + this.globalCells["$" + node.name] + "?" +
+                        this.globalValues["$" + node.name] +
+                        ":runtime.getGlobal(context," + quote(node.name) + "))" :
+                        "runtime.getGlobal(context," + quote(node.name) + ")"};
         }
         if (node.type === "MemberExpression") {
             return {kind: "member", object: this.expression(node.object),

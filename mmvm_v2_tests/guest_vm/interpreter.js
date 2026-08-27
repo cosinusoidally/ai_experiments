@@ -13,7 +13,7 @@
                 registers: registers, pc: 0,
                 context: context,
                 environment: environment,
-                returnRegister: returnRegister, handlers: []};
+                returnRegister: returnRegister};
         frame.heapAddress = runtime.heapRecords.allocateFrame(
             runtime.programAddress(program), environment ? environment.heapAddress : 0,
             caller ? caller.heapAddress : 0, returnRegister,
@@ -96,16 +96,32 @@
     Execution.prototype.handleException = function (error) {
         while (this.frames.length) {
             var frame = this.frames[this.frames.length - 1];
-            if (frame.handlers.length) {
-                var handler = frame.handlers.pop();
+            var handler = this.runtime.heapRecords.popFrameHandler(
+                frame.heapAddress);
+            if (handler) {
+                var nameConstant =
+                    this.runtime.heapRecords.handlerNameConstant(handler);
+                var target = this.runtime.heapRecords.handlerTarget(handler);
+                this.runtime.linearHeap.freeRecord(handler);
                 this.runtime.setBinding(frame.context, frame.environment,
-                                        handler.name, error);
-                frame.pc = handler.target;
+                    frame.constants[nameConstant],
+                    this.runtime.importCaughtException(error));
+                frame.pc = target;
                 return true;
             }
             this.frames.pop();
+            this.releaseFrame(frame);
         }
         return false;
+    };
+
+    Execution.prototype.releaseFrame = function (frame) {
+        var handler;
+        while ((handler = this.runtime.heapRecords.popFrameHandler(
+                    frame.heapAddress))) {
+            this.runtime.linearHeap.freeRecord(handler);
+        }
+        this.runtime.linearHeap.freeRecord(frame.heapAddress);
     };
 
     Execution.prototype.resume = function (budget) {
@@ -429,14 +445,16 @@
                         return this.finish("threw", thrownValue, used);
                     }
                 } else if (opcode === op.PUSH_CATCH) {
-                    frame.handlers.push({target: code[pc + 1],
-                                         name: constants[code[pc + 2]]});
+                    this.runtime.heapRecords.pushFrameHandler(
+                        frame.heapAddress, code[pc + 1], code[pc + 2]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.POP_CATCH) {
-                    if (!frame.handlers.length) {
+                    var poppedHandler = this.runtime.heapRecords.popFrameHandler(
+                        frame.heapAddress);
+                    if (!poppedHandler) {
                         throw new Error("catch-handler stack underflow");
                     }
-                    frame.handlers.pop();
+                    this.runtime.linearHeap.freeRecord(poppedHandler);
                     frame.pc = pc + 1;
                 } else if (opcode === op.RETURN) {
                     var returnValue = registers[code[pc + 1]];
@@ -445,6 +463,7 @@
                         (!returnValue || !returnValue.guestType)) {
                         returnValue = returnedFrame.constructReceiver;
                     }
+                    this.releaseFrame(returnedFrame);
                     if (!this.frames.length) return this.finish("completed", returnValue, used);
                     var caller = this.frames[this.frames.length - 1];
                     caller.registers[returnedFrame.returnRegister] = returnValue;

@@ -83,6 +83,7 @@
         {path: "language/object_control.js"},
         {path: "language/declaration_hoisting.js"},
         {path: "language/closure_fallback.js"},
+        {path: "language/compiled_stability.js"},
         {path: "buffer/buffer_guest.js"}
     ];
     var totalAssertions = 0;
@@ -173,6 +174,18 @@
         "structured compiler object/control flow passed: 8 assertion(s)";
     if (typeof print === "function") print(threadedControlResult);
     else console.log(threadedControlResult);
+
+    var threadedStabilityVM = new VM({threadedCompile: true});
+    threadedStabilityVM.run(readSource("language/compiled_stability.js"),
+                            "threaded_compiled_stability.js");
+    if (threadedStabilityVM.runtime.assertions !== 2) {
+        throw new Error("threaded compiler stability assertion count changed");
+    }
+    threadedStabilityVM.destroy();
+    var threadedStabilityResult =
+        "structured compiler heap environments passed: 2 assertion(s)";
+    if (typeof print === "function") print(threadedStabilityResult);
+    else console.log(threadedStabilityResult);
 
     var summary = "guest VM suite passed: " + guestTests.length +
                   " guest program(s), " + totalAssertions +

@@ -51,7 +51,13 @@
     var FRAME_PC = 12;
     var FRAME_RETURN_SLOT = 16;
     var FRAME_REGISTER_COUNT = 20;
-    var FRAME_REGISTERS = 24;
+    var FRAME_HANDLER = 24;
+    var FRAME_REGISTERS = 32;
+
+    var HANDLER_NEXT = 0;
+    var HANDLER_TARGET = 4;
+    var HANDLER_NAME_CONSTANT = 8;
+    var HANDLER_BYTES = 16;
 
     var BYTECODE_LENGTH = 0;
     var BYTECODE_WORDS = 8;
@@ -470,6 +476,37 @@
             throw new RangeError("invalid frame register");
         }
         return Heap.HEADER_SIZE + FRAME_REGISTERS + register * CELL_BYTES;
+    };
+
+    Records.prototype.frameHandler = function (frame) {
+        return this.heap.readTrustedFieldU32(frame, FRAME_HANDLER);
+    };
+
+    Records.prototype.setFrameHandler = function (frame, handler) {
+        this.heap.writeTrustedFieldU32(frame, FRAME_HANDLER, handler || 0);
+    };
+
+    Records.prototype.pushFrameHandler = function (frame, target, nameConstant) {
+        var handler = this.heap.allocateRecordWords(Heap.Types.HANDLER,
+            HANDLER_BYTES, this.frameHandler(frame), target, nameConstant, 0);
+        this.setFrameHandler(frame, handler);
+        return handler;
+    };
+
+    Records.prototype.popFrameHandler = function (frame) {
+        var handler = this.frameHandler(frame);
+        if (!handler) return 0;
+        this.setFrameHandler(frame,
+            this.heap.readTrustedFieldU32(handler, HANDLER_NEXT));
+        return handler;
+    };
+
+    Records.prototype.handlerTarget = function (handler) {
+        return this.heap.readTrustedFieldU32(handler, HANDLER_TARGET);
+    };
+
+    Records.prototype.handlerNameConstant = function (handler) {
+        return this.heap.readTrustedFieldU32(handler, HANDLER_NAME_CONSTANT);
     };
 
     Records.prototype.allocateBytecode = function (code) {

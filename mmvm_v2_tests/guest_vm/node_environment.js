@@ -147,7 +147,8 @@
         if (!value || value.guestType !== "buffer") return value;
         var bytes = [];
         var index = 0;
-        while (index < value.length) {
+        var length = this.runtime.bufferSupport.viewLength(value);
+        while (index < length) {
             bytes.push(this.runtime.bufferSupport.read(value, index));
             index++;
         }

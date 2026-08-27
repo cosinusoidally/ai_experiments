@@ -360,6 +360,11 @@
             this.valueCells.writeReferenceAt(cell, this.internStringAddress(value));
         } else if (value && value.guestType && value.heapAddress) {
             this.valueCells.writeReferenceAt(cell, value.heapAddress);
+        } else if (value && typeof value === "object") {
+            throw new TypeError("host object cannot be stored in guest heap" +
+                (value.name ? ": " + value.name : ""));
+        } else if (typeof value === "function") {
+            throw new TypeError("host function cannot be stored in guest heap");
         } else this.valueCells.writePrimitiveAt(cell, value);
     };
 
@@ -1026,6 +1031,26 @@
         return error;
     };
 
+    Runtime.prototype.importCaughtException = function (error) {
+        if (!error || error.guestType ||
+            (typeof error !== "object" && typeof error !== "function")) {
+            return error;
+        }
+        var result = this.makeObject();
+        this.setProperty(result, "name", error.name || "Error");
+        this.setProperty(result, "message",
+            error.message === undefined ? String(error) : String(error.message));
+        if (error.guestFilename !== undefined) {
+            this.setProperty(result, "fileName", error.guestFilename);
+            this.setProperty(result, "lineNumber", error.guestLine || 1);
+            this.setProperty(result, "columnNumber", error.guestColumn || 1);
+        }
+        if (error.stack !== undefined) {
+            this.setProperty(result, "stack", String(error.stack));
+        }
+        return result;
+    };
+
     Runtime.prototype.setGlobal = function (context, name, value) {
         if (arguments.length === 2) {
             value = name;
@@ -1281,11 +1306,14 @@
                        value.guestType !== "buffer")) return;
         if (value.gcMark === generation) return;
         value.gcMark = generation;
+        if (value.heapAddress) this.linearHeap.setMark(value.heapAddress, generation);
         if (value.guestType === "buffer") {
             this.bufferSupport.markView(value, generation);
             this.markValue(value.prototype, generation);
         }
         if (value.guestType === "array") {
+            this.linearHeap.setMark(
+                this.heapRecords.arrayElements(value.heapAddress), generation);
             var elementIndex = 0;
             while (elementIndex < this.arrayLength(value)) {
                 if (this.arrayHas(value, elementIndex)) {
@@ -1307,8 +1335,10 @@
             }
             var property = this.heapRecords.objectPropertyHead(value.heapAddress);
             while (property) {
-                this.markValue(this.readHeapValue(
-                    this.heapRecords.propertyValueCell(property)), generation);
+                this.linearHeap.setMark(property, generation);
+                this.linearHeap.setMark(this.heapRecords.propertyKey(property), generation);
+                this.markHeapCell(
+                    this.heapRecords.propertyValueCell(property), generation);
                 property = this.heapRecords.propertyNext(property);
             }
         } else {
@@ -1319,6 +1349,32 @@
                 if (own(properties, key)) this.markValue(properties[key], generation);
             }
         }
+    };
+
+    Runtime.prototype.markHeapCell = function (cell, generation) {
+        if (this.valueCells.tagAt(cell) !== ValueCells.Tags.REFERENCE) return;
+        var address = this.valueCells.referenceAddressAt(cell);
+        if (this.linearHeap.recordType(address) === Heap.Types.STRING) {
+            this.linearHeap.setMark(address, generation);
+            return;
+        }
+        this.markValue(this.heapHandles["$" + address], generation);
+    };
+
+    Runtime.prototype.releaseObjectRecords = function (object) {
+        var address = object.heapAddress;
+        var property = this.heapRecords.objectPropertyHead(address);
+        while (property) {
+            var next = this.heapRecords.propertyNext(property);
+            this.linearHeap.freeRecord(property);
+            property = next;
+        }
+        if (object.guestType === "array") {
+            this.linearHeap.freeRecord(this.heapRecords.arrayElements(address));
+        }
+        delete this.heapHandles["$" + address];
+        delete this.functionMetadata["$" + address];
+        this.linearHeap.freeRecord(address);
     };
 
     Runtime.prototype.collect = function () {
@@ -1363,10 +1419,22 @@
             while (index < this.heapObjects.length) {
                 if (this.heapObjects[index].gcMark === generation) {
                     survivors.push(this.heapObjects[index]);
-                }
+                } else this.releaseObjectRecords(this.heapObjects[index]);
                 index++;
             }
             this.heapObjects = survivors;
+            var environmentKey;
+            for (environmentKey in this.environmentMetadata) {
+                if (own(this.environmentMetadata, environmentKey)) {
+                    var environmentMetadata = this.environmentMetadata[environmentKey];
+                    if (environmentMetadata.gcMark !== generation) {
+                        this.linearHeap.freeRecord(
+                            environmentMetadata.handle.heapAddress);
+                        delete this.environmentMetadata[environmentKey];
+                    }
+                }
+            }
+            this.propertyAddressCache = {};
             this.bufferSupport.sweep(generation);
             this.gcAllocationDebt = 0;
             this.gcPending = false;
@@ -1404,11 +1472,15 @@
     Runtime.prototype.markEnvironment = function (environment, generation) {
         var current = environment;
         while (current) {
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            if (metadata && metadata.gcMark === generation) return;
+            if (metadata) metadata.gcMark = generation;
+            this.linearHeap.setMark(current.heapAddress, generation);
             var index = 0;
             var count = this.heapRecords.environmentSlotCount(current.heapAddress);
             while (index < count) {
-                this.markValue(this.readHeapValue(
-                    this.heapRecords.environmentCell(current.heapAddress, index)),
+                this.markHeapCell(
+                    this.heapRecords.environmentCell(current.heapAddress, index),
                     generation);
                 index++;
             }
