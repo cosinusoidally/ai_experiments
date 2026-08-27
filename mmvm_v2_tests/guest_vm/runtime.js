@@ -7,6 +7,7 @@
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     var RecordInitializer = root.GuestVMRecordInitializer;
     var NumericBytecodeBackend = root.GuestVMNumericBytecodeBackend;
+    var NativeInterpreter = root.GuestVMNativeInterpreter;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         HostFFI = require("./host_ffi.js");
@@ -16,6 +17,7 @@
         ThreadedCompiler = require("./threaded_compiler.js");
         RecordInitializer = require("./aot/record_initializer.js");
         NumericBytecodeBackend = require("./aot/bytecode_numeric_backend.js");
+        NativeInterpreter = require("./aot/native_interpreter.js");
     }
 
     function own(object, key) {
@@ -71,6 +73,8 @@
         this.nativeCompilations = [];
         this.installBuiltins();
         this.bufferSupport = new BufferSupport(this);
+        this.nativeInterpreter = options.nativeInterpreter ?
+            new NativeInterpreter(this) : null;
         if (options.rawFFI) this.installRawFFI();
     }
 
@@ -550,6 +554,18 @@
         while (index < count) {
             this.writeHeapValue(this.heapRecords.frameRegisterCell(
                 frame.heapAddress, index), frame.registers[index]);
+            index++;
+        }
+    };
+
+    Runtime.prototype.reloadFrame = function (frame) {
+        if (!frame || !frame.heapAddress) return;
+        frame.pc = this.heapRecords.framePC(frame.heapAddress);
+        var count = this.heapRecords.frameRegisterCount(frame.heapAddress);
+        var index = 0;
+        while (index < count) {
+            frame.registers[index] = this.readHeapValue(
+                this.heapRecords.frameRegisterCell(frame.heapAddress, index));
             index++;
         }
     };
@@ -1452,6 +1468,8 @@
     };
 
     Runtime.prototype.destroy = function () {
+        if (this.nativeInterpreter) this.nativeInterpreter.destroy();
+        this.nativeInterpreter = null;
         this.bufferSupport.destroy();
         if (this.linearHeap) this.linearHeap.destroy();
         this.linearHeap = null;

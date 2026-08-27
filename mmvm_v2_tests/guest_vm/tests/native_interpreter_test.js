@@ -80,6 +80,43 @@
                 throw new Error("native interpreter migration exit mismatch");
             }
             vm.runtime.linearHeap.freeRecord(unsupportedFrame);
+
+            var integratedVM = new VM({heapBytes: 256 * 1024,
+                                       nativeInterpreter: true});
+            try {
+                var context = integratedVM.context;
+                var integratedProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.MOVE, 1, 0,
+                           bytecode.RETURN, 1],
+                    constants: [23], registerCount: 2
+                };
+                var execution = context.startProgram(integratedProgram);
+                var integratedBudget = execution.resume(2);
+                if (integratedBudget.status !== "budget" ||
+                    integratedBudget.instructions !== 2) {
+                    throw new Error("native Execution budget integration mismatch");
+                }
+                var integratedReturn = execution.resume(2);
+                if (integratedReturn.status !== "completed" ||
+                    integratedReturn.value !== 23 ||
+                    integratedReturn.instructions !== 1) {
+                    throw new Error("native Execution return integration mismatch");
+                }
+
+                var fallbackContext = integratedVM.jsRuntime.createContext();
+                var fallbackProgram = {
+                    code: [bytecode.MAKE_OBJECT, 0,
+                           bytecode.RETURN, 0],
+                    constants: [], registerCount: 1
+                };
+                var fallbackResult = fallbackContext.runProgram(fallbackProgram);
+                if (!fallbackResult || fallbackResult.guestType !== "object") {
+                    throw new Error("native Execution migration fallback mismatch");
+                }
+            } finally {
+                integratedVM.destroy();
+            }
             return "kernel-compiled bytecode interpreter passed on " +
                    second.backend;
         } finally {
