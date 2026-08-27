@@ -21,6 +21,9 @@
         if (!fn || fn.type !== "FunctionExpression") {
             throw new SyntaxError("kernel source must contain one function");
         }
+        if (needsControlFlow(fn.body.body)) {
+            return compileControlFlow(fn, source);
+        }
         var locals = {};
         var parameterIndex = 0;
         while (parameterIndex < fn.parameters.length) {
@@ -59,6 +62,183 @@
                 expression: resultExpression,
                 source: source};
     };
+
+    function needsControlFlow(statements) {
+        var index = 0;
+        while (index < statements.length) {
+            var statement = statements[index++];
+            if (statement.type === "VariableStatement" ||
+                statement.type === "IfStatement" ||
+                statement.type === "WhileStatement" ||
+                statement.type === "BlockStatement") return true;
+            if (statement.type === "ExpressionStatement" &&
+                statement.expression.type === "AssignmentExpression") return true;
+        }
+        return false;
+    }
+
+    function compileControlFlow(fn, source) {
+        var symbols = {};
+        var parameterIndex = 0;
+        while (parameterIndex < fn.parameters.length) {
+            symbols["$" + fn.parameters[parameterIndex]] =
+                {kind: "argument", index: parameterIndex};
+            parameterIndex++;
+        }
+        var localNames = [];
+        collectLocals(fn.body, symbols, localNames);
+        var body = lowerStatements(fn.body.body, symbols);
+        return {name: fn.name || "kernel", parameters: fn.parameters.slice(0),
+                locals: localNames, resultType: "i32", body: body,
+                controlFlow: true, source: source};
+    }
+
+    function collectLocals(node, symbols, names) {
+        if (!node || typeof node !== "object") return;
+        if (node.type === "VariableStatement") {
+            var declarationIndex = 0;
+            while (declarationIndex < node.declarations.length) {
+                var name = node.declarations[declarationIndex++].name;
+                if (symbols["$" + name] === undefined) {
+                    symbols["$" + name] = {kind: "local", index: names.length};
+                    names.push(name);
+                }
+            }
+        }
+        var key;
+        for (key in node) {
+            if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key)) {
+                var value = node[key];
+                if (value && typeof value === "object") {
+                    if (typeof value.length === "number") {
+                        var index = 0;
+                        while (index < value.length) collectLocals(value[index++], symbols, names);
+                    } else collectLocals(value, symbols, names);
+                }
+            }
+        }
+    }
+
+    function lowerStatements(statements, symbols) {
+        var body = [];
+        var index = 0;
+        while (index < statements.length) {
+            var lowered = lowerStatement(statements[index++], symbols);
+            if (lowered.op === "block") {
+                var child = 0;
+                while (child < lowered.body.length) body.push(lowered.body[child++]);
+            } else body.push(lowered);
+        }
+        return body;
+    }
+
+    function lowerStatement(statement, symbols) {
+        if (statement.type === "BlockStatement") {
+            return {op: "block", body: lowerStatements(statement.body, symbols)};
+        }
+        if (statement.type === "VariableStatement") {
+            var declarations = [];
+            var index = 0;
+            while (index < statement.declarations.length) {
+                var declaration = statement.declarations[index++];
+                if (declaration.initial) {
+                    declarations.push({op: "set_local",
+                        index: requireLocal(symbols, declaration.name).index,
+                        value: lowerKernelExpression(declaration.initial, symbols)});
+                }
+            }
+            return {op: "block", body: declarations};
+        }
+        if (statement.type === "ExpressionStatement") {
+            var expression = statement.expression;
+            if (expression.type === "AssignmentExpression" &&
+                expression.operator === "=" &&
+                expression.left.type === "Identifier") {
+                var target = symbols["$" + expression.left.name];
+                if (!target) throw new SyntaxError("unknown kernel assignment " +
+                                                   expression.left.name);
+                return {op: target.kind === "local" ? "set_local" : "set_argument",
+                        index: target.index,
+                        value: lowerKernelExpression(expression.right, symbols)};
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
+                expression.callee.name === "store32" &&
+                expression.arguments.length === 2) {
+                return {op: "store_u32",
+                    address: lowerKernelExpression(expression.arguments[0], symbols),
+                    value: lowerKernelExpression(expression.arguments[1], symbols)};
+            }
+            throw new SyntaxError("unsupported kernel expression statement");
+        }
+        if (statement.type === "IfStatement") {
+            return {op: "if", test: lowerKernelExpression(statement.test, symbols),
+                    consequent: lowerStatement(statement.consequent, symbols),
+                    alternate: statement.alternate ?
+                        lowerStatement(statement.alternate, symbols) :
+                        {op: "block", body: []}};
+        }
+        if (statement.type === "WhileStatement") {
+            return {op: "while", test: lowerKernelExpression(statement.test, symbols),
+                    body: lowerStatement(statement.body, symbols)};
+        }
+        if (statement.type === "ReturnStatement" && statement.argument) {
+            return {op: "return",
+                    value: lowerKernelExpression(statement.argument, symbols)};
+        }
+        throw new SyntaxError("unsupported control-flow kernel statement " +
+                              statement.type);
+    }
+
+    function requireLocal(symbols, name) {
+        var symbol = symbols["$" + name];
+        if (!symbol || symbol.kind !== "local") {
+            throw new SyntaxError("kernel local is not declared: " + name);
+        }
+        return symbol;
+    }
+
+    function lowerKernelExpression(node, symbols) {
+        if (node.type === "Literal" && typeof node.value === "number" &&
+            node.value === (node.value | 0)) {
+            return {op: "const_i32", value: node.value | 0, type: "i32"};
+        }
+        if (node.type === "Identifier") {
+            var symbol = symbols["$" + node.name];
+            if (!symbol) throw new SyntaxError("unknown kernel identifier " + node.name);
+            return {op: symbol.kind === "local" ? "local_i32" : "arg_i32",
+                    index: symbol.index, type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "load32" && node.arguments.length === 1) {
+            return {op: "load_u32",
+                    address: lowerKernelExpression(node.arguments[0], symbols),
+                    type: "i32"};
+        }
+        if (node.type === "UnaryExpression" &&
+            (node.operator === "-" || node.operator === "~" ||
+             node.operator === "+" || node.operator === "!")) {
+            return {op: node.operator === "-" ? "neg_i32" :
+                        node.operator === "~" ? "not_i32" :
+                        node.operator === "!" ? "logical_not_i32" : "as_i32",
+                    value: lowerKernelExpression(node.argument, symbols), type: "i32"};
+        }
+        if (node.type === "BinaryExpression") {
+            var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
+                "&": "and_i32", "|": "or_i32", "^": "xor_i32",
+                "<<": "shl_i32", ">>": "shr_i32",
+                "===": "eq_i32", "!==": "ne_i32", "<": "lt_i32",
+                "<=": "le_i32", ">": "gt_i32", ">=": "ge_i32"};
+            var operation = operations[node.operator];
+            if (!operation) throw new SyntaxError("unsupported kernel operator " +
+                                                  node.operator);
+            return {op: operation,
+                    left: lowerKernelExpression(node.left, symbols),
+                    right: lowerKernelExpression(node.right, symbols), type: "i32"};
+        }
+        throw new SyntaxError("unsupported control-flow kernel expression " + node.type);
+    }
 
     function lower(node, locals) {
         if (node.type === "Literal" && typeof node.value === "number" &&

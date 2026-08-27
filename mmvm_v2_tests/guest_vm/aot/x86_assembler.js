@@ -31,6 +31,63 @@
         this.emitByte(displacement);
     };
 
+    Assembler.prototype.movEaxEbpArgument = function (index) {
+        var displacement = 8 + index * 4;
+        this.macros.push("mov_eax_ebp_arg(" + index + ")");
+        this.emitByte(0x8b); this.emitByte(0x45); this.emitByte(displacement);
+    };
+    Assembler.prototype.subEspImmediate = function (value) {
+        this.macros.push("sub_esp_i32(" + value + ")");
+        this.emitByte(0x81); this.emitByte(0xec); this.word32(value);
+    };
+    Assembler.prototype.movEaxLocal = function (index) {
+        var displacement = -(index + 1) * 4;
+        this.macros.push("mov_eax_local(" + index + ")");
+        this.emitByte(0x8b); this.emitByte(0x85); this.word32(displacement);
+    };
+    Assembler.prototype.movLocalEax = function (index) {
+        var displacement = -(index + 1) * 4;
+        this.macros.push("mov_local_eax(" + index + ")");
+        this.emitByte(0x89); this.emitByte(0x85); this.word32(displacement);
+    };
+    Assembler.prototype.movEbpArgumentEax = function (index) {
+        var displacement = 8 + index * 4;
+        this.macros.push("mov_ebp_arg_eax(" + index + ")");
+        this.emitByte(0x89); this.emitByte(0x45); this.emitByte(displacement);
+    };
+    Assembler.prototype.movEaxDwordPtrEax = function () {
+        this.macros.push("mov_eax_dword_ptr_eax()");
+        this.emitByte(0x8b); this.emitByte(0x00);
+    };
+    Assembler.prototype.testEaxEax = function () {
+        this.macros.push("test_eax()");
+        this.emitByte(0x85); this.emitByte(0xc0);
+    };
+    Assembler.prototype.compareEcxEax = function () {
+        this.macros.push("cmp_ecx_eax()");
+        this.emitByte(0x39); this.emitByte(0xc1);
+    };
+    Assembler.prototype.setNotEqualAl = function () {
+        this.macros.push("setne_al()");
+        this.emitByte(0x0f); this.emitByte(0x95); this.emitByte(0xc0);
+    };
+    Assembler.prototype.setLessAl = function () {
+        this.macros.push("setl_al()");
+        this.emitByte(0x0f); this.emitByte(0x9c); this.emitByte(0xc0);
+    };
+    Assembler.prototype.setLessOrEqualAl = function () {
+        this.macros.push("setle_al()");
+        this.emitByte(0x0f); this.emitByte(0x9e); this.emitByte(0xc0);
+    };
+    Assembler.prototype.setGreaterAl = function () {
+        this.macros.push("setg_al()");
+        this.emitByte(0x0f); this.emitByte(0x9f); this.emitByte(0xc0);
+    };
+    Assembler.prototype.setGreaterOrEqualAl = function () {
+        this.macros.push("setge_al()");
+        this.emitByte(0x0f); this.emitByte(0x9d); this.emitByte(0xc0);
+    };
+
     Assembler.prototype.pushEax = function () {
         this.macros.push("push_eax()"); this.emitByte(0x50); this.stackWords++;
     };

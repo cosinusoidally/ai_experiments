@@ -4,6 +4,7 @@
     function JSBackend() {}
 
     JSBackend.prototype.compile = function (ir) {
+        if (ir.controlFlow) return compileControlFlow(ir);
         var parameters = ir.parameters.slice(0);
         var body = "";
         var index = 0;
@@ -23,6 +24,84 @@
                      body + "return (" + emit(ir.expression, parameters) + ")|0;};";
         return {fn: Function(source)(), source: source, ir: ir, backend: "js"};
     };
+
+    function compileControlFlow(ir) {
+        var parameters = ir.parameters.slice(0);
+        var body = "";
+        if (ir.locals.length) body += "var " + ir.locals.join(",") + ";";
+        body += emitStatements(ir.body, parameters, ir.locals);
+        var source = "return function(memory," + parameters.join(",") + "){" +
+                     body + "};";
+        return {fn: Function(source)(), source: source, ir: ir, backend: "js"};
+    }
+
+    function emitStatements(statements, parameters, locals) {
+        var source = "";
+        var index = 0;
+        while (index < statements.length) {
+            source += emitStatement(statements[index++], parameters, locals);
+        }
+        return source;
+    }
+
+    function emitStatement(node, parameters, locals) {
+        if (node.op === "block") {
+            return "{" + emitStatements(node.body, parameters, locals) + "}";
+        }
+        if (node.op === "set_local") {
+            return locals[node.index] + "=" +
+                   emitControlExpression(node.value, parameters, locals) + ";";
+        }
+        if (node.op === "set_argument") {
+            return parameters[node.index] + "=" +
+                   emitControlExpression(node.value, parameters, locals) + ";";
+        }
+        if (node.op === "store_u32") {
+            return "memory.writeU32(" +
+                emitControlExpression(node.address, parameters, locals) + "," +
+                emitControlExpression(node.value, parameters, locals) + ");";
+        }
+        if (node.op === "if") {
+            return "if(" + emitControlExpression(node.test, parameters, locals) + ")" +
+                   emitStatement(node.consequent, parameters, locals) + "else" +
+                   emitStatement(node.alternate, parameters, locals);
+        }
+        if (node.op === "while") {
+            return "while(" + emitControlExpression(node.test, parameters, locals) + ")" +
+                   emitStatement(node.body, parameters, locals);
+        }
+        if (node.op === "return") {
+            return "return (" + emitControlExpression(
+                node.value, parameters, locals) + ")|0;";
+        }
+        throw new Error("unsupported JS control-flow kernel statement " + node.op);
+    }
+
+    function emitControlExpression(node, parameters, locals) {
+        if (node.op === "local_i32") return "(" + locals[node.index] + "|0)";
+        if (node.op === "load_u32") return "(memory.readU32(" +
+            emitControlExpression(node.address, parameters, locals) + ")|0)";
+        if (node.op === "logical_not_i32") return "(!" +
+            emitControlExpression(node.value, parameters, locals) + "|0)";
+        if (node.op === "arg_i32") return "(" + parameters[node.index] + "|0)";
+        if (node.op === "const_i32") return String(node.value | 0);
+        if (node.op === "neg_i32") return "(-" +
+            emitControlExpression(node.value, parameters, locals) + ")";
+        if (node.op === "not_i32") return "(~" +
+            emitControlExpression(node.value, parameters, locals) + ")";
+        if (node.op === "as_i32") return "(" +
+            emitControlExpression(node.value, parameters, locals) + "|0)";
+        var operators = {add_i32: "+", sub_i32: "-", mul_i32: "*",
+            and_i32: "&", or_i32: "|", xor_i32: "^", shl_i32: "<<", shr_i32: ">>",
+            eq_i32: "===", ne_i32: "!==", lt_i32: "<", le_i32: "<=",
+            gt_i32: ">", ge_i32: ">="};
+        if (!operators[node.op]) {
+            throw new Error("unsupported JS control-flow kernel expression " + node.op);
+        }
+        return "((" + emitControlExpression(node.left, parameters, locals) + ")" +
+               operators[node.op] + "(" +
+               emitControlExpression(node.right, parameters, locals) + "))";
+    }
 
     function emit(node, parameters) {
         if (node.op === "const_i32") return String(node.value | 0);

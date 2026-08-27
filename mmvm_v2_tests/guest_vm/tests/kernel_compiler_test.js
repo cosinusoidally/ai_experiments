@@ -101,6 +101,50 @@
                 f64Heap.destroy();
                 f64X86.destroy();
             }
+            function dispatchKernel(base, state, budget) {
+                var pc = load32(base + state);
+                var sum = 0;
+                while (budget > 0) {
+                    var value = load32(base + state + 4 + pc * 4);
+                    if (value === 0) {
+                        store32(base + state, pc);
+                        return sum;
+                    } else {
+                        sum = sum + value;
+                    }
+                    pc = pc + 1;
+                    budget = budget - 1;
+                }
+                store32(base + state, pc);
+                return sum;
+            }
+            var dispatchIR = compiler.compile(dispatchKernel);
+            var dispatchJS = new JSBackend().compile(dispatchIR);
+            var dispatchX86 = new X86Backend().compile(dispatchIR);
+            var dispatchHeap = new Heap({heapBytes: 4096});
+            try {
+                dispatchHeap.memory.writeU32(64, 0);
+                dispatchHeap.memory.writeU32(68, 7);
+                dispatchHeap.memory.writeU32(72, 11);
+                dispatchHeap.memory.writeU32(76, 0);
+                if (dispatchJS.fn(dispatchHeap.memory, 0, 64, 8) !== 18 ||
+                    dispatchHeap.memory.readU32(64) !== 2) {
+                    throw new Error("JavaScript control-flow kernel mismatch");
+                }
+                dispatchHeap.memory.writeU32(64, 0);
+                if (dispatchX86.fn &&
+                    (dispatchX86.fn(dispatchHeap.memory.nativeAddress(0), 64, 8) !== 18 ||
+                     dispatchHeap.memory.readU32(64) !== 2)) {
+                    throw new Error("i386 control-flow kernel mismatch");
+                }
+                if (dispatchX86.assembly.indexOf("kernel_loop_") < 0 ||
+                    dispatchX86.assembly.indexOf("mov_eax_dword_ptr_eax()") < 0) {
+                    throw new Error("control-flow backend bypassed macro assembly");
+                }
+            } finally {
+                dispatchHeap.destroy();
+                dispatchX86.destroy();
+            }
             return "shared kernel IR passed on JS" +
                    (x86Result.fn ? " and native i386" :
                     "; i386 macro output validated");
