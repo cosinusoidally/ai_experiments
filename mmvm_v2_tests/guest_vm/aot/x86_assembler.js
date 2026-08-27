@@ -130,6 +130,63 @@
     Assembler.prototype.notEax = function () {
         this.macros.push("not_eax()"); this.emitByte(0xf7); this.emitByte(0xd0);
     };
+    Assembler.prototype.movEdxEax = function () {
+        this.macros.push("mov_edx_eax()"); this.emitByte(0x89); this.emitByte(0xc2);
+    };
+    Assembler.prototype.movEcxEdx = function () {
+        this.macros.push("mov_ecx_edx()"); this.emitByte(0x89); this.emitByte(0xd1);
+    };
+    Assembler.prototype.shiftLeftEaxCl = function () {
+        this.macros.push("shl_eax_cl()"); this.emitByte(0xd3); this.emitByte(0xe0);
+    };
+    Assembler.prototype.shiftRightEaxCl = function () {
+        this.macros.push("sar_eax_cl()"); this.emitByte(0xd3); this.emitByte(0xf8);
+    };
+    Assembler.prototype.shiftUnsignedRightEaxCl = function () {
+        this.macros.push("shr_eax_cl()"); this.emitByte(0xd3); this.emitByte(0xe8);
+    };
+    Assembler.prototype.reserveStackBytes = function (count) {
+        this.macros.push("sub_esp_bytes(" + count + ")");
+        this.emitByte(0x83); this.emitByte(0xec); this.emitByte(count);
+    };
+    Assembler.prototype.releaseStackBytes = function (count) {
+        this.macros.push("add_esp_bytes(" + count + ")");
+        this.emitByte(0x83); this.emitByte(0xc4); this.emitByte(count);
+    };
+    Assembler.prototype.storeX87ControlWordAtStack = function (offset) {
+        this.macros.push("fnstcw_stack(" + offset + ")");
+        this.emitByte(0xd9); this.emitByte(0x7c); this.emitByte(0x24);
+        this.emitByte(offset);
+    };
+    Assembler.prototype.loadStackWordToEax = function (offset) {
+        this.macros.push("movzx_eax_word_stack(" + offset + ")");
+        this.emitByte(0x0f); this.emitByte(0xb7); this.emitByte(0x44);
+        this.emitByte(0x24); this.emitByte(offset);
+    };
+    Assembler.prototype.orEaxImmediate = function (value) {
+        this.macros.push("or_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x0d); this.word32(value);
+    };
+    Assembler.prototype.storeAxAtStack = function (offset) {
+        this.macros.push("mov_word_stack_ax(" + offset + ")");
+        this.emitByte(0x66); this.emitByte(0x89); this.emitByte(0x44);
+        this.emitByte(0x24); this.emitByte(offset);
+    };
+    Assembler.prototype.loadX87ControlWordFromStack = function (offset) {
+        this.macros.push("fldcw_stack(" + offset + ")");
+        this.emitByte(0xd9); this.emitByte(0x6c); this.emitByte(0x24);
+        this.emitByte(offset);
+    };
+    Assembler.prototype.storeInt64AtStackFromF64Pop = function (offset) {
+        this.macros.push("fistp_i64_stack(" + offset + ")");
+        this.emitByte(0xdf); this.emitByte(0x7c); this.emitByte(0x24);
+        this.emitByte(offset);
+    };
+    Assembler.prototype.loadStackDwordToEax = function (offset) {
+        this.macros.push("mov_eax_dword_stack(" + offset + ")");
+        this.emitByte(0x8b); this.emitByte(0x44); this.emitByte(0x24);
+        this.emitByte(offset);
+    };
     Assembler.prototype.movDwordPtrEcxEax = function () {
         this.macros.push("mov_dword_ptr_ecx_eax()");
         this.emitByte(0x89); this.emitByte(0x01);

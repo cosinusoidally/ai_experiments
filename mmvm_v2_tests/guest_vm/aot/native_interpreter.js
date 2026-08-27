@@ -100,6 +100,13 @@
         var OP_JUMP = 21;
         var OP_JUMP_IF_FALSE = 22;
         var OP_RETURN = 24;
+        var OP_BIT_AND = 29;
+        var OP_BIT_OR = 30;
+        var OP_BIT_XOR = 31;
+        var OP_SHIFT_LEFT = 32;
+        var OP_SHIFT_RIGHT = 33;
+        var OP_SHIFT_UNSIGNED_RIGHT = 34;
+        var OP_BIT_NOT = 39;
         var OP_GET_LOCAL = 43;
         var OP_SET_LOCAL = 44;
         var OP_GET_PROPERTY_CONST = 45;
@@ -731,6 +738,114 @@
                 store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions + 1);
                 store32(heapBase + framePC, pc);
                 return EXIT_RETURN;
+            } else if (opcode <= OP_BIT_NOT) {
+                if (opcode >= OP_BIT_AND) {
+                    if (opcode <= OP_SHIFT_RIGHT) {
+                    var bitTargetIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + FIRST_OPERAND) * WORD_BYTES);
+                    var bitLeftIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + SECOND_OPERAND) * WORD_BYTES);
+                    var bitRightIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    var bitTarget = heapBase + registerCells +
+                                    bitTargetIndex * VALUE_CELL_BYTES;
+                    var bitLeft = heapBase + registerCells +
+                                  bitLeftIndex * VALUE_CELL_BYTES;
+                    var bitRight = heapBase + registerCells +
+                                   bitRightIndex * VALUE_CELL_BYTES;
+                    var bitLeftTag = load32(bitLeft);
+                    var bitRightTag = load32(bitRight);
+                    var bitValid = 0;
+                    if (bitLeftTag === VALUE_TAG_INT32) bitValid = 1;
+                    else if (bitLeftTag === VALUE_TAG_DOUBLE) bitValid = 1;
+                    if (bitRightTag !== VALUE_TAG_INT32) {
+                        if (bitRightTag !== VALUE_TAG_DOUBLE) bitValid = 0;
+                    }
+                    if (bitValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    var bitLeftValue = toInt32F64(loadNumberF64(
+                        bitLeft + VALUE_CELL_LOW, bitLeftTag));
+                    var bitRightValue = toInt32F64(loadNumberF64(
+                        bitRight + VALUE_CELL_LOW, bitRightTag));
+                    var bitResult = 0;
+                    if (opcode === OP_BIT_AND) {
+                        bitResult = bitLeftValue & bitRightValue;
+                    } else if (opcode === OP_BIT_OR) {
+                        bitResult = bitLeftValue | bitRightValue;
+                    } else if (opcode === OP_BIT_XOR) {
+                        bitResult = bitLeftValue ^ bitRightValue;
+                    } else if (opcode === OP_SHIFT_LEFT) {
+                        bitResult = bitLeftValue << bitRightValue;
+                    } else {
+                        bitResult = bitLeftValue >> bitRightValue;
+                    }
+                    store32(bitTarget, VALUE_TAG_INT32);
+                    store32(bitTarget + VALUE_CELL_LOW, bitResult);
+                    store32(bitTarget + VALUE_CELL_HIGH, 0);
+                    store32(bitTarget + VALUE_CELL_AUX, 0);
+                    pc = pc + FOUR_WORD_INSTRUCTION;
+                    } else if (opcode === OP_BIT_NOT) {
+                    var bitNotTargetIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + FIRST_OPERAND) * WORD_BYTES);
+                    var bitNotSourceIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + SECOND_OPERAND) * WORD_BYTES);
+                    var bitNotSource = heapBase + registerCells +
+                        bitNotSourceIndex * VALUE_CELL_BYTES;
+                    var bitNotTag = load32(bitNotSource);
+                    if (bitNotTag !== VALUE_TAG_INT32) {
+                        if (bitNotTag !== VALUE_TAG_DOUBLE) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                    }
+                    var bitNotTarget = heapBase + registerCells +
+                        bitNotTargetIndex * VALUE_CELL_BYTES;
+                    store32(bitNotTarget, VALUE_TAG_INT32);
+                    store32(bitNotTarget + VALUE_CELL_LOW,
+                        ~toInt32F64(loadNumberF64(
+                            bitNotSource + VALUE_CELL_LOW, bitNotTag)));
+                    store32(bitNotTarget + VALUE_CELL_HIGH, 0);
+                    store32(bitNotTarget + VALUE_CELL_AUX, 0);
+                    pc = pc + THREE_WORD_INSTRUCTION;
+                    } else {
+                    /* Unsigned right shift may produce a positive value above
+                     * INT32_MAX, so it requires a binary64 result path. */
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                } else {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
             } else if (opcode === OP_GET_LOCAL) {
                 var localTargetIndex = load32(
                     heapBase + bytecodeWords + (pc + FIRST_OPERAND) * WORD_BYTES);

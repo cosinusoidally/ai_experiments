@@ -270,6 +270,12 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier") {
+            if (node.callee.name === "toInt32F64" &&
+                node.arguments.length === 1) {
+                return {op: "to_i32_f64",
+                    value: lowerKernelF64Expression(node.arguments[0], symbols),
+                    type: "i32"};
+            }
             var comparisons = {equalF64: "eq_f64", lessF64: "lt_f64",
                 lessEqualF64: "le_f64", greaterF64: "gt_f64",
                 greaterEqualF64: "ge_f64"};
@@ -292,7 +298,7 @@
         if (node.type === "BinaryExpression") {
             var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
                 "&": "and_i32", "|": "or_i32", "^": "xor_i32",
-                "<<": "shl_i32", ">>": "shr_i32",
+                "<<": "shl_i32", ">>": "shr_i32", ">>>": "ushr_i32",
                 "===": "eq_i32", "!==": "ne_i32", "<": "lt_i32",
                 "<=": "le_i32", ">": "gt_i32", ">=": "ge_i32"};
             var operation = operations[node.operator];

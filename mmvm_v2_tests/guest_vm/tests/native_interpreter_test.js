@@ -248,6 +248,21 @@
                     integratedVM.runtime.arrayLength(propertyArray) !== 2) {
                     throw new Error("native indexed array access mismatch");
                 }
+
+                var bitwiseContext = integratedVM.jsRuntime.createContext();
+                var bitwiseProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.BIT_AND, 2, 0, 1,
+                           bytecode.CONST, 3, 2,
+                           bytecode.SHIFT_LEFT, 4, 2, 3,
+                           bytecode.BIT_NOT, 5, 4,
+                           bytecode.RETURN, 5],
+                    constants: [12.9, 5, 1], registerCount: 6
+                };
+                if (bitwiseContext.runProgram(bitwiseProgram) !== -9) {
+                    throw new Error("native bitwise ToInt32 mismatch");
+                }
             } finally {
                 integratedVM.destroy();
             }

@@ -190,6 +190,19 @@
 
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
+        else if (node.op === "to_i32_f64") {
+            emitControlF64(assembler, node.value, state);
+            assembler.reserveStackBytes(12);
+            assembler.storeX87ControlWordAtStack(0);
+            assembler.loadStackWordToEax(0);
+            assembler.orEaxImmediate(0x0c00);
+            assembler.storeAxAtStack(2);
+            assembler.loadX87ControlWordFromStack(2);
+            assembler.storeInt64AtStackFromF64Pop(4);
+            assembler.loadX87ControlWordFromStack(0);
+            assembler.loadStackDwordToEax(4);
+            assembler.releaseStackBytes(12);
+        }
         else if (node.op === "arg_i32") assembler.movEaxEbpArgument(node.index);
         else if (node.op === "local_i32") assembler.movEaxLocal(node.index);
         else if (node.op === "eq_f64" || node.op === "lt_f64" ||
@@ -242,6 +255,15 @@
             else if (node.op === "and_i32") assembler.andEaxEcx();
             else if (node.op === "or_i32") assembler.orEaxEcx();
             else if (node.op === "xor_i32") assembler.xorEaxEcx();
+            else if (node.op === "shl_i32" || node.op === "shr_i32" ||
+                     node.op === "ushr_i32") {
+                assembler.movEdxEax();
+                assembler.movEaxEcx();
+                assembler.movEcxEdx();
+                if (node.op === "shl_i32") assembler.shiftLeftEaxCl();
+                else if (node.op === "shr_i32") assembler.shiftRightEaxCl();
+                else assembler.shiftUnsignedRightEaxCl();
+            }
             else if (node.op === "eq_i32" || node.op === "ne_i32" ||
                      node.op === "lt_i32" || node.op === "le_i32" ||
                      node.op === "gt_i32" || node.op === "ge_i32") {

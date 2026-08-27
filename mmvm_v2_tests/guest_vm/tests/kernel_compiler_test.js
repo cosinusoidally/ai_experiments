@@ -97,6 +97,39 @@
                     f64X86.assembly.indexOf("fstp_f64_ptr_ecx()") < 0) {
                     throw new Error("i386 binary64 backend did not use x87 macros");
                 }
+                function toInt32Kernel(base, address) {
+                    var coerced = toInt32F64(loadF64(base + address));
+                    return coerced;
+                }
+                var toInt32IR = compiler.compile(toInt32Kernel);
+                var toInt32JS = new JSBackend().compile(toInt32IR);
+                var toInt32X86 = new X86Backend().compile(toInt32IR);
+                try {
+                    var coercionInputs = [12.9, -12.9, 4294967297,
+                                          -4294967297, NaN, Infinity];
+                    var coercionIndex = 0;
+                    while (coercionIndex < coercionInputs.length) {
+                        var coercionValue = coercionInputs[coercionIndex++];
+                        var coercionExpected = coercionValue | 0;
+                        f64Heap.memory.writeF64(96, coercionValue);
+                        if (toInt32JS.fn(f64Heap.memory, 0, 96) !==
+                            coercionExpected) {
+                            throw new Error("JavaScript ToInt32 kernel mismatch");
+                        }
+                        if (toInt32X86.fn &&
+                            toInt32X86.fn(f64Heap.memory.nativeAddress(0), 96) !==
+                            coercionExpected) {
+                            throw new Error("i386 ToInt32 kernel mismatch for " +
+                                            coercionValue);
+                        }
+                    }
+                    if (toInt32X86.assembly.indexOf("fnstcw_stack(0)") < 0 ||
+                        toInt32X86.assembly.indexOf("fistp_i64_stack(4)") < 0) {
+                        throw new Error("i386 ToInt32 bypassed macro assembly");
+                    }
+                } finally {
+                    toInt32X86.destroy();
+                }
             } finally {
                 f64Heap.destroy();
                 f64X86.destroy();

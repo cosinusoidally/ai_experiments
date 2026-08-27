@@ -96,6 +96,8 @@
             emitControlExpression(node.value, parameters, locals) + "|0)";
         if (node.op === "arg_i32") return "(" + parameters[node.index] + "|0)";
         if (node.op === "const_i32") return String(node.value | 0);
+        if (node.op === "to_i32_f64") return "(" +
+            emitControlF64(node.value, parameters, locals) + "|0)";
         var f64Comparisons = {eq_f64: "===", lt_f64: "<", le_f64: "<=",
                               gt_f64: ">", ge_f64: ">="};
         if (f64Comparisons[node.op]) {
@@ -111,6 +113,7 @@
             emitControlExpression(node.value, parameters, locals) + "|0)";
         var operators = {add_i32: "+", sub_i32: "-", mul_i32: "*",
             and_i32: "&", or_i32: "|", xor_i32: "^", shl_i32: "<<", shr_i32: ">>",
+            ushr_i32: ">>>",
             eq_i32: "===", ne_i32: "!==", lt_i32: "<", le_i32: "<=",
             gt_i32: ">", ge_i32: ">="};
         if (!operators[node.op]) {
