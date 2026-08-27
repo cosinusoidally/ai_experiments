@@ -66,6 +66,10 @@
         var REGEXP_PROTOTYPE = 24;
         var BUFFER_VIEW_PROPERTY_HEAD = 32;
         var BUFFER_VIEW_PROTOTYPE = 28;
+        var BUFFER_VIEW_BACKING = 16;
+        var BUFFER_VIEW_OFFSET = 20;
+        var BUFFER_VIEW_LENGTH = 24;
+        var BUFFER_BACKING_POINTER = 16;
         var ARRAY_ELEMENTS = 24;
         var VECTOR_LENGTH = 16;
         var VECTOR_CAPACITY = 20;
@@ -145,6 +149,8 @@
         var INTRINSIC_POKE8 = 2;
         var INTRINSIC_PEEK32 = 3;
         var INTRINSIC_POKE32 = 4;
+        var INTRINSIC_BUFFER_READ_U32_LE = 5;
+        var INTRINSIC_BUFFER_WRITE_U32_LE = 6;
 
         var framePC = frame + FRAME_PC;
         var registerCells = frame + FRAME_REGISTERS;
@@ -796,7 +802,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_POKE32) {
+                    else if (intrinsicId > INTRINSIC_BUFFER_WRITE_U32_LE) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -819,6 +825,8 @@
                     requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_POKE32) {
                     requiredIntrinsicArguments = 2;
+                } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
+                    requiredIntrinsicArguments = 2;
                 }
                 if (intrinsicArgumentCount < requiredIntrinsicArguments) {
                     intrinsicCallValid = 0;
@@ -832,6 +840,130 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
+                var intrinsicTarget = heapBase + registerCells +
+                    callTargetIndex * VALUE_CELL_BYTES;
+                var intrinsicHandled = 0;
+                if (intrinsicId >= INTRINSIC_BUFFER_READ_U32_LE) {
+                    var bufferReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    var bufferReceiverValid = 1;
+                    if (bufferReceiverIndex < 0) bufferReceiverValid = 0;
+                    var bufferReceiverCell = heapBase + registerCells +
+                        bufferReceiverIndex * VALUE_CELL_BYTES;
+                    if (load32(bufferReceiverCell) !== VALUE_TAG_REFERENCE) {
+                        bufferReceiverValid = 0;
+                    }
+                    var bufferView = load32(
+                        bufferReceiverCell + VALUE_CELL_LOW);
+                    if (bufferReceiverValid === 1) {
+                        if (load32(heapBase + bufferView) !==
+                            HEAP_TYPE_BUFFER_VIEW) bufferReceiverValid = 0;
+                    }
+                    var bufferOffsetRegisterCell = heapBase +
+                        intrinsicArgumentsVector + VECTOR_CELLS;
+                    if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
+                        bufferOffsetRegisterCell = bufferOffsetRegisterCell +
+                                                   VALUE_CELL_BYTES;
+                    }
+                    if (load32(bufferOffsetRegisterCell) !== VALUE_TAG_INT32) {
+                        bufferReceiverValid = 0;
+                    }
+                    var bufferOffsetRegister = load32(
+                        bufferOffsetRegisterCell + VALUE_CELL_LOW);
+                    var bufferOffsetCell = heapBase + registerCells +
+                        bufferOffsetRegister * VALUE_CELL_BYTES;
+                    var bufferOffsetTag = load32(bufferOffsetCell);
+                    if (bufferOffsetTag !== VALUE_TAG_INT32) {
+                        if (bufferOffsetTag !== VALUE_TAG_DOUBLE) {
+                            bufferReceiverValid = 0;
+                        }
+                    }
+                    var bufferOffset = toInt32F64(loadNumberF64(
+                        bufferOffsetCell + VALUE_CELL_LOW, bufferOffsetTag));
+                    var bufferLength = load32(
+                        heapBase + bufferView + BUFFER_VIEW_LENGTH);
+                    if (bufferOffset < 0) bufferReceiverValid = 0;
+                    else if (bufferOffset + WORD_BYTES > bufferLength) {
+                        bufferReceiverValid = 0;
+                    }
+                    var bufferBacking = load32(
+                        heapBase + bufferView + BUFFER_VIEW_BACKING);
+                    var bufferPointer = load32(
+                        heapBase + bufferBacking + BUFFER_BACKING_POINTER);
+                    if (bufferPointer === 0) bufferReceiverValid = 0;
+                    if (bufferReceiverValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    var bufferAddress = bufferPointer + load32(
+                        heapBase + bufferView + BUFFER_VIEW_OFFSET) + bufferOffset;
+                    if (intrinsicId === INTRINSIC_BUFFER_READ_U32_LE) {
+                        var bufferReadValue = loadRaw32(bufferAddress);
+                        if (bufferReadValue < 0) {
+                            var bufferReadMantissa = bufferReadValue &
+                                                     IEEE754_ABSOLUTE_MASK;
+                            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+                            store32(intrinsicTarget + VALUE_CELL_LOW,
+                                bufferReadMantissa <<
+                                UINT32_MANTISSA_LOW_SHIFT);
+                            store32(intrinsicTarget + VALUE_CELL_HIGH,
+                                POSITIVE_2147483648_HIGH |
+                                (bufferReadMantissa >>>
+                                 UINT32_MANTISSA_HIGH_SHIFT));
+                        } else {
+                            store32(intrinsicTarget, VALUE_TAG_INT32);
+                            store32(intrinsicTarget + VALUE_CELL_LOW,
+                                    bufferReadValue);
+                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                        }
+                    } else {
+                        var bufferValueRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS;
+                        if (load32(bufferValueRegisterCell) !== VALUE_TAG_INT32) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                        var bufferValueRegister = load32(
+                            bufferValueRegisterCell + VALUE_CELL_LOW);
+                        var bufferValueCell = heapBase + registerCells +
+                            bufferValueRegister * VALUE_CELL_BYTES;
+                        var bufferValueTag = load32(bufferValueCell);
+                        if (bufferValueTag !== VALUE_TAG_INT32) {
+                            if (bufferValueTag !== VALUE_TAG_DOUBLE) {
+                                store32(heapBase + state + ENGINE_EXIT_REASON,
+                                        EXIT_UNSUPPORTED);
+                                store32(heapBase + state + ENGINE_PC, pc);
+                                store32(heapBase + state + ENGINE_RESULT, opcode);
+                                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                        instructions);
+                                store32(heapBase + framePC, pc);
+                                return EXIT_UNSUPPORTED;
+                            }
+                        }
+                        storeRaw32(bufferAddress, toInt32F64(loadNumberF64(
+                            bufferValueCell + VALUE_CELL_LOW, bufferValueTag)));
+                        store32(intrinsicTarget, VALUE_TAG_INT32);
+                        store32(intrinsicTarget + VALUE_CELL_LOW,
+                                bufferOffset + WORD_BYTES);
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    }
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                if (intrinsicHandled === 0) {
                 var intrinsicPointerRegisterCell = heapBase +
                     intrinsicArgumentsVector + VECTOR_CELLS;
                 if (load32(intrinsicPointerRegisterCell) !== VALUE_TAG_INT32) {
@@ -863,8 +995,6 @@
                 var intrinsicPointer = toInt32F64(loadNumberF64(
                     intrinsicPointerCell + VALUE_CELL_LOW,
                     intrinsicPointerTag));
-                var intrinsicTarget = heapBase + registerCells +
-                    callTargetIndex * VALUE_CELL_BYTES;
                 if (intrinsicId === INTRINSIC_PEEK8) {
                     store32(intrinsicTarget, VALUE_TAG_INT32);
                     store32(intrinsicTarget + VALUE_CELL_LOW,
@@ -917,6 +1047,7 @@
                     store32(intrinsicTarget + VALUE_CELL_LOW, 0);
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                }
                 }
                 pc = pc + FIVE_WORD_INSTRUCTION;
             } else if (opcode === OP_RETURN) {

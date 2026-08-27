@@ -308,6 +308,36 @@
                 if (unsignedContext.runProgram(unsignedProgram) !== 4294967295) {
                     throw new Error("native unsigned shift binary64 mismatch");
                 }
+
+                var wordBuffer = integratedVM.runtime.bufferSupport.allocate(8);
+                var writeUInt32LE = integratedVM.runtime.getProperty(
+                    wordBuffer, "writeUInt32LE");
+                var readUInt32LE = integratedVM.runtime.getProperty(
+                    wordBuffer, "readUInt32LE");
+                var bufferFallbacks =
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                var bufferContext = integratedVM.jsRuntime.createContext();
+                var bufferProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.CONST, 2, 2,
+                           bytecode.CONST, 3, 3,
+                           bytecode.CALL, 4, 1, 0, 4,
+                           bytecode.CONST, 5, 5,
+                           bytecode.CALL, 6, 5, 0, 6,
+                           bytecode.RETURN, 6],
+                    constants: [wordBuffer, writeUInt32LE, 0x89abcdef, 0,
+                                [2, 3], readUInt32LE, [3]],
+                    registerCount: 7
+                };
+                if (bufferContext.runProgram(bufferProgram) !== 0x89abcdef) {
+                    throw new Error("native Buffer UInt32LE intrinsic mismatch");
+                }
+                if (typeof get_dlsym === "function" &&
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                    bufferFallbacks) {
+                    throw new Error("native Buffer UInt32LE used semantic fallback");
+                }
             } finally {
                 integratedVM.destroy();
             }

@@ -1,7 +1,9 @@
 (function (root) {
     var HostMemory = root.GuestVMHostMemory;
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     if (typeof module !== "undefined" && module.exports) {
         HostMemory = require("./host_memory.js");
+        NativeIntrinsics = require("./native_intrinsics.js");
     }
 
     function integer(value) {
@@ -32,8 +34,9 @@
         this.installConstructor();
     }
 
-    BufferSupport.prototype.makeNative = function (name, callback) {
-        return this.runtime.makeNativeFunction(name, callback);
+    BufferSupport.prototype.makeNative = function (name, callback, intrinsicId) {
+        return this.runtime.makeNativeFunction(
+            name, callback, "intrinsic", intrinsicId || NativeIntrinsics.NONE);
     };
 
     BufferSupport.prototype.installPrototype = function () {
@@ -112,14 +115,14 @@
             function (receiver, args) {
                 support.requireBuffer(receiver);
                 return support.read32LE(receiver, integer(args[0]));
-            });
+            }, NativeIntrinsics.BUFFER_READ_U32_LE);
         properties.$writeUInt32LE = this.makeNative("Buffer.prototype.writeUInt32LE",
             function (receiver, args) {
                 support.requireBuffer(receiver);
                 var offset = integer(args[1]);
                 support.write32LE(receiver, offset, args[0]);
                 return offset + 4;
-            });
+            }, NativeIntrinsics.BUFFER_WRITE_U32_LE);
         properties.$readUInt16LE = this.makeNative("Buffer.prototype.readUInt16LE",
             function (receiver, args) {
                 support.requireBuffer(receiver);
