@@ -266,33 +266,76 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    store32(arithmeticTarget, VALUE_TAG_DOUBLE);
-                    if (opcode === OP_ADD) {
-                        storeF64(arithmeticTarget + VALUE_CELL_LOW,
-                            addF64(loadNumberF64(arithmeticLeft + VALUE_CELL_LOW,
-                                                 arithmeticLeftTag),
-                                   loadNumberF64(arithmeticRight + VALUE_CELL_LOW,
-                                                 arithmeticRightTag)));
-                    } else if (opcode === OP_SUBTRACT) {
-                        storeF64(arithmeticTarget + VALUE_CELL_LOW,
-                            subtractF64(loadNumberF64(arithmeticLeft + VALUE_CELL_LOW,
-                                                      arithmeticLeftTag),
-                                        loadNumberF64(arithmeticRight + VALUE_CELL_LOW,
-                                                      arithmeticRightTag)));
-                    } else if (opcode === OP_MULTIPLY) {
-                        storeF64(arithmeticTarget + VALUE_CELL_LOW,
-                            multiplyF64(loadNumberF64(arithmeticLeft + VALUE_CELL_LOW,
-                                                      arithmeticLeftTag),
-                                        loadNumberF64(arithmeticRight + VALUE_CELL_LOW,
-                                                      arithmeticRightTag)));
-                    } else {
-                        storeF64(arithmeticTarget + VALUE_CELL_LOW,
-                            divideF64(loadNumberF64(arithmeticLeft + VALUE_CELL_LOW,
-                                                    arithmeticLeftTag),
-                                      loadNumberF64(arithmeticRight + VALUE_CELL_LOW,
-                                                    arithmeticRightTag)));
+                    var integerArithmetic = 0;
+                    if (arithmeticLeftTag === VALUE_TAG_INT32) {
+                        if (arithmeticRightTag === VALUE_TAG_INT32) {
+                            var integerLeft = load32(
+                                arithmeticLeft + VALUE_CELL_LOW);
+                            var integerRight = load32(
+                                arithmeticRight + VALUE_CELL_LOW);
+                            var integerResult = 0;
+                            var integerOverflow = 1;
+                            var integerOperation = 0;
+                            if (opcode === OP_ADD) {
+                                integerOperation = 1;
+                                integerResult = integerLeft + integerRight;
+                                integerOverflow = (integerLeft ^ integerResult) &
+                                                  (integerRight ^ integerResult);
+                            } else if (opcode === OP_SUBTRACT) {
+                                integerOperation = 1;
+                                integerResult = integerLeft - integerRight;
+                                integerOverflow = (integerLeft ^ integerRight) &
+                                                  (integerLeft ^ integerResult);
+                            }
+                            if (integerOperation === 1) {
+                                if (integerOverflow >= 0) {
+                                    integerArithmetic = 1;
+                                    store32(arithmeticTarget, VALUE_TAG_INT32);
+                                    store32(arithmeticTarget + VALUE_CELL_LOW,
+                                            integerResult);
+                                    store32(arithmeticTarget + VALUE_CELL_HIGH, 0);
+                                    store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                                }
+                            }
+                        }
                     }
-                    store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                    if (integerArithmetic === 0) {
+                        store32(arithmeticTarget, VALUE_TAG_DOUBLE);
+                        if (opcode === OP_ADD) {
+                            storeF64(arithmeticTarget + VALUE_CELL_LOW,
+                                addF64(loadNumberF64(
+                                           arithmeticLeft + VALUE_CELL_LOW,
+                                           arithmeticLeftTag),
+                                       loadNumberF64(
+                                           arithmeticRight + VALUE_CELL_LOW,
+                                           arithmeticRightTag)));
+                        } else if (opcode === OP_SUBTRACT) {
+                            storeF64(arithmeticTarget + VALUE_CELL_LOW,
+                                subtractF64(loadNumberF64(
+                                                arithmeticLeft + VALUE_CELL_LOW,
+                                                arithmeticLeftTag),
+                                            loadNumberF64(
+                                                arithmeticRight + VALUE_CELL_LOW,
+                                                arithmeticRightTag)));
+                        } else if (opcode === OP_MULTIPLY) {
+                            storeF64(arithmeticTarget + VALUE_CELL_LOW,
+                                multiplyF64(loadNumberF64(
+                                                arithmeticLeft + VALUE_CELL_LOW,
+                                                arithmeticLeftTag),
+                                            loadNumberF64(
+                                                arithmeticRight + VALUE_CELL_LOW,
+                                                arithmeticRightTag)));
+                        } else {
+                            storeF64(arithmeticTarget + VALUE_CELL_LOW,
+                                divideF64(loadNumberF64(
+                                              arithmeticLeft + VALUE_CELL_LOW,
+                                              arithmeticLeftTag),
+                                          loadNumberF64(
+                                              arithmeticRight + VALUE_CELL_LOW,
+                                              arithmeticRightTag)));
+                        }
+                        store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                    }
                     pc = pc + FOUR_WORD_INSTRUCTION;
                 } else {
                     store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
