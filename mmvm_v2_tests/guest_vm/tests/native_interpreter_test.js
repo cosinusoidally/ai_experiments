@@ -269,6 +269,17 @@
                 if (bitwiseContext.runProgram(bitwiseProgram) !== -9) {
                     throw new Error("native bitwise ToInt32 mismatch");
                 }
+                var unsignedContext = integratedVM.jsRuntime.createContext();
+                var unsignedProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.SHIFT_UNSIGNED_RIGHT, 2, 0, 1,
+                           bytecode.RETURN, 2],
+                    constants: [-1, 0], registerCount: 3
+                };
+                if (unsignedContext.runProgram(unsignedProgram) !== 4294967295) {
+                    throw new Error("native unsigned shift binary64 mismatch");
+                }
             } finally {
                 integratedVM.destroy();
             }

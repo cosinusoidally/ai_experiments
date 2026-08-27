@@ -50,6 +50,8 @@
         var IEEE754_ABSOLUTE_MASK = 2147483647;
         var IEEE754_EXPONENT_MASK = 2146435072;
         var POSITIVE_2147483648_HIGH = 1105199104;
+        var UINT32_MANTISSA_LOW_SHIFT = 21;
+        var UINT32_MANTISSA_HIGH_SHIFT = 11;
 
         var FRAME_ENVIRONMENT = 20;
         var FRAME_PC = 28;
@@ -906,7 +908,7 @@
                 return EXIT_RETURN;
             } else if (opcode <= OP_BIT_NOT) {
                 if (opcode >= OP_BIT_AND) {
-                    if (opcode <= OP_SHIFT_RIGHT) {
+                    if (opcode <= OP_SHIFT_UNSIGNED_RIGHT) {
                     var bitTargetIndex = load32(
                         heapBase + bytecodeWords +
                         (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -953,12 +955,33 @@
                         bitResult = bitLeftValue ^ bitRightValue;
                     } else if (opcode === OP_SHIFT_LEFT) {
                         bitResult = bitLeftValue << bitRightValue;
-                    } else {
+                    } else if (opcode === OP_SHIFT_RIGHT) {
                         bitResult = bitLeftValue >> bitRightValue;
+                    } else {
+                        bitResult = bitLeftValue >>> bitRightValue;
                     }
-                    store32(bitTarget, VALUE_TAG_INT32);
-                    store32(bitTarget + VALUE_CELL_LOW, bitResult);
-                    store32(bitTarget + VALUE_CELL_HIGH, 0);
+                    if (opcode === OP_SHIFT_UNSIGNED_RIGHT) {
+                        if (bitResult < 0) {
+                            var unsignedMantissa = bitResult &
+                                                   IEEE754_ABSOLUTE_MASK;
+                            store32(bitTarget, VALUE_TAG_DOUBLE);
+                            store32(bitTarget + VALUE_CELL_LOW,
+                                    unsignedMantissa <<
+                                    UINT32_MANTISSA_LOW_SHIFT);
+                            store32(bitTarget + VALUE_CELL_HIGH,
+                                    POSITIVE_2147483648_HIGH |
+                                    (unsignedMantissa >>>
+                                     UINT32_MANTISSA_HIGH_SHIFT));
+                        } else {
+                            store32(bitTarget, VALUE_TAG_INT32);
+                            store32(bitTarget + VALUE_CELL_LOW, bitResult);
+                            store32(bitTarget + VALUE_CELL_HIGH, 0);
+                        }
+                    } else {
+                        store32(bitTarget, VALUE_TAG_INT32);
+                        store32(bitTarget + VALUE_CELL_LOW, bitResult);
+                        store32(bitTarget + VALUE_CELL_HIGH, 0);
+                    }
                     store32(bitTarget + VALUE_CELL_AUX, 0);
                     pc = pc + FOUR_WORD_INSTRUCTION;
                     } else if (opcode === OP_BIT_NOT) {
@@ -993,8 +1016,6 @@
                     store32(bitNotTarget + VALUE_CELL_AUX, 0);
                     pc = pc + THREE_WORD_INSTRUCTION;
                     } else {
-                    /* Unsigned right shift may produce a positive value above
-                     * INT32_MAX, so it requires a binary64 result path. */
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
