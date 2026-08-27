@@ -191,6 +191,25 @@ Current benchmark commands, measured demo2 progress, and the optional
 `guest_runner.js --vm-profile` opcode profiler are documented in
 `PERFORMANCE.md`.
 
+### Runtime introspection
+
+Embedders can inspect authoritative state without reading linear-memory offsets
+or relying on host-side handles:
+
+```js
+var record = vm.inspectHeapRecord(guestAddress);
+var snapshot = vm.inspectExecution(execution);
+```
+
+`inspectHeapRecord` reports the record type, allocation size, GC state, and the
+named fields relevant to frames, programs, and functions. `inspectExecution`
+returns the current guest call stack (top frame first), including each frame's
+program, filename, PC, numeric opcode, environment, caller, and register count;
+when the native engine is enabled its `nativeEngine` field also reports native
+runs, bytecodes, and semantic exits. These objects are read-only diagnostic snapshots allocated on
+the host. They are not guest values and changing them never changes VM state.
+The VM continues to access all authoritative fields through `HeapRecords`.
+
 The embedder provides on both hosts:
 
 - synchronous `fs.readFileSync` for Xauthority data;

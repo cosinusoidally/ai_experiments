@@ -152,11 +152,13 @@
     };
 
     Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
-        var prototype = this.makeObject();
         this.ensureLinearHeap();
+        var programAddress = this.programAddress(program);
+        var prototype = this.makeObject();
         var callable = this.trackObject(this.makeHeapHandle(
             this.heapRecords.allocateFunction(false, 0,
-                closure ? closure.heapAddress : 0, 0),
+                closure ? closure.heapAddress : 0, programAddress,
+                homeContext ? homeContext.heapAddress : 0),
             "bytecodeFunction"));
         callable.program = program;
         callable.name = program.name || "";
@@ -534,9 +536,25 @@
         var bytecode = this.heapRecords.allocateBytecode(program.code || []);
         var constants = this.heapRecords.allocateValueVector(
             program.constants ? program.constants.length : 0);
+        var constantRegisters = this.heapRecords.allocateValueVector(
+            program.constants ? program.constants.length : 0);
+        var bindingRegisters = program.bindingRegisters ?
+            this.heapRecords.allocateValueVector(program.bindingRegisters.length) : 0;
+        var parameterSlots = this.heapRecords.allocateValueVector(
+            program.parameterSlots ? program.parameterSlots.length : 0);
         var metadataId = this.programObjects.length + 1;
-        var address = this.heapRecords.allocateProgram(bytecode, constants,
-            metadataId, program.registerCount || 0);
+        var address = this.heapRecords.allocateProgram(bytecode, constants, {
+            constantRegisters: constantRegisters,
+            bindingRegisters: bindingRegisters,
+            parameterSlots: parameterSlots,
+            registerCount: program.registerCount || 0,
+            argumentsSlot: program.argumentsSlot === undefined ?
+                           -1 : program.argumentsSlot,
+            thisSlot: program.thisSlot === undefined ? -1 : program.thisSlot,
+            functionNameSlot: program.functionNameSlot === undefined ?
+                              -1 : program.functionNameSlot,
+            metadata: metadataId
+        });
         this.programObjects.push(program);
         this.programAddresses.push(address);
         this.programMetadata["$" + address] = program;
@@ -550,10 +568,33 @@
                        typeof value.length === "number") {
                 this.writeHeapValue(cell, this.arrayFrom(value));
             } else this.writeHeapValue(cell, value);
+            this.writeHeapValue(this.heapRecords.vectorCell(
+                constantRegisters, index),
+                program.constantRegisters &&
+                program.constantRegisters[index] !== undefined ?
+                program.constantRegisters[index] : -1);
             index++;
         }
         this.heapRecords.setVectorLength(constants,
             program.constants ? program.constants.length : 0);
+        this.heapRecords.setVectorLength(constantRegisters,
+            program.constants ? program.constants.length : 0);
+        index = 0;
+        while (program.bindingRegisters && index < program.bindingRegisters.length) {
+            this.writeHeapValue(this.heapRecords.vectorCell(bindingRegisters, index),
+                                program.bindingRegisters[index]);
+            index++;
+        }
+        if (bindingRegisters) this.heapRecords.setVectorLength(
+            bindingRegisters, program.bindingRegisters.length);
+        index = 0;
+        while (program.parameterSlots && index < program.parameterSlots.length) {
+            this.writeHeapValue(this.heapRecords.vectorCell(parameterSlots, index),
+                                program.parameterSlots[index]);
+            index++;
+        }
+        this.heapRecords.setVectorLength(parameterSlots,
+            program.parameterSlots ? program.parameterSlots.length : 0);
         return address;
     };
 
@@ -1500,6 +1541,77 @@
         } finally {
             this.gcCollecting = false;
         }
+    };
+
+    /* Read-only diagnostics deliberately go through the record accessor layer.
+     * They expose authoritative guest state without making record offsets part
+     * of the embedding API. */
+    Runtime.prototype.inspectHeapRecord = function (address) {
+        this.ensureLinearHeap();
+        var type = this.linearHeap.recordType(address);
+        var names = ["free", "object", "array", "native-function",
+                     "bytecode-function", "environment", "property", "string",
+                     "number", "regexp", "buffer-view", "buffer-backing",
+                     "root-slot", "value-vector", "frame", "program", "bytecode",
+                     "context", "handler", "engine-state"];
+        var result = {address: address, type: type,
+                      typeName: names[type] || "unknown",
+                      size: this.linearHeap.recordSize(address),
+                      mark: this.linearHeap.mark(address),
+                      flags: this.linearHeap.flags(address)};
+        if (type === Heap.Types.FRAME) {
+            result.program = this.heapRecords.frameProgram(address);
+            result.environment = this.heapRecords.frameEnvironment(address);
+            result.caller = this.heapRecords.frameCaller(address);
+            result.pc = this.heapRecords.framePC(address);
+            result.returnSlot = this.heapRecords.frameReturnSlot(address);
+            result.registerCount = this.heapRecords.frameRegisterCount(address);
+        } else if (type === Heap.Types.PROGRAM) {
+            result.bytecode = this.heapRecords.programBytecode(address);
+            result.constants = this.heapRecords.programConstants(address);
+            result.constantRegisters =
+                this.heapRecords.programConstantRegisters(address);
+            result.bindingRegisters =
+                this.heapRecords.programBindingRegisters(address);
+            result.parameterSlots =
+                this.heapRecords.programParameterSlots(address);
+            result.registerCount =
+                this.heapRecords.programRegisterCount(address);
+            result.argumentsSlot =
+                this.heapRecords.programArgumentsSlot(address);
+            result.thisSlot = this.heapRecords.programThisSlot(address);
+            result.functionNameSlot =
+                this.heapRecords.programFunctionNameSlot(address);
+        } else if (type === Heap.Types.NATIVE_FUNCTION ||
+                   type === Heap.Types.BYTECODE_FUNCTION) {
+            result.closure = this.heapRecords.functionClosure(address);
+            result.metadata = this.heapRecords.functionMetadata(address);
+            result.homeContext = this.heapRecords.functionHomeContext(address);
+        }
+        return result;
+    };
+
+    Runtime.prototype.inspectExecution = function (execution) {
+        var result = {status: execution.status,
+                      totalInstructions: execution.totalInstructions,
+                      frames: []};
+        var index = execution.frames.length - 1;
+        while (index >= 0) {
+            var hostFrame = execution.frames[index--];
+            var frame = this.inspectHeapRecord(hostFrame.heapAddress);
+            frame.name = hostFrame.program.name || "<script>";
+            frame.filename = hostFrame.program.filename || "<guest>";
+            frame.opcode = hostFrame.code[frame.pc];
+            result.frames.push(frame);
+        }
+        if (this.nativeInterpreter) {
+            result.nativeEngine = {
+                runs: this.nativeInterpreter.runCount,
+                instructions: this.nativeInterpreter.instructionCount,
+                semanticExits: this.nativeInterpreter.unsupportedExitCount
+            };
+        }
+        return result;
     };
 
     Runtime.prototype.destroy = function () {

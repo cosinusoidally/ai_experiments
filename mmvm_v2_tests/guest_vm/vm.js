@@ -66,6 +66,14 @@
         return this.runtime.collect();
     };
 
+    JSRuntime.prototype.inspectHeapRecord = function (address) {
+        return this.runtime.inspectHeapRecord(address);
+    };
+
+    JSRuntime.prototype.inspectExecution = function (execution) {
+        return this.runtime.inspectExecution(execution);
+    };
+
     JSRuntime.prototype.destroy = function () {
         if (this.destroyed) return;
         while (this.contexts.length) this.contexts[0].destroy();
@@ -206,6 +214,12 @@
     VM.prototype.retained = function (handle) { return this.jsRuntime.retained(handle); };
     VM.prototype.release = function (handle) { return this.jsRuntime.release(handle); };
     VM.prototype.collect = function () { return this.jsRuntime.collect(); };
+    VM.prototype.inspectHeapRecord = function (address) {
+        return this.jsRuntime.inspectHeapRecord(address);
+    };
+    VM.prototype.inspectExecution = function (execution) {
+        return this.jsRuntime.inspectExecution(execution);
+    };
     VM.prototype.destroy = function () { this.jsRuntime.destroy(); };
 
     VM.JSRuntime = JSRuntime;

@@ -43,7 +43,8 @@
     var FUNCTION_PROPERTIES = 4;
     var FUNCTION_CLOSURE = 8;
     var FUNCTION_METADATA = 12;
-    var FUNCTION_BYTES = 16;
+    var FUNCTION_HOME_CONTEXT = 16;
+    var FUNCTION_BYTES = 24;
 
     var FRAME_PROGRAM = 0;
     var FRAME_ENVIRONMENT = 4;
@@ -64,9 +65,15 @@
 
     var PROGRAM_BYTECODE = 0;
     var PROGRAM_CONSTANTS = 4;
-    var PROGRAM_METADATA = 8;
-    var PROGRAM_REGISTER_COUNT = 12;
-    var PROGRAM_BYTES = 16;
+    var PROGRAM_CONSTANT_REGISTERS = 8;
+    var PROGRAM_BINDING_REGISTERS = 12;
+    var PROGRAM_PARAMETER_SLOTS = 16;
+    var PROGRAM_REGISTER_COUNT = 20;
+    var PROGRAM_ARGUMENTS_SLOT = 24;
+    var PROGRAM_THIS_SLOT = 28;
+    var PROGRAM_FUNCTION_NAME_SLOT = 32;
+    var PROGRAM_METADATA = 36;
+    var PROGRAM_BYTES = 40;
 
     var CONTEXT_GLOBAL = 0;
     var CONTEXT_ACTIVE_FRAME = 4;
@@ -377,11 +384,15 @@
     };
 
     Records.prototype.allocateFunction = function (nativeFunction, prototype,
-                                                     closure, metadata) {
+                                                     closure, metadata,
+                                                     homeContext) {
         var type = nativeFunction ? Heap.Types.NATIVE_FUNCTION :
                                     Heap.Types.BYTECODE_FUNCTION;
-        return this.heap.allocateRecordWords(type, FUNCTION_BYTES,
+        var address = this.heap.allocateRecordWords(type, FUNCTION_BYTES,
             prototype || 0, 0, closure || 0, metadata || 0);
+        this.heap.writeTrustedFieldU32(address, FUNCTION_HOME_CONTEXT,
+            homeContext || 0, type);
+        return address;
     };
 
     Records.prototype.allocateRegExp = function (pattern, flags, prototype) {
@@ -450,6 +461,16 @@
         return this.heap.readTrustedFieldU32(address, FUNCTION_METADATA, type);
     };
 
+    Records.prototype.functionHomeContext = function (address) {
+        var type = this.heap.recordType(address);
+        if (type !== Heap.Types.NATIVE_FUNCTION &&
+            type !== Heap.Types.BYTECODE_FUNCTION) {
+            throw new TypeError("record is not a function");
+        }
+        return this.heap.readTrustedFieldU32(
+            address, FUNCTION_HOME_CONTEXT, type);
+    };
+
     Records.prototype.allocateFrame = function (program, environment, caller,
                                                   returnSlot, registerCount) {
         var address = this.heap.allocateRecordWords(Heap.Types.FRAME,
@@ -469,6 +490,22 @@
 
     Records.prototype.framePC = function (frame) {
         return this.heap.readTrustedFieldU32(frame, FRAME_PC, Heap.Types.FRAME);
+    };
+
+    Records.prototype.frameProgram = function (frame) {
+        return this.heap.readTrustedFieldU32(
+            frame, FRAME_PROGRAM, Heap.Types.FRAME);
+    };
+
+    Records.prototype.frameCaller = function (frame) {
+        return this.heap.readTrustedFieldU32(
+            frame, FRAME_CALLER, Heap.Types.FRAME);
+    };
+
+    Records.prototype.frameReturnSlot = function (frame) {
+        var value = this.heap.readTrustedFieldU32(
+            frame, FRAME_RETURN_SLOT, Heap.Types.FRAME);
+        return value >= 2147483648 ? value - 4294967296 : value;
     };
 
     Records.prototype.setFramePC = function (frame, pc) {
@@ -576,10 +613,23 @@
             vector, VECTOR_CELLS, 0, Heap.Types.VALUE_VECTOR);
     };
 
-    Records.prototype.allocateProgram = function (
-            bytecode, constants, metadata, registerCount) {
-        return this.heap.allocateRecordWords(Heap.Types.PROGRAM, PROGRAM_BYTES,
-            bytecode, constants, metadata, registerCount);
+    Records.prototype.allocateProgram = function (bytecode, constants, layout) {
+        var address = this.heap.allocateRecordWords(Heap.Types.PROGRAM, PROGRAM_BYTES,
+            bytecode, constants, layout.constantRegisters,
+            layout.bindingRegisters);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_PARAMETER_SLOTS,
+            layout.parameterSlots || 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_REGISTER_COUNT,
+            layout.registerCount || 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_ARGUMENTS_SLOT,
+            layout.argumentsSlot >>> 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_THIS_SLOT,
+            layout.thisSlot >>> 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_FUNCTION_NAME_SLOT,
+            layout.functionNameSlot >>> 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_METADATA,
+            layout.metadata || 0, Heap.Types.PROGRAM);
+        return address;
     };
 
     Records.prototype.programBytecode = function (program) {
@@ -588,6 +638,44 @@
 
     Records.prototype.programConstants = function (program) {
         return this.heap.readTrustedFieldU32(program, PROGRAM_CONSTANTS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programConstantRegisters = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_CONSTANT_REGISTERS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programBindingRegisters = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_BINDING_REGISTERS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programParameterSlots = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_PARAMETER_SLOTS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programRegisterCount = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_REGISTER_COUNT, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programArgumentsSlot = function (program) {
+        var value = this.heap.readTrustedFieldU32(
+            program, PROGRAM_ARGUMENTS_SLOT, Heap.Types.PROGRAM);
+        return value >= 2147483648 ? value - 4294967296 : value;
+    };
+
+    Records.prototype.programThisSlot = function (program) {
+        var value = this.heap.readTrustedFieldU32(
+            program, PROGRAM_THIS_SLOT, Heap.Types.PROGRAM);
+        return value >= 2147483648 ? value - 4294967296 : value;
+    };
+
+    Records.prototype.programFunctionNameSlot = function (program) {
+        var value = this.heap.readTrustedFieldU32(
+            program, PROGRAM_FUNCTION_NAME_SLOT, Heap.Types.PROGRAM);
+        return value >= 2147483648 ? value - 4294967296 : value;
     };
 
     Records.prototype.allocateContext = function (globalObject) {
