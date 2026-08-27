@@ -147,6 +147,14 @@
             assembler.movDwordPtrEcxEax();
             return;
         }
+        if (node.op === "store_f64") {
+            emitControlExpression(assembler, node.address);
+            assembler.pushEax();
+            emitControlF64(assembler, node.value, state);
+            assembler.popEcx();
+            assembler.storeF64EcxPop();
+            return;
+        }
         if (node.op === "return") {
             emitControlExpression(assembler, node.value);
             assembler.jump(state.returnLabel);
@@ -222,6 +230,37 @@
                 assembler.movzxEaxAl();
             } else throw new Error("unsupported i386 control-flow expression " + node.op);
         }
+    }
+
+    function emitControlF64(assembler, node, state) {
+        if (node.op === "load_f64" || node.op === "load_i32_f64") {
+            emitControlExpression(assembler, node.address);
+            if (node.op === "load_f64") assembler.loadF64Eax();
+            else assembler.loadI32EaxAsF64();
+            return;
+        }
+        if (node.op === "load_number_f64") {
+            var doubleLabel = "kernel_number_double_" + state.nextLabel;
+            var loadedLabel = "kernel_number_loaded_" + state.nextLabel++;
+            emitControlExpression(assembler, node.tag);
+            assembler.compareEaxImmediate(5);
+            assembler.jumpNotEqual(doubleLabel);
+            emitControlExpression(assembler, node.address);
+            assembler.loadI32EaxAsF64();
+            assembler.jump(loadedLabel);
+            assembler.label(doubleLabel);
+            emitControlExpression(assembler, node.address);
+            assembler.loadF64Eax();
+            assembler.label(loadedLabel);
+            return;
+        }
+        emitControlF64(assembler, node.left, state);
+        emitControlF64(assembler, node.right, state);
+        if (node.op === "add_f64") assembler.addF64Pop();
+        else if (node.op === "sub_f64") assembler.subtractF64Pop();
+        else if (node.op === "mul_f64") assembler.multiplyF64Pop();
+        else if (node.op === "div_f64") assembler.divideF64Pop();
+        else throw new Error("unsupported i386 control-flow f64 expression " + node.op);
     }
 
     function emitExpression(assembler, node) {

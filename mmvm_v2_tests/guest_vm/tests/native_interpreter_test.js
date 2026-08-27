@@ -23,6 +23,21 @@
             }
             vm.runtime.linearHeap.freeRecord(frame);
 
+            var arithmetic = {code: [bytecode.CONST, 0, 0,
+                                     bytecode.CONST, 1, 1,
+                                     bytecode.ADD, 2, 0, 1,
+                                     bytecode.RETURN, 2],
+                              constants: [7, 2.5], registerCount: 3};
+            var arithmeticAddress = vm.runtime.programAddress(arithmetic);
+            var arithmeticFrame = vm.runtime.heapRecords.allocateFrame(
+                arithmeticAddress, 0, 0, -1, arithmetic.registerCount);
+            var arithmeticExit = engine.run(arithmeticFrame, arithmetic, 10);
+            if (arithmeticExit.reason !== NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(arithmeticExit.resultCell) !== 9.5) {
+                throw new Error("native interpreter binary64 arithmetic mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(arithmeticFrame);
+
             var unsupported = {code: [bytecode.MAKE_OBJECT, 0,
                                       bytecode.RETURN, 0],
                                constants: [], registerCount: 1};

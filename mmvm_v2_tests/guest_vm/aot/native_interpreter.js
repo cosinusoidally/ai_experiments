@@ -38,6 +38,72 @@
                 store32(moveDestination + 8, load32(moveSource + 8));
                 store32(moveDestination + 12, load32(moveSource + 12));
                 pc = pc + 3;
+            } else if (opcode < 11) {
+                if (opcode >= 7) {
+                    var arithmeticTargetIndex = load32(
+                        heapBase + bytecodeWords + (pc + 1) * 4);
+                    var arithmeticLeftIndex = load32(
+                        heapBase + bytecodeWords + (pc + 2) * 4);
+                    var arithmeticRightIndex = load32(
+                        heapBase + bytecodeWords + (pc + 3) * 4);
+                    var arithmeticTarget = heapBase + registerCells +
+                                           arithmeticTargetIndex * 16;
+                    var arithmeticLeft = heapBase + registerCells +
+                                         arithmeticLeftIndex * 16;
+                    var arithmeticRight = heapBase + registerCells +
+                                          arithmeticRightIndex * 16;
+                    var arithmeticLeftTag = load32(arithmeticLeft);
+                    var arithmeticRightTag = load32(arithmeticRight);
+                    var arithmeticValid = 0;
+                    if (arithmeticLeftTag === 5) arithmeticValid = 1;
+                    else if (arithmeticLeftTag === 6) arithmeticValid = 1;
+                    if (arithmeticRightTag !== 5) {
+                        if (arithmeticRightTag !== 6) arithmeticValid = 0;
+                    }
+                    if (arithmeticValid === 0) {
+                        store32(heapBase + state, 3);
+                        store32(heapBase + state + 4, pc);
+                        store32(heapBase + state + 8, opcode);
+                        store32(heapBase + state + 12, instructions);
+                        store32(heapBase + framePC, pc);
+                        return 3;
+                    }
+                    store32(arithmeticTarget, 6);
+                    if (opcode === 7) {
+                        storeF64(arithmeticTarget + 4,
+                            addF64(loadNumberF64(arithmeticLeft + 4,
+                                                 arithmeticLeftTag),
+                                   loadNumberF64(arithmeticRight + 4,
+                                                 arithmeticRightTag)));
+                    } else if (opcode === 8) {
+                        storeF64(arithmeticTarget + 4,
+                            subtractF64(loadNumberF64(arithmeticLeft + 4,
+                                                      arithmeticLeftTag),
+                                        loadNumberF64(arithmeticRight + 4,
+                                                      arithmeticRightTag)));
+                    } else if (opcode === 9) {
+                        storeF64(arithmeticTarget + 4,
+                            multiplyF64(loadNumberF64(arithmeticLeft + 4,
+                                                      arithmeticLeftTag),
+                                        loadNumberF64(arithmeticRight + 4,
+                                                      arithmeticRightTag)));
+                    } else {
+                        storeF64(arithmeticTarget + 4,
+                            divideF64(loadNumberF64(arithmeticLeft + 4,
+                                                    arithmeticLeftTag),
+                                      loadNumberF64(arithmeticRight + 4,
+                                                    arithmeticRightTag)));
+                    }
+                    store32(arithmeticTarget + 12, 0);
+                    pc = pc + 4;
+                } else {
+                    store32(heapBase + state, 3);
+                    store32(heapBase + state + 4, pc);
+                    store32(heapBase + state + 8, opcode);
+                    store32(heapBase + state + 12, instructions);
+                    store32(heapBase + framePC, pc);
+                    return 3;
+                }
             } else if (opcode === 21) {
                 pc = load32(heapBase + bytecodeWords + (pc + 1) * 4);
             } else if (opcode === 22) {

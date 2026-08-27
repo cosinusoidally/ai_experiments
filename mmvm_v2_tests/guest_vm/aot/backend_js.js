@@ -61,6 +61,11 @@
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlExpression(node.value, parameters, locals) + ");";
         }
+        if (node.op === "store_f64") {
+            return "memory.writeF64(" +
+                emitControlExpression(node.address, parameters, locals) + "," +
+                emitControlF64(node.value, parameters, locals) + ");";
+        }
         if (node.op === "if") {
             return "if(" + emitControlExpression(node.test, parameters, locals) + "){" +
                    emitNested(node.consequent, parameters, locals) + "}else{" +
@@ -107,6 +112,31 @@
         return "((" + emitControlExpression(node.left, parameters, locals) + ")" +
                operators[node.op] + "(" +
                emitControlExpression(node.right, parameters, locals) + "))";
+    }
+
+    function emitControlF64(node, parameters, locals) {
+        if (node.op === "load_f64") {
+            return "memory.readF64(" +
+                emitControlExpression(node.address, parameters, locals) + ")";
+        }
+        if (node.op === "load_i32_f64") {
+            return "(memory.readU32(" +
+                emitControlExpression(node.address, parameters, locals) + ")|0)";
+        }
+        if (node.op === "load_number_f64") {
+            var numberAddress = emitControlExpression(
+                node.address, parameters, locals);
+            return "(" + emitControlExpression(node.tag, parameters, locals) +
+                "===5?(memory.readU32(" + numberAddress + ")|0):" +
+                "memory.readF64(" + numberAddress + "))";
+        }
+        var operators = {add_f64: "+", sub_f64: "-", mul_f64: "*", div_f64: "/"};
+        if (!operators[node.op]) {
+            throw new Error("unsupported JS control-flow f64 expression " + node.op);
+        }
+        return "((" + emitControlF64(node.left, parameters, locals) + ")" +
+               operators[node.op] + "(" +
+               emitControlF64(node.right, parameters, locals) + "))";
     }
 
     function emit(node, parameters) {

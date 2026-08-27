@@ -169,6 +169,14 @@
                     address: lowerKernelExpression(expression.arguments[0], symbols),
                     value: lowerKernelExpression(expression.arguments[1], symbols)};
             }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
+                expression.callee.name === "storeF64" &&
+                expression.arguments.length === 2) {
+                return {op: "store_f64",
+                    address: lowerKernelExpression(expression.arguments[0], symbols),
+                    value: lowerKernelF64Expression(expression.arguments[1], symbols)};
+            }
             throw new SyntaxError("unsupported kernel expression statement");
         }
         if (statement.type === "IfStatement") {
@@ -238,6 +246,34 @@
                     right: lowerKernelExpression(node.right, symbols), type: "i32"};
         }
         throw new SyntaxError("unsupported control-flow kernel expression " + node.type);
+    }
+
+    function lowerKernelF64Expression(node, symbols) {
+        if (node.type !== "CallExpression" || node.callee.type !== "Identifier") {
+            throw new SyntaxError("kernel binary64 value must be an intrinsic call");
+        }
+        var name = node.callee.name;
+        if ((name === "loadF64" || name === "loadI32F64") &&
+            node.arguments.length === 1) {
+            return {op: name === "loadF64" ? "load_f64" : "load_i32_f64",
+                    address: lowerKernelExpression(node.arguments[0], symbols),
+                    type: "f64"};
+        }
+        if (name === "loadNumberF64" && node.arguments.length === 2) {
+            return {op: "load_number_f64",
+                    address: lowerKernelExpression(node.arguments[0], symbols),
+                    tag: lowerKernelExpression(node.arguments[1], symbols),
+                    type: "f64"};
+        }
+        var operations = {addF64: "add_f64", subtractF64: "sub_f64",
+                          multiplyF64: "mul_f64", divideF64: "div_f64"};
+        if (operations[name] && node.arguments.length === 2) {
+            return {op: operations[name],
+                    left: lowerKernelF64Expression(node.arguments[0], symbols),
+                    right: lowerKernelF64Expression(node.arguments[1], symbols),
+                    type: "f64"};
+        }
+        throw new SyntaxError("unsupported control-flow binary64 intrinsic " + name);
     }
 
     function lower(node, locals) {

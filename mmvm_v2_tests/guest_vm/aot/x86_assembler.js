@@ -63,6 +63,10 @@
         this.macros.push("test_eax()");
         this.emitByte(0x85); this.emitByte(0xc0);
     };
+    Assembler.prototype.compareEaxImmediate = function (value) {
+        this.macros.push("cmp_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x3d); this.word32(value);
+    };
     Assembler.prototype.compareEcxEax = function () {
         this.macros.push("cmp_ecx_eax()");
         this.emitByte(0x39); this.emitByte(0xc1);
@@ -133,6 +137,10 @@
     Assembler.prototype.loadF64Eax = function () {
         this.macros.push("fld_f64_ptr_eax()");
         this.emitByte(0xdd); this.emitByte(0x00);
+    };
+    Assembler.prototype.loadI32EaxAsF64 = function () {
+        this.macros.push("fild_i32_ptr_eax()");
+        this.emitByte(0xdb); this.emitByte(0x00);
     };
     Assembler.prototype.storeF64EcxPop = function () {
         this.macros.push("fstp_f64_ptr_ecx()");
