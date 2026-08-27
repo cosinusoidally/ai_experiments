@@ -5,6 +5,7 @@ var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
 var guestRunnerProfile = false;
 var guestRunnerThreaded = false;
+var guestRunnerNative = false;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -29,6 +30,8 @@ for (var guestRunnerOptionIndex = 0;
         guestRunnerProfile = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-threaded") {
         guestRunnerThreaded = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
+        guestRunnerNative = true;
     } else {
         guestRunnerProgramArguments.push(guestRunnerArguments[guestRunnerOptionIndex]);
     }
@@ -36,7 +39,8 @@ for (var guestRunnerOptionIndex = 0;
 guestRunnerArguments = guestRunnerProgramArguments;
 
 if (!guestRunnerArguments.length) {
-    var guestUsage = "usage: guest_runner.js [--vm-profile] [--vm-threaded] program.js";
+    var guestUsage = "usage: guest_runner.js [--vm-profile] [--vm-threaded] " +
+                     "[--vm-native] program.js";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -49,8 +53,10 @@ var guestProgramSource = guestRunnerIsNode ?
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
                                         gcThreshold: 16384,
-                                        threadedCompile: !guestRunnerIsNode ||
-                                                         guestRunnerThreaded});
+                                        nativeInterpreter: guestRunnerNative,
+                                        threadedCompile: !guestRunnerNative &&
+                                            (!guestRunnerIsNode ||
+                                             guestRunnerThreaded)});
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
     guestProgramVM, guestRunnerArguments);
 var guestRunnerDeferredCleanup = false;
