@@ -387,7 +387,17 @@
             return this.readHeapString(address);
         }
         var handle = this.heapHandles["$" + address];
-        if (!handle) throw new Error("guest heap reference has no runtime handle");
+        if (!handle) {
+            var recordType = this.linearHeap.recordType(address);
+            var guestType = recordType === Heap.Types.OBJECT ? "object" :
+                recordType === Heap.Types.ARRAY ? "array" : null;
+            if (!guestType) {
+                throw new Error("guest heap reference has no runtime handle");
+            }
+            handle = this.makeHeapHandle(address, guestType);
+            this.heapObjects.push(handle);
+            this.noteAllocation(1);
+        }
         return handle;
     };
 

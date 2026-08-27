@@ -68,9 +68,9 @@
             }
             vm.runtime.linearHeap.freeRecord(nanFrame);
 
-            var unsupported = {code: [bytecode.MAKE_OBJECT, 0,
+            var unsupported = {code: [bytecode.MAKE_REGEXP, 0, 0, 1,
                                       bytecode.RETURN, 0],
-                               constants: [], registerCount: 1};
+                               constants: ["x", ""], registerCount: 1};
             var unsupportedAddress = vm.runtime.programAddress(unsupported);
             var unsupportedFrame = vm.runtime.heapRecords.allocateFrame(
                 unsupportedAddress, 0, 0, -1, unsupported.registerCount);
@@ -106,17 +106,39 @@
 
                 var fallbackContext = integratedVM.jsRuntime.createContext();
                 var fallbackProgram = {
-                    code: [bytecode.MAKE_OBJECT, 0,
+                    code: [bytecode.MAKE_REGEXP, 0, 0, 1,
                            bytecode.RETURN, 0],
-                    constants: [], registerCount: 1
+                    constants: ["x", ""], registerCount: 1
                 };
                 var fallbackResult = fallbackContext.runProgram(fallbackProgram);
-                if (!fallbackResult || fallbackResult.guestType !== "object") {
+                if (!fallbackResult || fallbackResult.guestType !== "regexp") {
                     throw new Error("native Execution migration fallback mismatch");
                 }
                 if (integratedVM.runtime.nativeInterpreter.runCount < 4 ||
                     integratedVM.runtime.nativeInterpreter.unsupportedExitCount < 1) {
                     throw new Error("native Execution did not re-enter after fallback");
+                }
+
+                var allocationFallbacks =
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                var objectContext = integratedVM.jsRuntime.createContext();
+                var nativeObject = objectContext.runProgram({
+                    code: [bytecode.MAKE_OBJECT, 0, bytecode.RETURN, 0],
+                    constants: [], registerCount: 1
+                });
+                var allocationContext = integratedVM.jsRuntime.createContext();
+                var nativeArray = allocationContext.runProgram({
+                    code: [bytecode.MAKE_ARRAY, 0, bytecode.RETURN, 0],
+                    constants: [], registerCount: 1
+                });
+                if (!nativeObject || nativeObject.guestType !== "object" ||
+                    !nativeArray || nativeArray.guestType !== "array" ||
+                    integratedVM.runtime.arrayLength(nativeArray) !== 0) {
+                    throw new Error("native bump allocation mismatch");
+                }
+                if (integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                    allocationFallbacks) {
+                    throw new Error("native allocation used semantic fallback");
                 }
 
                 var globalContext = integratedVM.jsRuntime.createContext();

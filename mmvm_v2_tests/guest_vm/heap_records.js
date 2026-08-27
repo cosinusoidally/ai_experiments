@@ -77,7 +77,9 @@
     var ENGINE_PC = 4;
     var ENGINE_RESULT_CELL = 8;
     var ENGINE_INSTRUCTIONS = 12;
-    var ENGINE_STATE_BYTES = 16;
+    var ENGINE_HEAP_BUMP = 16;
+    var ENGINE_HEAP_LIMIT = 20;
+    var ENGINE_STATE_BYTES = 24;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -631,6 +633,18 @@
     Records.prototype.engineInstructionCount = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_INSTRUCTIONS, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineHeapBounds = function (state, bump, limit) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_HEAP_BUMP, bump, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_HEAP_LIMIT, limit, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineHeapBump = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_HEAP_BUMP, Heap.Types.ENGINE_STATE);
     };
 
     function propertyHeadOffset(type) {

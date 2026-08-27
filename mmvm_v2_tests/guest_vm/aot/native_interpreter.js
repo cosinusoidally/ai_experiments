@@ -45,6 +45,7 @@
         var HEAP_TYPE_STRING = 7;
         var HEAP_TYPE_REGEXP = 9;
         var HEAP_TYPE_BUFFER_VIEW = 10;
+        var HEAP_TYPE_VALUE_VECTOR = 13;
         var STRING_LENGTH = 16;
         var IEEE754_SIGN_BIT = -2147483648;
         var IEEE754_ABSOLUTE_MASK = 2147483647;
@@ -58,6 +59,8 @@
         var FRAME_REGISTERS = 48;
         var OBJECT_PROPERTY_HEAD = 20;
         var OBJECT_PROTOTYPE = 16;
+        var OBJECT_EXTENSIBLE = 24;
+        var OBJECT_RESERVED = 28;
         var REGEXP_PROPERTY_HEAD = 28;
         var REGEXP_PROTOTYPE = 24;
         var BUFFER_VIEW_PROPERTY_HEAD = 32;
@@ -77,6 +80,17 @@
         var ENGINE_PC = 4;
         var ENGINE_RESULT = 8;
         var ENGINE_INSTRUCTIONS = 12;
+        var ENGINE_HEAP_BUMP = 16;
+        var ENGINE_HEAP_LIMIT = 20;
+
+        var RECORD_TYPE = 0;
+        var RECORD_SIZE = 4;
+        var RECORD_MARK = 8;
+        var RECORD_FLAGS = 12;
+        var OBJECT_RECORD_BYTES = 32;
+        var ARRAY_RECORD_BYTES = 32;
+        var INITIAL_ARRAY_CAPACITY = 4;
+        var INITIAL_VECTOR_RECORD_BYTES = 88;
 
         var EXIT_BUDGET = 1;
         var EXIT_RETURN = 2;
@@ -107,6 +121,8 @@
         var OP_JUMP_IF_FALSE = 22;
         var OP_CALL = 23;
         var OP_RETURN = 24;
+        var OP_MAKE_OBJECT = 26;
+        var OP_MAKE_ARRAY = 27;
         var OP_BIT_AND = 29;
         var OP_BIT_OR = 30;
         var OP_BIT_XOR = 31;
@@ -906,6 +922,90 @@
                 store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions + 1);
                 store32(heapBase + framePC, pc);
                 return EXIT_RETURN;
+            } else if (opcode === OP_MAKE_OBJECT) {
+                var makeObjectTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var makeObjectAddress = load32(
+                    heapBase + state + ENGINE_HEAP_BUMP);
+                var makeObjectLimit = load32(
+                    heapBase + state + ENGINE_HEAP_LIMIT);
+                if (makeObjectAddress + OBJECT_RECORD_BYTES > makeObjectLimit) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                store32(heapBase + makeObjectAddress + RECORD_TYPE,
+                        HEAP_TYPE_OBJECT);
+                store32(heapBase + makeObjectAddress + RECORD_SIZE,
+                        OBJECT_RECORD_BYTES);
+                store32(heapBase + makeObjectAddress + RECORD_MARK, 0);
+                store32(heapBase + makeObjectAddress + RECORD_FLAGS, 0);
+                store32(heapBase + makeObjectAddress + OBJECT_PROTOTYPE, 0);
+                store32(heapBase + makeObjectAddress + OBJECT_PROPERTY_HEAD, 0);
+                store32(heapBase + makeObjectAddress + OBJECT_EXTENSIBLE, 1);
+                store32(heapBase + makeObjectAddress + OBJECT_RESERVED, 0);
+                var makeObjectTarget = heapBase + registerCells +
+                    makeObjectTargetIndex * VALUE_CELL_BYTES;
+                store32(makeObjectTarget, VALUE_TAG_REFERENCE);
+                store32(makeObjectTarget + VALUE_CELL_LOW, makeObjectAddress);
+                store32(makeObjectTarget + VALUE_CELL_HIGH, 0);
+                store32(makeObjectTarget + VALUE_CELL_AUX, 0);
+                store32(heapBase + state + ENGINE_HEAP_BUMP,
+                        makeObjectAddress + OBJECT_RECORD_BYTES);
+                pc = pc + TWO_WORD_INSTRUCTION;
+            } else if (opcode === OP_MAKE_ARRAY) {
+                var makeArrayTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var makeVectorAddress = load32(
+                    heapBase + state + ENGINE_HEAP_BUMP);
+                var makeArrayAddress = makeVectorAddress +
+                                       INITIAL_VECTOR_RECORD_BYTES;
+                var makeArrayLimit = load32(
+                    heapBase + state + ENGINE_HEAP_LIMIT);
+                if (makeArrayAddress + ARRAY_RECORD_BYTES > makeArrayLimit) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                store32(heapBase + makeVectorAddress + RECORD_TYPE,
+                        HEAP_TYPE_VALUE_VECTOR);
+                store32(heapBase + makeVectorAddress + RECORD_SIZE,
+                        INITIAL_VECTOR_RECORD_BYTES);
+                store32(heapBase + makeVectorAddress + RECORD_MARK, 0);
+                store32(heapBase + makeVectorAddress + RECORD_FLAGS, 0);
+                store32(heapBase + makeVectorAddress + VECTOR_LENGTH, 0);
+                store32(heapBase + makeVectorAddress + VECTOR_CAPACITY,
+                        INITIAL_ARRAY_CAPACITY);
+                store32(heapBase + makeArrayAddress + RECORD_TYPE,
+                        HEAP_TYPE_ARRAY);
+                store32(heapBase + makeArrayAddress + RECORD_SIZE,
+                        ARRAY_RECORD_BYTES);
+                store32(heapBase + makeArrayAddress + RECORD_MARK, 0);
+                store32(heapBase + makeArrayAddress + RECORD_FLAGS, 0);
+                store32(heapBase + makeArrayAddress + OBJECT_PROTOTYPE, 0);
+                store32(heapBase + makeArrayAddress + OBJECT_PROPERTY_HEAD, 0);
+                store32(heapBase + makeArrayAddress + ARRAY_ELEMENTS,
+                        makeVectorAddress);
+                store32(heapBase + makeArrayAddress + OBJECT_RESERVED, 0);
+                var makeArrayTarget = heapBase + registerCells +
+                    makeArrayTargetIndex * VALUE_CELL_BYTES;
+                store32(makeArrayTarget, VALUE_TAG_REFERENCE);
+                store32(makeArrayTarget + VALUE_CELL_LOW, makeArrayAddress);
+                store32(makeArrayTarget + VALUE_CELL_HIGH, 0);
+                store32(makeArrayTarget + VALUE_CELL_AUX, 0);
+                store32(heapBase + state + ENGINE_HEAP_BUMP,
+                        makeArrayAddress + ARRAY_RECORD_BYTES);
+                pc = pc + TWO_WORD_INSTRUCTION;
             } else if (opcode <= OP_BIT_NOT) {
                 if (opcode >= OP_BIT_AND) {
                     if (opcode <= OP_SHIFT_UNSIGNED_RIGHT) {
@@ -1363,6 +1463,9 @@
         var constantCells = records.vectorCellsAddress(constants);
         var globalObject = context ? records.contextGlobal(context.heapAddress) : 0;
         var arrayLengthKey = this.runtime.internStringAddress("length");
+        records.setEngineHeapBounds(this.stateAddress,
+                                    this.runtime.linearHeap.bump,
+                                    this.runtime.linearHeap.byteLength);
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var reason = this.nativeResult.fn ? this.nativeResult.fn(
             heapBase, frame, bytecodeWords, constantCells, globalObject,
@@ -1370,6 +1473,10 @@
             this.runtime.linearHeap.memory, 0, frame, bytecodeWords,
             constantCells, globalObject, arrayLengthKey, budget,
             this.statePayload);
+        var nativeHeapBump = records.engineHeapBump(this.stateAddress);
+        if (nativeHeapBump > this.runtime.linearHeap.bump) {
+            this.runtime.linearHeap.bump = nativeHeapBump;
+        }
         var instructionCount = records.engineInstructionCount(this.stateAddress);
         this.runCount++;
         this.instructionCount += instructionCount;
