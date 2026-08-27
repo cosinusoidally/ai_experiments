@@ -30,6 +30,8 @@
         var bytecode = require("../bytecode.js");
         var runNumericBytecodeBackendTest = require(
             "./numeric_bytecode_backend_test.js");
+        var NativeInterpreter = require("../aot/native_interpreter.js");
+        var runNativeInterpreterTest = require("./native_interpreter_test.js");
         var fs = require("fs");
         var path = require("path");
         readSource = function (relativePath) {
@@ -49,6 +51,8 @@
         load("guest_vm/tests/heap_records_test.js");
         load("guest_vm/tests/kernel_compiler_test.js");
         load("guest_vm/tests/numeric_bytecode_backend_test.js");
+        load("guest_vm/aot/native_interpreter.js");
+        load("guest_vm/tests/native_interpreter_test.js");
         VM = GuestVM;
         runBufferLifetimeTest = GuestVMRunBufferLifetimeTest;
         runEmbeddingAPITest = GuestVMRunEmbeddingAPITest;
@@ -69,6 +73,8 @@
         NumericBytecodeBackend = GuestVMNumericBytecodeBackend;
         bytecode = GuestVMBytecode;
         runNumericBytecodeBackendTest = GuestVMRunNumericBytecodeBackendTest;
+        NativeInterpreter = GuestVMNativeInterpreter;
+        runNativeInterpreterTest = GuestVMRunNativeInterpreterTest;
         readSource = function (relativePath) {
             return read("guest_vm/tests/" + relativePath);
         };
@@ -137,6 +143,10 @@
         VM, NumericBytecodeBackend, bytecode);
     if (typeof print === "function") print(numericBackendResult);
     else console.log(numericBackendResult);
+    var nativeInterpreterResult = runNativeInterpreterTest(
+        VM, NativeInterpreter, bytecode);
+    if (typeof print === "function") print(nativeInterpreterResult);
+    else console.log(nativeInterpreterResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");

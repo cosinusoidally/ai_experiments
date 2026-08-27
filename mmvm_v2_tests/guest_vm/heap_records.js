@@ -73,6 +73,12 @@
     var CONTEXT_FLAGS = 8;
     var CONTEXT_BYTES = 16;
 
+    var ENGINE_EXIT_REASON = 0;
+    var ENGINE_PC = 4;
+    var ENGINE_RESULT_CELL = 8;
+    var ENGINE_INSTRUCTIONS = 12;
+    var ENGINE_STATE_BYTES = 16;
+
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
     var REGEXP_PROTOTYPE = 8;
@@ -478,6 +484,16 @@
         return Heap.HEADER_SIZE + FRAME_REGISTERS + register * CELL_BYTES;
     };
 
+    Records.prototype.framePCAddress = function (frame) {
+        return this.heap.trustedPayloadAddress(
+            frame, FRAME_PC, 4, Heap.Types.FRAME);
+    };
+
+    Records.prototype.frameRegistersAddress = function (frame) {
+        return this.heap.trustedPayloadAddress(
+            frame, FRAME_REGISTERS, 0, Heap.Types.FRAME);
+    };
+
     Records.prototype.frameHandler = function (frame) {
         return this.heap.readTrustedFieldU32(frame, FRAME_HANDLER);
     };
@@ -534,6 +550,16 @@
         return word >= 2147483648 ? word - 4294967296 : word;
     };
 
+    Records.prototype.bytecodeWordsAddress = function (bytecode) {
+        return this.heap.trustedPayloadAddress(
+            bytecode, BYTECODE_WORDS, 0, Heap.Types.BYTECODE);
+    };
+
+    Records.prototype.vectorCellsAddress = function (vector) {
+        return this.heap.trustedPayloadAddress(
+            vector, VECTOR_CELLS, 0, Heap.Types.VALUE_VECTOR);
+    };
+
     Records.prototype.allocateProgram = function (
             bytecode, constants, metadata, registerCount) {
         return this.heap.allocateRecordWords(Heap.Types.PROGRAM, PROGRAM_BYTES,
@@ -560,6 +586,37 @@
     Records.prototype.setContextActiveFrame = function (context, frame) {
         this.heap.writeTrustedFieldU32(context, CONTEXT_ACTIVE_FRAME, frame || 0,
                                 Heap.Types.CONTEXT);
+    };
+
+    Records.prototype.allocateEngineState = function () {
+        return this.heap.allocateRecordWords(
+            Heap.Types.ENGINE_STATE, ENGINE_STATE_BYTES, 0, 0, 0, 0);
+    };
+
+    Records.prototype.engineStatePayloadAddress = function (state) {
+        return this.heap.trustedPayloadAddress(
+            state, ENGINE_EXIT_REASON, ENGINE_STATE_BYTES,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineExitReason = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_EXIT_REASON, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.enginePC = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_PC, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineResultCell = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_RESULT_CELL, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineInstructionCount = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_INSTRUCTIONS, Heap.Types.ENGINE_STATE);
     };
 
     function propertyHeadOffset(type) {

@@ -43,7 +43,8 @@
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       ir: ir, backend: "i386", destroy: function () {}};
         if (!this.ffi.isMMVM) return result;
-        var allocationLength = 4096;
+        var allocationLength = Math.max(4096,
+            Math.ceil(assembler.bytes.length / 4096) * 4096);
         var pointer = this.ffi.call(this.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
@@ -89,7 +90,8 @@
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       ir: ir, backend: "i386", destroy: function () {}};
         if (!backend.ffi.isMMVM) return result;
-        var allocationLength = 4096;
+        var allocationLength = Math.max(4096,
+            Math.ceil(assembler.bytes.length / 4096) * 4096);
         var pointer = backend.ffi.call(backend.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");

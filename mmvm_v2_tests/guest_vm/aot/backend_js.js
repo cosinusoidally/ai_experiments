@@ -62,19 +62,25 @@
                 emitControlExpression(node.value, parameters, locals) + ");";
         }
         if (node.op === "if") {
-            return "if(" + emitControlExpression(node.test, parameters, locals) + ")" +
-                   emitStatement(node.consequent, parameters, locals) + "else" +
-                   emitStatement(node.alternate, parameters, locals);
+            return "if(" + emitControlExpression(node.test, parameters, locals) + "){" +
+                   emitNested(node.consequent, parameters, locals) + "}else{" +
+                   emitNested(node.alternate, parameters, locals) + "}";
         }
         if (node.op === "while") {
-            return "while(" + emitControlExpression(node.test, parameters, locals) + ")" +
-                   emitStatement(node.body, parameters, locals);
+            return "while(" + emitControlExpression(node.test, parameters, locals) + "){" +
+                   emitNested(node.body, parameters, locals) + "}";
         }
         if (node.op === "return") {
             return "return (" + emitControlExpression(
                 node.value, parameters, locals) + ")|0;";
         }
         throw new Error("unsupported JS control-flow kernel statement " + node.op);
+    }
+
+    function emitNested(node, parameters, locals) {
+        return node.op === "block" ?
+            emitStatements(node.body, parameters, locals) :
+            emitStatement(node, parameters, locals);
     }
 
     function emitControlExpression(node, parameters, locals) {

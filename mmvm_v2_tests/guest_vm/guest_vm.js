@@ -25,6 +25,7 @@
         load("guest_vm/aot/backend_x86.js");
         load("guest_vm/aot/record_initializer.js");
         load("guest_vm/aot/bytecode_numeric_backend.js");
+        load("guest_vm/aot/native_interpreter.js");
         load("guest_vm/threaded_compiler.js");
         load("guest_vm/buffer.js");
         load("guest_vm/runtime.js");

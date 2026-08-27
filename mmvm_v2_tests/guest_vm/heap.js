@@ -31,7 +31,8 @@
         PROGRAM: 15,
         BYTECODE: 16,
         CONTEXT: 17,
-        HANDLER: 18
+        HANDLER: 18,
+        ENGINE_STATE: 19
     };
 
     function align8(value) {
@@ -64,7 +65,7 @@
 
     Heap.prototype.allocateRecordWords = function (
             type, payloadBytes, word0, word1, word2, word3) {
-        if (!Types || type <= Types.FREE || type > Types.HANDLER) {
+        if (!Types || type <= Types.FREE || type > Types.ENGINE_STATE) {
             throw new TypeError("invalid heap record type");
         }
         payloadBytes = Number(payloadBytes);
