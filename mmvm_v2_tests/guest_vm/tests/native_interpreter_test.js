@@ -155,6 +155,56 @@
                 if (localContext.runProgram(localProgram) !== 15) {
                     throw new Error("native lexical environment access mismatch");
                 }
+
+                var unaryContext = integratedVM.jsRuntime.createContext();
+                var unaryProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.NEGATE, 1, 0,
+                           bytecode.POSITIVE, 2, 1,
+                           bytecode.RETURN, 2],
+                    constants: [5], registerCount: 3
+                };
+                if (unaryContext.runProgram(unaryProgram) !== -5) {
+                    throw new Error("native numeric unary opcode mismatch");
+                }
+
+                var negativeZeroContext = integratedVM.jsRuntime.createContext();
+                var negativeZeroProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.NEGATE, 1, 0,
+                           bytecode.RETURN, 1],
+                    constants: [0], registerCount: 2
+                };
+                var negativeZero = negativeZeroContext.runProgram(
+                    negativeZeroProgram);
+                if (negativeZero !== 0 || 1 / negativeZero !== -Infinity) {
+                    throw new Error("native unary minus lost negative zero");
+                }
+
+                var notContext = integratedVM.jsRuntime.createContext();
+                var notProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.NOT, 1, 0,
+                           bytecode.RETURN, 1],
+                    constants: [""], registerCount: 2
+                };
+                if (notContext.runProgram(notProgram) !== true) {
+                    throw new Error("native string truthiness mismatch");
+                }
+
+                var nanBranchContext = integratedVM.jsRuntime.createContext();
+                var nanBranchProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.JUMP_IF_FALSE, 0, 11,
+                           bytecode.CONST, 1, 1,
+                           bytecode.JUMP, 14,
+                           bytecode.CONST, 1, 2,
+                           bytecode.RETURN, 1],
+                    constants: [NaN, 1, 2], registerCount: 2
+                };
+                if (nanBranchContext.runProgram(nanBranchProgram) !== 2) {
+                    throw new Error("native NaN truthiness mismatch");
+                }
             } finally {
                 integratedVM.destroy();
             }

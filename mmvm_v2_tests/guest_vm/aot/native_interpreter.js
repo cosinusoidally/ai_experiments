@@ -34,6 +34,12 @@
         var VALUE_TAG_INT32 = 5;
         var VALUE_TAG_DOUBLE = 6;
         var VALUE_TAG_REFERENCE = 7;
+        var HEAP_TYPE_STRING = 7;
+        var STRING_LENGTH = 16;
+        var IEEE754_SIGN_BIT = -2147483648;
+        var IEEE754_ABSOLUTE_MASK = 2147483647;
+        var IEEE754_EXPONENT_MASK = 2146435072;
+        var POSITIVE_2147483648_HIGH = 1105199104;
 
         var FRAME_ENVIRONMENT = 20;
         var FRAME_PC = 28;
@@ -70,6 +76,9 @@
         var OP_LESS_EQUAL = 15;
         var OP_GREATER = 16;
         var OP_GREATER_EQUAL = 17;
+        var OP_NOT = 18;
+        var OP_NEGATE = 19;
+        var OP_POSITIVE = 20;
         var OP_JUMP = 21;
         var OP_JUMP_IF_FALSE = 22;
         var OP_RETURN = 24;
@@ -349,6 +358,136 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
+            } else if (opcode === OP_NOT) {
+                var notTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var notSourceIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var notSource = heapBase + registerCells +
+                                notSourceIndex * VALUE_CELL_BYTES;
+                var notTarget = heapBase + registerCells +
+                                notTargetIndex * VALUE_CELL_BYTES;
+                var notTag = load32(notSource);
+                var notValue = 0;
+                if (notTag === VALUE_TAG_UNDEFINED) notValue = 1;
+                else if (notTag === VALUE_TAG_NULL) notValue = 1;
+                else if (notTag === VALUE_TAG_FALSE) notValue = 1;
+                else if (notTag === VALUE_TAG_INT32) {
+                    if (load32(notSource + VALUE_CELL_LOW) === 0) notValue = 1;
+                } else if (notTag === VALUE_TAG_DOUBLE) {
+                    var notDoubleLow = load32(notSource + VALUE_CELL_LOW);
+                    var notDoubleHigh = load32(notSource + VALUE_CELL_HIGH) &
+                                        IEEE754_ABSOLUTE_MASK;
+                    if (notDoubleHigh === 0) {
+                        if (notDoubleLow === 0) notValue = 1;
+                    } else if (notDoubleHigh > IEEE754_EXPONENT_MASK) {
+                        notValue = 1;
+                    } else if (notDoubleHigh === IEEE754_EXPONENT_MASK) {
+                        if (notDoubleLow !== 0) notValue = 1;
+                    }
+                } else if (notTag === VALUE_TAG_REFERENCE) {
+                    var notReference = load32(notSource + VALUE_CELL_LOW);
+                    if (load32(heapBase + notReference) === HEAP_TYPE_STRING) {
+                        if (load32(heapBase + notReference + STRING_LENGTH) === 0) {
+                            notValue = 1;
+                        }
+                    }
+                } else {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                store32(notTarget, VALUE_TAG_FALSE + notValue);
+                store32(notTarget + VALUE_CELL_LOW, 0);
+                store32(notTarget + VALUE_CELL_HIGH, 0);
+                store32(notTarget + VALUE_CELL_AUX, 0);
+                pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_NEGATE) {
+                var negateTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var negateSourceIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var negateSource = heapBase + registerCells +
+                                   negateSourceIndex * VALUE_CELL_BYTES;
+                var negateTarget = heapBase + registerCells +
+                                   negateTargetIndex * VALUE_CELL_BYTES;
+                var negateTag = load32(negateSource);
+                if (negateTag === VALUE_TAG_INT32) {
+                    var negateInteger = load32(negateSource + VALUE_CELL_LOW);
+                    if (negateInteger === 0) {
+                        store32(negateTarget, VALUE_TAG_DOUBLE);
+                        store32(negateTarget + VALUE_CELL_LOW, 0);
+                        store32(negateTarget + VALUE_CELL_HIGH,
+                                IEEE754_SIGN_BIT);
+                    } else if (negateInteger === IEEE754_SIGN_BIT) {
+                        store32(negateTarget, VALUE_TAG_DOUBLE);
+                        store32(negateTarget + VALUE_CELL_LOW, 0);
+                        store32(negateTarget + VALUE_CELL_HIGH,
+                                POSITIVE_2147483648_HIGH);
+                    } else {
+                        store32(negateTarget, VALUE_TAG_INT32);
+                        store32(negateTarget + VALUE_CELL_LOW, -negateInteger);
+                        store32(negateTarget + VALUE_CELL_HIGH, 0);
+                    }
+                    store32(negateTarget + VALUE_CELL_AUX, 0);
+                } else if (negateTag === VALUE_TAG_DOUBLE) {
+                    store32(negateTarget, VALUE_TAG_DOUBLE);
+                    store32(negateTarget + VALUE_CELL_LOW,
+                            load32(negateSource + VALUE_CELL_LOW));
+                    store32(negateTarget + VALUE_CELL_HIGH,
+                            load32(negateSource + VALUE_CELL_HIGH) ^
+                            IEEE754_SIGN_BIT);
+                    store32(negateTarget + VALUE_CELL_AUX, 0);
+                } else {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_POSITIVE) {
+                var positiveTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var positiveSourceIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var positiveSource = heapBase + registerCells +
+                                     positiveSourceIndex * VALUE_CELL_BYTES;
+                var positiveTag = load32(positiveSource);
+                if (positiveTag !== VALUE_TAG_INT32) {
+                    if (positiveTag !== VALUE_TAG_DOUBLE) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                }
+                var positiveTarget = heapBase + registerCells +
+                                     positiveTargetIndex * VALUE_CELL_BYTES;
+                store32(positiveTarget, load32(positiveSource));
+                store32(positiveTarget + VALUE_CELL_LOW,
+                        load32(positiveSource + VALUE_CELL_LOW));
+                store32(positiveTarget + VALUE_CELL_HIGH,
+                        load32(positiveSource + VALUE_CELL_HIGH));
+                store32(positiveTarget + VALUE_CELL_AUX,
+                        load32(positiveSource + VALUE_CELL_AUX));
+                pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_JUMP) {
                 pc = load32(heapBase + bytecodeWords + (pc + FIRST_OPERAND) * WORD_BYTES);
             } else if (opcode === OP_JUMP_IF_FALSE) {
@@ -362,12 +501,25 @@
                 else if (conditionTag === VALUE_TAG_INT32) {
                     if (load32(condition + VALUE_CELL_LOW) === 0) falseCondition = 1;
                 } else if (conditionTag === VALUE_TAG_DOUBLE) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    var conditionDoubleLow = load32(
+                        condition + VALUE_CELL_LOW);
+                    var conditionDoubleHigh = load32(
+                        condition + VALUE_CELL_HIGH) & IEEE754_ABSOLUTE_MASK;
+                    if (conditionDoubleHigh === 0) {
+                        if (conditionDoubleLow === 0) falseCondition = 1;
+                    } else if (conditionDoubleHigh > IEEE754_EXPONENT_MASK) {
+                        falseCondition = 1;
+                    } else if (conditionDoubleHigh === IEEE754_EXPONENT_MASK) {
+                        if (conditionDoubleLow !== 0) falseCondition = 1;
+                    }
+                } else if (conditionTag === VALUE_TAG_REFERENCE) {
+                    var conditionReference = load32(
+                        condition + VALUE_CELL_LOW);
+                    if (load32(heapBase + conditionReference) ===
+                        HEAP_TYPE_STRING) {
+                        if (load32(heapBase + conditionReference + STRING_LENGTH) ===
+                            0) falseCondition = 1;
+                    }
                 }
                 if (falseCondition === 1) {
                     pc = load32(heapBase + bytecodeWords + (pc + SECOND_OPERAND) * WORD_BYTES);
