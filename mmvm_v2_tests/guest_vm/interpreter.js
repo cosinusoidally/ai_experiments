@@ -142,42 +142,7 @@
 
         this.status = "running";
         var used = 0;
-        if (this.runtime.nativeInterpreter && this.frames.length && budget !== 0) {
-            this.compiledEntry = null;
-            var nativeFrame = this.frames[this.frames.length - 1];
-            this.runtime.spillFrame(nativeFrame);
-            var nativeBudget = budget === Infinity ? 2147483647 : budget;
-            var nativeResult = this.runtime.nativeInterpreter.run(
-                nativeFrame.heapAddress, nativeFrame.program, nativeBudget,
-                nativeFrame.context);
-            this.runtime.reloadFrame(nativeFrame);
-            used += nativeResult.instructions;
-            this.totalInstructions += nativeResult.instructions;
-            if (budget !== Infinity) budget -= nativeResult.instructions;
-            if (nativeResult.reason === 1) {
-                this.status = "budget";
-                return this.result("budget", used);
-            }
-            if (nativeResult.reason === 2) {
-                var nativeReturnValue = this.runtime.readHeapValue(
-                    nativeResult.resultCell);
-                var nativeReturnedFrame = this.frames.pop();
-                if (nativeReturnedFrame.constructReceiver &&
-                    (!nativeReturnValue || !nativeReturnValue.guestType)) {
-                    nativeReturnValue = nativeReturnedFrame.constructReceiver;
-                }
-                this.releaseFrame(nativeReturnedFrame);
-                if (!this.frames.length) {
-                    return this.finish("completed", nativeReturnValue, used);
-                }
-                var nativeCaller = this.frames[this.frames.length - 1];
-                nativeCaller.registers[nativeReturnedFrame.returnRegister] =
-                    nativeReturnValue;
-            } else if (nativeResult.reason !== 3) {
-                throw new Error("unknown native interpreter exit " +
-                                nativeResult.reason);
-            }
-        }
+        if (this.runtime.nativeInterpreter) this.compiledEntry = null;
         if (this.compiledEntry && budget === Infinity) {
             var entry = this.compiledEntry;
             this.compiledEntry = null;
@@ -224,6 +189,47 @@
                 if (budget === 0) {
                     this.status = "budget";
                     return this.result("budget", used);
+                }
+                if (this.runtime.nativeInterpreter) {
+                    var nativeFrame = this.frames[this.frames.length - 1];
+                    this.runtime.spillFrame(nativeFrame);
+                    var nativeBudget = budget === Infinity ? 2147483647 : budget;
+                    var nativeResult = this.runtime.nativeInterpreter.run(
+                        nativeFrame.heapAddress, nativeFrame.program, nativeBudget,
+                        nativeFrame.context);
+                    this.runtime.reloadFrame(nativeFrame);
+                    used += nativeResult.instructions;
+                    this.totalInstructions += nativeResult.instructions;
+                    if (budget !== Infinity) budget -= nativeResult.instructions;
+                    if (nativeResult.reason === 1) {
+                        this.status = "budget";
+                        return this.result("budget", used);
+                    }
+                    if (nativeResult.reason === 2) {
+                        var nativeReturnValue = this.runtime.readHeapValue(
+                            nativeResult.resultCell);
+                        var nativeReturnedFrame = this.frames.pop();
+                        if (nativeReturnedFrame.constructReceiver &&
+                            (!nativeReturnValue || !nativeReturnValue.guestType)) {
+                            nativeReturnValue = nativeReturnedFrame.constructReceiver;
+                        }
+                        this.releaseFrame(nativeReturnedFrame);
+                        if (!this.frames.length) {
+                            return this.finish("completed", nativeReturnValue, used);
+                        }
+                        var nativeCaller = this.frames[this.frames.length - 1];
+                        nativeCaller.registers[nativeReturnedFrame.returnRegister] =
+                            nativeReturnValue;
+                        continue;
+                    }
+                    if (nativeResult.reason !== 3) {
+                        throw new Error("unknown native interpreter exit " +
+                                        nativeResult.reason);
+                    }
+                    if (budget === 0) {
+                        this.status = "budget";
+                        return this.result("budget", used);
+                    }
                 }
                 var frame = this.frames[this.frames.length - 1];
                 var code = frame.code;

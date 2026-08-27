@@ -491,6 +491,9 @@
         this.stateAddress = runtime.heapRecords.allocateEngineState();
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
+        this.runCount = 0;
+        this.instructionCount = 0;
+        this.unsupportedExitCount = 0;
     }
 
     NativeInterpreter.Exit = Exit;
@@ -509,10 +512,14 @@
             budget, this.statePayload) : this.js.fn(
             this.runtime.linearHeap.memory, 0, frame, bytecodeWords,
             constantCells, globalObject, budget, this.statePayload);
+        var instructionCount = records.engineInstructionCount(this.stateAddress);
+        this.runCount++;
+        this.instructionCount += instructionCount;
+        if (reason === Exit.UNSUPPORTED) this.unsupportedExitCount++;
         return {reason: reason,
                 pc: records.enginePC(this.stateAddress),
                 resultCell: records.engineResultCell(this.stateAddress),
-                instructions: records.engineInstructionCount(this.stateAddress),
+                instructions: instructionCount,
                 backend: this.nativeResult.fn ? "i386" : "js"};
     };
 

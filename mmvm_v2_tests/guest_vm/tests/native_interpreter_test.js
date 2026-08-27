@@ -114,6 +114,10 @@
                 if (!fallbackResult || fallbackResult.guestType !== "object") {
                     throw new Error("native Execution migration fallback mismatch");
                 }
+                if (integratedVM.runtime.nativeInterpreter.runCount < 4 ||
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount < 1) {
+                    throw new Error("native Execution did not re-enter after fallback");
+                }
 
                 var globalContext = integratedVM.jsRuntime.createContext();
                 globalContext.installGlobal("counter", 40);
