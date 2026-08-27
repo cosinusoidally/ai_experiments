@@ -99,7 +99,8 @@
         if (!address) {
             address = this.bump;
             if (address + size > this.byteLength) {
-                throw new RangeError("guest heap exhausted");
+                throw new RangeError("guest heap exhausted: " +
+                    this.exhaustionSummary(size));
             }
             this.bump += size;
         } else {
@@ -126,6 +127,34 @@
         }
         this.allocationCount++;
         return address;
+    };
+
+    Heap.prototype.exhaustionSummary = function (requested) {
+        var counts = [];
+        var bytes = [];
+        var address = 64;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                return "corrupt record at " + address;
+            }
+            counts[type] = (counts[type] || 0) + 1;
+            bytes[type] = (bytes[type] || 0) + size;
+            address += size;
+        }
+        var parts = [];
+        var typeIndex = 0;
+        while (typeIndex < counts.length) {
+            if (counts[typeIndex]) {
+                parts.push(typeIndex + "=" + counts[typeIndex] + "/" +
+                           bytes[typeIndex]);
+            }
+            typeIndex++;
+        }
+        return "requested=" + requested + " bump=" + this.bump +
+               " freeBlocks=" + this.freeBlocks.length +
+               " records(type=count/bytes): " + parts.join(",");
     };
 
     Heap.prototype.freeRecord = function (address) {

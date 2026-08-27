@@ -49,7 +49,38 @@
         if (!reuseVM.runtime.linearHeap.freeBlocks.length) {
             throw new Error("automatic GC did not return records to the guest heap");
         }
+        reuseVM.run(
+            "var rotating = [1, 2, 3];" +
+            "var deletionTarget = {};" +
+            "for (var m = 0; m < 2000; m++) {" +
+            "    rotating.reverse();" +
+            "    deletionTarget.value = m;" +
+            "    delete deletionTarget.value;" +
+            "}" +
+            "assertEqual(rotating.length, 3, 'array replacement retained length');" +
+            "assertEqual(deletionTarget.value, undefined, 'property deletion persisted');",
+            "automatic_gc_replaced_records.js");
         reuseVM.destroy();
+
+        var callbackVM = new VM({threadedCompile: true,
+                                 gcThreshold: 8,
+                                 heapBytes: 256 * 1024});
+        callbackVM.run(
+            "function compiledCallback(value) { return value + 1; }",
+            "automatic_gc_compiled_callback.js");
+        var callback = callbackVM.runtime.getGlobal(
+            callbackVM.context, "compiledCallback");
+        var callbackIndex = 0;
+        while (callbackIndex < 3000) {
+            var execution = callbackVM.context.startFunction(
+                callback, undefined, [callbackIndex]);
+            var callbackResult = callbackVM.context.runExecutionToCompletion(execution);
+            if (callbackResult !== callbackIndex + 1) {
+                throw new Error("compiled callback returned the wrong value");
+            }
+            callbackIndex++;
+        }
+        callbackVM.destroy();
         return "automatic GC threshold and stress modes passed";
     }
 

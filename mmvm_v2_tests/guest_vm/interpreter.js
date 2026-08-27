@@ -45,6 +45,9 @@
         }
         runtime.assertOwned(callable);
         var execution = new Execution(callable.program, runtime, context);
+        while (execution.frames.length) {
+            execution.releaseFrame(execution.frames.pop());
+        }
         execution.frames = [makeFrame(callable.program, runtime,
             callable.homeContext || context, receiver, args || [], runtime.functionClosure(callable),
             callable, -1)];
@@ -142,7 +145,9 @@
         if (this.compiledEntry && budget === Infinity) {
             var entry = this.compiledEntry;
             this.compiledEntry = null;
-            this.frames = [];
+            while (this.frames.length) {
+                this.releaseFrame(this.frames.pop());
+            }
             try {
                 var compiledValue;
                 if (this.runtime.profileOpcodeCounts) {

@@ -453,6 +453,7 @@
         this.heapRecords.setVectorLength(newVector, length);
         this.heapRecords.setArrayElements(array.heapAddress, newVector);
         array.arrayStructureVersion++;
+        this.linearHeap.freeRecord(oldVector);
         return newVector;
     };
 
@@ -484,6 +485,7 @@
     };
 
     Runtime.prototype.replaceArray = function (array, values) {
+        var oldVector = this.heapRecords.arrayElements(array.heapAddress);
         var capacity = values.length < 4 ? 4 : values.length;
         var vector = this.heapRecords.allocateValueVector(capacity);
         this.heapRecords.setArrayElements(array.heapAddress, vector);
@@ -495,6 +497,7 @@
             index++;
         }
         this.heapRecords.setVectorLength(vector, values.length);
+        this.linearHeap.freeRecord(oldVector);
         return array;
     };
 
@@ -1165,10 +1168,13 @@
         }
         if (object.heapAddress) {
             var keyAddress = this.internStringAddress(key);
+            var removedProperty = this.heapRecords.findOwnProperty(
+                object.heapAddress, keyAddress);
             delete this.propertyAddressCache[
                 "$" + object.heapAddress + ":" + keyAddress];
             var deleted = this.heapRecords.deleteOwnProperty(
                 object.heapAddress, keyAddress);
+            if (removedProperty) this.linearHeap.freeRecord(removedProperty);
             if (deleted) object.propertyVersion++;
             if (deleted) object.valueVersion++;
             return deleted;
