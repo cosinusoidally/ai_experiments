@@ -42,6 +42,7 @@
         var HEAP_TYPE_ARRAY = 2;
         var HEAP_TYPE_NATIVE_FUNCTION = 3;
         var HEAP_TYPE_BYTECODE_FUNCTION = 4;
+        var HEAP_TYPE_PROPERTY = 6;
         var HEAP_TYPE_STRING = 7;
         var HEAP_TYPE_REGEXP = 9;
         var HEAP_TYPE_BUFFER_VIEW = 10;
@@ -73,6 +74,10 @@
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
         var PROPERTY_VALUE = 32;
+        var PROPERTY_ATTRIBUTES = 24;
+        var PROPERTY_RESERVED = 28;
+        var DEFAULT_PROPERTY_ATTRIBUTES = 7;
+        var PROPERTY_RECORD_BYTES = 48;
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
         var ENVIRONMENT_CELLS = 24;
@@ -1371,22 +1376,27 @@
                 var setPropertyObjectType = load32(
                     heapBase + setPropertyObject);
                 var setPropertyHead = 0;
+                var setPropertyHeadOffset = 0;
                 if (setPropertyObjectType >= HEAP_TYPE_OBJECT) {
                     if (setPropertyObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
                         setPropertyHead = load32(
                             heapBase + setPropertyObject + OBJECT_PROPERTY_HEAD);
+                        setPropertyHeadOffset = OBJECT_PROPERTY_HEAD;
                     }
                 }
                 if (setPropertyObjectType === HEAP_TYPE_REGEXP) {
                     setPropertyHead = load32(
                         heapBase + setPropertyObject + REGEXP_PROPERTY_HEAD);
+                    setPropertyHeadOffset = REGEXP_PROPERTY_HEAD;
                 } else if (setPropertyObjectType === HEAP_TYPE_BUFFER_VIEW) {
                     setPropertyHead = load32(
                         heapBase + setPropertyObject + BUFFER_VIEW_PROPERTY_HEAD);
+                    setPropertyHeadOffset = BUFFER_VIEW_PROPERTY_HEAD;
                 }
                 var setPropertyKey = load32(
                     setPropertyKeyCell + VALUE_CELL_LOW);
                 var setPropertyRecord = 0;
+                var setPropertyFirst = setPropertyHead;
                 while (setPropertyHead !== 0) {
                     if (load32(heapBase + setPropertyHead + PROPERTY_KEY) ===
                         setPropertyKey) {
@@ -1398,13 +1408,46 @@
                     }
                 }
                 if (setPropertyRecord === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    if (setPropertyHeadOffset === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    setPropertyRecord = load32(
+                        heapBase + state + ENGINE_HEAP_BUMP);
+                    if (setPropertyRecord + PROPERTY_RECORD_BYTES > load32(
+                        heapBase + state + ENGINE_HEAP_LIMIT)) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    store32(heapBase + setPropertyRecord + RECORD_TYPE,
+                            HEAP_TYPE_PROPERTY);
+                    store32(heapBase + setPropertyRecord + RECORD_SIZE,
+                            PROPERTY_RECORD_BYTES);
+                    store32(heapBase + setPropertyRecord + RECORD_MARK, 0);
+                    store32(heapBase + setPropertyRecord + RECORD_FLAGS, 0);
+                    store32(heapBase + setPropertyRecord + PROPERTY_NEXT,
+                            setPropertyFirst);
+                    store32(heapBase + setPropertyRecord + PROPERTY_KEY,
+                            setPropertyKey);
+                    store32(heapBase + setPropertyRecord + PROPERTY_ATTRIBUTES,
+                            DEFAULT_PROPERTY_ATTRIBUTES);
+                    store32(heapBase + setPropertyRecord + PROPERTY_RESERVED, 0);
+                    store32(heapBase + setPropertyObject + setPropertyHeadOffset,
+                            setPropertyRecord);
+                    store32(heapBase + state + ENGINE_HEAP_BUMP,
+                            setPropertyRecord + PROPERTY_RECORD_BYTES);
                 }
                 var setPropertyDestination = heapBase + setPropertyRecord +
                                              PROPERTY_VALUE;

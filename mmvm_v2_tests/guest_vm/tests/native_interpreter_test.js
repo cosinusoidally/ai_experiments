@@ -123,8 +123,12 @@
                     integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
                 var objectContext = integratedVM.jsRuntime.createContext();
                 var nativeObject = objectContext.runProgram({
-                    code: [bytecode.MAKE_OBJECT, 0, bytecode.RETURN, 0],
-                    constants: [], registerCount: 1
+                    code: [bytecode.MAKE_OBJECT, 0,
+                           bytecode.CONST, 1, 0,
+                           bytecode.SET_PROPERTY_CONST, 0, 1, 1,
+                           bytecode.GET_PROPERTY_CONST, 2, 0, 1,
+                           bytecode.RETURN, 0],
+                    constants: [9, "nativeProperty"], registerCount: 3
                 });
                 var allocationContext = integratedVM.jsRuntime.createContext();
                 var nativeArray = allocationContext.runProgram({
@@ -133,7 +137,9 @@
                 });
                 if (!nativeObject || nativeObject.guestType !== "object" ||
                     !nativeArray || nativeArray.guestType !== "array" ||
-                    integratedVM.runtime.arrayLength(nativeArray) !== 0) {
+                    integratedVM.runtime.arrayLength(nativeArray) !== 0 ||
+                    integratedVM.runtime.getProperty(
+                        nativeObject, "nativeProperty") !== 9) {
                     throw new Error("native bump allocation mismatch");
                 }
                 if (integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
