@@ -98,10 +98,18 @@
         if (node.type === "VariableStatement") {
             var declarationIndex = 0;
             while (declarationIndex < node.declarations.length) {
-                var name = node.declarations[declarationIndex++].name;
+                var declaration = node.declarations[declarationIndex++];
+                var name = declaration.name;
                 if (symbols["$" + name] === undefined) {
-                    symbols["$" + name] = {kind: "local", index: names.length};
-                    names.push(name);
+                    if (isKernelConstantDeclaration(declaration)) {
+                        symbols["$" + name] = {
+                            kind: "constant",
+                            value: kernelConstantValue(declaration.initial)
+                        };
+                    } else {
+                        symbols["$" + name] = {kind: "local", index: names.length};
+                        names.push(name);
+                    }
                 }
             }
         }
@@ -117,6 +125,27 @@
                 }
             }
         }
+    }
+
+    function isKernelConstantDeclaration(declaration) {
+        return /^[A-Z][A-Z0-9_]*$/.test(declaration.name) &&
+               kernelConstantValue(declaration.initial) !== null;
+    }
+
+    function kernelConstantValue(expression) {
+        if (expression && expression.type === "Literal" &&
+            typeof expression.value === "number" &&
+            expression.value === (expression.value | 0)) {
+            return expression.value | 0;
+        }
+        if (expression && expression.type === "UnaryExpression" &&
+            expression.operator === "-" && expression.argument &&
+            expression.argument.type === "Literal" &&
+            typeof expression.argument.value === "number" &&
+            -expression.argument.value === (-expression.argument.value | 0)) {
+            return -expression.argument.value | 0;
+        }
+        return null;
     }
 
     function lowerStatements(statements, symbols) {
@@ -142,9 +171,17 @@
             while (index < statement.declarations.length) {
                 var declaration = statement.declarations[index++];
                 if (declaration.initial) {
-                    declarations.push({op: "set_local",
-                        index: requireLocal(symbols, declaration.name).index,
-                        value: lowerKernelExpression(declaration.initial, symbols)});
+                    var declarationSymbol = symbols["$" + declaration.name];
+                    if (!declarationSymbol) {
+                        throw new SyntaxError("unknown kernel declaration " +
+                                              declaration.name);
+                    }
+                    if (declarationSymbol.kind !== "constant") {
+                        declarations.push({op: "set_local",
+                            index: requireLocal(symbols, declaration.name).index,
+                            value: lowerKernelExpression(
+                                declaration.initial, symbols)});
+                    }
                 }
             }
             return {op: "block", body: declarations};
@@ -157,6 +194,10 @@
                 var target = symbols["$" + expression.left.name];
                 if (!target) throw new SyntaxError("unknown kernel assignment " +
                                                    expression.left.name);
+                if (target.kind === "constant") {
+                    throw new SyntaxError("kernel constant cannot be assigned: " +
+                                          expression.left.name);
+                }
                 return {op: target.kind === "local" ? "set_local" : "set_argument",
                         index: target.index,
                         value: lowerKernelExpression(expression.right, symbols)};
@@ -214,6 +255,9 @@
         if (node.type === "Identifier") {
             var symbol = symbols["$" + node.name];
             if (!symbol) throw new SyntaxError("unknown kernel identifier " + node.name);
+            if (symbol.kind === "constant") {
+                return {op: "const_i32", value: symbol.value, type: "i32"};
+            }
             return {op: symbol.kind === "local" ? "local_i32" : "arg_i32",
                     index: symbol.index, type: "i32"};
         }

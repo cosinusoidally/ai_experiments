@@ -148,7 +148,8 @@
             this.runtime.spillFrame(nativeFrame);
             var nativeBudget = budget === Infinity ? 2147483647 : budget;
             var nativeResult = this.runtime.nativeInterpreter.run(
-                nativeFrame.heapAddress, nativeFrame.program, nativeBudget);
+                nativeFrame.heapAddress, nativeFrame.program, nativeBudget,
+                nativeFrame.context);
             this.runtime.reloadFrame(nativeFrame);
             used += nativeResult.instructions;
             this.totalInstructions += nativeResult.instructions;

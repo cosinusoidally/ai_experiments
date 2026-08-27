@@ -101,6 +101,38 @@
                 f64Heap.destroy();
                 f64X86.destroy();
             }
+            function namedConstantKernel(value) {
+                var WORD_BYTES = 4;
+                var PREVIOUS_WORD = -1;
+                return value * WORD_BYTES + PREVIOUS_WORD;
+            }
+            var namedConstantIR = compiler.compile(namedConstantKernel);
+            var namedConstantJS = new JSBackend().compile(namedConstantIR);
+            var namedConstantX86 = new X86Backend().compile(namedConstantIR);
+            try {
+                if (namedConstantIR.locals.length !== 0 ||
+                    namedConstantJS.fn(null, 3) !== 11 ||
+                    (namedConstantX86.fn && namedConstantX86.fn(3) !== 11)) {
+                    throw new Error("named kernel constants were not folded");
+                }
+                var rejectedConstantAssignment = false;
+                try {
+                    compiler.compile(function () {
+                        var IMMUTABLE_WORDS = 4;
+                        IMMUTABLE_WORDS = 8;
+                        return IMMUTABLE_WORDS;
+                    });
+                } catch (constantError) {
+                    rejectedConstantAssignment =
+                        String(constantError).indexOf(
+                            "kernel constant cannot be assigned") >= 0;
+                }
+                if (!rejectedConstantAssignment) {
+                    throw new Error("kernel compiler allowed constant assignment");
+                }
+            } finally {
+                namedConstantX86.destroy();
+            }
             function dispatchKernel(base, state, budget) {
                 var pc = load32(base + state);
                 var sum = 0;

@@ -468,6 +468,11 @@
         return this.heap.readTrustedFieldU32(frame, FRAME_REGISTER_COUNT, Heap.Types.FRAME);
     };
 
+    Records.prototype.frameEnvironment = function (frame) {
+        return this.heap.readTrustedFieldU32(
+            frame, FRAME_ENVIRONMENT, Heap.Types.FRAME);
+    };
+
     Records.prototype.frameRegisterCell = function (frame, register) {
         var count = this.frameRegisterCount(frame);
         if (register < 0 || register >= count || register !== Math.floor(register)) {

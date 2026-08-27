@@ -114,6 +114,43 @@
                 if (!fallbackResult || fallbackResult.guestType !== "object") {
                     throw new Error("native Execution migration fallback mismatch");
                 }
+
+                var globalContext = integratedVM.jsRuntime.createContext();
+                globalContext.installGlobal("counter", 40);
+                var globalProgram = {
+                    code: [bytecode.GET_GLOBAL, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.ADD, 2, 0, 1,
+                           bytecode.SET_GLOBAL, 0, 2,
+                           bytecode.GET_GLOBAL, 3, 0,
+                           bytecode.RETURN, 3],
+                    constants: ["counter", 2], registerCount: 4
+                };
+                var globalResult = globalContext.runProgram(globalProgram);
+                if (globalResult !== 42 ||
+                    integratedVM.runtime.getGlobal(globalContext, "counter") !== 42) {
+                    throw new Error("native global value-cell access mismatch");
+                }
+
+                var localContext = integratedVM.jsRuntime.createContext();
+                var localProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.SET_LOCAL, 0, 0, 0,
+                           bytecode.GET_LOCAL, 1, 0, 0,
+                           bytecode.CONST, 2, 1,
+                           bytecode.ADD, 3, 1, 2,
+                           bytecode.SET_LOCAL, 0, 0, 3,
+                           bytecode.GET_LOCAL, 4, 0, 0,
+                           bytecode.RETURN, 4],
+                    constants: [10, 5], registerCount: 5,
+                    bindings: ["x", "arguments", "this"],
+                    bindingSlots: {$x: 0, $arguments: 1, $this: 2},
+                    parameters: [], parameterSlots: [], argumentsSlot: 1,
+                    thisSlot: 2, functionNameSlot: -1
+                };
+                if (localContext.runProgram(localProgram) !== 15) {
+                    throw new Error("native lexical environment access mismatch");
+                }
             } finally {
                 integratedVM.destroy();
             }
