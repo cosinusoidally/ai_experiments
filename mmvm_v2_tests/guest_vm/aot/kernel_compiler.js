@@ -8,6 +8,41 @@
 
     function KernelCompiler() {}
 
+    var READ_FIELD_ACCESSORS = {
+        recordType: "RECORD_TYPE",
+        arrayElements: "ARRAY_ELEMENTS",
+        vectorLength: "VECTOR_LENGTH",
+        vectorCapacity: "VECTOR_CAPACITY",
+        objectPropertyHead: "OBJECT_PROPERTY_HEAD",
+        regexpPropertyHead: "REGEXP_PROPERTY_HEAD",
+        bufferViewPropertyHead: "BUFFER_VIEW_PROPERTY_HEAD",
+        propertyNext: "PROPERTY_NEXT",
+        propertyKey: "PROPERTY_KEY",
+        engineHeapBump: "ENGINE_HEAP_BUMP",
+        engineHeapLimit: "ENGINE_HEAP_LIMIT"
+    };
+
+    var WRITE_FIELD_ACCESSORS = {
+        setVectorLength: "VECTOR_LENGTH",
+        setRecordType: "RECORD_TYPE",
+        setRecordSize: "RECORD_SIZE",
+        setRecordMark: "RECORD_MARK",
+        setRecordFlags: "RECORD_FLAGS",
+        setArrayPrototype: "ARRAY_PROTOTYPE",
+        setArrayPropertyHead: "ARRAY_PROPERTY_HEAD",
+        setArrayElements: "ARRAY_ELEMENTS",
+        setArrayReserved: "ARRAY_RESERVED",
+        setObjectPropertyHead: "OBJECT_PROPERTY_HEAD",
+        setRegexpPropertyHead: "REGEXP_PROPERTY_HEAD",
+        setBufferViewPropertyHead: "BUFFER_VIEW_PROPERTY_HEAD",
+        setPropertyNext: "PROPERTY_NEXT",
+        setPropertyKey: "PROPERTY_KEY",
+        setPropertyAttributes: "PROPERTY_ATTRIBUTES",
+        setPropertyReserved: "PROPERTY_RESERVED",
+        setVectorCapacity: "VECTOR_CAPACITY",
+        setEngineHeapBump: "ENGINE_HEAP_BUMP"
+    };
+
     KernelCompiler.prototype.compile = function (functionObject) {
         if (typeof functionObject !== "function") {
             throw new TypeError("kernel compiler requires a function");
@@ -204,6 +239,15 @@
             }
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
+                WRITE_FIELD_ACCESSORS[expression.callee.name] &&
+                expression.arguments.length === 3) {
+                return {op: "store_u32",
+                    address: namedFieldAddress(expression.callee.name,
+                        expression.arguments, symbols, WRITE_FIELD_ACCESSORS),
+                    value: lowerKernelExpression(expression.arguments[2], symbols)};
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
                 expression.callee.name === "store32" &&
                 expression.arguments.length === 2) {
                 return {op: "store_u32",
@@ -275,6 +319,15 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
+            READ_FIELD_ACCESSORS[node.callee.name] &&
+            node.arguments.length === 2) {
+            return {op: "load_u32",
+                    address: namedFieldAddress(node.callee.name,
+                        node.arguments, symbols, READ_FIELD_ACCESSORS),
+                    type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
             node.callee.name === "load32" && node.arguments.length === 1) {
             return {op: "load_u32",
                     address: lowerKernelExpression(node.arguments[0], symbols),
@@ -331,6 +384,22 @@
                     right: lowerKernelExpression(node.right, symbols), type: "i32"};
         }
         throw new SyntaxError("unsupported control-flow kernel expression " + node.type);
+    }
+
+    function namedFieldAddress(name, argumentsList, symbols, accessors) {
+        var fieldName = accessors[name];
+        var field = symbols["$" + fieldName];
+        if (!field || field.kind !== "constant") {
+            throw new SyntaxError("kernel field accessor " + name +
+                                  " requires " + fieldName);
+        }
+        return {op: "add_i32",
+            left: {op: "add_i32",
+                left: lowerKernelExpression(argumentsList[0], symbols),
+                right: lowerKernelExpression(argumentsList[1], symbols),
+                type: "i32"},
+            right: {op: "const_i32", value: field.value, type: "i32"},
+            type: "i32"};
     }
 
     function lowerKernelF64Expression(node, symbols) {

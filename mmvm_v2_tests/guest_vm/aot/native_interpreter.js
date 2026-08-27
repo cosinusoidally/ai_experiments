@@ -15,7 +15,7 @@
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3};
 
     function interpreterKernel(heapBase, frame, globalObject, arrayLengthKey,
-                               budget, state) {
+                               arrayPrototype, budget, state) {
         /* Upper-case integer declarations are compile-time kernel constants.
          * These names mirror bytecode.js, value_cell.js, and heap_records.js;
          * the compiler substitutes their values rather than allocating locals. */
@@ -462,17 +462,17 @@
                 var arraySetObject = load32(
                     arraySetObjectCell + VALUE_CELL_LOW);
                 if (arraySetSupported === 1) {
-                    if (load32(heapBase + arraySetObject) !== HEAP_TYPE_ARRAY) {
+                    if (recordType(heapBase, arraySetObject) !==
+                        HEAP_TYPE_ARRAY) {
                         arraySetSupported = 0;
                     }
                 }
                 if (arraySetIndex < 0) arraySetSupported = 0;
                 var arraySetVector = 0;
                 if (arraySetSupported === 1) {
-                    arraySetVector = load32(
-                        heapBase + arraySetObject + ARRAY_ELEMENTS);
-                    if (arraySetIndex >= load32(
-                        heapBase + arraySetVector + VECTOR_CAPACITY)) {
+                    arraySetVector = arrayElements(heapBase, arraySetObject);
+                    if (arraySetIndex >= vectorCapacity(
+                        heapBase, arraySetVector)) {
                         arraySetSupported = 0;
                     }
                 }
@@ -488,11 +488,10 @@
                             load32(arraySetSource + VALUE_CELL_HIGH));
                     store32(arraySetDestination + VALUE_CELL_AUX,
                             load32(arraySetSource + VALUE_CELL_AUX));
-                    var arraySetLength = load32(
-                        heapBase + arraySetVector + VECTOR_LENGTH);
+                    var arraySetLength = vectorLength(heapBase, arraySetVector);
                     if (arraySetIndex >= arraySetLength) {
-                        store32(heapBase + arraySetVector + VECTOR_LENGTH,
-                                arraySetIndex + 1);
+                        setVectorLength(heapBase, arraySetVector,
+                                        arraySetIndex + 1);
                     }
                 } else {
                     var dynamicPropertyValid = 1;
@@ -505,34 +504,32 @@
                     var dynamicPropertyKey = load32(
                         arraySetKeyCell + VALUE_CELL_LOW);
                     if (dynamicPropertyValid === 1) {
-                        if (load32(heapBase + dynamicPropertyKey) !==
+                        if (recordType(heapBase, dynamicPropertyKey) !==
                             HEAP_TYPE_STRING) dynamicPropertyValid = 0;
                     }
                     var dynamicPropertyObjectType = 0;
                     if (dynamicPropertyValid === 1) {
-                        dynamicPropertyObjectType = load32(
-                            heapBase + arraySetObject);
+                        dynamicPropertyObjectType = recordType(
+                            heapBase, arraySetObject);
                     }
                     var dynamicPropertyHead = 0;
                     var dynamicPropertyHeadOffset = 0;
                     if (dynamicPropertyObjectType >= HEAP_TYPE_OBJECT) {
                         if (dynamicPropertyObjectType <=
                             HEAP_TYPE_BYTECODE_FUNCTION) {
-                            dynamicPropertyHead = load32(
-                                heapBase + arraySetObject +
-                                OBJECT_PROPERTY_HEAD);
+                            dynamicPropertyHead = objectPropertyHead(
+                                heapBase, arraySetObject);
                             dynamicPropertyHeadOffset = OBJECT_PROPERTY_HEAD;
                         }
                     }
                     if (dynamicPropertyObjectType === HEAP_TYPE_REGEXP) {
-                        dynamicPropertyHead = load32(
-                            heapBase + arraySetObject + REGEXP_PROPERTY_HEAD);
+                        dynamicPropertyHead = regexpPropertyHead(
+                            heapBase, arraySetObject);
                         dynamicPropertyHeadOffset = REGEXP_PROPERTY_HEAD;
                     } else if (dynamicPropertyObjectType ===
                                HEAP_TYPE_BUFFER_VIEW) {
-                        dynamicPropertyHead = load32(
-                            heapBase + arraySetObject +
-                            BUFFER_VIEW_PROPERTY_HEAD);
+                        dynamicPropertyHead = bufferViewPropertyHead(
+                            heapBase, arraySetObject);
                         dynamicPropertyHeadOffset = BUFFER_VIEW_PROPERTY_HEAD;
                     }
                     if (dynamicPropertyHeadOffset === 0) {
@@ -551,20 +548,19 @@
                     var dynamicPropertyFirst = dynamicPropertyHead;
                     var dynamicPropertyRecord = 0;
                     while (dynamicPropertyHead !== 0) {
-                        if (load32(heapBase + dynamicPropertyHead +
-                                   PROPERTY_KEY) === dynamicPropertyKey) {
+                        if (propertyKey(heapBase, dynamicPropertyHead) ===
+                            dynamicPropertyKey) {
                             dynamicPropertyRecord = dynamicPropertyHead;
                             dynamicPropertyHead = 0;
                         } else {
-                            dynamicPropertyHead = load32(
-                                heapBase + dynamicPropertyHead + PROPERTY_NEXT);
+                            dynamicPropertyHead = propertyNext(
+                                heapBase, dynamicPropertyHead);
                         }
                     }
                     if (dynamicPropertyRecord === 0) {
-                        dynamicPropertyRecord = load32(
-                            heapBase + state + ENGINE_HEAP_BUMP);
+                        dynamicPropertyRecord = engineHeapBump(heapBase, state);
                         if (dynamicPropertyRecord + PROPERTY_RECORD_BYTES >
-                            load32(heapBase + state + ENGINE_HEAP_LIMIT)) {
+                            engineHeapLimit(heapBase, state)) {
                             store32(heapBase + state + ENGINE_EXIT_REASON,
                                     EXIT_UNSUPPORTED);
                             store32(heapBase + state + ENGINE_PC, pc);
@@ -574,26 +570,33 @@
                             store32(heapBase + framePC, pc);
                             return EXIT_UNSUPPORTED;
                         }
-                        store32(heapBase + dynamicPropertyRecord + RECORD_TYPE,
-                                HEAP_TYPE_PROPERTY);
-                        store32(heapBase + dynamicPropertyRecord + RECORD_SIZE,
-                                PROPERTY_RECORD_BYTES);
-                        store32(heapBase + dynamicPropertyRecord + RECORD_MARK, 0);
-                        store32(heapBase + dynamicPropertyRecord + RECORD_FLAGS, 0);
-                        store32(heapBase + dynamicPropertyRecord + PROPERTY_NEXT,
-                                dynamicPropertyFirst);
-                        store32(heapBase + dynamicPropertyRecord + PROPERTY_KEY,
-                                dynamicPropertyKey);
-                        store32(heapBase + dynamicPropertyRecord +
-                                PROPERTY_ATTRIBUTES,
-                                DEFAULT_PROPERTY_ATTRIBUTES);
-                        store32(heapBase + dynamicPropertyRecord +
-                                PROPERTY_RESERVED, 0);
-                        store32(heapBase + arraySetObject +
-                                dynamicPropertyHeadOffset,
-                                dynamicPropertyRecord);
-                        store32(heapBase + state + ENGINE_HEAP_BUMP,
-                                dynamicPropertyRecord + PROPERTY_RECORD_BYTES);
+                        setRecordType(heapBase, dynamicPropertyRecord,
+                                      HEAP_TYPE_PROPERTY);
+                        setRecordSize(heapBase, dynamicPropertyRecord,
+                                      PROPERTY_RECORD_BYTES);
+                        setRecordMark(heapBase, dynamicPropertyRecord, 0);
+                        setRecordFlags(heapBase, dynamicPropertyRecord, 0);
+                        setPropertyNext(heapBase, dynamicPropertyRecord,
+                                        dynamicPropertyFirst);
+                        setPropertyKey(heapBase, dynamicPropertyRecord,
+                                       dynamicPropertyKey);
+                        setPropertyAttributes(heapBase, dynamicPropertyRecord,
+                                              DEFAULT_PROPERTY_ATTRIBUTES);
+                        setPropertyReserved(heapBase, dynamicPropertyRecord, 0);
+                        if (dynamicPropertyObjectType === HEAP_TYPE_REGEXP) {
+                            setRegexpPropertyHead(heapBase, arraySetObject,
+                                                  dynamicPropertyRecord);
+                        } else if (dynamicPropertyObjectType ===
+                                   HEAP_TYPE_BUFFER_VIEW) {
+                            setBufferViewPropertyHead(heapBase, arraySetObject,
+                                                      dynamicPropertyRecord);
+                        } else {
+                            setObjectPropertyHead(heapBase, arraySetObject,
+                                                  dynamicPropertyRecord);
+                        }
+                        setEngineHeapBump(heapBase, state,
+                                          dynamicPropertyRecord +
+                                          PROPERTY_RECORD_BYTES);
                     }
                     var dynamicPropertyDestination = heapBase +
                         dynamicPropertyRecord + PROPERTY_VALUE;
@@ -1902,12 +1905,10 @@
                 var makeArrayTargetIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var makeVectorAddress = load32(
-                    heapBase + state + ENGINE_HEAP_BUMP);
+                var makeVectorAddress = engineHeapBump(heapBase, state);
                 var makeArrayAddress = makeVectorAddress +
                                        INITIAL_VECTOR_RECORD_BYTES;
-                var makeArrayLimit = load32(
-                    heapBase + state + ENGINE_HEAP_LIMIT);
+                var makeArrayLimit = engineHeapLimit(heapBase, state);
                 if (makeArrayAddress + ARRAY_RECORD_BYTES > makeArrayLimit) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
@@ -1917,34 +1918,31 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                store32(heapBase + makeVectorAddress + RECORD_TYPE,
-                        HEAP_TYPE_VALUE_VECTOR);
-                store32(heapBase + makeVectorAddress + RECORD_SIZE,
-                        INITIAL_VECTOR_RECORD_BYTES);
-                store32(heapBase + makeVectorAddress + RECORD_MARK, 0);
-                store32(heapBase + makeVectorAddress + RECORD_FLAGS, 0);
-                store32(heapBase + makeVectorAddress + VECTOR_LENGTH, 0);
-                store32(heapBase + makeVectorAddress + VECTOR_CAPACITY,
-                        INITIAL_ARRAY_CAPACITY);
-                store32(heapBase + makeArrayAddress + RECORD_TYPE,
-                        HEAP_TYPE_ARRAY);
-                store32(heapBase + makeArrayAddress + RECORD_SIZE,
-                        ARRAY_RECORD_BYTES);
-                store32(heapBase + makeArrayAddress + RECORD_MARK, 0);
-                store32(heapBase + makeArrayAddress + RECORD_FLAGS, 0);
-                store32(heapBase + makeArrayAddress + OBJECT_PROTOTYPE, 0);
-                store32(heapBase + makeArrayAddress + OBJECT_PROPERTY_HEAD, 0);
-                store32(heapBase + makeArrayAddress + ARRAY_ELEMENTS,
-                        makeVectorAddress);
-                store32(heapBase + makeArrayAddress + OBJECT_RESERVED, 0);
+                setRecordType(heapBase, makeVectorAddress,
+                              HEAP_TYPE_VALUE_VECTOR);
+                setRecordSize(heapBase, makeVectorAddress,
+                              INITIAL_VECTOR_RECORD_BYTES);
+                setRecordMark(heapBase, makeVectorAddress, 0);
+                setRecordFlags(heapBase, makeVectorAddress, 0);
+                setVectorLength(heapBase, makeVectorAddress, 0);
+                setVectorCapacity(heapBase, makeVectorAddress,
+                                  INITIAL_ARRAY_CAPACITY);
+                setRecordType(heapBase, makeArrayAddress, HEAP_TYPE_ARRAY);
+                setRecordSize(heapBase, makeArrayAddress, ARRAY_RECORD_BYTES);
+                setRecordMark(heapBase, makeArrayAddress, 0);
+                setRecordFlags(heapBase, makeArrayAddress, 0);
+                setArrayPrototype(heapBase, makeArrayAddress, arrayPrototype);
+                setArrayPropertyHead(heapBase, makeArrayAddress, 0);
+                setArrayElements(heapBase, makeArrayAddress, makeVectorAddress);
+                setArrayReserved(heapBase, makeArrayAddress, 0);
                 var makeArrayTarget = heapBase + registerCells +
                     makeArrayTargetIndex * VALUE_CELL_BYTES;
                 store32(makeArrayTarget, VALUE_TAG_REFERENCE);
                 store32(makeArrayTarget + VALUE_CELL_LOW, makeArrayAddress);
                 store32(makeArrayTarget + VALUE_CELL_HIGH, 0);
                 store32(makeArrayTarget + VALUE_CELL_AUX, 0);
-                store32(heapBase + state + ENGINE_HEAP_BUMP,
-                        makeArrayAddress + ARRAY_RECORD_BYTES);
+                setEngineHeapBump(heapBase, state,
+                                  makeArrayAddress + ARRAY_RECORD_BYTES);
                 pc = pc + TWO_WORD_INSTRUCTION;
             } else if (opcode <= OP_BIT_NOT) {
                 if (opcode >= OP_BIT_AND) {
@@ -2447,15 +2445,17 @@
         var records = this.runtime.heapRecords;
         var contextAddress = context ? context.heapAddress : 0;
         var arrayLengthKey = this.runtime.internStringAddress("length");
+        var arrayPrototype = this.runtime.arrayPrototype ?
+            this.runtime.arrayPrototype.heapAddress : 0;
         records.setEngineHeapBounds(this.stateAddress,
                                     this.runtime.linearHeap.bump,
                                     this.runtime.linearHeap.byteLength);
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var reason = this.nativeResult.fn ? this.nativeResult.fn(
-            heapBase, frame, contextAddress, arrayLengthKey, budget,
+            heapBase, frame, contextAddress, arrayLengthKey, arrayPrototype, budget,
             this.statePayload) : this.js.fn(
             this.runtime.linearHeap.memory, 0, frame, contextAddress,
-            arrayLengthKey, budget,
+            arrayLengthKey, arrayPrototype, budget,
             this.statePayload);
         var nativeHeapBump = records.engineHeapBump(this.stateAddress);
         if (nativeHeapBump > this.runtime.linearHeap.bump) {
@@ -2596,6 +2596,20 @@
             var capacity = this.runtime.heapRecords.vectorCapacity(vector);
             reason = key >= capacity ? "array-capacity" : "array-other";
         }
+        this.propertyFallbackCounts[reason] =
+            (this.propertyFallbackCounts[reason] || 0) + 1;
+    };
+
+    NativeInterpreter.prototype.noteConstantPropertyFallback = function (
+            frame, pc) {
+        var code = frame.code;
+        var object = frame.registers[code[pc + 2]];
+        var key = frame.constants[code[pc + 3]];
+        var objectKind = object && object.guestType ? object.guestType :
+                         typeof object;
+        var reason = "get-" + objectKind + "@" +
+                     (frame.program.name || "<anonymous>");
+        if (typeof key === "string" && key.length < 32) reason += ":" + key;
         this.propertyFallbackCounts[reason] =
             (this.propertyFallbackCounts[reason] || 0) + 1;
     };

@@ -66,6 +66,7 @@
         this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;
         this.profileNextReport = 1000000;
+        this.heapNativeBuiltins = !!options.nativeInterpreter;
         this.threadedCompiler = options.threadedCompile ?
             new ThreadedCompiler(this) : null;
         this.ensureLinearHeap();
@@ -118,7 +119,9 @@
     Runtime.prototype.makeArray = function () {
         this.ensureLinearHeap();
         return this.trackObject(this.makeHeapHandle(
-            this.heapRecords.allocateArray(0, 4), "array"));
+            this.heapRecords.allocateArray(
+                this.arrayPrototype ? this.arrayPrototype.heapAddress : 0, 4),
+            "array"));
     };
 
     Runtime.prototype.makeObjectLiteral3 = function (
@@ -865,6 +868,7 @@
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
             function (receiver) { return String(receiver).toUpperCase(); });
         this.arrayMethods = {};
+        this.arrayPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.arrayMethods.push = this.makeNativeFunction("Array.push",
             function (receiver, args) {
                 var index = 0;
@@ -946,6 +950,9 @@
                 }
                 return result;
             });
+        if (this.arrayPrototype) {
+            this.setProperty(this.arrayPrototype, "push", this.arrayMethods.push);
+        }
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
@@ -1000,7 +1007,7 @@
         this.setGlobal("String", stringConstructor);
         this.setGlobal("Number", this.makeNativeFunction("Number",
             function (receiver, args) { return args.length ? Number(args[0]) : 0; }));
-        this.setGlobal("Array", this.makeNativeFunction("Array",
+        var arrayConstructor = this.makeNativeFunction("Array",
             function (receiver, args) {
                 var array = runtime.makeArray();
                 if (args.length === 1 && typeof args[0] === "number") {
@@ -1015,7 +1022,12 @@
                     while (index < args.length) runtime.arraySet(array, index, args[index++]);
                 }
                 return array;
-            }));
+            });
+        if (this.arrayPrototype) {
+            this.setProperty(arrayConstructor, "prototype", this.arrayPrototype);
+            this.setProperty(this.arrayPrototype, "constructor", arrayConstructor);
+        }
+        this.setGlobal("Array", arrayConstructor);
         var math = this.makeObject();
         function mathMethod(name, callback, intrinsicId) {
             runtime.setProperty(math, name,
