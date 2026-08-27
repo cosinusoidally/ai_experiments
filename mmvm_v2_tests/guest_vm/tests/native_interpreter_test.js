@@ -205,6 +205,29 @@
                 if (nanBranchContext.runProgram(nanBranchProgram) !== 2) {
                     throw new Error("native NaN truthiness mismatch");
                 }
+
+                var propertyContext = integratedVM.jsRuntime.createContext();
+                var propertyPrototype = integratedVM.runtime.makeObject();
+                integratedVM.runtime.setProperty(propertyPrototype, "inherited", 20);
+                var propertyObject = integratedVM.runtime.makeObject();
+                integratedVM.runtime.setPrototype(propertyObject, propertyPrototype);
+                integratedVM.runtime.setProperty(propertyObject, "own", 10);
+                var propertyProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.GET_PROPERTY_CONST, 1, 0, 1,
+                           bytecode.CONST, 2, 2,
+                           bytecode.SET_PROPERTY_CONST, 0, 1, 2,
+                           bytecode.GET_PROPERTY_CONST, 3, 0, 1,
+                           bytecode.GET_PROPERTY_CONST, 4, 0, 3,
+                           bytecode.ADD, 5, 3, 4,
+                           bytecode.RETURN, 5],
+                    constants: [propertyObject, "own", 15, "inherited"],
+                    registerCount: 6
+                };
+                if (propertyContext.runProgram(propertyProgram) !== 35 ||
+                    integratedVM.runtime.getProperty(propertyObject, "own") !== 15) {
+                    throw new Error("native constant property access mismatch");
+                }
             } finally {
                 integratedVM.destroy();
             }
