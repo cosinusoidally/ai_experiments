@@ -74,7 +74,8 @@
     var PROGRAM_THIS_SLOT = 28;
     var PROGRAM_FUNCTION_NAME_SLOT = 32;
     var PROGRAM_METADATA = 36;
-    var PROGRAM_BYTES = 40;
+    var PROGRAM_FLAGS = 40;
+    var PROGRAM_BYTES = 48;
 
     var CONTEXT_GLOBAL = 0;
     var CONTEXT_ACTIVE_FRAME = 4;
@@ -88,7 +89,9 @@
     var ENGINE_HEAP_BUMP = 16;
     var ENGINE_HEAP_LIMIT = 20;
     var ENGINE_CURRENT_FRAME = 24;
-    var ENGINE_STATE_BYTES = 32;
+    var ENGINE_CALL_REJECT_REASON = 28;
+    var ENGINE_FREE_FRAME = 32;
+    var ENGINE_STATE_BYTES = 40;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -639,6 +642,8 @@
             layout.functionNameSlot >>> 0, Heap.Types.PROGRAM);
         this.heap.writeTrustedFieldU32(address, PROGRAM_METADATA,
             layout.metadata || 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_FLAGS,
+            layout.flags || 0, Heap.Types.PROGRAM);
         return address;
     };
 
@@ -748,6 +753,16 @@
     Records.prototype.engineCurrentFrame = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_CURRENT_FRAME, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineCallRejectReason = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_CALL_REJECT_REASON, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineFreeFrame = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_FREE_FRAME, Heap.Types.ENGINE_STATE);
     };
 
     function propertyHeadOffset(type) {

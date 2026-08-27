@@ -153,20 +153,31 @@
 
     Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
         this.ensureLinearHeap();
-        var programAddress = this.programAddress(program);
-        var prototype = this.makeObject();
-        var callable = this.trackObject(this.makeHeapHandle(
+        /* Keep construction intermediates on the runtime. Firefox 1 does not
+         * reliably preserve arbitrary JS locals across these re-entrant heap
+         * allocation calls. Runtime fields are also visible to the guest GC. */
+        this.functionConstructionProgram = this.programAddress(program);
+        this.functionConstructionPrototype = this.makeObject();
+        this.functionConstructionCallable = this.trackObject(this.makeHeapHandle(
             this.heapRecords.allocateFunction(false, 0,
-                closure ? closure.heapAddress : 0, programAddress,
+                closure ? closure.heapAddress : 0,
+                this.functionConstructionProgram,
                 homeContext ? homeContext.heapAddress : 0),
             "bytecodeFunction"));
+        var callable = this.functionConstructionCallable;
         callable.program = program;
         callable.name = program.name || "";
         callable.source = program.source || null;
         callable.homeContext = homeContext;
         this.functionMetadata["$" + callable.heapAddress] = callable;
-        this.setProperty(callable, "prototype", prototype);
-        this.setProperty(prototype, "constructor", callable);
+        this.setProperty(this.functionConstructionCallable, "prototype",
+                         this.functionConstructionPrototype);
+        this.setProperty(this.functionConstructionPrototype, "constructor",
+                         this.functionConstructionCallable);
+        callable = this.functionConstructionCallable;
+        this.functionConstructionCallable = null;
+        this.functionConstructionPrototype = null;
+        this.functionConstructionProgram = 0;
         return callable;
     };
 
@@ -533,27 +544,31 @@
             index++;
         }
         this.ensureLinearHeap();
-        var bytecode = this.heapRecords.allocateBytecode(program.code || []);
-        var constants = this.heapRecords.allocateValueVector(
+        program.heapBytecodeAddress =
+            this.heapRecords.allocateBytecode(program.code || []);
+        program.heapConstantsAddress = this.heapRecords.allocateValueVector(
             program.constants ? program.constants.length : 0);
-        var constantRegisters = this.heapRecords.allocateValueVector(
+        program.heapConstantRegistersAddress =
+            this.heapRecords.allocateValueVector(
             program.constants ? program.constants.length : 0);
-        var bindingRegisters = program.bindingRegisters ?
+        program.heapBindingRegistersAddress = program.bindingRegisters ?
             this.heapRecords.allocateValueVector(program.bindingRegisters.length) : 0;
-        var parameterSlots = this.heapRecords.allocateValueVector(
+        program.heapParameterSlotsAddress = this.heapRecords.allocateValueVector(
             program.parameterSlots ? program.parameterSlots.length : 0);
         var metadataId = this.programObjects.length + 1;
-        var address = this.heapRecords.allocateProgram(bytecode, constants, {
-            constantRegisters: constantRegisters,
-            bindingRegisters: bindingRegisters,
-            parameterSlots: parameterSlots,
+        var address = this.heapRecords.allocateProgram(
+            program.heapBytecodeAddress, program.heapConstantsAddress, {
+            constantRegisters: program.heapConstantRegistersAddress,
+            bindingRegisters: program.heapBindingRegistersAddress,
+            parameterSlots: program.heapParameterSlotsAddress,
             registerCount: program.registerCount || 0,
             argumentsSlot: program.argumentsSlot === undefined ?
                            -1 : program.argumentsSlot,
             thisSlot: program.thisSlot === undefined ? -1 : program.thisSlot,
             functionNameSlot: program.functionNameSlot === undefined ?
                               -1 : program.functionNameSlot,
-            metadata: metadataId
+            metadata: metadataId,
+            flags: program.usesArguments ? 1 : 0
         });
         this.programObjects.push(program);
         this.programAddresses.push(address);
@@ -561,7 +576,8 @@
         index = 0;
         while (program.constants && index < program.constants.length) {
             var value = program.constants[index];
-            var cell = this.heapRecords.vectorCell(constants, index);
+            var cell = this.heapRecords.vectorCell(
+                program.heapConstantsAddress, index);
             if (value && typeof value === "object" && value.code && value.constants) {
                 this.valueCells.writeReferenceAt(cell, this.registerProgram(value));
             } else if (value && typeof value === "object" &&
@@ -569,31 +585,35 @@
                 this.writeHeapValue(cell, this.arrayFrom(value));
             } else this.writeHeapValue(cell, value);
             this.writeHeapValue(this.heapRecords.vectorCell(
-                constantRegisters, index),
+                program.heapConstantRegistersAddress, index),
                 program.constantRegisters &&
                 program.constantRegisters[index] !== undefined ?
                 program.constantRegisters[index] : -1);
             index++;
         }
-        this.heapRecords.setVectorLength(constants,
+        this.heapRecords.setVectorLength(program.heapConstantsAddress,
             program.constants ? program.constants.length : 0);
-        this.heapRecords.setVectorLength(constantRegisters,
+        this.heapRecords.setVectorLength(program.heapConstantRegistersAddress,
             program.constants ? program.constants.length : 0);
         index = 0;
         while (program.bindingRegisters && index < program.bindingRegisters.length) {
-            this.writeHeapValue(this.heapRecords.vectorCell(bindingRegisters, index),
+            this.writeHeapValue(this.heapRecords.vectorCell(
+                                program.heapBindingRegistersAddress, index),
                                 program.bindingRegisters[index]);
             index++;
         }
-        if (bindingRegisters) this.heapRecords.setVectorLength(
-            bindingRegisters, program.bindingRegisters.length);
+        if (program.heapBindingRegistersAddress) {
+            this.heapRecords.setVectorLength(program.heapBindingRegistersAddress,
+                program.bindingRegisters.length);
+        }
         index = 0;
         while (program.parameterSlots && index < program.parameterSlots.length) {
-            this.writeHeapValue(this.heapRecords.vectorCell(parameterSlots, index),
+            this.writeHeapValue(this.heapRecords.vectorCell(
+                                program.heapParameterSlotsAddress, index),
                                 program.parameterSlots[index]);
             index++;
         }
-        this.heapRecords.setVectorLength(parameterSlots,
+        this.heapRecords.setVectorLength(program.heapParameterSlotsAddress,
             program.parameterSlots ? program.parameterSlots.length : 0);
         return address;
     };

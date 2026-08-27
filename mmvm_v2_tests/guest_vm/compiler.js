@@ -118,6 +118,7 @@
         program.thisSlot = program.bindingSlots.$this;
         program.functionNameSlot = expression.name ?
             program.bindingSlots["$" + expression.name] : -1;
+        program.usesArguments = referencesArguments(expression.body);
         program.name = expression.name || "";
         program.source = expression.source || null;
         program.astBody = expression.body;
@@ -800,6 +801,28 @@
         for (key in node) {
             if (Object.prototype.hasOwnProperty.call(node, key) && key !== "type" &&
                 containsNestedFunctionOrTry(node[key])) return true;
+        }
+        return false;
+    }
+
+    function referencesArguments(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "Identifier" && node.name === "arguments") return true;
+        if (node.type === "FunctionDeclaration" ||
+            node.type === "FunctionExpression") return false;
+        var key;
+        for (key in node) {
+            if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key)) {
+                var value = node[key];
+                if (value && typeof value === "object") {
+                    if (typeof value.length === "number") {
+                        var index = 0;
+                        while (index < value.length) {
+                            if (referencesArguments(value[index++])) return true;
+                        }
+                    } else if (referencesArguments(value)) return true;
+                }
+            }
         }
         return false;
     }

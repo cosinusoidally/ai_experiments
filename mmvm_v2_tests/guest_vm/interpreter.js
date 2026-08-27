@@ -103,7 +103,18 @@
     };
 
     Execution.prototype.reloadNativeOperand = function (frame, register) {
-        if (register >= 0) this.runtime.reloadFrameRegister(frame, register);
+        if (register >= 0) {
+            var registerCount = this.runtime.heapRecords.frameRegisterCount(
+                frame.heapAddress);
+            if (register >= registerCount) {
+                throw new Error("native frame/program mismatch: frame=" +
+                    frame.heapAddress + " program=" +
+                    this.runtime.heapRecords.frameProgram(frame.heapAddress) +
+                    " register=" + register + " registerCount=" +
+                    registerCount + " pc=" + frame.pc);
+            }
+            this.runtime.reloadFrameRegister(frame, register);
+        }
     };
 
     Execution.prototype.reloadNativeOperands = function (frame, pc, opcode) {
@@ -248,8 +259,14 @@
         while (index >= 0) {
             address = addresses[index--];
             var frame = existing["$" + address];
+            var authoritativeProgram =
+                this.runtime.heapRecords.frameProgram(address);
+            if (frame && this.runtime.programAddress(frame.program) !==
+                authoritativeProgram) {
+                frame = null;
+            }
             if (!frame) {
-                var programAddress = this.runtime.heapRecords.frameProgram(address);
+                var programAddress = authoritativeProgram;
                 var program = this.runtime.programMetadata["$" + programAddress];
                 if (!program) {
                     throw new Error("native frame references unknown guest program " +
@@ -537,7 +554,7 @@
                     if (this.runtime.nativeInterpreter &&
                         this.runtime.profileOpcodeCounts) {
                         this.runtime.nativeInterpreter.noteFallbackCall(
-                            callableValue && callableValue.name);
+                            callableValue);
                     }
                     var receiver = code[pc + 3] < 0 ? undefined :
                                    registers[code[pc + 3]];
