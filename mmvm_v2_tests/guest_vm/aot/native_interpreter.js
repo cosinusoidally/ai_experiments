@@ -14,8 +14,7 @@
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3};
 
-    function interpreterKernel(heapBase, frame, bytecodeWords,
-                               constantCells, globalObject, arrayLengthKey,
+    function interpreterKernel(heapBase, frame, globalObject, arrayLengthKey,
                                budget, state) {
         /* Upper-case integer declarations are compile-time kernel constants.
          * These names mirror bytecode.js, value_cell.js, and heap_records.js;
@@ -56,8 +55,13 @@
         var UINT32_MANTISSA_HIGH_SHIFT = 11;
 
         var FRAME_ENVIRONMENT = 20;
+        var FRAME_PROGRAM = 16;
         var FRAME_PC = 28;
         var FRAME_REGISTERS = 48;
+        var PROGRAM_BYTECODE = 16;
+        var PROGRAM_CONSTANTS = 20;
+        var BYTECODE_WORDS = 24;
+        var CONTEXT_GLOBAL = 16;
         var OBJECT_PROPERTY_HEAD = 20;
         var OBJECT_PROTOTYPE = 16;
         var OBJECT_EXTENSIBLE = 24;
@@ -152,6 +156,12 @@
         var INTRINSIC_BUFFER_READ_U32_LE = 5;
         var INTRINSIC_BUFFER_WRITE_U32_LE = 6;
 
+        var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
+        var bytecodeWords = load32(
+            heapBase + currentProgram + PROGRAM_BYTECODE) + BYTECODE_WORDS;
+        var constantCells = load32(
+            heapBase + currentProgram + PROGRAM_CONSTANTS) + VECTOR_CELLS;
+        globalObject = load32(heapBase + globalObject + CONTEXT_GLOBAL);
         var framePC = frame + FRAME_PC;
         var registerCells = frame + FRAME_REGISTERS;
         var environment = load32(heapBase + frame + FRAME_ENVIRONMENT);
@@ -1630,22 +1640,17 @@
 
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
         var records = this.runtime.heapRecords;
-        var programAddress = this.runtime.programAddress(program);
-        var bytecode = records.programBytecode(programAddress);
-        var constants = records.programConstants(programAddress);
-        var bytecodeWords = records.bytecodeWordsAddress(bytecode);
-        var constantCells = records.vectorCellsAddress(constants);
-        var globalObject = context ? records.contextGlobal(context.heapAddress) : 0;
+        var contextAddress = context ? context.heapAddress : 0;
         var arrayLengthKey = this.runtime.internStringAddress("length");
         records.setEngineHeapBounds(this.stateAddress,
                                     this.runtime.linearHeap.bump,
                                     this.runtime.linearHeap.byteLength);
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var reason = this.nativeResult.fn ? this.nativeResult.fn(
-            heapBase, frame, bytecodeWords, constantCells, globalObject,
-            arrayLengthKey, budget, this.statePayload) : this.js.fn(
-            this.runtime.linearHeap.memory, 0, frame, bytecodeWords,
-            constantCells, globalObject, arrayLengthKey, budget,
+            heapBase, frame, contextAddress, arrayLengthKey, budget,
+            this.statePayload) : this.js.fn(
+            this.runtime.linearHeap.memory, 0, frame, contextAddress,
+            arrayLengthKey, budget,
             this.statePayload);
         var nativeHeapBump = records.engineHeapBump(this.stateAddress);
         if (nativeHeapBump > this.runtime.linearHeap.bump) {
