@@ -177,6 +177,10 @@ built-in `fs`, `net`, `http`, timers, and process streams under Node, while
 enables the structured compiled tier by default; pass `--vm-threaded` when a
 Node-hosted guest should exercise that same tier.
 
+The in-progress kernel-native interpreter is selected explicitly with
+`guest_runner.js --vm-native program.js`. Its portable dispatch benchmark and
+the current migration boundary are documented in `PERFORMANCE.md`.
+
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:
 demo6/demo7 are substantially heavier than demo1--demo5. No artifacts

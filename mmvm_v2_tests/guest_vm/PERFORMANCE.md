@@ -1,5 +1,34 @@
 # Guest VM performance notes
 
+## 2026-08-27: kernel-native dispatch checkpoint
+
+`guest_vm/benchmarks/native_dispatch_benchmark.js` is a portable, X11-free
+benchmark for the resumable bytecode engine. It runs under both supported host
+VMs and keeps compilation/VM setup outside the timed region. From
+`mmvm_v2_tests`, run:
+
+```sh
+node guest_vm/benchmarks/native_dispatch_benchmark.js 200000
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_vm/benchmarks/native_dispatch_benchmark.js 200000
+```
+
+On the development machine, the `js_min.exe` run completed 200,000 loop
+iterations (1,400,006 guest bytecodes) in approximately 45 ms in the native
+engine, versus approximately 59 ms for the equivalent direct JavaScript loop
+in the old host shell and 6,736 ms in the semantic guest interpreter. There
+were three intentional semantic exits for setup/call operations which have not
+yet migrated. These figures demonstrate dispatch/arithmetic parity for this
+narrow kernel; they do not yet claim whole-demo parity.
+
+`guest_runner.js --vm-native program.js` selects the new engine explicitly.
+Unsupported bytecodes currently execute one semantic step in the reference
+interpreter and then re-enter native dispatch. Normal Node-hosted runs still
+use their existing path, so the slower JavaScript emulation of the kernel does
+not replace or regress Node's default backend.
+
 ## 2026-08-25: demo2 interpreter baseline and first compiler pass
 
 The live benchmark command was run from `mmvm_v2_tests` against the locally
