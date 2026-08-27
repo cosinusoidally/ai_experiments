@@ -570,6 +570,21 @@
         }
     };
 
+    Runtime.prototype.reloadFrameRegister = function (frame, register) {
+        frame.registers[register] = this.readHeapValue(
+            this.heapRecords.frameRegisterCell(frame.heapAddress, register));
+    };
+
+    Runtime.prototype.spillFrameRegister = function (frame, register) {
+        this.writeHeapValue(
+            this.heapRecords.frameRegisterCell(frame.heapAddress, register),
+            frame.registers[register]);
+    };
+
+    Runtime.prototype.spillFramePC = function (frame) {
+        this.heapRecords.setFramePC(frame.heapAddress, frame.pc);
+    };
+
     Runtime.prototype.unregisterContext = function (context) {
         var survivors = [];
         var index = 0;
@@ -665,6 +680,7 @@
         var functionLine = "guest VM profile functions: " + functionParts.join(" ");
         if (typeof print === "function") print(functionLine);
         else if (typeof console !== "undefined" && console.log) console.log(functionLine);
+        if (this.nativeInterpreter) this.nativeInterpreter.reportProfile();
     };
 
     Runtime.prototype.gcSafePoint = function () {

@@ -130,10 +130,16 @@
                            bytecode.RETURN, 3],
                     constants: ["counter", 2], registerCount: 4
                 };
+                var globalFallbacksBefore =
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
                 var globalResult = globalContext.runProgram(globalProgram);
                 if (globalResult !== 42 ||
                     integratedVM.runtime.getGlobal(globalContext, "counter") !== 42) {
                     throw new Error("native global value-cell access mismatch");
+                }
+                if (integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                    globalFallbacksBefore) {
+                    throw new Error("native globals unexpectedly used semantic fallback");
                 }
 
                 var localContext = integratedVM.jsRuntime.createContext();

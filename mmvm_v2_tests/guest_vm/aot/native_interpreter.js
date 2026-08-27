@@ -4,10 +4,12 @@
     var KernelCompiler = root.GuestVMKernelCompiler;
     var JSBackend = root.GuestVMKernelJSBackend;
     var X86Backend = root.GuestVMKernelX86Backend;
+    var Bytecode = root.GuestVMBytecode;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
+        Bytecode = require("../bytecode.js");
     }
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3};
@@ -155,7 +157,7 @@
                 var globalKey = load32(globalKeyCell + VALUE_CELL_LOW);
                 var globalProperty = load32(
                     heapBase + globalObject + OBJECT_PROPERTY_HEAD);
-                while (globalProperty !== 0) {
+                while (globalProperty > 0) {
                     if (load32(heapBase + globalProperty + PROPERTY_KEY) ===
                         globalKey) {
                         var globalValue = heapBase + globalProperty + PROPERTY_VALUE;
@@ -203,7 +205,7 @@
                 var setGlobalKey = load32(setGlobalKeyCell + VALUE_CELL_LOW);
                 var setGlobalProperty = load32(
                     heapBase + globalObject + OBJECT_PROPERTY_HEAD);
-                while (setGlobalProperty !== 0) {
+                while (setGlobalProperty > 0) {
                     if (load32(heapBase + setGlobalProperty + PROPERTY_KEY) ===
                         setGlobalKey) {
                         var setGlobalValue = heapBase + setGlobalProperty +
@@ -1161,6 +1163,8 @@
         this.runCount = 0;
         this.instructionCount = 0;
         this.unsupportedExitCount = 0;
+        this.unsupportedOpcodeCounts = [];
+        this.fallbackCallCounts = {};
     }
 
     NativeInterpreter.Exit = Exit;
@@ -1184,12 +1188,61 @@
         var instructionCount = records.engineInstructionCount(this.stateAddress);
         this.runCount++;
         this.instructionCount += instructionCount;
-        if (reason === Exit.UNSUPPORTED) this.unsupportedExitCount++;
+        if (reason === Exit.UNSUPPORTED) {
+            this.unsupportedExitCount++;
+            var unsupportedOpcode = records.engineResultCell(this.stateAddress);
+            this.unsupportedOpcodeCounts[unsupportedOpcode] =
+                (this.unsupportedOpcodeCounts[unsupportedOpcode] || 0) + 1;
+            if (this.runtime.profileOpcodeCounts &&
+                this.unsupportedExitCount % 1000 === 0) {
+                this.reportProfile();
+            }
+        }
         return {reason: reason,
                 pc: records.enginePC(this.stateAddress),
                 resultCell: records.engineResultCell(this.stateAddress),
+                opcode: reason === Exit.UNSUPPORTED ?
+                    records.engineResultCell(this.stateAddress) : 0,
                 instructions: instructionCount,
                 backend: this.nativeResult.fn ? "i386" : "js"};
+    };
+
+    NativeInterpreter.prototype.reportProfile = function () {
+        var parts = [];
+        var opcode = 1;
+        while (opcode < this.unsupportedOpcodeCounts.length) {
+            if (this.unsupportedOpcodeCounts[opcode]) {
+                parts.push((Bytecode.NAMES[opcode] || opcode) + "=" +
+                           this.unsupportedOpcodeCounts[opcode]);
+            }
+            opcode++;
+        }
+        var line = "native guest profile: bytecodes=" + this.instructionCount +
+                   " exits=" + this.unsupportedExitCount + " " +
+                   parts.join(" ");
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
+        var callParts = [];
+        var callName;
+        for (callName in this.fallbackCallCounts) {
+            if (Object.prototype.hasOwnProperty.call(
+                    this.fallbackCallCounts, callName)) {
+                callParts.push(callName + "=" +
+                               this.fallbackCallCounts[callName]);
+            }
+        }
+        callParts.sort();
+        var callLine = "native guest fallback calls: " + callParts.join(" ");
+        if (typeof print === "function") print(callLine);
+        else if (typeof console !== "undefined" && console.log) {
+            console.log(callLine);
+        }
+    };
+
+    NativeInterpreter.prototype.noteFallbackCall = function (name) {
+        name = name || "<anonymous>";
+        this.fallbackCallCounts[name] =
+            (this.fallbackCallCounts[name] || 0) + 1;
     };
 
     NativeInterpreter.prototype.destroy = function () {
