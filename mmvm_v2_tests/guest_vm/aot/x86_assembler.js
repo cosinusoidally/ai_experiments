@@ -194,6 +194,11 @@
         this.emitByte(0x0f); this.emitByte(0x84);
         this.relativeFixup(name);
     };
+    Assembler.prototype.jumpParity = function (name) {
+        this.macros.push("jp(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x8a);
+        this.relativeFixup(name);
+    };
 
     Assembler.prototype.relativeFixup = function (name) {
         this.fixups.push({name: name, displacement: this.bytes.length,

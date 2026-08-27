@@ -38,6 +38,36 @@
             }
             vm.runtime.linearHeap.freeRecord(arithmeticFrame);
 
+            var comparison = {code: [bytecode.CONST, 0, 0,
+                                     bytecode.CONST, 1, 1,
+                                     bytecode.LESS, 2, 0, 1,
+                                     bytecode.RETURN, 2],
+                              constants: [2.5, 7], registerCount: 3};
+            var comparisonAddress = vm.runtime.programAddress(comparison);
+            var comparisonFrame = vm.runtime.heapRecords.allocateFrame(
+                comparisonAddress, 0, 0, -1, comparison.registerCount);
+            var comparisonExit = engine.run(comparisonFrame, comparison, 10);
+            if (comparisonExit.reason !== NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(comparisonExit.resultCell) !== true) {
+                throw new Error("native interpreter binary64 comparison mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(comparisonFrame);
+
+            var nanComparison = {code: [bytecode.CONST, 0, 0,
+                                        bytecode.CONST, 1, 0,
+                                        bytecode.STRICT_EQUAL, 2, 0, 1,
+                                        bytecode.RETURN, 2],
+                                 constants: [NaN], registerCount: 3};
+            var nanAddress = vm.runtime.programAddress(nanComparison);
+            var nanFrame = vm.runtime.heapRecords.allocateFrame(
+                nanAddress, 0, 0, -1, nanComparison.registerCount);
+            var nanExit = engine.run(nanFrame, nanComparison, 10);
+            if (nanExit.reason !== NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(nanExit.resultCell) !== false) {
+                throw new Error("native interpreter NaN comparison mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(nanFrame);
+
             var unsupported = {code: [bytecode.MAKE_OBJECT, 0,
                                       bytecode.RETURN, 0],
                                constants: [], registerCount: 1};

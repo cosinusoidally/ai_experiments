@@ -224,6 +224,19 @@
                     address: lowerKernelExpression(node.arguments[0], symbols),
                     type: "i32"};
         }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier") {
+            var comparisons = {equalF64: "eq_f64", lessF64: "lt_f64",
+                lessEqualF64: "le_f64", greaterF64: "gt_f64",
+                greaterEqualF64: "ge_f64"};
+            var comparison = comparisons[node.callee.name];
+            if (comparison && node.arguments.length === 2) {
+                return {op: comparison,
+                    left: lowerKernelF64Expression(node.arguments[0], symbols),
+                    right: lowerKernelF64Expression(node.arguments[1], symbols),
+                    type: "i32"};
+            }
+        }
         if (node.type === "UnaryExpression" &&
             (node.operator === "-" || node.operator === "~" ||
              node.operator === "+" || node.operator === "!")) {

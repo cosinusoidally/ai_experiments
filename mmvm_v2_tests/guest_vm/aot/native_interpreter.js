@@ -104,6 +104,75 @@
                     store32(heapBase + framePC, pc);
                     return 3;
                 }
+            } else if (opcode < 18) {
+                if (opcode >= 12) {
+                    var comparisonTargetIndex = load32(
+                        heapBase + bytecodeWords + (pc + 1) * 4);
+                    var comparisonLeftIndex = load32(
+                        heapBase + bytecodeWords + (pc + 2) * 4);
+                    var comparisonRightIndex = load32(
+                        heapBase + bytecodeWords + (pc + 3) * 4);
+                    var comparisonTarget = heapBase + registerCells +
+                                           comparisonTargetIndex * 16;
+                    var comparisonLeft = heapBase + registerCells +
+                                         comparisonLeftIndex * 16;
+                    var comparisonRight = heapBase + registerCells +
+                                          comparisonRightIndex * 16;
+                    var comparisonLeftTag = load32(comparisonLeft);
+                    var comparisonRightTag = load32(comparisonRight);
+                    var comparisonValid = 0;
+                    if (comparisonLeftTag === 5) comparisonValid = 1;
+                    else if (comparisonLeftTag === 6) comparisonValid = 1;
+                    if (comparisonRightTag !== 5) {
+                        if (comparisonRightTag !== 6) comparisonValid = 0;
+                    }
+                    if (comparisonValid === 0) {
+                        store32(heapBase + state, 3);
+                        store32(heapBase + state + 4, pc);
+                        store32(heapBase + state + 8, opcode);
+                        store32(heapBase + state + 12, instructions);
+                        store32(heapBase + framePC, pc);
+                        return 3;
+                    }
+                    var comparisonValue = 0;
+                    if (opcode === 12) {
+                        comparisonValue = equalF64(
+                            loadNumberF64(comparisonLeft + 4, comparisonLeftTag),
+                            loadNumberF64(comparisonRight + 4, comparisonRightTag));
+                    } else if (opcode === 13) {
+                        comparisonValue = equalF64(
+                            loadNumberF64(comparisonLeft + 4, comparisonLeftTag),
+                            loadNumberF64(comparisonRight + 4, comparisonRightTag));
+                    } else if (opcode === 14) {
+                        comparisonValue = lessF64(
+                            loadNumberF64(comparisonLeft + 4, comparisonLeftTag),
+                            loadNumberF64(comparisonRight + 4, comparisonRightTag));
+                    } else if (opcode === 15) {
+                        comparisonValue = lessEqualF64(
+                            loadNumberF64(comparisonLeft + 4, comparisonLeftTag),
+                            loadNumberF64(comparisonRight + 4, comparisonRightTag));
+                    } else if (opcode === 16) {
+                        comparisonValue = greaterF64(
+                            loadNumberF64(comparisonLeft + 4, comparisonLeftTag),
+                            loadNumberF64(comparisonRight + 4, comparisonRightTag));
+                    } else {
+                        comparisonValue = greaterEqualF64(
+                            loadNumberF64(comparisonLeft + 4, comparisonLeftTag),
+                            loadNumberF64(comparisonRight + 4, comparisonRightTag));
+                    }
+                    store32(comparisonTarget, comparisonValue + 3);
+                    store32(comparisonTarget + 4, 0);
+                    store32(comparisonTarget + 8, 0);
+                    store32(comparisonTarget + 12, 0);
+                    pc = pc + 4;
+                } else {
+                    store32(heapBase + state, 3);
+                    store32(heapBase + state + 4, pc);
+                    store32(heapBase + state + 8, opcode);
+                    store32(heapBase + state + 12, instructions);
+                    store32(heapBase + framePC, pc);
+                    return 3;
+                }
             } else if (opcode === 21) {
                 pc = load32(heapBase + bytecodeWords + (pc + 1) * 4);
             } else if (opcode === 22) {

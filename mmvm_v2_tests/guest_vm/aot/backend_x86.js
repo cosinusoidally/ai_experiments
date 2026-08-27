@@ -134,21 +134,21 @@
             return;
         }
         if (node.op === "set_local" || node.op === "set_argument") {
-            emitControlExpression(assembler, node.value);
+            emitControlExpression(assembler, node.value, state);
             if (node.op === "set_local") assembler.movLocalEax(node.index);
             else assembler.movEbpArgumentEax(node.index);
             return;
         }
         if (node.op === "store_u32") {
-            emitControlExpression(assembler, node.address);
+            emitControlExpression(assembler, node.address, state);
             assembler.pushEax();
-            emitControlExpression(assembler, node.value);
+            emitControlExpression(assembler, node.value, state);
             assembler.popEcx();
             assembler.movDwordPtrEcxEax();
             return;
         }
         if (node.op === "store_f64") {
-            emitControlExpression(assembler, node.address);
+            emitControlExpression(assembler, node.address, state);
             assembler.pushEax();
             emitControlF64(assembler, node.value, state);
             assembler.popEcx();
@@ -156,14 +156,14 @@
             return;
         }
         if (node.op === "return") {
-            emitControlExpression(assembler, node.value);
+            emitControlExpression(assembler, node.value, state);
             assembler.jump(state.returnLabel);
             return;
         }
         if (node.op === "if") {
             var alternateLabel = "kernel_else_" + state.nextLabel;
             var endLabel = "kernel_if_end_" + state.nextLabel++;
-            emitControlExpression(assembler, node.test);
+            emitControlExpression(assembler, node.test, state);
             assembler.testEaxEax();
             assembler.jumpEqual(alternateLabel);
             emitStatement(assembler, node.consequent, state);
@@ -177,7 +177,7 @@
             var loopLabel = "kernel_loop_" + state.nextLabel;
             var exitLabel = "kernel_loop_exit_" + state.nextLabel++;
             assembler.label(loopLabel);
-            emitControlExpression(assembler, node.test);
+            emitControlExpression(assembler, node.test, state);
             assembler.testEaxEax();
             assembler.jumpEqual(exitLabel);
             emitStatement(assembler, node.body, state);
@@ -188,16 +188,41 @@
         throw new Error("unsupported i386 control-flow statement " + node.op);
     }
 
-    function emitControlExpression(assembler, node) {
+    function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
         else if (node.op === "arg_i32") assembler.movEaxEbpArgument(node.index);
         else if (node.op === "local_i32") assembler.movEaxLocal(node.index);
+        else if (node.op === "eq_f64" || node.op === "lt_f64" ||
+                 node.op === "le_f64" || node.op === "gt_f64" ||
+                 node.op === "ge_f64") {
+            var reverse = node.op === "gt_f64" || node.op === "ge_f64";
+            emitControlF64(assembler, reverse ? node.right : node.left, state);
+            emitControlF64(assembler, reverse ? node.left : node.right, state);
+            assembler.fucomipSt0St1();
+            assembler.fstpSt0();
+            if (node.op === "eq_f64") {
+                var unorderedLabel = "kernel_compare_unordered_" + state.nextLabel;
+                var compareEnd = "kernel_compare_end_" + state.nextLabel++;
+                assembler.jumpParity(unorderedLabel);
+                assembler.setEqualAl();
+                assembler.movzxEaxAl();
+                assembler.jump(compareEnd);
+                assembler.label(unorderedLabel);
+                assembler.movEaxImmediate(0);
+                assembler.label(compareEnd);
+            } else {
+                if (node.op === "lt_f64" || node.op === "gt_f64") {
+                    assembler.setAboveAl();
+                } else assembler.setAboveOrEqualAl();
+                assembler.movzxEaxAl();
+            }
+        }
         else if (node.op === "load_u32") {
-            emitControlExpression(assembler, node.address);
+            emitControlExpression(assembler, node.address, state);
             assembler.movEaxDwordPtrEax();
         } else if (node.op === "neg_i32" || node.op === "not_i32" ||
                    node.op === "as_i32" || node.op === "logical_not_i32") {
-            emitControlExpression(assembler, node.value);
+            emitControlExpression(assembler, node.value, state);
             if (node.op === "neg_i32") assembler.negEax();
             else if (node.op === "not_i32") assembler.notEax();
             else if (node.op === "logical_not_i32") {
@@ -206,9 +231,9 @@
                 assembler.movzxEaxAl();
             }
         } else {
-            emitControlExpression(assembler, node.left);
+            emitControlExpression(assembler, node.left, state);
             assembler.pushEax();
-            emitControlExpression(assembler, node.right);
+            emitControlExpression(assembler, node.right, state);
             assembler.popEcx();
             if (node.op === "add_i32") assembler.addEaxEcx();
             else if (node.op === "sub_i32") {
@@ -234,7 +259,7 @@
 
     function emitControlF64(assembler, node, state) {
         if (node.op === "load_f64" || node.op === "load_i32_f64") {
-            emitControlExpression(assembler, node.address);
+            emitControlExpression(assembler, node.address, state);
             if (node.op === "load_f64") assembler.loadF64Eax();
             else assembler.loadI32EaxAsF64();
             return;
@@ -242,14 +267,14 @@
         if (node.op === "load_number_f64") {
             var doubleLabel = "kernel_number_double_" + state.nextLabel;
             var loadedLabel = "kernel_number_loaded_" + state.nextLabel++;
-            emitControlExpression(assembler, node.tag);
+            emitControlExpression(assembler, node.tag, state);
             assembler.compareEaxImmediate(5);
             assembler.jumpNotEqual(doubleLabel);
-            emitControlExpression(assembler, node.address);
+            emitControlExpression(assembler, node.address, state);
             assembler.loadI32EaxAsF64();
             assembler.jump(loadedLabel);
             assembler.label(doubleLabel);
-            emitControlExpression(assembler, node.address);
+            emitControlExpression(assembler, node.address, state);
             assembler.loadF64Eax();
             assembler.label(loadedLabel);
             return;
