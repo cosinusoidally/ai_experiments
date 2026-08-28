@@ -704,6 +704,11 @@
         return this.heap.readTrustedFieldU32(context, CONTEXT_GLOBAL, Heap.Types.CONTEXT);
     };
 
+    Records.prototype.setContextGlobal = function (context, globalObject) {
+        this.heap.writeTrustedFieldU32(context, CONTEXT_GLOBAL, globalObject,
+                                       Heap.Types.CONTEXT);
+    };
+
     Records.prototype.setContextActiveFrame = function (context, frame) {
         this.heap.writeTrustedFieldU32(context, CONTEXT_ACTIVE_FRAME, frame || 0,
                                 Heap.Types.CONTEXT);

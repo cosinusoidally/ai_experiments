@@ -107,6 +107,17 @@
         return program;
     };
 
+    JSContext.prototype.shareGlobalObject = function (otherContext) {
+        if (this.destroyed) throw new Error("context has been destroyed");
+        if (!otherContext || otherContext.destroyed ||
+            otherContext.jsRuntime !== this.jsRuntime) {
+            throw new TypeError("shared global must belong to the same JSRuntime");
+        }
+        this.globalObject = otherContext.globalObject;
+        this.runtime.heapRecords.setContextGlobal(
+            this.heapAddress, this.globalObject.heapAddress);
+    };
+
     JSContext.prototype.start = function (source, filename) {
         return this.startProgram(this.compile(source, filename));
     };

@@ -486,7 +486,7 @@
                  * global object. Sharing this binding table preserves that
                  * observable behavior while retaining an independent active
                  * execution slot for nested guest evaluation. */
-                loadContext.globalObject = environment.context.globalObject;
+                loadContext.shareGlobalObject(environment.context);
                 environment.moduleContexts.push(loadContext);
                 loadContext.run(source, filename);
                 return undefined;
