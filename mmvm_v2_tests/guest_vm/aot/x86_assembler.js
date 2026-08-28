@@ -67,6 +67,22 @@
         this.macros.push("cmp_eax_i32(" + (value | 0) + ")");
         this.emitByte(0x3d); this.word32(value);
     };
+    Assembler.prototype.compareEaxEbx = function () {
+        this.macros.push("cmp_eax_ebx()");
+        this.emitByte(0x39); this.emitByte(0xd8);
+    };
+    Assembler.prototype.compareEaxEsi = function () {
+        this.macros.push("cmp_eax_esi()");
+        this.emitByte(0x39); this.emitByte(0xf0);
+    };
+    Assembler.prototype.compareEaxEdi = function () {
+        this.macros.push("cmp_eax_edi()");
+        this.emitByte(0x39); this.emitByte(0xf8);
+    };
+    Assembler.prototype.compareEaxEbpDisplacement = function (displacement) {
+        this.macros.push("cmp_eax_ptr_ebp(" + displacement + ")");
+        this.emitByte(0x3b); this.emitByte(0x85); this.word32(displacement);
+    };
     Assembler.prototype.compareEcxEax = function () {
         this.macros.push("cmp_ecx_eax()");
         this.emitByte(0x39); this.emitByte(0xc1);

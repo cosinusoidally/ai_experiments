@@ -270,6 +270,23 @@
         }
     }
 
+    function compareEaxWithSimpleOperand(assembler, node, state) {
+        if (node.op === "const_i32") {
+            assembler.compareEaxImmediate(node.value);
+            return;
+        }
+        var key = (node.op === "arg_i32" ? "argument:" : "local:") + node.index;
+        var registerName = state.registerMap[key];
+        if (registerName === "ebx") assembler.compareEaxEbx();
+        else if (registerName === "esi") assembler.compareEaxEsi();
+        else if (registerName === "edi") assembler.compareEaxEdi();
+        else {
+            var displacement = node.op === "arg_i32" ?
+                8 + node.index * 4 : -(node.index + 1) * 4;
+            assembler.compareEaxEbpDisplacement(displacement);
+        }
+    }
+
     function emitStatements(assembler, statements, state) {
         var index = 0;
         while (index < statements.length) {
@@ -369,16 +386,16 @@
         var operation = node.op;
         var expression;
         var immediate;
-        if (node.right.op === "const_i32") {
+        if (isSimpleIntegerOperand(node.right)) {
             expression = node.left;
-            immediate = node.right.value;
-        } else if (node.left.op === "const_i32") {
+            immediate = node.right;
+        } else if (isSimpleIntegerOperand(node.left)) {
             expression = node.right;
-            immediate = node.left.value;
+            immediate = node.left;
             operation = reverseIntegerComparison(operation);
         } else return false;
         emitControlExpression(assembler, expression, state);
-        assembler.compareEaxImmediate(immediate);
+        compareEaxWithSimpleOperand(assembler, immediate, state);
         if (operation === "eq_i32") assembler.jumpNotEqual(label);
         else if (operation === "ne_i32") assembler.jumpEqual(label);
         else if (operation === "lt_i32") assembler.jumpGreaterOrEqual(label);
@@ -551,22 +568,22 @@
         else if ((node.op === "eq_i32" || node.op === "ne_i32" ||
                   node.op === "lt_i32" || node.op === "le_i32" ||
                   node.op === "gt_i32" || node.op === "ge_i32") &&
-                 (node.left.op === "const_i32" ||
-                  node.right.op === "const_i32")) {
+                 (isSimpleIntegerOperand(node.left) ||
+                  isSimpleIntegerOperand(node.right))) {
             var immediateComparison = node.op;
             var immediateExpression;
             var immediateValue;
-            if (node.right.op === "const_i32") {
+            if (isSimpleIntegerOperand(node.right)) {
                 immediateExpression = node.left;
-                immediateValue = node.right.value;
+                immediateValue = node.right;
             } else {
                 immediateExpression = node.right;
-                immediateValue = node.left.value;
+                immediateValue = node.left;
                 immediateComparison = reverseIntegerComparison(
                     immediateComparison);
             }
             emitControlExpression(assembler, immediateExpression, state);
-            assembler.compareEaxImmediate(immediateValue);
+            compareEaxWithSimpleOperand(assembler, immediateValue, state);
             if (immediateComparison === "eq_i32") assembler.setEqualAl();
             else if (immediateComparison === "ne_i32") assembler.setNotEqualAl();
             else if (immediateComparison === "lt_i32") assembler.setLessAl();
