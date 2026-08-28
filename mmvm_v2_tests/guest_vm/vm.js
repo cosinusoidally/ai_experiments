@@ -146,17 +146,26 @@
     };
 
     JSContext.prototype.runExecutionToCompletion = function (execution) {
+        /* Synchronous embedding does not imply an unbounded engine run.  A
+         * finite slice publishes native frames and gives the runtime a safe
+         * point at which to service pending collection before resuming. */
+        var completionBudget = this.runtime.threadedCompiler ?
+                               Infinity : 1000000;
         while (true) {
-            var result = execution.resume(Infinity);
+            var result = execution.resume(completionBudget);
             if (result.status === "hostCall") {
                 execution.serviceHostCall();
                 if (execution.status === "threw") throw execution.exception;
+            } else if (result.status === "budget") {
+                /* The synchronous embedder immediately grants another slice. */
+                this.runtime.gcSafePoint();
             } else if (result.status === "completed") {
                 return result.value;
             } else if (result.status === "threw") {
                 throw result.exception;
             } else {
-                throw new Error("unlimited execution unexpectedly exhausted budget");
+                throw new Error("unknown synchronous execution status: " +
+                                result.status);
             }
         }
     };

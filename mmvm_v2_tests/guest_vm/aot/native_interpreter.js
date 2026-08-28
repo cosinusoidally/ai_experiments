@@ -1944,14 +1944,69 @@
                     var pushVector = 0;
                     var pushLength = 0;
                     if (pushValid === 1) {
-                        pushVector = load32(
-                            heapBase + pushArray + ARRAY_ELEMENTS);
-                        pushLength = load32(
-                            heapBase + pushVector + VECTOR_LENGTH);
-                        var pushCapacity = load32(
-                            heapBase + pushVector + VECTOR_CAPACITY);
+                        pushVector = arrayElements(heapBase, pushArray);
+                        pushLength = vectorLength(heapBase, pushVector);
+                        var pushCapacity = vectorCapacity(heapBase, pushVector);
                         if (pushLength + intrinsicArgumentCount > pushCapacity) {
-                            pushValid = 0;
+                            var grownPushCapacity = pushCapacity;
+                            if (grownPushCapacity < INITIAL_ARRAY_CAPACITY) {
+                                grownPushCapacity = INITIAL_ARRAY_CAPACITY;
+                            }
+                            while (grownPushCapacity <
+                                   pushLength + intrinsicArgumentCount) {
+                                grownPushCapacity = grownPushCapacity * 2;
+                            }
+                            var grownPushVectorBytes = VECTOR_CELLS +
+                                grownPushCapacity * VALUE_CELL_BYTES;
+                            var grownPushVector = engineHeapBump(heapBase, state);
+                            if (grownPushVector + grownPushVectorBytes >
+                                engineHeapLimit(heapBase, state)) {
+                                pushValid = 0;
+                            } else {
+                                setRecordType(heapBase, grownPushVector,
+                                              HEAP_TYPE_VALUE_VECTOR);
+                                setRecordSize(heapBase, grownPushVector,
+                                              grownPushVectorBytes);
+                                setRecordMark(heapBase, grownPushVector, 0);
+                                setRecordFlags(heapBase, grownPushVector, 0);
+                                setVectorLength(heapBase, grownPushVector,
+                                                pushLength);
+                                setVectorCapacity(heapBase, grownPushVector,
+                                                  grownPushCapacity);
+                                var grownPushIndex = 0;
+                                while (grownPushIndex < grownPushCapacity) {
+                                    var grownPushTarget = heapBase +
+                                        grownPushVector + VECTOR_CELLS +
+                                        grownPushIndex * VALUE_CELL_BYTES;
+                                    if (grownPushIndex < pushLength) {
+                                        var grownPushSource = heapBase +
+                                            pushVector + VECTOR_CELLS +
+                                            grownPushIndex * VALUE_CELL_BYTES;
+                                        store32(grownPushTarget,
+                                                load32(grownPushSource));
+                                        store32(grownPushTarget + VALUE_CELL_LOW,
+                                            load32(grownPushSource +
+                                                   VALUE_CELL_LOW));
+                                        store32(grownPushTarget + VALUE_CELL_HIGH,
+                                            load32(grownPushSource +
+                                                   VALUE_CELL_HIGH));
+                                        store32(grownPushTarget + VALUE_CELL_AUX,
+                                            load32(grownPushSource +
+                                                   VALUE_CELL_AUX));
+                                    } else {
+                                        store32(grownPushTarget, 0);
+                                        store32(grownPushTarget + VALUE_CELL_LOW, 0);
+                                        store32(grownPushTarget + VALUE_CELL_HIGH, 0);
+                                        store32(grownPushTarget + VALUE_CELL_AUX, 0);
+                                    }
+                                    grownPushIndex = grownPushIndex + 1;
+                                }
+                                setArrayElements(heapBase, pushArray,
+                                                 grownPushVector);
+                                setEngineHeapBump(heapBase, state,
+                                    grownPushVector + grownPushVectorBytes);
+                                pushVector = grownPushVector;
+                            }
                         }
                     }
                     var pushIndex = 0;
@@ -1995,7 +2050,7 @@
                         pushIndex = pushIndex + 1;
                     }
                     pushLength = pushLength + intrinsicArgumentCount;
-                    store32(heapBase + pushVector + VECTOR_LENGTH, pushLength);
+                    setVectorLength(heapBase, pushVector, pushLength);
                     store32(intrinsicTarget, VALUE_TAG_INT32);
                     store32(intrinsicTarget + VALUE_CELL_LOW, pushLength);
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
