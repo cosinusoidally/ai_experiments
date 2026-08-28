@@ -755,19 +755,29 @@
                                           arithmeticRightIndex * VALUE_CELL_BYTES;
                     var arithmeticLeftTag = load32(arithmeticLeft);
                     var arithmeticRightTag = load32(arithmeticRight);
-                    var arithmeticValid = 0;
-                    if (arithmeticLeftTag === VALUE_TAG_INT32) arithmeticValid = 1;
-                    else if (arithmeticLeftTag === VALUE_TAG_DOUBLE) arithmeticValid = 1;
-                    if (arithmeticRightTag !== VALUE_TAG_INT32) {
-                        if (arithmeticRightTag !== VALUE_TAG_DOUBLE) arithmeticValid = 0;
+                    if (arithmeticLeftTag !== VALUE_TAG_INT32) {
+                        if (arithmeticLeftTag !== VALUE_TAG_DOUBLE) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
                     }
-                    if (arithmeticValid === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                    if (arithmeticRightTag !== VALUE_TAG_INT32) {
+                        if (arithmeticRightTag !== VALUE_TAG_DOUBLE) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
                     }
                     var integerArithmetic = 0;
                     if (arithmeticLeftTag === VALUE_TAG_INT32) {
