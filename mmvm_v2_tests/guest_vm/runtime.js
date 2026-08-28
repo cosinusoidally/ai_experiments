@@ -1051,8 +1051,12 @@
         mathMethod("atan2", function (receiver, args) {
             return Math.atan2(Number(args[0]), Number(args[1]));
         });
-        mathMethod("ceil", function (receiver, args) { return Math.ceil(Number(args[0])); });
-        mathMethod("floor", function (receiver, args) { return Math.floor(Number(args[0])); });
+        mathMethod("ceil", function (receiver, args) {
+            return Math.ceil(Number(args[0]));
+        }, NativeIntrinsics.MATH_CEIL);
+        mathMethod("floor", function (receiver, args) {
+            return Math.floor(Number(args[0]));
+        }, NativeIntrinsics.MATH_FLOOR);
         mathMethod("round", function (receiver, args) { return Math.round(Number(args[0])); });
         mathMethod("sqrt", function (receiver, args) {
             return Math.sqrt(Number(args[0]));

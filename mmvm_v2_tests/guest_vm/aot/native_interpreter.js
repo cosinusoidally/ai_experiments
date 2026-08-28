@@ -195,6 +195,8 @@
         var INTRINSIC_MATH_ABS = 9;
         var INTRINSIC_MATH_MAX = 10;
         var INTRINSIC_ARRAY_PUSH = 11;
+        var INTRINSIC_MATH_FLOOR = 12;
+        var INTRINSIC_MATH_CEIL = 13;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -1356,7 +1358,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_ARRAY_PUSH) {
+                    else if (intrinsicId > INTRINSIC_MATH_CEIL) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -1479,10 +1481,11 @@
                 }
                 if (intrinsicHandled === 0) {
                 if (intrinsicId >= INTRINSIC_MATH_SQRT) {
-                if (intrinsicId <= INTRINSIC_MATH_MAX) {
+                if (intrinsicId <= INTRINSIC_MATH_CEIL) {
                     var mathArgumentsValid = 1;
                     var mathArgumentIndex = 0;
                     var minimumCell = 0;
+                    var unaryMathCell = 0;
                     var selectExtreme = 0;
                     if (intrinsicId === INTRINSIC_MATH_MIN) selectExtreme = 1;
                     else if (intrinsicId === INTRINSIC_MATH_MAX) {
@@ -1500,6 +1503,7 @@
                         var mathValueCell = heapBase + registerCells +
                             mathRegister * VALUE_CELL_BYTES;
                         var mathValueTag = load32(mathValueCell);
+                        if (mathArgumentIndex === 0) unaryMathCell = mathValueCell;
                         if (mathValueTag !== VALUE_TAG_INT32) {
                             if (mathValueTag !== VALUE_TAG_DOUBLE) {
                                 mathArgumentsValid = 0;
@@ -1582,6 +1586,67 @@
                         storeF64(intrinsicTarget + VALUE_CELL_LOW,
                             absF64(loadNumberF64(
                                 absValueCell + VALUE_CELL_LOW, absValueTag)));
+                    } else if (intrinsicId >= INTRINSIC_MATH_FLOOR) {
+                        var roundingTag = load32(unaryMathCell);
+                        var roundingValue = toInt32F64(loadNumberF64(
+                            unaryMathCell + VALUE_CELL_LOW, roundingTag));
+                        store32(heapBase + state + ENGINE_SCRATCH_LEFT,
+                                roundingValue);
+                        store32(heapBase + state + ENGINE_SCRATCH_RIGHT, 0);
+                        var roundingExact = equalF64(loadNumberF64(
+                            unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                            loadI32F64(heapBase + state +
+                                       ENGINE_SCRATCH_LEFT));
+                        var roundingSafe = 1;
+                        if (roundingTag === VALUE_TAG_DOUBLE) {
+                            if (load32(unaryMathCell + VALUE_CELL_LOW) === 0) {
+                                if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
+                                     IEEE754_ABSOLUTE_MASK) === 0) {
+                                    if (load32(unaryMathCell +
+                                               VALUE_CELL_HIGH) < 0) {
+                                        roundingSafe = 0;
+                                    }
+                                }
+                            }
+                        }
+                        if (roundingExact === 0) {
+                            if (roundingValue === MINIMUM_INT32) {
+                                roundingSafe = 0;
+                            } else if (equalF64(loadNumberF64(
+                                unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                                loadNumberF64(unaryMathCell + VALUE_CELL_LOW,
+                                              roundingTag)) === 0) {
+                                roundingSafe = 0;
+                            } else if (greaterF64(loadNumberF64(
+                                unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                                loadI32F64(heapBase + state +
+                                           ENGINE_SCRATCH_RIGHT)) === 1) {
+                                if (roundingValue < 0) roundingSafe = 0;
+                                else if (intrinsicId === INTRINSIC_MATH_CEIL) {
+                                    if (roundingValue === 2147483647) {
+                                        roundingSafe = 0;
+                                    } else roundingValue = roundingValue + 1;
+                                }
+                            } else {
+                                if (roundingValue > 0) roundingSafe = 0;
+                                else if (intrinsicId === INTRINSIC_MATH_FLOOR) {
+                                    roundingValue = roundingValue - 1;
+                                }
+                            }
+                        }
+                        if (roundingSafe === 0) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                        store32(intrinsicTarget, VALUE_TAG_INT32);
+                        store32(intrinsicTarget + VALUE_CELL_LOW, roundingValue);
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     } else {
                         store32(intrinsicTarget, load32(minimumCell));
                         store32(intrinsicTarget + VALUE_CELL_LOW,
