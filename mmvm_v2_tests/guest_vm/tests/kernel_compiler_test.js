@@ -28,6 +28,38 @@
                 x86Result.assembly.indexOf("ret()") < 0) {
                 throw new Error("i386 backend did not use macro assembly");
             }
+            function nativeCallKernel(pointer) {
+                return callNativeI32(pointer);
+            }
+            var nativeCallIR = compiler.compile(nativeCallKernel);
+            var nativeCallJS = new JSBackend().compile(nativeCallIR);
+            var nativeCallBackend = new X86Backend();
+            var nativeCallX86 = nativeCallBackend.compile(nativeCallIR);
+            var nativeCallHeap = new Heap({heapBytes: 4096});
+            try {
+                nativeCallHeap.memory.setNativeCaller(function (pointer, args) {
+                    if (pointer !== 1234 || args.length !== 0) {
+                        throw new Error("JavaScript native-call ABI mismatch");
+                    }
+                    return 4321;
+                });
+                if (nativeCallJS.fn(nativeCallHeap.memory, 1234) !== 4321) {
+                    throw new Error("JavaScript native-call result mismatch");
+                }
+                if (nativeCallX86.fn) {
+                    var getpid = nativeCallBackend.ffi.resolve("getpid");
+                    if (nativeCallX86.fn(getpid) <= 0) {
+                        throw new Error("i386 native-call result mismatch");
+                    }
+                }
+                if (nativeCallX86.assembly.indexOf(
+                        "call_dword_ptr_esp(0)") < 0) {
+                    throw new Error("native call bypassed macro assembly");
+                }
+            } finally {
+                nativeCallHeap.destroy();
+                nativeCallX86.destroy();
+            }
             function recordInitializer(base, address, type, size,
                                        word0, word1, word2, word3) {
                 store32(base + address, type);

@@ -220,11 +220,14 @@
         var INTRINSIC_STRING_CHAR_AT = 22;
         var INTRINSIC_BUFFER_ALLOC = 23;
         var INTRINSIC_BUFFER_COPY = 24;
+        var INTRINSIC_GET_DLSYM = 25;
+        var INTRINSIC_FFI_CALL = 26;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
         var STRING_SUPPORT_EMPTY = 2;
         var STRING_SUPPORT_ASCII_BASE = 3;
         var RUNTIME_SUPPORT_BUFFER_PROTOTYPE = 259;
+        var RUNTIME_SUPPORT_DLSYM_POINTER = 260;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -1711,7 +1714,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_BUFFER_COPY) {
+                    else if (intrinsicId > INTRINSIC_FFI_CALL) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -1730,7 +1733,9 @@
                     }
                 }
                 var requiredIntrinsicArguments = 1;
-                if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
+                if (intrinsicId === INTRINSIC_GET_DLSYM) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
                     requiredIntrinsicArguments = 0;
@@ -1762,6 +1767,155 @@
                 var intrinsicTarget = heapBase + registerCells +
                     callTargetIndex * VALUE_CELL_BYTES;
                 var intrinsicHandled = 0;
+                if (intrinsicId === INTRINSIC_GET_DLSYM) {
+                    store32(intrinsicTarget, VALUE_TAG_INT32);
+                    store32(intrinsicTarget + VALUE_CELL_LOW,
+                        runtimeSupportDlsymPointer(heapBase, stringSupport));
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_FFI_CALL) {
+                    var ffiValid = 1;
+                    if (intrinsicArgumentCount < 1) ffiValid = 0;
+                    if (intrinsicArgumentCount > 9) ffiValid = 0;
+                    var ffiPointer = 0;
+                    var ffiArg0 = 0;
+                    var ffiArg1 = 0;
+                    var ffiArg2 = 0;
+                    var ffiArg3 = 0;
+                    var ffiArg4 = 0;
+                    var ffiArg5 = 0;
+                    var ffiArg6 = 0;
+                    var ffiArg7 = 0;
+                    var ffiConvertIndex = 0;
+                    while (ffiConvertIndex < intrinsicArgumentCount) {
+                        var ffiRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS +
+                            ffiConvertIndex * VALUE_CELL_BYTES;
+                        if (load32(ffiRegisterCell) !== VALUE_TAG_INT32) {
+                            ffiValid = 0;
+                        }
+                        var ffiRegister = load32(
+                            ffiRegisterCell + VALUE_CELL_LOW);
+                        var ffiValueCell = heapBase + registerCells +
+                            ffiRegister * VALUE_CELL_BYTES;
+                        var ffiValueTag = load32(ffiValueCell);
+                        var ffiValue = 0;
+                        if (ffiValueTag === VALUE_TAG_INT32) {
+                            ffiValue = load32(ffiValueCell + VALUE_CELL_LOW);
+                        } else if (ffiValueTag === VALUE_TAG_DOUBLE) {
+                            ffiValue = toInt32F64(loadF64(
+                                ffiValueCell + VALUE_CELL_LOW));
+                        } else if (ffiValueTag === VALUE_TAG_NULL) {
+                            ffiValue = 0;
+                        } else if (ffiValueTag === VALUE_TAG_UNDEFINED) {
+                            ffiValue = 0;
+                        } else if (ffiValueTag === VALUE_TAG_REFERENCE) {
+                            var ffiReference = load32(
+                                ffiValueCell + VALUE_CELL_LOW);
+                            if (recordType(heapBase, ffiReference) ===
+                                HEAP_TYPE_STRING) {
+                                var ffiStringLength = stringLength(
+                                    heapBase, ffiReference);
+                                var ffiStringBytes =
+                                    (BUFFER_BACKING_DATA + ffiStringLength +
+                                     1 + 7) & -8;
+                                var ffiStringBacking = engineHeapBump(
+                                    heapBase, state);
+                                if (ffiStringBacking + ffiStringBytes >
+                                    engineHeapLimit(heapBase, state)) {
+                                    ffiValid = 0;
+                                } else {
+                                    setRecordType(heapBase, ffiStringBacking,
+                                                  HEAP_TYPE_BUFFER_BACKING);
+                                    setRecordSize(heapBase, ffiStringBacking,
+                                                  ffiStringBytes);
+                                    setRecordMark(heapBase, ffiStringBacking, 0);
+                                    setRecordFlags(heapBase, ffiStringBacking, 0);
+                                    ffiValue = heapBase + ffiStringBacking +
+                                               BUFFER_BACKING_DATA;
+                                    setBufferBackingPointer(
+                                        heapBase, ffiStringBacking, ffiValue);
+                                    setBufferBackingLength(
+                                        heapBase, ffiStringBacking,
+                                        ffiStringLength + 1);
+                                    setBufferBackingMetadata(
+                                        heapBase, ffiStringBacking, 0);
+                                    var ffiCharacterIndex = 0;
+                                    while (ffiCharacterIndex < ffiStringLength) {
+                                        storeRaw8(ffiValue + ffiCharacterIndex,
+                                            stringCharacterCodeUnit(
+                                                heapBase, ffiReference,
+                                                ffiCharacterIndex) & 255);
+                                        ffiCharacterIndex =
+                                            ffiCharacterIndex + 1;
+                                    }
+                                    storeRaw8(ffiValue + ffiStringLength, 0);
+                                    setEngineHeapBump(heapBase, state,
+                                        ffiStringBacking + ffiStringBytes);
+                                }
+                            } else ffiValid = 0;
+                        } else ffiValid = 0;
+                        if (ffiConvertIndex === 0) ffiPointer = ffiValue;
+                        else if (ffiConvertIndex === 1) ffiArg0 = ffiValue;
+                        else if (ffiConvertIndex === 2) ffiArg1 = ffiValue;
+                        else if (ffiConvertIndex === 3) ffiArg2 = ffiValue;
+                        else if (ffiConvertIndex === 4) ffiArg3 = ffiValue;
+                        else if (ffiConvertIndex === 5) ffiArg4 = ffiValue;
+                        else if (ffiConvertIndex === 6) ffiArg5 = ffiValue;
+                        else if (ffiConvertIndex === 7) ffiArg6 = ffiValue;
+                        else if (ffiConvertIndex === 8) ffiArg7 = ffiValue;
+                        ffiConvertIndex = ffiConvertIndex + 1;
+                    }
+                    if (ffiPointer === 0) ffiValid = 0;
+                    if (ffiValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    var ffiResult = 0;
+                    if (intrinsicArgumentCount === 1) {
+                        ffiResult = callNativeI32(ffiPointer);
+                    } else if (intrinsicArgumentCount === 2) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0);
+                    } else if (intrinsicArgumentCount === 3) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1);
+                    } else if (intrinsicArgumentCount === 4) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1,
+                                                  ffiArg2);
+                    } else if (intrinsicArgumentCount === 5) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1,
+                                                  ffiArg2, ffiArg3);
+                    } else if (intrinsicArgumentCount === 6) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1,
+                                                  ffiArg2, ffiArg3, ffiArg4);
+                    } else if (intrinsicArgumentCount === 7) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1,
+                                                  ffiArg2, ffiArg3, ffiArg4,
+                                                  ffiArg5);
+                    } else if (intrinsicArgumentCount === 8) {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1,
+                                                  ffiArg2, ffiArg3, ffiArg4,
+                                                  ffiArg5, ffiArg6);
+                    } else {
+                        ffiResult = callNativeI32(ffiPointer, ffiArg0, ffiArg1,
+                                                  ffiArg2, ffiArg3, ffiArg4,
+                                                  ffiArg5, ffiArg6, ffiArg7);
+                    }
+                    store32(intrinsicTarget, VALUE_TAG_INT32);
+                    store32(intrinsicTarget + VALUE_CELL_LOW, ffiResult);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                }
                 if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
                     var pushReceiverIndex = load32(
                         heapBase + bytecodeWords +
@@ -3459,7 +3613,7 @@
         this.stateAddress = runtime.heapRecords.allocateEngineState();
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(260);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(261);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -3478,7 +3632,9 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 259),
             runtime.bufferSupport.prototype.heapAddress);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 260);
+        runtime.valueCells.writePrimitiveAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 260), 0);
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 261);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
@@ -3508,6 +3664,12 @@
     }
 
     NativeInterpreter.Exit = Exit;
+
+    NativeInterpreter.prototype.setDlsymPointer = function (pointer) {
+        this.runtime.valueCells.writePrimitiveAt(
+            this.runtime.heapRecords.vectorCell(this.stringSupportAddress, 260),
+            Number(pointer) | 0);
+    };
 
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
         var records = this.runtime.heapRecords;

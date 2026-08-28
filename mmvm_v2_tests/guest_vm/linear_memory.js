@@ -19,7 +19,19 @@
         this.allocation = this.host.allocate(byteLength, true);
         this.byteLength = byteLength;
         this.destroyed = false;
+        this.nativeCaller = null;
     }
+
+    LinearMemory.prototype.setNativeCaller = function (caller) {
+        this.nativeCaller = caller || null;
+    };
+
+    LinearMemory.prototype.callNativeI32 = function (pointer, args) {
+        if (!this.nativeCaller) {
+            throw new Error("native calls are unavailable in this execution backend");
+        }
+        return this.nativeCaller(pointer | 0, args) | 0;
+    };
 
     LinearMemory.prototype.checkRange = function (address, length) {
         address = Number(address);

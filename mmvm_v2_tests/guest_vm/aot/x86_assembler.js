@@ -112,6 +112,15 @@
         this.macros.push("push_eax()"); this.emitByte(0x50); this.stackWords++;
     };
 
+    Assembler.prototype.callDwordPtrEspDisplacement = function (displacement) {
+        if (displacement < 0 || displacement > 127) {
+            throw new RangeError("indirect call stack displacement is out of range");
+        }
+        this.macros.push("call_dword_ptr_esp(" + displacement + ")");
+        this.emitByte(0xff); this.emitByte(0x54); this.emitByte(0x24);
+        this.emitByte(displacement);
+    };
+
     Assembler.prototype.popEcx = function () {
         this.macros.push("pop_ecx()"); this.emitByte(0x59); this.stackWords--;
     };
@@ -296,7 +305,10 @@
         this.emitByte(0xd9); this.emitByte(0xe1);
     };
     Assembler.prototype.ret = function () {
-        if (this.stackWords !== 0) throw new Error("unbalanced assembler stack");
+        if (this.stackWords !== 0) {
+            throw new Error("unbalanced assembler stack: " + this.stackWords +
+                            " outstanding word(s)");
+        }
         this.macros.push("ret()"); this.emitByte(0xc3);
     };
     Assembler.prototype.dump = function () { return this.macros.join("\n"); };

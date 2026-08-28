@@ -49,10 +49,22 @@ handles and metadata maps remain transitional caches used by semantic exits;
 they are no longer guest storage. The principal unfinished boundary is core
 builtin and slow-path execution: unsupported JavaScript semantics still return
 to host JavaScript callbacks. Those operations must move behind the shared
-kernel builtin/service ABI. MMVM platform services, including timers, polling,
-sockets, files, output, and raw FFI, must then call native service-table entries
-directly instead of returning to SpiderMonkey. Node implements the same service
+kernel builtin/service ABI. Raw integer/pointer FFI is now entered directly by
+the native engine. Higher-level MMVM platform services—including timers,
+polling, sockets, files, output, and scheduling—must use this native service
+path instead of returning to SpiderMonkey. Node implements the same service
 contract with JavaScript and its event loop.
+
+The first part of that service ABI is now live. Shared kernel IR has a typed
+`callNativeI32(pointer, ...)` operation accepting up to eight cdecl arguments.
+The i386 backend emits the indirect call exclusively through named macro
+assembler operations; the JavaScript backend invokes the same operation
+through the linear-memory service contract. Guest `get_dlsym` and `ffi_call`
+are native interpreter intrinsics on MMVM. Integer/pointer arguments and
+temporary NUL-terminated string arguments are prepared in runtime-owned memory,
+then libc is entered without a semantic exit to SpiderMonkey. This is the
+foundation for the remaining timer, polling, file, socket, output, and event
+scheduler services.
 
 ## Execution boundary
 

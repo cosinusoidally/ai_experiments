@@ -466,6 +466,15 @@
 
     function specializeDispatchStatement(node, localIndex, value) {
         if (!node || typeof node !== "object") return node;
+        if (typeof node.length === "number") {
+            var specializedStatements = [];
+            var statementIndex = 0;
+            while (statementIndex < node.length) {
+                specializedStatements.push(specializeDispatchStatement(
+                    node[statementIndex++], localIndex, value));
+            }
+            return specializedStatements;
+        }
         if (node.op === "if") {
             var test = specializeDispatchExpression(node.test, localIndex, value);
             if (test.op === "const_i32") {
@@ -502,6 +511,15 @@
 
     function specializeDispatchExpression(node, localIndex, value) {
         if (!node || typeof node !== "object") return node;
+        if (typeof node.length === "number") {
+            var specializedExpressions = [];
+            var expressionIndex = 0;
+            while (expressionIndex < node.length) {
+                specializedExpressions.push(specializeDispatchExpression(
+                    node[expressionIndex++], localIndex, value));
+            }
+            return specializedExpressions;
+        }
         if (node.op === "local_i32" && node.index === localIndex) {
             return {op: "const_i32", value: value, type: "i32"};
         }
@@ -542,6 +560,22 @@
 
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
+        else if (node.op === "call_native_i32") {
+            /* Keep the target below the cdecl arguments. Every operand can
+             * then use the ordinary expression emitter without naming a
+             * physical register in the kernel IR. */
+            emitControlExpression(assembler, node.pointer, state);
+            assembler.pushEax();
+            var nativeArgumentIndex = node.arguments.length;
+            while (nativeArgumentIndex > 0) {
+                emitControlExpression(assembler,
+                    node.arguments[--nativeArgumentIndex], state);
+                assembler.pushEax();
+            }
+            assembler.callDwordPtrEspDisplacement(node.arguments.length * 4);
+            nativeArgumentIndex = node.arguments.length + 1;
+            while (nativeArgumentIndex-- > 0) assembler.popEcx();
+        }
         else if (node.op === "to_i32_f64") {
             emitControlF64(assembler, node.value, state);
             assembler.reserveStackBytes(12);
@@ -736,6 +770,18 @@
     function emitExpression(assembler, node) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
         else if (node.op === "arg_i32") assembler.movEaxArgument(node.index);
+        else if (node.op === "call_native_i32") {
+            emitExpression(assembler, node.pointer);
+            assembler.pushEax();
+            var nativeArgumentIndex = node.arguments.length;
+            while (nativeArgumentIndex > 0) {
+                emitExpression(assembler, node.arguments[--nativeArgumentIndex]);
+                assembler.pushEax();
+            }
+            assembler.callDwordPtrEspDisplacement(node.arguments.length * 4);
+            nativeArgumentIndex = node.arguments.length + 1;
+            while (nativeArgumentIndex-- > 0) assembler.popEcx();
+        }
         else if (node.op === "neg_i32" || node.op === "not_i32" ||
                  node.op === "as_i32") {
             emitExpression(assembler, node.value);

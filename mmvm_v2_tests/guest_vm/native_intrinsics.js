@@ -10,7 +10,8 @@
                       BUFFER_READ_U16_LE: 17, BUFFER_READ_U16_BE: 18,
                       BUFFER_WRITE_U16_LE: 19, BUFFER_WRITE_I16_LE: 20,
                       BUFFER_SLICE: 21, STRING_CHAR_AT: 22,
-                      BUFFER_ALLOC: 23, BUFFER_COPY: 24};
+                      BUFFER_ALLOC: 23, BUFFER_COPY: 24,
+                      GET_DLSYM: 25, FFI_CALL: 26};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

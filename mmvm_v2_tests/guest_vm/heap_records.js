@@ -174,6 +174,18 @@
         return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
     };
 
+    Records.prototype.stringCharacterCodeUnit = function (address, index) {
+        var length = this.stringLength(address);
+        if (index < 0 || index >= length || index !== Math.floor(index)) {
+            throw new RangeError("string character index is out of bounds");
+        }
+        var low = this.heap.readTrustedFieldU8(
+            address, STRING_CHARS + index * 2);
+        var high = this.heap.readTrustedFieldU8(
+            address, STRING_CHARS + index * 2 + 1);
+        return low | (high << 8);
+    };
+
     Records.prototype.readString = function (address) {
         var length = this.stringLength(address);
         var result = "";

@@ -103,6 +103,17 @@
 
     function emitControlExpression(node, parameters, locals) {
         if (node.op === "local_i32") return "(" + locals[node.index] + "|0)";
+        if (node.op === "call_native_i32") {
+            var nativeArguments = [];
+            var nativeArgumentIndex = 0;
+            while (nativeArgumentIndex < node.arguments.length) {
+                nativeArguments.push(emitControlExpression(
+                    node.arguments[nativeArgumentIndex++], parameters, locals));
+            }
+            return "(memory.callNativeI32(" +
+                emitControlExpression(node.pointer, parameters, locals) +
+                ",[" + nativeArguments.join(",") + "])|0)";
+        }
         if (node.op === "load_u32") return "(memory.readU32(" +
             emitControlExpression(node.address, parameters, locals) + ")|0)";
         if (node.op === "load_raw_u8" || node.op === "load_raw_u32") {
@@ -182,6 +193,16 @@
     function emit(node, parameters) {
         if (node.op === "const_i32") return String(node.value | 0);
         if (node.op === "arg_i32") return "(" + parameters[node.index] + "|0)";
+        if (node.op === "call_native_i32") {
+            var nativeArguments = [];
+            var nativeArgumentIndex = 0;
+            while (nativeArgumentIndex < node.arguments.length) {
+                nativeArguments.push(emit(
+                    node.arguments[nativeArgumentIndex++], parameters));
+            }
+            return "(memory.callNativeI32(" + emit(node.pointer, parameters) +
+                   ",[" + nativeArguments.join(",") + "])|0)";
+        }
         if (node.op === "neg_i32") return "(-" + emit(node.value, parameters) + ")";
         if (node.op === "not_i32") return "(~" + emit(node.value, parameters) + ")";
         if (node.op === "as_i32") return "(" + emit(node.value, parameters) + "|0)";

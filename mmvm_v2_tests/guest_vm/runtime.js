@@ -1110,11 +1110,11 @@
             throw new Error("raw guest FFI requires the js_min.exe host");
         }
         this.hostFFI = bridge;
-        this.setGlobal("get_dlsym", this.makeHostFunction("get_dlsym",
+        this.setGlobal("get_dlsym", this.makeNativeFunction("get_dlsym",
             function () {
                 return bridge.getDlsym();
-            }));
-        this.setGlobal("ffi_call", this.makeHostFunction("ffi_call",
+            }, "intrinsic", NativeIntrinsics.GET_DLSYM));
+        this.setGlobal("ffi_call", this.makeNativeFunction("ffi_call",
             function (receiver, args) {
                 if (!args.length) throw new TypeError("ffi_call requires a pointer");
                 var pointer = args[0];
@@ -1125,7 +1125,13 @@
                     index++;
                 }
                 return bridge.call(pointer, callArguments);
-            }));
+            }, "intrinsic", NativeIntrinsics.FFI_CALL));
+        this.linearHeap.memory.setNativeCaller(function (pointer, args) {
+            return bridge.call(pointer, args);
+        });
+        if (this.nativeInterpreter) {
+            this.nativeInterpreter.setDlsymPointer(bridge.getDlsym());
+        }
         this.setGlobal("peek8", this.makeNativeFunction("peek8",
             function (receiver, args) { return bridge.peek8(args[0]); },
             "intrinsic", NativeIntrinsics.PEEK8));

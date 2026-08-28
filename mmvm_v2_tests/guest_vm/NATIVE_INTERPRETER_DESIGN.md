@@ -57,6 +57,14 @@ Validation rejects implicit coercions, dynamic property access, allocation of
 host objects, exceptions, closures, and calls outside the intrinsic table.
 The JavaScript and i386 backends consume the identical IR.
 
+Native calls are represented in shared IR as `call_native_i32`, produced by
+the kernel-dialect `callNativeI32(pointer, ...)` intrinsic. The i386 backend
+places the target beneath right-to-left cdecl arguments and performs a named
+macro-assembler indirect call. The JavaScript backend sends the identical
+pointer and argument vector through `LinearMemory.callNativeI32`. Native FFI is
+therefore an execution-backend operation rather than a SpiderMonkey callback
+or an MMVM-specific instruction sequence scattered through guest semantics.
+
 ## Execution migration
 
 The migration remains runnable at each checkpoint:
