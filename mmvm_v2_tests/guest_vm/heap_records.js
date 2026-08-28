@@ -497,6 +497,10 @@
             this.cells.writePrimitiveAt(this.frameRegisterCell(address, index), undefined);
             index++;
         }
+        if (this.frameHandler(address) !== 0) {
+            throw new Error("fresh guest frame has a nonempty handler chain: " +
+                            this.frameHandler(address));
+        }
         return address;
     };
 
@@ -716,6 +720,11 @@
                                 Heap.Types.CONTEXT);
     };
 
+    Records.prototype.contextActiveFrame = function (context) {
+        return this.heap.readTrustedFieldU32(
+            context, CONTEXT_ACTIVE_FRAME, Heap.Types.CONTEXT);
+    };
+
     Records.prototype.allocateEngineState = function () {
         return this.heap.allocateRecordWords(
             Heap.Types.ENGINE_STATE, ENGINE_STATE_BYTES, 0, 0, 0, 0);
@@ -779,6 +788,92 @@
         return this.heap.readTrustedFieldU32(
             state, ENGINE_OPCODE_COUNTS + opcode * 4,
             Heap.Types.ENGINE_STATE);
+    };
+
+    /* Enumerate the authoritative outgoing guest-heap edges of one record.
+     * Layout knowledge stays in this accessor module; collectors and heap
+     * inspectors never duplicate offsets. */
+    Records.prototype.visitReferences = function (address, visit) {
+        var records = this;
+        var type = this.heap.recordType(address);
+        function reference(target) {
+            if (target) visit(target);
+        }
+        function cell(cellAddress) {
+            if (records.cells.tagAt(cellAddress) === ValueCells.Tags.REFERENCE) {
+                reference(records.cells.referenceAddressAt(cellAddress));
+            }
+        }
+        function objectEdges() {
+            reference(records.objectPrototype(address));
+            reference(records.objectPropertyHead(address));
+        }
+        if (type === Heap.Types.OBJECT) {
+            objectEdges();
+        } else if (type === Heap.Types.ARRAY) {
+            objectEdges();
+            reference(records.arrayElements(address));
+        } else if (type === Heap.Types.NATIVE_FUNCTION ||
+                   type === Heap.Types.BYTECODE_FUNCTION) {
+            objectEdges();
+            reference(records.functionClosure(address));
+            if (type === Heap.Types.BYTECODE_FUNCTION) {
+                reference(records.functionMetadata(address));
+            }
+            reference(records.functionHomeContext(address));
+        } else if (type === Heap.Types.ENVIRONMENT) {
+            reference(records.environmentParent(address));
+            var environmentIndex = 0;
+            while (environmentIndex < records.environmentSlotCount(address)) {
+                cell(records.environmentCell(address, environmentIndex++));
+            }
+        } else if (type === Heap.Types.PROPERTY) {
+            reference(records.propertyNext(address));
+            reference(records.propertyKey(address));
+            cell(records.propertyValueCell(address));
+        } else if (type === Heap.Types.REGEXP) {
+            reference(this.heap.readTrustedFieldU32(
+                address, REGEXP_PATTERN, Heap.Types.REGEXP));
+            reference(this.heap.readTrustedFieldU32(
+                address, REGEXP_FLAGS, Heap.Types.REGEXP));
+            objectEdges();
+        } else if (type === Heap.Types.BUFFER_VIEW) {
+            reference(records.bufferViewBacking(address));
+            reference(this.heap.readTrustedFieldU32(
+                address, BUFFER_VIEW_PROTOTYPE, Heap.Types.BUFFER_VIEW));
+            reference(records.objectPropertyHead(address));
+        } else if (type === Heap.Types.ROOT_SLOT) {
+            cell(this.heap.trustedPayloadAddress(address, 0));
+        } else if (type === Heap.Types.VALUE_VECTOR) {
+            var vectorIndex = 0;
+            while (vectorIndex < records.vectorCapacity(address)) {
+                cell(records.vectorCell(address, vectorIndex++));
+            }
+        } else if (type === Heap.Types.FRAME) {
+            reference(records.frameProgram(address));
+            reference(records.frameEnvironment(address));
+            reference(records.frameCaller(address));
+            reference(records.frameHandler(address));
+            reference(records.frameContext(address));
+            var registerIndex = 0;
+            while (registerIndex < records.frameRegisterCount(address)) {
+                cell(records.frameRegisterCell(address, registerIndex++));
+            }
+        } else if (type === Heap.Types.PROGRAM) {
+            reference(records.programBytecode(address));
+            reference(records.programConstants(address));
+            reference(records.programConstantRegisters(address));
+            reference(records.programBindingRegisters(address));
+            reference(records.programParameterSlots(address));
+        } else if (type === Heap.Types.CONTEXT) {
+            reference(records.contextGlobal(address));
+            reference(records.contextActiveFrame(address));
+        } else if (type === Heap.Types.HANDLER) {
+            reference(this.heap.readTrustedFieldU32(
+                address, HANDLER_NEXT, Heap.Types.HANDLER));
+        } else if (type === Heap.Types.ENGINE_STATE) {
+            reference(records.engineCurrentFrame(address));
+        }
     };
 
     function propertyHeadOffset(type) {

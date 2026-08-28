@@ -325,6 +325,8 @@
             while (this.frames.length) {
                 this.releaseFrame(this.frames.pop());
             }
+            this.runtime.heapRecords.setContextActiveFrame(
+                this.context.heapAddress, 0);
             try {
                 var compiledValue;
                 if (this.runtime.profileOpcodeCounts) {
@@ -546,7 +548,10 @@
                     registers[code[pc + 1]] = this.runtime.keys(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.JUMP) {
-                    if (code[pc + 1] <= pc) this.runtime.gcSafePoint();
+                    if (code[pc + 1] <= pc &&
+                        !this.runtime.nativeInterpreter) {
+                        this.runtime.gcSafePoint();
+                    }
                     frame.pc = code[pc + 1];
                 } else if (opcode === op.JUMP_IF_FALSE) {
                     frame.pc = !this.runtime.truthy(registers[code[pc + 1]]) ?
@@ -610,7 +615,9 @@
                                 this.runtime.functionClosure(callableValue), callableValue,
                                 destination, frame));
                         }
-                        this.runtime.gcSafePoint();
+                        if (!this.runtime.nativeInterpreter) {
+                            this.runtime.gcSafePoint();
+                        }
                     } else if (callableValue && callableValue.guestType === "function" &&
                                callableValue.callMode === "host") {
                         this.pendingHostCall = {callable: callableValue,
@@ -625,7 +632,9 @@
                     } else {
                         registers[destination] = this.runtime.call(
                             callableValue, receiver, args);
-                        this.runtime.gcSafePoint();
+                        if (!this.runtime.nativeInterpreter) {
+                            this.runtime.gcSafePoint();
+                        }
                     }
                 } else if (opcode === op.CONSTRUCT) {
                     args = [];
@@ -667,29 +676,41 @@
                             constructorValue, constructDestination, frame);
                         constructorFrame.constructReceiver = constructedReceiver;
                         this.frames.push(constructorFrame);
-                        this.runtime.gcSafePoint();
+                        if (!this.runtime.nativeInterpreter) {
+                            this.runtime.gcSafePoint();
+                        }
                     } else {
                         registers[constructDestination] = this.runtime.construct(
                             constructorValue, args);
-                        this.runtime.gcSafePoint();
+                        if (!this.runtime.nativeInterpreter) {
+                            this.runtime.gcSafePoint();
+                        }
                     }
                 } else if (opcode === op.MAKE_FUNCTION) {
                     registers[code[pc + 1]] = this.runtime.makeGuestFunction(
                         constants[code[pc + 2]], frame.environment, frame.context);
-                    this.runtime.gcSafePoint();
+                    if (!this.runtime.nativeInterpreter) {
+                        this.runtime.gcSafePoint();
+                    }
                     frame.pc = pc + 3;
                 } else if (opcode === op.MAKE_OBJECT) {
                     registers[code[pc + 1]] = this.runtime.makeObject();
-                    this.runtime.gcSafePoint();
+                    if (!this.runtime.nativeInterpreter) {
+                        this.runtime.gcSafePoint();
+                    }
                     frame.pc = pc + 2;
                 } else if (opcode === op.MAKE_ARRAY) {
                     registers[code[pc + 1]] = this.runtime.makeArray();
-                    this.runtime.gcSafePoint();
+                    if (!this.runtime.nativeInterpreter) {
+                        this.runtime.gcSafePoint();
+                    }
                     frame.pc = pc + 2;
                 } else if (opcode === op.MAKE_REGEXP) {
                     registers[code[pc + 1]] = this.runtime.makeRegExp(
                         constants[code[pc + 2]], constants[code[pc + 3]]);
-                    this.runtime.gcSafePoint();
+                    if (!this.runtime.nativeInterpreter) {
+                        this.runtime.gcSafePoint();
+                    }
                     frame.pc = pc + 4;
                 } else if (opcode === op.THROW) {
                     var thrownValue = registers[code[pc + 1]];
@@ -724,6 +745,7 @@
                 }
                 if (this.runtime.nativeInterpreter) {
                     this.synchronizeFallbackStep(frame, pc, opcode);
+                    this.runtime.gcSafePoint();
                 }
             }
             return this.finish("completed", undefined, used);

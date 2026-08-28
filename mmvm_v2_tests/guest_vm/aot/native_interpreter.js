@@ -13,6 +13,9 @@
     }
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3};
+    var FREE_RECORD_HEADER_BYTES = 16;
+    var MIN_NATIVE_ALLOCATION_REGION_BYTES = 4096 + FREE_RECORD_HEADER_BYTES;
+    var NATIVE_ALLOCATION_REGION_FLAG = 2;
 
     function interpreterKernel(heapBase, frame, globalObject, arrayLengthKey,
                                arrayPrototype, budget, state) {
@@ -2632,6 +2635,7 @@
         this.fallbackCallLayouts = {};
         this.callRejectCounts = [];
         this.propertyFallbackCounts = {};
+        this.allocationRegion = null;
         if (runtime.profileOpcodeCounts) {
             var codeLine = "native guest code: pointer=" +
                 this.nativeResult.pointer + " bytes=" + this.nativeResult.length;
@@ -2657,9 +2661,28 @@
         var arrayLengthKey = this.runtime.internStringAddress("length");
         var arrayPrototype = this.runtime.arrayPrototype ?
             this.runtime.arrayPrototype.heapAddress : 0;
+        var heap = this.runtime.linearHeap;
+        var allocationBump = heap.bump;
+        var allocationLimit = heap.byteLength;
+        if (!this.allocationRegion &&
+            heap.bump >= Math.floor(heap.byteLength * 3 / 4)) {
+            var claimedRegion = heap.claimLargestFreeBlock(
+                MIN_NATIVE_ALLOCATION_REGION_BYTES);
+            if (claimedRegion) {
+                this.allocationRegion = {
+                    cursor: claimedRegion.address,
+                    end: claimedRegion.address + claimedRegion.size
+                };
+            }
+        }
+        if (this.allocationRegion) {
+            allocationBump = this.allocationRegion.cursor;
+            /* Keep space for a valid free-record header at every yield. */
+            allocationLimit = this.allocationRegion.end -
+                              FREE_RECORD_HEADER_BYTES;
+        }
         records.setEngineHeapBounds(this.stateAddress,
-                                    this.runtime.linearHeap.bump,
-                                    this.runtime.linearHeap.byteLength);
+                                    allocationBump, allocationLimit);
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var reason = this.nativeResult.fn ? this.nativeResult.fn(
             heapBase, frame, contextAddress, arrayLengthKey, arrayPrototype, budget,
@@ -2668,8 +2691,19 @@
             arrayLengthKey, arrayPrototype, budget,
             this.statePayload);
         var nativeHeapBump = records.engineHeapBump(this.stateAddress);
-        if (nativeHeapBump > this.runtime.linearHeap.bump) {
-            this.runtime.linearHeap.bump = nativeHeapBump;
+        if (this.allocationRegion) {
+            this.allocationRegion.cursor = nativeHeapBump;
+            var regionRemaining = this.allocationRegion.end - nativeHeapBump;
+            heap.publishFreeRegion(nativeHeapBump, regionRemaining,
+                                   NATIVE_ALLOCATION_REGION_FLAG);
+            if (regionRemaining < MIN_NATIVE_ALLOCATION_REGION_BYTES) {
+                heap.publishFreeRegion(nativeHeapBump, regionRemaining, 0);
+                this.allocationRegion = null;
+                heap.rebuildFreeBlocks();
+            }
+        } else if (nativeHeapBump > heap.bump) {
+            heap.bump = nativeHeapBump;
+            this.runtime.noteNativeHeapBump(nativeHeapBump);
         }
         var instructionCount = records.engineInstructionCount(this.stateAddress);
         this.runCount++;

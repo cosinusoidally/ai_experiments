@@ -389,30 +389,50 @@ general Node.js implementation.
 
 ## Collector and roots
 
-The collector is a non-moving mark/sweep collector over `Runtime.heapObjects`.
-`gcGeneration` avoids clearing mark bits on every object before tracing. Current
-roots are:
+The collector is a non-moving mark/sweep collector over the authoritative
+linear-heap record graph. `Runtime.heapObjects` and the other host maps are
+derived handle/metadata caches; an object created entirely by native bytecode
+does not need a host handle in order to survive. `gcGeneration` avoids clearing
+mark bits on every record before tracing. Current roots are:
 
 - every value in the guest global table;
 - opaque values retained in the embedder host-root table;
 - every register in every live or suspended execution frame;
 - every live or suspended frame environment and captured closure environment;
 - each pending host-call receiver and argument;
-- the internal Buffer prototype and objects reachable through marked property
-  maps.
+- every registered context, program, and strongly interned string;
+- the native interpreter engine state and its current frame chain;
+- the runtime-owned primitive method tables and internal Buffer prototype;
+- transient function-construction records.
+
+The record accessor layer owns graph traversal. It follows prototypes,
+properties and property values, array vectors, lexical environments, function
+closures and home contexts, frame registers/callers/handlers, program constant
+vectors, Buffer view backings, contexts, and engine state. Collectors do not
+duplicate record offsets.
 
 Marking a Buffer view marks its shared backing store for the same generation.
-Sweep first removes unmarked guest object records, then asks `BufferSupport` to
-free each unmarked backing store. Multiple views therefore do not cause multiple
-frees, and one reachable slice retains the allocation.
+Sweep first asks `BufferSupport` to free the external allocation belonging to
+each unmarked backing record, then frees all other unmarked guest records.
+Multiple views therefore do not cause multiple frees, and one reachable slice
+retains the allocation. On an i386 `js_min.exe` host, the linear sweep itself is
+compiled from the kernel dialect; Node uses the equivalent JavaScript pass.
 
-Collection is automatic. Every tracked guest object charges one allocation
-unit; a native Buffer backing additionally charges one unit per 64 bytes,
-rounded up. The default threshold is 1,024 units. Reaching the threshold marks
-collection pending, and the interpreter collects at the next safe point after
-an allocation-producing instruction or native call, or at a backward branch.
-Deferring collection to a safe point ensures that a newly returned object is in
-an active guest register before marking begins.
+Collection is automatic. Semantic host-side allocation uses the configurable
+allocation-unit threshold. Native execution additionally requests a collection
+when its bump allocation reaches three quarters of the heap, leaving stack and
+allocation headroom. The request is serviced only after the native engine has
+published its current frame and a semantic fallback has published its result;
+the collector never runs over private register state.
+
+The native allocator initially uses the heap tail. After a pressure collection
+it may claim a coalesced ordinary free block as a private bump region. At every
+yield it publishes the unused suffix as a flagged free record, keeping the heap
+walkable while excluding that suffix from the host allocator. Returned native
+call frames use a different existing flag and remain owned by the engine's
+frame cache. Only unflagged free records enter the general host free-block
+index. This ownership distinction prevents either allocator from reusing the
+same bytes.
 
 `VM.collect`, `Runtime.collect`, and the test-only `guestCollect` global request
 an immediate full collection, but normal guest programs and embedders do not
@@ -422,9 +442,10 @@ collection at the next safe point. The portable suite runs threshold and stress
 modes under both hosts to expose missing roots.
 
 Registers are conservatively rooted for an entire active program because
-bytecode liveness is not yet available. Sweep compacts both the guest heap table
-and the Buffer backing table so repeated automatic collections do not retain an
-ever-growing list of dead records.
+bytecode liveness is not yet available. Adjacent ordinary free records are
+coalesced. A completely dead heap tail lowers the bump pointer without moving
+live records; host allocations clear bump ranges because a lowered tail may
+contain old bytes.
 
 Host code must not retain a raw guest value across a point where collection may
 occur. It calls `VM.retain(value)` and stores the returned integer handle, then

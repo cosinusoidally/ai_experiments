@@ -6,6 +6,7 @@
     var HeapRecords = root.GuestVMHeapRecords;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     var RecordInitializer = root.GuestVMRecordInitializer;
+    var HeapSweeper = root.GuestVMHeapSweeper;
     var NumericBytecodeBackend = root.GuestVMNumericBytecodeBackend;
     var NativeInterpreter = root.GuestVMNativeInterpreter;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
@@ -17,6 +18,7 @@
         HeapRecords = require("./heap_records.js");
         ThreadedCompiler = require("./threaded_compiler.js");
         RecordInitializer = require("./aot/record_initializer.js");
+        HeapSweeper = require("./aot/heap_sweeper.js");
         NumericBytecodeBackend = require("./aot/bytecode_numeric_backend.js");
         NativeInterpreter = require("./aot/native_interpreter.js");
         NativeIntrinsics = require("./native_intrinsics.js");
@@ -59,6 +61,7 @@
         this.interpretGuest = null;
         this.linearHeap = null;
         this.valueCells = null;
+        this.heapSweeper = null;
         this.heapRecords = null;
         this.linearHeapBytes = options.heapBytes === undefined ?
             16 * 1024 * 1024 : Number(options.heapBytes);
@@ -88,6 +91,7 @@
             this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);
             this.linearHeap.setRecordInitializer(
                 new RecordInitializer(this.linearHeap));
+            this.heapSweeper = new HeapSweeper(this.linearHeap);
         }
         return this.linearHeap;
     };
@@ -707,6 +711,16 @@
     Runtime.prototype.noteAllocation = function (units) {
         this.gcAllocationDebt += units > 0 ? units : 1;
         if (this.gcAllocationDebt >= this.gcThreshold) this.gcPending = true;
+    };
+
+    Runtime.prototype.noteNativeHeapBump = function (bump) {
+        /* Native allocation cannot call back into the host collector while
+         * registers and frame links are live. Request collection with ample
+         * headroom; the interpreter services it only after publishing the
+         * native frame at the next ordinary yield. */
+        if (bump >= Math.floor(this.linearHeap.byteLength * 3 / 4)) {
+            this.gcPending = true;
+        }
     };
 
     Runtime.prototype.countOpcode = function (opcode, functionName) {
@@ -1520,15 +1534,78 @@
         this.linearHeap.freeRecord(address);
     };
 
+    Runtime.prototype.markAuthoritativeHeap = function (generation) {
+        var runtime = this;
+        var pending = [];
+        function enqueue(address) {
+            if (!address) return;
+            if (runtime.linearHeap.mark(address) === generation) return;
+            runtime.linearHeap.setMark(address, generation);
+            pending.push(address);
+        }
+
+        /* Host semantic marking ran first. Put those records through the same
+         * graph traversal so references created solely by native bytecode are
+         * visible even when no host handle has ever existed for them. */
+        this.linearHeap.visitRecords(function (address, type, size, mark) {
+            if (type !== Heap.Types.FREE && mark === generation) {
+                pending.push(address);
+            }
+        });
+        enqueue(this.globalObject ? this.globalObject.heapAddress : 0);
+        var index = 0;
+        while (index < this.contexts.length) {
+            enqueue(this.contexts[index++].heapAddress);
+        }
+        index = 0;
+        while (index < this.programAddresses.length) {
+            enqueue(this.programAddresses[index++]);
+        }
+        var stringKey;
+        for (stringKey in this.internedStrings) {
+            if (own(this.internedStrings, stringKey)) {
+                enqueue(this.internedStrings[stringKey]);
+            }
+        }
+        if (this.nativeInterpreter) {
+            enqueue(this.nativeInterpreter.stateAddress);
+        }
+        enqueue(this.functionConstructionProgram || 0);
+        enqueue(this.functionConstructionCallable ?
+                this.functionConstructionCallable.heapAddress : 0);
+        enqueue(this.functionConstructionPrototype ?
+                this.functionConstructionPrototype.heapAddress : 0);
+
+        index = 0;
+        while (index < pending.length) {
+            this.heapRecords.visitReferences(pending[index++], enqueue);
+        }
+    };
+
     Runtime.prototype.collect = function () {
         if (this.gcCollecting) return this.heapObjects.length;
         this.gcCollecting = true;
         try {
+            var heapBumpBeforeCollection = this.linearHeap.bump;
+            var collectionStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             this.gcGeneration++;
             var generation = this.gcGeneration;
             var key;
             this.markValue(this.globalObject, generation);
             this.markValue(this.bufferSupport.prototype, generation);
+            var builtinTables = [this.stringMethods, this.arrayMethods,
+                this.objectMethods, this.functionMethods, this.numberMethods,
+                this.regexpMethods];
+            var builtinTableIndex = 0;
+            while (builtinTableIndex < builtinTables.length) {
+                var builtinTable = builtinTables[builtinTableIndex++];
+                for (key in builtinTable) {
+                    if (own(builtinTable, key)) {
+                        this.markValue(builtinTable[key], generation);
+                    }
+                }
+            }
             var hostRootIndex = 0;
             while (hostRootIndex < this.hostRoots.length) {
                 if (this.hostRoots[hostRootIndex] !== null) {
@@ -1557,12 +1634,18 @@
                 if (context.execution) markExecution(context.execution, generation, this);
                 contextIndex++;
             }
+            this.markAuthoritativeHeap(generation);
+            var markingFinished = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             var survivors = [];
             var index = 0;
             while (index < this.heapObjects.length) {
-                if (this.heapObjects[index].gcMark === generation) {
-                    survivors.push(this.heapObjects[index]);
-                } else this.releaseObjectRecords(this.heapObjects[index]);
+                var heapObject = this.heapObjects[index];
+                if (heapObject.heapAddress &&
+                    this.linearHeap.mark(heapObject.heapAddress) === generation) {
+                    heapObject.gcMark = generation;
+                    survivors.push(heapObject);
+                }
                 index++;
             }
             this.heapObjects = survivors;
@@ -1570,18 +1653,63 @@
             for (environmentKey in this.environmentMetadata) {
                 if (own(this.environmentMetadata, environmentKey)) {
                     var environmentMetadata = this.environmentMetadata[environmentKey];
-                    if (environmentMetadata.gcMark !== generation) {
-                        this.linearHeap.freeRecord(
-                            environmentMetadata.handle.heapAddress);
+                    if (this.linearHeap.mark(
+                            environmentMetadata.handle.heapAddress) !== generation) {
                         delete this.environmentMetadata[environmentKey];
+                    } else {
+                        environmentMetadata.gcMark = generation;
                     }
                 }
             }
+            var handleKey;
+            for (handleKey in this.heapHandles) {
+                if (own(this.heapHandles, handleKey) &&
+                    this.linearHeap.mark(
+                        this.heapHandles[handleKey].heapAddress) !== generation) {
+                    delete this.heapHandles[handleKey];
+                    delete this.functionMetadata[handleKey];
+                }
+            }
             this.propertyAddressCache = {};
+            index = 0;
+            while (index < this.bufferSupport.backings.length) {
+                var backing = this.bufferSupport.backings[index++];
+                if (!backing.freed && this.linearHeap.mark(
+                        backing.heapAddress) === generation) {
+                    backing.gcMark = generation;
+                }
+            }
             this.bufferSupport.sweep(generation);
+            var sweepResult;
+            if (this.heapSweeper &&
+                this.heapSweeper.compiled.backend === "i386") {
+                sweepResult = {records: null,
+                    bytes: this.heapSweeper.sweep(generation)};
+                this.linearHeap.rebuildFreeBlocks();
+            } else {
+                sweepResult = this.linearHeap.sweepUnmarked(generation);
+            }
+            var sweepingFinished = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             this.gcAllocationDebt = 0;
             this.gcPending = false;
             this.collectionCount++;
+            if (this.profileOpcodeCounts) {
+                var collectionLine = "guest heap collection " +
+                    this.collectionCount + ": bump=" +
+                    heapBumpBeforeCollection + "->" + this.linearHeap.bump +
+                    " reclaimedBytes=" + sweepResult.bytes +
+                    (sweepResult.records === null ? "" :
+                     " reclaimedRecords=" + sweepResult.records) +
+                    " freeBlocks=" +
+                    this.linearHeap.freeBlocks.length + " markMs=" +
+                    (markingFinished - collectionStarted) + " sweepMs=" +
+                    (sweepingFinished - markingFinished);
+                if (typeof print === "function") print(collectionLine);
+                else if (typeof console !== "undefined" && console.log) {
+                    console.log(collectionLine);
+                }
+            }
             return survivors.length;
         } finally {
             this.gcCollecting = false;
@@ -1667,6 +1795,7 @@
         if (this.linearHeap) this.linearHeap.destroy();
         this.linearHeap = null;
         this.valueCells = null;
+        this.heapSweeper = null;
         this.heapObjects = [];
         this.hostRoots = [];
         this.contexts = [];
@@ -1752,6 +1881,7 @@
         var frameIndex = 0;
         while (frameIndex < execution.frames.length) {
             var frame = execution.frames[frameIndex];
+            runtime.linearHeap.setMark(frame.heapAddress, generation);
             var registerIndex = 0;
             while (registerIndex < frame.registers.length) {
                 runtime.markValue(frame.registers[registerIndex], generation);
