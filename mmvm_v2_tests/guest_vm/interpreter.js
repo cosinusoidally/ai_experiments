@@ -224,6 +224,15 @@
                     frame.constants[nameConstant],
                     this.runtime.importCaughtException(error));
                 frame.pc = target;
+                /* Handler search runs in the semantic reference path, but the
+                 * selected continuation belongs to the authoritative heap
+                 * frame. Publish it before re-entering the native engine;
+                 * otherwise that engine sees the stale post-call PC and can
+                 * execute the try block's POP_CATCH for a second time. */
+                if (this.runtime.nativeInterpreter) {
+                    this.runtime.spillFramePC(frame);
+                    frame.nativeHeapCurrent = true;
+                }
                 return true;
             }
             this.frames.pop();
