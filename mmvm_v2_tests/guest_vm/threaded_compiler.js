@@ -15,7 +15,6 @@
         this.profileNextReport = 0;
         this.nativeMemmove = null;
         this.constructionReceivers = [];
-        this.pixelObject = null;
         this.pixelVersion = -1;
         this.pixelFormat = null;
         this.pixelAddress = 0;
@@ -271,38 +270,6 @@
             count, a0, a1, a2, a3, a4, a5, a6, a7) {
         return this.callFixed(this.runtime.getProperty(object, key), object, context,
                               count, a0, a1, a2, a3, a4, a5, a6, a7);
-    };
-
-    ThreadedCompiler.prototype.setPixelFast = function (
-            framebuffer, x, y, red, green, blue, context) {
-        if (framebuffer && framebuffer.guestType === "object" &&
-            typeof poke32 === "function") {
-            if (this.pixelObject !== framebuffer ||
-                this.pixelVersion !== framebuffer.valueVersion) {
-                this.pixelObject = framebuffer;
-                this.pixelVersion = framebuffer.valueVersion;
-                this.pixelFormat = this.runtime.getProperty(
-                    framebuffer, "pixelFormat");
-                this.pixelAddress = this.runtime.getProperty(
-                    framebuffer, "pixelAddress");
-                this.pixelWidth = this.runtime.getProperty(framebuffer, "width");
-                this.pixelHeight = this.runtime.getProperty(framebuffer, "height");
-            }
-            if (this.pixelFormat !== "bgrx32le" || !this.pixelAddress) {
-                return this.callMemberFixed(framebuffer, "setPixel", context, 5,
-                                            x, y, red, green, blue);
-            }
-            x = Number(x);
-            y = Number(y);
-            if (x < 0 || y < 0 || x >= this.pixelWidth ||
-                y >= this.pixelHeight) return undefined;
-            poke32(this.pixelAddress + (y * this.pixelWidth + x) * 4,
-                   ((Number(red) & 255) << 16) |
-                   ((Number(green) & 255) << 8) | (Number(blue) & 255));
-            return undefined;
-        }
-        return this.callMemberFixed(framebuffer, "setPixel", context, 5,
-                                    x, y, red, green, blue);
     };
 
     ThreadedCompiler.prototype.fallbackCompiled = function (callable, receiver, args,
@@ -812,7 +779,6 @@
         this.useEnvironment = !program.bindingRegisters;
         this.callIndex = 0;
         this.memberIndex = 0;
-        this.pixelIndex = 0;
         this.environmentCells = {};
         this.environmentValues = {};
         this.globalCells = {};
@@ -1446,38 +1412,6 @@
                        node.callee.property.value + "(" + args + ")";
             }
             var member = this.reference(node.callee);
-            if (!node.callee.computed && node.callee.property.value === "setPixel" &&
-                node.arguments.length === 5) {
-                return "hc.setPixelFast(" + member.object + "," + args +
-                       ",context)";
-                var pixelSite = this.pixelIndex++;
-                var pixelArguments = argumentSources;
-                var pixelObject = "s" + pixelSite + "_0";
-                var pixelX = "s" + pixelSite + "_1";
-                var pixelY = "s" + pixelSite + "_2";
-                var pixelRed = "s" + pixelSite + "_3";
-                var pixelGreen = "s" + pixelSite + "_4";
-                var pixelBlue = "s" + pixelSite + "_5";
-                return "((" + pixelObject + "=" + member.object + "),(" +
-                       pixelX + "=" + pixelArguments[0] + "),(" + pixelY + "=" +
-                       pixelArguments[1] + "),(" + pixelRed + "=" + pixelArguments[2] +
-                       "),(" + pixelGreen + "=" + pixelArguments[3] + "),(" +
-                       pixelBlue + "=" + pixelArguments[4] + "),(" + pixelObject +
-                       "&&" + pixelObject + ".guestType==='object'&&" + pixelObject +
-                       ".properties.$pixelFormat==='bgrx32le'&&" + pixelObject +
-                       ".properties.$pixelAddress&&typeof poke32==='function'?((" +
-                       pixelX + "=Number(" + pixelX + ")),(" + pixelY + "=Number(" +
-                       pixelY + ")),(" + pixelX + "<0||" + pixelY + "<0||" +
-                       pixelX + ">=" + pixelObject + ".properties.$width||" + pixelY +
-                       ">=" + pixelObject + ".properties.$height?undefined:poke32(" +
-                       pixelObject + ".properties.$pixelAddress+(" + pixelY + "*" +
-                       pixelObject + ".properties.$width+" + pixelX + ")*4,((Number(" +
-                       pixelRed + ")&255)<<16)|((Number(" + pixelGreen +
-                       ")&255)<<8)|(Number(" + pixelBlue + ")&255)))):" +
-                       "hc.callMemberFixed(" + pixelObject + ",\"setPixel\",context,5," +
-                       pixelX + "," + pixelY + "," + pixelRed + "," + pixelGreen +
-                       "," + pixelBlue + ")))";
-            }
             if (!node.callee.computed && node.callee.property.value === "push" &&
                 node.callee.object.type === "Identifier" && this.fastPlan &&
                 this.fastPlan.kinds["$" + node.callee.object.name] === "array") {
