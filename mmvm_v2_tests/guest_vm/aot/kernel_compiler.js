@@ -55,7 +55,9 @@
         propertyNext: "PROPERTY_NEXT",
         propertyKey: "PROPERTY_KEY",
         engineHeapBump: "ENGINE_HEAP_BUMP",
-        engineHeapLimit: "ENGINE_HEAP_LIMIT"
+        engineHeapLimit: "ENGINE_HEAP_LIMIT",
+        enginePlatformServices: "ENGINE_PLATFORM_SERVICES",
+        platformDlsymPointer: "PLATFORM_DLSYM_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {
@@ -444,13 +446,6 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
-            node.callee.name === "runtimeSupportDlsymPointer" &&
-            node.arguments.length === 2) {
-            return {op: "load_u32", address: runtimeSupportDlsymAddress(
-                node.arguments, symbols), type: "i32"};
-        }
-        if (node.type === "CallExpression" &&
-            node.callee.type === "Identifier" &&
             node.callee.name === "load32" && node.arguments.length === 1) {
             return {op: "load_u32",
                     address: lowerKernelExpression(node.arguments[0], symbols),
@@ -597,25 +592,6 @@
                     left: lowerKernelExpression(argumentsList[2], symbols),
                     right: {op: "const_i32", value: 2, type: "i32"},
                     type: "i32"}, type: "i32"}, type: "i32"};
-    }
-
-    function runtimeSupportDlsymAddress(argumentsList, symbols) {
-        var cells = symbols.$VECTOR_CELLS;
-        var low = symbols.$VALUE_CELL_LOW;
-        var index = symbols.$RUNTIME_SUPPORT_DLSYM_POINTER;
-        if (!cells || !low || !index || cells.kind !== "constant" ||
-            low.kind !== "constant" || index.kind !== "constant") {
-            throw new SyntaxError(
-                "dlsym support accessor requires the runtime-support layout");
-        }
-        return {op: "add_i32",
-            left: {op: "add_i32",
-                left: lowerKernelExpression(argumentsList[0], symbols),
-                right: lowerKernelExpression(argumentsList[1], symbols),
-                type: "i32"},
-            right: {op: "const_i32",
-                value: cells.value + index.value * 16 + low.value,
-                type: "i32"}, type: "i32"};
     }
 
     function lowerKernelF64Expression(node, symbols) {

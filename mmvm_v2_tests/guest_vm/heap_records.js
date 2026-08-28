@@ -93,6 +93,7 @@
     var ENGINE_FREE_FRAME = 32;
     var ENGINE_SCRATCH_LEFT = 36;
     var ENGINE_SCRATCH_RIGHT = 40;
+    var ENGINE_PLATFORM_SERVICES = 44;
     var ENGINE_OPCODE_COUNTS = 48;
     var ENGINE_OPCODE_COUNT = 48;
     var ENGINE_STATE_BYTES = ENGINE_OPCODE_COUNTS + ENGINE_OPCODE_COUNT * 4;
@@ -113,6 +114,13 @@
     var BUFFER_BACKING_LENGTH = 4;
     var BUFFER_BACKING_METADATA = 8;
     var BUFFER_BACKING_DATA = 16;
+
+    var PLATFORM_DLSYM_POINTER = 0;
+    var PLATFORM_WRITE_POINTER = 4;
+    var PLATFORM_POLL_POINTER = 8;
+    var PLATFORM_CLOCK_GETTIME_POINTER = 12;
+    var PLATFORM_EXIT_POINTER = 16;
+    var PLATFORM_SERVICES_BYTES = 24;
 
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
@@ -798,6 +806,35 @@
             Heap.Types.ENGINE_STATE, ENGINE_STATE_BYTES, 0, 0, 0, 0);
     };
 
+    Records.prototype.allocatePlatformServices = function () {
+        return this.heap.allocateRecordWords(
+            Heap.Types.PLATFORM_SERVICES, PLATFORM_SERVICES_BYTES,
+            0, 0, 0, 0);
+    };
+
+    Records.prototype.setEnginePlatformServices = function (state, services) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_PLATFORM_SERVICES, services,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.enginePlatformServices = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_PLATFORM_SERVICES, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setPlatformDlsymPointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_DLSYM_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformDlsymPointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_DLSYM_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
     Records.prototype.engineStatePayloadAddress = function (state) {
         return this.heap.trustedPayloadAddress(
             state, ENGINE_EXIT_REASON, ENGINE_STATE_BYTES,
@@ -941,6 +978,7 @@
                 address, HANDLER_NEXT, Heap.Types.HANDLER));
         } else if (type === Heap.Types.ENGINE_STATE) {
             reference(records.engineCurrentFrame(address));
+            reference(records.enginePlatformServices(address));
         }
     };
 

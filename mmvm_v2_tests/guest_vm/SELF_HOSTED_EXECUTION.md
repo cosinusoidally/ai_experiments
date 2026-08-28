@@ -66,6 +66,12 @@ then libc is entered without a semantic exit to SpiderMonkey. This is the
 foundation for the remaining timer, polling, file, socket, output, and event
 scheduler services.
 
+Bootstrap-resolved native entry points live in a dedicated
+`PLATFORM_SERVICES` heap record referenced by `ENGINE_STATE`; they are not
+mixed with guest strings, objects, or host JavaScript metadata. The collector
+keeps the table alive through that named engine-state edge, while treating its
+contents as native pointers rather than guest references.
+
 ## Execution boundary
 
 The intended MMVM startup sequence is:

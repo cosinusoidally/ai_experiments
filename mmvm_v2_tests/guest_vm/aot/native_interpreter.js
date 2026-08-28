@@ -135,7 +135,9 @@
         var ENGINE_FREE_FRAME = 32;
         var ENGINE_SCRATCH_LEFT = 36;
         var ENGINE_SCRATCH_RIGHT = 40;
+        var ENGINE_PLATFORM_SERVICES = 44;
         var ENGINE_OPCODE_COUNTS = 48;
+        var PLATFORM_DLSYM_POINTER = 16;
         var PROFILE_OPCODES = 0;
         var CALL_REJECT_NONE = 0;
         var CALL_REJECT_ARGUMENT_LIST = 1;
@@ -227,7 +229,6 @@
         var STRING_SUPPORT_EMPTY = 2;
         var STRING_SUPPORT_ASCII_BASE = 3;
         var RUNTIME_SUPPORT_BUFFER_PROTOTYPE = 259;
-        var RUNTIME_SUPPORT_DLSYM_POINTER = 260;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -1770,7 +1771,8 @@
                 if (intrinsicId === INTRINSIC_GET_DLSYM) {
                     store32(intrinsicTarget, VALUE_TAG_INT32);
                     store32(intrinsicTarget + VALUE_CELL_LOW,
-                        runtimeSupportDlsymPointer(heapBase, stringSupport));
+                        platformDlsymPointer(heapBase,
+                            enginePlatformServices(heapBase, state)));
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
@@ -3613,7 +3615,11 @@
         this.stateAddress = runtime.heapRecords.allocateEngineState();
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(261);
+        this.platformServicesAddress =
+            runtime.heapRecords.allocatePlatformServices();
+        runtime.heapRecords.setEnginePlatformServices(
+            this.stateAddress, this.platformServicesAddress);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(260);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -3632,9 +3638,7 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 259),
             runtime.bufferSupport.prototype.heapAddress);
-        runtime.valueCells.writePrimitiveAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 260), 0);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 261);
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 260);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
@@ -3666,9 +3670,8 @@
     NativeInterpreter.Exit = Exit;
 
     NativeInterpreter.prototype.setDlsymPointer = function (pointer) {
-        this.runtime.valueCells.writePrimitiveAt(
-            this.runtime.heapRecords.vectorCell(this.stringSupportAddress, 260),
-            Number(pointer) | 0);
+        this.runtime.heapRecords.setPlatformDlsymPointer(
+            this.platformServicesAddress, Number(pointer) | 0);
     };
 
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
