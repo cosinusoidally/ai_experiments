@@ -865,10 +865,53 @@
                     var comparisonLeftTag = load32(comparisonLeft);
                     var comparisonRightTag = load32(comparisonRight);
                     var comparisonValid = 0;
-                    if (comparisonLeftTag === VALUE_TAG_INT32) comparisonValid = 1;
-                    else if (comparisonLeftTag === VALUE_TAG_DOUBLE) comparisonValid = 1;
-                    if (comparisonRightTag !== VALUE_TAG_INT32) {
-                        if (comparisonRightTag !== VALUE_TAG_DOUBLE) comparisonValid = 0;
+                    var comparisonValue = 0;
+                    if (opcode === OP_STRICT_EQUAL) {
+                        comparisonValid = 1;
+                        if (comparisonLeftTag === VALUE_TAG_INT32) {
+                            if (comparisonRightTag === VALUE_TAG_INT32) {
+                                comparisonValue = equalF64(loadNumberF64(
+                                    comparisonLeft + VALUE_CELL_LOW,
+                                    comparisonLeftTag), loadNumberF64(
+                                    comparisonRight + VALUE_CELL_LOW,
+                                    comparisonRightTag));
+                            } else if (comparisonRightTag === VALUE_TAG_DOUBLE) {
+                                comparisonValue = equalF64(loadNumberF64(
+                                    comparisonLeft + VALUE_CELL_LOW,
+                                    comparisonLeftTag), loadNumberF64(
+                                    comparisonRight + VALUE_CELL_LOW,
+                                    comparisonRightTag));
+                            }
+                        } else if (comparisonLeftTag === VALUE_TAG_DOUBLE) {
+                            if (comparisonRightTag === VALUE_TAG_INT32) {
+                                comparisonValue = equalF64(loadNumberF64(
+                                    comparisonLeft + VALUE_CELL_LOW,
+                                    comparisonLeftTag), loadNumberF64(
+                                    comparisonRight + VALUE_CELL_LOW,
+                                    comparisonRightTag));
+                            } else if (comparisonRightTag === VALUE_TAG_DOUBLE) {
+                                comparisonValue = equalF64(loadNumberF64(
+                                    comparisonLeft + VALUE_CELL_LOW,
+                                    comparisonLeftTag), loadNumberF64(
+                                    comparisonRight + VALUE_CELL_LOW,
+                                    comparisonRightTag));
+                            }
+                        } else if (comparisonLeftTag === comparisonRightTag) {
+                            if (comparisonLeftTag === VALUE_TAG_REFERENCE) {
+                                if (load32(comparisonLeft + VALUE_CELL_LOW) ===
+                                    load32(comparisonRight + VALUE_CELL_LOW)) {
+                                    comparisonValue = 1;
+                                }
+                            } else comparisonValue = 1;
+                        }
+                    } else {
+                        if (comparisonLeftTag === VALUE_TAG_INT32) comparisonValid = 1;
+                        else if (comparisonLeftTag === VALUE_TAG_DOUBLE) comparisonValid = 1;
+                        if (comparisonRightTag !== VALUE_TAG_INT32) {
+                            if (comparisonRightTag !== VALUE_TAG_DOUBLE) {
+                                comparisonValid = 0;
+                            }
+                        }
                     }
                     if (comparisonValid === 0) {
                         store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
@@ -878,11 +921,8 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    var comparisonValue = 0;
                     if (opcode === OP_STRICT_EQUAL) {
-                        comparisonValue = equalF64(
-                            loadNumberF64(comparisonLeft + VALUE_CELL_LOW, comparisonLeftTag),
-                            loadNumberF64(comparisonRight + VALUE_CELL_LOW, comparisonRightTag));
+                        /* Strict equality was completed above for all tags. */
                     } else if (opcode === OP_EQUAL) {
                         comparisonValue = equalF64(
                             loadNumberF64(comparisonLeft + VALUE_CELL_LOW, comparisonLeftTag),
