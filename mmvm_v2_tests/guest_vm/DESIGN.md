@@ -488,8 +488,12 @@ Buffer view
     properties    ordinary named properties
 ```
 
-The backing record owns exactly one host-memory allocation. `slice` creates a
-new view with adjusted offset/length and does not allocate or copy bytes.
+The backing record owns its bytes inline in the non-moving runtime heap.
+`slice` creates a new view with adjusted offset/length and does not allocate or
+copy bytes. On MMVM the record caches the native address of its inline data so
+kernel code and native platform services can consume it directly. On Node that
+pointer is zero and the same named record accessors read and write the emulated
+linear memory. There is no per-Buffer host allocation object or backing-ID map.
 Canonical decimal numeric property names read/write bytes; out-of-range numeric
 writes are ignored and reads return `undefined`. Allocation is zero-filled.
 
@@ -509,12 +513,12 @@ This is not yet the complete Node.js 0.10 Buffer profile. Encoding methods,
 constructor compatibility, signed values, other endian widths, enumeration,
 descriptors, and exact error variations remain future work.
 
-Under `js_min.exe`, `host_memory.js` asks `host_ffi.js` to resolve and call
-`calloc` and `free`. `host_ffi.js` owns the only raw `ffi_call` sites in
-`guest_vm`; the memory adapter accesses data
-with `peek8`/`poke8` or aligned `peek32`/`poke32`. Under Node it uses a zero-filled
-ordinary array behind the identical private interface; it does not substitute a
-Node Buffer into guest semantics.
+The runtime's one linear heap allocation remains behind `linear_memory.js` and
+`host_memory.js`; individual Buffer backing stores do not call `calloc` or
+`free`. The ordinary heap marker reaches a backing from every live view, and
+the ordinary sweep reclaims an unreachable backing exactly once. Native
+`Buffer.alloc`, indexing, endian operations, slicing, and overlap-safe copying
+operate on these records without constructing a host object.
 
 `get_dlsym` and `ffi_call` are not ordinary guest globals. Constructing a VM
 with `{rawFFI: true}` installs compatibility functions so the unchanged

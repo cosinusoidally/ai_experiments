@@ -283,14 +283,16 @@
                 var valueRoot = value && value.guestType ? environment.vm.retain(value) : 0;
                 var callbackRoot = callback ? environment.vm.retain(callback) : 0;
                 var hostValue;
-                if (value && value.guestType === "buffer" &&
-                    environment.runtime.bufferSupport.viewBacking(value).
-                        allocation.isNative) {
+                if (value && value.guestType === "buffer") {
                     var valueBacking = environment.runtime.bufferSupport.
                         viewBacking(value);
-                    hostValue = {_nodePointer: valueBacking.allocation.pointer +
+                    var valuePointer = environment.runtime.heapRecords.
+                        bufferBackingPointer(valueBacking);
+                    if (valuePointer) {
+                    hostValue = {_nodePointer: valuePointer +
                             environment.runtime.bufferSupport.viewOffset(value),
                         length: environment.runtime.bufferSupport.viewLength(value)};
+                    } else hostValue = environment.hostBody(value);
                 } else hostValue = environment.hostBody(value);
                 return hostSocket.write(hostValue, function () {
                     if (callback) environment.enqueueGuest(callback, socket, []);

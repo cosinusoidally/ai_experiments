@@ -1797,15 +1797,6 @@
                 }
             }
             this.propertyAddressCache = {};
-            index = 0;
-            while (index < this.bufferSupport.backings.length) {
-                var backing = this.bufferSupport.backings[index++];
-                if (!backing.freed && this.linearHeap.mark(
-                        backing.heapAddress) === generation) {
-                    backing.gcMark = generation;
-                }
-            }
-            this.bufferSupport.sweep(generation);
             var sweepResult;
             if (this.heapSweeper &&
                 this.heapSweeper.compiled.backend === "i386") {

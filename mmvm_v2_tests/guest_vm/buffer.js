@@ -1,8 +1,8 @@
 (function (root) {
-    var HostMemory = root.GuestVMHostMemory;
+    var Heap = root.GuestVMHeap;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     if (typeof module !== "undefined" && module.exports) {
-        HostMemory = require("./host_memory.js");
+        Heap = require("./heap.js");
         NativeIntrinsics = require("./native_intrinsics.js");
     }
 
@@ -25,10 +25,6 @@
 
     function BufferSupport(runtime) {
         this.runtime = runtime;
-        this.memory = new HostMemory();
-        this.backings = [];
-        this.backingById = {};
-        this.nextBackingId = 1;
         this.prototype = runtime.makeObject();
         this.installPrototype();
         this.installConstructor();
@@ -98,7 +94,7 @@
                     index += backwards ? -1 : 1;
                 }
                 return count;
-            });
+            }, NativeIntrinsics.BUFFER_COPY);
         properties.$readUInt8 = this.makeNative("Buffer.prototype.readUInt8",
             function (receiver, args) {
                 support.requireBuffer(receiver);
@@ -202,7 +198,7 @@
                     support.runtime.call(fill, buffer, [args[1]]);
                 }
                 return buffer;
-            }));
+            }, NativeIntrinsics.BUFFER_ALLOC));
         this.runtime.setProperty(constructor, "isBuffer", this.makeNative("Buffer.isBuffer",
             function (receiver, args) {
                 return !!args[0] && args[0].guestType === "buffer";
@@ -212,10 +208,12 @@
         this.runtime.setProperty(constructor, "allocNative", this.makeNative("Buffer.allocNative",
             function (receiver, args) {
                 var buffer = support.allocate(args[0]);
-                var allocation = support.viewBacking(buffer).allocation;
-                if (allocation.isNative) {
+                var backing = support.viewBacking(buffer);
+                var pointer = support.runtime.heapRecords.bufferBackingPointer(
+                    backing);
+                if (pointer) {
                     support.runtime.setProperty(buffer, "_nodePointer",
-                        allocation.pointer + support.viewOffset(buffer));
+                        pointer + support.viewOffset(buffer));
                 }
                 return buffer;
             }));
@@ -276,32 +274,22 @@
     BufferSupport.prototype.allocate = function (size) {
         size = integer(size);
         if (size < 0 || size > 0x3fffffff) throw new RangeError("invalid Buffer size");
-        var backing = {allocation: this.memory.allocate(size), length: size,
-                       freed: false, gcMark: 0};
-        var backingId = this.nextBackingId++;
-        this.backings.push(backing);
-        this.backingById["$" + backingId] = backing;
-        backing.heapAddress = this.runtime.heapRecords.allocateBufferBacking(
-            backing.allocation.isNative ? backing.allocation.pointer : 0,
-            size, backingId);
+        var backing = this.runtime.heapRecords.allocateBufferBacking(size);
         this.runtime.noteAllocation(Math.max(1, Math.ceil(size / 64)));
         return this.makeView(backing, 0, size);
     };
 
     BufferSupport.prototype.makeView = function (backing, offset, length) {
-        if (backing.freed) throw new Error("cannot view a freed backing store");
         var viewAddress = this.runtime.heapRecords.allocateBufferView(
-            backing.heapAddress, offset, length, this.prototype.heapAddress);
+            backing, offset, length, this.prototype.heapAddress);
         var view = this.runtime.makeHeapHandle(viewAddress, "buffer");
         this.runtime.trackObject(view);
         return view;
     };
 
     BufferSupport.prototype.viewBacking = function (view) {
-        var backingAddress = this.runtime.heapRecords.bufferViewBacking(view.heapAddress);
-        var id = this.runtime.heapRecords.bufferBackingMetadata(backingAddress);
-        var backing = this.backingById["$" + id];
-        if (!backing || backing.freed) throw new Error("Buffer backing store is freed");
+        var backing = this.runtime.heapRecords.bufferViewBacking(view.heapAddress);
+        this.runtime.heapRecords.bufferBackingLength(backing);
         return backing;
     };
 
@@ -321,26 +309,26 @@
 
     BufferSupport.prototype.read = function (view, index) {
         if (index < 0 || index >= this.viewLength(view)) throw new RangeError("Buffer index out of range");
-        return this.memory.read8(this.viewBacking(view).allocation,
-                                 this.viewOffset(view) + index);
+        return this.runtime.heapRecords.readBufferByte(this.viewBacking(view),
+            this.viewOffset(view) + index);
     };
 
     BufferSupport.prototype.write = function (view, index, value) {
         if (index < 0 || index >= this.viewLength(view)) throw new RangeError("Buffer index out of range");
-        this.memory.write8(this.viewBacking(view).allocation,
-                           this.viewOffset(view) + index, value);
+        this.runtime.heapRecords.writeBufferByte(this.viewBacking(view),
+            this.viewOffset(view) + index, value);
     };
 
     BufferSupport.prototype.read32LE = function (view, index) {
         if (index < 0 || index + 4 > this.viewLength(view)) throw new RangeError("Buffer read out of range");
-        return this.memory.read32LE(this.viewBacking(view).allocation,
-                                    this.viewOffset(view) + index);
+        return this.runtime.heapRecords.readBufferU32LE(this.viewBacking(view),
+            this.viewOffset(view) + index);
     };
 
     BufferSupport.prototype.write32LE = function (view, index, value) {
         if (index < 0 || index + 4 > this.viewLength(view)) throw new RangeError("Buffer write out of range");
-        this.memory.write32LE(this.viewBacking(view).allocation,
-                              this.viewOffset(view) + index, value);
+        this.runtime.heapRecords.writeBufferU32LE(this.viewBacking(view),
+            this.viewOffset(view) + index, value);
     };
 
     BufferSupport.prototype.getProperty = function (view, key) {
@@ -367,49 +355,24 @@
     };
 
     BufferSupport.prototype.markView = function (view, generation) {
-        this.viewBacking(view).gcMark = generation;
+        this.runtime.linearHeap.setMark(this.viewBacking(view), generation);
     };
 
     BufferSupport.prototype.sweep = function (generation) {
-        var survivors = [];
-        var index = 0;
-        while (index < this.backings.length) {
-            var backing = this.backings[index];
-            if (!backing.freed && backing.gcMark !== generation) {
-                var backingId = this.runtime.heapRecords.bufferBackingMetadata(
-                    backing.heapAddress);
-                this.memory.free(backing.allocation);
-                this.runtime.linearHeap.freeRecord(backing.heapAddress);
-                delete this.backingById["$" + backingId];
-                backing.freed = true;
-            }
-            if (!backing.freed) survivors.push(backing);
-            index++;
-        }
-        this.backings = survivors;
-        return survivors.length;
+        /* Backing bytes are ordinary authoritative heap records. The runtime
+         * collector sweeps them together with every other unreachable record. */
+        return this.liveBackingCount();
     };
 
     BufferSupport.prototype.liveBackingCount = function () {
         var count = 0;
-        var index = 0;
-        while (index < this.backings.length) {
-            if (!this.backings[index].freed) count++;
-            index++;
-        }
+        this.runtime.linearHeap.visitRecords(function (address, type) {
+            if (type === Heap.Types.BUFFER_BACKING) count++;
+        });
         return count;
     };
 
-    BufferSupport.prototype.destroy = function () {
-        var index = 0;
-        while (index < this.backings.length) {
-            if (!this.backings[index].freed) {
-                this.memory.free(this.backings[index].allocation);
-                this.backings[index].freed = true;
-            }
-            index++;
-        }
-    };
+    BufferSupport.prototype.destroy = function () {};
 
     root.GuestVMBufferSupport = BufferSupport;
     if (typeof module !== "undefined" && module.exports) module.exports = BufferSupport;

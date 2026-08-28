@@ -156,10 +156,10 @@
         do {
             gcResult = gcExecution.resume(12);
         } while (gcResult.status === "budget");
+        var retainedBytes = firstRuntime.runtime.getGlobal(
+            firstContext, "suspendedBytes");
         assert(gcResult.status === "completed" &&
-               firstRuntime.runtime.bufferSupport.viewBacking(
-                   firstRuntime.runtime.getGlobal(firstContext,
-                                                  "suspendedBytes")).freed === false,
+               firstRuntime.runtime.bufferSupport.read(retainedBytes, 0) === 63,
                "collection did not retain a suspended execution value");
 
         firstRuntime.destroy();

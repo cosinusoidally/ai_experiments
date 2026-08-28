@@ -112,7 +112,7 @@
     var BUFFER_BACKING_POINTER = 0;
     var BUFFER_BACKING_LENGTH = 4;
     var BUFFER_BACKING_METADATA = 8;
-    var BUFFER_BACKING_BYTES = 16;
+    var BUFFER_BACKING_DATA = 16;
 
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
@@ -421,9 +421,15 @@
             regexp, REGEXP_FLAGS, Heap.Types.REGEXP));
     };
 
-    Records.prototype.allocateBufferBacking = function (pointer, length, metadata) {
-        return this.heap.allocateRecordWords(Heap.Types.BUFFER_BACKING,
-            BUFFER_BACKING_BYTES, pointer || 0, length, metadata || 0, 0);
+    Records.prototype.allocateBufferBacking = function (length) {
+        length = Number(length);
+        var address = this.heap.allocateRecordWords(Heap.Types.BUFFER_BACKING,
+            BUFFER_BACKING_DATA + length, 0, length, 0, 0);
+        var pointer = this.heap.memory.nativeAddress(
+            address + Heap.HEADER_SIZE + BUFFER_BACKING_DATA);
+        this.heap.writeTrustedFieldU32(address, BUFFER_BACKING_POINTER,
+                                       pointer, Heap.Types.BUFFER_BACKING);
+        return address;
     };
 
     Records.prototype.allocateBufferView = function (backing, offset, length,
@@ -450,6 +456,56 @@
     Records.prototype.bufferBackingMetadata = function (backing) {
         return this.heap.readTrustedFieldU32(backing, BUFFER_BACKING_METADATA,
                                       Heap.Types.BUFFER_BACKING);
+    };
+
+    Records.prototype.bufferBackingPointer = function (backing) {
+        var pointer = this.heap.readTrustedFieldU32(
+            backing, BUFFER_BACKING_POINTER, Heap.Types.BUFFER_BACKING);
+        return pointer >= 2147483648 ? pointer - 4294967296 : pointer;
+    };
+
+    Records.prototype.bufferBackingLength = function (backing) {
+        return this.heap.readTrustedFieldU32(backing, BUFFER_BACKING_LENGTH,
+                                      Heap.Types.BUFFER_BACKING);
+    };
+
+    Records.prototype.bufferBackingDataAddress = function (backing) {
+        this.heap.requireRecord(backing, Heap.Types.BUFFER_BACKING);
+        return backing + Heap.HEADER_SIZE + BUFFER_BACKING_DATA;
+    };
+
+    Records.prototype.readBufferByte = function (backing, offset) {
+        var length = this.bufferBackingLength(backing);
+        if (offset < 0 || offset >= length) {
+            throw new RangeError("Buffer index out of range");
+        }
+        return this.heap.memory.readU8Trusted(
+            this.bufferBackingDataAddress(backing) + offset);
+    };
+
+    Records.prototype.writeBufferByte = function (backing, offset, value) {
+        var length = this.bufferBackingLength(backing);
+        if (offset < 0 || offset >= length) {
+            throw new RangeError("Buffer index out of range");
+        }
+        this.heap.memory.writeU8Trusted(
+            this.bufferBackingDataAddress(backing) + offset, value);
+    };
+
+    Records.prototype.readBufferU32LE = function (backing, offset) {
+        if (offset < 0 || offset + 4 > this.bufferBackingLength(backing)) {
+            throw new RangeError("Buffer read out of range");
+        }
+        return this.heap.memory.readU32Trusted(
+            this.bufferBackingDataAddress(backing) + offset);
+    };
+
+    Records.prototype.writeBufferU32LE = function (backing, offset, value) {
+        if (offset < 0 || offset + 4 > this.bufferBackingLength(backing)) {
+            throw new RangeError("Buffer write out of range");
+        }
+        this.heap.memory.writeU32Trusted(
+            this.bufferBackingDataAddress(backing) + offset, value);
     };
 
     Records.prototype.functionClosure = function (address) {

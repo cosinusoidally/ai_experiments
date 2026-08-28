@@ -42,15 +42,17 @@ The current implementation has completed these preparatory steps:
 - finite instruction budgets continue to select the resumable interpreter,
   while the command runner's unlimited slices may use compiled callbacks.
 
-The live semantic runtime still stores objects, arrays, frames, and most values
-in transitional host JavaScript records. Therefore it is not yet independent
-of the host VM, and the MMVM runner still returns for host calls and event-loop
-work. The portable compiler is a reference backend and performance bridge, not
-the self-hosting endpoint. The next representation milestone is to put
-frame/register and lexical
-environment cells in the runtime heap, followed by objects/properties/arrays
-and a heap-tracing collector. Native kernel dispatch follows those layouts; it
-must not attempt to call back into transitional host objects.
+Objects, arrays, frames, environments, strings, programs, bytecode, contexts,
+Buffer views, and inline Buffer bytes now have authoritative runtime-heap
+records, and the kernel-compiled marker/sweeper collects that graph. Host
+handles and metadata maps remain transitional caches used by semantic exits;
+they are no longer guest storage. The principal unfinished boundary is core
+builtin and slow-path execution: unsupported JavaScript semantics still return
+to host JavaScript callbacks. Those operations must move behind the shared
+kernel builtin/service ABI. MMVM platform services, including timers, polling,
+sockets, files, output, and raw FFI, must then call native service-table entries
+directly instead of returning to SpiderMonkey. Node implements the same service
+contract with JavaScript and its event loop.
 
 ## Execution boundary
 
@@ -128,7 +130,7 @@ with internal platform services. At minimum these include:
 - timer scheduling and cancellation;
 - nonblocking file, socket, and poll operations;
 - standard streams and process exit;
-- allocation and release of native Buffer backing stores;
+- allocation and release of runtime heap regions;
 - the controlled libc/FFI surface required by existing MMVM examples.
 
 An internal service may suspend one guest context and schedule another without

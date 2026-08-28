@@ -1,5 +1,22 @@
 # Guest VM performance notes
 
+## 2026-08-28: runtime-owned Buffer storage
+
+Buffer backing bytes moved from per-allocation host objects into inline,
+non-moving `BUFFER_BACKING` heap records. Native `Buffer.alloc` zeroes and
+publishes the backing plus its first view in one kernel operation, and native
+`Buffer.copy` performs overlap-safe byte movement without a semantic exit. This
+is a representation change, not a demo-specific copy shortcut: Node reads the
+same record through the JavaScript memory backend and GC traces the view-to-
+backing edge normally.
+
+The host-side copy loop was a major whole-demo cost. In an initial uncontaminated
+`demo5.js` sample at 64x64, the first five-second window increased from roughly
+1.2--1.6 FPS to about 4.3 FPS. A later window in that run received live keyboard
+input and is not a valid comparison. `demo1.js` at 320x240 reached about 5.6 FPS,
+up from the prior 5.2 FPS checkpoint and remaining above the approximately
+3.6--3.8 FPS direct-`js_min.exe` baseline measured earlier.
+
 ## 2026-08-28: native/semantic boundary profiling
 
 The opcode profiler now reports cumulative time and invocation count for the
