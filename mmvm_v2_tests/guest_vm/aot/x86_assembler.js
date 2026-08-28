@@ -299,6 +299,11 @@
         this.emitByte(0x0f); this.emitByte(0x84);
         this.relativeFixup(name);
     };
+    Assembler.prototype.jumpLess = function (name) {
+        this.macros.push("jl(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x8c);
+        this.relativeFixup(name);
+    };
     Assembler.prototype.jumpParity = function (name) {
         this.macros.push("jp(" + name + ")");
         this.emitByte(0x0f); this.emitByte(0x8a);

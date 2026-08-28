@@ -214,6 +214,7 @@
         store32(heapBase + state + ENGINE_CURRENT_FRAME, frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
+            beginOpcodeDispatch(opcode, OP_CONST, OP_SET_PROPERTY_CONST);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);

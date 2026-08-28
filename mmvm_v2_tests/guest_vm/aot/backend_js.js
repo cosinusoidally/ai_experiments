@@ -81,6 +81,9 @@
             return "while(" + emitControlExpression(node.test, parameters, locals) + "){" +
                    emitNested(node.body, parameters, locals) + "}";
         }
+        if (node.op === "opcode_dispatch") {
+            return emitStatement(node.body, parameters, locals);
+        }
         if (node.op === "return") {
             return "return (" + emitControlExpression(
                 node.value, parameters, locals) + ")|0;";

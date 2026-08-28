@@ -206,6 +206,14 @@
         var index = 0;
         while (index < statements.length) {
             var lowered = lowerStatement(statements[index++], symbols);
+            if (lowered.op === "dispatch_marker") {
+                if (index >= statements.length) {
+                    throw new SyntaxError("kernel dispatch marker requires a body");
+                }
+                lowered = {op: "opcode_dispatch", value: lowered.value,
+                    minimum: lowered.minimum, maximum: lowered.maximum,
+                    body: lowerStatement(statements[index++], symbols)};
+            }
             if (lowered.op === "block") {
                 var child = 0;
                 while (child < lowered.body.length) body.push(lowered.body[child++]);
@@ -241,6 +249,22 @@
         }
         if (statement.type === "ExpressionStatement") {
             var expression = statement.expression;
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
+                expression.callee.name === "beginOpcodeDispatch" &&
+                expression.arguments.length === 3) {
+                var minimum = lowerKernelExpression(
+                    expression.arguments[1], symbols);
+                var maximum = lowerKernelExpression(
+                    expression.arguments[2], symbols);
+                if (minimum.op !== "const_i32" || maximum.op !== "const_i32") {
+                    throw new SyntaxError(
+                        "kernel opcode dispatch bounds must be constants");
+                }
+                return {op: "dispatch_marker",
+                    value: lowerKernelExpression(expression.arguments[0], symbols),
+                    minimum: minimum.value, maximum: maximum.value};
+            }
             if (expression.type === "AssignmentExpression" &&
                 expression.operator === "=" &&
                 expression.left.type === "Identifier") {

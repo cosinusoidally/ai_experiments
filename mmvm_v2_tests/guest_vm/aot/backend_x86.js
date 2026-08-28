@@ -347,7 +347,138 @@
             assembler.label(exitLabel);
             return;
         }
+        if (node.op === "opcode_dispatch") {
+            emitOpcodeDispatch(assembler, node, state);
+            return;
+        }
         throw new Error("unsupported i386 control-flow statement " + node.op);
+    }
+
+    function emitOpcodeDispatch(assembler, node, state) {
+        if (node.value.op !== "local_i32") {
+            throw new Error("i386 opcode dispatch requires a kernel local");
+        }
+        var dispatchId = state.nextLabel++;
+        var defaultLabel = "kernel_dispatch_default_" + dispatchId;
+        var endLabel = "kernel_dispatch_end_" + dispatchId;
+        emitControlExpression(assembler, node.value, state);
+        emitBalancedDispatch(assembler, node.minimum, node.maximum,
+                             dispatchId, defaultLabel);
+        var opcode = node.minimum;
+        while (opcode <= node.maximum) {
+            assembler.label(dispatchCaseLabel(dispatchId, opcode));
+            emitStatement(assembler,
+                specializeDispatchStatement(node.body, node.value.index, opcode),
+                state);
+            assembler.jump(endLabel);
+            opcode++;
+        }
+        assembler.label(defaultLabel);
+        emitStatement(assembler, node.body, state);
+        assembler.label(endLabel);
+    }
+
+    function emitBalancedDispatch(assembler, minimum, maximum, id,
+                                  defaultLabel) {
+        if (minimum > maximum) {
+            assembler.jump(defaultLabel);
+            return;
+        }
+        if (minimum === maximum) {
+            assembler.compareEaxImmediate(minimum);
+            assembler.jumpEqual(dispatchCaseLabel(id, minimum));
+            assembler.jump(defaultLabel);
+            return;
+        }
+        var pivot = (minimum + maximum) >> 1;
+        var leftLabel = "kernel_dispatch_left_" + id + "_" + minimum +
+                        "_" + maximum;
+        assembler.compareEaxImmediate(pivot);
+        assembler.jumpLess(leftLabel);
+        assembler.jumpEqual(dispatchCaseLabel(id, pivot));
+        emitBalancedDispatch(assembler, pivot + 1, maximum, id, defaultLabel);
+        assembler.label(leftLabel);
+        emitBalancedDispatch(assembler, minimum, pivot - 1, id, defaultLabel);
+    }
+
+    function dispatchCaseLabel(id, opcode) {
+        return "kernel_dispatch_case_" + id + "_" + opcode;
+    }
+
+    function specializeDispatchStatement(node, localIndex, value) {
+        if (!node || typeof node !== "object") return node;
+        if (node.op === "if") {
+            var test = specializeDispatchExpression(node.test, localIndex, value);
+            if (test.op === "const_i32") {
+                return specializeDispatchStatement(test.value ? node.consequent :
+                                                    node.alternate,
+                                                    localIndex, value);
+            }
+            return {op: "if", test: test,
+                consequent: specializeDispatchStatement(
+                    node.consequent, localIndex, value),
+                alternate: specializeDispatchStatement(
+                    node.alternate, localIndex, value)};
+        }
+        if (node.op === "block") {
+            var body = [];
+            var index = 0;
+            while (index < node.body.length) {
+                body.push(specializeDispatchStatement(
+                    node.body[index++], localIndex, value));
+            }
+            return {op: "block", body: body};
+        }
+        if (node.op === "while" || node.op === "opcode_dispatch") return node;
+        var result = {};
+        var key;
+        for (key in node) {
+            if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+            var child = node[key];
+            result[key] = child && typeof child === "object" ?
+                specializeDispatchExpression(child, localIndex, value) : child;
+        }
+        return result;
+    }
+
+    function specializeDispatchExpression(node, localIndex, value) {
+        if (!node || typeof node !== "object") return node;
+        if (node.op === "local_i32" && node.index === localIndex) {
+            return {op: "const_i32", value: value, type: "i32"};
+        }
+        var result = {};
+        var key;
+        for (key in node) {
+            if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+            var child = node[key];
+            result[key] = child && typeof child === "object" ?
+                specializeDispatchExpression(child, localIndex, value) : child;
+        }
+        if (result.left && result.right &&
+            result.left.op === "const_i32" && result.right.op === "const_i32") {
+            return foldSpecializedInteger(result.op, result.left.value,
+                                          result.right.value);
+        }
+        return result;
+    }
+
+    function foldSpecializedInteger(operation, left, right) {
+        var value;
+        var comparison = 0;
+        if (operation === "eq_i32") { value = left === right; comparison = 1; }
+        else if (operation === "ne_i32") { value = left !== right; comparison = 1; }
+        else if (operation === "lt_i32") { value = left < right; comparison = 1; }
+        else if (operation === "le_i32") { value = left <= right; comparison = 1; }
+        else if (operation === "gt_i32") { value = left > right; comparison = 1; }
+        else if (operation === "ge_i32") { value = left >= right; comparison = 1; }
+        else if (operation === "add_i32") value = (left + right) | 0;
+        else if (operation === "sub_i32") value = (left - right) | 0;
+        else if (operation === "mul_i32") value = (left * right) | 0;
+        else return {op: operation,
+            left: {op: "const_i32", value: left, type: "i32"},
+            right: {op: "const_i32", value: right, type: "i32"}, type: "i32"};
+        return {op: "const_i32", value: comparison ? (value ? 1 : 0) : value,
+                type: "i32"};
     }
 
     function emitControlExpression(assembler, node, state) {
