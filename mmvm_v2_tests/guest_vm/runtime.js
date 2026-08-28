@@ -847,7 +847,9 @@
             }));
         this.stringMethods = {};
         this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
-            function (receiver, args) { return String(receiver).charAt(Number(args[0]) || 0); });
+            function (receiver, args) {
+                return String(receiver).charAt(Number(args[0]) || 0);
+            }, "intrinsic", NativeIntrinsics.STRING_CHAR_AT);
         this.stringMethods.charCodeAt = this.makeNativeFunction("String.charCodeAt",
             function (receiver, args) { return String(receiver).charCodeAt(Number(args[0]) || 0); });
         this.stringMethods.indexOf = this.makeNativeFunction("String.indexOf",
@@ -1605,6 +1607,10 @@
         }
         value(this.globalObject);
         value(this.bufferSupport.prototype);
+        if (this.nativeInterpreter) {
+            this.linearHeap.setMark(
+                this.nativeInterpreter.stringSupportAddress, generation);
+        }
         var index = 0;
         while (index < this.hostRoots.length) {
             value(this.hostRoots[index++]);
@@ -1748,6 +1754,10 @@
                 this.markValue(context.globalObject, generation);
                 if (context.execution) markExecution(context.execution, generation, this);
                 contextIndex++;
+            }
+            if (this.nativeInterpreter) {
+                this.linearHeap.setMark(
+                    this.nativeInterpreter.stringSupportAddress, generation);
             }
             this.markAuthoritativeHeap(generation);
             }

@@ -9,7 +9,7 @@
                       MATH_ROUND: 14, MATH_SIN: 15, MATH_COS: 16,
                       BUFFER_READ_U16_LE: 17, BUFFER_READ_U16_BE: 18,
                       BUFFER_WRITE_U16_LE: 19, BUFFER_WRITE_I16_LE: 20,
-                      BUFFER_SLICE: 21};
+                      BUFFER_SLICE: 21, STRING_CHAR_AT: 22};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;
