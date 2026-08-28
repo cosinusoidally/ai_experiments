@@ -5,7 +5,11 @@
     var Intrinsics = {NONE: 0, PEEK8: 1, POKE8: 2, PEEK32: 3, POKE32: 4,
                       BUFFER_READ_U32_LE: 5, BUFFER_WRITE_U32_LE: 6,
                       MATH_SQRT: 7, MATH_MIN: 8, MATH_ABS: 9, MATH_MAX: 10,
-                      ARRAY_PUSH: 11, MATH_FLOOR: 12, MATH_CEIL: 13};
+                      ARRAY_PUSH: 11, MATH_FLOOR: 12, MATH_CEIL: 13,
+                      MATH_ROUND: 14, MATH_SIN: 15, MATH_COS: 16,
+                      BUFFER_READ_U16_LE: 17, BUFFER_READ_U16_BE: 18,
+                      BUFFER_WRITE_U16_LE: 19, BUFFER_WRITE_I16_LE: 20,
+                      BUFFER_SLICE: 21};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

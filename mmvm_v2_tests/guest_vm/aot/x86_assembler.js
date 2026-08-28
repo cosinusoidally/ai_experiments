@@ -283,6 +283,14 @@
         this.macros.push("fsqrt()");
         this.emitByte(0xd9); this.emitByte(0xfa);
     };
+    Assembler.prototype.sinF64 = function () {
+        this.macros.push("fsin()");
+        this.emitByte(0xd9); this.emitByte(0xfe);
+    };
+    Assembler.prototype.cosF64 = function () {
+        this.macros.push("fcos()");
+        this.emitByte(0xd9); this.emitByte(0xff);
+    };
     Assembler.prototype.absF64 = function () {
         this.macros.push("fabs()");
         this.emitByte(0xd9); this.emitByte(0xe1);

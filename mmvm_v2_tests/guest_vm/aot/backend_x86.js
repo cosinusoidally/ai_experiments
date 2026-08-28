@@ -697,6 +697,12 @@
             assembler.sqrtF64();
             return;
         }
+        if (node.op === "sin_f64" || node.op === "cos_f64") {
+            emitControlF64(assembler, node.value, state);
+            if (node.op === "sin_f64") assembler.sinF64();
+            else assembler.cosF64();
+            return;
+        }
         if (node.op === "load_f64" || node.op === "load_i32_f64") {
             emitControlExpression(assembler, node.address, state);
             if (node.op === "load_f64") assembler.loadF64Eax();
@@ -755,6 +761,12 @@
     }
 
     function emitF64Expression(assembler, node) {
+        if (node.op === "sin_f64" || node.op === "cos_f64") {
+            emitF64Expression(assembler, node.value);
+            if (node.op === "sin_f64") assembler.sinF64();
+            else assembler.cosF64();
+            return;
+        }
         if (node.op === "load_f64") {
             emitExpression(assembler, node.address);
             assembler.loadF64Eax();

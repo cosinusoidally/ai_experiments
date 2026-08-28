@@ -24,7 +24,10 @@
         regexpFlags: "REGEXP_FLAGS",
         regexpPrototype: "REGEXP_PROTOTYPE",
         bufferViewBacking: "BUFFER_VIEW_BACKING",
+        bufferViewOffset: "BUFFER_VIEW_OFFSET",
+        bufferViewLength: "BUFFER_VIEW_LENGTH",
         bufferViewPrototype: "BUFFER_VIEW_PROTOTYPE",
+        bufferBackingPointer: "BUFFER_BACKING_POINTER",
         vectorCapacity: "VECTOR_CAPACITY",
         frameProgram: "FRAME_PROGRAM",
         frameEnvironment: "FRAME_ENVIRONMENT",
@@ -67,6 +70,10 @@
         setArrayReserved: "ARRAY_RESERVED",
         setObjectPropertyHead: "OBJECT_PROPERTY_HEAD",
         setRegexpPropertyHead: "REGEXP_PROPERTY_HEAD",
+        setBufferViewBacking: "BUFFER_VIEW_BACKING",
+        setBufferViewOffset: "BUFFER_VIEW_OFFSET",
+        setBufferViewLength: "BUFFER_VIEW_LENGTH",
+        setBufferViewPrototype: "BUFFER_VIEW_PROTOTYPE",
         setBufferViewPropertyHead: "BUFFER_VIEW_PROPERTY_HEAD",
         setPropertyNext: "PROPERTY_NEXT",
         setPropertyKey: "PROPERTY_KEY",
@@ -561,15 +568,17 @@
                     tag: lowerKernelExpression(node.arguments[1], symbols),
                     type: "f64"};
         }
-        if (name === "sqrtF64" && node.arguments.length === 1) {
-            return {op: "sqrt_f64",
+        var unaryOperations = {sqrtF64: "sqrt_f64", absF64: "abs_f64",
+                               sinF64: "sin_f64", cosF64: "cos_f64"};
+        if (unaryOperations[name] && node.arguments.length === 1) {
+            return {op: unaryOperations[name],
                     value: lowerKernelF64Expression(node.arguments[0], symbols),
                     type: "f64"};
         }
-        if (name === "absF64" && node.arguments.length === 1) {
-            return {op: "abs_f64",
-                    value: lowerKernelF64Expression(node.arguments[0], symbols),
-                    type: "f64"};
+        var unaryOperations = {sinF64: "sin_f64", cosF64: "cos_f64"};
+        if (unaryOperations[name] && node.arguments.length === 1) {
+            return {op: unaryOperations[name],
+                    value: lowerF64(node.arguments[0], locals), type: "f64"};
         }
         var operations = {addF64: "add_f64", subtractF64: "sub_f64",
                           multiplyF64: "mul_f64", divideF64: "div_f64"};

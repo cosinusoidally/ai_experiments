@@ -410,9 +410,12 @@
         if (!handle) {
             var recordType = this.linearHeap.recordType(address);
             var guestType = recordType === Heap.Types.OBJECT ? "object" :
-                recordType === Heap.Types.ARRAY ? "array" : null;
+                recordType === Heap.Types.ARRAY ? "array" :
+                recordType === Heap.Types.BUFFER_VIEW ? "buffer" : null;
             if (!guestType) {
-                throw new Error("guest heap reference has no runtime handle");
+                throw new Error("guest heap reference has no runtime handle: " +
+                    "address=" + address + " type=" + recordType +
+                    " cell=" + cell);
             }
             handle = this.makeHeapHandle(address, guestType);
             this.heapObjects.push(handle);
@@ -1071,12 +1074,18 @@
         mathMethod("floor", function (receiver, args) {
             return Math.floor(Number(args[0]));
         }, NativeIntrinsics.MATH_FLOOR);
-        mathMethod("round", function (receiver, args) { return Math.round(Number(args[0])); });
+        mathMethod("round", function (receiver, args) {
+            return Math.round(Number(args[0]));
+        }, NativeIntrinsics.MATH_ROUND);
         mathMethod("sqrt", function (receiver, args) {
             return Math.sqrt(Number(args[0]));
         }, NativeIntrinsics.MATH_SQRT);
-        mathMethod("sin", function (receiver, args) { return Math.sin(Number(args[0])); });
-        mathMethod("cos", function (receiver, args) { return Math.cos(Number(args[0])); });
+        mathMethod("sin", function (receiver, args) {
+            return Math.sin(Number(args[0]));
+        }, NativeIntrinsics.MATH_SIN);
+        mathMethod("cos", function (receiver, args) {
+            return Math.cos(Number(args[0]));
+        }, NativeIntrinsics.MATH_COS);
         mathMethod("exp", function (receiver, args) { return Math.exp(Number(args[0])); });
         mathMethod("log", function (receiver, args) { return Math.log(Number(args[0])); });
         mathMethod("pow", function (receiver, args) {

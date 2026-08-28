@@ -151,6 +151,10 @@
             return "Math.sqrt(" +
                 emitControlF64(node.value, parameters, locals) + ")";
         }
+        if (node.op === "sin_f64" || node.op === "cos_f64") {
+            return "Math." + (node.op === "sin_f64" ? "sin" : "cos") + "(" +
+                emitControlF64(node.value, parameters, locals) + ")";
+        }
         if (node.op === "load_f64") {
             return "memory.readF64(" +
                 emitControlExpression(node.address, parameters, locals) + ")";
@@ -190,6 +194,10 @@
     }
 
     function emitF64(node, parameters) {
+        if (node.op === "sin_f64" || node.op === "cos_f64") {
+            return "Math." + (node.op === "sin_f64" ? "sin" : "cos") + "(" +
+                emitF64(node.value, parameters) + ")";
+        }
         if (node.op === "load_f64") {
             return "memory.readF64(" + emit(node.address, parameters) + ")";
         }

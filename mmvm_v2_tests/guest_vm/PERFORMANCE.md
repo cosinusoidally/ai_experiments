@@ -1,5 +1,30 @@
 # Guest VM performance notes
 
+## 2026-08-28: native/semantic boundary profiling
+
+The opcode profiler now reports cumulative time and invocation count for the
+kernel-native engine. In a 28-second `demo5.js` sample at 64x64, the engine
+spent only about 0.99 seconds executing 23.7 million bytecodes. Approximately
+5,000 unsupported-operation transitions consumed nearly all remaining time.
+This rules out dispatch, double arithmetic, and GC as the current dominant
+whole-demo cost.
+
+The portable dispatch benchmark now has arithmetic, property, call, and array
+workloads. On `js_min.exe`, 800,025 bytecodes reading properties from a
+16-property object took about 22 ms natively versus 24 ms in direct host
+JavaScript. A 5,000-iteration guest-call workload took about 5 ms natively
+versus 6 ms directly, and a 700,332-bytecode indexed-array workload took about
+12 ms natively versus 102 ms directly. These focused results are diagnostic,
+not a substitute for demo FPS.
+
+The first boundary-reduction pass keeps `Math.round`, common-range `Math.sin`
+and `Math.cos`, Buffer `length`, numeric indexing, 16-bit endian operations,
+and zero-copy Buffer slicing inside the native interpreter. At roughly 15.4
+million `demo5` bytecodes this reduced cumulative semantic exits from about
+3,900 to about 2,940, while native execution time remained around 0.64 seconds.
+The demo was still around 1.5 FPS at that scene angle, so eliminating the
+remaining general semantic transitions is still the leading work item.
+
 ## 2026-08-28: kernel-native collector checkpoint
 
 The authoritative guest heap is now marked and swept by kernel-dialect code

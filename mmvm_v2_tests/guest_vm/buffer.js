@@ -52,7 +52,7 @@
                 if (end < start) end = start;
                 return support.makeView(support.viewBacking(receiver),
                                         support.viewOffset(receiver) + start, end - start);
-            });
+            }, NativeIntrinsics.BUFFER_SLICE);
         properties.$fill = this.makeNative("Buffer.prototype.fill",
             function (receiver, args) {
                 support.requireBuffer(receiver);
@@ -129,14 +129,14 @@
                 var offset = integer(args[0]);
                 return support.read(receiver, offset) |
                        (support.read(receiver, offset + 1) << 8);
-            });
+            }, NativeIntrinsics.BUFFER_READ_U16_LE);
         properties.$readUInt16BE = this.makeNative("Buffer.prototype.readUInt16BE",
             function (receiver, args) {
                 support.requireBuffer(receiver);
                 var offset = integer(args[0]);
                 return (support.read(receiver, offset) << 8) |
                        support.read(receiver, offset + 1);
-            });
+            }, NativeIntrinsics.BUFFER_READ_U16_BE);
         properties.$readInt16LE = this.makeNative("Buffer.prototype.readInt16LE",
             function (receiver, args) {
                 support.requireBuffer(receiver);
@@ -152,7 +152,7 @@
                 support.write(receiver, offset, args[0]);
                 support.write(receiver, offset + 1, Number(args[0]) >>> 8);
                 return offset + 2;
-            });
+            }, NativeIntrinsics.BUFFER_WRITE_U16_LE);
         properties.$writeInt16LE = this.makeNative("Buffer.prototype.writeInt16LE",
             function (receiver, args) {
                 support.requireBuffer(receiver);
@@ -160,7 +160,7 @@
                 support.write(receiver, offset, args[0]);
                 support.write(receiver, offset + 1, Number(args[0]) >>> 8);
                 return offset + 2;
-            });
+            }, NativeIntrinsics.BUFFER_WRITE_I16_LE);
         properties.$toString = this.makeNative("Buffer.prototype.toString",
             function (receiver, args) {
                 support.requireBuffer(receiver);

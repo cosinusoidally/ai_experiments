@@ -123,6 +123,15 @@ also internal semantic operations rather than embedder host calls. Potentially
 blocking or externally observable services such as raw FFI, output, timers,
 filesystem, and sockets must yield.
 
+The i386 interpreter currently completes common numeric `Math` operations,
+Buffer length/index access, zero-copy Buffer slicing, and selected endian reads
+and writes inside that boundary. The same kernel IR has JavaScript equivalents
+for the Node backend. Each intrinsic has a stable, named ID in
+`native_intrinsics.js`; the dispatch source uses those names and the macro
+assembler emits individual x87 operations for native sine and cosine. Inputs
+outside the x87 argument-reduction range and uncommon numeric cases return to
+the semantic implementation rather than silently changing ES5.1 behavior.
+
 The MMVM Node profile also binds `NodeLibc.memmove` as an inline structured-tier
 intrinsic for demo7's already-allocated Buffer spans. The embedder supplies the
 native callback; the compiler contains no address or machine-code constant.
@@ -493,7 +502,8 @@ Currently implemented public operations are:
 - `slice(start[, end])` with negative offsets;
 - numeric `fill(value[, start[, end]])`;
 - overlap-safe `copy(target[, targetStart[, sourceStart[, sourceEnd]]])`;
-- `readUInt8`, `writeUInt8`, `readUInt32LE`, and `writeUInt32LE`.
+- `readUInt8`, `writeUInt8`, `readUInt16LE`, `readUInt16BE`,
+  `writeUInt16LE`, `writeInt16LE`, `readUInt32LE`, and `writeUInt32LE`.
 
 This is not yet the complete Node.js 0.10 Buffer profile. Encoding methods,
 constructor compatibility, signed values, other endian widths, enumeration,
