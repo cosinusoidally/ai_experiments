@@ -213,7 +213,6 @@
         var instructions = 0;
         store32(heapBase + state + ENGINE_CURRENT_FRAME, frame);
         while (budget > 0) {
-            store32(heapBase + state + ENGINE_CURRENT_FRAME, frame);
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
@@ -1371,6 +1370,8 @@
                             store32(heapBase + state + ENGINE_HEAP_BUMP,
                                     bytecodeAllocationEnd);
                             frame = calleeFrame;
+                            store32(heapBase + state + ENGINE_CURRENT_FRAME,
+                                    frame);
                             currentContext = calleeContext;
                             currentProgram = calleeProgram;
                             bytecodeWords = load32(
@@ -1956,6 +1957,7 @@
                     store32(heapBase + state + ENGINE_FREE_FRAME,
                             returnedNativeFrame);
                     frame = nativeCallerFrame;
+                    store32(heapBase + state + ENGINE_CURRENT_FRAME, frame);
                     currentContext = load32(
                         heapBase + frame + FRAME_CONTEXT);
                     currentProgram = load32(
