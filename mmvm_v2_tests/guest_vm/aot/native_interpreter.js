@@ -473,9 +473,58 @@
                 var arraySetVector = 0;
                 if (arraySetSupported === 1) {
                     arraySetVector = arrayElements(heapBase, arraySetObject);
-                    if (arraySetIndex >= vectorCapacity(
-                        heapBase, arraySetVector)) {
-                        arraySetSupported = 0;
+                    var arraySetCapacity = vectorCapacity(
+                        heapBase, arraySetVector);
+                    if (arraySetIndex >= arraySetCapacity) {
+                        var grownArrayCapacity = arraySetCapacity;
+                        if (grownArrayCapacity === 0) {
+                            grownArrayCapacity = INITIAL_ARRAY_CAPACITY;
+                        }
+                        while (grownArrayCapacity <= arraySetIndex) {
+                            grownArrayCapacity = grownArrayCapacity * 2;
+                        }
+                        var grownVectorBytes = VECTOR_CELLS +
+                            grownArrayCapacity * VALUE_CELL_BYTES;
+                        var grownVector = engineHeapBump(heapBase, state);
+                        if (grownVector + grownVectorBytes >
+                            engineHeapLimit(heapBase, state)) {
+                            arraySetSupported = 0;
+                        } else {
+                            setRecordType(heapBase, grownVector,
+                                          HEAP_TYPE_VALUE_VECTOR);
+                            setRecordSize(heapBase, grownVector,
+                                          grownVectorBytes);
+                            setRecordMark(heapBase, grownVector, 0);
+                            setRecordFlags(heapBase, grownVector, 0);
+                            var grownArrayLength = vectorLength(
+                                heapBase, arraySetVector);
+                            setVectorLength(heapBase, grownVector,
+                                            grownArrayLength);
+                            setVectorCapacity(heapBase, grownVector,
+                                              grownArrayCapacity);
+                            var grownCellIndex = 0;
+                            while (grownCellIndex < grownArrayLength) {
+                                var oldArrayCell = heapBase + arraySetVector +
+                                    VECTOR_CELLS +
+                                    grownCellIndex * VALUE_CELL_BYTES;
+                                var newArrayCell = heapBase + grownVector +
+                                    VECTOR_CELLS +
+                                    grownCellIndex * VALUE_CELL_BYTES;
+                                store32(newArrayCell, load32(oldArrayCell));
+                                store32(newArrayCell + VALUE_CELL_LOW,
+                                    load32(oldArrayCell + VALUE_CELL_LOW));
+                                store32(newArrayCell + VALUE_CELL_HIGH,
+                                    load32(oldArrayCell + VALUE_CELL_HIGH));
+                                store32(newArrayCell + VALUE_CELL_AUX,
+                                    load32(oldArrayCell + VALUE_CELL_AUX));
+                                grownCellIndex = grownCellIndex + 1;
+                            }
+                            setArrayElements(heapBase, arraySetObject,
+                                             grownVector);
+                            setEngineHeapBump(heapBase, state,
+                                              grownVector + grownVectorBytes);
+                            arraySetVector = grownVector;
+                        }
                     }
                 }
                 var arraySetSource = heapBase + registerCells +
