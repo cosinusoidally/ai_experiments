@@ -1094,7 +1094,7 @@
         mathMethod("log", function (receiver, args) { return Math.log(Number(args[0])); });
         mathMethod("pow", function (receiver, args) {
             return Math.pow(Number(args[0]), Number(args[1]));
-        });
+        }, NativeIntrinsics.MATH_POW);
         mathMethod("random", function () { return Math.random(); });
         mathMethod("min", function (receiver, args) {
             return Math.min.apply(Math, args);

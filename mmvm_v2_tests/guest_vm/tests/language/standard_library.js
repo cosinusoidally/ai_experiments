@@ -32,6 +32,8 @@ assertEqual(Math.sqrt(81), 9, "Math.sqrt");
 assertEqual(Math.min(7, 3), 3, "Math.min");
 assertEqual(Math.cos(0), 1, "Math.cos");
 assertEqual(Math.sin(0), 0, "Math.sin");
+assertEqual(Math.pow(2, 10), 1024, "Math.pow positive base");
+assertEqual(Math.pow(-2, 3), -8, "Math.pow negative-base semantics");
 assertEqual(Math.floor(Math.exp(1)), 2, "Math.exp");
 assertEqual(Math.PI > 3.1415 && Math.PI < 3.1416, true, "Math.PI constant");
 assertEqual(Math.SQRT2 > 1.4142 && Math.SQRT2 < 1.4143, true,

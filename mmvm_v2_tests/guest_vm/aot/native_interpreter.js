@@ -225,6 +225,7 @@
         var INTRINSIC_GET_DLSYM = 25;
         var INTRINSIC_FFI_CALL = 26;
         var INTRINSIC_STRING_CHAR_CODE_AT = 27;
+        var INTRINSIC_MATH_POW = 28;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
         var STRING_SUPPORT_EMPTY = 2;
@@ -1716,7 +1717,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_STRING_CHAR_CODE_AT) {
+                    else if (intrinsicId > INTRINSIC_MATH_POW) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -1745,6 +1746,8 @@
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
                     requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_MATH_POW) {
+                    requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_POKE8) {
                     requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_POKE32) {
@@ -2000,12 +2003,21 @@
                     intrinsicHandled = 1;
                 }
                 if (intrinsicHandled === 0) {
+                var isMathIntrinsic = 0;
                 if (intrinsicId >= INTRINSIC_MATH_SQRT) {
-                if (intrinsicId <= INTRINSIC_MATH_COS) {
+                    if (intrinsicId <= INTRINSIC_MATH_COS) {
+                        isMathIntrinsic = 1;
+                    }
+                }
+                if (intrinsicId === INTRINSIC_MATH_POW) {
+                    isMathIntrinsic = 1;
+                }
+                if (isMathIntrinsic === 1) {
                     var mathArgumentsValid = 1;
                     var mathArgumentIndex = 0;
                     var minimumCell = 0;
                     var unaryMathCell = 0;
+                    var powerExponentCell = 0;
                     var selectExtreme = 0;
                     if (intrinsicId === INTRINSIC_MATH_MIN) selectExtreme = 1;
                     else if (intrinsicId === INTRINSIC_MATH_MAX) {
@@ -2024,6 +2036,9 @@
                             mathRegister * VALUE_CELL_BYTES;
                         var mathValueTag = load32(mathValueCell);
                         if (mathArgumentIndex === 0) unaryMathCell = mathValueCell;
+                        else if (mathArgumentIndex === 1) {
+                            powerExponentCell = mathValueCell;
+                        }
                         if (mathValueTag !== VALUE_TAG_INT32) {
                             if (mathValueTag !== VALUE_TAG_DOUBLE) {
                                 mathArgumentsValid = 0;
@@ -2082,7 +2097,50 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    if (intrinsicId >= INTRINSIC_MATH_SIN) {
+                    if (intrinsicId === INTRINSIC_MATH_POW) {
+                        if (intrinsicArgumentCount !== 2) {
+                            mathArgumentsValid = 0;
+                        }
+                        var powerBaseTag = load32(unaryMathCell);
+                        var powerExponentTag = load32(powerExponentCell);
+                        store32(heapBase + state + ENGINE_SCRATCH_LEFT, 0);
+                        if (greaterF64(loadNumberF64(
+                                unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
+                                loadI32F64(heapBase + state +
+                                           ENGINE_SCRATCH_LEFT)) === 0) {
+                            mathArgumentsValid = 0;
+                        }
+                        if (equalF64(loadNumberF64(
+                                unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
+                                loadNumberF64(unaryMathCell + VALUE_CELL_LOW,
+                                              powerBaseTag)) === 0) {
+                            mathArgumentsValid = 0;
+                        }
+                        if (equalF64(loadNumberF64(
+                                powerExponentCell + VALUE_CELL_LOW,
+                                powerExponentTag), loadNumberF64(
+                                powerExponentCell + VALUE_CELL_LOW,
+                                powerExponentTag)) === 0) {
+                            mathArgumentsValid = 0;
+                        }
+                        if (mathArgumentsValid === 0) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                            powF64(loadNumberF64(
+                                unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
+                                loadNumberF64(
+                                    powerExponentCell + VALUE_CELL_LOW,
+                                    powerExponentTag)));
+                    } else if (intrinsicId >= INTRINSIC_MATH_SIN) {
                         var trigTag = load32(unaryMathCell);
                         var trigSupported = 1;
                         if (trigTag === VALUE_TAG_DOUBLE) {
@@ -2287,7 +2345,6 @@
                     }
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
-                }
                 }
                 }
                 if (intrinsicHandled === 0) {

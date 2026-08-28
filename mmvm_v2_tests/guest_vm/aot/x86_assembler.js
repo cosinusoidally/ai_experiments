@@ -304,6 +304,42 @@
         this.macros.push("fabs()");
         this.emitByte(0xd9); this.emitByte(0xe1);
     };
+    Assembler.prototype.multiplyLog2F64Pop = function () {
+        this.macros.push("fyl2x()");
+        this.emitByte(0xd9); this.emitByte(0xf1);
+    };
+    Assembler.prototype.duplicateF64 = function () {
+        this.macros.push("fld_st0()");
+        this.emitByte(0xd9); this.emitByte(0xc0);
+    };
+    Assembler.prototype.roundF64ToIntegral = function () {
+        this.macros.push("frndint()");
+        this.emitByte(0xd9); this.emitByte(0xfc);
+    };
+    Assembler.prototype.exchangeF64WithSt1 = function () {
+        this.macros.push("fxch_st1()");
+        this.emitByte(0xd9); this.emitByte(0xc9);
+    };
+    Assembler.prototype.subtractSt1FromF64 = function () {
+        this.macros.push("fsub_st0_st1()");
+        this.emitByte(0xd8); this.emitByte(0xe1);
+    };
+    Assembler.prototype.twoPowerF64MinusOne = function () {
+        this.macros.push("f2xm1()");
+        this.emitByte(0xd9); this.emitByte(0xf0);
+    };
+    Assembler.prototype.loadOneF64 = function () {
+        this.macros.push("fld1()");
+        this.emitByte(0xd9); this.emitByte(0xe8);
+    };
+    Assembler.prototype.scaleF64BySt1 = function () {
+        this.macros.push("fscale()");
+        this.emitByte(0xd9); this.emitByte(0xfd);
+    };
+    Assembler.prototype.popSt1F64 = function () {
+        this.macros.push("fstp_st1()");
+        this.emitByte(0xdd); this.emitByte(0xd9);
+    };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) {
             throw new Error("unbalanced assembler stack: " + this.stackWords +

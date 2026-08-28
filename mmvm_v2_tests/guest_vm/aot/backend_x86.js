@@ -758,6 +758,21 @@
             assembler.label(loadedLabel);
             return;
         }
+        if (node.op === "pow_f64") {
+            emitControlF64(assembler, node.right, state);
+            emitControlF64(assembler, node.left, state);
+            assembler.multiplyLog2F64Pop();
+            assembler.duplicateF64();
+            assembler.roundF64ToIntegral();
+            assembler.exchangeF64WithSt1();
+            assembler.subtractSt1FromF64();
+            assembler.twoPowerF64MinusOne();
+            assembler.loadOneF64();
+            assembler.addF64Pop();
+            assembler.scaleF64BySt1();
+            assembler.popSt1F64();
+            return;
+        }
         emitControlF64(assembler, node.left, state);
         emitControlF64(assembler, node.right, state);
         if (node.op === "add_f64") assembler.addF64Pop();
