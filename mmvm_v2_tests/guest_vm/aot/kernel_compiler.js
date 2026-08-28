@@ -44,7 +44,7 @@
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 
-    KernelCompiler.prototype.compile = function (functionObject) {
+    KernelCompiler.prototype.compile = function (functionObject, options) {
         if (typeof functionObject !== "function") {
             throw new TypeError("kernel compiler requires a function");
         }
@@ -58,7 +58,7 @@
             throw new SyntaxError("kernel source must contain one function");
         }
         if (needsControlFlow(fn.body.body)) {
-            return compileControlFlow(fn, source);
+            return compileControlFlow(fn, source, options || {});
         }
         var locals = {};
         var parameterIndex = 0;
@@ -113,7 +113,7 @@
         return false;
     }
 
-    function compileControlFlow(fn, source) {
+    function compileControlFlow(fn, source, options) {
         var symbols = {};
         var parameterIndex = 0;
         while (parameterIndex < fn.parameters.length) {
@@ -124,9 +124,26 @@
         var localNames = [];
         collectLocals(fn.body, symbols, localNames);
         var body = lowerStatements(fn.body.body, symbols);
+        var registerPreferences = resolveRegisterPreferences(
+            options.registerPreferences || [], symbols);
         return {name: fn.name || "kernel", parameters: fn.parameters.slice(0),
                 locals: localNames, resultType: "i32", body: body,
-                controlFlow: true, source: source};
+                controlFlow: true, source: source,
+                registerPreferences: registerPreferences};
+    }
+
+    function resolveRegisterPreferences(names, symbols) {
+        var preferences = [];
+        var index = 0;
+        while (index < names.length) {
+            var name = names[index++];
+            var symbol = symbols["$" + name];
+            if (!symbol || symbol.kind === "constant") {
+                throw new SyntaxError("unknown kernel register preference " + name);
+            }
+            preferences.push(symbol.kind + ":" + symbol.index);
+        }
+        return preferences;
     }
 
     function collectLocals(node, symbols, names) {

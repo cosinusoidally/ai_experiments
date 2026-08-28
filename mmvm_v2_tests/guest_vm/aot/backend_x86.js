@@ -92,7 +92,10 @@
         assembler.resolveLabels();
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
-                      ir: ir, backend: "i386", destroy: function () {}};
+                      ir: ir, backend: "i386",
+                      registerAllocation: describeRegisterAllocation(
+                          ir, state.registerMap),
+                      destroy: function () {}};
         if (!backend.ffi.isMMVM) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.bytes.length / 4096) * 4096);
@@ -125,6 +128,20 @@
         return result;
     }
 
+    function describeRegisterAllocation(ir, registerMap) {
+        var description = {};
+        var key;
+        for (key in registerMap) {
+            if (!Object.prototype.hasOwnProperty.call(registerMap, key)) continue;
+            var separator = key.indexOf(":");
+            var kind = key.substring(0, separator);
+            var index = Number(key.substring(separator + 1));
+            var name = kind === "argument" ? ir.parameters[index] : ir.locals[index];
+            description[registerMap[key]] = kind + ":" + name;
+        }
+        return description;
+    }
+
     /* i386 has only three callee-saved general registers available to a cdecl
      * kernel. Keep the most frequently referenced kernel values in them. This
      * is deliberately an IR-wide backend policy: kernels do not name physical
@@ -146,9 +163,17 @@
         var names = ["ebx", "esi", "edi"];
         var result = {};
         var index = 0;
-        while (index < names.length && index < values.length) {
-            result[values[index].key] = names[index];
+        var preferences = ir.registerPreferences || [];
+        while (index < names.length && index < preferences.length) {
+            result[preferences[index]] = names[index];
             index++;
+        }
+        var valueIndex = 0;
+        while (index < names.length && valueIndex < values.length) {
+            if (result[values[valueIndex].key] === undefined) {
+                result[values[valueIndex].key] = names[index++];
+            }
+            valueIndex++;
         }
         return result;
     }

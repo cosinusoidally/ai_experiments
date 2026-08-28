@@ -907,7 +907,29 @@
                     store32(comparisonTarget + VALUE_CELL_LOW, 0);
                     store32(comparisonTarget + VALUE_CELL_HIGH, 0);
                     store32(comparisonTarget + VALUE_CELL_AUX, 0);
-                    pc = pc + FOUR_WORD_INSTRUCTION;
+                    var comparisonNextPC = pc + FOUR_WORD_INSTRUCTION;
+                    var comparisonNextOpcode = load32(
+                        heapBase + bytecodeWords +
+                        comparisonNextPC * WORD_BYTES);
+                    if (budget > 1) {
+                        if (comparisonNextOpcode === OP_JUMP_IF_FALSE) {
+                            var comparisonConditionIndex = load32(
+                                heapBase + bytecodeWords +
+                                (comparisonNextPC + FIRST_OPERAND) * WORD_BYTES);
+                            if (comparisonConditionIndex === comparisonTargetIndex) {
+                                if (comparisonValue === 0) {
+                                    pc = load32(heapBase + bytecodeWords +
+                                        (comparisonNextPC + SECOND_OPERAND) *
+                                        WORD_BYTES);
+                                } else {
+                                    pc = comparisonNextPC +
+                                         THREE_WORD_INSTRUCTION;
+                                }
+                                budget = budget - 1;
+                                instructions = instructions + 1;
+                            } else pc = comparisonNextPC;
+                        } else pc = comparisonNextPC;
+                    } else pc = comparisonNextPC;
                 } else {
                     store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
@@ -2533,7 +2555,9 @@
 
     function NativeInterpreter(runtime) {
         this.runtime = runtime;
-        this.ir = new KernelCompiler().compile(interpreterKernel);
+        this.ir = new KernelCompiler().compile(interpreterKernel, {
+            registerPreferences: ["heapBase", "pc", "bytecodeWords"]
+        });
         this.js = new JSBackend().compile(this.ir);
         this.nativeResult = new X86Backend().compile(this.ir);
         this.stateAddress = runtime.heapRecords.allocateEngineState();
@@ -2550,6 +2574,13 @@
         if (runtime.profileOpcodeCounts) {
             var codeLine = "native guest code: pointer=" +
                 this.nativeResult.pointer + " bytes=" + this.nativeResult.length;
+            var allocation = this.nativeResult.registerAllocation;
+            if (allocation) {
+                codeLine += " registers=" +
+                    "ebx:" + allocation.ebx + "," +
+                    "esi:" + allocation.esi + "," +
+                    "edi:" + allocation.edi;
+            }
             if (typeof print === "function") print(codeLine);
             else if (typeof console !== "undefined" && console.log) {
                 console.log(codeLine);
