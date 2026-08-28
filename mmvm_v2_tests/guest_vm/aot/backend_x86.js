@@ -325,9 +325,12 @@
         if (node.op === "if") {
             var alternateLabel = "kernel_else_" + state.nextLabel;
             var endLabel = "kernel_if_end_" + state.nextLabel++;
-            emitControlExpression(assembler, node.test, state);
-            assembler.testEaxEax();
-            assembler.jumpEqual(alternateLabel);
+            if (!emitIntegerComparisonFalseJump(
+                    assembler, node.test, alternateLabel, state)) {
+                emitControlExpression(assembler, node.test, state);
+                assembler.testEaxEax();
+                assembler.jumpEqual(alternateLabel);
+            }
             emitStatement(assembler, node.consequent, state);
             assembler.jump(endLabel);
             assembler.label(alternateLabel);
@@ -352,6 +355,40 @@
             return;
         }
         throw new Error("unsupported i386 control-flow statement " + node.op);
+    }
+
+    function emitIntegerComparisonFalseJump(assembler, node, label, state) {
+        if (node.op !== "eq_i32" && node.op !== "ne_i32" &&
+            node.op !== "lt_i32" && node.op !== "le_i32" &&
+            node.op !== "gt_i32" && node.op !== "ge_i32") return false;
+        var operation = node.op;
+        var expression;
+        var immediate;
+        if (node.right.op === "const_i32") {
+            expression = node.left;
+            immediate = node.right.value;
+        } else if (node.left.op === "const_i32") {
+            expression = node.right;
+            immediate = node.left.value;
+            operation = reverseIntegerComparison(operation);
+        } else return false;
+        emitControlExpression(assembler, expression, state);
+        assembler.compareEaxImmediate(immediate);
+        if (operation === "eq_i32") assembler.jumpNotEqual(label);
+        else if (operation === "ne_i32") assembler.jumpEqual(label);
+        else if (operation === "lt_i32") assembler.jumpGreaterOrEqual(label);
+        else if (operation === "le_i32") assembler.jumpGreater(label);
+        else if (operation === "gt_i32") assembler.jumpLessOrEqual(label);
+        else assembler.jumpLess(label);
+        return true;
+    }
+
+    function reverseIntegerComparison(operation) {
+        if (operation === "lt_i32") return "gt_i32";
+        if (operation === "le_i32") return "ge_i32";
+        if (operation === "gt_i32") return "lt_i32";
+        if (operation === "ge_i32") return "le_i32";
+        return operation;
     }
 
     function emitOpcodeDispatch(assembler, node, state) {
@@ -505,6 +542,33 @@
             var localRegister = state.registerMap["local:" + node.index];
             if (localRegister) moveRegisterToEax(assembler, localRegister);
             else assembler.movEaxLocal(node.index);
+        }
+        else if ((node.op === "eq_i32" || node.op === "ne_i32" ||
+                  node.op === "lt_i32" || node.op === "le_i32" ||
+                  node.op === "gt_i32" || node.op === "ge_i32") &&
+                 (node.left.op === "const_i32" ||
+                  node.right.op === "const_i32")) {
+            var immediateComparison = node.op;
+            var immediateExpression;
+            var immediateValue;
+            if (node.right.op === "const_i32") {
+                immediateExpression = node.left;
+                immediateValue = node.right.value;
+            } else {
+                immediateExpression = node.right;
+                immediateValue = node.left.value;
+                immediateComparison = reverseIntegerComparison(
+                    immediateComparison);
+            }
+            emitControlExpression(assembler, immediateExpression, state);
+            assembler.compareEaxImmediate(immediateValue);
+            if (immediateComparison === "eq_i32") assembler.setEqualAl();
+            else if (immediateComparison === "ne_i32") assembler.setNotEqualAl();
+            else if (immediateComparison === "lt_i32") assembler.setLessAl();
+            else if (immediateComparison === "le_i32") assembler.setLessOrEqualAl();
+            else if (immediateComparison === "gt_i32") assembler.setGreaterAl();
+            else assembler.setGreaterOrEqualAl();
+            assembler.movzxEaxAl();
         }
         else if (node.op === "eq_f64" || node.op === "lt_f64" ||
                  node.op === "le_f64" || node.op === "gt_f64" ||

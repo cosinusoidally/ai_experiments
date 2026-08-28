@@ -304,6 +304,21 @@
         this.emitByte(0x0f); this.emitByte(0x8c);
         this.relativeFixup(name);
     };
+    Assembler.prototype.jumpGreaterOrEqual = function (name) {
+        this.macros.push("jge(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x8d);
+        this.relativeFixup(name);
+    };
+    Assembler.prototype.jumpGreater = function (name) {
+        this.macros.push("jg(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x8f);
+        this.relativeFixup(name);
+    };
+    Assembler.prototype.jumpLessOrEqual = function (name) {
+        this.macros.push("jle(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x8e);
+        this.relativeFixup(name);
+    };
     Assembler.prototype.jumpParity = function (name) {
         this.macros.push("jp(" + name + ")");
         this.emitByte(0x0f); this.emitByte(0x8a);
