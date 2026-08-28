@@ -1,5 +1,21 @@
 # Guest VM performance notes
 
+## 2026-08-28: kernel-native collector checkpoint
+
+The authoritative guest heap is now marked and swept by kernel-dialect code
+compiled to i386 on `js_min.exe`. In a sustained `demo5.js` run, collection of
+a roughly 12 MiB used heap measured about 6--7 ms for graph marking and about
+80--85 ms for the coalescing sweep. The previous hybrid host graph mark and
+uncoalesced host free-list rebuild each took seconds on the same workload.
+
+The native dispatch benchmark remains healthy after the collector change:
+1,000,007 native bytecodes took approximately 13 ms, compared with 53 ms for
+the direct host loop and 5,235 ms for the semantic guest interpreter on the
+development machine. A longer graphics run still slows while approaching the
+next collection and then recovers. That steady-state decay is therefore a
+separate allocation or execution issue, not the collector pause, and should
+not be hidden by quoting only the post-collection frame rate.
+
 ## 2026-08-27: kernel-native dispatch checkpoint
 
 `guest_vm/benchmarks/native_dispatch_benchmark.js` is a portable, X11-free

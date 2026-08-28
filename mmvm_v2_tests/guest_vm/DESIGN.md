@@ -411,12 +411,26 @@ closures and home contexts, frame registers/callers/handlers, program constant
 vectors, Buffer view backings, contexts, and engine state. Collectors do not
 duplicate record offsets.
 
+On i386, both marking and sweeping are compiled from kernel-dialect JavaScript
+through the shared kernel compiler and macro assembler. The marker uses the
+unused portion of the runtime's linear heap as an explicit work stack; the
+native allocation-pressure threshold deliberately leaves that space available.
+It reports overflow instead of writing beyond the heap. During the remaining
+hybrid transition, the host first seeds marks for roots that can still be held
+in host-side frame/register caches. The native marker then traces the complete
+authoritative record graph. A post-mark invariant checks every published frame
+reference before and after sweeping, so a missing edge fails at collection time
+rather than becoming delayed heap corruption. Node uses the corresponding
+JavaScript graph walk.
+
 Marking a Buffer view marks its shared backing store for the same generation.
 Sweep first asks `BufferSupport` to free the external allocation belonging to
 each unmarked backing record, then frees all other unmarked guest records.
 Multiple views therefore do not cause multiple frees, and one reachable slice
-retains the allocation. On an i386 `js_min.exe` host, the linear sweep itself is
-compiled from the kernel dialect; Node uses the equivalent JavaScript pass.
+retains the allocation. The native sweep coalesces adjacent ordinary free
+records in the same linear pass before the host rebuilds its derived free-block
+index. Flagged engine-owned regions remain separate. Node uses the equivalent
+JavaScript pass.
 
 Collection is automatic. Semantic host-side allocation uses the configurable
 allocation-unit threshold. Native execution additionally requests a collection

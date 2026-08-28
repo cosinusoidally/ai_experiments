@@ -85,7 +85,6 @@
                 candidate + HEADER_SIZE_FIELD);
             if (candidateSize >= size) {
                 address = candidate;
-                this.freeBlocks.splice(freeIndex, 1);
                 var remainder = candidateSize - size;
                 if (remainder >= HEADER_SIZE + 8) {
                     var remainderAddress = address + size;
@@ -95,8 +94,16 @@
                                                 remainder);
                     this.memory.writeU32Trusted(remainderAddress + HEADER_MARK, 0);
                     this.memory.writeU32Trusted(remainderAddress + HEADER_FLAGS, 0);
-                    this.freeBlocks.push(remainderAddress);
-                } else size = candidateSize;
+                    if (freeIndex === 0) {
+                        this.freeBlocks[0] = remainderAddress;
+                    } else {
+                        this.freeBlocks[freeIndex] = this.freeBlocks[0];
+                        this.freeBlocks[0] = remainderAddress;
+                    }
+                } else {
+                    size = candidateSize;
+                    this.freeBlocks.splice(freeIndex, 1);
+                }
                 break;
             }
             freeIndex++;
@@ -288,7 +295,8 @@
         address = Number(address);
         if (!address || address !== Math.floor(address) || address < 64 ||
             address + HEADER_SIZE > this.bump) {
-            throw new TypeError("invalid guest heap reference");
+            throw new TypeError("invalid guest heap reference " + address +
+                                " (heap bump " + this.bump + ")");
         }
         var type = this.memory.readU32(address + HEADER_TYPE);
         if (type === Types.FREE) throw new Error("guest heap reference is freed");

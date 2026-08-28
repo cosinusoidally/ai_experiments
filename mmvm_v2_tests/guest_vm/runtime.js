@@ -1582,6 +1582,103 @@
         }
     };
 
+    Runtime.prototype.seedNativeCollectorRoots = function (generation) {
+        var runtime = this;
+        function value(candidate) {
+            if (candidate && candidate.heapAddress) {
+                runtime.linearHeap.setMark(candidate.heapAddress, generation);
+            }
+        }
+        function environment(candidate) {
+            if (candidate && candidate.heapAddress) {
+                runtime.linearHeap.setMark(candidate.heapAddress, generation);
+            }
+        }
+        value(this.globalObject);
+        value(this.bufferSupport.prototype);
+        var index = 0;
+        while (index < this.hostRoots.length) {
+            value(this.hostRoots[index++]);
+        }
+        index = 0;
+        while (index < this.activeRegisterFrames.length) {
+            var registers = this.activeRegisterFrames[index++];
+            var registerIndex = 0;
+            while (registerIndex < registers.length) {
+                value(registers[registerIndex++]);
+            }
+        }
+        index = 0;
+        while (index < this.activeEnvironmentFrames.length) {
+            environment(this.activeEnvironmentFrames[index++]);
+        }
+        index = 0;
+        while (index < this.contexts.length) {
+            var execution = this.contexts[index++].execution;
+            if (execution) {
+                var frameIndex = 0;
+                while (frameIndex < execution.frames.length) {
+                    var hostFrame = execution.frames[frameIndex++];
+                    runtime.linearHeap.setMark(
+                        hostFrame.heapAddress, generation);
+                    var hostRegisterIndex = 0;
+                    while (hostRegisterIndex < hostFrame.registers.length) {
+                        value(hostFrame.registers[hostRegisterIndex++]);
+                    }
+                    environment(hostFrame.environment);
+                    value(hostFrame.constructReceiver);
+                }
+                if (execution.pendingHostCall) {
+                    value(execution.pendingHostCall.receiver);
+                    var argumentIndex = 0;
+                    while (argumentIndex <
+                           execution.pendingHostCall.args.length) {
+                        value(execution.pendingHostCall.args[argumentIndex++]);
+                    }
+                }
+            }
+        }
+        if (this.functionConstructionCallable) {
+            value(this.functionConstructionCallable);
+        }
+        if (this.functionConstructionPrototype) {
+            value(this.functionConstructionPrototype);
+        }
+        if (this.functionConstructionProgram) {
+            this.linearHeap.setMark(
+                this.functionConstructionProgram, generation);
+        }
+    };
+
+    Runtime.prototype.verifyNativeFrameMarks = function (generation) {
+        var contextIndex = 0;
+        while (contextIndex < this.contexts.length) {
+            var execution = this.contexts[contextIndex++].execution;
+            if (!execution) continue;
+            var frameIndex = 0;
+            while (frameIndex < execution.frames.length) {
+                var frameAddress = execution.frames[frameIndex++].heapAddress;
+                var registerIndex = 0;
+                var registerCount = this.heapRecords.frameRegisterCount(
+                    frameAddress);
+                while (registerIndex < registerCount) {
+                    var cell = this.heapRecords.frameRegisterCell(
+                        frameAddress, registerIndex);
+                    if (this.valueCells.tagAt(cell) ===
+                        ValueCells.Tags.REFERENCE) {
+                        var reference = this.valueCells.referenceAddressAt(cell);
+                        if (this.linearHeap.mark(reference) !== generation) {
+                            throw new Error("native marker missed frame reference: " +
+                                "frame=" + frameAddress + " register=" +
+                                registerIndex + " reference=" + reference);
+                        }
+                    }
+                    registerIndex++;
+                }
+            }
+        }
+    };
+
     Runtime.prototype.collect = function () {
         if (this.gcCollecting) return this.heapObjects.length;
         this.gcCollecting = true;
@@ -1592,6 +1689,15 @@
             this.gcGeneration++;
             var generation = this.gcGeneration;
             var key;
+            var nativeMarking = this.heapSweeper &&
+                this.heapSweeper.marker.backend === "i386";
+            if (nativeMarking) {
+                this.seedNativeCollectorRoots(generation);
+                if (this.heapSweeper.mark(generation) !== 0) {
+                    throw new Error("native guest marker exhausted its work stack");
+                }
+                this.verifyNativeFrameMarks(generation);
+            } else {
             this.markValue(this.globalObject, generation);
             this.markValue(this.bufferSupport.prototype, generation);
             var builtinTables = [this.stringMethods, this.arrayMethods,
@@ -1635,6 +1741,7 @@
                 contextIndex++;
             }
             this.markAuthoritativeHeap(generation);
+            }
             var markingFinished = this.profileOpcodeCounts ?
                 new Date().getTime() : 0;
             var survivors = [];
@@ -1685,6 +1792,7 @@
                 this.heapSweeper.compiled.backend === "i386") {
                 sweepResult = {records: null,
                     bytes: this.heapSweeper.sweep(generation)};
+                this.verifyNativeFrameMarks(generation);
                 this.linearHeap.rebuildFreeBlocks();
             } else {
                 sweepResult = this.linearHeap.sweepUnmarked(generation);
