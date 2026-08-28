@@ -10,6 +10,7 @@
 
     var READ_FIELD_ACCESSORS = {
         recordType: "RECORD_TYPE",
+        stringLength: "STRING_LENGTH",
         arrayElements: "ARRAY_ELEMENTS",
         vectorLength: "VECTOR_LENGTH",
         vectorCapacity: "VECTOR_CAPACITY",

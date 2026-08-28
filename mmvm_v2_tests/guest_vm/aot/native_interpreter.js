@@ -34,6 +34,7 @@
         var VALUE_TAG_UNDEFINED = 1;
         var VALUE_TAG_NULL = 2;
         var VALUE_TAG_FALSE = 3;
+        var VALUE_TAG_TRUE = 4;
         var VALUE_TAG_INT32 = 5;
         var VALUE_TAG_DOUBLE = 6;
         var VALUE_TAG_REFERENCE = 7;
@@ -864,10 +865,50 @@
                     var comparisonLeftTag = load32(comparisonLeft);
                     var comparisonRightTag = load32(comparisonRight);
                     var comparisonValid = 0;
-                    if (comparisonLeftTag === VALUE_TAG_INT32) comparisonValid = 1;
-                    else if (comparisonLeftTag === VALUE_TAG_DOUBLE) comparisonValid = 1;
-                    if (comparisonRightTag !== VALUE_TAG_INT32) {
-                        if (comparisonRightTag !== VALUE_TAG_DOUBLE) comparisonValid = 0;
+                    var comparisonValue = 0;
+                    if (opcode === OP_STRICT_EQUAL) {
+                        comparisonValid = 1;
+                        var strictLeftNumeric = 0;
+                        var strictRightNumeric = 0;
+                        if (comparisonLeftTag === VALUE_TAG_INT32) {
+                            strictLeftNumeric = 1;
+                        } else if (comparisonLeftTag === VALUE_TAG_DOUBLE) {
+                            strictLeftNumeric = 1;
+                        }
+                        if (comparisonRightTag === VALUE_TAG_INT32) {
+                            strictRightNumeric = 1;
+                        } else if (comparisonRightTag === VALUE_TAG_DOUBLE) {
+                            strictRightNumeric = 1;
+                        }
+                        if (strictLeftNumeric === 1) {
+                            if (strictRightNumeric === 1) {
+                                comparisonValue = equalF64(loadNumberF64(
+                                    comparisonLeft + VALUE_CELL_LOW,
+                                    comparisonLeftTag), loadNumberF64(
+                                    comparisonRight + VALUE_CELL_LOW,
+                                    comparisonRightTag));
+                            }
+                        } else if (comparisonLeftTag === comparisonRightTag) {
+                            if (comparisonLeftTag === VALUE_TAG_REFERENCE) {
+                                if (load32(comparisonLeft + VALUE_CELL_LOW) ===
+                                    load32(comparisonRight + VALUE_CELL_LOW)) {
+                                    comparisonValue = 1;
+                                }
+                            } else {
+                                comparisonValue = 1;
+                            }
+                        }
+                    } else {
+                        if (comparisonLeftTag === VALUE_TAG_INT32) {
+                            comparisonValid = 1;
+                        } else if (comparisonLeftTag === VALUE_TAG_DOUBLE) {
+                            comparisonValid = 1;
+                        }
+                        if (comparisonRightTag !== VALUE_TAG_INT32) {
+                            if (comparisonRightTag !== VALUE_TAG_DOUBLE) {
+                                comparisonValid = 0;
+                            }
+                        }
                     }
                     if (comparisonValid === 0) {
                         store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
@@ -877,12 +918,7 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    var comparisonValue = 0;
-                    if (opcode === OP_STRICT_EQUAL) {
-                        comparisonValue = equalF64(
-                            loadNumberF64(comparisonLeft + VALUE_CELL_LOW, comparisonLeftTag),
-                            loadNumberF64(comparisonRight + VALUE_CELL_LOW, comparisonRightTag));
-                    } else if (opcode === OP_EQUAL) {
+                    if (opcode === OP_EQUAL) {
                         comparisonValue = equalF64(
                             loadNumberF64(comparisonLeft + VALUE_CELL_LOW, comparisonLeftTag),
                             loadNumberF64(comparisonRight + VALUE_CELL_LOW, comparisonRightTag));
@@ -932,6 +968,7 @@
                 if (notTag === VALUE_TAG_UNDEFINED) notValue = 1;
                 else if (notTag === VALUE_TAG_NULL) notValue = 1;
                 else if (notTag === VALUE_TAG_FALSE) notValue = 1;
+                else if (notTag === VALUE_TAG_TRUE) notValue = 0;
                 else if (notTag === VALUE_TAG_INT32) {
                     if (load32(notSource + VALUE_CELL_LOW) === 0) notValue = 1;
                 } else if (notTag === VALUE_TAG_DOUBLE) {
@@ -947,8 +984,8 @@
                     }
                 } else if (notTag === VALUE_TAG_REFERENCE) {
                     var notReference = load32(notSource + VALUE_CELL_LOW);
-                    if (load32(heapBase + notReference) === HEAP_TYPE_STRING) {
-                        if (load32(heapBase + notReference + STRING_LENGTH) === 0) {
+                    if (recordType(heapBase, notReference) === HEAP_TYPE_STRING) {
+                        if (stringLength(heapBase, notReference) === 0) {
                             notValue = 1;
                         }
                     }
