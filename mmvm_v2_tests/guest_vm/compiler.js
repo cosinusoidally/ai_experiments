@@ -157,10 +157,19 @@
             index = 0;
             while (index < statement.declarations.length) {
                 var declaration = statement.declarations[index];
-                var value = declaration.initial ?
-                    this.compileExpression(declaration.initial) :
-                    this.emitConstant(undefined);
-                this.storeReference(this.referenceForName(declaration.name), value);
+                var declarationReference = this.referenceForName(declaration.name);
+                var value;
+                if (declaration.initial &&
+                    declarationReference.kind === "register" &&
+                    this.compileExpressionInto(
+                        declaration.initial, declarationReference.register)) {
+                    value = declarationReference.register;
+                } else {
+                    value = declaration.initial ?
+                        this.compileExpression(declaration.initial) :
+                        this.emitConstant(undefined);
+                    this.storeReference(declarationReference, value);
+                }
                 index++;
             }
             return;
