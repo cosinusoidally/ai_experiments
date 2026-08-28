@@ -93,7 +93,9 @@
     var ENGINE_FREE_FRAME = 32;
     var ENGINE_SCRATCH_LEFT = 36;
     var ENGINE_SCRATCH_RIGHT = 40;
-    var ENGINE_STATE_BYTES = 48;
+    var ENGINE_OPCODE_COUNTS = 48;
+    var ENGINE_OPCODE_COUNT = 48;
+    var ENGINE_STATE_BYTES = ENGINE_OPCODE_COUNTS + ENGINE_OPCODE_COUNT * 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -770,6 +772,13 @@
     Records.prototype.engineFreeFrame = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_FREE_FRAME, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineOpcodeCount = function (state, opcode) {
+        if (opcode < 0 || opcode >= ENGINE_OPCODE_COUNT) return 0;
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_OPCODE_COUNTS + opcode * 4,
+            Heap.Types.ENGINE_STATE);
     };
 
     function propertyHeadOffset(type) {

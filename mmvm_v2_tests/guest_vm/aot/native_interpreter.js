@@ -126,6 +126,8 @@
         var ENGINE_FREE_FRAME = 32;
         var ENGINE_SCRATCH_LEFT = 36;
         var ENGINE_SCRATCH_RIGHT = 40;
+        var ENGINE_OPCODE_COUNTS = 48;
+        var PROFILE_OPCODES = 0;
         var CALL_REJECT_NONE = 0;
         var CALL_REJECT_ARGUMENT_LIST = 1;
         var CALL_REJECT_ARGUMENT_REGISTER = 2;
@@ -214,6 +216,10 @@
         store32(heapBase + state + ENGINE_CURRENT_FRAME, frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
+            if (PROFILE_OPCODES !== 0) {
+                setOpcodeExecutionCount(heapBase, state, opcode,
+                    opcodeExecutionCount(heapBase, state, opcode) + 1);
+            }
             beginOpcodeDispatch(opcode, OP_CONST, OP_SET_PROPERTY_CONST);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
@@ -2607,7 +2613,10 @@
     function NativeInterpreter(runtime) {
         this.runtime = runtime;
         this.ir = new KernelCompiler().compile(interpreterKernel, {
-            registerPreferences: ["heapBase", "pc", "bytecodeWords"]
+            registerPreferences: ["heapBase", "pc", "bytecodeWords"],
+            constantOverrides: {
+                PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
+            }
         });
         this.js = new JSBackend().compile(this.ir);
         this.nativeResult = new X86Backend().compile(this.ir);
@@ -2616,6 +2625,7 @@
             this.stateAddress);
         this.runCount = 0;
         this.instructionCount = 0;
+        this.nextInstructionProfileReport = 5000000;
         this.unsupportedExitCount = 0;
         this.unsupportedOpcodeCounts = [];
         this.fallbackCallCounts = {};
@@ -2664,6 +2674,13 @@
         var instructionCount = records.engineInstructionCount(this.stateAddress);
         this.runCount++;
         this.instructionCount += instructionCount;
+        if (this.runtime.profileOpcodeCounts &&
+            this.instructionCount >= this.nextInstructionProfileReport) {
+            this.reportProfile();
+            while (this.instructionCount >= this.nextInstructionProfileReport) {
+                this.nextInstructionProfileReport += 5000000;
+            }
+        }
         if (reason === Exit.UNSUPPORTED) {
             this.unsupportedExitCount++;
             var unsupportedOpcode = records.engineResultCell(this.stateAddress);
@@ -2691,6 +2708,25 @@
     };
 
     NativeInterpreter.prototype.reportProfile = function () {
+        var executionParts = [];
+        var executedOpcode = 1;
+        while (executedOpcode < Bytecode.NAMES.length) {
+            var executedCount = this.runtime.heapRecords.engineOpcodeCount(
+                this.stateAddress, executedOpcode);
+            if (executedCount) {
+                executionParts.push((Bytecode.NAMES[executedOpcode] ||
+                    executedOpcode) + "=" + executedCount);
+            }
+            executedOpcode++;
+        }
+        if (executionParts.length) {
+            var executionLine = "native guest executed opcodes: " +
+                                executionParts.join(" ");
+            if (typeof print === "function") print(executionLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(executionLine);
+            }
+        }
         var parts = [];
         var opcode = 1;
         while (opcode < this.unsupportedOpcodeCounts.length) {

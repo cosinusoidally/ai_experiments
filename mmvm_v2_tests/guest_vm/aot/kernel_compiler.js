@@ -122,7 +122,8 @@
             parameterIndex++;
         }
         var localNames = [];
-        collectLocals(fn.body, symbols, localNames);
+        collectLocals(fn.body, symbols, localNames,
+                      options.constantOverrides || {});
         var body = lowerStatements(fn.body.body, symbols);
         var registerPreferences = resolveRegisterPreferences(
             options.registerPreferences || [], symbols);
@@ -146,7 +147,7 @@
         return preferences;
     }
 
-    function collectLocals(node, symbols, names) {
+    function collectLocals(node, symbols, names, constantOverrides) {
         if (!node || typeof node !== "object") return;
         if (node.type === "VariableStatement") {
             var declarationIndex = 0;
@@ -157,7 +158,10 @@
                     if (isKernelConstantDeclaration(declaration)) {
                         symbols["$" + name] = {
                             kind: "constant",
-                            value: kernelConstantValue(declaration.initial)
+                            value: Object.prototype.hasOwnProperty.call(
+                                constantOverrides, name) ?
+                                constantOverrides[name] | 0 :
+                                kernelConstantValue(declaration.initial)
                         };
                     } else {
                         symbols["$" + name] = {kind: "local", index: names.length};
@@ -173,8 +177,12 @@
                 if (value && typeof value === "object") {
                     if (typeof value.length === "number") {
                         var index = 0;
-                        while (index < value.length) collectLocals(value[index++], symbols, names);
-                    } else collectLocals(value, symbols, names);
+                        while (index < value.length) {
+                            collectLocals(value[index++], symbols, names,
+                                          constantOverrides);
+                        }
+                    } else collectLocals(value, symbols, names,
+                                         constantOverrides);
                 }
             }
         }
@@ -281,6 +289,16 @@
             }
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
+                expression.callee.name === "setOpcodeExecutionCount" &&
+                expression.arguments.length === 4) {
+                return {op: "store_u32",
+                    address: opcodeCounterAddress(
+                        expression.arguments, symbols),
+                    value: lowerKernelExpression(
+                        expression.arguments[3], symbols)};
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
                 WRITE_FIELD_ACCESSORS[expression.callee.name] &&
                 expression.arguments.length === 3) {
                 return {op: "store_u32",
@@ -367,6 +385,13 @@
                     address: namedFieldAddress(node.callee.name,
                         node.arguments, symbols, READ_FIELD_ACCESSORS),
                     type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "opcodeExecutionCount" &&
+            node.arguments.length === 3) {
+            return {op: "load_u32", address: opcodeCounterAddress(
+                node.arguments, symbols), type: "i32"};
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
@@ -466,6 +491,25 @@
                 type: "i32"},
             right: {op: "const_i32", value: field.value, type: "i32"},
             type: "i32"};
+    }
+
+    function opcodeCounterAddress(argumentsList, symbols) {
+        var field = symbols.$ENGINE_OPCODE_COUNTS;
+        if (!field || field.kind !== "constant") {
+            throw new SyntaxError(
+                "opcode counter accessor requires ENGINE_OPCODE_COUNTS");
+        }
+        return {op: "add_i32",
+            left: {op: "add_i32",
+                left: lowerKernelExpression(argumentsList[0], symbols),
+                right: lowerKernelExpression(argumentsList[1], symbols),
+                type: "i32"},
+            right: {op: "add_i32",
+                left: {op: "const_i32", value: field.value, type: "i32"},
+                right: {op: "mul_i32",
+                    left: lowerKernelExpression(argumentsList[2], symbols),
+                    right: {op: "const_i32", value: 4, type: "i32"},
+                    type: "i32"}, type: "i32"}, type: "i32"};
     }
 
     function lowerKernelF64Expression(node, symbols) {

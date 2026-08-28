@@ -323,6 +323,11 @@
             return;
         }
         if (node.op === "if") {
+            if (node.test.op === "const_i32") {
+                emitStatement(assembler, node.test.value ?
+                    node.consequent : node.alternate, state);
+                return;
+            }
             var alternateLabel = "kernel_else_" + state.nextLabel;
             var endLabel = "kernel_if_end_" + state.nextLabel++;
             if (!emitIntegerComparisonFalseJump(

@@ -73,6 +73,10 @@
                 emitControlExpression(node.value, parameters, locals) + ");";
         }
         if (node.op === "if") {
+            if (node.test.op === "const_i32") {
+                return emitNested(node.test.value ? node.consequent :
+                                  node.alternate, parameters, locals);
+            }
             return "if(" + emitControlExpression(node.test, parameters, locals) + "){" +
                    emitNested(node.consequent, parameters, locals) + "}else{" +
                    emitNested(node.alternate, parameters, locals) + "}";
