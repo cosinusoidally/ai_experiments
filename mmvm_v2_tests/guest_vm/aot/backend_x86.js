@@ -76,13 +76,17 @@
 
     function compileControlFlow(backend, ir) {
         var assembler = new Assembler();
-        var state = {nextLabel: 0, returnLabel: "kernel_return"};
+        var state = {nextLabel: 0, returnLabel: "kernel_return",
+                     registerMap: allocateKernelRegisters(ir)};
         assembler.pushEbp();
         assembler.movEbpEsp();
         if (ir.locals.length) assembler.subEspImmediate(ir.locals.length * 4);
+        saveKernelRegisters(assembler);
+        initializeKernelArgumentRegisters(assembler, state.registerMap);
         emitStatements(assembler, ir.body, state);
         assembler.movEaxImmediate(0);
         assembler.label(state.returnLabel);
+        restoreKernelRegisters(assembler);
         assembler.leave();
         assembler.ret();
         assembler.resolveLabels();
@@ -121,6 +125,126 @@
         return result;
     }
 
+    /* i386 has only three callee-saved general registers available to a cdecl
+     * kernel. Keep the most frequently referenced kernel values in them. This
+     * is deliberately an IR-wide backend policy: kernels do not name physical
+     * registers and semantic code remains identical in the JS backend. */
+    function allocateKernelRegisters(ir) {
+        var counts = {};
+        countStatementUses(ir.body, counts);
+        var values = [];
+        var key;
+        for (key in counts) {
+            if (Object.prototype.hasOwnProperty.call(counts, key)) {
+                values.push({key: key, count: counts[key]});
+            }
+        }
+        values.sort(function (left, right) {
+            if (left.count !== right.count) return right.count - left.count;
+            return left.key < right.key ? -1 : 1;
+        });
+        var names = ["ebx", "esi", "edi"];
+        var result = {};
+        var index = 0;
+        while (index < names.length && index < values.length) {
+            result[values[index].key] = names[index];
+            index++;
+        }
+        return result;
+    }
+
+    function countStatementUses(node, counts) {
+        if (!node) return;
+        if (typeof node.length === "number") {
+            var index = 0;
+            while (index < node.length) countStatementUses(node[index++], counts);
+            return;
+        }
+        if (node.op === "arg_i32") {
+            incrementUse(counts, "argument:" + node.index);
+            return;
+        }
+        if (node.op === "local_i32") {
+            incrementUse(counts, "local:" + node.index);
+            return;
+        }
+        var key;
+        for (key in node) {
+            if (key !== "op" && Object.prototype.hasOwnProperty.call(node, key) &&
+                node[key] && typeof node[key] === "object") {
+                countStatementUses(node[key], counts);
+            }
+        }
+    }
+
+    function incrementUse(counts, key) {
+        counts[key] = (counts[key] || 0) + 1;
+    }
+
+    function saveKernelRegisters(assembler) {
+        assembler.pushEbx();
+        assembler.pushEsi();
+        assembler.pushEdi();
+    }
+
+    function restoreKernelRegisters(assembler) {
+        assembler.popEdi();
+        assembler.popEsi();
+        assembler.popEbx();
+    }
+
+    function initializeKernelArgumentRegisters(assembler, registerMap) {
+        var key;
+        for (key in registerMap) {
+            if (Object.prototype.hasOwnProperty.call(registerMap, key) &&
+                key.indexOf("argument:") === 0) {
+                var index = Number(key.substring(9));
+                moveEbpArgumentToRegister(assembler, index, registerMap[key]);
+            }
+        }
+    }
+
+    function moveEbpArgumentToRegister(assembler, index, registerName) {
+        var displacement = 8 + index * 4;
+        if (registerName === "ebx") assembler.movEbxEbpDisplacement(displacement);
+        else if (registerName === "esi") assembler.movEsiEbpDisplacement(displacement);
+        else assembler.movEdiEbpDisplacement(displacement);
+    }
+
+    function moveRegisterToEax(assembler, registerName) {
+        if (registerName === "ebx") assembler.movEaxEbx();
+        else if (registerName === "esi") assembler.movEaxEsi();
+        else assembler.movEaxEdi();
+    }
+
+    function moveEaxToRegister(assembler, registerName) {
+        if (registerName === "ebx") assembler.movEbxEax();
+        else if (registerName === "esi") assembler.movEsiEax();
+        else assembler.movEdiEax();
+    }
+
+    function isSimpleIntegerOperand(node) {
+        return node.op === "const_i32" || node.op === "arg_i32" ||
+               node.op === "local_i32";
+    }
+
+    function addSimpleOperandToEax(assembler, node, state) {
+        if (node.op === "const_i32") {
+            assembler.addEaxImmediate(node.value);
+            return;
+        }
+        var key = (node.op === "arg_i32" ? "argument:" : "local:") + node.index;
+        var registerName = state.registerMap[key];
+        if (registerName === "ebx") assembler.addEaxEbx();
+        else if (registerName === "esi") assembler.addEaxEsi();
+        else if (registerName === "edi") assembler.addEaxEdi();
+        else {
+            var displacement = node.op === "arg_i32" ?
+                8 + node.index * 4 : -(node.index + 1) * 4;
+            assembler.addEaxEbpDisplacement(displacement);
+        }
+    }
+
     function emitStatements(assembler, statements, state) {
         var index = 0;
         while (index < statements.length) {
@@ -135,7 +259,11 @@
         }
         if (node.op === "set_local" || node.op === "set_argument") {
             emitControlExpression(assembler, node.value, state);
-            if (node.op === "set_local") assembler.movLocalEax(node.index);
+            var valueKey = (node.op === "set_local" ? "local:" : "argument:") +
+                           node.index;
+            if (state.registerMap[valueKey]) {
+                moveEaxToRegister(assembler, state.registerMap[valueKey]);
+            } else if (node.op === "set_local") assembler.movLocalEax(node.index);
             else assembler.movEbpArgumentEax(node.index);
             return;
         }
@@ -212,8 +340,16 @@
             assembler.loadStackDwordToEax(4);
             assembler.releaseStackBytes(12);
         }
-        else if (node.op === "arg_i32") assembler.movEaxEbpArgument(node.index);
-        else if (node.op === "local_i32") assembler.movEaxLocal(node.index);
+        else if (node.op === "arg_i32") {
+            var argumentRegister = state.registerMap["argument:" + node.index];
+            if (argumentRegister) moveRegisterToEax(assembler, argumentRegister);
+            else assembler.movEaxEbpArgument(node.index);
+        }
+        else if (node.op === "local_i32") {
+            var localRegister = state.registerMap["local:" + node.index];
+            if (localRegister) moveRegisterToEax(assembler, localRegister);
+            else assembler.movEaxLocal(node.index);
+        }
         else if (node.op === "eq_f64" || node.op === "lt_f64" ||
                  node.op === "le_f64" || node.op === "gt_f64" ||
                  node.op === "ge_f64") {
@@ -256,6 +392,21 @@
                 assembler.setEqualAl();
                 assembler.movzxEaxAl();
             }
+        } else if (node.op === "add_i32" && isSimpleIntegerOperand(node.right)) {
+            emitControlExpression(assembler, node.left, state);
+            addSimpleOperandToEax(assembler, node.right, state);
+        } else if (node.op === "add_i32" && isSimpleIntegerOperand(node.left)) {
+            emitControlExpression(assembler, node.right, state);
+            addSimpleOperandToEax(assembler, node.left, state);
+        } else if (node.op === "sub_i32" && node.right.op === "const_i32") {
+            emitControlExpression(assembler, node.left, state);
+            assembler.subtractEaxImmediate(node.right.value);
+        } else if (node.op === "mul_i32" && node.right.op === "const_i32") {
+            emitControlExpression(assembler, node.left, state);
+            assembler.multiplyEaxImmediate(node.right.value);
+        } else if (node.op === "mul_i32" && node.left.op === "const_i32") {
+            emitControlExpression(assembler, node.right, state);
+            assembler.multiplyEaxImmediate(node.left.value);
         } else {
             emitControlExpression(assembler, node.left, state);
             assembler.pushEax();

@@ -380,11 +380,35 @@
             var operation = operations[node.operator];
             if (!operation) throw new SyntaxError("unsupported kernel operator " +
                                                   node.operator);
-            return {op: operation,
-                    left: lowerKernelExpression(node.left, symbols),
-                    right: lowerKernelExpression(node.right, symbols), type: "i32"};
+            var left = lowerKernelExpression(node.left, symbols);
+            var right = lowerKernelExpression(node.right, symbols);
+            if (left.op === "const_i32" && right.op === "const_i32") {
+                return foldIntegerOperation(operation, left.value, right.value);
+            }
+            return {op: operation, left: left, right: right, type: "i32"};
         }
         throw new SyntaxError("unsupported control-flow kernel expression " + node.type);
+    }
+
+    function foldIntegerOperation(operation, left, right) {
+        var value;
+        if (operation === "add_i32") value = left + right;
+        else if (operation === "sub_i32") value = left - right;
+        else if (operation === "mul_i32") value = left * right;
+        else if (operation === "rem_i32") value = left % right;
+        else if (operation === "and_i32") value = left & right;
+        else if (operation === "or_i32") value = left | right;
+        else if (operation === "xor_i32") value = left ^ right;
+        else if (operation === "shl_i32") value = left << right;
+        else if (operation === "shr_i32") value = left >> right;
+        else if (operation === "ushr_i32") value = left >>> right;
+        else if (operation === "eq_i32") value = left === right ? 1 : 0;
+        else if (operation === "ne_i32") value = left !== right ? 1 : 0;
+        else if (operation === "lt_i32") value = left < right ? 1 : 0;
+        else if (operation === "le_i32") value = left <= right ? 1 : 0;
+        else if (operation === "gt_i32") value = left > right ? 1 : 0;
+        else value = left >= right ? 1 : 0;
+        return {op: "const_i32", value: value | 0, type: "i32"};
     }
 
     function namedFieldAddress(name, argumentsList, symbols, accessors) {

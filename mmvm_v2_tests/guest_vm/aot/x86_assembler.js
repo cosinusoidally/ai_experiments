@@ -103,6 +103,31 @@
     Assembler.prototype.addEaxEcx = function () {
         this.macros.push("add_eax_ecx()"); this.emitByte(0x01); this.emitByte(0xc8);
     };
+    Assembler.prototype.addEaxImmediate = function (value) {
+        this.macros.push("add_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x05); this.word32(value);
+    };
+    Assembler.prototype.subtractEaxImmediate = function (value) {
+        this.macros.push("sub_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x2d); this.word32(value);
+    };
+    Assembler.prototype.multiplyEaxImmediate = function (value) {
+        this.macros.push("imul_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x69); this.emitByte(0xc0); this.word32(value);
+    };
+    Assembler.prototype.addEaxEbx = function () {
+        this.macros.push("add_eax_ebx()"); this.emitByte(0x01); this.emitByte(0xd8);
+    };
+    Assembler.prototype.addEaxEsi = function () {
+        this.macros.push("add_eax_esi()"); this.emitByte(0x01); this.emitByte(0xf0);
+    };
+    Assembler.prototype.addEaxEdi = function () {
+        this.macros.push("add_eax_edi()"); this.emitByte(0x01); this.emitByte(0xf8);
+    };
+    Assembler.prototype.addEaxEbpDisplacement = function (displacement) {
+        this.macros.push("add_eax_ptr_ebp(" + displacement + ")");
+        this.emitByte(0x03); this.emitByte(0x85); this.word32(displacement);
+    };
     Assembler.prototype.subEcxEax = function () {
         this.macros.push("sub_ecx_eax()");
         this.emitByte(0x29); this.emitByte(0xc1);
@@ -314,6 +339,9 @@
     Assembler.prototype.pushEsi = function () {
         this.macros.push("push_esi()"); this.emitByte(0x56);
     };
+    Assembler.prototype.pushEdi = function () {
+        this.macros.push("push_edi()"); this.emitByte(0x57);
+    };
     Assembler.prototype.movEbxEbpDisplacement = function (displacement) {
         this.macros.push("mov_ebx_ptr_ebp(" + displacement + ")");
         this.emitByte(0x8b); this.emitByte(0x5d); this.emitByte(displacement);
@@ -322,11 +350,42 @@
         this.macros.push("mov_esi_ptr_ebp(" + displacement + ")");
         this.emitByte(0x8b); this.emitByte(0x75); this.emitByte(displacement);
     };
+    Assembler.prototype.movEdiEbpDisplacement = function (displacement) {
+        this.macros.push("mov_edi_ptr_ebp(" + displacement + ")");
+        this.emitByte(0x8b); this.emitByte(0x7d); this.emitByte(displacement);
+    };
+    Assembler.prototype.movEaxEbx = function () {
+        this.macros.push("mov_eax_ebx()");
+        this.emitByte(0x89); this.emitByte(0xd8);
+    };
+    Assembler.prototype.movEaxEsi = function () {
+        this.macros.push("mov_eax_esi()");
+        this.emitByte(0x89); this.emitByte(0xf0);
+    };
+    Assembler.prototype.movEaxEdi = function () {
+        this.macros.push("mov_eax_edi()");
+        this.emitByte(0x89); this.emitByte(0xf8);
+    };
+    Assembler.prototype.movEbxEax = function () {
+        this.macros.push("mov_ebx_eax()");
+        this.emitByte(0x89); this.emitByte(0xc3);
+    };
+    Assembler.prototype.movEsiEax = function () {
+        this.macros.push("mov_esi_eax()");
+        this.emitByte(0x89); this.emitByte(0xc6);
+    };
+    Assembler.prototype.movEdiEax = function () {
+        this.macros.push("mov_edi_eax()");
+        this.emitByte(0x89); this.emitByte(0xc7);
+    };
     Assembler.prototype.addEsiEbx = function () {
         this.macros.push("add_esi_ebx()"); this.emitByte(0x01); this.emitByte(0xde);
     };
     Assembler.prototype.popEsi = function () {
         this.macros.push("pop_esi()"); this.emitByte(0x5e);
+    };
+    Assembler.prototype.popEdi = function () {
+        this.macros.push("pop_edi()"); this.emitByte(0x5f);
     };
     Assembler.prototype.popEbx = function () {
         this.macros.push("pop_ebx()"); this.emitByte(0x5b);
