@@ -224,6 +224,7 @@
         var INTRINSIC_BUFFER_COPY = 24;
         var INTRINSIC_GET_DLSYM = 25;
         var INTRINSIC_FFI_CALL = 26;
+        var INTRINSIC_STRING_CHAR_CODE_AT = 27;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
         var STRING_SUPPORT_EMPTY = 2;
@@ -1715,7 +1716,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_FFI_CALL) {
+                    else if (intrinsicId > INTRINSIC_STRING_CHAR_CODE_AT) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -1741,6 +1742,8 @@
                 } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_POKE8) {
                     requiredIntrinsicArguments = 2;
@@ -2531,7 +2534,13 @@
                 }
                 }
                 if (intrinsicHandled === 0) {
+                var isCharacterIntrinsic = 0;
                 if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
+                    isCharacterIntrinsic = 1;
+                } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
+                    isCharacterIntrinsic = 1;
+                }
+                if (isCharacterIntrinsic === 1) {
                     var charAtReceiverIndex = load32(
                         heapBase + bytecodeWords +
                         (pc + THIRD_OPERAND) * WORD_BYTES);
@@ -2580,15 +2589,20 @@
                         }
                     }
                     var charAtSupportIndex = STRING_SUPPORT_EMPTY;
+                    var charAtInRange = 0;
+                    var charAtCode = 0;
                     if (charAtValid === 1) {
                         if (charAtIndex >= 0) {
                             if (charAtIndex < stringLength(
                                 heapBase, charAtString)) {
-                                var charAtCode = load32(heapBase + charAtString +
-                                    STRING_CHARS + charAtIndex * 2) & 65535;
-                                if (charAtCode > 255) charAtValid = 0;
-                                else charAtSupportIndex =
-                                    STRING_SUPPORT_ASCII_BASE + charAtCode;
+                                charAtInRange = 1;
+                                charAtCode = stringCharacterCodeUnit(
+                                    heapBase, charAtString, charAtIndex) & 65535;
+                                if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
+                                    if (charAtCode > 255) charAtValid = 0;
+                                    else charAtSupportIndex =
+                                        STRING_SUPPORT_ASCII_BASE + charAtCode;
+                                }
                             }
                         }
                     }
@@ -2602,12 +2616,26 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    var charAtResultCell = heapBase + stringSupport +
-                        VECTOR_CELLS + charAtSupportIndex * VALUE_CELL_BYTES;
-                    store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                    store32(intrinsicTarget + VALUE_CELL_LOW,
-                        load32(charAtResultCell + VALUE_CELL_LOW));
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
+                        if (charAtInRange === 1) {
+                            store32(intrinsicTarget, VALUE_TAG_INT32);
+                            store32(intrinsicTarget + VALUE_CELL_LOW,
+                                    charAtCode);
+                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                        } else {
+                            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+                            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                            store32(intrinsicTarget + VALUE_CELL_HIGH,
+                                    2146959360);
+                        }
+                    } else {
+                        var charAtResultCell = heapBase + stringSupport +
+                            VECTOR_CELLS + charAtSupportIndex * VALUE_CELL_BYTES;
+                        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+                        store32(intrinsicTarget + VALUE_CELL_LOW,
+                            load32(charAtResultCell + VALUE_CELL_LOW));
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    }
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
                 }

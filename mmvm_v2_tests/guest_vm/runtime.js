@@ -851,7 +851,9 @@
                 return String(receiver).charAt(Number(args[0]) || 0);
             }, "intrinsic", NativeIntrinsics.STRING_CHAR_AT);
         this.stringMethods.charCodeAt = this.makeNativeFunction("String.charCodeAt",
-            function (receiver, args) { return String(receiver).charCodeAt(Number(args[0]) || 0); });
+            function (receiver, args) {
+                return String(receiver).charCodeAt(Number(args[0]) || 0);
+            }, "intrinsic", NativeIntrinsics.STRING_CHAR_CODE_AT);
         this.stringMethods.indexOf = this.makeNativeFunction("String.indexOf",
             function (receiver, args) {
                 return String(receiver).indexOf(String(args[0]),
