@@ -395,8 +395,9 @@
         return null;
     };
 
-    Compiler.prototype.loadReference = function (reference) {
-        var target = this.allocate();
+    Compiler.prototype.loadReference = function (reference, requestedTarget) {
+        var target = requestedTarget === undefined ?
+            this.allocate() : requestedTarget;
         if (reference.kind === "global") {
             this.emit(op.GET_GLOBAL, target, reference.name);
             this.registerHints[target] = "global:" + this.constants[reference.name];
@@ -428,6 +429,38 @@
         } else {
             this.emit(op.SET_PROPERTY, reference.object, reference.key, value);
         }
+    };
+
+    /* Compile the common expression forms directly into an existing lexical
+     * register. Operands are still fully evaluated before the destination is
+     * written, so assignment evaluation order and self-references retain their
+     * ECMAScript meaning. Returning false asks the ordinary expression path to
+     * produce a value followed by a MOVE. */
+    Compiler.prototype.compileExpressionInto = function (expression, target) {
+        if (expression.type === "BinaryExpression" &&
+            expression.operator !== "&&" && expression.operator !== "||") {
+            var left = this.compileExpression(expression.left, expression.right);
+            var right = this.compileExpression(expression.right);
+            this.emitBinary(expression.operator, target, left, right);
+            return true;
+        }
+        if (expression.type === "UnaryExpression" &&
+            expression.operator !== "delete" && expression.operator !== "void") {
+            var argument = this.compileExpression(expression.argument);
+            if (expression.operator === "!") this.emit(op.NOT, target, argument);
+            else if (expression.operator === "-") this.emit(op.NEGATE, target, argument);
+            else if (expression.operator === "+") this.emit(op.POSITIVE, target, argument);
+            else if (expression.operator === "~") this.emit(op.BIT_NOT, target, argument);
+            else if (expression.operator === "typeof") {
+                this.emit(op.TYPEOF, target, argument);
+            } else return false;
+            return true;
+        }
+        if (expression.type === "MemberExpression") {
+            this.loadReference(this.compileReference(expression, null), target);
+            return true;
+        }
+        return false;
     };
 
     Compiler.prototype.compileExpression = function (expression, future) {
@@ -557,7 +590,11 @@
             var reference = this.compileReference(expression.left, expression.right);
             var assigned;
             if (expression.operator === "=") {
-                assigned = this.compileExpression(expression.right);
+                if (reference.kind === "register" &&
+                    this.compileExpressionInto(expression.right,
+                                               reference.register)) {
+                    assigned = reference.register;
+                } else assigned = this.compileExpression(expression.right);
             } else {
                 var current = this.loadReference(reference);
                 var assignmentRight = this.compileExpression(expression.right);
