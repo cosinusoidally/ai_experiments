@@ -253,6 +253,14 @@
     };
 
     Execution.prototype.synchronizeNativeFrames = function (currentFrameAddress) {
+        if (this.frames.length &&
+            this.frames[this.frames.length - 1].heapAddress ===
+                currentFrameAddress &&
+            this.runtime.programAddress(
+                this.frames[this.frames.length - 1].program) ===
+                this.runtime.heapRecords.frameProgram(currentFrameAddress)) {
+            return this.frames[this.frames.length - 1];
+        }
         var existing = {};
         var index = 0;
         while (index < this.frames.length) {
