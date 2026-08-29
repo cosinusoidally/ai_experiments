@@ -65,14 +65,27 @@ var guestRunnerFailure = null;
 
 function guestRunnerDescribeError(error) {
     var properties = error && error.properties;
+    function guestErrorProperty(name) {
+        if (!error || !error.guestType) return undefined;
+        try {
+            return guestProgramVM.runtime.getProperty(error, name);
+        } catch (ignored) {
+            return undefined;
+        }
+    }
     var filename = error && (error.guestFilename || error.fileName) ||
-                   properties && properties.$fileName || "<guest>";
+                   properties && properties.$fileName ||
+                   guestErrorProperty("fileName") || "<guest>";
     var line = error && (error.guestLine || error.lineNumber) ||
-               properties && properties.$lineNumber || 1;
+               properties && properties.$lineNumber ||
+               guestErrorProperty("lineNumber") || 1;
     var column = error && (error.guestColumn || error.columnNumber) ||
-                 properties && properties.$columnNumber || 1;
-    var name = properties && properties.$name || error && error.name || "Error";
+                 properties && properties.$columnNumber ||
+                 guestErrorProperty("columnNumber") || 1;
+    var name = properties && properties.$name || guestErrorProperty("name") ||
+               error && error.name || "Error";
     var message = properties && properties.$message || error && error.message ||
+                  guestErrorProperty("message") ||
                   String(error);
     return filename + ":" + line + ":" + column + ": " + name +
            (message ? ": " + message : "");

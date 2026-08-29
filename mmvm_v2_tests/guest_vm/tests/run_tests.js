@@ -165,11 +165,11 @@
     var threadedVM = new VM({threadedCompile: true});
     threadedVM.run(readSource("language/functions_objects.js"),
                    "threaded_functions_objects.js");
-    if (threadedVM.runtime.assertions !== 22) {
+    if (threadedVM.runtime.assertions !== 23) {
         throw new Error("threaded compiler assertion count changed");
     }
     threadedVM.destroy();
-    var threadedResult = "structured compiler closures passed: 22 assertion(s)";
+    var threadedResult = "structured compiler closures passed: 23 assertion(s)";
     if (typeof print === "function") print(threadedResult);
     else console.log(threadedResult);
 

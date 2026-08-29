@@ -73,6 +73,13 @@ function orderedRegisterArguments() {
 assertEqual(orderedRegisterArguments(), 12,
             "earlier register arguments preserve their value");
 
+function orderedAssignmentArguments() {
+    var value = 1;
+    return pair(value = value + 1, value = value + 1);
+}
+assertEqual(orderedAssignmentArguments(), 23,
+            "side-effecting arguments preserve left-to-right values");
+
 function methodReceiverBeforeArguments() {
     var first = {value: 3, read: function () { return this.value; }};
     var second = {value: 9};

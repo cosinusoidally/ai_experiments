@@ -613,6 +613,11 @@
                                 current, assignmentRight);
             }
             this.storeReference(reference, assigned);
+            if (this.expressionWritesRegister(future, assigned)) {
+                var stableAssignment = this.allocate();
+                this.emit(op.MOVE, stableAssignment, assigned);
+                return stableAssignment;
+            }
             return assigned;
         }
         if (expression.type === "UpdateExpression") {
@@ -624,7 +629,13 @@
             this.emit(expression.operator === "++" ? op.ADD : op.SUBTRACT,
                       updated, current, one);
             this.storeReference(reference, updated);
-            return expression.prefix ? updated : current;
+            var updateResult = expression.prefix ? updated : current;
+            if (this.expressionWritesRegister(future, updateResult)) {
+                var stableUpdate = this.allocate();
+                this.emit(op.MOVE, stableUpdate, updateResult);
+                return stableUpdate;
+            }
+            return updateResult;
         }
         if (expression.type === "CallExpression") {
             if (expression.callee.type === "MemberExpression" &&
