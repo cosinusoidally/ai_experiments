@@ -284,6 +284,13 @@ Zero budget returns immediately, finite exhaustion returns `budget`, and
 `Infinity` is accepted for trusted compatibility execution. No fixed lifetime
 budget exists inside a frame.
 
+The bundled synchronous embedders grant `Infinity` to the threaded or native
+engine. This is an embedder policy, not a change to budget semantics: those
+engines still yield for semantic services and allocation pressure, while an
+embedder that needs multiplexing may continue to pass any finite budget. The
+policy avoids materializing native frames merely to resume them immediately in
+a command-line run that has no competing guest context.
+
 Several primitive operators still use host numeric operations after explicit
 `Number` conversion. This is sufficient for the current tests but is not a
 claim of complete ES5 conversion semantics. As object coercion is implemented,
@@ -448,6 +455,14 @@ allocation headroom. The request is serviced only after the native engine has
 published its current frame and a semantic fallback has published its result;
 the collector never runs over private register state.
 
+Runtimes reserve a suffix of linear memory solely for the collector's mark work
+list (including when only the collector, rather than the interpreter, uses its
+native backend). The configured `heapBytes` remains entirely available for
+guest records; the workspace is additional runtime-owned linear memory sized
+for one entry per minimum-sized record. Guest allocation bounds exclude it, so
+marking capacity cannot depend on how close allocation came to the end of the
+heap.
+
 The native allocator initially uses the heap tail. After a pressure collection
 it may claim a coalesced ordinary free block as a private bump region. At every
 yield it publishes the unused suffix as a flagged free record, keeping the heap
@@ -455,7 +470,18 @@ walkable while excluding that suffix from the host allocator. Returned native
 call frames use a different existing flag and remain owned by the engine's
 frame cache. Only unflagged free records enter the general host free-block
 index. This ownership distinction prevents either allocator from reusing the
-same bytes.
+same bytes. Before a collection, the engine publishes any reserved suffix as
+ordinary free space and invalidates its private cursor. Sweeping can then
+coalesce the complete free graph, and the next native run claims a region from
+the new layout rather than retaining stale pre-collection bounds. Returned
+native call frames use an engine-private free list between collections; a
+collection drains that cache into ordinary free records as well, preventing
+inactive frames from withholding most of the heap under call-heavy workloads.
+An unsupported operation normally leaves the private native region intact. If
+the ordinary allocator has no useful tail or free block, the engine returns its
+reserved suffix before entering semantic fallback, preventing a host-side
+allocation from reporting false exhaustion while most memory is merely
+reserved by the native allocator.
 
 `VM.collect`, `Runtime.collect`, and the test-only `guestCollect` global request
 an immediate full collection, but normal guest programs and embedders do not

@@ -45,6 +45,8 @@
         this.hasInjectedHostException = false;
         this.totalInstructions = 0;
         this.compiledEntry = null;
+        this.allocationRetryFrame = 0;
+        this.allocationRetryPC = -1;
         runtime.heapRecords.setContextActiveFrame(context.heapAddress,
                                                   this.frames[0].heapAddress);
     }
@@ -416,10 +418,32 @@
                         nativeCaller.nativeHeapCurrent = true;
                         continue;
                     }
+                    if (nativeResult.reason === 4) {
+                        if (this.allocationRetryFrame !== nativeFrame.heapAddress ||
+                            this.allocationRetryPC !== nativeResult.pc) {
+                            this.allocationRetryFrame = nativeFrame.heapAddress;
+                            this.allocationRetryPC = nativeResult.pc;
+                            this.runtime.gcPending = true;
+                            this.runtime.gcSafePoint();
+                            nativeFrame.nativeHeapCurrent = true;
+                            continue;
+                        }
+                        /* A collection could not make this operation native.
+                         * Clear the retry guard and let the semantic path
+                         * either allocate from the rebuilt free list or report
+                         * a genuine out-of-memory error. */
+                        this.allocationRetryFrame = 0;
+                        this.allocationRetryPC = -1;
+                        nativeResult.reason = 3;
+                    } else {
+                        this.allocationRetryFrame = 0;
+                        this.allocationRetryPC = -1;
+                    }
                     if (nativeResult.reason !== 3) {
                         throw new Error("unknown native interpreter exit " +
                                         nativeResult.reason);
                     }
+                    this.runtime.nativeInterpreter.prepareSemanticFallback();
                     if (budget === 0) {
                         this.status = "budget";
                         return this.result("budget", used);
@@ -582,6 +606,11 @@
                     var receiver = code[pc + 3] < 0 ? undefined :
                                    registers[code[pc + 3]];
                     if (callableValue &&
+                        callableValue.intrinsicKind === "functionCall") {
+                        callableValue = receiver;
+                        receiver = args.length ? args[0] : undefined;
+                        args = args.slice(1);
+                    } else if (callableValue &&
                         callableValue.intrinsicKind === "functionApply") {
                         callableValue = receiver;
                         receiver = args.length ? args[0] : undefined;

@@ -197,7 +197,11 @@ var NodeProcess = {
     },
 
     reportException: function (error) {
-        var message = error && error.stack ? error.stack : String(error);
+        var message = this.exceptionFormatter ?
+            this.exceptionFormatter(error) :
+            (error && error.stack ? error.stack : String(error));
         NodeMemory.writeAll(2, message + "\n");
-    }
+    },
+
+    exceptionFormatter: null
 };

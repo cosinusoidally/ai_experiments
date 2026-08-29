@@ -873,6 +873,11 @@
             state, ENGINE_HEAP_BUMP, Heap.Types.ENGINE_STATE);
     };
 
+    Records.prototype.engineHeapLimit = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_HEAP_LIMIT, Heap.Types.ENGINE_STATE);
+    };
+
     Records.prototype.engineCurrentFrame = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_CURRENT_FRAME, Heap.Types.ENGINE_STATE);
@@ -886,6 +891,16 @@
     Records.prototype.engineFreeFrame = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_FREE_FRAME, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineFreeFrame = function (state, frame) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_FREE_FRAME, frame, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.cachedFrameNext = function (frame) {
+        return this.heap.readTrustedFieldU32(
+            frame, FRAME_PROGRAM, Heap.Types.FREE);
     };
 
     Records.prototype.engineOpcodeCount = function (state, opcode) {

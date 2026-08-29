@@ -173,6 +173,23 @@
     ThreadedCompiler.prototype.call = function (callable, receiver, args, context) {
         this.runtime.assertOwned(callable);
         if (!callable) throw new TypeError("value is not callable");
+        if (callable.intrinsicKind === "functionCall") {
+            callable = receiver;
+            receiver = args.length ? args[0] : undefined;
+            args = args.slice(1);
+        } else if (callable.intrinsicKind === "functionApply") {
+            callable = receiver;
+            receiver = args.length ? args[0] : undefined;
+            if (args.length > 1 && args[1] !== null &&
+                args[1] !== undefined) {
+                if (!args[1].guestType || args[1].guestType !== "array") {
+                    throw new TypeError("apply arguments must be array-like");
+                }
+                args = this.runtime.arrayToHost(args[1]);
+            } else args = [];
+        }
+        this.runtime.assertOwned(callable);
+        if (!callable) throw new TypeError("value is not callable");
         if (callable.guestType === "bytecodeFunction") {
             var compiled = this.compile(callable.program);
             if (compiled) {
@@ -1374,29 +1391,6 @@
                    this.reloadAfter(arrayCall);
         }
         if (node.callee.type === "MemberExpression") {
-            if (!node.callee.computed && node.callee.property.value === "call") {
-                var explicitCallable = this.expression(node.callee.object);
-                var explicitReceiver = node.arguments.length ?
-                    argumentSources[0] : "undefined";
-                var explicitArguments = argumentSources.slice(1);
-                if (explicitArguments.length <= 8) {
-                    return this.reloadAfter("hc.callFixed(" + explicitCallable + "," +
-                           explicitReceiver + ",context," +
-                           explicitArguments.length +
-                           (explicitArguments.length ? "," +
-                            explicitArguments.join(",") : "") + ")");
-                }
-                return this.reloadAfter("hc.call(" + explicitCallable + "," +
-                       explicitReceiver + ",[" + explicitArguments.join(",") +
-                       "],context)");
-            }
-            if (!node.callee.computed && node.callee.property.value === "apply") {
-                return this.reloadAfter("hc.callApply(" +
-                       this.expression(node.callee.object) + "," +
-                       (argumentSources.length ? argumentSources[0] : "undefined") +
-                       "," + (argumentSources.length > 1 ? argumentSources[1] :
-                              "undefined") + ",context)");
-            }
             if (node.callee.object.type === "Identifier" &&
                 node.callee.object.name === "NodeLibc" &&
                 !node.callee.computed &&

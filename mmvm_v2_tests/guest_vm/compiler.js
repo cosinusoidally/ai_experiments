@@ -491,7 +491,8 @@
                 var property = expression.properties[propertyIndex];
                 var propertyKey = this.emitConstant(property.key);
                 var propertyValue = this.compileExpression(property.value);
-                this.emit(op.SET_PROPERTY, objectRegister, propertyKey, propertyValue);
+                this.emit(op.SET_PROPERTY, objectRegister, propertyKey,
+                          propertyValue);
                 propertyIndex++;
             }
             return objectRegister;
@@ -638,28 +639,6 @@
             return updateResult;
         }
         if (expression.type === "CallExpression") {
-            if (expression.callee.type === "MemberExpression" &&
-                !expression.callee.computed &&
-                expression.callee.property.value === "call") {
-                var calledFunction = this.compileExpression(
-                    expression.callee.object, expression.arguments);
-                var explicitReceiver = expression.arguments.length ?
-                    this.compileExpression(expression.arguments[0],
-                        expression.arguments.slice(1)) :
-                    this.emitConstant(undefined);
-                var callValues = [];
-                var callArgumentIndex = 1;
-                while (callArgumentIndex < expression.arguments.length) {
-                    callValues.push(this.compileExpression(
-                        expression.arguments[callArgumentIndex],
-                        expression.arguments.slice(callArgumentIndex + 1)));
-                    callArgumentIndex++;
-                }
-                var explicitCallResult = this.allocate();
-                this.emit(op.CALL, explicitCallResult, calledFunction,
-                          explicitReceiver, this.constant(callValues));
-                return explicitCallResult;
-            }
             var callee;
             var receiver = -1;
             if (expression.callee.type === "MemberExpression") {

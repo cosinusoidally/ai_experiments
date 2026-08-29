@@ -105,7 +105,7 @@ try {
     var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
     while (true) {
         var guestExecutionResult = guestExecution.resume(
-            guestProgramVM.runtime.threadedCompiler ? Infinity : 1000000);
+            guestProgramVM.runtime.synchronousExecutionBudget());
         if (guestExecutionResult.status === "budget") {
             /* The command-line embedder grants another cooperative time slice. */
         } else if (guestExecutionResult.status === "hostCall") {

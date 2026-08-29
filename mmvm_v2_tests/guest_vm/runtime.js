@@ -86,7 +86,8 @@
 
     Runtime.prototype.ensureLinearHeap = function () {
         if (!this.linearHeap) {
-            this.linearHeap = new Heap({heapBytes: this.linearHeapBytes});
+            this.linearHeap = new Heap({heapBytes: this.linearHeapBytes,
+                collectorWorkspace: true});
             this.valueCells = new ValueCells(this.linearHeap);
             this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);
             this.linearHeap.setRecordInitializer(
@@ -721,7 +722,7 @@
          * registers and frame links are live. Request collection with ample
          * headroom; the interpreter services it only after publishing the
          * native frame at the next ordinary yield. */
-        if (bump >= Math.floor(this.linearHeap.byteLength * 3 / 4)) {
+        if (bump >= Math.floor(this.linearHeap.allocationLimit * 3 / 4)) {
             this.gcPending = true;
         }
     };
@@ -783,6 +784,15 @@
         if (this.gcPending && !this.gcCollecting && this.compiledDepth === 0) {
             this.collect();
         }
+    };
+
+    Runtime.prototype.synchronousExecutionBudget = function () {
+        /* A synchronous embedder has no competing guest work to schedule.
+         * Native execution already yields on semantic services and allocation
+         * pressure, so a small artificial slice would only force expensive
+         * frame materialization at otherwise unnecessary host boundaries. */
+        return this.threadedCompiler || this.nativeInterpreter ?
+               Infinity : 1000000;
     };
 
     Runtime.prototype.retain = function (value) {
@@ -980,6 +990,11 @@
                 return runtime.hasOwnProperty(receiver, String(args[0]));
             });
         this.functionMethods = {};
+        this.functionMethods.call = this.makeNativeFunction("Function.call",
+            function () {
+                throw new Error("Function.call must be dispatched by the VM");
+            });
+        this.functionMethods.call.intrinsicKind = "functionCall";
         this.functionMethods.apply = this.makeNativeFunction("Function.apply",
             function () {
                 throw new Error("Function.apply must be dispatched by the VM");
@@ -1020,7 +1035,9 @@
                 return result;
             });
         var stringConstructor = this.makeNativeFunction("String",
-            function (receiver, args) { return args.length ? String(args[0]) : ""; });
+            function (receiver, args) {
+                return args.length ? runtime.toString(args[0]) : "";
+            });
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
                 return String.fromCharCode.apply(String, args);
@@ -1392,6 +1409,26 @@
         return typeof value;
     };
 
+    Runtime.prototype.toString = function (value) {
+        if (value === undefined) return "undefined";
+        if (value === null) return "null";
+        if (!value || !value.guestType) return String(value);
+        /* Error is currently installed by the embedding environment.  Keep
+         * its ES5 observable string form in the semantic runtime so both the
+         * Node and js_min hosts report guest failures alike. */
+        if (this.hasOwnProperty(value, "name") &&
+            this.hasOwnProperty(value, "message")) {
+            var name = this.getProperty(value, "name");
+            var message = this.getProperty(value, "message");
+            name = name === undefined ? "Error" : String(name);
+            message = message === undefined ? "" : String(message);
+            if (!name) return message;
+            if (!message) return name;
+            return name + ": " + message;
+        }
+        return "[object Object]";
+    };
+
     Runtime.prototype.setProperty = function (object, key, value) {
         this.assertOwned(object);
         this.assertOwned(value);
@@ -1425,7 +1462,7 @@
 
     Runtime.prototype.add = function (left, right) {
         if (typeof left === "string" || typeof right === "string") {
-            return String(left) + String(right);
+            return this.toString(left) + this.toString(right);
         }
         return Number(left) + Number(right);
     };
@@ -1603,13 +1640,22 @@
 
     Runtime.prototype.seedNativeCollectorRoots = function (generation) {
         var runtime = this;
-        function value(candidate) {
+        function value(candidate, source) {
             if (candidate && candidate.heapAddress) {
+                if (runtime.linearHeap.isFreeRecord(candidate.heapAddress)) {
+                    throw new Error("collector root contains freed reference: " +
+                        (source || "value") + " type=" + candidate.guestType +
+                        " reference=" + candidate.heapAddress);
+                }
                 runtime.linearHeap.setMark(candidate.heapAddress, generation);
             }
         }
         function environment(candidate) {
             if (candidate && candidate.heapAddress) {
+                if (runtime.linearHeap.isFreeRecord(candidate.heapAddress)) {
+                    throw new Error("collector environment root is freed: " +
+                        candidate.heapAddress);
+                }
                 runtime.linearHeap.setMark(candidate.heapAddress, generation);
             }
         }
@@ -1621,14 +1667,17 @@
         }
         var index = 0;
         while (index < this.hostRoots.length) {
-            value(this.hostRoots[index++]);
+            value(this.hostRoots[index], "hostRoots[" + index + "]");
+            index++;
         }
         index = 0;
         while (index < this.activeRegisterFrames.length) {
             var registers = this.activeRegisterFrames[index++];
             var registerIndex = 0;
             while (registerIndex < registers.length) {
-                value(registers[registerIndex++]);
+                value(registers[registerIndex], "activeRegisters[" + index +
+                    "][" + registerIndex + "]");
+                registerIndex++;
             }
         }
         index = 0;
@@ -1644,9 +1693,15 @@
                     var hostFrame = execution.frames[frameIndex++];
                     runtime.linearHeap.setMark(
                         hostFrame.heapAddress, generation);
-                    var hostRegisterIndex = 0;
-                    while (hostRegisterIndex < hostFrame.registers.length) {
-                        value(hostFrame.registers[hostRegisterIndex++]);
+                    if (!runtime.nativeInterpreter ||
+                        !hostFrame.nativeHeapCurrent) {
+                        var hostRegisterIndex = 0;
+                        while (hostRegisterIndex < hostFrame.registers.length) {
+                            value(hostFrame.registers[hostRegisterIndex],
+                                "frame " + hostFrame.heapAddress + " register " +
+                                hostRegisterIndex);
+                            hostRegisterIndex++;
+                        }
                     }
                     environment(hostFrame.environment);
                     value(hostFrame.constructReceiver);
@@ -1690,6 +1745,11 @@
                     if (this.valueCells.tagAt(cell) ===
                         ValueCells.Tags.REFERENCE) {
                         var reference = this.valueCells.referenceAddressAt(cell);
+                        if (this.linearHeap.isFreeRecord(reference)) {
+                            throw new Error("native frame contains freed reference: " +
+                                "frame=" + frameAddress + " register=" +
+                                registerIndex + " reference=" + reference);
+                        }
                         if (this.linearHeap.mark(reference) !== generation) {
                             throw new Error("native marker missed frame reference: " +
                                 "frame=" + frameAddress + " register=" +
@@ -1706,6 +1766,10 @@
         if (this.gcCollecting) return this.heapObjects.length;
         this.gcCollecting = true;
         try {
+            if (this.nativeInterpreter) {
+                this.nativeInterpreter.releaseAllocationRegionForCollection();
+                this.nativeInterpreter.releaseCachedFramesForCollection();
+            }
             var heapBumpBeforeCollection = this.linearHeap.bump;
             var collectionStarted = this.profileOpcodeCounts ?
                 new Date().getTime() : 0;
@@ -1776,6 +1840,7 @@
             while (index < this.heapObjects.length) {
                 var heapObject = this.heapObjects[index];
                 if (heapObject.heapAddress &&
+                    !this.linearHeap.isFreeRecord(heapObject.heapAddress) &&
                     this.linearHeap.mark(heapObject.heapAddress) === generation) {
                     heapObject.gcMark = generation;
                     survivors.push(heapObject);
@@ -1787,7 +1852,9 @@
             for (environmentKey in this.environmentMetadata) {
                 if (own(this.environmentMetadata, environmentKey)) {
                     var environmentMetadata = this.environmentMetadata[environmentKey];
-                    if (this.linearHeap.mark(
+                    if (this.linearHeap.isFreeRecord(
+                            environmentMetadata.handle.heapAddress) ||
+                        this.linearHeap.mark(
                             environmentMetadata.handle.heapAddress) !== generation) {
                         delete this.environmentMetadata[environmentKey];
                     } else {
@@ -1798,8 +1865,10 @@
             var handleKey;
             for (handleKey in this.heapHandles) {
                 if (own(this.heapHandles, handleKey) &&
-                    this.linearHeap.mark(
-                        this.heapHandles[handleKey].heapAddress) !== generation) {
+                    (this.linearHeap.isFreeRecord(
+                        this.heapHandles[handleKey].heapAddress) ||
+                     this.linearHeap.mark(
+                        this.heapHandles[handleKey].heapAddress) !== generation)) {
                     delete this.heapHandles[handleKey];
                     delete this.functionMetadata[handleKey];
                 }
@@ -2008,10 +2077,12 @@
         while (frameIndex < execution.frames.length) {
             var frame = execution.frames[frameIndex];
             runtime.linearHeap.setMark(frame.heapAddress, generation);
-            var registerIndex = 0;
-            while (registerIndex < frame.registers.length) {
-                runtime.markValue(frame.registers[registerIndex], generation);
-                registerIndex++;
+            if (!runtime.nativeInterpreter || !frame.nativeHeapCurrent) {
+                var registerIndex = 0;
+                while (registerIndex < frame.registers.length) {
+                    runtime.markValue(frame.registers[registerIndex], generation);
+                    registerIndex++;
+                }
             }
             runtime.markEnvironment(frame.environment, generation);
             frameIndex++;

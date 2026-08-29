@@ -35,6 +35,11 @@
             load("node_compat/fs.js");
             load("node_compat/http.js");
             NodeProcess.install(runnerArguments);
+            var guestEnvironment = this;
+            NodeProcess.exceptionFormatter = function (error) {
+                var visible = guestEnvironment.hostVisibleError(error);
+                return visible && visible.stack ? visible.stack : String(visible);
+            };
             this.hostFs = NodeFs;
             this.hostNet = NodeNet;
             this.hostHttp = NodeHttp;
@@ -119,6 +124,30 @@
         });
     };
 
+    GuestNodeEnvironment.prototype.hostVisibleError = function (error) {
+        if (!error || error instanceof Error) return error;
+        var runtime = this.runtime;
+        function property(name) {
+            try { return runtime.getProperty(error, name); }
+            catch (ignored) { return undefined; }
+        }
+        var direct = error.properties || {};
+        var filename = error.guestFilename || direct.$fileName ||
+                       property("fileName") || "<guest>";
+        var line = error.guestLine || direct.$lineNumber ||
+                   property("lineNumber") || 1;
+        var column = error.guestColumn || direct.$columnNumber ||
+                     property("columnNumber") || 1;
+        var name = direct.$name || property("name") || error.name || "Error";
+        var message = direct.$message || property("message") ||
+                      error.message || String(error);
+        var description = filename + ":" + line + ":" + column + ": " +
+            name + (message ? ": " + message : "");
+        var visible = new Error(description);
+        visible.stack = description;
+        return visible;
+    };
+
     GuestNodeEnvironment.prototype.hostHeaders = function (headers) {
         var result = {};
         if (!headers || !headers.properties) return result;
@@ -160,15 +189,18 @@
                               callable.homeContext : this.context;
         var execution = callbackContext.startFunction(callable, receiver, args || []);
         while (true) {
-            var result = execution.resume(this.runtime.threadedCompiler ?
-                                          Infinity : 1000000);
+            var result = execution.resume(
+                this.runtime.synchronousExecutionBudget());
             if (result.status === "budget") continue;
             if (result.status === "hostCall") {
                 execution.serviceHostCall();
                 continue;
             }
             if (result.status === "completed") return result.value;
-            if (result.status === "threw") throw result.exception;
+            if (result.status === "threw") {
+                if (this.isExit(result.exception)) throw result.exception;
+                throw this.hostVisibleError(result.exception);
+            }
             throw new Error("unknown guest callback status: " + result.status);
         }
     };

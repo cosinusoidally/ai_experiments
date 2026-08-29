@@ -12,10 +12,12 @@
         Bytecode = require("../bytecode.js");
     }
 
-    var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3};
+    var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
     var MIN_NATIVE_ALLOCATION_REGION_BYTES = 4096 + FREE_RECORD_HEADER_BYTES;
     var NATIVE_ALLOCATION_REGION_FLAG = 2;
+    var NATIVE_PROPERTY_RECORD_BYTES = 48;
+    var CallReject = {HEAP_SPACE: 4};
 
     function interpreterKernel(heapBase, frame, globalObject, arrayLengthKey,
                                arrayPrototype, stringSupport, budget, state) {
@@ -1476,6 +1478,7 @@
                         var calleeFrameBytes = FRAME_FIXED_BYTES +
                             calleeRegisterCount * VALUE_CELL_BYTES;
                         var calleeFrame = 0;
+                        var calleeFrameReused = 0;
                         var bytecodeAllocationEnd = load32(
                             heapBase + state + ENGINE_HEAP_BUMP);
                         if (bytecodeCallValid === 1) {
@@ -1488,6 +1491,7 @@
                             if (load32(heapBase + reusableFrame + RECORD_SIZE) >=
                                 calleeFrameBytes) {
                                 calleeFrame = reusableFrame;
+                                calleeFrameReused = 1;
                                 if (reusableFramePrevious === 0) {
                                     store32(heapBase + state + ENGINE_FREE_FRAME,
                                             reusableFrameNext);
@@ -1517,7 +1521,7 @@
                         if (bytecodeCallValid === 1) {
                             store32(heapBase + calleeFrame + RECORD_TYPE,
                                     HEAP_TYPE_FRAME);
-                            if (load32(heapBase + calleeFrame + RECORD_SIZE) === 0) {
+                            if (calleeFrameReused === 0) {
                                 store32(heapBase + calleeFrame + RECORD_SIZE,
                                         calleeFrameBytes);
                             }
@@ -3814,6 +3818,53 @@
             this.platformServicesAddress, Number(pointer) | 0);
     };
 
+    /* A published native allocation suffix is private only between
+     * collections.  Collection rebuilds and coalesces the authoritative free
+     * record graph, so retaining its old cursor across that operation would
+     * both fragment the heap and leave this object describing pre-collection
+     * layout. */
+    NativeInterpreter.prototype.releaseAllocationRegionForCollection =
+            function () {
+        if (!this.allocationRegion) return;
+        var heap = this.runtime.linearHeap;
+        var remaining = this.allocationRegion.end -
+                        this.allocationRegion.cursor;
+        if (remaining >= FREE_RECORD_HEADER_BYTES) {
+            heap.publishFreeRegion(this.allocationRegion.cursor, remaining, 0);
+        }
+        this.allocationRegion = null;
+        heap.rebuildFreeBlocks();
+    };
+
+    NativeInterpreter.prototype.prepareSemanticFallback = function () {
+        if (!this.allocationRegion) return;
+        var heap = this.runtime.linearHeap;
+        /* Most semantic operations allocate nothing and should not disturb
+         * the native bump region. If the ordinary allocator has neither tail
+         * room nor a useful free block, however, return the reserved suffix
+         * before entering host semantics so allocating fallbacks cannot see a
+         * false out-of-memory condition. */
+        if (heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES <=
+                heap.allocationLimit ||
+            heap.largestFreeBlockSize() >= MIN_NATIVE_ALLOCATION_REGION_BYTES) {
+            return;
+        }
+        this.releaseAllocationRegionForCollection();
+    };
+
+    NativeInterpreter.prototype.releaseCachedFramesForCollection = function () {
+        var records = this.runtime.heapRecords;
+        var heap = this.runtime.linearHeap;
+        var frame = records.engineFreeFrame(this.stateAddress);
+        records.setEngineFreeFrame(this.stateAddress, 0);
+        while (frame) {
+            var next = records.cachedFrameNext(frame);
+            heap.setFreeRecordFlags(frame, 0);
+            frame = next;
+        }
+        heap.rebuildFreeBlocks();
+    };
+
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
         var records = this.runtime.heapRecords;
         var contextAddress = context ? context.heapAddress : 0;
@@ -3822,9 +3873,9 @@
             this.runtime.arrayPrototype.heapAddress : 0;
         var heap = this.runtime.linearHeap;
         var allocationBump = heap.bump;
-        var allocationLimit = heap.byteLength;
+        var allocationLimit = heap.allocationLimit;
         if (!this.allocationRegion &&
-            heap.bump >= Math.floor(heap.byteLength * 3 / 4)) {
+            heap.bump >= Math.floor(heap.allocationLimit * 3 / 4)) {
             var claimedRegion = heap.claimLargestFreeBlock(
                 MIN_NATIVE_ALLOCATION_REGION_BYTES);
             if (claimedRegion) {
@@ -3880,6 +3931,19 @@
             }
         }
         if (reason === Exit.UNSUPPORTED) {
+            var allocationOpcode = records.engineResultCell(this.stateAddress);
+            var allocationRemaining = records.engineHeapLimit(this.stateAddress) -
+                                      records.engineHeapBump(this.stateAddress);
+            var allocationExit = allocationRemaining <
+                    NATIVE_PROPERTY_RECORD_BYTES ||
+                allocationOpcode === Bytecode.MAKE_OBJECT ||
+                allocationOpcode === Bytecode.MAKE_ARRAY ||
+                (allocationOpcode === Bytecode.CALL &&
+                 records.engineCallRejectReason(this.stateAddress) ===
+                 CallReject.HEAP_SPACE);
+            if (allocationExit) reason = Exit.ALLOCATION;
+        }
+        if (reason === Exit.UNSUPPORTED) {
             this.unsupportedExitCount++;
             var unsupportedOpcode = records.engineResultCell(this.stateAddress);
             this.unsupportedOpcodeCounts[unsupportedOpcode] =
@@ -3899,7 +3963,8 @@
                 frame: records.engineCurrentFrame(this.stateAddress),
                 pc: records.enginePC(this.stateAddress),
                 resultCell: records.engineResultCell(this.stateAddress),
-                opcode: reason === Exit.UNSUPPORTED ?
+                opcode: reason === Exit.UNSUPPORTED ||
+                        reason === Exit.ALLOCATION ?
                     records.engineResultCell(this.stateAddress) : 0,
                 instructions: instructionCount,
                 backend: this.nativeResult.fn ? "i386" : "js"};

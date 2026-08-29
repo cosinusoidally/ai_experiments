@@ -15,7 +15,7 @@
     var sharedMarkJS = null;
     var sharedMarkX86 = null;
 
-    function markKernel(heapBase, heapBump, heapLimit, generation) {
+    function markKernel(heapBase, heapBump, stackBase, heapLimit, generation) {
         var HEAP_FIRST_RECORD = 64;
         var HEAP_TYPE_FREE = 0;
         var HEAP_TYPE_OBJECT = 1;
@@ -79,7 +79,6 @@
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;
         var address = HEAP_FIRST_RECORD;
-        var stackBase = heapBump;
         var stackCount = 0;
         while (address < heapBump) {
             var rootType = recordType(heapBase, address);
@@ -286,9 +285,11 @@
     HeapSweeper.prototype.mark = function (generation) {
         if (this.marker.backend === "i386") {
             return this.marker.fn(this.heap.memory.nativeAddress(0),
-                this.heap.bump, this.heap.byteLength, generation) | 0;
+                this.heap.bump, this.heap.collectorStackBase,
+                this.heap.byteLength, generation) | 0;
         }
         return this.marker.fn(this.heap.memory, 0, this.heap.bump,
+                              this.heap.collectorStackBase,
                               this.heap.byteLength, generation) | 0;
     };
 

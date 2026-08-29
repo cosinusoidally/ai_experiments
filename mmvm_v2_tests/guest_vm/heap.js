@@ -42,8 +42,15 @@
 
     function Heap(options) {
         options = options || {};
-        this.byteLength = options.heapBytes === undefined ? 16 * 1024 * 1024 :
-                          Number(options.heapBytes);
+        this.allocationLimit = options.heapBytes === undefined ?
+            16 * 1024 * 1024 : Number(options.heapBytes);
+        /* Native marking needs one 32-bit work-list entry per possible heap
+         * record.  A record is at least one 16-byte header, so this reserved
+         * suffix is sufficient without reducing the guest-visible capacity. */
+        this.collectorStackBytes = options.collectorWorkspace ?
+            Math.max(4096, align8(Math.ceil(this.allocationLimit / 4))) : 0;
+        this.collectorStackBase = this.allocationLimit;
+        this.byteLength = this.allocationLimit + this.collectorStackBytes;
         this.memory = new LinearMemory(this.byteLength);
         /* Zero is the null reference. Keep the first cache line inaccessible. */
         this.bump = 64;
@@ -111,7 +118,7 @@
         }
         if (!address) {
             address = this.bump;
-            if (address + size > this.byteLength) {
+            if (address + size > this.allocationLimit) {
                 throw new RangeError("guest heap exhausted: " +
                     this.exhaustionSummary(size));
             }
@@ -145,6 +152,8 @@
     Heap.prototype.exhaustionSummary = function (requested) {
         var counts = [];
         var bytes = [];
+        var flaggedFreeCounts = [];
+        var flaggedFreeBytes = [];
         var address = 64;
         while (address < this.bump) {
             var type = this.memory.readU32Trusted(address + HEADER_TYPE);
@@ -154,6 +163,15 @@
             }
             counts[type] = (counts[type] || 0) + 1;
             bytes[type] = (bytes[type] || 0) + size;
+            if (type === Types.FREE) {
+                var flags = this.memory.readU32Trusted(address + HEADER_FLAGS);
+                if (flags) {
+                    flaggedFreeCounts[flags] =
+                        (flaggedFreeCounts[flags] || 0) + 1;
+                    flaggedFreeBytes[flags] =
+                        (flaggedFreeBytes[flags] || 0) + size;
+                }
+            }
             address += size;
         }
         var parts = [];
@@ -165,8 +183,18 @@
             }
             typeIndex++;
         }
+        var flagParts = [];
+        var flagIndex = 0;
+        while (flagIndex < flaggedFreeCounts.length) {
+            if (flaggedFreeCounts[flagIndex]) {
+                flagParts.push(flagIndex + "=" + flaggedFreeCounts[flagIndex] +
+                    "/" + flaggedFreeBytes[flagIndex]);
+            }
+            flagIndex++;
+        }
         return "requested=" + requested + " bump=" + this.bump +
                " freeBlocks=" + this.freeBlocks.length +
+               " flaggedFree(flag=count/bytes): " + flagParts.join(",") +
                " records(type=count/bytes): " + parts.join(",");
     };
 
@@ -243,6 +271,17 @@
         return {address: claimedAddress, size: bestSize};
     };
 
+    Heap.prototype.largestFreeBlockSize = function () {
+        var largest = 0;
+        var index = 0;
+        while (index < this.freeBlocks.length) {
+            var size = this.memory.readU32Trusted(
+                this.freeBlocks[index++] + HEADER_SIZE_FIELD);
+            if (size > largest) largest = size;
+        }
+        return largest;
+    };
+
     Heap.prototype.publishFreeRegion = function (address, size, flags) {
         if (address < 64 || address !== Math.floor(address) ||
             size < HEADER_SIZE || size % 8 || address + size > this.bump) {
@@ -300,7 +339,12 @@
                                 " (heap bump " + this.bump + ")");
         }
         var type = this.memory.readU32(address + HEADER_TYPE);
-        if (type === Types.FREE) throw new Error("guest heap reference is freed");
+        if (type === Types.FREE && expectedType !== Types.FREE) {
+            throw new Error("guest heap reference " + address +
+                " is freed (size " +
+                this.memory.readU32(address + HEADER_SIZE_FIELD) +
+                ", flags " + this.memory.readU32(address + HEADER_FLAGS) + ")");
+        }
         if (expectedType !== undefined && type !== expectedType) {
             throw new TypeError("unexpected guest heap record type");
         }
@@ -310,6 +354,12 @@
     Heap.prototype.recordType = function (address) {
         this.requireRecord(address);
         return this.memory.readU32(address + HEADER_TYPE);
+    };
+
+    Heap.prototype.isFreeRecord = function (address) {
+        address = Number(address);
+        if (!address || address < 64 || address >= this.bump) return false;
+        return this.memory.readU32Trusted(address + HEADER_TYPE) === Types.FREE;
     };
 
     Heap.prototype.recordSize = function (address) {
@@ -334,6 +384,11 @@
 
     Heap.prototype.setFlags = function (address, flags) {
         this.requireRecord(address);
+        this.memory.writeU32(address + HEADER_FLAGS, flags);
+    };
+
+    Heap.prototype.setFreeRecordFlags = function (address, flags) {
+        this.requireRecord(address, Types.FREE);
         this.memory.writeU32(address + HEADER_FLAGS, flags);
     };
 

@@ -149,8 +149,7 @@
         /* Synchronous embedding does not imply an unbounded engine run.  A
          * finite slice publishes native frames and gives the runtime a safe
          * point at which to service pending collection before resuming. */
-        var completionBudget = this.runtime.threadedCompiler ?
-                               Infinity : 1000000;
+        var completionBudget = this.runtime.synchronousExecutionBudget();
         while (true) {
             var result = execution.resume(completionBudget);
             if (result.status === "hostCall") {
