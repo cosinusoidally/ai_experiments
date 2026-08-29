@@ -64,7 +64,13 @@
         this.heapSweeper = null;
         this.heapRecords = null;
         this.linearHeapBytes = options.heapBytes === undefined ?
-            16 * 1024 * 1024 : Number(options.heapBytes);
+            64 * 1024 * 1024 : Number(options.heapBytes);
+        /* An explicit heapBytes without maxHeapBytes preserves the historical
+         * fixed-capacity embedding behavior. The normal default runtime starts
+         * small but reserves a stable native address range for automatic growth. */
+        this.maximumLinearHeapBytes = options.maxHeapBytes === undefined ?
+            (options.heapBytes === undefined ? 256 * 1024 * 1024 :
+             this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;
@@ -87,6 +93,7 @@
     Runtime.prototype.ensureLinearHeap = function () {
         if (!this.linearHeap) {
             this.linearHeap = new Heap({heapBytes: this.linearHeapBytes,
+                maxHeapBytes: this.maximumLinearHeapBytes,
                 collectorWorkspace: true});
             this.valueCells = new ValueCells(this.linearHeap);
             this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);

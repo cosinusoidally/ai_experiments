@@ -81,6 +81,34 @@
             callbackIndex++;
         }
         callbackVM.destroy();
+
+        /* Growth reserves one stable native address range and raises only the
+         * guest-visible allocation limit. This matters for Buffer data because
+         * native callers may retain its address while ordinary guest records
+         * force the heap past its initial capacity. */
+        var growthVM = new VM({heapBytes: 64 * 1024,
+                               maxHeapBytes: 512 * 1024,
+                               gcThreshold: 1000000});
+        var growthBuffer = growthVM.runtime.bufferSupport.allocate(16 * 1024);
+        growthVM.runtime.setProperty(growthBuffer, 0, 0x5a);
+        var growthBacking = growthVM.runtime.bufferSupport.viewBacking(
+            growthBuffer);
+        var pointerBeforeGrowth = growthVM.runtime.heapRecords.
+            bufferBackingPointer(growthBacking);
+        growthVM.runtime.bufferSupport.allocate(96 * 1024);
+        if (growthVM.runtime.linearHeap.growthCount < 1 ||
+            growthVM.runtime.linearHeap.allocationLimit <= 64 * 1024) {
+            throw new Error("guest heap did not grow past its initial capacity");
+        }
+        if (growthVM.runtime.getProperty(growthBuffer, 0) !== 0x5a) {
+            throw new Error("guest heap growth did not preserve Buffer data");
+        }
+        if (pointerBeforeGrowth &&
+            growthVM.runtime.heapRecords.bufferBackingPointer(growthBacking) !==
+                pointerBeforeGrowth) {
+            throw new Error("guest heap growth moved the native address range");
+        }
+        growthVM.destroy();
         return "automatic GC threshold and stress modes passed";
     }
 

@@ -198,7 +198,15 @@
         }
         if (!live) return;
         this.runtime.spillFramePC(frame);
-        if (this.fallbackHasDestination(opcode)) {
+        /* A guest CALL or CONSTRUCT only schedules its callee at this point.
+         * Its destination is not defined until that callee returns.  In that
+         * case another frame is now on top, and publishing the caller's host
+         * register would copy a stale value over the authoritative heap slot.
+         * Stale handles are expected after native execution and may already
+         * name records reclaimed by GC.  Synchronous semantic operations keep
+         * this frame on top and still publish their completed destination. */
+        if (this.fallbackHasDestination(opcode) &&
+            this.frames[this.frames.length - 1] === frame) {
             this.runtime.spillFrameRegister(frame, frame.code[pc + 1]);
         }
         frame.nativeHeapCurrent = true;

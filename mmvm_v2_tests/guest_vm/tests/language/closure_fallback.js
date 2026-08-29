@@ -62,3 +62,15 @@ assertEqual(installedClosures.first(), "first",
             "first installed closure retains its call environment");
 assertEqual(installedClosures.second(), "second",
             "second installed closure retains its call environment");
+
+/* A constructor call is deferred after the semantic path creates its receiver:
+ * the guest callee runs on the following interpreter iteration.  Collection
+ * during that call must retain the pending receiver, and returning must publish
+ * the new value rather than an obsolete destination-register value. */
+function CollectingConstructor(value) {
+    this.value = value;
+    guestCollect();
+}
+var collectedConstruction = new CollectingConstructor(73);
+assertEqual(collectedConstruction.value, 73,
+            "constructor result survives collection before return");

@@ -43,19 +43,38 @@
     function Heap(options) {
         options = options || {};
         this.allocationLimit = options.heapBytes === undefined ?
-            16 * 1024 * 1024 : Number(options.heapBytes);
+            64 * 1024 * 1024 : Number(options.heapBytes);
+        this.maximumAllocationLimit = options.maxHeapBytes === undefined ?
+            this.allocationLimit : Number(options.maxHeapBytes);
+        if (this.allocationLimit < 4096 ||
+            this.allocationLimit !== Math.floor(this.allocationLimit)) {
+            throw new RangeError(
+                "guest heap size must be an integer of at least 4096 bytes");
+        }
+        if (this.maximumAllocationLimit < this.allocationLimit ||
+            this.maximumAllocationLimit !==
+                Math.floor(this.maximumAllocationLimit) ||
+            this.maximumAllocationLimit > 1073741824) {
+            throw new RangeError("maximum guest heap size must be an integer " +
+                                 "between the initial size and 1 GiB");
+        }
         /* Native marking needs one 32-bit work-list entry per possible heap
-         * record.  A record is at least one 16-byte header, so this reserved
-         * suffix is sufficient without reducing the guest-visible capacity. */
+         * record. A record is at least one 16-byte header. Reserve the maximum
+         * heap and its collector suffix up front so logical growth never moves
+         * the native base address: guest Buffer pointers and running native
+         * code may safely retain addresses within this allocation. */
         this.collectorStackBytes = options.collectorWorkspace ?
-            Math.max(4096, align8(Math.ceil(this.allocationLimit / 4))) : 0;
-        this.collectorStackBase = this.allocationLimit;
-        this.byteLength = this.allocationLimit + this.collectorStackBytes;
+            Math.max(4096, align8(Math.ceil(
+                this.maximumAllocationLimit / 4))) : 0;
+        this.collectorStackBase = this.maximumAllocationLimit;
+        this.byteLength = this.maximumAllocationLimit +
+                          this.collectorStackBytes;
         this.memory = new LinearMemory(this.byteLength);
         /* Zero is the null reference. Keep the first cache line inaccessible. */
         this.bump = 64;
         this.freeBlocks = [];
         this.allocationCount = 0;
+        this.growthCount = 0;
         this.destroyed = false;
         this.recordInitializer = null;
     }
@@ -69,6 +88,21 @@
 
     Heap.prototype.setRecordInitializer = function (initializer) {
         this.recordInitializer = initializer;
+    };
+
+    Heap.prototype.growToFit = function (requiredLimit) {
+        requiredLimit = Number(requiredLimit);
+        if (requiredLimit <= this.allocationLimit) return true;
+        if (requiredLimit > this.maximumAllocationLimit) return false;
+        var grownLimit = this.allocationLimit;
+        while (grownLimit < requiredLimit) {
+            var doubled = grownLimit * 2;
+            grownLimit = doubled > this.maximumAllocationLimit ?
+                         this.maximumAllocationLimit : doubled;
+        }
+        this.allocationLimit = grownLimit;
+        this.growthCount++;
+        return true;
     };
 
     Heap.prototype.allocateRecordWords = function (
@@ -118,7 +152,7 @@
         }
         if (!address) {
             address = this.bump;
-            if (address + size > this.allocationLimit) {
+            if (!this.growToFit(address + size)) {
                 throw new RangeError("guest heap exhausted: " +
                     this.exhaustionSummary(size));
             }
@@ -193,6 +227,8 @@
             flagIndex++;
         }
         return "requested=" + requested + " bump=" + this.bump +
+               " limit=" + this.allocationLimit +
+               " maximum=" + this.maximumAllocationLimit +
                " freeBlocks=" + this.freeBlocks.length +
                " flaggedFree(flag=count/bytes): " + flagParts.join(",") +
                " records(type=count/bytes): " + parts.join(",");

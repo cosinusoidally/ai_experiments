@@ -449,9 +449,10 @@ vectors, Buffer view backings, contexts, and engine state. Collectors do not
 duplicate record offsets.
 
 On i386, both marking and sweeping are compiled from kernel-dialect JavaScript
-through the shared kernel compiler and macro assembler. The marker uses the
-unused portion of the runtime's linear heap as an explicit work stack; the
-native allocation-pressure threshold deliberately leaves that space available.
+through the shared kernel compiler and macro assembler. The marker uses a
+runtime-reserved suffix after the maximum guest allocation range as an explicit
+work stack. Guest allocation can therefore fill its current logical limit
+without consuming collector workspace.
 It reports overflow instead of writing beyond the heap. During the remaining
 hybrid transition, the host first seeds marks for roots that can still be held
 in host-side frame/register caches. The native marker then traces the complete
@@ -476,13 +477,24 @@ allocation headroom. The request is serviced only after the native engine has
 published its current frame and a semantic fallback has published its result;
 the collector never runs over private register state.
 
-Runtimes reserve a suffix of linear memory solely for the collector's mark work
-list (including when only the collector, rather than the interpreter, uses its
-native backend). The configured `heapBytes` remains entirely available for
-guest records; the workspace is additional runtime-owned linear memory sized
-for one entry per minimum-sized record. Guest allocation bounds exclude it, so
-marking capacity cannot depend on how close allocation came to the end of the
-heap.
+Runtimes reserve one stable linear address range up to `maxHeapBytes`, followed
+by a suffix used solely for the collector's mark work list (including when only
+the collector, rather than the interpreter, uses its native backend). The
+configured `heapBytes` is the initial logical allocation limit and remains
+entirely available for guest records. When a record cannot fit, the allocator
+doubles that logical limit, capped at `maxHeapBytes`; no records move and guest
+offsets remain unchanged. The default runtime starts at 64 MiB and reserves up
+to 256 MiB. Supplying `heapBytes` without `maxHeapBytes` deliberately preserves
+a fixed-size heap for embedders and allocator tests that require a hard bound.
+
+Reserving the maximum range up front is essential on the native backend.
+Buffer backing bytes live inline in the heap, and guest/native code can retain
+their absolute addresses. Reallocating and copying the linear memory would make
+those pointers stale. The reservation consumes virtual address space, while
+physical pages are committed by the host as they are touched. Node's backend
+uses its sparse zero-on-read representation for the same address contract.
+Collector workspace is sized for one entry per minimum-sized record at the
+maximum limit and is never exposed to guest allocation.
 
 The native allocator initially uses the heap tail. After a pressure collection
 it may claim a coalesced ordinary free block as a private bump region. At every

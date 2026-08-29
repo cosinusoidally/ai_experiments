@@ -383,6 +383,34 @@ until execution returns. Collection during one top-level program can therefore
 be conservative. Host-root behavior and collection between executions are
 precise for the implemented object graph.
 
+## Heap capacity and growth
+
+The default `JSRuntime` begins with a 64 MiB logical guest heap and can grow it
+automatically to 256 MiB. Growth doubles the logical allocation limit as needed.
+It does not relocate records: guest references remain heap-relative offsets and
+native pointers into Buffer backing data remain valid.
+
+The runtime reserves its maximum linear address range when it is created. This
+is virtual address-space reservation on the native host; pages acquire physical
+storage as the host touches them. The Node backend represents untouched memory
+sparsely while preserving the same zero-on-read behavior.
+
+Embedders can choose both limits:
+
+```js
+var growing = new VM({
+    heapBytes: 16 * 1024 * 1024,
+    maxHeapBytes: 128 * 1024 * 1024
+});
+```
+
+`heapBytes` is the initial logical limit and `maxHeapBytes` is the reserved hard
+limit. Both are byte counts; the maximum must be at least the initial size and
+cannot exceed 1 GiB. For compatibility, specifying `heapBytes` without
+`maxHeapBytes` creates a fixed-capacity heap. When the hard limit cannot satisfy
+an allocation after normal reuse and collection opportunities, allocation
+throws `RangeError: guest heap exhausted` with heap diagnostics.
+
 ## Buffer use
 
 Guest programs currently create buffers with `Buffer.alloc`. Under MMVM the
