@@ -75,6 +75,7 @@
     var PROGRAM_FUNCTION_NAME_SLOT = 32;
     var PROGRAM_METADATA = 36;
     var PROGRAM_FLAGS = 40;
+    var PROGRAM_BINDING_COUNT = 44;
     var PROGRAM_BYTES = 48;
 
     var CONTEXT_GLOBAL = 0;
@@ -728,6 +729,8 @@
             layout.metadata || 0, Heap.Types.PROGRAM);
         this.heap.writeTrustedFieldU32(address, PROGRAM_FLAGS,
             layout.flags || 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_BINDING_COUNT,
+            layout.bindingCount || 0, Heap.Types.PROGRAM);
         return address;
     };
 
@@ -747,6 +750,11 @@
     Records.prototype.programBindingRegisters = function (program) {
         return this.heap.readTrustedFieldU32(
             program, PROGRAM_BINDING_REGISTERS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programBindingCount = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_BINDING_COUNT, Heap.Types.PROGRAM);
     };
 
     Records.prototype.programParameterSlots = function (program) {

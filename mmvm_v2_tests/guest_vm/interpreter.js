@@ -253,14 +253,6 @@
     };
 
     Execution.prototype.synchronizeNativeFrames = function (currentFrameAddress) {
-        if (this.frames.length &&
-            this.frames[this.frames.length - 1].heapAddress ===
-                currentFrameAddress &&
-            this.runtime.programAddress(
-                this.frames[this.frames.length - 1].program) ===
-                this.runtime.heapRecords.frameProgram(currentFrameAddress)) {
-            return this.frames[this.frames.length - 1];
-        }
         var existing = {};
         var index = 0;
         while (index < this.frames.length) {
@@ -306,6 +298,10 @@
                     this.runtime.heapRecords.frameEnvironment(address);
                 var environmentMetadata = environmentAddress ?
                     this.runtime.environmentMetadata["$" + environmentAddress] : null;
+                if (environmentAddress && !environmentMetadata) {
+                    environmentMetadata = this.runtime.adoptEnvironment(
+                        environmentAddress, program.bindingSlots || {});
+                }
                 frame = {program: program, code: program.code,
                          constants: program.constants, registers: [],
                          pc: this.runtime.heapRecords.framePC(address),
@@ -316,6 +312,27 @@
                             this.runtime.heapRecords.frameReturnSlot(address),
                          heapAddress: address, nativeHeapCurrent: true};
             }
+            /* Native return caches frame records and a later call may reuse
+             * the same address for the same program with a new lexical
+             * environment.  Address plus program is therefore not a call
+             * incarnation identity.  Refresh all per-invocation fields from
+             * the authoritative guest frame whenever native execution yields. */
+            var refreshedEnvironmentAddress =
+                this.runtime.heapRecords.frameEnvironment(address);
+            var refreshedEnvironmentMetadata = refreshedEnvironmentAddress ?
+                this.runtime.environmentMetadata[
+                    "$" + refreshedEnvironmentAddress] : null;
+            if (refreshedEnvironmentAddress && !refreshedEnvironmentMetadata) {
+                refreshedEnvironmentMetadata = this.runtime.adoptEnvironment(
+                    refreshedEnvironmentAddress,
+                    frame.program.bindingSlots || {});
+            }
+            frame.environment = refreshedEnvironmentMetadata ?
+                                refreshedEnvironmentMetadata.handle : null;
+            frame.pc = this.runtime.heapRecords.framePC(address);
+            frame.returnRegister =
+                this.runtime.heapRecords.frameReturnSlot(address);
+            frame.nativeHeapCurrent = true;
             synchronizedFrames.push(frame);
         }
         this.frames = synchronizedFrames;

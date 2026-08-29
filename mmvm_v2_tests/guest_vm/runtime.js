@@ -282,13 +282,16 @@
     };
 
     Runtime.prototype.getEnvironmentSlot = function (environment, depth, slot) {
+        var requestedDepth = depth;
         while (depth > 0) {
             environment = this.environmentParent(environment);
             depth--;
         }
-        if (!environment || slot < 0 ||
-            slot >= this.heapRecords.environmentSlotCount(environment.heapAddress)) {
-            throw new Error("invalid lexical environment slot");
+        var slotCount = environment ?
+            this.heapRecords.environmentSlotCount(environment.heapAddress) : 0;
+        if (!environment || slot < 0 || slot >= slotCount) {
+            throw new Error("invalid lexical environment slot " + slot +
+                            " of " + slotCount + " at depth " + requestedDepth);
         }
         return this.readHeapValue(
             this.heapRecords.environmentCell(environment.heapAddress, slot));
@@ -339,8 +342,23 @@
         var address = this.heapRecords.environmentParent(environment.heapAddress);
         if (!address) return null;
         var metadata = this.environmentMetadata["$" + address];
-        if (!metadata) throw new Error("guest environment has no runtime metadata");
+        if (!metadata) return this.adoptEnvironment(address, {}).handle;
         return metadata.handle;
+    };
+
+    /* Native frames create lexical environments without allocating host
+     * objects.  Materialize the lightweight handle only if execution falls
+     * back to the host interpreter; the authoritative slots remain entirely
+     * in the guest heap. */
+    Runtime.prototype.adoptEnvironment = function (address, bindingSlots) {
+        var key = "$" + address;
+        var metadata = this.environmentMetadata[key];
+        if (metadata) return metadata;
+        this.linearHeap.requireRecord(address, Heap.Types.ENVIRONMENT);
+        var handle = {heapAddress: address, ownerRuntime: this};
+        metadata = {handle: handle, bindingSlots: bindingSlots || {}};
+        this.environmentMetadata[key] = metadata;
+        return metadata;
     };
 
     Runtime.prototype.functionClosure = function (callable) {
@@ -584,8 +602,13 @@
             functionNameSlot: program.functionNameSlot === undefined ?
                               -1 : program.functionNameSlot,
             metadata: metadataId,
-            flags: program.usesArguments ? 1 : 0
+            flags: program.usesArguments ? 1 : 0,
+            bindingCount: program.bindings ? program.bindings.length : 0
         });
+        if (program.bindings && this.heapRecords.programBindingCount(address) !==
+                program.bindings.length) {
+            throw new Error("guest program binding layout was not preserved");
+        }
         this.programObjects.push(program);
         this.programAddresses.push(address);
         this.programMetadata["$" + address] = program;

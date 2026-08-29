@@ -48,6 +48,7 @@
         var HEAP_TYPE_ARRAY = 2;
         var HEAP_TYPE_NATIVE_FUNCTION = 3;
         var HEAP_TYPE_BYTECODE_FUNCTION = 4;
+        var HEAP_TYPE_ENVIRONMENT = 5;
         var HEAP_TYPE_PROPERTY = 6;
         var HEAP_TYPE_STRING = 7;
         var HEAP_TYPE_REGEXP = 9;
@@ -85,6 +86,7 @@
         var PROGRAM_THIS_SLOT = 44;
         var PROGRAM_FUNCTION_NAME_SLOT = 48;
         var PROGRAM_FLAGS = 56;
+        var PROGRAM_BINDING_COUNT = 60;
         var PROGRAM_FLAG_USES_ARGUMENTS = 1;
         var BYTECODE_WORDS = 24;
         var CONTEXT_GLOBAL = 16;
@@ -115,6 +117,9 @@
         var VECTOR_CAPACITY = 20;
         var VECTOR_CELLS = 24;
         var NATIVE_FUNCTION_METADATA = 28;
+        var FUNCTION_CLOSURE = 24;
+        var FUNCTION_METADATA = 28;
+        var FUNCTION_HOME_CONTEXT = 32;
         var BYTECODE_FUNCTION_CLOSURE = 24;
         var BYTECODE_FUNCTION_PROGRAM = 28;
         var BYTECODE_FUNCTION_HOME_CONTEXT = 32;
@@ -130,6 +135,7 @@
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
         var ENVIRONMENT_CELLS = 24;
+        var ENVIRONMENT_FIXED_BYTES = 24;
         var ENGINE_EXIT_REASON = 0;
         var ENGINE_PC = 4;
         var ENGINE_RESULT = 8;
@@ -1637,25 +1643,10 @@
                             bytecodeArgumentCount = load32(
                                 heapBase + bytecodeArgumentVector + VECTOR_LENGTH);
                         }
-                        var calleeProgram = load32(
-                            heapBase + bytecodeCallable +
-                            BYTECODE_FUNCTION_PROGRAM);
-                        var calleeBindingRegisters = load32(
-                            heapBase + calleeProgram +
-                            PROGRAM_BINDING_REGISTERS);
-                        if (calleeBindingRegisters === 0) {
-                            bytecodeCallValid = 0;
-                            store32(heapBase + state +
-                                ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_ENVIRONMENT);
-                        }
-                        if ((load32(heapBase + calleeProgram + PROGRAM_FLAGS) &
-                            PROGRAM_FLAG_USES_ARGUMENTS) !== 0) {
-                            bytecodeCallValid = 0;
-                            store32(heapBase + state +
-                                ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_ENVIRONMENT);
-                        }
+                        var calleeProgram = functionMetadata(
+                            heapBase, bytecodeCallable);
+                        var calleeBindingRegisters = programBindingRegisters(
+                            heapBase, calleeProgram);
                         var argumentCheckIndex = 0;
                         while (argumentCheckIndex < bytecodeArgumentCount) {
                             var argumentRegisterCell = heapBase +
@@ -1669,8 +1660,8 @@
                             }
                             argumentCheckIndex = argumentCheckIndex + 1;
                         }
-                        var calleeRegisterCount = load32(
-                            heapBase + calleeProgram + PROGRAM_REGISTER_COUNT);
+                        var calleeRegisterCount = programRegisterCount(
+                            heapBase, calleeProgram);
                         var calleeFrameBytes = FRAME_FIXED_BYTES +
                             calleeRegisterCount * VALUE_CELL_BYTES;
                         var calleeFrame = 0;
@@ -1706,6 +1697,33 @@
                             bytecodeAllocationEnd = bytecodeAllocationEnd +
                                                     calleeFrameBytes;
                         }
+                        var calleeEnvironment = functionClosure(
+                            heapBase, bytecodeCallable);
+                        var calleeArgumentsArray = 0;
+                        var calleeArgumentsVector = 0;
+                        var calleeBindingCount = 0;
+                        var calleeNeedsArguments = 0;
+                        if ((programFlags(heapBase, calleeProgram) &
+                             PROGRAM_FLAG_USES_ARGUMENTS) !== 0) {
+                            calleeNeedsArguments = 1;
+                        }
+                        if (calleeBindingRegisters === 0) {
+                            calleeBindingCount = programBindingCount(
+                                heapBase, calleeProgram);
+                            calleeEnvironment = bytecodeAllocationEnd;
+                            bytecodeAllocationEnd = bytecodeAllocationEnd +
+                                ENVIRONMENT_FIXED_BYTES +
+                                calleeBindingCount * VALUE_CELL_BYTES;
+                        }
+                        if (calleeNeedsArguments === 1) {
+                            calleeArgumentsArray = bytecodeAllocationEnd;
+                            bytecodeAllocationEnd = bytecodeAllocationEnd +
+                                ARRAY_RECORD_BYTES;
+                            calleeArgumentsVector = bytecodeAllocationEnd;
+                            bytecodeAllocationEnd = bytecodeAllocationEnd +
+                                VECTOR_CELLS + bytecodeArgumentCount *
+                                VALUE_CELL_BYTES;
+                        }
                         if (bytecodeAllocationEnd > load32(
                                 heapBase + state + ENGINE_HEAP_LIMIT)) {
                             bytecodeCallValid = 0;
@@ -1715,6 +1733,96 @@
                         }
                         }
                         if (bytecodeCallValid === 1) {
+                            if (calleeBindingRegisters === 0) {
+                                setRecordType(heapBase, calleeEnvironment,
+                                              HEAP_TYPE_ENVIRONMENT);
+                                setRecordSize(heapBase, calleeEnvironment,
+                                    ENVIRONMENT_FIXED_BYTES +
+                                    calleeBindingCount * VALUE_CELL_BYTES);
+                                setRecordMark(heapBase, calleeEnvironment, 0);
+                                setRecordFlags(heapBase, calleeEnvironment, 0);
+                                setEnvironmentParent(heapBase,
+                                    calleeEnvironment,
+                                    functionClosure(heapBase,
+                                                    bytecodeCallable));
+                                setEnvironmentCount(heapBase,
+                                    calleeEnvironment, calleeBindingCount);
+                                var clearEnvironmentSlot = 0;
+                                while (clearEnvironmentSlot <
+                                       calleeBindingCount) {
+                                    var clearEnvironmentCell = heapBase +
+                                        calleeEnvironment + ENVIRONMENT_CELLS +
+                                        clearEnvironmentSlot * VALUE_CELL_BYTES;
+                                    store32(clearEnvironmentCell,
+                                            VALUE_TAG_UNDEFINED);
+                                    store32(clearEnvironmentCell + VALUE_CELL_LOW,
+                                            0);
+                                    store32(clearEnvironmentCell + VALUE_CELL_HIGH,
+                                            0);
+                                    store32(clearEnvironmentCell + VALUE_CELL_AUX,
+                                            0);
+                                    clearEnvironmentSlot =
+                                        clearEnvironmentSlot + 1;
+                                }
+                            }
+                            if (calleeNeedsArguments === 1) {
+                                setRecordType(heapBase, calleeArgumentsArray,
+                                              HEAP_TYPE_ARRAY);
+                                setRecordSize(heapBase, calleeArgumentsArray,
+                                              ARRAY_RECORD_BYTES);
+                                setRecordMark(heapBase, calleeArgumentsArray, 0);
+                                setRecordFlags(heapBase, calleeArgumentsArray, 0);
+                                setArrayPrototype(heapBase,
+                                    calleeArgumentsArray, arrayPrototype);
+                                setArrayPropertyHead(heapBase,
+                                    calleeArgumentsArray, 0);
+                                setArrayElements(heapBase, calleeArgumentsArray,
+                                                 calleeArgumentsVector);
+                                setArrayReserved(heapBase,
+                                                 calleeArgumentsArray, 0);
+                                setRecordType(heapBase, calleeArgumentsVector,
+                                              HEAP_TYPE_VALUE_VECTOR);
+                                setRecordSize(heapBase, calleeArgumentsVector,
+                                    VECTOR_CELLS + bytecodeArgumentCount *
+                                    VALUE_CELL_BYTES);
+                                setRecordMark(heapBase, calleeArgumentsVector, 0);
+                                setRecordFlags(heapBase,
+                                               calleeArgumentsVector, 0);
+                                setVectorLength(heapBase,
+                                                calleeArgumentsVector,
+                                                bytecodeArgumentCount);
+                                setVectorCapacity(heapBase,
+                                                  calleeArgumentsVector,
+                                                  bytecodeArgumentCount);
+                                var copyArgumentIndex = 0;
+                                while (copyArgumentIndex <
+                                       bytecodeArgumentCount) {
+                                    var copiedArgumentRegisterCell = heapBase +
+                                        bytecodeArgumentVector + VECTOR_CELLS +
+                                        copyArgumentIndex * VALUE_CELL_BYTES;
+                                    var copiedArgumentRegister = load32(
+                                        copiedArgumentRegisterCell +
+                                        VALUE_CELL_LOW);
+                                    var copiedArgumentSource = heapBase +
+                                        registerCells + copiedArgumentRegister *
+                                        VALUE_CELL_BYTES;
+                                    var copiedArgumentTarget = heapBase +
+                                        calleeArgumentsVector + VECTOR_CELLS +
+                                        copyArgumentIndex * VALUE_CELL_BYTES;
+                                    store32(copiedArgumentTarget,
+                                            load32(copiedArgumentSource));
+                                    store32(copiedArgumentTarget + VALUE_CELL_LOW,
+                                        load32(copiedArgumentSource +
+                                               VALUE_CELL_LOW));
+                                    store32(copiedArgumentTarget + VALUE_CELL_HIGH,
+                                        load32(copiedArgumentSource +
+                                               VALUE_CELL_HIGH));
+                                    store32(copiedArgumentTarget + VALUE_CELL_AUX,
+                                        load32(copiedArgumentSource +
+                                               VALUE_CELL_AUX));
+                                    copyArgumentIndex = copyArgumentIndex + 1;
+                                }
+                            }
                             store32(heapBase + calleeFrame + RECORD_TYPE,
                                     HEAP_TYPE_FRAME);
                             if (calleeFrameReused === 0) {
@@ -1727,8 +1835,7 @@
                             store32(heapBase + calleeFrame + FRAME_PROGRAM,
                                     calleeProgram);
                             store32(heapBase + calleeFrame + FRAME_ENVIRONMENT,
-                                load32(heapBase + bytecodeCallable +
-                                       BYTECODE_FUNCTION_CLOSURE));
+                                calleeEnvironment);
                             store32(heapBase + calleeFrame + FRAME_CALLER, frame);
                             store32(heapBase + calleeFrame + FRAME_PC, 0);
                             store32(heapBase + calleeFrame + FRAME_RETURN_SLOT,
@@ -1736,9 +1843,8 @@
                             store32(heapBase + calleeFrame +
                                     FRAME_REGISTER_COUNT, calleeRegisterCount);
                             store32(heapBase + calleeFrame + FRAME_HANDLER, 0);
-                            var calleeContext = load32(
-                                heapBase + bytecodeCallable +
-                                BYTECODE_FUNCTION_HOME_CONTEXT);
+                            var calleeContext = functionHomeContext(
+                                heapBase, bytecodeCallable);
                             if (calleeContext === 0) calleeContext = currentContext;
                             store32(heapBase + calleeFrame + FRAME_CONTEXT,
                                     calleeContext);
@@ -1753,11 +1859,11 @@
                                 store32(clearCalleeCell + VALUE_CELL_AUX, 0);
                                 clearCalleeRegister = clearCalleeRegister + 1;
                             }
-                            var calleeConstants = load32(
-                                heapBase + calleeProgram + PROGRAM_CONSTANTS);
-                            var calleeConstantRegisters = load32(
-                                heapBase + calleeProgram +
-                                PROGRAM_CONSTANT_REGISTERS);
+                            var calleeConstants = programConstants(
+                                heapBase, calleeProgram);
+                            var calleeConstantRegisters =
+                                programConstantRegisters(
+                                    heapBase, calleeProgram);
                             var calleeConstantCount = load32(
                                 heapBase + calleeConstantRegisters + VECTOR_LENGTH);
                             var initializeConstant = 0;
@@ -1791,9 +1897,8 @@
                                 }
                                 initializeConstant = initializeConstant + 1;
                             }
-                            var calleeParameterSlots = load32(
-                                heapBase + calleeProgram +
-                                PROGRAM_PARAMETER_SLOTS);
+                            var calleeParameterSlots = programParameterSlots(
+                                heapBase, calleeProgram);
                             var calleeParameterCount = load32(
                                 heapBase + calleeParameterSlots + VECTOR_LENGTH);
                             var initializeParameter = 0;
@@ -1804,11 +1909,6 @@
                                         initializeParameter * VALUE_CELL_BYTES;
                                     var parameterSlot = load32(
                                         parameterSlotCell + VALUE_CELL_LOW);
-                                    var parameterRegisterCell = heapBase +
-                                        calleeBindingRegisters + VECTOR_CELLS +
-                                        parameterSlot * VALUE_CELL_BYTES;
-                                    var parameterRegister = load32(
-                                        parameterRegisterCell + VALUE_CELL_LOW);
                                     var parameterArgumentRegisterCell = heapBase +
                                         bytecodeArgumentVector + VECTOR_CELLS +
                                         initializeParameter * VALUE_CELL_BYTES;
@@ -1818,9 +1918,23 @@
                                     var parameterSource = heapBase + registerCells +
                                         parameterArgumentRegister *
                                         VALUE_CELL_BYTES;
-                                    var parameterTarget = heapBase + calleeFrame +
-                                        FRAME_REGISTERS + parameterRegister *
-                                        VALUE_CELL_BYTES;
+                                    var parameterTarget = 0;
+                                    if (calleeBindingRegisters === 0) {
+                                        parameterTarget = heapBase +
+                                            calleeEnvironment +
+                                            ENVIRONMENT_CELLS + parameterSlot *
+                                            VALUE_CELL_BYTES;
+                                    } else {
+                                        var parameterRegisterCell = heapBase +
+                                            calleeBindingRegisters + VECTOR_CELLS +
+                                            parameterSlot * VALUE_CELL_BYTES;
+                                        var parameterRegister = load32(
+                                            parameterRegisterCell +
+                                            VALUE_CELL_LOW);
+                                        parameterTarget = heapBase + calleeFrame +
+                                            FRAME_REGISTERS + parameterRegister *
+                                            VALUE_CELL_BYTES;
+                                    }
                                     store32(parameterTarget, load32(parameterSource));
                                     store32(parameterTarget + VALUE_CELL_LOW,
                                         load32(parameterSource + VALUE_CELL_LOW));
@@ -1831,15 +1945,59 @@
                                 }
                                 initializeParameter = initializeParameter + 1;
                             }
-                            var thisSlot = load32(
-                                heapBase + calleeProgram + PROGRAM_THIS_SLOT);
-                            var thisRegisterCell = heapBase +
-                                calleeBindingRegisters + VECTOR_CELLS +
-                                thisSlot * VALUE_CELL_BYTES;
-                            var thisRegister = load32(
-                                thisRegisterCell + VALUE_CELL_LOW);
-                            var thisTarget = heapBase + calleeFrame +
-                                FRAME_REGISTERS + thisRegister * VALUE_CELL_BYTES;
+                            var thisSlot = programThisSlot(
+                                heapBase, calleeProgram);
+                            var thisTarget = 0;
+                            if (calleeBindingRegisters === 0) {
+                                if (calleeNeedsArguments === 1) {
+                                    var argumentsSlot = programArgumentsSlot(
+                                        heapBase, calleeProgram);
+                                    var argumentsTarget = heapBase +
+                                        calleeEnvironment + ENVIRONMENT_CELLS +
+                                        argumentsSlot * VALUE_CELL_BYTES;
+                                    store32(argumentsTarget,
+                                            VALUE_TAG_REFERENCE);
+                                    store32(argumentsTarget + VALUE_CELL_LOW,
+                                            calleeArgumentsArray);
+                                    store32(argumentsTarget + VALUE_CELL_HIGH,
+                                            0);
+                                    store32(argumentsTarget + VALUE_CELL_AUX, 0);
+                                }
+                                thisTarget = heapBase + calleeEnvironment +
+                                    ENVIRONMENT_CELLS + thisSlot *
+                                    VALUE_CELL_BYTES;
+                            } else {
+                                if (calleeNeedsArguments === 1) {
+                                    var registerArgumentsSlot =
+                                        programArgumentsSlot(
+                                            heapBase, calleeProgram);
+                                    var argumentsRegisterCell = heapBase +
+                                        calleeBindingRegisters + VECTOR_CELLS +
+                                        registerArgumentsSlot * VALUE_CELL_BYTES;
+                                    var argumentsRegister = load32(
+                                        argumentsRegisterCell + VALUE_CELL_LOW);
+                                    var registerArgumentsTarget = heapBase +
+                                        calleeFrame + FRAME_REGISTERS +
+                                        argumentsRegister * VALUE_CELL_BYTES;
+                                    store32(registerArgumentsTarget,
+                                            VALUE_TAG_REFERENCE);
+                                    store32(registerArgumentsTarget +
+                                            VALUE_CELL_LOW,
+                                            calleeArgumentsArray);
+                                    store32(registerArgumentsTarget +
+                                            VALUE_CELL_HIGH, 0);
+                                    store32(registerArgumentsTarget +
+                                            VALUE_CELL_AUX, 0);
+                                }
+                                var thisRegisterCell = heapBase +
+                                    calleeBindingRegisters + VECTOR_CELLS +
+                                    thisSlot * VALUE_CELL_BYTES;
+                                var thisRegister = load32(
+                                    thisRegisterCell + VALUE_CELL_LOW);
+                                thisTarget = heapBase + calleeFrame +
+                                    FRAME_REGISTERS + thisRegister *
+                                    VALUE_CELL_BYTES;
+                            }
                             var receiverIndex = load32(
                                 heapBase + bytecodeWords +
                                 (pc + THIRD_OPERAND) * WORD_BYTES);
@@ -1854,18 +2012,25 @@
                                 store32(thisTarget + VALUE_CELL_AUX,
                                     load32(thisSource + VALUE_CELL_AUX));
                             }
-                            var functionNameSlot = load32(
-                                heapBase + calleeProgram +
-                                PROGRAM_FUNCTION_NAME_SLOT);
+                            var functionNameSlot = programFunctionNameSlot(
+                                heapBase, calleeProgram);
                             if (functionNameSlot >= 0) {
-                                var functionNameRegisterCell = heapBase +
-                                    calleeBindingRegisters + VECTOR_CELLS +
-                                    functionNameSlot * VALUE_CELL_BYTES;
-                                var functionNameRegister = load32(
-                                    functionNameRegisterCell + VALUE_CELL_LOW);
-                                var functionNameTarget = heapBase + calleeFrame +
-                                    FRAME_REGISTERS + functionNameRegister *
-                                    VALUE_CELL_BYTES;
+                                var functionNameTarget = 0;
+                                if (calleeBindingRegisters === 0) {
+                                    functionNameTarget = heapBase +
+                                        calleeEnvironment + ENVIRONMENT_CELLS +
+                                        functionNameSlot * VALUE_CELL_BYTES;
+                                } else {
+                                    var functionNameRegisterCell = heapBase +
+                                        calleeBindingRegisters + VECTOR_CELLS +
+                                        functionNameSlot * VALUE_CELL_BYTES;
+                                    var functionNameRegister = load32(
+                                        functionNameRegisterCell +
+                                        VALUE_CELL_LOW);
+                                    functionNameTarget = heapBase + calleeFrame +
+                                        FRAME_REGISTERS + functionNameRegister *
+                                        VALUE_CELL_BYTES;
+                                }
                                 store32(functionNameTarget, VALUE_TAG_REFERENCE);
                                 store32(functionNameTarget + VALUE_CELL_LOW,
                                         bytecodeCallable);

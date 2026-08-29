@@ -100,6 +100,27 @@ Host handles, parsed ASTs, compiler analysis, generated-code addresses, and
 libc symbol addresses are bootstrap metadata only. The native engine cannot
 dereference or call a host handle.
 
+Native bytecode-to-bytecode calls support both register-bound functions and
+functions that require lexical environments. A `PROGRAM` record carries its
+binding count as part of the authoritative heap layout. For an
+environment-bound call, the dispatch kernel allocates and initializes the
+`ENVIRONMENT` record itself, links it to the callable's closure, and places
+parameters, `this`, and a referenced `arguments` value into named slots. An
+`arguments` array is allocated only when static compiler analysis says the
+function observes it; without `eval`, omitting an unobservable array preserves
+semantics while avoiding substantial short-lived allocation. All record-field
+access in this path goes through the kernel compiler's named accessors.
+
+Native return caches frame storage, so a frame address is not a call-incarnation
+identity. If an unsupported semantic operation yields to the reference
+interpreter, the bridge always refreshes the frame PC, return slot, context,
+and lexical-environment handle from the authoritative heap record—even when
+the address and program equal a previously seen frame. Host environment
+metadata is created lazily at that boundary only; uninterrupted native calls
+do not create host environment objects. This rule is essential for closures
+created by repeated calls, because each closure must retain that call's
+distinct guest-heap environment.
+
 ## Correctness and performance gates
 
 Every native operation must pass:

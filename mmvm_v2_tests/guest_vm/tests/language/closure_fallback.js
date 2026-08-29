@@ -49,3 +49,16 @@ assertEqual(nestedOriginal === nestedSlice, false,
 assertEqual(nestedOriginal.length, 4,
             "nested construction does not mutate the source receiver");
 assertEqual(nestedSlice.length, 3, "nested constructor initializes new receiver");
+
+/* Each invocation must own a distinct captured environment.  This is the
+ * closure pattern used by module installers and compiler method tables. */
+var installedClosures = {};
+function installCapturedMethod(name) {
+    installedClosures[name] = function () { return name; };
+}
+installCapturedMethod("first");
+installCapturedMethod("second");
+assertEqual(installedClosures.first(), "first",
+            "first installed closure retains its call environment");
+assertEqual(installedClosures.second(), "second",
+            "second installed closure retains its call environment");
