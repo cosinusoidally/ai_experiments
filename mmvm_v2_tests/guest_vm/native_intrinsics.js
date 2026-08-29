@@ -15,7 +15,7 @@
                       STRING_CHAR_CODE_AT: 27, MATH_POW: 28,
                       STRING_SUBSTR: 29, STRING_INDEX_OF: 30,
                       REGEXP_TEST: 31, STRING_REPLACE: 32,
-                      FUNCTION_APPLY: 33};
+                      FUNCTION_APPLY: 33, OBJECT_HAS_OWN_PROPERTY: 34};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

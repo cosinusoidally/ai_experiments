@@ -249,6 +249,7 @@
         var INTRINSIC_REGEXP_TEST = 31;
         var INTRINSIC_STRING_REPLACE = 32;
         var INTRINSIC_FUNCTION_APPLY = 33;
+        var INTRINSIC_OBJECT_HAS_OWN_PROPERTY = 34;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -2224,7 +2225,8 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_FUNCTION_APPLY) {
+                    else if (intrinsicId >
+                             INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2299,6 +2301,92 @@
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
+                    var ownReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    var ownValid = 1;
+                    if (ownReceiverIndex < 0) ownValid = 0;
+                    var ownReceiverCell = heapBase + registerCells +
+                        ownReceiverIndex * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, ownReceiverCell) !==
+                        VALUE_TAG_REFERENCE) ownValid = 0;
+                    var ownObject = valueCellReference(0, ownReceiverCell);
+                    var ownObjectType = recordType(heapBase, ownObject);
+                    var ownProperty = 0;
+                    if (ownObjectType >= HEAP_TYPE_OBJECT) {
+                        if (ownObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
+                            ownProperty = objectPropertyHead(
+                                heapBase, ownObject);
+                        } else ownValid = 0;
+                    } else if (ownObjectType === HEAP_TYPE_REGEXP) {
+                        ownProperty = regexpPropertyHead(heapBase, ownObject);
+                    } else if (ownObjectType === HEAP_TYPE_BUFFER_VIEW) {
+                        ownProperty = bufferViewPropertyHead(
+                            heapBase, ownObject);
+                    } else ownValid = 0;
+                    var ownKeyRegisterCell = heapBase +
+                        intrinsicArgumentsVector + VECTOR_CELLS;
+                    if (valueCellTag(0, ownKeyRegisterCell) !==
+                        VALUE_TAG_INT32) ownValid = 0;
+                    var ownKeyRegister = load32(
+                        ownKeyRegisterCell + VALUE_CELL_LOW);
+                    var ownKeyCell = heapBase + registerCells +
+                        ownKeyRegister * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, ownKeyCell) !==
+                        VALUE_TAG_REFERENCE) ownValid = 0;
+                    var ownKey = valueCellReference(0, ownKeyCell);
+                    if (ownValid === 1) {
+                        if (recordType(heapBase, ownKey) !== HEAP_TYPE_STRING) {
+                            ownValid = 0;
+                        }
+                    }
+                    var ownFound = 0;
+                    while (ownValid === 1) {
+                        if (ownProperty === 0) {
+                            ownValid = 2;
+                        } else {
+                            var ownStoredKey = propertyKey(
+                                heapBase, ownProperty);
+                            var ownMatches = 0;
+                            if (ownStoredKey === ownKey) ownMatches = 1;
+                            else if (stringLength(heapBase, ownStoredKey) ===
+                                     stringLength(heapBase, ownKey)) {
+                                ownMatches = 1;
+                                var ownCharacterIndex = 0;
+                                while (ownCharacterIndex <
+                                       stringLength(heapBase, ownKey)) {
+                                    if ((stringCharacterCodeUnit(heapBase,
+                                        ownStoredKey, ownCharacterIndex) &
+                                        65535) !==
+                                        (stringCharacterCodeUnit(heapBase,
+                                        ownKey, ownCharacterIndex) & 65535)) {
+                                        ownMatches = 0;
+                                        ownCharacterIndex = stringLength(
+                                            heapBase, ownKey);
+                                    } else ownCharacterIndex =
+                                        ownCharacterIndex + 1;
+                                }
+                            }
+                            if (ownMatches === 1) {
+                                ownFound = 1;
+                                ownValid = 2;
+                            } else ownProperty = propertyNext(
+                                heapBase, ownProperty);
+                        }
+                    }
+                    if (ownValid === 2) {
+                        if (ownFound === 1) {
+                            store32(intrinsicTarget, VALUE_TAG_TRUE);
+                        } else store32(intrinsicTarget, VALUE_TAG_FALSE);
+                        store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                        intrinsicHandled = 1;
+                    }
+                }
                 }
                 if (intrinsicHandled === 0) {
                 if (intrinsicId === INTRINSIC_FFI_CALL) {

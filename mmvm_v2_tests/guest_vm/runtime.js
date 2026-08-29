@@ -1073,7 +1073,7 @@
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
                 return runtime.hasOwnProperty(receiver, String(args[0]));
-            });
+            }, "intrinsic", NativeIntrinsics.OBJECT_HAS_OWN_PROPERTY);
         if (this.objectPrototype) {
             this.setProperty(this.objectPrototype, "hasOwnProperty",
                              this.objectMethods.hasOwnProperty);

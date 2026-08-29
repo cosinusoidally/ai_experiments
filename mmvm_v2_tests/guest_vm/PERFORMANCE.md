@@ -268,6 +268,12 @@ stays in native prototype-chain lookup. This removes the repeated
 `Function.apply` semantic call exits and bytecode-function `.apply` property
 misses from demo8's macro-assembler recorder.
 
+Native own-property queries subsequently removed `Object.hasOwnProperty` from
+the recorder's fallback-call profile. With that addition the same initialization
+timer reported about 23.4 seconds. The continuing post-initialization hotspot
+is still the recorder's repeated Array join/string construction; own-property
+queries no longer appear in the fallback-call table.
+
 At 320x240 with a 20 FPS limit, demo8 continued to initialize correctly in
 about 24.1 seconds as measured by its own initialization timer, versus roughly
 26.1 seconds at the preceding source-processing checkpoint. This is a startup

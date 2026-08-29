@@ -138,6 +138,10 @@ is a guest bytecode function and its second argument is a guest Array: the
 interpreter copies value cells from that Array, installs the requested receiver,
 and enters the callee without converting either arguments or results to host
 values. Other callable and array-like forms retain the complete semantic path.
+`Object.prototype.hasOwnProperty` likewise walks the receiver's own guest-heap
+property chain in native execution when the receiver and key already have their
+ordinary heap representations. Its comparison handles distinct string records
+with equal contents; exotic keys and receivers retain semantic fallback.
 
 The MMVM Node profile also binds `NodeLibc.memmove` as an inline structured-tier
 intrinsic for demo7's already-allocated Buffer spans. The embedder supplies the
