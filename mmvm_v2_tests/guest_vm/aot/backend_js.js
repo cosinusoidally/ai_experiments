@@ -56,8 +56,9 @@
             return parameters[node.index] + "=" +
                    emitControlExpression(node.value, parameters, locals) + ";";
         }
-        if (node.op === "store_u32") {
-            return "memory.writeU32(" +
+        if (node.op === "store_u32" || node.op === "store_u8") {
+            return "memory." + (node.op === "store_u8" ?
+                "writeU8" : "writeU32") + "(" +
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlExpression(node.value, parameters, locals) + ");";
         }

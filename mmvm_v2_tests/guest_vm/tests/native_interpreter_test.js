@@ -38,6 +38,31 @@
             }
             vm.runtime.linearHeap.freeRecord(arithmeticFrame);
 
+            var stringSemantics = {
+                code: [bytecode.CONST, 0, 0,
+                       bytecode.CONST, 1, 1,
+                       bytecode.ADD, 2, 0, 1,
+                       bytecode.CONST, 3, 2,
+                       bytecode.STRICT_EQUAL, 4, 2, 3,
+                       bytecode.RETURN, 4],
+                constants: ["road", ":", "road:"], registerCount: 5
+            };
+            var stringSemanticsAddress = vm.runtime.programAddress(
+                stringSemantics);
+            var stringSemanticsFrame = vm.runtime.heapRecords.allocateFrame(
+                stringSemanticsAddress, 0, 0, -1,
+                stringSemantics.registerCount);
+            var stringSemanticsExit = engine.run(
+                stringSemanticsFrame, stringSemantics, 20);
+            if (stringSemanticsExit.reason !==
+                    NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(
+                    stringSemanticsExit.resultCell) !== true) {
+                throw new Error(
+                    "native interpreter guest-string semantics mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(stringSemanticsFrame);
+
             var comparison = {code: [bytecode.CONST, 0, 0,
                                      bytecode.CONST, 1, 1,
                                      bytecode.LESS, 2, 0, 1,
@@ -68,18 +93,23 @@
             }
             vm.runtime.linearHeap.freeRecord(nanFrame);
 
-            var unsupported = {code: [bytecode.MAKE_REGEXP, 0, 0, 1,
-                                      bytecode.RETURN, 0],
-                               constants: ["x", ""], registerCount: 1};
-            var unsupportedAddress = vm.runtime.programAddress(unsupported);
-            var unsupportedFrame = vm.runtime.heapRecords.allocateFrame(
-                unsupportedAddress, 0, 0, -1, unsupported.registerCount);
-            var exit = engine.run(unsupportedFrame, unsupported, 10);
-            if (exit.reason !== NativeInterpreter.Exit.UNSUPPORTED ||
-                exit.pc !== 0) {
-                throw new Error("native interpreter migration exit mismatch");
+            var regexpProgram = {code: [bytecode.MAKE_REGEXP, 0, 0, 1,
+                                        bytecode.RETURN, 0],
+                                 constants: ["x", "i"], registerCount: 1};
+            var regexpAddress = vm.runtime.programAddress(regexpProgram);
+            var regexpFrame = vm.runtime.heapRecords.allocateFrame(
+                regexpAddress, 0, 0, -1, regexpProgram.registerCount);
+            var exit = engine.run(regexpFrame, regexpProgram, 10);
+            var regexpResult = vm.runtime.readHeapValue(exit.resultCell);
+            if (exit.reason !== NativeInterpreter.Exit.RETURN ||
+                !regexpResult || regexpResult.guestType !== "regexp" ||
+                vm.runtime.heapRecords.regexpPattern(
+                    regexpResult.heapAddress) !== "x" ||
+                vm.runtime.heapRecords.regexpFlags(
+                    regexpResult.heapAddress) !== "i") {
+                throw new Error("native interpreter regexp construction mismatch");
             }
-            vm.runtime.linearHeap.freeRecord(unsupportedFrame);
+            vm.runtime.linearHeap.freeRecord(regexpFrame);
 
             var integratedVM = new VM({heapBytes: 256 * 1024,
                                        nativeInterpreter: true});
@@ -104,19 +134,18 @@
                     throw new Error("native Execution return integration mismatch");
                 }
 
-                var fallbackContext = integratedVM.jsRuntime.createContext();
-                var fallbackProgram = {
+                var regexpContext = integratedVM.jsRuntime.createContext();
+                var regexpProgram = {
                     code: [bytecode.MAKE_REGEXP, 0, 0, 1,
                            bytecode.RETURN, 0],
                     constants: ["x", ""], registerCount: 1
                 };
-                var fallbackResult = fallbackContext.runProgram(fallbackProgram);
-                if (!fallbackResult || fallbackResult.guestType !== "regexp") {
-                    throw new Error("native Execution migration fallback mismatch");
+                var nativeRegexp = regexpContext.runProgram(regexpProgram);
+                if (!nativeRegexp || nativeRegexp.guestType !== "regexp") {
+                    throw new Error("native Execution regexp mismatch");
                 }
-                if (integratedVM.runtime.nativeInterpreter.runCount < 4 ||
-                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount < 1) {
-                    throw new Error("native Execution did not re-enter after fallback");
+                if (integratedVM.runtime.nativeInterpreter.runCount < 3) {
+                    throw new Error("native Execution did not run regexp opcode");
                 }
 
                 var allocationFallbacks =

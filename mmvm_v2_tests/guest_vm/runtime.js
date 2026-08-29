@@ -118,7 +118,9 @@
     Runtime.prototype.makeObject = function () {
         this.ensureLinearHeap();
         return this.trackObject(this.makeHeapHandle(
-            this.heapRecords.allocateObject(0), "object"));
+            this.heapRecords.allocateObject(
+                this.objectPrototype ? this.objectPrototype.heapAddress : 0),
+            "object"));
     };
 
     Runtime.prototype.makeArray = function () {
@@ -412,6 +414,7 @@
             var recordType = this.linearHeap.recordType(address);
             var guestType = recordType === Heap.Types.OBJECT ? "object" :
                 recordType === Heap.Types.ARRAY ? "array" :
+                recordType === Heap.Types.REGEXP ? "regexp" :
                 recordType === Heap.Types.BUFFER_VIEW ? "buffer" : null;
             if (!guestType) {
                 throw new Error("guest heap reference has no runtime handle: " +
@@ -825,6 +828,11 @@
 
     Runtime.prototype.installBuiltins = function () {
         var runtime = this;
+        this.objectPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        if (this.objectPrototype) {
+            this.heapRecords.setObjectPrototype(
+                this.globalObject.heapAddress, this.objectPrototype.heapAddress);
+        }
         this.setGlobal("undefined", undefined);
         this.setGlobal("assertEqual", this.makeNativeFunction("assertEqual",
             function (receiver, args) {
@@ -981,14 +989,22 @@
                 }
                 return result;
             });
-        if (this.arrayPrototype) {
-            this.setProperty(this.arrayPrototype, "push", this.arrayMethods.push);
-        }
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
                 return runtime.hasOwnProperty(receiver, String(args[0]));
             });
+        if (this.objectPrototype) {
+            this.setProperty(this.objectPrototype, "hasOwnProperty",
+                             this.objectMethods.hasOwnProperty);
+            var arrayMethodName;
+            for (arrayMethodName in this.arrayMethods) {
+                if (own(this.arrayMethods, arrayMethodName)) {
+                    this.setProperty(this.arrayPrototype, arrayMethodName,
+                                     this.arrayMethods[arrayMethodName]);
+                }
+            }
+        }
         this.functionMethods = {};
         this.functionMethods.call = this.makeNativeFunction("Function.call",
             function () {

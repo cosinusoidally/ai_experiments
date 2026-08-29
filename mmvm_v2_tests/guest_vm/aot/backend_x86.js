@@ -309,12 +309,13 @@
             else assembler.movEbpArgumentEax(node.index);
             return;
         }
-        if (node.op === "store_u32") {
+        if (node.op === "store_u32" || node.op === "store_u8") {
             emitControlExpression(assembler, node.address, state);
             assembler.pushEax();
             emitControlExpression(assembler, node.value, state);
             assembler.popEcx();
-            assembler.movDwordPtrEcxEax();
+            if (node.op === "store_u8") assembler.movBytePtrEcxAl();
+            else assembler.movDwordPtrEcxEax();
             return;
         }
         if (node.op === "store_f64") {

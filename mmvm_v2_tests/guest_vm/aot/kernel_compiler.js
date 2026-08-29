@@ -47,6 +47,7 @@
         valueCellTag: "VALUE_CELL_TAG",
         valueCellReference: "VALUE_CELL_REFERENCE",
         stringLength: "STRING_LENGTH",
+        stringHash: "STRING_HASH",
         vectorLength: "VECTOR_LENGTH",
         vectorCapacity: "VECTOR_CAPACITY",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
@@ -66,11 +67,16 @@
         setRecordSize: "RECORD_SIZE",
         setRecordMark: "RECORD_MARK",
         setRecordFlags: "RECORD_FLAGS",
+        setStringLength: "STRING_LENGTH",
+        setStringHash: "STRING_HASH",
         setArrayPrototype: "ARRAY_PROTOTYPE",
         setArrayPropertyHead: "ARRAY_PROPERTY_HEAD",
         setArrayElements: "ARRAY_ELEMENTS",
         setArrayReserved: "ARRAY_RESERVED",
         setObjectPropertyHead: "OBJECT_PROPERTY_HEAD",
+        setRegexpPattern: "REGEXP_PATTERN",
+        setRegexpFlags: "REGEXP_FLAGS",
+        setRegexpPrototype: "REGEXP_PROTOTYPE",
         setRegexpPropertyHead: "REGEXP_PROPERTY_HEAD",
         setBufferViewBacking: "BUFFER_VIEW_BACKING",
         setBufferViewOffset: "BUFFER_VIEW_OFFSET",
@@ -352,6 +358,16 @@
             }
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
+                expression.callee.name === "setStringCharacterByte" &&
+                expression.arguments.length === 4) {
+                return {op: "store_u8",
+                    address: stringCharacterByteAddress(
+                        expression.arguments, symbols),
+                    value: lowerKernelExpression(
+                        expression.arguments[3], symbols)};
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
                 expression.callee.name === "store32" &&
                 expression.arguments.length === 2) {
                 return {op: "store_u32",
@@ -592,6 +608,23 @@
                     left: lowerKernelExpression(argumentsList[2], symbols),
                     right: {op: "const_i32", value: 2, type: "i32"},
                     type: "i32"}, type: "i32"}, type: "i32"};
+    }
+
+    function stringCharacterByteAddress(argumentsList, symbols) {
+        var chars = symbols.$STRING_CHARS;
+        if (!chars || chars.kind !== "constant") {
+            throw new SyntaxError(
+                "string character writer requires STRING_CHARS");
+        }
+        return {op: "add_i32",
+            left: {op: "add_i32",
+                left: lowerKernelExpression(argumentsList[0], symbols),
+                right: lowerKernelExpression(argumentsList[1], symbols),
+                type: "i32"},
+            right: {op: "add_i32",
+                left: {op: "const_i32", value: chars.value, type: "i32"},
+                right: lowerKernelExpression(argumentsList[2], symbols),
+                type: "i32"}, type: "i32"};
     }
 
     function lowerKernelF64Expression(node, symbols) {
