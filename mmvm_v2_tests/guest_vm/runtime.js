@@ -158,7 +158,9 @@
     Runtime.prototype.makeRegExp = function (pattern, flags) {
         this.ensureLinearHeap();
         return this.trackObject(this.makeHeapHandle(
-            this.heapRecords.allocateRegExp(pattern, flags, 0), "regexp"));
+            this.heapRecords.allocateRegExp(pattern, flags,
+                this.regexpPrototype ? this.regexpPrototype.heapAddress : 0),
+            "regexp"));
     };
 
     Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
@@ -829,6 +831,8 @@
     Runtime.prototype.installBuiltins = function () {
         var runtime = this;
         this.objectPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.stringPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         if (this.objectPrototype) {
             this.heapRecords.setObjectPrototype(
                 this.globalObject.heapAddress, this.objectPrototype.heapAddress);
@@ -876,7 +880,7 @@
             function (receiver, args) {
                 return String(receiver).indexOf(String(args[0]),
                     args.length > 1 ? Number(args[1]) : 0);
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_INDEX_OF);
         this.stringMethods.substring = this.makeNativeFunction("String.substring",
             function (receiver, args) {
                 return args.length > 1 ? String(receiver).substring(Number(args[0]), Number(args[1])) :
@@ -886,7 +890,7 @@
             function (receiver, args) {
                 return args.length > 1 ? String(receiver).substr(Number(args[0]),
                     Number(args[1])) : String(receiver).substr(Number(args[0]));
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_SUBSTR);
         this.stringMethods.toLowerCase = this.makeNativeFunction("String.toLowerCase",
             function (receiver) { return String(receiver).toLowerCase(); });
         this.stringMethods.split = this.makeNativeFunction("String.split",
@@ -906,6 +910,15 @@
             });
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
             function (receiver) { return String(receiver).toUpperCase(); });
+        if (this.stringPrototype) {
+            var stringMethodName;
+            for (stringMethodName in this.stringMethods) {
+                if (own(this.stringMethods, stringMethodName)) {
+                    this.setProperty(this.stringPrototype, stringMethodName,
+                                     this.stringMethods[stringMethodName]);
+                }
+            }
+        }
         this.arrayMethods = {};
         this.arrayPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.arrayMethods.push = this.makeNativeFunction("Array.push",
@@ -1038,7 +1051,7 @@
                 return new RegExp(runtime.heapRecords.regexpPattern(
                     receiver.heapAddress), runtime.heapRecords.regexpFlags(
                     receiver.heapAddress)).test(String(args[0]));
-            });
+            }, "intrinsic", NativeIntrinsics.NONE);
         this.regexpMethods.exec = this.makeNativeFunction("RegExp.exec",
             function (receiver, args) {
                 var match = new RegExp(runtime.heapRecords.regexpPattern(
@@ -1050,6 +1063,15 @@
                 runtime.setProperty(result, "input", match.input);
                 return result;
             });
+        if (this.regexpPrototype) {
+            var regexpMethodName;
+            for (regexpMethodName in this.regexpMethods) {
+                if (own(this.regexpMethods, regexpMethodName)) {
+                    this.setProperty(this.regexpPrototype, regexpMethodName,
+                                     this.regexpMethods[regexpMethodName]);
+                }
+            }
+        }
         var stringConstructor = this.makeNativeFunction("String",
             function (receiver, args) {
                 return args.length ? runtime.toString(args[0]) : "";

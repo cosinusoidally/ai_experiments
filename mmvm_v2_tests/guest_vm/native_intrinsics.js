@@ -12,7 +12,9 @@
                       BUFFER_SLICE: 21, STRING_CHAR_AT: 22,
                       BUFFER_ALLOC: 23, BUFFER_COPY: 24,
                       GET_DLSYM: 25, FFI_CALL: 26,
-                      STRING_CHAR_CODE_AT: 27, MATH_POW: 28};
+                      STRING_CHAR_CODE_AT: 27, MATH_POW: 28,
+                      STRING_SUBSTR: 29, STRING_INDEX_OF: 30,
+                      REGEXP_TEST: 31};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

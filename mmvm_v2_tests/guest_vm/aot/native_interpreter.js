@@ -233,12 +233,18 @@
         var INTRINSIC_FFI_CALL = 26;
         var INTRINSIC_STRING_CHAR_CODE_AT = 27;
         var INTRINSIC_MATH_POW = 28;
+        var INTRINSIC_STRING_SUBSTR = 29;
+        var INTRINSIC_STRING_INDEX_OF = 30;
+        var INTRINSIC_REGEXP_TEST = 31;
+        var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
         var STRING_SUPPORT_EMPTY = 2;
         var STRING_SUPPORT_ASCII_BASE = 3;
         var RUNTIME_SUPPORT_BUFFER_PROTOTYPE = 259;
         var RUNTIME_SUPPORT_OBJECT_PROTOTYPE = 260;
+        var RUNTIME_SUPPORT_STRING_PROTOTYPE = 261;
+        var RUNTIME_SUPPORT_REGEXP_PROTOTYPE = 262;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -484,24 +490,12 @@
                     if (namedGetObject !== 0) {
                         if (recordType(heapBase, namedGetObject) ===
                             HEAP_TYPE_STRING) {
-                            var dynamicCharAtKeyCell = heapBase +
+                            var dynamicStringPrototypeCell = heapBase +
                                 stringSupport + VECTOR_CELLS +
-                                STRING_SUPPORT_CHAR_AT_KEY * VALUE_CELL_BYTES;
-                            if (namedGetKey === load32(
-                                dynamicCharAtKeyCell + VALUE_CELL_LOW)) {
-                                var dynamicCharAtFunctionCell = heapBase +
-                                    stringSupport + VECTOR_CELLS +
-                                    STRING_SUPPORT_CHAR_AT_FUNCTION *
-                                    VALUE_CELL_BYTES;
-                                store32(arrayGetTarget, VALUE_TAG_REFERENCE);
-                                store32(arrayGetTarget + VALUE_CELL_LOW,
-                                    load32(dynamicCharAtFunctionCell +
-                                           VALUE_CELL_LOW));
-                                store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                                store32(arrayGetTarget + VALUE_CELL_AUX, 0);
-                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                                namedGetObject = 0;
-                            }
+                                RUNTIME_SUPPORT_STRING_PROTOTYPE *
+                                VALUE_CELL_BYTES;
+                            namedGetObject = load32(
+                                dynamicStringPrototypeCell + VALUE_CELL_LOW);
                         }
                     }
                     while (namedGetObject !== 0) {
@@ -1923,7 +1917,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_MATH_POW) {
+                    else if (intrinsicId > INTRINSIC_REGEXP_TEST) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -1952,6 +1946,12 @@
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
                     requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
+                    requiredIntrinsicArguments = 1;
+                } else if (intrinsicId === INTRINSIC_REGEXP_TEST) {
+                    requiredIntrinsicArguments = 1;
                 } else if (intrinsicId === INTRINSIC_MATH_POW) {
                     requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_POKE8) {
@@ -2852,6 +2852,644 @@
                 }
                 }
                 if (intrinsicHandled === 0) {
+                if (ENABLE_NATIVE_REGEXP_TEST === 1) {
+                if (intrinsicId === INTRINSIC_REGEXP_TEST) {
+                    var regexpTestReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    var regexpTestValid = 1;
+                    if (regexpTestReceiverIndex < 0) regexpTestValid = 0;
+                    var regexpTestReceiverCell = heapBase + registerCells +
+                        regexpTestReceiverIndex * VALUE_CELL_BYTES;
+                    if (load32(regexpTestReceiverCell) !==
+                        VALUE_TAG_REFERENCE) regexpTestValid = 0;
+                    var regexpTestObject = load32(
+                        regexpTestReceiverCell + VALUE_CELL_LOW);
+                    if (regexpTestValid === 1) {
+                        if (recordType(heapBase, regexpTestObject) !==
+                            HEAP_TYPE_REGEXP) regexpTestValid = 0;
+                    }
+                    var regexpTestArgumentRegisterCell = heapBase +
+                        intrinsicArgumentsVector + VECTOR_CELLS;
+                    if (load32(regexpTestArgumentRegisterCell) !==
+                        VALUE_TAG_INT32) regexpTestValid = 0;
+                    var regexpTestArgumentRegister = load32(
+                        regexpTestArgumentRegisterCell + VALUE_CELL_LOW);
+                    var regexpTestArgumentCell = heapBase + registerCells +
+                        regexpTestArgumentRegister * VALUE_CELL_BYTES;
+                    if (load32(regexpTestArgumentCell) !==
+                        VALUE_TAG_REFERENCE) regexpTestValid = 0;
+                    var regexpTestSource = load32(
+                        regexpTestArgumentCell + VALUE_CELL_LOW);
+                    if (regexpTestValid === 1) {
+                        if (recordType(heapBase, regexpTestSource) !==
+                            HEAP_TYPE_STRING) regexpTestValid = 0;
+                    }
+                    var regexpTestPattern = 0;
+                    var regexpTestFlags = 0;
+                    if (regexpTestValid === 1) {
+                        regexpTestPattern = regexpPattern(
+                            heapBase, regexpTestObject);
+                        regexpTestFlags = regexpFlags(
+                            heapBase, regexpTestObject);
+                        if (stringLength(heapBase, regexpTestFlags) !== 0) {
+                            regexpTestValid = 0;
+                        }
+                    }
+                    var regexpTestPatternLength = 0;
+                    if (regexpTestValid === 1) {
+                        regexpTestPatternLength = stringLength(
+                            heapBase, regexpTestPattern);
+                    }
+                    var regexpTestSourceLength = 0;
+                    var regexpTestResult = 1;
+                    var regexpTestSourceIndex = 0;
+                    if (regexpTestValid === 1) {
+                        regexpTestSourceLength = stringLength(
+                            heapBase, regexpTestSource);
+                        if (regexpTestPatternLength === 2) {
+                            if ((stringCharacterCodeUnit(heapBase,
+                                regexpTestPattern, 0) & 65535) === 92) {
+                                if ((stringCharacterCodeUnit(heapBase,
+                                    regexpTestPattern, 1) & 65535) === 115) {
+                                    var regexpWhitespaceIndex = 0;
+                                    var regexpWhitespaceResult = 0;
+                                    while (regexpWhitespaceIndex <
+                                           regexpTestSourceLength) {
+                                        var regexpWhitespaceCharacter =
+                                            stringCharacterCodeUnit(heapBase,
+                                            regexpTestSource,
+                                            regexpWhitespaceIndex) & 65535;
+                                        if (regexpWhitespaceCharacter >= 9) {
+                                            if (regexpWhitespaceCharacter <=
+                                                13) {
+                                                regexpWhitespaceResult = 1;
+                                            }
+                                        }
+                                        if (regexpWhitespaceCharacter === 32) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   160) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   5760) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   6158) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter >=
+                                                   8192) {
+                                            if (regexpWhitespaceCharacter <=
+                                                8202) {
+                                                regexpWhitespaceResult = 1;
+                                            }
+                                        }
+                                        if (regexpWhitespaceCharacter ===
+                                            8232) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   8233) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   8239) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   8287) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   12288) {
+                                            regexpWhitespaceResult = 1;
+                                        } else if (regexpWhitespaceCharacter ===
+                                                   65279) {
+                                            regexpWhitespaceResult = 1;
+                                        }
+                                        if (regexpWhitespaceResult === 1) {
+                                            regexpWhitespaceIndex =
+                                                regexpTestSourceLength;
+                                        } else regexpWhitespaceIndex =
+                                            regexpWhitespaceIndex + 1;
+                                    }
+                                    regexpTestResult = regexpWhitespaceResult;
+                                    regexpTestSourceIndex =
+                                        regexpTestSourceLength;
+                                    regexpTestValid = 2;
+                                }
+                            }
+                        }
+                    }
+                    if (regexpTestValid === 1) {
+                        if (regexpTestPatternLength >= 3) {
+                            if ((stringCharacterCodeUnit(heapBase,
+                                regexpTestPattern, 0) & 65535) === 91) {
+                                if ((stringCharacterCodeUnit(heapBase,
+                                    regexpTestPattern,
+                                    regexpTestPatternLength - 1) &
+                                    65535) === 93) {
+                                    var simpleClassStart = 1;
+                                    var simpleClassEnd =
+                                        regexpTestPatternLength - 1;
+                                    var simpleClassNegated = 0;
+                                    if ((stringCharacterCodeUnit(heapBase,
+                                        regexpTestPattern,
+                                        simpleClassStart) & 65535) === 94) {
+                                        simpleClassNegated = 1;
+                                        simpleClassStart = simpleClassStart + 1;
+                                    }
+                                    var simpleClassSourceIndex = 0;
+                                    var simpleClassResult = 0;
+                                    while (simpleClassSourceIndex <
+                                           regexpTestSourceLength) {
+                                        var simpleClassCharacter =
+                                            stringCharacterCodeUnit(heapBase,
+                                            regexpTestSource,
+                                            simpleClassSourceIndex) & 65535;
+                                        var simpleClassPatternIndex =
+                                            simpleClassStart;
+                                        var simpleClassMatches = 0;
+                                        while (simpleClassPatternIndex <
+                                               simpleClassEnd) {
+                                            var simpleClassLow =
+                                                stringCharacterCodeUnit(
+                                                heapBase, regexpTestPattern,
+                                                simpleClassPatternIndex) &
+                                                65535;
+                                            var simpleClassHigh = simpleClassLow;
+                                            if (simpleClassPatternIndex + 2 <
+                                                simpleClassEnd) {
+                                                if ((stringCharacterCodeUnit(
+                                                    heapBase,
+                                                    regexpTestPattern,
+                                                    simpleClassPatternIndex +
+                                                    1) & 65535) === 45) {
+                                                    simpleClassHigh =
+                                                        stringCharacterCodeUnit(
+                                                        heapBase,
+                                                        regexpTestPattern,
+                                                        simpleClassPatternIndex +
+                                                        2) & 65535;
+                                                    simpleClassPatternIndex =
+                                                        simpleClassPatternIndex +
+                                                        2;
+                                                }
+                                            }
+                                            if (simpleClassCharacter >=
+                                                simpleClassLow) {
+                                                if (simpleClassCharacter <=
+                                                    simpleClassHigh) {
+                                                    simpleClassMatches = 1;
+                                                }
+                                            }
+                                            simpleClassPatternIndex =
+                                                simpleClassPatternIndex + 1;
+                                        }
+                                        if (simpleClassNegated === 1) {
+                                            simpleClassMatches =
+                                                1 - simpleClassMatches;
+                                        }
+                                        if (simpleClassMatches === 1) {
+                                            simpleClassResult = 1;
+                                            simpleClassSourceIndex =
+                                                regexpTestSourceLength;
+                                        } else simpleClassSourceIndex =
+                                            simpleClassSourceIndex + 1;
+                                    }
+                                    regexpTestResult = simpleClassResult;
+                                    regexpTestSourceIndex =
+                                        regexpTestSourceLength;
+                                    regexpTestValid = 2;
+                                }
+                            }
+                        }
+                    }
+                    if (regexpTestValid === 1) {
+                        if (regexpTestPatternLength < 4) regexpTestValid = 0;
+                    }
+                    if (regexpTestValid === 1) {
+                        if ((stringCharacterCodeUnit(heapBase,
+                            regexpTestPattern, 0) & 65535) !== 94) {
+                            regexpTestValid = 0;
+                        }
+                        if ((stringCharacterCodeUnit(heapBase,
+                            regexpTestPattern,
+                            regexpTestPatternLength - 1) & 65535) !== 36) {
+                            regexpTestValid = 0;
+                        }
+                    }
+                    var regexpTestPatternIndex = 1;
+                    if (regexpTestValid === 1) {
+                        regexpTestSourceLength = stringLength(
+                            heapBase, regexpTestSource);
+                    }
+                    while (regexpTestValid === 1) {
+                        if (regexpTestPatternIndex >=
+                            regexpTestPatternLength - 1) {
+                            regexpTestValid = 2;
+                        } else {
+                            if ((stringCharacterCodeUnit(heapBase,
+                                regexpTestPattern,
+                                regexpTestPatternIndex) & 65535) !== 91) {
+                                regexpTestValid = 0;
+                            }
+                            var regexpClassStart =
+                                regexpTestPatternIndex + 1;
+                            var regexpClassEnd = regexpClassStart;
+                            var regexpClassSearching = 1;
+                            while (regexpClassSearching === 1) {
+                                if (regexpClassEnd >=
+                                    regexpTestPatternLength - 1) {
+                                    regexpClassSearching = 0;
+                                } else if ((stringCharacterCodeUnit(heapBase,
+                                    regexpTestPattern, regexpClassEnd) &
+                                    65535) === 93) {
+                                    regexpClassSearching = 0;
+                                } else regexpClassEnd = regexpClassEnd + 1;
+                            }
+                            if (regexpClassEnd <= regexpClassStart) {
+                                regexpTestValid = 0;
+                            }
+                            regexpTestPatternIndex = regexpClassEnd + 1;
+                            var regexpClassRepeats = 0;
+                            if (regexpTestPatternIndex <
+                                regexpTestPatternLength - 1) {
+                                if ((stringCharacterCodeUnit(heapBase,
+                                    regexpTestPattern,
+                                    regexpTestPatternIndex) & 65535) === 42) {
+                                    regexpClassRepeats = 1;
+                                    regexpTestPatternIndex =
+                                        regexpTestPatternIndex + 1;
+                                    if (regexpTestPatternIndex !==
+                                        regexpTestPatternLength - 1) {
+                                        regexpTestValid = 0;
+                                    }
+                                }
+                            }
+                            var regexpClassNeedsCharacter = 1;
+                            if (regexpClassRepeats === 1) {
+                                regexpClassNeedsCharacter = 0;
+                            }
+                            if (regexpClassNeedsCharacter === 1) {
+                                if (regexpTestSourceIndex >=
+                                    regexpTestSourceLength) {
+                                    regexpTestResult = 0;
+                                }
+                            }
+                            var regexpClassContinue = 1;
+                            while (regexpClassContinue === 1) {
+                                if (regexpTestSourceIndex >=
+                                    regexpTestSourceLength) {
+                                    regexpClassContinue = 0;
+                                } else {
+                                    var regexpClassCharacter =
+                                        stringCharacterCodeUnit(heapBase,
+                                        regexpTestSource,
+                                        regexpTestSourceIndex) & 65535;
+                                    var regexpClassNegated = 0;
+                                    var regexpClassIndex = regexpClassStart;
+                                    if ((stringCharacterCodeUnit(heapBase,
+                                        regexpTestPattern,
+                                        regexpClassIndex) & 65535) === 94) {
+                                        regexpClassNegated = 1;
+                                        regexpClassIndex =
+                                            regexpClassIndex + 1;
+                                    }
+                                    var regexpClassMatches = 0;
+                                    while (regexpClassIndex < regexpClassEnd) {
+                                        var regexpClassLow =
+                                            stringCharacterCodeUnit(heapBase,
+                                            regexpTestPattern,
+                                            regexpClassIndex) & 65535;
+                                        var regexpClassHigh = regexpClassLow;
+                                        if (regexpClassIndex + 2 <
+                                            regexpClassEnd) {
+                                            if ((stringCharacterCodeUnit(
+                                                heapBase, regexpTestPattern,
+                                                regexpClassIndex + 1) &
+                                                65535) === 45) {
+                                                regexpClassHigh =
+                                                    stringCharacterCodeUnit(
+                                                    heapBase,
+                                                    regexpTestPattern,
+                                                    regexpClassIndex + 2) &
+                                                    65535;
+                                                regexpClassIndex =
+                                                    regexpClassIndex + 2;
+                                            }
+                                        }
+                                        if (regexpClassCharacter >=
+                                            regexpClassLow) {
+                                            if (regexpClassCharacter <=
+                                                regexpClassHigh) {
+                                                regexpClassMatches = 1;
+                                            }
+                                        }
+                                        regexpClassIndex =
+                                            regexpClassIndex + 1;
+                                    }
+                                    if (regexpClassNegated === 1) {
+                                        regexpClassMatches =
+                                            1 - regexpClassMatches;
+                                    }
+                                    if (regexpClassMatches === 1) {
+                                        regexpTestSourceIndex =
+                                            regexpTestSourceIndex + 1;
+                                        if (regexpClassRepeats === 0) {
+                                            regexpClassContinue = 0;
+                                        }
+                                    } else {
+                                        if (regexpClassRepeats === 0) {
+                                            regexpTestResult = 0;
+                                        }
+                                        regexpClassContinue = 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (regexpTestValid !== 2) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    if (regexpTestSourceIndex !== regexpTestSourceLength) {
+                        regexpTestResult = 0;
+                    }
+                    store32(intrinsicTarget,
+                        VALUE_TAG_FALSE + regexpTestResult);
+                    store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                }
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
+                    var indexOfReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    var indexOfValid = 1;
+                    if (indexOfReceiverIndex < 0) indexOfValid = 0;
+                    var indexOfReceiverCell = heapBase + registerCells +
+                        indexOfReceiverIndex * VALUE_CELL_BYTES;
+                    if (load32(indexOfReceiverCell) !== VALUE_TAG_REFERENCE) {
+                        indexOfValid = 0;
+                    }
+                    var indexOfSource = load32(
+                        indexOfReceiverCell + VALUE_CELL_LOW);
+                    if (indexOfValid === 1) {
+                        if (recordType(heapBase, indexOfSource) !==
+                            HEAP_TYPE_STRING) indexOfValid = 0;
+                    }
+                    var indexOfSearchRegisterCell = heapBase +
+                        intrinsicArgumentsVector + VECTOR_CELLS;
+                    if (load32(indexOfSearchRegisterCell) !==
+                        VALUE_TAG_INT32) indexOfValid = 0;
+                    var indexOfSearchRegister = load32(
+                        indexOfSearchRegisterCell + VALUE_CELL_LOW);
+                    var indexOfSearchCell = heapBase + registerCells +
+                        indexOfSearchRegister * VALUE_CELL_BYTES;
+                    if (load32(indexOfSearchCell) !== VALUE_TAG_REFERENCE) {
+                        indexOfValid = 0;
+                    }
+                    var indexOfSearch = load32(
+                        indexOfSearchCell + VALUE_CELL_LOW);
+                    if (indexOfValid === 1) {
+                        if (recordType(heapBase, indexOfSearch) !==
+                            HEAP_TYPE_STRING) indexOfValid = 0;
+                    }
+                    var indexOfStart = 0;
+                    if (intrinsicArgumentCount > 1) {
+                        var indexOfStartRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS +
+                            VALUE_CELL_BYTES;
+                        if (load32(indexOfStartRegisterCell) !==
+                            VALUE_TAG_INT32) indexOfValid = 0;
+                        var indexOfStartRegister = load32(
+                            indexOfStartRegisterCell + VALUE_CELL_LOW);
+                        var indexOfStartCell = heapBase + registerCells +
+                            indexOfStartRegister * VALUE_CELL_BYTES;
+                        var indexOfStartTag = load32(indexOfStartCell);
+                        if (indexOfStartTag !== VALUE_TAG_INT32) {
+                            if (indexOfStartTag !== VALUE_TAG_DOUBLE) {
+                                indexOfValid = 0;
+                            }
+                        }
+                        if (indexOfValid === 1) {
+                            indexOfStart = toInt32F64(loadNumberF64(
+                                indexOfStartCell + VALUE_CELL_LOW,
+                                indexOfStartTag));
+                            store32(heapBase + state + ENGINE_SCRATCH_LEFT,
+                                    indexOfStart);
+                            if (equalF64(loadNumberF64(
+                                indexOfStartCell + VALUE_CELL_LOW,
+                                indexOfStartTag), loadI32F64(heapBase + state +
+                                ENGINE_SCRATCH_LEFT)) === 0) {
+                                indexOfValid = 0;
+                            }
+                        }
+                    }
+                    if (indexOfValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    var indexOfSourceLength = stringLength(
+                        heapBase, indexOfSource);
+                    var indexOfSearchLength = stringLength(
+                        heapBase, indexOfSearch);
+                    if (indexOfStart < 0) indexOfStart = 0;
+                    if (indexOfStart > indexOfSourceLength) {
+                        indexOfStart = indexOfSourceLength;
+                    }
+                    var indexOfResult = -1;
+                    var indexOfCandidate = indexOfStart;
+                    while (indexOfCandidate <= indexOfSourceLength -
+                           indexOfSearchLength) {
+                        var indexOfMatches = 1;
+                        var indexOfCharacter = 0;
+                        while (indexOfCharacter < indexOfSearchLength) {
+                            if ((stringCharacterCodeUnit(heapBase,
+                                indexOfSource, indexOfCandidate +
+                                indexOfCharacter) & 65535) !==
+                                (stringCharacterCodeUnit(heapBase,
+                                indexOfSearch, indexOfCharacter) & 65535)) {
+                                indexOfMatches = 0;
+                                indexOfCharacter = indexOfSearchLength;
+                            } else indexOfCharacter = indexOfCharacter + 1;
+                        }
+                        if (indexOfMatches === 1) {
+                            indexOfResult = indexOfCandidate;
+                            indexOfCandidate = indexOfSourceLength + 1;
+                        } else indexOfCandidate = indexOfCandidate + 1;
+                    }
+                    store32(intrinsicTarget, VALUE_TAG_INT32);
+                    store32(intrinsicTarget + VALUE_CELL_LOW, indexOfResult);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
+                    var substrReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    var substrValid = 1;
+                    if (substrReceiverIndex < 0) substrValid = 0;
+                    var substrReceiverCell = heapBase + registerCells +
+                        substrReceiverIndex * VALUE_CELL_BYTES;
+                    if (load32(substrReceiverCell) !== VALUE_TAG_REFERENCE) {
+                        substrValid = 0;
+                    }
+                    var substrSource = load32(
+                        substrReceiverCell + VALUE_CELL_LOW);
+                    if (substrValid === 1) {
+                        if (recordType(heapBase, substrSource) !==
+                            HEAP_TYPE_STRING) substrValid = 0;
+                    }
+                    var substrSourceLength = 0;
+                    if (substrValid === 1) {
+                        substrSourceLength = stringLength(
+                            heapBase, substrSource);
+                    }
+                    var substrStart = 0;
+                    var substrLength = substrSourceLength;
+                    var substrArgumentIndex = 0;
+                    while (substrArgumentIndex < intrinsicArgumentCount) {
+                        if (substrArgumentIndex < 2) {
+                            var substrRegisterCell = heapBase +
+                                intrinsicArgumentsVector + VECTOR_CELLS +
+                                substrArgumentIndex * VALUE_CELL_BYTES;
+                            if (load32(substrRegisterCell) !== VALUE_TAG_INT32) {
+                                substrValid = 0;
+                            }
+                            var substrRegister = load32(
+                                substrRegisterCell + VALUE_CELL_LOW);
+                            var substrValueCell = heapBase + registerCells +
+                                substrRegister * VALUE_CELL_BYTES;
+                            var substrValueTag = load32(substrValueCell);
+                            if (substrValueTag !== VALUE_TAG_INT32) {
+                                if (substrValueTag !== VALUE_TAG_DOUBLE) {
+                                    substrValid = 0;
+                                }
+                            }
+                            var substrValue = 0;
+                            if (substrValid === 1) {
+                                substrValue = toInt32F64(loadNumberF64(
+                                    substrValueCell + VALUE_CELL_LOW,
+                                    substrValueTag));
+                                store32(heapBase + state + ENGINE_SCRATCH_LEFT,
+                                        substrValue);
+                                if (equalF64(loadNumberF64(
+                                    substrValueCell + VALUE_CELL_LOW,
+                                    substrValueTag), loadI32F64(heapBase +
+                                    state + ENGINE_SCRATCH_LEFT)) === 0) {
+                                    substrValid = 0;
+                                }
+                            }
+                            if (substrArgumentIndex === 0) {
+                                substrStart = substrValue;
+                            } else substrLength = substrValue;
+                        }
+                        substrArgumentIndex = substrArgumentIndex + 1;
+                    }
+                    if (substrValid === 1) {
+                        if (substrStart < 0) {
+                            substrStart = substrSourceLength + substrStart;
+                            if (substrStart < 0) substrStart = 0;
+                        } else if (substrStart > substrSourceLength) {
+                            substrStart = substrSourceLength;
+                        }
+                        if (substrLength < 0) substrLength = 0;
+                        if (substrLength > substrSourceLength - substrStart) {
+                            substrLength = substrSourceLength - substrStart;
+                        }
+                    }
+                    if (substrValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                    var substrResultAddress = 0;
+                    if (substrLength === 0) {
+                        var substrEmptyCell = heapBase + stringSupport +
+                            VECTOR_CELLS + STRING_SUPPORT_EMPTY *
+                            VALUE_CELL_BYTES;
+                        substrResultAddress = load32(
+                            substrEmptyCell + VALUE_CELL_LOW);
+                    } else if (substrStart === 0) {
+                        if (substrLength === substrSourceLength) {
+                            substrResultAddress = substrSource;
+                        }
+                    }
+                    if (substrResultAddress === 0) {
+                        var substrBytes =
+                            (STRING_CHARS + substrLength * 2 + 7) & -8;
+                        substrResultAddress = engineHeapBump(heapBase, state);
+                        if (substrResultAddress + substrBytes >
+                            engineHeapLimit(heapBase, state)) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                        setRecordType(heapBase, substrResultAddress,
+                                      HEAP_TYPE_STRING);
+                        setRecordSize(heapBase, substrResultAddress,
+                                      substrBytes);
+                        setRecordMark(heapBase, substrResultAddress, 0);
+                        setRecordFlags(heapBase, substrResultAddress, 0);
+                        setStringLength(heapBase, substrResultAddress,
+                                        substrLength);
+                        var substrHash = -2128831035;
+                        var substrCopyIndex = 0;
+                        while (substrCopyIndex < substrLength) {
+                            var substrCode = stringCharacterCodeUnit(
+                                heapBase, substrSource,
+                                substrStart + substrCopyIndex) & 65535;
+                            setStringCharacterByte(heapBase,
+                                substrResultAddress, substrCopyIndex * 2,
+                                substrCode & 255);
+                            setStringCharacterByte(heapBase,
+                                substrResultAddress,
+                                substrCopyIndex * 2 + 1,
+                                (substrCode >>> 8) & 255);
+                            substrHash = (substrHash ^ substrCode) * 16777619;
+                            substrCopyIndex = substrCopyIndex + 1;
+                        }
+                        setStringHash(heapBase, substrResultAddress,
+                                      substrHash);
+                        setEngineHeapBump(heapBase, state,
+                            substrResultAddress + substrBytes);
+                    }
+                    store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+                    store32(intrinsicTarget + VALUE_CELL_LOW,
+                            substrResultAddress);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    intrinsicHandled = 1;
+                }
+                }
+                if (intrinsicHandled === 0) {
                 var isCharacterIntrinsic = 0;
                 if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
                     isCharacterIntrinsic = 1;
@@ -3487,7 +4125,11 @@
                     load32(makeRegexpPatternCell + VALUE_CELL_LOW));
                 setRegexpFlags(heapBase, makeRegexpAddress,
                     load32(makeRegexpFlagsCell + VALUE_CELL_LOW));
-                setRegexpPrototype(heapBase, makeRegexpAddress, 0);
+                var makeRegexpPrototypeCell = heapBase + stringSupport +
+                    VECTOR_CELLS + RUNTIME_SUPPORT_REGEXP_PROTOTYPE *
+                    VALUE_CELL_BYTES;
+                setRegexpPrototype(heapBase, makeRegexpAddress,
+                    load32(makeRegexpPrototypeCell + VALUE_CELL_LOW));
                 setRegexpPropertyHead(heapBase, makeRegexpAddress, 0);
                 var makeRegexpTarget = heapBase + registerCells +
                     makeRegexpTargetIndex * VALUE_CELL_BYTES;
@@ -3785,26 +4427,12 @@
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                         propertyObject = 0;
                     } else {
-                        var constantCharAtKeyCell = heapBase + stringSupport +
-                            VECTOR_CELLS + STRING_SUPPORT_CHAR_AT_KEY *
+                        var constantStringPrototypeCell = heapBase +
+                            stringSupport + VECTOR_CELLS +
+                            RUNTIME_SUPPORT_STRING_PROTOTYPE *
                             VALUE_CELL_BYTES;
-                        if (propertyKey === load32(
-                            constantCharAtKeyCell + VALUE_CELL_LOW)) {
-                            var constantCharAtFunctionCell = heapBase +
-                                stringSupport + VECTOR_CELLS +
-                                STRING_SUPPORT_CHAR_AT_FUNCTION *
-                                VALUE_CELL_BYTES;
-                            var constantCharAtTarget = heapBase + registerCells +
-                                propertyTargetIndex * VALUE_CELL_BYTES;
-                            store32(constantCharAtTarget, VALUE_TAG_REFERENCE);
-                            store32(constantCharAtTarget + VALUE_CELL_LOW,
-                                load32(constantCharAtFunctionCell +
-                                       VALUE_CELL_LOW));
-                            store32(constantCharAtTarget + VALUE_CELL_HIGH, 0);
-                            store32(constantCharAtTarget + VALUE_CELL_AUX, 0);
-                            propertyRecord = PROPERTY_FOUND_SENTINEL;
-                            propertyObject = 0;
-                        }
+                        propertyObject = load32(
+                            constantStringPrototypeCell + VALUE_CELL_LOW);
                     }
                 }
                 while (propertyObject !== 0) {
@@ -4033,7 +4661,7 @@
             runtime.heapRecords.allocatePlatformServices();
         runtime.heapRecords.setEnginePlatformServices(
             this.stateAddress, this.platformServicesAddress);
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(261);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(263);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -4058,7 +4686,19 @@
             runtime.valueCells.writeReferenceAt(objectPrototypeSupportCell,
                 runtime.objectPrototype.heapAddress);
         } else runtime.writeHeapValue(objectPrototypeSupportCell, undefined);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 261);
+        var stringPrototypeSupportCell = runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 261);
+        if (runtime.stringPrototype) {
+            runtime.valueCells.writeReferenceAt(stringPrototypeSupportCell,
+                runtime.stringPrototype.heapAddress);
+        } else runtime.writeHeapValue(stringPrototypeSupportCell, undefined);
+        var regexpPrototypeSupportCell = runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 262);
+        if (runtime.regexpPrototype) {
+            runtime.valueCells.writeReferenceAt(regexpPrototypeSupportCell,
+                runtime.regexpPrototype.heapAddress);
+        } else runtime.writeHeapValue(regexpPrototypeSupportCell, undefined);
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 263);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
