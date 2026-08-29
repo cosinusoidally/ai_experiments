@@ -130,6 +130,15 @@ the runtime lazily reconstructs only a handle from those fields; function
 identity, reachability, and closure lifetime continue to come from the guest
 heap.
 
+Frequently used ES5 string operations remain ordinary, general runtime
+intrinsics rather than application hooks. The native engine currently handles
+`typeof`, the character-class subset of `RegExp.prototype.test`, and global
+single-character regular-expression replacements. Unsupported regular
+expressions and replacement substitutions still yield to the complete
+semantic implementation. This keeps tokenizer and source-generation loops in
+native execution without claiming a partial matcher has full ES5 RegExp
+semantics.
+
 ## Correctness and performance gates
 
 Every native operation must pass:

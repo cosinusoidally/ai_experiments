@@ -969,7 +969,7 @@
                         search.heapAddress));
                 }
                 return String(receiver).replace(search, String(args[1]));
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_REPLACE);
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
             function (receiver) { return String(receiver).toUpperCase(); });
         if (this.stringPrototype) {
@@ -1113,7 +1113,7 @@
                 return new RegExp(runtime.heapRecords.regexpPattern(
                     receiver.heapAddress), runtime.heapRecords.regexpFlags(
                     receiver.heapAddress)).test(String(args[0]));
-            }, "intrinsic", NativeIntrinsics.NONE);
+            }, "intrinsic", NativeIntrinsics.REGEXP_TEST);
         this.regexpMethods.exec = this.makeNativeFunction("RegExp.exec",
             function (receiver, args) {
                 var match = new RegExp(runtime.heapRecords.regexpPattern(
