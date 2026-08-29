@@ -17,6 +17,7 @@
         arrayElements: "ARRAY_ELEMENTS",
         functionClosure: "FUNCTION_CLOSURE",
         functionMetadata: "FUNCTION_METADATA",
+        nativeFunctionMetadata: "NATIVE_FUNCTION_METADATA",
         functionHomeContext: "FUNCTION_HOME_CONTEXT",
         environmentParent: "ENVIRONMENT_PARENT",
         environmentCount: "ENVIRONMENT_COUNT",

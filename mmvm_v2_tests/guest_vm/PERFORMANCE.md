@@ -258,3 +258,26 @@ check. Heap-native array inline caches retain vector addresses and structural
 versions, but never element values. After these changes, demo1 measured about
 2.1--2.2 FPS at 64x64 and demo2 measured about 0.6 FPS at 64x64. The accepted
 pre-migration references remain 13.5 and 12.2 FPS respectively.
+
+## 2026-08-29: native guest-call and function-prototype checkpoint
+
+The native interpreter now enters ordinary guest bytecode closures directly,
+including calls forwarded by `Function.prototype.apply`. Function methods live
+on a real runtime-owned guest function prototype, so fetching `.apply` also
+stays in native prototype-chain lookup. This removes the repeated
+`Function.apply` semantic call exits and bytecode-function `.apply` property
+misses from demo8's macro-assembler recorder.
+
+At 320x240 with a 20 FPS limit, demo8 continued to initialize correctly in
+about 24.1 seconds as measured by its own initialization timer, versus roughly
+26.1 seconds at the preceding source-processing checkpoint. This is a startup
+improvement, not a steady-frame-rate claim: the first complete rendered frame
+still did not finish during the subsequent 70-second observation window.
+
+A native fast path for `Array.prototype.join` was measured and rejected. It
+increased demo8's reported initialization time to about 45.2 seconds because
+its allocation and character-copy cost exceeded the existing complete bridge.
+The rejected path is not enabled or retained in the interpreter. The remaining
+recorder profile is dominated by Array join/string construction and later
+rasterizer specialization, so string allocation/interning must be improved as
+a general facility before revisiting native join.

@@ -132,6 +132,13 @@ assembler emits individual x87 operations for native sine and cosine. Inputs
 outside the x87 argument-reduction range and uncommon numeric cases return to
 the semantic implementation rather than silently changing ES5.1 behavior.
 
+Ordinary calls to guest bytecode functions stay inside the native dispatch
+loop. `Function.prototype.apply` uses the same call-frame path when its target
+is a guest bytecode function and its second argument is a guest Array: the
+interpreter copies value cells from that Array, installs the requested receiver,
+and enters the callee without converting either arguments or results to host
+values. Other callable and array-like forms retain the complete semantic path.
+
 The MMVM Node profile also binds `NodeLibc.memmove` as an inline structured-tier
 intrinsic for demo7's already-allocated Buffer spans. The embedder supplies the
 native callback; the compiler contains no address or machine-code constant.
@@ -326,10 +333,14 @@ function-scoped `var` names, and a guest array used as `arguments`. Identifier
 lookup walks captured parent environments before the global table. Assignments
 update an existing binding or create a non-strict global when none exists.
 
-The current ordinary object model has no guest prototypes or descriptors yet.
-The Buffer prototype is an explicit internal object used by the Buffer exotic
-lookup. Native functions are trusted implementation records whose callbacks
-receive `(receiver, argumentsArray)`.
+Ordinary guest objects, arrays, strings, regexps, Buffers, and functions now
+have runtime-owned prototype objects on the guest heap. In particular, both
+host-created and native-dispatch-created guest functions inherit from the same
+function prototype, which owns `call`, `apply`, and `toString`. Native property
+lookup therefore follows the ordinary guest prototype chain for these methods;
+it does not require a host-side special case. Property descriptors are not yet
+implemented. Native functions are trusted implementation records whose
+callbacks receive `(receiver, argumentsArray)` on the semantic path.
 
 ## Current standard-library bridge
 

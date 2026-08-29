@@ -101,7 +101,9 @@
                                                       intrinsicId) {
         this.ensureLinearHeap();
         var address = this.heapRecords.allocateFunction(
-            true, 0, 0, intrinsicId || NativeIntrinsics.NONE);
+            true,
+            this.functionPrototype ? this.functionPrototype.heapAddress : 0,
+            0, intrinsicId || NativeIntrinsics.NONE);
         var callable = this.makeHeapHandle(address, "function");
         callable.name = name;
         callable.callback = callback;
@@ -171,7 +173,9 @@
         this.functionConstructionProgram = this.programAddress(program);
         this.functionConstructionPrototype = this.makeObject();
         this.functionConstructionCallable = this.trackObject(this.makeHeapHandle(
-            this.heapRecords.allocateFunction(false, 0,
+            this.heapRecords.allocateFunction(false,
+                this.functionPrototype ?
+                    this.functionPrototype.heapAddress : 0,
                 closure ? closure.heapAddress : 0,
                 this.functionConstructionProgram,
                 homeContext ? homeContext.heapAddress : 0),
@@ -893,6 +897,7 @@
     Runtime.prototype.installBuiltins = function () {
         var runtime = this;
         this.objectPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.functionPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.stringPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         if (this.objectPrototype) {
@@ -1089,7 +1094,7 @@
         this.functionMethods.apply = this.makeNativeFunction("Function.apply",
             function () {
                 throw new Error("Function.apply must be dispatched by the VM");
-            });
+            }, "intrinsic", NativeIntrinsics.FUNCTION_APPLY);
         this.functionMethods.apply.intrinsicKind = "functionApply";
         this.functionMethods.toString = this.makeNativeFunction("Function.toString",
             function (receiver) {
@@ -1098,6 +1103,15 @@
                 }
                 return "function " + (receiver.name || "") + "() { [native code] }";
             });
+        if (this.functionPrototype) {
+            var functionMethodName;
+            for (functionMethodName in this.functionMethods) {
+                if (own(this.functionMethods, functionMethodName)) {
+                    this.setProperty(this.functionPrototype, functionMethodName,
+                                     this.functionMethods[functionMethodName]);
+                }
+            }
+        }
         this.numberMethods = {};
         this.numberMethods.toString = this.makeNativeFunction("Number.toString",
             function (receiver, args) {
