@@ -548,6 +548,15 @@
             }
             return {op: operation, left: left, right: right, type: "i32"};
         }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "divideI32" &&
+            node.arguments.length === 2) {
+            return {op: "div_i32",
+                    left: lowerKernelExpression(node.arguments[0], symbols),
+                    right: lowerKernelExpression(node.arguments[1], symbols),
+                    type: "i32"};
+        }
         throw new SyntaxError("unsupported control-flow kernel expression " + node.type);
     }
 
@@ -557,6 +566,7 @@
         else if (operation === "sub_i32") value = left - right;
         else if (operation === "mul_i32") value = left * right;
         else if (operation === "rem_i32") value = left % right;
+        else if (operation === "div_i32") value = (left / right) | 0;
         else if (operation === "and_i32") value = left & right;
         else if (operation === "or_i32") value = left | right;
         else if (operation === "xor_i32") value = left ^ right;
@@ -723,6 +733,13 @@
                                                   node.operator);
             return {op: operation, left: lower(node.left, locals),
                     right: lower(node.right, locals), type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "divideI32" &&
+            node.arguments.length === 2) {
+            return {op: "div_i32", left: lower(node.arguments[0], locals),
+                    right: lower(node.arguments[1], locals), type: "i32"};
         }
         throw new SyntaxError("unsupported kernel expression " + node.type);
     }

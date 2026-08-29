@@ -165,6 +165,18 @@
         this.macros.push("imul_eax_ecx()");
         this.emitByte(0x0f); this.emitByte(0xaf); this.emitByte(0xc1);
     };
+    Assembler.prototype.exchangeEaxEcx = function () {
+        this.macros.push("exchange_eax_ecx()");
+        this.emitByte(0x91);
+    };
+    Assembler.prototype.signExtendEaxIntoEdx = function () {
+        this.macros.push("sign_extend_eax_into_edx()");
+        this.emitByte(0x99);
+    };
+    Assembler.prototype.divideEaxByEcx = function () {
+        this.macros.push("divide_eax_by_ecx()");
+        this.emitByte(0xf7); this.emitByte(0xf9);
+    };
     Assembler.prototype.remainderEcxEax = function () {
         this.macros.push("signed_remainder_ecx_eax()");
         this.emitByte(0x91);

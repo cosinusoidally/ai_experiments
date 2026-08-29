@@ -142,6 +142,12 @@ values. Other callable and array-like forms retain the complete semantic path.
 property chain in native execution when the receiver and key already have their
 ordinary heap representations. Its comparison handles distinct string records
 with equal contents; exotic keys and receivers retain semantic fallback.
+The native `String` constructor currently handles no-argument, undefined,
+already-string, and signed-int32 conversions on the guest heap. Other ES5.1
+ToString cases retain the semantic implementation. Its decimal conversion uses
+the shared kernel IR's signed-int32 division operation; the JS backend emits an
+integer-truncating division expression and the i386 backend composes exchange,
+sign-extension, and signed-division macro-assembler instructions.
 
 The MMVM Node profile also binds `NodeLibc.memmove` as an inline structured-tier
 intrinsic for demo7's already-allocated Buffer spans. The embedder supplies the

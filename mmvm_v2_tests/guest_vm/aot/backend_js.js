@@ -141,6 +141,9 @@
             emitControlExpression(node.value, parameters, locals) + ")";
         if (node.op === "as_i32") return "(" +
             emitControlExpression(node.value, parameters, locals) + "|0)";
+        if (node.op === "div_i32") return "((" +
+            emitControlExpression(node.left, parameters, locals) + "/" +
+            emitControlExpression(node.right, parameters, locals) + ")|0)";
         var operators = {add_i32: "+", sub_i32: "-", mul_i32: "*", rem_i32: "%",
             and_i32: "&", or_i32: "|", xor_i32: "^", shl_i32: "<<", shr_i32: ">>",
             ushr_i32: ">>>",
@@ -211,6 +214,9 @@
         if (node.op === "neg_i32") return "(-" + emit(node.value, parameters) + ")";
         if (node.op === "not_i32") return "(~" + emit(node.value, parameters) + ")";
         if (node.op === "as_i32") return "(" + emit(node.value, parameters) + "|0)";
+        if (node.op === "div_i32") return "((" +
+            emit(node.left, parameters) + "/" +
+            emit(node.right, parameters) + ")|0)";
         var operators = {add_i32: "+", sub_i32: "-", mul_i32: "*", rem_i32: "%",
                          and_i32: "&", or_i32: "|", xor_i32: "^",
                          shl_i32: "<<", shr_i32: ">>"};

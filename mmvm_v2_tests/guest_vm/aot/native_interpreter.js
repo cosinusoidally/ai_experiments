@@ -250,6 +250,7 @@
         var INTRINSIC_STRING_REPLACE = 32;
         var INTRINSIC_FUNCTION_APPLY = 33;
         var INTRINSIC_OBJECT_HAS_OWN_PROPERTY = 34;
+        var INTRINSIC_STRING_CONSTRUCTOR = 35;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -2225,8 +2226,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId >
-                             INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
+                    else if (intrinsicId > INTRINSIC_STRING_CONSTRUCTOR) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2248,6 +2248,8 @@
                 if (intrinsicId === INTRINSIC_GET_DLSYM) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
                     requiredIntrinsicArguments = 0;
@@ -2301,6 +2303,156 @@
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
+                    var stringConvertValid = 1;
+                    var stringConvertAllocationFailed = 0;
+                    var stringConvertSourceCell = 0;
+                    var stringConvertTag = VALUE_TAG_UNDEFINED;
+                    if (intrinsicArgumentCount > 0) {
+                        var stringConvertRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS;
+                        if (valueCellTag(0, stringConvertRegisterCell) !==
+                            VALUE_TAG_INT32) stringConvertValid = 0;
+                        var stringConvertRegister = load32(
+                            stringConvertRegisterCell + VALUE_CELL_LOW);
+                        stringConvertSourceCell = heapBase + registerCells +
+                            stringConvertRegister * VALUE_CELL_BYTES;
+                        stringConvertTag = valueCellTag(
+                            0, stringConvertSourceCell);
+                    }
+                    var stringConvertExisting = 0;
+                    if (intrinsicArgumentCount === 0) {
+                        var stringConvertEmptyCell = heapBase + stringSupport +
+                            VECTOR_CELLS + 2 * VALUE_CELL_BYTES;
+                        stringConvertExisting = valueCellReference(
+                            0, stringConvertEmptyCell);
+                    } else if (stringConvertTag === VALUE_TAG_UNDEFINED) {
+                        var stringConvertUndefinedCell = heapBase +
+                            stringSupport + VECTOR_CELLS +
+                            RUNTIME_SUPPORT_TYPE_UNDEFINED * VALUE_CELL_BYTES;
+                        stringConvertExisting = valueCellReference(
+                            0, stringConvertUndefinedCell);
+                    } else if (stringConvertTag === VALUE_TAG_REFERENCE) {
+                        stringConvertExisting = valueCellReference(
+                            0, stringConvertSourceCell);
+                        if (recordType(heapBase,
+                            stringConvertExisting) !== HEAP_TYPE_STRING) {
+                            stringConvertValid = 0;
+                        }
+                    } else if (stringConvertTag !== VALUE_TAG_INT32) {
+                        stringConvertValid = 0;
+                    }
+                    if (stringConvertValid === 1) {
+                        if (stringConvertExisting !== 0) {
+                            store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+                            store32(intrinsicTarget + VALUE_CELL_LOW,
+                                    stringConvertExisting);
+                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                            intrinsicHandled = 1;
+                        } else {
+                            var stringConvertNumber = load32(
+                                stringConvertSourceCell + VALUE_CELL_LOW);
+                            var stringConvertNegative = 0;
+                            if (stringConvertNumber > 0) {
+                                stringConvertNumber = 0 - stringConvertNumber;
+                            } else if (stringConvertNumber < 0) {
+                                stringConvertNegative = 1;
+                            }
+                            var stringConvertLength = 1 +
+                                stringConvertNegative;
+                            var stringConvertMeasure = stringConvertNumber;
+                            while (stringConvertMeasure <= -10) {
+                                stringConvertMeasure = divideI32(
+                                    stringConvertMeasure, 10);
+                                stringConvertLength =
+                                    stringConvertLength + 1;
+                            }
+                            var stringConvertBytes = (STRING_CHARS +
+                                stringConvertLength * 2 + 7) & -8;
+                            var stringConvertResult = engineHeapBump(
+                                heapBase, state);
+                            if (stringConvertResult + stringConvertBytes >
+                                engineHeapLimit(heapBase, state)) {
+                                stringConvertValid = 0;
+                                stringConvertAllocationFailed = 1;
+                            }
+                            if (stringConvertValid === 1) {
+                                setRecordType(heapBase, stringConvertResult,
+                                              HEAP_TYPE_STRING);
+                                setRecordSize(heapBase, stringConvertResult,
+                                              stringConvertBytes);
+                                setRecordMark(heapBase, stringConvertResult, 0);
+                                setRecordFlags(heapBase, stringConvertResult, 0);
+                                setStringLength(heapBase, stringConvertResult,
+                                                stringConvertLength);
+                                var stringConvertIndex =
+                                    stringConvertLength - 1;
+                                var stringConvertHash = -2128831035;
+                                while (stringConvertIndex >=
+                                       stringConvertNegative) {
+                                    var stringConvertDigit = 0 -
+                                        (stringConvertNumber % 10);
+                                    var stringConvertCode =
+                                        stringConvertDigit + 48;
+                                    setStringCharacterByte(heapBase,
+                                        stringConvertResult,
+                                        stringConvertIndex * 2,
+                                        stringConvertCode);
+                                    setStringCharacterByte(heapBase,
+                                        stringConvertResult,
+                                        stringConvertIndex * 2 + 1, 0);
+                                    stringConvertNumber = divideI32(
+                                        stringConvertNumber, 10);
+                                    stringConvertIndex =
+                                        stringConvertIndex - 1;
+                                }
+                                if (stringConvertNegative === 1) {
+                                    setStringCharacterByte(heapBase,
+                                        stringConvertResult, 0, 45);
+                                    setStringCharacterByte(heapBase,
+                                        stringConvertResult, 1, 0);
+                                }
+                                var stringConvertHashIndex = 0;
+                                while (stringConvertHashIndex <
+                                       stringConvertLength) {
+                                    var stringConvertHashCode =
+                                        stringCharacterCodeUnit(heapBase,
+                                            stringConvertResult,
+                                            stringConvertHashIndex) & 65535;
+                                    stringConvertHash = (stringConvertHash ^
+                                        stringConvertHashCode) * 16777619;
+                                    stringConvertHashIndex =
+                                        stringConvertHashIndex + 1;
+                                }
+                                setStringHash(heapBase, stringConvertResult,
+                                              stringConvertHash);
+                                setEngineHeapBump(heapBase, state,
+                                    stringConvertResult + stringConvertBytes);
+                                store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+                                store32(intrinsicTarget + VALUE_CELL_LOW,
+                                        stringConvertResult);
+                                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                                intrinsicHandled = 1;
+                            }
+                        }
+                    }
+                    if (stringConvertAllocationFailed === 1) {
+                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                                CALL_REJECT_HEAP_SPACE);
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                }
                 }
                 if (intrinsicHandled === 0) {
                 if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {

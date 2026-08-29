@@ -274,6 +274,12 @@ timer reported about 23.4 seconds. The continuing post-initialization hotspot
 is still the recorder's repeated Array join/string construction; own-property
 queries no longer appear in the fallback-call table.
 
+Moving the common signed-int32 and already-string forms of the `String`
+constructor into native execution reduced the same reported initialization
+time further, to about 19.6 seconds. The remaining `String` fallbacks are
+non-int32 conversions; they are substantially smaller than the continuing
+Array-join call count.
+
 At 320x240 with a 20 FPS limit, demo8 continued to initialize correctly in
 about 24.1 seconds as measured by its own initialization timer, versus roughly
 26.1 seconds at the preceding source-processing checkpoint. This is a startup

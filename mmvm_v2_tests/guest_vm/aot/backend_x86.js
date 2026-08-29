@@ -693,6 +693,11 @@
             else if (node.op === "sub_i32") {
                 assembler.subEcxEax(); assembler.movEaxEcx();
             } else if (node.op === "mul_i32") assembler.imulEaxEcx();
+            else if (node.op === "div_i32") {
+                assembler.exchangeEaxEcx();
+                assembler.signExtendEaxIntoEdx();
+                assembler.divideEaxByEcx();
+            }
             else if (node.op === "rem_i32") assembler.remainderEcxEax();
             else if (node.op === "and_i32") assembler.andEaxEcx();
             else if (node.op === "or_i32") assembler.orEaxEcx();
@@ -814,6 +819,11 @@
                 assembler.movEaxEcx();
             }
             else if (node.op === "mul_i32") assembler.imulEaxEcx();
+            else if (node.op === "div_i32") {
+                assembler.exchangeEaxEcx();
+                assembler.signExtendEaxIntoEdx();
+                assembler.divideEaxByEcx();
+            }
             else if (node.op === "rem_i32") assembler.remainderEcxEax();
             else if (node.op === "and_i32") assembler.andEaxEcx();
             else if (node.op === "or_i32") assembler.orEaxEcx();

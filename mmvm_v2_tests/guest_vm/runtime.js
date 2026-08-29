@@ -1151,7 +1151,7 @@
         var stringConstructor = this.makeNativeFunction("String",
             function (receiver, args) {
                 return args.length ? runtime.toString(args[0]) : "";
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_CONSTRUCTOR);
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
                 return String.fromCharCode.apply(String, args);
