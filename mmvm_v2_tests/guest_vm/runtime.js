@@ -432,6 +432,9 @@
         var handle = this.heapHandles["$" + address];
         if (!handle) {
             var recordType = this.linearHeap.recordType(address);
+            if (recordType === Heap.Types.BYTECODE_FUNCTION) {
+                return this.adoptBytecodeFunction(address);
+            }
             var guestType = recordType === Heap.Types.OBJECT ? "object" :
                 recordType === Heap.Types.ARRAY ? "array" :
                 recordType === Heap.Types.REGEXP ? "regexp" :
@@ -446,6 +449,42 @@
             this.noteAllocation(1);
         }
         return handle;
+    };
+
+    /* Functions created by the native MAKE_FUNCTION opcode acquire a host
+     * handle only if a later semantic exit needs one.  Program, closure, and
+     * context identity are reconstructed from authoritative heap fields. */
+    Runtime.prototype.adoptBytecodeFunction = function (address) {
+        var key = "$" + address;
+        var existing = this.heapHandles[key];
+        if (existing) return existing;
+        this.linearHeap.requireRecord(address, Heap.Types.BYTECODE_FUNCTION);
+        var programAddress = this.heapRecords.functionMetadata(address);
+        var program = this.programMetadata["$" + programAddress];
+        if (!program) {
+            throw new Error("native function references unknown guest program " +
+                            programAddress);
+        }
+        var callable = this.makeHeapHandle(address, "bytecodeFunction");
+        callable.program = program;
+        callable.name = program.name || "";
+        callable.source = program.source || null;
+        var contextAddress = this.heapRecords.functionHomeContext(address);
+        callable.homeContext = null;
+        var contextIndex = 0;
+        while (contextIndex < this.contexts.length) {
+            if (this.contexts[contextIndex].heapAddress === contextAddress) {
+                callable.homeContext = this.contexts[contextIndex];
+                break;
+            }
+            contextIndex++;
+        }
+        var closureAddress = this.heapRecords.functionClosure(address);
+        if (closureAddress) this.adoptEnvironment(closureAddress, {});
+        this.functionMetadata[key] = callable;
+        this.heapObjects.push(callable);
+        this.noteAllocation(1);
+        return callable;
     };
 
     Runtime.prototype.heapOwnProperty = function (object, key, create) {

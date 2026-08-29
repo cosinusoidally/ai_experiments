@@ -33,6 +33,8 @@
         var FOUR_WORD_INSTRUCTION = 4;
         var FIVE_WORD_INSTRUCTION = 5;
         var VALUE_CELL_BYTES = 16;
+        var VALUE_CELL_TAG = 0;
+        var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_LOW = 4;
         var VALUE_CELL_HIGH = 8;
         var VALUE_CELL_AUX = 12;
@@ -120,6 +122,7 @@
         var FUNCTION_CLOSURE = 24;
         var FUNCTION_METADATA = 28;
         var FUNCTION_HOME_CONTEXT = 32;
+        var FUNCTION_RECORD_BYTES = 40;
         var BYTECODE_FUNCTION_CLOSURE = 24;
         var BYTECODE_FUNCTION_PROGRAM = 28;
         var BYTECODE_FUNCTION_HOME_CONTEXT = 32;
@@ -195,6 +198,7 @@
         var OP_JUMP_IF_FALSE = 22;
         var OP_CALL = 23;
         var OP_RETURN = 24;
+        var OP_MAKE_FUNCTION = 25;
         var OP_MAKE_OBJECT = 26;
         var OP_MAKE_ARRAY = 27;
         var OP_MAKE_REGEXP = 28;
@@ -251,6 +255,8 @@
         var RUNTIME_SUPPORT_OBJECT_PROTOTYPE = 260;
         var RUNTIME_SUPPORT_STRING_PROTOTYPE = 261;
         var RUNTIME_SUPPORT_REGEXP_PROTOTYPE = 262;
+        var RUNTIME_SUPPORT_PROTOTYPE_KEY = 263;
+        var RUNTIME_SUPPORT_CONSTRUCTOR_KEY = 264;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -4155,6 +4161,136 @@
                 store32(heapBase + framePC, pc);
                 return EXIT_RETURN;
                 }
+            } else if (opcode === OP_MAKE_FUNCTION) {
+                var makeFunctionTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var makeFunctionProgramIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var makeFunctionProgramCell = heapBase + constantCells +
+                    makeFunctionProgramIndex * VALUE_CELL_BYTES;
+                if (valueCellTag(0, makeFunctionProgramCell) !==
+                    VALUE_TAG_REFERENCE) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var makeFunctionProgram = valueCellReference(
+                    0, makeFunctionProgramCell);
+                var makeFunctionAddress = engineHeapBump(heapBase, state);
+                var makeFunctionPrototype = makeFunctionAddress +
+                    FUNCTION_RECORD_BYTES;
+                var makeFunctionPrototypeProperty = makeFunctionPrototype +
+                    OBJECT_RECORD_BYTES;
+                var makeFunctionConstructorProperty =
+                    makeFunctionPrototypeProperty + PROPERTY_RECORD_BYTES;
+                var makeFunctionEnd = makeFunctionConstructorProperty +
+                    PROPERTY_RECORD_BYTES;
+                if (makeFunctionEnd > engineHeapLimit(heapBase, state)) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var makeFunctionObjectPrototypeCell = heapBase +
+                    stringSupport + VECTOR_CELLS +
+                    RUNTIME_SUPPORT_OBJECT_PROTOTYPE * VALUE_CELL_BYTES;
+                var makeFunctionPrototypeKeyCell = heapBase + stringSupport +
+                    VECTOR_CELLS + RUNTIME_SUPPORT_PROTOTYPE_KEY *
+                    VALUE_CELL_BYTES;
+                var makeFunctionConstructorKeyCell = heapBase + stringSupport +
+                    VECTOR_CELLS + RUNTIME_SUPPORT_CONSTRUCTOR_KEY *
+                    VALUE_CELL_BYTES;
+                setRecordType(heapBase, makeFunctionAddress,
+                              HEAP_TYPE_BYTECODE_FUNCTION);
+                setRecordSize(heapBase, makeFunctionAddress,
+                              FUNCTION_RECORD_BYTES);
+                setRecordMark(heapBase, makeFunctionAddress, 0);
+                setRecordFlags(heapBase, makeFunctionAddress, 0);
+                setObjectPrototype(heapBase, makeFunctionAddress, 0);
+                setObjectPropertyHead(heapBase, makeFunctionAddress,
+                                      makeFunctionPrototypeProperty);
+                setFunctionClosure(heapBase, makeFunctionAddress,
+                                   environment);
+                setFunctionMetadata(heapBase, makeFunctionAddress,
+                                    makeFunctionProgram);
+                setFunctionHomeContext(heapBase, makeFunctionAddress,
+                                       currentContext);
+                setRecordType(heapBase, makeFunctionPrototype,
+                              HEAP_TYPE_OBJECT);
+                setRecordSize(heapBase, makeFunctionPrototype,
+                              OBJECT_RECORD_BYTES);
+                setRecordMark(heapBase, makeFunctionPrototype, 0);
+                setRecordFlags(heapBase, makeFunctionPrototype, 0);
+                setObjectPrototype(heapBase, makeFunctionPrototype,
+                    valueCellReference(0,
+                                       makeFunctionObjectPrototypeCell));
+                setObjectPropertyHead(heapBase, makeFunctionPrototype,
+                                      makeFunctionConstructorProperty);
+                store32(heapBase + makeFunctionPrototype + OBJECT_EXTENSIBLE,
+                        1);
+                store32(heapBase + makeFunctionPrototype + OBJECT_RESERVED, 0);
+                setRecordType(heapBase, makeFunctionPrototypeProperty,
+                              HEAP_TYPE_PROPERTY);
+                setRecordSize(heapBase, makeFunctionPrototypeProperty,
+                              PROPERTY_RECORD_BYTES);
+                setRecordMark(heapBase, makeFunctionPrototypeProperty, 0);
+                setRecordFlags(heapBase, makeFunctionPrototypeProperty, 0);
+                setPropertyNext(heapBase, makeFunctionPrototypeProperty, 0);
+                setPropertyKey(heapBase, makeFunctionPrototypeProperty,
+                    valueCellReference(0, makeFunctionPrototypeKeyCell));
+                setPropertyAttributes(heapBase,
+                    makeFunctionPrototypeProperty,
+                    DEFAULT_PROPERTY_ATTRIBUTES);
+                setPropertyReserved(heapBase,
+                    makeFunctionPrototypeProperty, 0);
+                var makeFunctionPrototypeValue = heapBase +
+                    makeFunctionPrototypeProperty + PROPERTY_VALUE;
+                store32(makeFunctionPrototypeValue, VALUE_TAG_REFERENCE);
+                store32(makeFunctionPrototypeValue + VALUE_CELL_LOW,
+                        makeFunctionPrototype);
+                store32(makeFunctionPrototypeValue + VALUE_CELL_HIGH, 0);
+                store32(makeFunctionPrototypeValue + VALUE_CELL_AUX, 0);
+                setRecordType(heapBase, makeFunctionConstructorProperty,
+                              HEAP_TYPE_PROPERTY);
+                setRecordSize(heapBase, makeFunctionConstructorProperty,
+                              PROPERTY_RECORD_BYTES);
+                setRecordMark(heapBase, makeFunctionConstructorProperty, 0);
+                setRecordFlags(heapBase, makeFunctionConstructorProperty, 0);
+                setPropertyNext(heapBase, makeFunctionConstructorProperty, 0);
+                setPropertyKey(heapBase, makeFunctionConstructorProperty,
+                    valueCellReference(0, makeFunctionConstructorKeyCell));
+                setPropertyAttributes(heapBase,
+                    makeFunctionConstructorProperty,
+                    DEFAULT_PROPERTY_ATTRIBUTES);
+                setPropertyReserved(heapBase,
+                    makeFunctionConstructorProperty, 0);
+                var makeFunctionConstructorValue = heapBase +
+                    makeFunctionConstructorProperty + PROPERTY_VALUE;
+                store32(makeFunctionConstructorValue, VALUE_TAG_REFERENCE);
+                store32(makeFunctionConstructorValue + VALUE_CELL_LOW,
+                        makeFunctionAddress);
+                store32(makeFunctionConstructorValue + VALUE_CELL_HIGH, 0);
+                store32(makeFunctionConstructorValue + VALUE_CELL_AUX, 0);
+                var makeFunctionTarget = heapBase + registerCells +
+                    makeFunctionTargetIndex * VALUE_CELL_BYTES;
+                store32(makeFunctionTarget, VALUE_TAG_REFERENCE);
+                store32(makeFunctionTarget + VALUE_CELL_LOW,
+                        makeFunctionAddress);
+                store32(makeFunctionTarget + VALUE_CELL_HIGH, 0);
+                store32(makeFunctionTarget + VALUE_CELL_AUX, 0);
+                setEngineHeapBump(heapBase, state, makeFunctionEnd);
+                pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MAKE_OBJECT) {
                 var makeObjectTargetIndex = load32(
                     heapBase + bytecodeWords +
@@ -4826,7 +4962,7 @@
             runtime.heapRecords.allocatePlatformServices();
         runtime.heapRecords.setEnginePlatformServices(
             this.stateAddress, this.platformServicesAddress);
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(263);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(265);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -4863,7 +4999,13 @@
             runtime.valueCells.writeReferenceAt(regexpPrototypeSupportCell,
                 runtime.regexpPrototype.heapAddress);
         } else runtime.writeHeapValue(regexpPrototypeSupportCell, undefined);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 263);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 263),
+            runtime.internStringAddress("prototype"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 264),
+            runtime.internStringAddress("constructor"));
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 265);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
@@ -5019,6 +5161,7 @@
             var allocationExit = allocationRemaining <
                     NATIVE_PROPERTY_RECORD_BYTES ||
                 allocationOpcode === Bytecode.MAKE_OBJECT ||
+                allocationOpcode === Bytecode.MAKE_FUNCTION ||
                 allocationOpcode === Bytecode.MAKE_ARRAY ||
                 allocationOpcode === Bytecode.MAKE_REGEXP ||
                 (allocationOpcode === Bytecode.CALL &&

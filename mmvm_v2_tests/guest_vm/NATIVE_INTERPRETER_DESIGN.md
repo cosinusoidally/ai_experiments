@@ -121,6 +121,15 @@ do not create host environment objects. This rule is essential for closures
 created by repeated calls, because each closure must retain that call's
 distinct guest-heap environment.
 
+`MAKE_FUNCTION` follows the same rule. The native opcode allocates the
+bytecode-function record, its ordinary prototype object, and the reciprocal
+`prototype`/`constructor` properties in one checked guest-heap allocation.
+The callable records its program, home context, and current lexical
+environment directly. If a later semantic exit needs a host-visible callable,
+the runtime lazily reconstructs only a handle from those fields; function
+identity, reachability, and closure lifetime continue to come from the guest
+heap.
+
 ## Correctness and performance gates
 
 Every native operation must pass:
