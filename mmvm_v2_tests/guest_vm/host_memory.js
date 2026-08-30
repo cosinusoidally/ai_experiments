@@ -52,6 +52,18 @@
         else allocation.bytes[offset] = value;
     };
 
+    HostMemory.prototype.read8Trusted = function (allocation, offset) {
+        if (allocation.isNative) return peek8(allocation.pointer + offset);
+        var value = allocation.bytes[offset];
+        return value === undefined ? 0 : value;
+    };
+
+    HostMemory.prototype.write8Trusted = function (allocation, offset, value) {
+        value = Number(value) & 255;
+        if (allocation.isNative) poke8(allocation.pointer + offset, value);
+        else allocation.bytes[offset] = value;
+    };
+
     HostMemory.prototype.read32LE = function (allocation, offset) {
         if (offset < 0 || offset + 4 > allocation.length) {
             throw new RangeError("32-bit read is out of bounds");
@@ -82,6 +94,32 @@
         this.write8(allocation, offset + 1, value >>> 8);
         this.write8(allocation, offset + 2, value >>> 16);
         this.write8(allocation, offset + 3, value >>> 24);
+    };
+
+    HostMemory.prototype.read32LETrusted = function (allocation, offset) {
+        if (allocation.isNative) {
+            return peek32(allocation.pointer + offset) >>> 0;
+        }
+        var bytes = allocation.bytes;
+        return ((bytes[offset] || 0) |
+                ((bytes[offset + 1] || 0) << 8) |
+                ((bytes[offset + 2] || 0) << 16) |
+                ((bytes[offset + 3] || 0) << 24)) >>> 0;
+    };
+
+    HostMemory.prototype.write32LETrusted = function (allocation, offset, value) {
+        value = Number(value) % 4294967296;
+        if (value < 0) value += 4294967296;
+        if (allocation.isNative) {
+            poke32(allocation.pointer + offset,
+                   value >= 2147483648 ? value - 4294967296 : value);
+            return;
+        }
+        var bytes = allocation.bytes;
+        bytes[offset] = value & 255;
+        bytes[offset + 1] = (value >>> 8) & 255;
+        bytes[offset + 2] = (value >>> 16) & 255;
+        bytes[offset + 3] = (value >>> 24) & 255;
     };
 
     HostMemory.prototype.free = function (allocation) {

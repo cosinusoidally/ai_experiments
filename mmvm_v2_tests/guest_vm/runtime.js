@@ -44,11 +44,9 @@
         this.assertions = 0;
         this.heapObjects = [];
         this.heapHandles = {};
+        this.nextHeapIdentity = 1;
         this.functionMetadata = {};
         this.environmentMetadata = {};
-        /* Derived lookup metadata only: cached entries name heap records and
-         * never contain property values. */
-        this.propertyAddressCache = {};
         this.programObjects = [];
         this.programAddresses = [];
         this.programMetadata = {};
@@ -425,7 +423,9 @@
         if (existing) return existing;
         var handle = {guestType: guestType, ownerRuntime: this,
                       heapAddress: address, gcMark: 0, propertyVersion: 0,
-                      valueVersion: 0, arrayStructureVersion: 0};
+                      valueVersion: 0, arrayStructureVersion: 0,
+                      propertyAddresses: {},
+                      heapIdentity: this.nextHeapIdentity++};
         this.heapHandles[key] = handle;
         return handle;
     };
@@ -460,12 +460,12 @@
             return this.valueCells.readPrimitiveTaggedAt(cell, tag);
         }
         var address = this.valueCells.referenceAddressAt(cell);
-        if (this.linearHeap.recordType(address) === Heap.Types.STRING) {
-            return this.readHeapString(address);
-        }
         var handle = this.heapHandles["$" + address];
         if (!handle) {
             var recordType = this.linearHeap.recordType(address);
+            if (recordType === Heap.Types.STRING) {
+                return this.readHeapString(address);
+            }
             if (recordType === Heap.Types.BYTECODE_FUNCTION) {
                 return this.adoptBytecodeFunction(address);
             }
@@ -523,17 +523,22 @@
 
     Runtime.prototype.heapOwnProperty = function (object, key, create) {
         var keyAddress = this.internStringAddress(key);
-        var cacheKey = "$" + object.heapAddress + ":" + keyAddress;
-        var property = this.propertyAddressCache[cacheKey] || 0;
+        return this.heapOwnPropertyAddress(object, keyAddress, create);
+    };
+
+    Runtime.prototype.heapOwnPropertyAddress = function (
+            object, keyAddress, create) {
+        var cacheKey = "$" + keyAddress;
+        var property = object.propertyAddresses[cacheKey] || 0;
         if (!property) {
             property = this.heapRecords.findOwnProperty(object.heapAddress, keyAddress);
-            if (property) this.propertyAddressCache[cacheKey] = property;
+            if (property) object.propertyAddresses[cacheKey] = property;
         }
         if (!property && create) {
             property = this.heapRecords.defineOwnProperty(
                 object.heapAddress, keyAddress,
                 HeapRecords.Attributes.DEFAULT);
-            this.propertyAddressCache[cacheKey] = property;
+            object.propertyAddresses[cacheKey] = property;
             object.propertyVersion++;
         }
         return property;
@@ -1534,8 +1539,7 @@
             var keyAddress = this.internStringAddress(key);
             var removedProperty = this.heapRecords.findOwnProperty(
                 object.heapAddress, keyAddress);
-            delete this.propertyAddressCache[
-                "$" + object.heapAddress + ":" + keyAddress];
+            delete object.propertyAddresses["$" + keyAddress];
             var deleted = this.heapRecords.deleteOwnProperty(
                 object.heapAddress, keyAddress);
             if (removedProperty) this.linearHeap.freeRecord(removedProperty);
@@ -2069,7 +2073,6 @@
                     delete this.functionMetadata[handleKey];
                 }
             }
-            this.propertyAddressCache = {};
             var sweepResult;
             if (this.heapSweeper &&
                 this.heapSweeper.compiled.backend === "i386") {
@@ -2205,7 +2208,6 @@
         this.transientStringAddresses = {};
         this.decodedStrings = {};
         this.globalObject = null;
-        this.propertyAddressCache = {};
         var compilationIndex = 0;
         while (compilationIndex < this.nativeCompilations.length) {
             this.nativeCompilations[compilationIndex++].destroy();

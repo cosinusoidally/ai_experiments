@@ -457,6 +457,21 @@ closures and home contexts, frame registers/callers/handlers, program constant
 vectors, Buffer view backings, contexts, and engine state. Collectors do not
 duplicate record offsets.
 
+Trusted fixed-layout accessors remain the only route used by runtime and
+compiler code for validated heap records. At the final linear-memory boundary,
+their aligned word operations omit a second host-memory bounds/alignment check:
+js_min performs one `peek32` or `poke32`, while Node uses the equivalent sparse
+array operation. Public/raw addresses still use the checked memory API.
+Per-object property metadata and structured inline caches retain only guest
+record addresses and versions, never property values. Constant-key inline
+caches intern the key once per compiled site and pass its address to the named
+property-record lookup.
+The structured tier also keeps a bounded polymorphic property-cell cache for a
+constant-key site. Each entry contains only a heap address, allocation identity,
+property version, and property-cell address. The allocation identity prevents a
+reused heap address from matching stale metadata; the 256-object cap prevents a
+megamorphic site from growing host metadata without bound.
+
 On i386, both marking and sweeping are compiled from kernel-dialect JavaScript
 through the shared kernel compiler and macro assembler. The marker uses a
 runtime-reserved suffix after the maximum guest allocation range as an explicit

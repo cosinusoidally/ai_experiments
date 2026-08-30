@@ -332,3 +332,22 @@ reverse cache preserves address reuse during normal execution, while ordinary
 heap reachability controls lifetime at collection. This particularly targets
 the temporary macro-assembly and specialization strings created while changing
 demo8 modes; atoms and property keys remain strongly interned.
+
+Trusted value-cell and fixed-field reads now reach js_min's aligned
+`peek32`/`poke32` primitives without repeating host-memory validation after the
+record accessor has already established the address. Constant-property inline
+caches similarly retain the interned key address per compiled site, and object
+handles retain only their property-record addresses. These changes target the
+millions of authoritative-heap reads in terrain and garage geometry without
+copying guest property values onto the host heap. A short 64x64 demo2 smoke run
+continued to render at roughly 0.4--0.6 FPS on the current fully migrated heap;
+this is a stability checkpoint, not the requested final performance level.
+
+The same checkpoint adds a 256-entry polymorphic property-cell cache per
+compiled constant-key site. A profiled 64x64 demo8 run reduced X11 setup-reply
+processing from roughly 0.81 seconds to 0.44 seconds, the initial incoming-X11
+callback from roughly 6.5--6.9 seconds to 5.8 seconds, and the large source-
+generation call from roughly 26.3 seconds to 24.2 seconds. Terrain construction
+still took about 185 seconds under profiling and remains a major general guest-
+object access bottleneck. These samples are useful directional measurements,
+not frame-rate claims.

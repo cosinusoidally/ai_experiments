@@ -59,12 +59,13 @@
         }
         if (!program.astBody ||
             !this.supports(program)) return null;
-        /* Old SpiderMonkey does not reliably preserve constructor receivers
-         * through a generated Function calling back into this compiler.  Keep
-         * construction-bearing functions in the semantic interpreter.  The
-         * functions they call remain independently compilable. */
-        if (program.astBody && containsGuestConstruction(program.astBody)) {
-            this.reportCompileDecision(program, "interpreter: guest construction");
+        /* Firefox 1 aliases generated caller activations across a guest
+         * construction trampoline even when locals are spilled. Keep the
+         * containing function semantic; independently called leaf functions
+         * remain eligible for structured compilation. */
+        if (containsGuestConstruction(program.astBody)) {
+            this.reportCompileDecision(program,
+                "interpreter: guest construction");
             return null;
         }
         var existing = this.find(program);
@@ -73,8 +74,10 @@
                                       this.generate(program);
         var factory = Function("hc", "p", "ic", source);
         var compiled = factory(this, program,
-            {objects: [], versions: [], cells: [], arrayObjects: [],
-             arrayVersions: [], arrayVectors: [], arrayLengths: []});
+            {objects: [], versions: [], cells: [], keyAddresses: [], arrayObjects: [],
+             arrayVersions: [], arrayVectors: [], arrayLengths: [],
+             propertyIdentities: [], propertyVersions: [], propertyCells: [],
+             propertyCounts: []});
         this.programs.push(program);
         this.compiled.push(compiled);
         program.threadedCompiler = this;
@@ -320,11 +323,9 @@
             if (prototype && prototype.guestType) {
                 this.runtime.setPrototype(constructedReceiver, prototype);
             }
-            /* Construction is uncommon and requires preserving an implicit
-             * receiver across a nested call.  Run the constructor body through
-             * the semantic fallback; leaf functions it calls can still use the
-             * compiled tier.  This also avoids an activation-aliasing defect in
-             * the Firefox 1 host used by js_min.exe. */
+            /* Keep the implicit receiver in compiler-owned storage and run the
+             * constructor through the semantic fallback. Firefox 1 aliases
+             * generated activations across this re-entrant boundary. */
             if (!this.fallback) {
                 throw new Error("compiled construction needs interpreter fallback");
             }
@@ -356,11 +357,46 @@
                 cache.versions[site] === object.propertyVersion) {
                 return this.runtime.readHeapValue(cache.cells[site]);
             }
-            var property = this.runtime.heapOwnProperty(object, key, false);
+            var polymorphicKey = "$" + object.heapAddress;
+            var identities = cache.propertyIdentities[site];
+            if (identities &&
+                identities[polymorphicKey] === object.heapIdentity &&
+                cache.propertyVersions[site][polymorphicKey] ===
+                    object.propertyVersion) {
+                return this.runtime.readHeapValue(
+                    cache.propertyCells[site][polymorphicKey]);
+            }
+            var keyAddress = cache.keyAddresses[site];
+            if (!keyAddress) {
+                keyAddress = this.runtime.internStringAddress(key);
+                cache.keyAddresses[site] = keyAddress;
+            }
+            var property = this.runtime.heapOwnPropertyAddress(
+                object, keyAddress, false);
             if (property) {
                 cache.objects[site] = object;
                 cache.versions[site] = object.propertyVersion;
                 cache.cells[site] = this.runtime.heapRecords.propertyValueCell(property);
+                if (!identities) {
+                    identities = {};
+                    cache.propertyIdentities[site] = identities;
+                    cache.propertyVersions[site] = {};
+                    cache.propertyCells[site] = {};
+                    cache.propertyCounts[site] = 0;
+                }
+                var cachePolymorphicProperty =
+                    identities[polymorphicKey] !== undefined;
+                if (!cachePolymorphicProperty &&
+                    cache.propertyCounts[site] < 256) {
+                    cache.propertyCounts[site]++;
+                    cachePolymorphicProperty = true;
+                }
+                if (cachePolymorphicProperty) {
+                    identities[polymorphicKey] = object.heapIdentity;
+                    cache.propertyVersions[site][polymorphicKey] =
+                        object.propertyVersion;
+                    cache.propertyCells[site][polymorphicKey] = cache.cells[site];
+                }
                 return this.runtime.readHeapValue(cache.cells[site]);
             }
         }
@@ -407,10 +443,47 @@
                 object.valueVersion++;
                 return value;
             }
-            var property = this.runtime.heapOwnProperty(object, key, true);
+            var polymorphicKey = "$" + object.heapAddress;
+            var identities = cache.propertyIdentities[site];
+            if (identities &&
+                identities[polymorphicKey] === object.heapIdentity &&
+                cache.propertyVersions[site][polymorphicKey] ===
+                    object.propertyVersion) {
+                this.runtime.writeHeapValue(
+                    cache.propertyCells[site][polymorphicKey], value);
+                object.valueVersion++;
+                return value;
+            }
+            var keyAddress = cache.keyAddresses[site];
+            if (!keyAddress) {
+                keyAddress = this.runtime.internStringAddress(key);
+                cache.keyAddresses[site] = keyAddress;
+            }
+            var property = this.runtime.heapOwnPropertyAddress(
+                object, keyAddress, true);
             cache.objects[site] = object;
             cache.versions[site] = object.propertyVersion;
             cache.cells[site] = this.runtime.heapRecords.propertyValueCell(property);
+            if (!identities) {
+                identities = {};
+                cache.propertyIdentities[site] = identities;
+                cache.propertyVersions[site] = {};
+                cache.propertyCells[site] = {};
+                cache.propertyCounts[site] = 0;
+            }
+            var cachePolymorphicProperty =
+                identities[polymorphicKey] !== undefined;
+            if (!cachePolymorphicProperty &&
+                cache.propertyCounts[site] < 256) {
+                cache.propertyCounts[site]++;
+                cachePolymorphicProperty = true;
+            }
+            if (cachePolymorphicProperty) {
+                identities[polymorphicKey] = object.heapIdentity;
+                cache.propertyVersions[site][polymorphicKey] =
+                    object.propertyVersion;
+                cache.propertyCells[site][polymorphicKey] = cache.cells[site];
+            }
             this.runtime.writeHeapValue(cache.cells[site], value);
             object.valueVersion++;
             return value;
@@ -1847,10 +1920,9 @@
         function visit(value) {
             if (!value || typeof value !== "object" || found) return;
             if (value.type === "NewExpression") {
-                var calleeName = value.callee && value.callee.type === "Identifier" ?
-                                 value.callee.name : null;
-                /* These constructors are runtime intrinsics and do not enter a
-                 * generated guest constructor activation. */
+                var calleeName = value.callee &&
+                    value.callee.type === "Identifier" ?
+                    value.callee.name : null;
                 if (calleeName !== "Array" && calleeName !== "Date" &&
                     calleeName !== "Error" && calleeName !== "Object" &&
                     calleeName !== "String" && calleeName !== "Number") {
