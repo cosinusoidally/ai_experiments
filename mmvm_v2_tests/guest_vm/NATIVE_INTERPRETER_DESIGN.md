@@ -130,6 +130,23 @@ the runtime lazily reconstructs only a handle from those fields; function
 identity, reachability, and closure lifetime continue to come from the guest
 heap.
 
+`CONSTRUCT` stays in the native dispatch loop when its target is guest
+bytecode. The engine resolves the callable's `prototype` property (falling
+back to `Object.prototype` when it is not an object), allocates the receiver,
+roots it in the caller's destination cell, and enters an ordinary guest frame
+with that receiver as `this`. A constructor frame is distinguished by a named
+frame flag. On return, an object result replaces the receiver and a primitive
+result is ignored, as required by ECMAScript. Constructors implemented as
+host/native functions still take the complete semantic fallback until their
+individual service contracts are moved into the native engine.
+
+Objects and function prototypes allocated by native opcodes do not acquire
+host wrappers eagerly. If a later semantic exit traverses such a reference,
+the runtime adopts a wrapper from the authoritative record type and address at
+that boundary. Prototype traversal must use this lazy-adoption operation,
+rather than assuming that the host wrapper table already contains every
+reachable guest object.
+
 Frequently used ES5 string operations remain ordinary, general runtime
 intrinsics rather than application hooks. The native engine currently handles
 `typeof`, the character-class subset of `RegExp.prototype.test`, and global

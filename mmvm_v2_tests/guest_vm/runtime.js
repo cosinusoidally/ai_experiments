@@ -460,6 +460,13 @@
             return this.valueCells.readPrimitiveTaggedAt(cell, tag);
         }
         var address = this.valueCells.referenceAddressAt(cell);
+        return this.readHeapReference(address, cell);
+    };
+
+    /* Native execution deliberately does not manufacture host wrappers for
+     * every guest allocation.  Adopt one only when a semantic exit actually
+     * needs to expose the reference to host-side runtime code. */
+    Runtime.prototype.readHeapReference = function (address, sourceCell) {
         var handle = this.heapHandles["$" + address];
         if (!handle) {
             var recordType = this.linearHeap.recordType(address);
@@ -476,7 +483,8 @@
             if (!guestType) {
                 throw new Error("guest heap reference has no runtime handle: " +
                     "address=" + address + " type=" + recordType +
-                    " cell=" + cell);
+                    (sourceCell === undefined ? "" :
+                     " cell=" + sourceCell));
             }
             handle = this.makeHeapHandle(address, guestType);
             this.heapObjects.push(handle);
@@ -1493,7 +1501,7 @@
             var prototypeAddress = this.heapRecords.objectPrototype(object.heapAddress);
             if (prototypeAddress) {
                 var inherited = this.getProperty(
-                    this.heapHandles["$" + prototypeAddress], key);
+                    this.readHeapReference(prototypeAddress), key);
                 if (inherited !== undefined) return inherited;
             }
             if ((object.guestType === "function" ||

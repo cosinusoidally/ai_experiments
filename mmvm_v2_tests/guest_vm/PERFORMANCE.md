@@ -351,3 +351,28 @@ generation call from roughly 26.3 seconds to 24.2 seconds. Terrain construction
 still took about 185 seconds under profiling and remains a major general guest-
 object access bottleneck. These samples are useful directional measurements,
 not frame-rate claims.
+
+## 2026-08-30: native guest-constructor checkpoint
+
+Ordinary guest-bytecode construction now remains inside the native interpreter
+instead of yielding and executing the complete constructor body in the host
+interpreter. Receiver and prototype allocation, `this` binding, guest-frame
+entry, and constructor return semantics all use authoritative heap records.
+This is a general `CONSTRUCT` implementation; no demo functions or object
+shapes are recognized specially.
+
+On the unchanged profiled 64x64 demo8 workload, the rally became playable in
+roughly 30 seconds of total wall time. That includes approximately 14 seconds
+for Firefox 1 to build the native interpreter, X11 initialization, and the
+game's reported 8.2-second initialization. At the preceding checkpoint, the
+profiled terrain-construction phase alone took about 185 seconds. The large
+difference occurs because a semantic constructor exit previously ran the
+entire called constructor in the host bytecode interpreter, not merely because
+of the number of `CONSTRUCT` opcodes.
+
+The same run entered garage mode after Escape then G. Its first automatic heap
+collection reclaimed about 34.6 MiB and spent 49 ms marking plus 655 ms
+sweeping/indexing; the mode then reported itself active without the former
+long constructor stall or a freed-reference failure. These are startup and
+mode-transition results at a deliberately small profiling resolution, not a
+320x240 frame-rate or direct-js_min parity claim.

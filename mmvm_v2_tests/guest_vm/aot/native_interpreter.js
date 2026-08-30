@@ -129,12 +129,14 @@
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
         var PROPERTY_VALUE = 32;
+        var PROPERTY_VALUE_REFERENCE = 36;
         var PROPERTY_ATTRIBUTES = 24;
         var PROPERTY_RESERVED = 28;
         var DEFAULT_PROPERTY_ATTRIBUTES = 7;
         var PROPERTY_RECORD_BYTES = 48;
         var FRAME_FIXED_BYTES = 48;
         var FRAME_FLAG_NATIVE_CALL = 1;
+        var FRAME_FLAG_NATIVE_CONSTRUCT = 2;
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
         var ENVIRONMENT_CELLS = 24;
@@ -208,6 +210,7 @@
         var OP_SHIFT_LEFT = 32;
         var OP_SHIFT_RIGHT = 33;
         var OP_SHIFT_UNSIGNED_RIGHT = 34;
+        var OP_CONSTRUCT = 36;
         var OP_BIT_NOT = 39;
         var OP_TYPEOF = 40;
         var OP_GET_LOCAL = 43;
@@ -286,6 +289,9 @@
         store32(heapBase + state + ENGINE_CURRENT_FRAME, frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
+            var callOperation = 0;
+            if (opcode === OP_CALL) callOperation = 1;
+            else if (opcode === OP_CONSTRUCT) callOperation = 2;
             if (PROFILE_OPCODES !== 0) {
                 setOpcodeExecutionCount(heapBase, state, opcode,
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
@@ -1613,7 +1619,7 @@
                 if (falseCondition === 1) {
                     pc = load32(heapBase + bytecodeWords + (pc + SECOND_OPERAND) * WORD_BYTES);
                 } else pc = pc + THREE_WORD_INSTRUCTION;
-            } else if (opcode === OP_CALL) {
+            } else if (callOperation > 0) {
                 store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
                         CALL_REJECT_NONE);
                 var callTargetIndex = load32(
@@ -1622,9 +1628,13 @@
                 var callFunctionIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
+                var callArgumentsOperand = FOUR_WORD_INSTRUCTION;
+                if (callOperation === 2) {
+                    callArgumentsOperand = THIRD_OPERAND;
+                }
                 var callArgumentsIndex = load32(
                     heapBase + bytecodeWords +
-                    (pc + FOUR_WORD_INSTRUCTION) * WORD_BYTES);
+                    (pc + callArgumentsOperand) * WORD_BYTES);
                 var callFunctionCell = heapBase + registerCells +
                     callFunctionIndex * VALUE_CELL_BYTES;
                 var callArgumentsCell = heapBase + constantCells +
@@ -1795,9 +1805,74 @@
                             calleeRegisterCount * VALUE_CELL_BYTES;
                         var calleeFrame = 0;
                         var calleeFrameReused = 0;
+                        var constructedObject = 0;
+                        var constructedPrototype = 0;
                         var bytecodeAllocationEnd = load32(
                             heapBase + state + ENGINE_HEAP_BUMP);
                         if (bytecodeCallValid === 1) {
+                        if (callOperation === 2) {
+                            constructedObject = bytecodeAllocationEnd;
+                            bytecodeAllocationEnd = bytecodeAllocationEnd +
+                                OBJECT_RECORD_BYTES;
+                            var defaultObjectPrototypeCell = heapBase +
+                                stringSupport + VECTOR_CELLS +
+                                RUNTIME_SUPPORT_OBJECT_PROTOTYPE *
+                                VALUE_CELL_BYTES;
+                            constructedPrototype = valueCellReference(
+                                0, defaultObjectPrototypeCell);
+                            var constructorPrototypeKeyCell = heapBase +
+                                stringSupport + VECTOR_CELLS +
+                                RUNTIME_SUPPORT_PROTOTYPE_KEY * VALUE_CELL_BYTES;
+                            var constructorPrototypeKey = valueCellReference(
+                                0, constructorPrototypeKeyCell);
+                            var constructorProperty = objectPropertyHead(
+                                heapBase, bytecodeCallable);
+                            while (constructorProperty !== 0) {
+                                if (propertyKey(heapBase,
+                                    constructorProperty) ===
+                                    constructorPrototypeKey) {
+                                    if (propertyValueTag(heapBase,
+                                        constructorProperty) ===
+                                        VALUE_TAG_REFERENCE) {
+                                        var candidateConstructedPrototype =
+                                            propertyValueReference(heapBase,
+                                                constructorProperty);
+                                        var candidateConstructedType = recordType(
+                                            heapBase,
+                                            candidateConstructedPrototype);
+                                        if (candidateConstructedType ===
+                                            HEAP_TYPE_OBJECT) {
+                                            constructedPrototype =
+                                                candidateConstructedPrototype;
+                                        } else if (candidateConstructedType ===
+                                                   HEAP_TYPE_ARRAY) {
+                                            constructedPrototype =
+                                                candidateConstructedPrototype;
+                                        } else if (candidateConstructedType ===
+                                                   HEAP_TYPE_NATIVE_FUNCTION) {
+                                            constructedPrototype =
+                                                candidateConstructedPrototype;
+                                        } else if (candidateConstructedType ===
+                                                   HEAP_TYPE_BYTECODE_FUNCTION) {
+                                            constructedPrototype =
+                                                candidateConstructedPrototype;
+                                        } else if (candidateConstructedType ===
+                                                   HEAP_TYPE_REGEXP) {
+                                            constructedPrototype =
+                                                candidateConstructedPrototype;
+                                        } else if (candidateConstructedType ===
+                                                   HEAP_TYPE_BUFFER_VIEW) {
+                                            constructedPrototype =
+                                                candidateConstructedPrototype;
+                                        }
+                                    }
+                                    constructorProperty = 0;
+                                } else {
+                                    constructorProperty = propertyNext(
+                                        heapBase, constructorProperty);
+                                }
+                            }
+                        }
                         var reusableFrame = load32(
                             heapBase + state + ENGINE_FREE_FRAME);
                         var reusableFramePrevious = 0;
@@ -1862,6 +1937,29 @@
                         }
                         }
                         if (bytecodeCallValid === 1) {
+                            if (callOperation === 2) {
+                                setRecordType(heapBase, constructedObject,
+                                              HEAP_TYPE_OBJECT);
+                                setRecordSize(heapBase, constructedObject,
+                                              OBJECT_RECORD_BYTES);
+                                setRecordMark(heapBase, constructedObject, 0);
+                                setRecordFlags(heapBase, constructedObject, 0);
+                                setObjectPrototype(heapBase, constructedObject,
+                                                   constructedPrototype);
+                                setObjectPropertyHead(heapBase,
+                                    constructedObject, 0);
+                                setObjectExtensible(heapBase,
+                                    constructedObject, 1);
+                                setObjectReserved(heapBase,
+                                    constructedObject, 0);
+                                var constructedTarget = heapBase + registerCells +
+                                    callTargetIndex * VALUE_CELL_BYTES;
+                                store32(constructedTarget, VALUE_TAG_REFERENCE);
+                                store32(constructedTarget + VALUE_CELL_LOW,
+                                        constructedObject);
+                                store32(constructedTarget + VALUE_CELL_HIGH, 0);
+                                store32(constructedTarget + VALUE_CELL_AUX, 0);
+                            }
                             if (calleeBindingRegisters === 0) {
                                 setRecordType(heapBase, calleeEnvironment,
                                               HEAP_TYPE_ENVIRONMENT);
@@ -1964,8 +2062,12 @@
                                         calleeFrameBytes);
                             }
                             store32(heapBase + calleeFrame + RECORD_MARK, 0);
+                            var calleeFrameFlags = FRAME_FLAG_NATIVE_CALL;
+                            if (callOperation === 2) {
+                                calleeFrameFlags = FRAME_FLAG_NATIVE_CONSTRUCT;
+                            }
                             store32(heapBase + calleeFrame + RECORD_FLAGS,
-                                    FRAME_FLAG_NATIVE_CALL);
+                                    calleeFrameFlags);
                             store32(heapBase + calleeFrame + FRAME_PROGRAM,
                                     calleeProgram);
                             store32(heapBase + calleeFrame + FRAME_ENVIRONMENT,
@@ -2137,11 +2239,15 @@
                                     FRAME_REGISTERS + thisRegister *
                                     VALUE_CELL_BYTES;
                             }
-                            var receiverIndex = load32(
-                                heapBase + bytecodeWords +
-                                (pc + THIRD_OPERAND) * WORD_BYTES);
+                            var receiverIndex = -1;
                             var thisSource = bytecodeThisSource;
-                            if (bytecodeApplyForwarding === 0) {
+                            if (callOperation === 2) {
+                                thisSource = heapBase + registerCells +
+                                    callTargetIndex * VALUE_CELL_BYTES;
+                            } else if (bytecodeApplyForwarding === 0) {
+                                receiverIndex = load32(
+                                    heapBase + bytecodeWords +
+                                    (pc + THIRD_OPERAND) * WORD_BYTES);
                                 if (receiverIndex >= 0) {
                                     thisSource = heapBase + registerCells +
                                         receiverIndex * VALUE_CELL_BYTES;
@@ -2181,8 +2287,11 @@
                                 store32(functionNameTarget + VALUE_CELL_HIGH, 0);
                                 store32(functionNameTarget + VALUE_CELL_AUX, 0);
                             }
-                            store32(heapBase + framePC,
-                                    pc + FIVE_WORD_INSTRUCTION);
+                            var callerAdvance = FIVE_WORD_INSTRUCTION;
+                            if (callOperation === 2) {
+                                callerAdvance = FOUR_WORD_INSTRUCTION;
+                            }
+                            store32(heapBase + framePC, pc + callerAdvance);
                             store32(heapBase + state + ENGINE_HEAP_BUMP,
                                     bytecodeAllocationEnd);
                             frame = calleeFrame;
@@ -2209,6 +2318,7 @@
                 }
                 if (bytecodeCallHandled === 0) {
                 var intrinsicCallValid = 1;
+                if (callOperation === 2) intrinsicCallValid = 0;
                 if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
                     intrinsicCallValid = 0;
                 }
@@ -4886,6 +4996,9 @@
                 if (nativeCallerFrame !== 0) {
                     if (nativeFrameFlags === FRAME_FLAG_NATIVE_CALL) {
                         returnInsideNativeEngine = 1;
+                    } else if (nativeFrameFlags ===
+                               FRAME_FLAG_NATIVE_CONSTRUCT) {
+                        returnInsideNativeEngine = 1;
                     }
                 }
                 if (returnInsideNativeEngine === 1) {
@@ -4895,13 +5008,42 @@
                         returnIndex * VALUE_CELL_BYTES;
                     var nativeReturnTarget = heapBase + nativeCallerFrame +
                         FRAME_REGISTERS + nativeReturnSlot * VALUE_CELL_BYTES;
-                    store32(nativeReturnTarget, load32(nativeReturnSource));
-                    store32(nativeReturnTarget + VALUE_CELL_LOW,
-                            load32(nativeReturnSource + VALUE_CELL_LOW));
-                    store32(nativeReturnTarget + VALUE_CELL_HIGH,
-                            load32(nativeReturnSource + VALUE_CELL_HIGH));
-                    store32(nativeReturnTarget + VALUE_CELL_AUX,
-                            load32(nativeReturnSource + VALUE_CELL_AUX));
+                    var copyNativeReturn = 1;
+                    if (nativeFrameFlags === FRAME_FLAG_NATIVE_CONSTRUCT) {
+                        copyNativeReturn = 0;
+                        if (valueCellTag(0, nativeReturnSource) ===
+                            VALUE_TAG_REFERENCE) {
+                            var constructedReturnReference = valueCellReference(
+                                0, nativeReturnSource);
+                            var constructedReturnType = recordType(
+                                heapBase, constructedReturnReference);
+                            if (constructedReturnType === HEAP_TYPE_OBJECT) {
+                                copyNativeReturn = 1;
+                            } else if (constructedReturnType === HEAP_TYPE_ARRAY) {
+                                copyNativeReturn = 1;
+                            } else if (constructedReturnType ===
+                                       HEAP_TYPE_NATIVE_FUNCTION) {
+                                copyNativeReturn = 1;
+                            } else if (constructedReturnType ===
+                                       HEAP_TYPE_BYTECODE_FUNCTION) {
+                                copyNativeReturn = 1;
+                            } else if (constructedReturnType === HEAP_TYPE_REGEXP) {
+                                copyNativeReturn = 1;
+                            } else if (constructedReturnType ===
+                                       HEAP_TYPE_BUFFER_VIEW) {
+                                copyNativeReturn = 1;
+                            }
+                        }
+                    }
+                    if (copyNativeReturn === 1) {
+                        store32(nativeReturnTarget, load32(nativeReturnSource));
+                        store32(nativeReturnTarget + VALUE_CELL_LOW,
+                                load32(nativeReturnSource + VALUE_CELL_LOW));
+                        store32(nativeReturnTarget + VALUE_CELL_HIGH,
+                                load32(nativeReturnSource + VALUE_CELL_HIGH));
+                        store32(nativeReturnTarget + VALUE_CELL_AUX,
+                                load32(nativeReturnSource + VALUE_CELL_AUX));
+                    }
                     var returnedNativeFrame = frame;
                     var nativeFreeFrame = load32(
                         heapBase + state + ENGINE_FREE_FRAME);
