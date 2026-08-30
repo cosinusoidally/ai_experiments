@@ -376,3 +376,14 @@ sweeping/indexing; the mode then reported itself active without the former
 long constructor stall or a freed-reference failure. These are startup and
 mode-transition results at a deliberately small profiling resolution, not a
 320x240 frame-rate or direct-js_min parity claim.
+
+Fallback profiling now reports both host-visible argument kinds and the
+authoritative descriptor/source tags in guest call frames. This exposed an
+important distinction in demo8's runtime assembler: many values passed to
+`String` are numerically int32-valued, while their guest cells correctly retain
+the double tag. A native exact-int32-double conversion was evaluated, removed,
+and not committed as an optimization: it enlarged the native interpreter by
+about 4.8 KiB and one comparable profiled initialization rose from roughly
+8.3 seconds to 10.5 seconds despite eliminating those `String` exits. The
+remaining dominant assembler boundary is `Array.join`; reducing a smaller
+exit class at the cost of a larger dispatch engine is not a net improvement.

@@ -634,7 +634,7 @@
                     if (this.runtime.nativeInterpreter &&
                         this.runtime.profileOpcodeCounts) {
                         this.runtime.nativeInterpreter.noteFallbackCall(
-                            callableValue);
+                            callableValue, args, frame, pc);
                     }
                     var receiver = code[pc + 3] < 0 ? undefined :
                                    registers[code[pc + 3]];

@@ -2463,9 +2463,9 @@
                             store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                             intrinsicHandled = 1;
                         } else {
+                            var stringConvertNegative = 0;
                             var stringConvertNumber = load32(
                                 stringConvertSourceCell + VALUE_CELL_LOW);
-                            var stringConvertNegative = 0;
                             if (stringConvertNumber > 0) {
                                 stringConvertNumber = 0 - stringConvertNumber;
                             } else if (stringConvertNumber < 0) {
@@ -6011,6 +6011,8 @@
         this.unsupportedLocationCounts = {};
         this.fallbackCallCounts = {};
         this.fallbackCallLayouts = {};
+        this.fallbackCallArgumentLayouts = {};
+        this.fallbackCallHeapLayouts = {};
         this.callRejectCounts = [];
         this.propertyFallbackCounts = {};
         this.allocationRegion = null;
@@ -6324,6 +6326,40 @@
                 console.log(callLine);
             }
         }
+        layoutParts = [];
+        for (callName in this.fallbackCallArgumentLayouts) {
+            if (Object.prototype.hasOwnProperty.call(
+                    this.fallbackCallArgumentLayouts, callName)) {
+                layoutParts.push(callName + "=" +
+                                 this.fallbackCallArgumentLayouts[callName]);
+            }
+        }
+        layoutParts.sort();
+        if (layoutParts.length) {
+            callLine = "native guest fallback argument kinds: " +
+                       layoutParts.join(" ");
+            if (typeof print === "function") print(callLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(callLine);
+            }
+        }
+        layoutParts = [];
+        for (callName in this.fallbackCallHeapLayouts) {
+            if (Object.prototype.hasOwnProperty.call(
+                    this.fallbackCallHeapLayouts, callName)) {
+                layoutParts.push(callName + "=" +
+                                 this.fallbackCallHeapLayouts[callName]);
+            }
+        }
+        layoutParts.sort();
+        if (layoutParts.length) {
+            callLine = "native guest fallback heap layouts: " +
+                       layoutParts.join(" ");
+            if (typeof print === "function") print(callLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(callLine);
+            }
+        }
     };
 
     NativeInterpreter.prototype.noteUnsupportedLocation = function (
@@ -6399,7 +6435,8 @@
             (this.propertyFallbackCounts[reason] || 0) + 1;
     };
 
-    NativeInterpreter.prototype.noteFallbackCall = function (callable) {
+    NativeInterpreter.prototype.noteFallbackCall = function (
+            callable, args, frame, pc) {
         var name = callable && callable.name || "<anonymous>";
         this.fallbackCallCounts[name] =
             (this.fallbackCallCounts[name] || 0) + 1;
@@ -6412,6 +6449,60 @@
                 (bindingRegisters ? "heap-registers" : "heap-environment") +
                 "/" + (callable.program && callable.program.bindingRegisters ?
                          "host-registers" : "host-environment");
+        }
+        if (args && args.length) {
+            var kinds = [];
+            var index = 0;
+            while (index < args.length) {
+                var value = args[index++];
+                var kind = value && value.guestType ? value.guestType :
+                           value === null ? "null" : typeof value;
+                if (kind === "number") {
+                    if (value === (value | 0)) kind = "number-int32";
+                    else if (value >= 0 && value <= 4294967295 &&
+                             value === Math.floor(value)) {
+                        kind = "number-uint32";
+                    } else kind = "number-double";
+                }
+                kinds.push(kind);
+            }
+            var signature = kinds.join(",");
+            var key = name + "(" + signature + ")";
+            this.fallbackCallArgumentLayouts[key] =
+                (this.fallbackCallArgumentLayouts[key] || 0) + 1;
+        }
+        if (frame && frame.heapAddress && frame.code[pc] === Bytecode.CALL) {
+            var records = this.runtime.heapRecords;
+            var programAddress = records.frameProgram(frame.heapAddress);
+            var constants = records.programConstants(programAddress);
+            var argumentListCell = records.vectorCellWithinLength(
+                constants, frame.code[pc + 4]);
+            var argumentList = this.runtime.readHeapValue(argumentListCell);
+            if (argumentList && argumentList.guestType === "array") {
+                var vector = records.arrayElements(argumentList.heapAddress);
+                var count = records.vectorLength(vector);
+                var heapKinds = [];
+                var argumentIndex = 0;
+                while (argumentIndex < count) {
+                    var descriptorCell = records.vectorCellWithinLength(
+                        vector, argumentIndex++);
+                    var descriptorTag = this.runtime.valueCells.tagAt(
+                        descriptorCell);
+                    var descriptor = this.runtime.readHeapValue(descriptorCell);
+                    var sourceTag = descriptorTag;
+                    if (typeof descriptor === "number" && descriptor >= 0 &&
+                        descriptor < records.frameRegisterCount(
+                            frame.heapAddress)) {
+                        sourceTag = this.runtime.valueCells.tagAt(
+                            records.frameRegisterCell(
+                                frame.heapAddress, descriptor));
+                    }
+                    heapKinds.push(descriptorTag + "/" + sourceTag);
+                }
+                key = name + "(" + heapKinds.join(",") + ")";
+                this.fallbackCallHeapLayouts[key] =
+                    (this.fallbackCallHeapLayouts[key] || 0) + 1;
+            }
         }
     };
 
