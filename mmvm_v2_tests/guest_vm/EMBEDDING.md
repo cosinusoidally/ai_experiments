@@ -349,8 +349,9 @@ or cancellation has removed every native use.
 
 ## Automatic collection
 
-Guest garbage collection is automatic. Guest-object and Buffer allocations
-accumulate allocation units; after the default 1,024-unit threshold, the
+Guest garbage collection is automatic. Guest-object, computed-string, and
+Buffer allocations accumulate allocation units; after the default 8,192-unit
+threshold, the
 interpreter performs a mark-and-sweep collection at a safe point. Embedders and
 ordinary guest programs do not need to call the collector.
 

@@ -307,10 +307,11 @@ The semantic `Array.prototype.join` implementation now resolves the guest
 array's backing vector and length once, reads elements through named value-cell
 accessors, and performs one host-array join. It does not add a demo-specific
 intrinsic or retain the previously rejected native guest-string builder. In a
-profiled 64x64 demo8 startup, the large source-generation call fell from about
-26.8 seconds to about 13.3 seconds. Profiling substantially perturbs total
-runtime, so these figures describe the same identified phase rather than a
-frame-rate claim.
+profiled 64x64 demo8 startup, one early sample put the large source-generation
+call at 13.3 seconds, but repeated samples remained in the 26--28 second range.
+The lower result is therefore not treated as a reproducible speedup. Profiling
+substantially perturbs total runtime; the accessor change is retained because
+it removes redundant heap reads, but no wall-clock claim is made for it.
 
 For repeatable interactive profiling, start demo8 and obtain its window ID
 with `xwininfo -root -tree`, then send X11 keycodes with the repository's
@@ -324,3 +325,10 @@ node guest_vm/tools/x11_send_keys.js WINDOW_ID 9 42
 The tool uses only built-in `fs` and `net`, contains its own minimal X11 setup
 and SendEvent bindings, and can also be loaded through `node_runner.js` on
 js_min.exe. It is profiling support, not part of guest VM execution.
+
+Computed guest strings are no longer promoted into the runtime's permanent
+intern table merely because a semantic register is spilled. A per-generation
+reverse cache preserves address reuse during normal execution, while ordinary
+heap reachability controls lifetime at collection. This particularly targets
+the temporary macro-assembly and specialization strings created while changing
+demo8 modes; atoms and property keys remain strongly interned.

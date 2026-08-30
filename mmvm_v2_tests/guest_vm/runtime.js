@@ -32,6 +32,12 @@
         options = options || {};
         this.contexts = [];
         this.internedStrings = {};
+        this.stringAddresses = {};
+        /* Computed primitive strings need stable heap addresses while they are
+         * being spilled and reloaded, but they are not language atoms. Keep a
+         * generation-local reverse map so repeated spills share one record
+         * without making every computed string an immortal interned root. */
+        this.transientStringAddresses = {};
         /* Strings are immutable. This is a decoded representation cache keyed
          * only by the authoritative heap address, never semantic storage. */
         this.decodedStrings = {};
@@ -427,7 +433,8 @@
     Runtime.prototype.writeHeapValue = function (cell, value) {
         this.assertOwned(value);
         if (typeof value === "string") {
-            this.valueCells.writeReferenceAt(cell, this.internStringAddress(value));
+            this.valueCells.writeReferenceAt(cell,
+                this.computedStringAddress(value));
         } else if (value && value.guestType && value.heapAddress) {
             this.valueCells.writeReferenceAt(cell, value.heapAddress);
         } else if (value && typeof value === "object") {
@@ -436,6 +443,15 @@
         } else if (typeof value === "function") {
             throw new TypeError("host function cannot be stored in guest heap");
         } else this.valueCells.writePrimitiveAt(cell, value);
+    };
+
+    Runtime.prototype.writeConstantHeapValue = function (cell, value) {
+        /* Bytecode property-name constants share the runtime atom address so
+         * the native constant-property path may compare addresses directly. */
+        if (typeof value === "string") {
+            this.valueCells.writeReferenceAt(cell,
+                this.internStringAddress(value));
+        } else this.writeHeapValue(cell, value);
     };
 
     Runtime.prototype.readHeapValue = function (cell) {
@@ -702,7 +718,7 @@
             } else if (value && typeof value === "object" &&
                        typeof value.length === "number") {
                 this.writeHeapValue(cell, this.arrayFrom(value));
-            } else this.writeHeapValue(cell, value);
+            } else this.writeConstantHeapValue(cell, value);
             this.writeHeapValue(this.heapRecords.vectorCell(
                 program.heapConstantRegistersAddress, index),
                 program.constantRegisters &&
@@ -793,13 +809,15 @@
     Runtime.prototype.internString = function (value) {
         value = String(value);
         var key = "$" + value;
-        var address = this.internedStrings[key];
+        var address = this.stringAddresses[key];
         if (!address) {
             this.ensureLinearHeap();
             address = this.heapRecords.allocateString(value);
-            this.internedStrings[key] = address;
             this.decodedStrings["$" + address] = value;
         }
+        this.stringAddresses[key] = address;
+        this.internedStrings[key] = address;
+        delete this.transientStringAddresses[key];
         return this.readHeapString(address);
     };
 
@@ -818,6 +836,21 @@
         var key = "$" + value;
         if (!this.internedStrings[key]) this.internString(value);
         return this.internedStrings[key];
+    };
+
+    Runtime.prototype.computedStringAddress = function (value) {
+        value = String(value);
+        var key = "$" + value;
+        var address = this.stringAddresses[key];
+        if (!address) {
+            this.ensureLinearHeap();
+            address = this.heapRecords.allocateString(value);
+            this.stringAddresses[key] = address;
+            this.transientStringAddresses[key] = address;
+            this.decodedStrings["$" + address] = value;
+            this.noteAllocation(1);
+        }
+        return address;
     };
 
     Runtime.prototype.noteAllocation = function (units) {
@@ -1657,6 +1690,11 @@
     };
 
     Runtime.prototype.markValue = function (value, generation) {
+        if (typeof value === "string") {
+            var stringAddress = this.stringAddresses["$" + value];
+            if (stringAddress) this.linearHeap.setMark(stringAddress, generation);
+            return;
+        }
         if (!value || (value.guestType !== "object" && value.guestType !== "array" &&
                        value.guestType !== "function" &&
                        value.guestType !== "bytecodeFunction" && value.guestType !== "regexp" &&
@@ -1785,6 +1823,13 @@
     Runtime.prototype.seedNativeCollectorRoots = function (generation) {
         var runtime = this;
         function value(candidate, source) {
+            if (typeof candidate === "string") {
+                var stringAddress = runtime.stringAddresses["$" + candidate];
+                if (stringAddress) {
+                    runtime.linearHeap.setMark(stringAddress, generation);
+                }
+                return;
+            }
             if (candidate && candidate.heapAddress) {
                 if (runtime.linearHeap.isFreeRecord(candidate.heapAddress)) {
                     throw new Error("collector root contains freed reference: " +
@@ -1869,6 +1914,13 @@
         if (this.functionConstructionProgram) {
             this.linearHeap.setMark(
                 this.functionConstructionProgram, generation);
+        }
+        var internedStringKey;
+        for (internedStringKey in this.internedStrings) {
+            if (own(this.internedStrings, internedStringKey)) {
+                this.linearHeap.setMark(
+                    this.internedStrings[internedStringKey], generation);
+            }
         }
     };
 
@@ -2032,6 +2084,16 @@
                 new Date().getTime() : 0;
             this.gcAllocationDebt = 0;
             this.gcPending = false;
+            this.transientStringAddresses = {};
+            this.stringAddresses = {};
+            this.decodedStrings = {};
+            var retainedStringKey;
+            for (retainedStringKey in this.internedStrings) {
+                if (own(this.internedStrings, retainedStringKey)) {
+                    this.stringAddresses[retainedStringKey] =
+                        this.internedStrings[retainedStringKey];
+                }
+            }
             this.collectionCount++;
             if (this.profileOpcodeCounts) {
                 var collectionLine = "guest heap collection " +
@@ -2139,6 +2201,8 @@
         this.hostRoots = [];
         this.contexts = [];
         this.internedStrings = {};
+        this.stringAddresses = {};
+        this.transientStringAddresses = {};
         this.decodedStrings = {};
         this.globalObject = null;
         this.propertyAddressCache = {};
@@ -2208,7 +2272,7 @@
     }
 
     function normalizeGCThreshold(value) {
-        if (value === undefined) return 1024;
+        if (value === undefined) return 8192;
         value = Number(value);
         if (value < 1 || value !== Math.floor(value)) {
             throw new RangeError("gcThreshold must be a positive integer");

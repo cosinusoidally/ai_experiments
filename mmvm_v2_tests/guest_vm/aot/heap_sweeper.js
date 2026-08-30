@@ -86,8 +86,7 @@
             var rootType = recordType(heapBase, address);
             if (rootType !== HEAP_TYPE_FREE) {
                 var structuralRoot = 0;
-                if (rootType === HEAP_TYPE_STRING) structuralRoot = 1;
-                else if (rootType === HEAP_TYPE_NATIVE_FUNCTION) structuralRoot = 1;
+                if (rootType === HEAP_TYPE_NATIVE_FUNCTION) structuralRoot = 1;
                 else if (rootType === HEAP_TYPE_PROGRAM) structuralRoot = 1;
                 else if (rootType === HEAP_TYPE_CONTEXT) structuralRoot = 1;
                 else if (rootType === HEAP_TYPE_ENGINE_STATE) structuralRoot = 1;

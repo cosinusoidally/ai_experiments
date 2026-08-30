@@ -62,6 +62,21 @@
             "automatic_gc_replaced_records.js");
         reuseVM.destroy();
 
+        var computedStringVM = new VM({gcThreshold: 32,
+                                       heapBytes: 128 * 1024});
+        computedStringVM.run(
+            "var latestText = '';" +
+            "for (var textIndex = 0; textIndex < 600; textIndex++) {" +
+            "    latestText = 'computed-' + textIndex;" +
+            "}" +
+            "assertEqual(latestText, 'computed-599'," +
+            "    'computed string survived collection');",
+            "automatic_gc_computed_strings.js");
+        if (computedStringVM.runtime.collectionCount < 10) {
+            throw new Error("computed strings did not exercise repeated collection");
+        }
+        computedStringVM.destroy();
+
         var callbackVM = new VM({threadedCompile: true,
                                  gcThreshold: 8,
                                  heapBytes: 256 * 1024});

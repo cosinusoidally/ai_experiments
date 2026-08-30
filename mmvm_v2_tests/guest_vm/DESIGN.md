@@ -338,6 +338,15 @@ collisions with the host object's prototype without requiring `Object.create`,
 which the old host cannot be assumed to provide. All lookup uses an explicit
 own-property check. Buffer numeric keys bypass this map.
 
+Every spilled string primitive has an authoritative linear-heap string record.
+Property keys, atoms, and other explicitly interned strings are strong runtime
+roots. Computed strings instead use a generation-local content-to-address
+cache: repeated spills during one collection generation reuse the same record,
+but the cache does not make the string a root. Reachability through registers,
+objects, arrays, programs, and environments determines whether such a record
+survives collection. The reverse cache and decoded host-string cache are
+discarded after each collection so neither can retain a reclaimed address.
+
 Function calls create an environment whose bindings contain parameters,
 function-scoped `var` names, and a guest array used as `arguments`. Identifier
 lookup walks captured parent environments before the global table. Assignments
@@ -518,8 +527,9 @@ reserved by the native allocator.
 
 `VM.collect`, `Runtime.collect`, and the test-only `guestCollect` global request
 an immediate full collection, but normal guest programs and embedders do not
-need to call them. `new VM({gcThreshold: n})` selects a positive allocation-unit
-threshold. `new VM({gcStress: true})` makes every eligible allocation request a
+need to call them. The normal threshold is 8,192 allocation units;
+`new VM({gcThreshold: n})` selects another positive allocation-unit threshold.
+`new VM({gcStress: true})` makes every eligible allocation request a
 collection at the next safe point. The portable suite runs threshold and stress
 modes under both hosts to expose missing roots.
 
