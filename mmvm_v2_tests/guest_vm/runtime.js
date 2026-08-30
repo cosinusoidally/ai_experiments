@@ -104,6 +104,13 @@
         return this.linearHeap;
     };
 
+    Runtime.prototype.rebuildFreeBlockIndex = function () {
+        if (this.heapSweeper && this.heapSweeper.indexer) {
+            return this.heapSweeper.rebuildFreeBlocks();
+        }
+        return this.linearHeap.rebuildFreeBlocks();
+    };
+
     Runtime.prototype.makeNativeFunction = function (name, callback, callMode,
                                                       intrinsicId) {
         this.ensureLinearHeap();
@@ -600,6 +607,29 @@
         return result;
     };
 
+    Runtime.prototype.joinArrayValues = function (array, separator) {
+        /* Array.join is unusually hot in source-generating guest programs.
+         * Resolve the backing vector once, then use the ordinary named
+         * value-cell accessors.  Re-entering arrayLength/arrayGet for every
+         * element repeats record validation and native-memory reads. */
+        var vector = this.heapRecords.arrayElements(array.heapAddress);
+        var length = this.heapRecords.vectorLength(vector);
+        var parts = new Array(length);
+        var index = 0;
+        while (index < length) {
+            var cell = this.heapRecords.vectorCellWithinLength(vector, index);
+            if (this.valueCells.tagAt(cell) === 0) {
+                parts[index] = "";
+            } else {
+                var value = this.readHeapValue(cell);
+                parts[index] = value === undefined || value === null ?
+                               "" : String(value);
+            }
+            index++;
+        }
+        return parts.join(separator);
+    };
+
     Runtime.prototype.replaceArray = function (array, values) {
         var oldVector = this.heapRecords.arrayElements(array.heapAddress);
         var capacity = values.length < 4 ? 4 : values.length;
@@ -1067,14 +1097,7 @@
             function (receiver, args) {
                 var separator = args.length && args[0] !== undefined ?
                                 String(args[0]) : ",";
-                var result = "";
-                var index = 0;
-                while (index < runtime.arrayLength(receiver)) {
-                    if (index) result += separator;
-                    var value = runtime.arrayGet(receiver, index++);
-                    if (value !== undefined && value !== null) result += String(value);
-                }
-                return result;
+                return runtime.joinArrayValues(receiver, separator);
             });
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
@@ -2001,7 +2024,7 @@
                 sweepResult = {records: null,
                     bytes: this.heapSweeper.sweep(generation)};
                 this.verifyNativeFrameMarks(generation);
-                this.linearHeap.rebuildFreeBlocks();
+                this.rebuildFreeBlockIndex();
             } else {
                 sweepResult = this.linearHeap.sweepUnmarked(generation);
             }

@@ -293,3 +293,34 @@ The rejected path is not enabled or retained in the interpreter. The remaining
 recorder profile is dominated by Array join/string construction and later
 rasterizer specialization, so string allocation/interning must be improved as
 a general facility before revisiting native join.
+
+## 2026-08-30: garage-transition allocation and source-building checkpoint
+
+The native collector now rebuilds its free-block index with a shared
+kernel-dialect scan after sweeping. On the real demo8 Escape-then-G transition,
+the first collection still reclaimed approximately 28.9 MiB, while the
+reported sweep/index phase fell from about 2184 ms to about 703 ms. The kernel
+scan has both JavaScript and generated-i386 backends; the host only materializes
+the resulting free-address list after the scan.
+
+The semantic `Array.prototype.join` implementation now resolves the guest
+array's backing vector and length once, reads elements through named value-cell
+accessors, and performs one host-array join. It does not add a demo-specific
+intrinsic or retain the previously rejected native guest-string builder. In a
+profiled 64x64 demo8 startup, the large source-generation call fell from about
+26.8 seconds to about 13.3 seconds. Profiling substantially perturbs total
+runtime, so these figures describe the same identified phase rather than a
+frame-rate claim.
+
+For repeatable interactive profiling, start demo8 and obtain its window ID
+with `xwininfo -root -tree`, then send X11 keycodes with the repository's
+dependency-free JavaScript tool. The common Xorg keycodes 9 and 42 select
+Escape followed by G:
+
+```sh
+node guest_vm/tools/x11_send_keys.js WINDOW_ID 9 42
+```
+
+The tool uses only built-in `fs` and `net`, contains its own minimal X11 setup
+and SendEvent bindings, and can also be loaded through `node_runner.js` on
+js_min.exe. It is profiling support, not part of guest VM execution.

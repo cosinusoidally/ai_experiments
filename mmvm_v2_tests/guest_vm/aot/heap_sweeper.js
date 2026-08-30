@@ -14,6 +14,8 @@
     var sharedX86 = null;
     var sharedMarkJS = null;
     var sharedMarkX86 = null;
+    var sharedIndexJS = null;
+    var sharedIndexX86 = null;
 
     function markKernel(heapBase, heapBump, stackBase, heapLimit, generation) {
         var HEAP_FIRST_RECORD = 64;
@@ -262,6 +264,49 @@
         return reclaimedBytes;
     }
 
+    /* Publish the derived host allocator index through collector workspace.
+     * Native sweeping has already coalesced adjacent ordinary free records, so
+     * this scan needs to report only their addresses and the reclaimable tail.
+     * Keeping the record walk in kernel code avoids one host FFI transition for
+     * every header word in a large, fragmented heap. */
+    function indexFreeBlocksKernel(heapBase, heapBump, outputBase, outputLimit) {
+        var HEAP_FIRST_RECORD = 64;
+        var HEAP_TYPE_FREE = 0;
+        var RECORD_TYPE = 0;
+        var RECORD_SIZE = 4;
+        var RECORD_FLAGS = 12;
+        var WORD_BYTES = 4;
+        var OUTPUT_COUNT_WORD = 0;
+        var OUTPUT_BUMP_WORD = 1;
+        var OUTPUT_FIRST_ADDRESS_WORD = 2;
+        var address = HEAP_FIRST_RECORD;
+        var count = 0;
+        var rebuiltBump = heapBump;
+        while (address < heapBump) {
+            var size = recordSize(heapBase, address);
+            var ordinaryFree = 0;
+            if (recordType(heapBase, address) === HEAP_TYPE_FREE) {
+                if (recordFlags(heapBase, address) === 0) ordinaryFree = 1;
+            }
+            if (ordinaryFree === 1) {
+                if (address + size === heapBump) {
+                    rebuiltBump = address;
+                } else {
+                    var outputAddress = outputBase +
+                        (OUTPUT_FIRST_ADDRESS_WORD + count) * WORD_BYTES;
+                    if (outputAddress + WORD_BYTES > outputLimit) return -1;
+                    store32(heapBase + outputAddress, address);
+                    count = count + 1;
+                }
+            }
+            address = address + size;
+        }
+        store32(heapBase + outputBase + OUTPUT_COUNT_WORD * WORD_BYTES, count);
+        store32(heapBase + outputBase + OUTPUT_BUMP_WORD * WORD_BYTES,
+                rebuiltBump);
+        return count;
+    }
+
     function HeapSweeper(heap) {
         if (!sharedJS) {
             var ir = new KernelCompiler().compile(sweepKernel, {
@@ -274,12 +319,19 @@
             });
             sharedMarkJS = new JSBackend().compile(markIR);
             sharedMarkX86 = new X86Backend().compile(markIR);
+            var indexIR = new KernelCompiler().compile(indexFreeBlocksKernel, {
+                registerPreferences: ["heapBase", "address", "count"]
+            });
+            sharedIndexJS = new JSBackend().compile(indexIR);
+            sharedIndexX86 = new X86Backend().compile(indexIR);
         }
         this.heap = heap;
         this.compiled = heap.memory.nativeAddress(0) && sharedX86.fn ?
                         sharedX86 : sharedJS;
         this.marker = heap.memory.nativeAddress(0) && sharedMarkX86.fn ?
                       sharedMarkX86 : sharedMarkJS;
+        this.indexer = heap.memory.nativeAddress(0) && sharedIndexX86.fn ?
+                       sharedIndexX86 : sharedIndexJS;
     }
 
     HeapSweeper.prototype.mark = function (generation) {
@@ -300,6 +352,31 @@
         }
         return this.compiled.fn(this.heap.memory, 0,
                                 this.heap.bump, generation) >>> 0;
+    };
+
+    HeapSweeper.prototype.rebuildFreeBlocks = function () {
+        var heap = this.heap;
+        var count;
+        if (this.indexer.backend === "i386") {
+            count = this.indexer.fn(heap.memory.nativeAddress(0), heap.bump,
+                heap.collectorStackBase, heap.byteLength) | 0;
+        } else {
+            count = this.indexer.fn(heap.memory, 0, heap.bump,
+                heap.collectorStackBase, heap.byteLength) | 0;
+        }
+        if (count < 0) return heap.rebuildFreeBlocks();
+        var rebuiltBump = heap.memory.readU32Trusted(
+            heap.collectorStackBase + 4);
+        var blocks = [];
+        var index = 0;
+        while (index < count) {
+            blocks[index] = heap.memory.readU32Trusted(
+                heap.collectorStackBase + 8 + index * 4);
+            index++;
+        }
+        heap.bump = rebuiltBump;
+        heap.freeBlocks = blocks;
+        return count;
     };
 
     root.GuestVMHeapSweeper = HeapSweeper;

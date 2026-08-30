@@ -5911,7 +5911,7 @@
             heap.publishFreeRegion(this.allocationRegion.cursor, remaining, 0);
         }
         this.allocationRegion = null;
-        heap.rebuildFreeBlocks();
+        this.runtime.rebuildFreeBlockIndex();
     };
 
     NativeInterpreter.prototype.prepareSemanticFallback = function () {
@@ -5940,7 +5940,7 @@
             heap.setFreeRecordFlags(frame, 0);
             frame = next;
         }
-        heap.rebuildFreeBlocks();
+        this.runtime.rebuildFreeBlockIndex();
     };
 
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
@@ -5992,7 +5992,7 @@
             if (regionRemaining < MIN_NATIVE_ALLOCATION_REGION_BYTES) {
                 heap.publishFreeRegion(nativeHeapBump, regionRemaining, 0);
                 this.allocationRegion = null;
-                heap.rebuildFreeBlocks();
+                this.runtime.rebuildFreeBlockIndex();
             }
         } else if (nativeHeapBump > heap.bump) {
             heap.bump = nativeHeapBump;
