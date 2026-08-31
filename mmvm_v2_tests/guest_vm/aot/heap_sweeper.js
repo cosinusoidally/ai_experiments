@@ -59,6 +59,7 @@
         var BUFFER_VIEW_BACKING = 16;
         var BUFFER_VIEW_PROTOTYPE = 28;
         var BUFFER_VIEW_PROPERTY_HEAD = 32;
+        var VECTOR_LENGTH = 16;
         var VECTOR_CAPACITY = 20;
         var VECTOR_CELLS = 24;
         var FRAME_PROGRAM = 16;
@@ -77,6 +78,7 @@
         var CONTEXT_ACTIVE_FRAME = 20;
         var HANDLER_NEXT = 16;
         var ENGINE_CURRENT_FRAME = 40;
+        var ENGINE_PLATFORM_SERVICES = 60;
         var VALUE_CELL_TAG = 0;
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;
@@ -114,7 +116,7 @@
             if (type === HEAP_TYPE_ENVIRONMENT) {
                 itemCount = environmentCount(heapBase, address);
             } else if (type === HEAP_TYPE_VALUE_VECTOR) {
-                itemCount = vectorCapacity(heapBase, address);
+                itemCount = vectorLength(heapBase, address);
             } else if (type === HEAP_TYPE_FRAME) {
                 itemCount = frameRegisterCount(heapBase, address);
             }
@@ -202,6 +204,9 @@
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ENGINE_STATE) {
                     if (referenceIndex === 0) target = engineCurrentFrame(heapBase, address);
+                    else if (referenceIndex === 1) {
+                        target = enginePlatformServices(heapBase, address);
+                    }
                     else referenceIndex = -2;
                 } else referenceIndex = -2;
                 if (cellAddress !== 0) {

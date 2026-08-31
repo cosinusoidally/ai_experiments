@@ -1144,7 +1144,7 @@
                 var separator = args.length && args[0] !== undefined ?
                                 String(args[0]) : ",";
                 return runtime.joinArrayValues(receiver, separator);
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_JOIN);
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
@@ -1970,6 +1970,25 @@
         }
     };
 
+    Runtime.prototype.verifyNativeHeapGraph = function (generation) {
+        var runtime = this;
+        this.linearHeap.visitRecords(function (address, type, size, mark) {
+            if (type === Heap.Types.FREE || mark !== generation) return;
+            runtime.heapRecords.visitReferences(address, function (reference) {
+                if (runtime.linearHeap.isFreeRecord(reference)) {
+                    throw new Error("native marker retained a freed edge: " +
+                        "source=" + address + " type=" + type +
+                        " reference=" + reference);
+                }
+                if (runtime.linearHeap.mark(reference) !== generation) {
+                    throw new Error("native marker missed heap edge: source=" +
+                        address + " type=" + type + " reference=" +
+                        reference);
+                }
+            });
+        });
+    };
+
     Runtime.prototype.collect = function () {
         if (this.gcCollecting) return this.heapObjects.length;
         this.gcCollecting = true;
@@ -1992,6 +2011,9 @@
                     throw new Error("native guest marker exhausted its work stack");
                 }
                 this.verifyNativeFrameMarks(generation);
+                if (this.profileOpcodeCounts) {
+                    this.verifyNativeHeapGraph(generation);
+                }
             } else {
             this.markValue(this.globalObject, generation);
             this.markValue(this.bufferSupport.prototype, generation);

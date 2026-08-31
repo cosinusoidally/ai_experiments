@@ -974,7 +974,7 @@
             cell(this.heap.trustedPayloadAddress(address, 0));
         } else if (type === Heap.Types.VALUE_VECTOR) {
             var vectorIndex = 0;
-            while (vectorIndex < records.vectorCapacity(address)) {
+            while (vectorIndex < records.vectorLength(address)) {
                 cell(records.vectorCell(address, vectorIndex++));
             }
         } else if (type === Heap.Types.FRAME) {

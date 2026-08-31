@@ -255,6 +255,7 @@
         var INTRINSIC_OBJECT_HAS_OWN_PROPERTY = 34;
         var INTRINSIC_STRING_CONSTRUCTOR = 35;
         var INTRINSIC_MATH_ATAN2 = 36;
+        var INTRINSIC_ARRAY_JOIN = 37;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -2478,7 +2479,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_MATH_ATAN2) {
+                    else if (intrinsicId > INTRINSIC_ARRAY_JOIN) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2933,6 +2934,181 @@
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
+                }
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_ARRAY_JOIN) {
+                    /* Keep small, all-string joins inside the guest.  Large
+                     * joins deliberately retain the semantic path until they
+                     * can allocate through a resumable bulk allocator. */
+                    var joinValid = 1;
+                    if (intrinsicArgumentCount !== 1) joinValid = 0;
+                    var joinReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    if (joinReceiverIndex < 0) joinValid = 0;
+                    var joinReceiverCell = heapBase + registerCells +
+                        joinReceiverIndex * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, joinReceiverCell) !==
+                        VALUE_TAG_REFERENCE) joinValid = 0;
+                    var joinArray = valueCellReference(0, joinReceiverCell);
+                    if (joinValid === 1) {
+                        if (recordType(heapBase, joinArray) !==
+                            HEAP_TYPE_ARRAY) joinValid = 0;
+                    }
+                    var joinSeparator = 0;
+                    if (joinValid === 1) {
+                        var joinSeparatorRegisterCell = heapBase +
+                            intrinsicArgumentsVector + VECTOR_CELLS;
+                        if (valueCellTag(0, joinSeparatorRegisterCell) !==
+                            VALUE_TAG_INT32) joinValid = 0;
+                        var joinSeparatorRegister = load32(
+                            joinSeparatorRegisterCell + VALUE_CELL_LOW);
+                        var joinSeparatorCell = heapBase + registerCells +
+                            joinSeparatorRegister * VALUE_CELL_BYTES;
+                        if (valueCellTag(0, joinSeparatorCell) !==
+                            VALUE_TAG_REFERENCE) joinValid = 0;
+                        joinSeparator = valueCellReference(
+                            0, joinSeparatorCell);
+                        if (joinValid === 1) {
+                            if (recordType(heapBase, joinSeparator) !==
+                                HEAP_TYPE_STRING) joinValid = 0;
+                        }
+                    }
+                    var joinVector = 0;
+                    var joinLength = 0;
+                    var joinSeparatorLength = 0;
+                    var joinCharacterLength = 0;
+                    if (joinValid === 1) {
+                        joinVector = arrayElements(heapBase, joinArray);
+                        joinLength = vectorLength(heapBase, joinVector);
+                        if (joinLength > 16) joinValid = 0;
+                    }
+                    if (joinValid === 1) {
+                        joinSeparatorLength = stringLength(
+                            heapBase, joinSeparator);
+                        if (joinLength > 1) {
+                            joinCharacterLength =
+                                (joinLength - 1) * joinSeparatorLength;
+                        }
+                        if (joinCharacterLength > 4096) joinValid = 0;
+                    }
+                    var joinMeasureIndex = 0;
+                    while (joinMeasureIndex < joinLength) {
+                        var joinMeasureCell = heapBase + joinVector +
+                            VECTOR_CELLS +
+                            joinMeasureIndex * VALUE_CELL_BYTES;
+                        var joinMeasureTag = valueCellTag(0, joinMeasureCell);
+                        if (joinMeasureTag === VALUE_TAG_REFERENCE) {
+                            var joinMeasureString = valueCellReference(
+                                0, joinMeasureCell);
+                            if (recordType(heapBase, joinMeasureString) !==
+                                HEAP_TYPE_STRING) joinValid = 0;
+                            if (joinValid === 1) {
+                                joinCharacterLength = joinCharacterLength +
+                                    stringLength(heapBase, joinMeasureString);
+                                if (joinCharacterLength > 4096) joinValid = 0;
+                            }
+                        } else if (joinMeasureTag !== 0) {
+                            if (joinMeasureTag !== VALUE_TAG_UNDEFINED) {
+                                if (joinMeasureTag !== VALUE_TAG_NULL) {
+                                    joinValid = 0;
+                                }
+                            }
+                        }
+                        joinMeasureIndex = joinMeasureIndex + 1;
+                    }
+                    var joinAllocationFailed = 0;
+                    var joinBytes = 0;
+                    var joinResult = 0;
+                    if (joinValid === 1) {
+                        joinBytes = (STRING_CHARS +
+                                     joinCharacterLength * 2 + 7) & -8;
+                        joinResult = engineHeapBump(heapBase, state);
+                        if (joinResult + joinBytes >
+                            engineHeapLimit(heapBase, state)) {
+                            joinValid = 0;
+                            joinAllocationFailed = 1;
+                        }
+                    }
+                    if (joinValid === 1) {
+                        setRecordType(heapBase, joinResult, HEAP_TYPE_STRING);
+                        setRecordSize(heapBase, joinResult, joinBytes);
+                        setRecordMark(heapBase, joinResult, 0);
+                        setRecordFlags(heapBase, joinResult, 0);
+                        setStringLength(heapBase, joinResult,
+                                        joinCharacterLength);
+                        var joinHash = -2128831035;
+                        var joinOutputIndex = 0;
+                        var joinElementIndex = 0;
+                        while (joinElementIndex < joinLength) {
+                            var joinCopySource = 0;
+                            var joinCopyLength = 0;
+                            if (joinElementIndex > 0) {
+                                joinCopySource = joinSeparator;
+                                joinCopyLength = joinSeparatorLength;
+                            }
+                            var joinCopyIndex = 0;
+                            while (joinCopyIndex < joinCopyLength) {
+                                var joinCode = stringCharacterCodeUnit(
+                                    heapBase, joinCopySource,
+                                    joinCopyIndex) & 65535;
+                                setStringCharacterByte(heapBase, joinResult,
+                                    joinOutputIndex * 2, joinCode & 255);
+                                setStringCharacterByte(heapBase, joinResult,
+                                    joinOutputIndex * 2 + 1,
+                                    (joinCode >>> 8) & 255);
+                                joinHash = (joinHash ^ joinCode) * 16777619;
+                                joinOutputIndex = joinOutputIndex + 1;
+                                joinCopyIndex = joinCopyIndex + 1;
+                            }
+                            var joinElementCell = heapBase + joinVector +
+                                VECTOR_CELLS +
+                                joinElementIndex * VALUE_CELL_BYTES;
+                            if (valueCellTag(0, joinElementCell) ===
+                                VALUE_TAG_REFERENCE) {
+                                joinCopySource = valueCellReference(
+                                    0, joinElementCell);
+                                joinCopyLength = stringLength(
+                                    heapBase, joinCopySource);
+                                joinCopyIndex = 0;
+                                while (joinCopyIndex < joinCopyLength) {
+                                    joinCode = stringCharacterCodeUnit(
+                                        heapBase, joinCopySource,
+                                        joinCopyIndex) & 65535;
+                                    setStringCharacterByte(heapBase, joinResult,
+                                        joinOutputIndex * 2, joinCode & 255);
+                                    setStringCharacterByte(heapBase, joinResult,
+                                        joinOutputIndex * 2 + 1,
+                                        (joinCode >>> 8) & 255);
+                                    joinHash = (joinHash ^ joinCode) * 16777619;
+                                    joinOutputIndex = joinOutputIndex + 1;
+                                    joinCopyIndex = joinCopyIndex + 1;
+                                }
+                            }
+                            joinElementIndex = joinElementIndex + 1;
+                        }
+                        setStringHash(heapBase, joinResult, joinHash);
+                        setEngineHeapBump(heapBase, state,
+                                          joinResult + joinBytes);
+                        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+                        store32(intrinsicTarget + VALUE_CELL_LOW, joinResult);
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                        intrinsicHandled = 1;
+                    }
+                    if (joinAllocationFailed === 1) {
+                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                                CALL_REJECT_HEAP_SPACE);
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
                 }
                 }
                 if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
