@@ -189,6 +189,11 @@
             return "Math.pow(" + emitControlF64(node.left, parameters, locals) +
                    "," + emitControlF64(node.right, parameters, locals) + ")";
         }
+        if (node.op === "atan2_f64") {
+            return "Math.atan2(" +
+                emitControlF64(node.left, parameters, locals) + "," +
+                emitControlF64(node.right, parameters, locals) + ")";
+        }
         var operators = {add_f64: "+", sub_f64: "-", mul_f64: "*", div_f64: "/"};
         if (!operators[node.op]) {
             throw new Error("unsupported JS control-flow f64 expression " + node.op);

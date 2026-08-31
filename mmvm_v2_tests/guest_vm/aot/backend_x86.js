@@ -785,6 +785,7 @@
         else if (node.op === "sub_f64") assembler.subtractF64Pop();
         else if (node.op === "mul_f64") assembler.multiplyF64Pop();
         else if (node.op === "div_f64") assembler.divideF64Pop();
+        else if (node.op === "atan2_f64") assembler.atan2F64Pop();
         else throw new Error("unsupported i386 control-flow f64 expression " + node.op);
     }
 

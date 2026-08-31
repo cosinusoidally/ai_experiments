@@ -312,6 +312,10 @@
         this.macros.push("fcos()");
         this.emitByte(0xd9); this.emitByte(0xff);
     };
+    Assembler.prototype.atan2F64Pop = function () {
+        this.macros.push("fpatan_st1_st0()");
+        this.emitByte(0xd9); this.emitByte(0xf3);
+    };
     Assembler.prototype.absF64 = function () {
         this.macros.push("fabs()");
         this.emitByte(0xd9); this.emitByte(0xe1);

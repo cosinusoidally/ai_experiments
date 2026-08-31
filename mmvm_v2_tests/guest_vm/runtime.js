@@ -1278,7 +1278,7 @@
         mathMethod("atan", function (receiver, args) { return Math.atan(Number(args[0])); });
         mathMethod("atan2", function (receiver, args) {
             return Math.atan2(Number(args[0]), Number(args[1]));
-        });
+        }, NativeIntrinsics.MATH_ATAN2);
         mathMethod("ceil", function (receiver, args) {
             return Math.ceil(Number(args[0]));
         }, NativeIntrinsics.MATH_CEIL);

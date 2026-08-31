@@ -254,6 +254,7 @@
         var INTRINSIC_FUNCTION_APPLY = 33;
         var INTRINSIC_OBJECT_HAS_OWN_PROPERTY = 34;
         var INTRINSIC_STRING_CONSTRUCTOR = 35;
+        var INTRINSIC_MATH_ATAN2 = 36;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -1089,29 +1090,130 @@
                     var arithmeticLeftTag = load32(arithmeticLeft);
                     var arithmeticRightTag = load32(arithmeticRight);
                     var stringConcatenation = 0;
+                    var concatenationLeftIsString = 0;
+                    var concatenationRightIsString = 0;
+                    var concatenationLeftIsInteger = 0;
+                    var concatenationRightIsInteger = 0;
+                    var concatenationLeftInteger = 0;
+                    var concatenationRightInteger = 0;
                     if (opcode === OP_ADD) {
                         if (arithmeticLeftTag === VALUE_TAG_REFERENCE) {
-                            if (arithmeticRightTag === VALUE_TAG_REFERENCE) {
-                                var concatenationLeft = load32(
-                                    arithmeticLeft + VALUE_CELL_LOW);
-                                var concatenationRight = load32(
-                                    arithmeticRight + VALUE_CELL_LOW);
-                                if (recordType(heapBase, concatenationLeft) ===
-                                    HEAP_TYPE_STRING) {
-                                    if (recordType(heapBase,
-                                        concatenationRight) ===
-                                        HEAP_TYPE_STRING) {
-                                        stringConcatenation = 1;
-                                    }
-                                }
+                            var concatenationLeft = load32(
+                                arithmeticLeft + VALUE_CELL_LOW);
+                            if (recordType(heapBase, concatenationLeft) ===
+                                HEAP_TYPE_STRING) {
+                                concatenationLeftIsString = 1;
+                            }
+                        }
+                        if (arithmeticRightTag === VALUE_TAG_REFERENCE) {
+                            var concatenationRight = load32(
+                                arithmeticRight + VALUE_CELL_LOW);
+                            if (recordType(heapBase, concatenationRight) ===
+                                HEAP_TYPE_STRING) {
+                                concatenationRightIsString = 1;
+                            }
+                        }
+                        if (arithmeticLeftTag === VALUE_TAG_INT32) {
+                            concatenationLeftIsInteger = 1;
+                            concatenationLeftInteger = load32(
+                                arithmeticLeft + VALUE_CELL_LOW);
+                        } else if (arithmeticLeftTag === VALUE_TAG_DOUBLE) {
+                            concatenationLeftInteger = toInt32F64(
+                                loadNumberF64(arithmeticLeft + VALUE_CELL_LOW,
+                                              arithmeticLeftTag));
+                            store32(heapBase + state + ENGINE_SCRATCH_LEFT,
+                                    concatenationLeftInteger);
+                            if (equalF64(loadNumberF64(
+                                    arithmeticLeft + VALUE_CELL_LOW,
+                                    arithmeticLeftTag),
+                                loadI32F64(heapBase + state +
+                                           ENGINE_SCRATCH_LEFT)) === 1) {
+                                concatenationLeftIsInteger = 1;
+                            }
+                        }
+                        if (arithmeticRightTag === VALUE_TAG_INT32) {
+                            concatenationRightIsInteger = 1;
+                            concatenationRightInteger = load32(
+                                arithmeticRight + VALUE_CELL_LOW);
+                        } else if (arithmeticRightTag === VALUE_TAG_DOUBLE) {
+                            concatenationRightInteger = toInt32F64(
+                                loadNumberF64(arithmeticRight + VALUE_CELL_LOW,
+                                              arithmeticRightTag));
+                            store32(heapBase + state + ENGINE_SCRATCH_RIGHT,
+                                    concatenationRightInteger);
+                            if (equalF64(loadNumberF64(
+                                    arithmeticRight + VALUE_CELL_LOW,
+                                    arithmeticRightTag),
+                                loadI32F64(heapBase + state +
+                                           ENGINE_SCRATCH_RIGHT)) === 1) {
+                                concatenationRightIsInteger = 1;
+                            }
+                        }
+                        if (concatenationLeftIsString === 1) {
+                            if (concatenationRightIsString === 1) {
+                                stringConcatenation = 1;
+                            } else if (concatenationRightIsInteger === 1) {
+                                stringConcatenation = 1;
+                            }
+                        } else if (concatenationRightIsString === 1) {
+                            if (concatenationLeftIsInteger === 1) {
+                                stringConcatenation = 1;
                             }
                         }
                     }
                     if (stringConcatenation === 1) {
-                        var concatenationLeftLength = stringLength(
-                            heapBase, concatenationLeft);
-                        var concatenationRightLength = stringLength(
-                            heapBase, concatenationRight);
+                        var concatenationLeftLength = 0;
+                        var concatenationLeftNumber = 0;
+                        var concatenationLeftNegative = 0;
+                        if (concatenationLeftIsString === 1) {
+                            concatenationLeftLength = stringLength(
+                                heapBase, concatenationLeft);
+                        } else {
+                            concatenationLeftNumber =
+                                concatenationLeftInteger;
+                            if (concatenationLeftNumber > 0) {
+                                concatenationLeftNumber =
+                                    0 - concatenationLeftNumber;
+                            } else if (concatenationLeftNumber < 0) {
+                                concatenationLeftNegative = 1;
+                            }
+                            concatenationLeftLength =
+                                1 + concatenationLeftNegative;
+                            var concatenationLeftMeasure =
+                                concatenationLeftNumber;
+                            while (concatenationLeftMeasure <= -10) {
+                                concatenationLeftMeasure = divideI32(
+                                    concatenationLeftMeasure, 10);
+                                concatenationLeftLength =
+                                    concatenationLeftLength + 1;
+                            }
+                        }
+                        var concatenationRightLength = 0;
+                        var concatenationRightNumber = 0;
+                        var concatenationRightNegative = 0;
+                        if (concatenationRightIsString === 1) {
+                            concatenationRightLength = stringLength(
+                                heapBase, concatenationRight);
+                        } else {
+                            concatenationRightNumber =
+                                concatenationRightInteger;
+                            if (concatenationRightNumber > 0) {
+                                concatenationRightNumber =
+                                    0 - concatenationRightNumber;
+                            } else if (concatenationRightNumber < 0) {
+                                concatenationRightNegative = 1;
+                            }
+                            concatenationRightLength =
+                                1 + concatenationRightNegative;
+                            var concatenationRightMeasure =
+                                concatenationRightNumber;
+                            while (concatenationRightMeasure <= -10) {
+                                concatenationRightMeasure = divideI32(
+                                    concatenationRightMeasure, 10);
+                                concatenationRightLength =
+                                    concatenationRightLength + 1;
+                            }
+                        }
                         var concatenationLength = concatenationLeftLength +
                                                   concatenationRightLength;
                         var concatenationValid = 1;
@@ -1152,14 +1254,54 @@
                         while (concatenationIndex < concatenationLength) {
                             var concatenationCode = 0;
                             if (concatenationIndex < concatenationLeftLength) {
-                                concatenationCode = stringCharacterCodeUnit(
-                                    heapBase, concatenationLeft,
-                                    concatenationIndex) & 65535;
+                                if (concatenationLeftIsString === 1) {
+                                    concatenationCode = stringCharacterCodeUnit(
+                                        heapBase, concatenationLeft,
+                                        concatenationIndex) & 65535;
+                                } else if (concatenationIndex <
+                                           concatenationLeftNegative) {
+                                    concatenationCode = 45;
+                                } else {
+                                    var concatenationLeftPlace =
+                                        concatenationLeftLength -
+                                        concatenationIndex - 1;
+                                    var concatenationLeftDigits =
+                                        concatenationLeftNumber;
+                                    while (concatenationLeftPlace > 0) {
+                                        concatenationLeftDigits = divideI32(
+                                            concatenationLeftDigits, 10);
+                                        concatenationLeftPlace =
+                                            concatenationLeftPlace - 1;
+                                    }
+                                    concatenationCode = 48 -
+                                        (concatenationLeftDigits % 10);
+                                }
                             } else {
-                                concatenationCode = stringCharacterCodeUnit(
-                                    heapBase, concatenationRight,
+                                var concatenationRightIndex =
                                     concatenationIndex -
-                                    concatenationLeftLength) & 65535;
+                                    concatenationLeftLength;
+                                if (concatenationRightIsString === 1) {
+                                    concatenationCode = stringCharacterCodeUnit(
+                                        heapBase, concatenationRight,
+                                        concatenationRightIndex) & 65535;
+                                } else if (concatenationRightIndex <
+                                           concatenationRightNegative) {
+                                    concatenationCode = 45;
+                                } else {
+                                    var concatenationRightPlace =
+                                        concatenationRightLength -
+                                        concatenationRightIndex - 1;
+                                    var concatenationRightDigits =
+                                        concatenationRightNumber;
+                                    while (concatenationRightPlace > 0) {
+                                        concatenationRightDigits = divideI32(
+                                            concatenationRightDigits, 10);
+                                        concatenationRightPlace =
+                                            concatenationRightPlace - 1;
+                                    }
+                                    concatenationCode = 48 -
+                                        (concatenationRightDigits % 10);
+                                }
                             }
                             setStringCharacterByte(heapBase,
                                 concatenationAddress, concatenationIndex * 2,
@@ -2336,7 +2478,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_STRING_CONSTRUCTOR) {
+                    else if (intrinsicId > INTRINSIC_MATH_ATAN2) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2357,6 +2499,8 @@
                 var requiredIntrinsicArguments = 1;
                 if (intrinsicId === INTRINSIC_GET_DLSYM) {
                     requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+                    requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
@@ -2934,6 +3078,9 @@
                 if (intrinsicId === INTRINSIC_MATH_POW) {
                     isMathIntrinsic = 1;
                 }
+                if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+                    isMathIntrinsic = 1;
+                }
                 if (isMathIntrinsic === 1) {
                     var mathArgumentsValid = 1;
                     var mathArgumentIndex = 0;
@@ -3019,7 +3166,29 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    if (intrinsicId === INTRINSIC_MATH_POW) {
+                    if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+                        if (intrinsicArgumentCount !== 2) {
+                            mathArgumentsValid = 0;
+                        }
+                        if (mathArgumentsValid === 0) {
+                            store32(heapBase + state + ENGINE_EXIT_REASON,
+                                    EXIT_UNSUPPORTED);
+                            store32(heapBase + state + ENGINE_PC, pc);
+                            store32(heapBase + state + ENGINE_RESULT, opcode);
+                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                    instructions);
+                            store32(heapBase + framePC, pc);
+                            return EXIT_UNSUPPORTED;
+                        }
+                        var atan2YTag = load32(unaryMathCell);
+                        var atan2XTag = load32(powerExponentCell);
+                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                            atan2F64(loadNumberF64(
+                                unaryMathCell + VALUE_CELL_LOW, atan2YTag),
+                                loadNumberF64(powerExponentCell +
+                                    VALUE_CELL_LOW, atan2XTag)));
+                    } else if (intrinsicId === INTRINSIC_MATH_POW) {
                         if (intrinsicArgumentCount !== 2) {
                             mathArgumentsValid = 0;
                         }

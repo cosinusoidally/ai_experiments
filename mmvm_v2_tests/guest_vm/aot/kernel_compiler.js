@@ -688,7 +688,7 @@
         }
         var operations = {addF64: "add_f64", subtractF64: "sub_f64",
                           multiplyF64: "mul_f64", divideF64: "div_f64",
-                          powF64: "pow_f64"};
+                          powF64: "pow_f64", atan2F64: "atan2_f64"};
         if (operations[name] && node.arguments.length === 2) {
             return {op: operations[name],
                     left: lowerKernelF64Expression(node.arguments[0], symbols),
