@@ -6162,7 +6162,8 @@
                 allocationOpcode === Bytecode.MAKE_FUNCTION ||
                 allocationOpcode === Bytecode.MAKE_ARRAY ||
                 allocationOpcode === Bytecode.MAKE_REGEXP ||
-                (allocationOpcode === Bytecode.CALL &&
+                ((allocationOpcode === Bytecode.CALL ||
+                  allocationOpcode === Bytecode.CONSTRUCT) &&
                  records.engineCallRejectReason(this.stateAddress) ===
                  CallReject.HEAP_SPACE);
             if (allocationExit) reason = Exit.ALLOCATION;
