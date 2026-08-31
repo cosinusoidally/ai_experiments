@@ -17,7 +17,7 @@
                       REGEXP_TEST: 31, STRING_REPLACE: 32,
                       FUNCTION_APPLY: 33, OBJECT_HAS_OWN_PROPERTY: 34,
                       STRING_CONSTRUCTOR: 35, MATH_ATAN2: 36,
-                      ARRAY_JOIN: 37};
+                      ARRAY_JOIN: 37, ARRAY_SHIFT: 38};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

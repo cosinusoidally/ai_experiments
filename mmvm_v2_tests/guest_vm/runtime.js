@@ -1108,7 +1108,7 @@
                 var result = values.shift();
                 runtime.replaceArray(receiver, values);
                 return result;
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_SHIFT);
         this.arrayMethods.pop = this.makeNativeFunction("Array.pop",
             function (receiver) {
                 var values = runtime.arrayToHost(receiver);

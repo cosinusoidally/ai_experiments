@@ -259,6 +259,7 @@
         var INTRINSIC_STRING_CONSTRUCTOR = 35;
         var INTRINSIC_MATH_ATAN2 = 36;
         var INTRINSIC_ARRAY_JOIN = 37;
+        var INTRINSIC_ARRAY_SHIFT = 38;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -2484,7 +2485,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_ARRAY_JOIN) {
+                    else if (intrinsicId > INTRINSIC_ARRAY_SHIFT) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2508,6 +2509,8 @@
                 } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
                     requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
                     requiredIntrinsicArguments = 0;
@@ -3020,6 +3023,80 @@
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
+                }
+                }
+                if (intrinsicHandled === 0) {
+                if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
+                    var shiftValid = 1;
+                    var shiftReceiverIndex = load32(
+                        heapBase + bytecodeWords +
+                        (pc + THIRD_OPERAND) * WORD_BYTES);
+                    if (shiftReceiverIndex < 0) shiftValid = 0;
+                    var shiftReceiverCell = heapBase + registerCells +
+                        shiftReceiverIndex * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, shiftReceiverCell) !==
+                        VALUE_TAG_REFERENCE) shiftValid = 0;
+                    var shiftArray = valueCellReference(0, shiftReceiverCell);
+                    if (shiftValid === 1) {
+                        if (recordType(heapBase, shiftArray) !==
+                            HEAP_TYPE_ARRAY) shiftValid = 0;
+                    }
+                    if (shiftValid === 1) {
+                        var shiftVector = arrayElements(heapBase, shiftArray);
+                        var shiftLength = vectorLength(heapBase, shiftVector);
+                        if (shiftLength === 0) {
+                            store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
+                            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                        } else {
+                            var shiftFirstCell = heapBase + shiftVector +
+                                VECTOR_CELLS;
+                            var shiftFirstTag = valueCellTag(0, shiftFirstCell);
+                            if (shiftFirstTag === 0) {
+                                store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
+                                store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                            } else {
+                                store32(intrinsicTarget,
+                                        load32(shiftFirstCell));
+                                store32(intrinsicTarget + VALUE_CELL_LOW,
+                                    load32(shiftFirstCell + VALUE_CELL_LOW));
+                                store32(intrinsicTarget + VALUE_CELL_HIGH,
+                                    load32(shiftFirstCell + VALUE_CELL_HIGH));
+                                store32(intrinsicTarget + VALUE_CELL_AUX,
+                                    load32(shiftFirstCell + VALUE_CELL_AUX));
+                            }
+                            var shiftIndex = 1;
+                            while (shiftIndex < shiftLength) {
+                                var shiftSourceCell = heapBase + shiftVector +
+                                    VECTOR_CELLS +
+                                    shiftIndex * VALUE_CELL_BYTES;
+                                var shiftTargetCell = shiftSourceCell -
+                                    VALUE_CELL_BYTES;
+                                store32(shiftTargetCell,
+                                        load32(shiftSourceCell));
+                                store32(shiftTargetCell + VALUE_CELL_LOW,
+                                    load32(shiftSourceCell + VALUE_CELL_LOW));
+                                store32(shiftTargetCell + VALUE_CELL_HIGH,
+                                    load32(shiftSourceCell + VALUE_CELL_HIGH));
+                                store32(shiftTargetCell + VALUE_CELL_AUX,
+                                    load32(shiftSourceCell + VALUE_CELL_AUX));
+                                shiftIndex = shiftIndex + 1;
+                            }
+                            var shiftLastCell = heapBase + shiftVector +
+                                VECTOR_CELLS +
+                                (shiftLength - 1) * VALUE_CELL_BYTES;
+                            store32(shiftLastCell, VALUE_TAG_UNDEFINED);
+                            store32(shiftLastCell + VALUE_CELL_LOW, 0);
+                            store32(shiftLastCell + VALUE_CELL_HIGH, 0);
+                            store32(shiftLastCell + VALUE_CELL_AUX, 0);
+                            setVectorLength(heapBase, shiftVector,
+                                            shiftLength - 1);
+                        }
+                        intrinsicHandled = 1;
+                    }
                 }
                 }
                 if (intrinsicHandled === 0) {
