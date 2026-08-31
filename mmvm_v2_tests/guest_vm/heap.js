@@ -234,7 +234,7 @@
                " records(type=count/bytes): " + parts.join(",");
     };
 
-    Heap.prototype.freeRecord = function (address) {
+    Heap.prototype.freeRecord = function (address, source) {
         address = Number(address);
         if (!address || address !== Math.floor(address) || address < 64 ||
             address + HEADER_SIZE > this.bump) {
@@ -242,7 +242,11 @@
                                 " (heap bump " + this.bump + ")");
         }
         if (this.memory.readU32Trusted(address + HEADER_TYPE) === Types.FREE) {
-            throw new Error("guest heap record is already freed");
+            throw new Error("guest heap record " + address +
+                            " is already freed (size " +
+                            this.memory.readU32Trusted(
+                                address + HEADER_SIZE_FIELD) +
+                            (source ? ", released by " + source : "") + ")");
         }
         var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
         this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
@@ -294,6 +298,13 @@
         var index = 0;
         while (index < this.freeBlocks.length) {
             var address = this.freeBlocks[index];
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var flags = this.memory.readU32Trusted(address + HEADER_FLAGS);
+            if (type !== Types.FREE || flags !== 0) {
+                throw new Error("stale guest free-block index: address=" +
+                    address + " type=" + type + " flags=" + flags +
+                    " index=" + index);
+            }
             var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
             if (size >= minimumSize && size > bestSize) {
                 bestIndex = index;

@@ -229,7 +229,8 @@
                 var nameConstant =
                     this.runtime.heapRecords.handlerNameConstant(handler);
                 var target = this.runtime.heapRecords.handlerTarget(handler);
-                this.runtime.linearHeap.freeRecord(handler);
+                this.runtime.linearHeap.freeRecord(handler,
+                                                   "exception handler");
                 this.runtime.setBinding(frame.context, frame.environment,
                     frame.constants[nameConstant],
                     this.runtime.importCaughtException(error));
@@ -255,9 +256,11 @@
         var handler;
         while ((handler = this.runtime.heapRecords.popFrameHandler(
                     frame.heapAddress))) {
-            this.runtime.linearHeap.freeRecord(handler);
+            this.runtime.linearHeap.freeRecord(handler,
+                                               "frame-handler cleanup");
         }
-        this.runtime.linearHeap.freeRecord(frame.heapAddress);
+        this.runtime.linearHeap.freeRecord(frame.heapAddress,
+                                           "execution frame");
     };
 
     Execution.prototype.synchronizeNativeFrames = function (currentFrameAddress) {
@@ -798,7 +801,8 @@
                     if (!poppedHandler) {
                         throw new Error("catch-handler stack underflow");
                     }
-                    this.runtime.linearHeap.freeRecord(poppedHandler);
+                    this.runtime.linearHeap.freeRecord(poppedHandler,
+                                                       "POP_CATCH");
                     frame.pc = pc + 1;
                 } else if (opcode === op.RETURN) {
                     var returnValue = registers[code[pc + 1]];

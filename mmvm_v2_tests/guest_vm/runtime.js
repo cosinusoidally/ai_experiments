@@ -605,7 +605,7 @@
         this.heapRecords.setVectorLength(newVector, length);
         this.heapRecords.setArrayElements(array.heapAddress, newVector);
         array.arrayStructureVersion++;
-        this.linearHeap.freeRecord(oldVector);
+        this.linearHeap.freeRecord(oldVector, "array growth");
         return newVector;
     };
 
@@ -672,7 +672,7 @@
             index++;
         }
         this.heapRecords.setVectorLength(vector, values.length);
-        this.linearHeap.freeRecord(oldVector);
+        this.linearHeap.freeRecord(oldVector, "array replacement");
         return array;
     };
 
