@@ -786,6 +786,16 @@
         else if (node.op === "mul_f64") assembler.multiplyF64Pop();
         else if (node.op === "div_f64") assembler.divideF64Pop();
         else if (node.op === "atan2_f64") assembler.atan2F64Pop();
+        else if (node.op === "rem_f64") {
+            var remainderLabel = "kernel_f64_remainder_" + state.nextLabel++;
+            assembler.exchangeF64WithSt1();
+            assembler.label(remainderLabel);
+            assembler.partialRemainderF64();
+            assembler.storeF64StatusInAx();
+            assembler.testF64RemainderIncomplete();
+            assembler.jumpNotZero(remainderLabel);
+            assembler.popSt1F64();
+        }
         else throw new Error("unsupported i386 control-flow f64 expression " + node.op);
     }
 
@@ -851,6 +861,17 @@
         else if (node.op === "sub_f64") assembler.subtractF64Pop();
         else if (node.op === "mul_f64") assembler.multiplyF64Pop();
         else if (node.op === "div_f64") assembler.divideF64Pop();
+        else if (node.op === "rem_f64") {
+            var remainderExpressionLabel =
+                "kernel_f64_expression_remainder_" + assembler.bytes.length;
+            assembler.exchangeF64WithSt1();
+            assembler.label(remainderExpressionLabel);
+            assembler.partialRemainderF64();
+            assembler.storeF64StatusInAx();
+            assembler.testF64RemainderIncomplete();
+            assembler.jumpNotZero(remainderExpressionLabel);
+            assembler.popSt1F64();
+        }
         else throw new Error("unsupported i386 f64 IR " + node.op);
     }
 

@@ -316,6 +316,18 @@
         this.macros.push("fpatan_st1_st0()");
         this.emitByte(0xd9); this.emitByte(0xf3);
     };
+    Assembler.prototype.partialRemainderF64 = function () {
+        this.macros.push("fprem_st0_st1()");
+        this.emitByte(0xd9); this.emitByte(0xf8);
+    };
+    Assembler.prototype.storeF64StatusInAx = function () {
+        this.macros.push("fnstsw_ax()");
+        this.emitByte(0xdf); this.emitByte(0xe0);
+    };
+    Assembler.prototype.testF64RemainderIncomplete = function () {
+        this.macros.push("test_ah_fprem_incomplete()");
+        this.emitByte(0xf6); this.emitByte(0xc4); this.emitByte(0x04);
+    };
     Assembler.prototype.absF64 = function () {
         this.macros.push("fabs()");
         this.emitByte(0xd9); this.emitByte(0xe1);
@@ -379,6 +391,11 @@
 
     Assembler.prototype.jumpNotEqual = function (name) {
         this.macros.push("jne(" + name + ")");
+        this.emitByte(0x0f); this.emitByte(0x85);
+        this.relativeFixup(name);
+    };
+    Assembler.prototype.jumpNotZero = function (name) {
+        this.macros.push("jnz(" + name + ")");
         this.emitByte(0x0f); this.emitByte(0x85);
         this.relativeFixup(name);
     };
