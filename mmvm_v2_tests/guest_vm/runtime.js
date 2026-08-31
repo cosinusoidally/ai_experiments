@@ -1132,14 +1132,14 @@
                     } else runtime.arraySet(result, runtime.arrayLength(result), value);
                 }
                 return result;
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_CONCAT);
         this.arrayMethods.slice = this.makeNativeFunction("Array.slice",
             function (receiver, args) {
                 var start = args.length ? Number(args[0]) : 0;
                 var values = runtime.arrayToHost(receiver);
                 var end = args.length > 1 ? Number(args[1]) : values.length;
                 return runtime.arrayFrom(values.slice(start, end));
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_SLICE);
         this.arrayMethods.join = this.makeNativeFunction("Array.join",
             function (receiver, args) {
                 var separator = args.length && args[0] !== undefined ?

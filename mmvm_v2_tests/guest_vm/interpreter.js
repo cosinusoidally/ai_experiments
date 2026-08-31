@@ -640,6 +640,13 @@
                     }
                     var callableValue = registers[code[pc + 2]];
                     if (this.runtime.nativeInterpreter &&
+                        this.runtime.nativeInterpreter.ensureIntrinsicHelper(
+                            callableValue)) {
+                        frame.pc = pc;
+                        frame.nativeHeapCurrent = true;
+                        continue;
+                    }
+                    if (this.runtime.nativeInterpreter &&
                         this.runtime.profileOpcodeCounts) {
                         this.runtime.nativeInterpreter.noteFallbackCall(
                             callableValue, args, frame, pc);

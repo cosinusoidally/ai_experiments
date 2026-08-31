@@ -121,7 +121,9 @@
     var PLATFORM_POLL_POINTER = 8;
     var PLATFORM_CLOCK_GETTIME_POINTER = 12;
     var PLATFORM_EXIT_POINTER = 16;
-    var PLATFORM_SERVICES_BYTES = 24;
+    var PLATFORM_ARRAY_SLICE_POINTER = 20;
+    var PLATFORM_ARRAY_CONCAT_POINTER = 24;
+    var PLATFORM_SERVICES_BYTES = 32;
 
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
@@ -840,6 +842,32 @@
     Records.prototype.platformDlsymPointer = function (services) {
         return this.heap.readTrustedFieldU32(
             services, PLATFORM_DLSYM_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.setPlatformArraySlicePointer = function (
+            services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_ARRAY_SLICE_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformArraySlicePointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_ARRAY_SLICE_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.setPlatformArrayConcatPointer = function (
+            services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_ARRAY_CONCAT_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformArrayConcatPointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_ARRAY_CONCAT_POINTER,
             Heap.Types.PLATFORM_SERVICES);
     };
 

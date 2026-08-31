@@ -70,7 +70,9 @@
         engineHeapBump: "ENGINE_HEAP_BUMP",
         engineHeapLimit: "ENGINE_HEAP_LIMIT",
         enginePlatformServices: "ENGINE_PLATFORM_SERVICES",
-        platformDlsymPointer: "PLATFORM_DLSYM_POINTER"
+        platformDlsymPointer: "PLATFORM_DLSYM_POINTER",
+        platformArraySlicePointer: "PLATFORM_ARRAY_SLICE_POINTER",
+        platformArrayConcatPointer: "PLATFORM_ARRAY_CONCAT_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {
