@@ -76,6 +76,7 @@
             (options.heapBytes === undefined ? 256 * 1024 * 1024 :
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
+        this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;
         this.profileNextReport = 1000000;
@@ -2011,7 +2012,7 @@
                     throw new Error("native guest marker exhausted its work stack");
                 }
                 this.verifyNativeFrameMarks(generation);
-                if (this.profileOpcodeCounts) {
+                if (this.verifyNativeHeap) {
                     this.verifyNativeHeapGraph(generation);
                 }
             } else {

@@ -455,6 +455,11 @@
                         continue;
                     }
                     if (nativeResult.reason === 4) {
+                        if (this.runtime.nativeInterpreter.
+                                tryRefillAllocationRegion()) {
+                            nativeFrame.nativeHeapCurrent = true;
+                            continue;
+                        }
                         if (this.allocationRetryFrame !== nativeFrame.heapAddress ||
                             this.allocationRetryPC !== nativeResult.pc) {
                             this.allocationRetryFrame = nativeFrame.heapAddress;

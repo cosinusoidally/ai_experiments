@@ -6787,6 +6787,18 @@
         this.releaseAllocationRegionForCollection();
     };
 
+    NativeInterpreter.prototype.tryRefillAllocationRegion = function () {
+        if (this.allocationRegion) return false;
+        var claimedRegion = this.runtime.linearHeap.claimLargestFreeBlock(
+            MIN_NATIVE_ALLOCATION_REGION_BYTES);
+        if (!claimedRegion) return false;
+        this.allocationRegion = {
+            cursor: claimedRegion.address,
+            end: claimedRegion.address + claimedRegion.size
+        };
+        return true;
+    };
+
     NativeInterpreter.prototype.releaseCachedFramesForCollection = function () {
         var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;

@@ -4,6 +4,7 @@ var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
 var guestRunnerProfile = false;
+var guestRunnerVerifyHeap = false;
 var guestRunnerThreaded = false;
 var guestRunnerNative = false;
 
@@ -28,6 +29,9 @@ for (var guestRunnerOptionIndex = 0;
      guestRunnerOptionIndex++) {
     if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
         guestRunnerProfile = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--vm-verify-heap") {
+        guestRunnerVerifyHeap = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-threaded") {
         guestRunnerThreaded = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
@@ -39,7 +43,8 @@ for (var guestRunnerOptionIndex = 0;
 guestRunnerArguments = guestRunnerProgramArguments;
 
 if (!guestRunnerArguments.length) {
-    var guestUsage = "usage: guest_runner.js [--vm-profile] [--vm-threaded] " +
+    var guestUsage = "usage: guest_runner.js [--vm-profile] " +
+                     "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-native] program.js";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
@@ -52,6 +57,7 @@ var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
+                                        verifyNativeHeap: guestRunnerVerifyHeap,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,
                                         threadedCompile: !guestRunnerNative &&
