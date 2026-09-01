@@ -296,7 +296,8 @@
              this.current.value === "-=" || this.current.value === "*=" ||
              this.current.value === "/=" || this.current.value === "%=" ||
              this.current.value === "|=" || this.current.value === "&=" ||
-             this.current.value === "^=")) {
+             this.current.value === "^=" || this.current.value === "<<=" ||
+             this.current.value === ">>=" || this.current.value === ">>>=")) {
             var operator = this.advance(true).value;
             return {type: "AssignmentExpression", operator: operator,
                     left: left, right: this.parseAssignment()};

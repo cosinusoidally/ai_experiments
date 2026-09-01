@@ -119,6 +119,7 @@ score's internal benchmark interval.
 | --- | --- | ---: | ---: | --- |
 | Richards | passing | 76.4 | 15.36 s | Native loose equality reduced a quick run to about 40 semantic exits. |
 | DeltaBlue | passing | 116 | 15.45 s | Native `Function.call`, `Array.pop`, and `Array` construction reduced a quick run from 2,912 semantic exits to 40. |
+| Crypto | passing | 129 | 48.02 s | Required general compound `<<=`, `>>=`, and `>>>=` parsing and bytecode lowering. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers

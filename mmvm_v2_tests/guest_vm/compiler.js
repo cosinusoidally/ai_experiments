@@ -686,7 +686,8 @@
                 var assignmentRight = this.compileExpression(expression.right);
                 assigned = reference.kind === "register" ?
                     reference.register : this.allocate();
-                this.emitBinary(expression.operator.charAt(0), assigned,
+                this.emitBinary(expression.operator.substring(
+                                    0, expression.operator.length - 1), assigned,
                                 current, assignmentRight);
             }
             this.storeReference(reference, assigned);

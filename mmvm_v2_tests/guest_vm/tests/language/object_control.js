@@ -32,6 +32,14 @@ var flags = 1;
 flags |= 4;
 flags &= 6;
 assertEqual(flags, 4, "compound bitwise assignment");
+var shifted = 3;
+shifted <<= 3;
+assertEqual(shifted, 24, "compound left shift assignment");
+shifted >>= 2;
+assertEqual(shifted, 6, "compound signed right shift assignment");
+shifted = -1;
+shifted >>>= 28;
+assertEqual(shifted, 15, "compound unsigned right shift assignment");
 
 function switchValue(value) {
     var result = "";
