@@ -151,6 +151,77 @@
         }
     }
 
+    X86Backend.prototype.loadExecutableCache = function (path) {
+        if (!this.ffi.isMMVM) return null;
+        var openPointer = this.ffi.resolve("open");
+        var closePointer = this.ffi.resolve("close");
+        var seekPointer = this.ffi.resolve("lseek");
+        var descriptor = this.ffi.call(openPointer, [path, 0, 0]);
+        if (descriptor < 0) return null;
+        var length = this.ffi.call(seekPointer, [descriptor, 0, 2]);
+        if (length <= 0 || length > 16 * 1024 * 1024) {
+            this.ffi.call(closePointer, [descriptor]);
+            return null;
+        }
+        this.ffi.call(seekPointer, [descriptor, 0, 0]);
+        var pointer = this.ffi.call(this.mmap,
+            [0, length, 5, 2, descriptor, 0]);
+        this.ffi.call(closePointer, [descriptor]);
+        if (!pointer || pointer === -1) return null;
+        var ffi = this.ffi;
+        var munmap = this.munmap;
+        var result = {fn: null, pointer: pointer, length: length,
+            bytes: null, assembly: "", ir: null, backend: "i386-cache",
+            destroy: function () {}};
+        result.fn = function () {
+            var args = [];
+            var argumentIndex = 0;
+            while (argumentIndex < arguments.length && argumentIndex < 8) {
+                args[argumentIndex] = Number(arguments[argumentIndex]) | 0;
+                argumentIndex++;
+            }
+            return ffi.call(pointer, args) | 0;
+        };
+        result.destroy = function () {
+            if (!result.pointer) return;
+            ffi.call(munmap, [result.pointer, length]);
+            result.pointer = 0;
+            result.fn = null;
+        };
+        return result;
+    };
+
+    X86Backend.prototype.writeExecutableCache = function (path, result) {
+        if (!this.ffi.isMMVM || !result || !result.pointer ||
+            result.length <= 0) return false;
+        var openPointer = this.ffi.resolve("open");
+        var closePointer = this.ffi.resolve("close");
+        var writePointer = this.ffi.resolve("write");
+        var renamePointer = this.ffi.resolve("rename");
+        var unlinkPointer = this.ffi.resolve("unlink");
+        var getpidPointer = this.ffi.resolve("getpid");
+        var temporaryPath = path + ".tmp." +
+            this.ffi.call(getpidPointer, []);
+        var descriptor = this.ffi.call(openPointer,
+            [temporaryPath, 577, 384]);
+        if (descriptor < 0) return false;
+        var written = 0;
+        while (written < result.length) {
+            var amount = this.ffi.call(writePointer,
+                [descriptor, result.pointer + written,
+                 result.length - written]);
+            if (amount <= 0) break;
+            written += amount;
+        }
+        this.ffi.call(closePointer, [descriptor]);
+        if (written !== result.length ||
+            this.ffi.call(renamePointer, [temporaryPath, path]) !== 0) {
+            this.ffi.call(unlinkPointer, [temporaryPath]);
+            return false;
+        }
+        return true;
+    };
+
     function describeRegisterAllocation(ir, registerMap) {
         var description = {};
         var key;
