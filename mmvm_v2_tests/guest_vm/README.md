@@ -193,6 +193,11 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
 LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
   --with-snapshot artifacts/native-interpreter.snapshot hello.js
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --with-snapshot artifacts/native-interpreter.snapshot \
+  --skip-snapshot-hash hello.js
 ```
 
 Both options imply `--vm-native`. `--snapshot FILE` compiles normally, writes
@@ -201,6 +206,15 @@ FILE` requires a compatible snapshot and fails rather than silently compiling
 when the file is absent, truncated, built for profiling mode, or stale. Remove
 snapshots with `./mk_clean`; they are temporary build artifacts and must not be
 committed.
+
+`--skip-snapshot-hash` is an explicit faster but unchecked form of
+`--with-snapshot FILE`. It avoids converting the interpreter kernel function
+back to source and hashing that source at startup. The loader still checks the
+snapshot magic, file-format version, compiler version, profiling mode, declared
+code length, and actual file length. It cannot detect that a snapshot was made
+from older kernel source, however, so use it only with a snapshot whose origin
+is trusted and whose build is known to match the current checkout. The option
+is rejected unless `--with-snapshot FILE` is also present.
 
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:

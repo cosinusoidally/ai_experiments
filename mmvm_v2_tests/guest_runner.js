@@ -9,6 +9,7 @@ var guestRunnerThreaded = false;
 var guestRunnerNative = false;
 var guestRunnerSnapshot = null;
 var guestRunnerWithSnapshot = null;
+var guestRunnerSkipSnapshotHash = false;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -54,6 +55,10 @@ for (var guestRunnerOptionIndex = 0;
                 guestRunnerArguments[guestRunnerOptionIndex];
         }
         guestRunnerNative = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--skip-snapshot-hash") {
+        guestRunnerSkipSnapshotHash = true;
+        guestRunnerNative = true;
     } else {
         guestRunnerProgramArguments.push(guestRunnerArguments[guestRunnerOptionIndex]);
     }
@@ -64,7 +69,7 @@ if (!guestRunnerArguments.length) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-native] [--snapshot file | " +
-                     "--with-snapshot file] program.js";
+                     "--with-snapshot file [--skip-snapshot-hash]] program.js";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -81,6 +86,8 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         nativeInterpreter: guestRunnerNative,
                                         snapshot: guestRunnerSnapshot,
                                         withSnapshot: guestRunnerWithSnapshot,
+                                        skipSnapshotHash:
+                                            guestRunnerSkipSnapshotHash,
                                         threadedCompile: !guestRunnerNative &&
                                             (!guestRunnerIsNode ||
                                              guestRunnerThreaded)});

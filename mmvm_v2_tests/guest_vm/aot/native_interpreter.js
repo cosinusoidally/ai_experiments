@@ -7445,7 +7445,10 @@
         this.runtime = runtime;
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
-        var kernelSource = snapshotRequested ? interpreterKernel.toString() : null;
+        var snapshotNeedsSource = runtime.nativeSnapshotWrite ||
+            (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
+        var kernelSource = snapshotNeedsSource ?
+            interpreterKernel.toString() : null;
         var snapshotMetadata = null;
         if (snapshotRequested) {
             snapshotMetadata = {
@@ -7453,7 +7456,9 @@
                  * the executable contract without changing kernel source. */
                 compilerVersion: 1,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
-                sourceHash: hashKernelSource(kernelSource)
+                sourceHash: snapshotNeedsSource ?
+                    hashKernelSource(kernelSource) : 0,
+                skipSourceHash: !snapshotNeedsSource
             };
         }
         var x86Backend = new X86Backend({captureAssembly: false});
@@ -7482,7 +7487,7 @@
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
                 }
             };
-            if (snapshotRequested) compilerOptions.source = kernelSource;
+            if (snapshotNeedsSource) compilerOptions.source = kernelSource;
             this.ir = new KernelCompiler().compile(interpreterKernel,
                                                    compilerOptions);
         }
@@ -7514,7 +7519,9 @@
             backendTimings.install = 0;
             reportSnapshot("loaded native snapshot: " +
                            runtime.nativeSnapshotRead + " (" +
-                           this.nativeResult.length + " bytes)");
+                           this.nativeResult.length + " bytes" +
+                           (runtime.skipNativeSnapshotHash ?
+                               ", source hash unchecked" : "") + ")");
         }
         var nativeBackendFinished = constructionStarted ?
             new Date().getTime() : 0;

@@ -79,12 +79,16 @@
         this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.nativeSnapshotWrite = options.snapshot || null;
         this.nativeSnapshotRead = options.withSnapshot || null;
+        this.skipNativeSnapshotHash = !!options.skipSnapshotHash;
         if (this.nativeSnapshotWrite && this.nativeSnapshotRead) {
             throw new Error("snapshot and withSnapshot are mutually exclusive");
         }
         if ((this.nativeSnapshotWrite || this.nativeSnapshotRead) &&
             !options.nativeInterpreter) {
             throw new Error("native snapshots require nativeInterpreter");
+        }
+        if (this.skipNativeSnapshotHash && !this.nativeSnapshotRead) {
+            throw new Error("skipSnapshotHash requires withSnapshot");
         }
         this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;

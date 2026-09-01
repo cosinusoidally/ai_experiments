@@ -190,7 +190,8 @@
             formatVersion !== SNAPSHOT_FORMAT_VERSION ||
             compilerVersion !== (expected.compilerVersion >>> 0) ||
             profileMode !== (expected.profileMode >>> 0) ||
-            sourceHash !== (expected.sourceHash >>> 0) ||
+            (!expected.skipSourceHash &&
+             sourceHash !== (expected.sourceHash >>> 0)) ||
             length <= 0 || length > 16 * 1024 * 1024) {
             this.ffi.call(closePointer, [descriptor]);
             throw new Error("native snapshot is incompatible with this VM: " +

@@ -387,3 +387,23 @@ about 4.8 KiB and one comparable profiled initialization rose from roughly
 8.3 seconds to 10.5 seconds despite eliminating those `String` exits. The
 remaining dominant assembler boundary is `Array.join`; reducing a smaller
 exit class at the cost of a larger dispatch engine is not a net improvement.
+
+## 2026-09-01: unchecked native-snapshot startup
+
+`--with-snapshot FILE --skip-snapshot-hash` explicitly trusts a native
+snapshot and avoids both `interpreterKernel.toString()` and hashing the
+recovered source. Three alternating `hello.js` process starts under
+`js_min.exe` measured:
+
+| snapshot mode | runs (seconds) | mean |
+| --- | --- | --- |
+| checked | 4.38, 4.17, 4.05 | 4.20 s |
+| source hash unchecked | 0.41, 0.39, 0.40 | 0.40 s |
+
+The unchecked mode saved 3.80 seconds, or about 90% of checked snapshot
+startup, and made this small workload start 10.5 times faster. Its measured
+0.40-second startup is also far below the earlier roughly 9.44-second normal
+native compilation path. This mode still validates snapshot magic, format and
+compiler versions, profile mode, code length, and file length; only source
+identity is unchecked. It is opt-in because stale native code would otherwise
+be indistinguishable from code for the current interpreter kernel.

@@ -75,6 +75,14 @@ is a default cache policy. Embedders expose the same choice as the mutually
 exclusive `snapshot` and `withSnapshot` runtime options, both of which require
 `nativeInterpreter: true` and an MMVM host.
 
+An embedder which trusts a snapshot produced for the exact current checkout
+may combine `withSnapshot` with `skipSnapshotHash: true`; the command-line form
+is `--with-snapshot FILE --skip-snapshot-hash`. This avoids both
+`interpreterKernel.toString()` and the source-hash pass. The loader continues
+to validate every other header and file-layout field, but deliberately cannot
+reject executable code generated from stale kernel source. The unchecked mode
+is never implicit and is invalid without `withSnapshot`.
+
 A snapshot contains a 32-byte header followed by the macro assembler's i386
 output. The header records:
 
