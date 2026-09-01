@@ -1664,6 +1664,14 @@
         return this.typeOf(this.getProperty(globalObject, name));
     };
 
+    Runtime.prototype.toNumber = function (value) {
+        if (value && value.guestType && this.dateValueKey !== undefined &&
+            this.hasOwnProperty(value, this.dateValueKey)) {
+            return Number(this.getProperty(value, this.dateValueKey));
+        }
+        return Number(value);
+    };
+
     Runtime.prototype.toString = function (value) {
         if (value === undefined) return "undefined";
         if (value === null) return "null";

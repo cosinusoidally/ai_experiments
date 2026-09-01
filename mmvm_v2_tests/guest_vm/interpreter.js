@@ -618,10 +618,14 @@
                     left = registers[code[pc + 2]];
                     right = registers[code[pc + 3]];
                     if (opcode === op.ADD) registers[target] = this.runtime.add(left, right);
-                    else if (opcode === op.SUBTRACT) registers[target] = Number(left) - Number(right);
-                    else if (opcode === op.MULTIPLY) registers[target] = Number(left) * Number(right);
-                    else if (opcode === op.DIVIDE) registers[target] = Number(left) / Number(right);
-                    else if (opcode === op.REMAINDER) registers[target] = Number(left) % Number(right);
+                    else if (opcode === op.SUBTRACT) registers[target] =
+                        this.runtime.toNumber(left) - this.runtime.toNumber(right);
+                    else if (opcode === op.MULTIPLY) registers[target] =
+                        this.runtime.toNumber(left) * this.runtime.toNumber(right);
+                    else if (opcode === op.DIVIDE) registers[target] =
+                        this.runtime.toNumber(left) / this.runtime.toNumber(right);
+                    else if (opcode === op.REMAINDER) registers[target] =
+                        this.runtime.toNumber(left) % this.runtime.toNumber(right);
                     else if (opcode === op.STRICT_EQUAL) registers[target] = left === right;
                     else if (opcode === op.EQUAL) registers[target] = this.runtime.equal(left, right);
                     else if (opcode === op.LESS) registers[target] = left < right;
@@ -639,10 +643,12 @@
                     registers[code[pc + 1]] = !this.runtime.truthy(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.NEGATE) {
-                    registers[code[pc + 1]] = -Number(registers[code[pc + 2]]);
+                    registers[code[pc + 1]] = -this.runtime.toNumber(
+                        registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.POSITIVE) {
-                    registers[code[pc + 1]] = Number(registers[code[pc + 2]]);
+                    registers[code[pc + 1]] = this.runtime.toNumber(
+                        registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.BIT_NOT) {
                     registers[code[pc + 1]] = ~registers[code[pc + 2]];

@@ -762,10 +762,10 @@
                        "==='number')?" + rr(2) + "+" + rr(3) + ":runtime.add(" +
                        rr(2) + "," + rr(3) + ");");
         }
-        else if (opcode === op.SUBTRACT) lines.push(rr(1) + "=Number(" + rr(2) + ")-Number(" + rr(3) + ");");
-        else if (opcode === op.MULTIPLY) lines.push(rr(1) + "=Number(" + rr(2) + ")*Number(" + rr(3) + ");");
-        else if (opcode === op.DIVIDE) lines.push(rr(1) + "=Number(" + rr(2) + ")/Number(" + rr(3) + ");");
-        else if (opcode === op.REMAINDER) lines.push(rr(1) + "=Number(" + rr(2) + ")%Number(" + rr(3) + ");");
+        else if (opcode === op.SUBTRACT) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")-runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.MULTIPLY) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")*runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.DIVIDE) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")/runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.REMAINDER) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")%runtime.toNumber(" + rr(3) + ");");
         else if (opcode === op.STRICT_EQUAL) lines.push(rr(1) + "=" + rr(2) + "===" + rr(3) + ";");
         else if (opcode === op.EQUAL) lines.push(rr(1) + "=runtime.equal(" + rr(2) + "," + rr(3) + ");");
         else if (opcode === op.LESS) lines.push(rr(1) + "=" + rr(2) + "<" + rr(3) + ";");
@@ -779,8 +779,8 @@
         else if (opcode === op.SHIFT_RIGHT) lines.push(rr(1) + "=" + rr(2) + ">>" + rr(3) + ";");
         else if (opcode === op.SHIFT_UNSIGNED_RIGHT) lines.push(rr(1) + "=" + rr(2) + ">>>" + rr(3) + ";");
         else if (opcode === op.NOT) lines.push(rr(1) + "=!" + rr(2) + ";");
-        else if (opcode === op.NEGATE) lines.push(rr(1) + "=-Number(" + rr(2) + ");");
-        else if (opcode === op.POSITIVE) lines.push(rr(1) + "=Number(" + rr(2) + ");");
+        else if (opcode === op.NEGATE) lines.push(rr(1) + "=-runtime.toNumber(" + rr(2) + ");");
+        else if (opcode === op.POSITIVE) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ");");
         else if (opcode === op.BIT_NOT) lines.push(rr(1) + "=~" + rr(2) + ";");
         else if (opcode === op.TYPEOF) lines.push(rr(1) + "=runtime.typeOf(" + rr(2) + ");");
         else if (opcode === op.TYPEOF_GLOBAL) {

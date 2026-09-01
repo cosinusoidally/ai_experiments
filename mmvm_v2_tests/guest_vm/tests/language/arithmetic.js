@@ -5,4 +5,8 @@ assertEqual(17 % 5, 2, "remainder");
 assertEqual("guest" + " vm", "guest vm", "string addition");
 assertEqual(4 === 4, true, "strict equality");
 assertEqual(4 !== 5, true, "strict inequality");
+assertEqual(null == undefined, true, "loose null/undefined equality");
+assertEqual({} == null, false, "loose object/null inequality");
+assertEqual(false == 0, true, "loose boolean/number equality");
+assertEqual(true == 1.0, true, "loose boolean/double equality");
 assertEqual(4 < 5 && 8 >= 8, true, "relational and logical operators");

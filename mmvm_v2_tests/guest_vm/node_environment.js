@@ -605,6 +605,7 @@
             }, true));
 
         var dateValueKey = "\x00DateValue";
+        this.runtime.dateValueKey = dateValueKey;
         var datePrototype = this.object({});
         function dateValue(receiver) {
             return Number(environment.runtime.getProperty(
@@ -620,6 +621,7 @@
         dateMethod("getFullYear"); dateMethod("getHours");
         dateMethod("getMinutes"); dateMethod("getSeconds");
         dateMethod("getTime", NativeIntrinsics.DATE_GET_TIME);
+        dateMethod("valueOf", NativeIntrinsics.DATE_GET_TIME);
         var dateConstructor = this.makeFunction("Date", function () {}, true,
             NativeIntrinsics.DATE_CONSTRUCTOR);
         dateConstructor.constructCallback = function () {
