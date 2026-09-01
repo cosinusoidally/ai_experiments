@@ -13,6 +13,19 @@
         this.bytes[this.bytes.length] = value & 255;
     };
 
+    Assembler.prototype.emitBytes2 = function (first, second) {
+        var index = this.bytes.length;
+        this.bytes[index] = first & 255;
+        this.bytes[index + 1] = second & 255;
+    };
+
+    Assembler.prototype.emitBytes3 = function (first, second, third) {
+        var index = this.bytes.length;
+        this.bytes[index] = first & 255;
+        this.bytes[index + 1] = second & 255;
+        this.bytes[index + 2] = third & 255;
+    };
+
     Assembler.prototype.word32 = function (value) {
         value = Number(value) >>> 0;
         var index = this.bytes.length;
@@ -30,41 +43,41 @@
     Assembler.prototype.movEaxArgument = function (index) {
         var displacement = 4 + index * 4 + this.stackWords * 4;
         if (this.macros) this.macros.push("mov_eax_arg(" + index + ")");
-        this.emitByte(0x8b); this.emitByte(0x44); this.emitByte(0x24);
+        this.emitBytes3(0x8b, 0x44, 0x24);
         this.emitByte(displacement);
     };
 
     Assembler.prototype.movEaxEbpArgument = function (index) {
         var displacement = 8 + index * 4;
         if (this.macros) this.macros.push("mov_eax_ebp_arg(" + index + ")");
-        this.emitByte(0x8b); this.emitByte(0x45); this.emitByte(displacement);
+        this.emitBytes3(0x8b, 0x45, displacement);
     };
     Assembler.prototype.subEspImmediate = function (value) {
         if (this.macros) this.macros.push("sub_esp_i32(" + value + ")");
-        this.emitByte(0x81); this.emitByte(0xec); this.word32(value);
+        this.emitBytes2(0x81, 0xec); this.word32(value);
     };
     Assembler.prototype.movEaxLocal = function (index) {
         var displacement = -(index + 1) * 4;
         if (this.macros) this.macros.push("mov_eax_local(" + index + ")");
-        this.emitByte(0x8b); this.emitByte(0x85); this.word32(displacement);
+        this.emitBytes2(0x8b, 0x85); this.word32(displacement);
     };
     Assembler.prototype.movLocalEax = function (index) {
         var displacement = -(index + 1) * 4;
         if (this.macros) this.macros.push("mov_local_eax(" + index + ")");
-        this.emitByte(0x89); this.emitByte(0x85); this.word32(displacement);
+        this.emitBytes2(0x89, 0x85); this.word32(displacement);
     };
     Assembler.prototype.movEbpArgumentEax = function (index) {
         var displacement = 8 + index * 4;
         if (this.macros) this.macros.push("mov_ebp_arg_eax(" + index + ")");
-        this.emitByte(0x89); this.emitByte(0x45); this.emitByte(displacement);
+        this.emitBytes3(0x89, 0x45, displacement);
     };
     Assembler.prototype.movEaxDwordPtrEax = function () {
         if (this.macros) this.macros.push("mov_eax_dword_ptr_eax()");
-        this.emitByte(0x8b); this.emitByte(0x00);
+        this.emitBytes2(0x8b, 0x00);
     };
     Assembler.prototype.testEaxEax = function () {
         if (this.macros) this.macros.push("test_eax()");
-        this.emitByte(0x85); this.emitByte(0xc0);
+        this.emitBytes2(0x85, 0xc0);
     };
     Assembler.prototype.compareEaxImmediate = function (value) {
         if (this.macros) this.macros.push("cmp_eax_i32(" + (value | 0) + ")");
@@ -72,43 +85,43 @@
     };
     Assembler.prototype.compareEaxEbx = function () {
         if (this.macros) this.macros.push("cmp_eax_ebx()");
-        this.emitByte(0x39); this.emitByte(0xd8);
+        this.emitBytes2(0x39, 0xd8);
     };
     Assembler.prototype.compareEaxEsi = function () {
         if (this.macros) this.macros.push("cmp_eax_esi()");
-        this.emitByte(0x39); this.emitByte(0xf0);
+        this.emitBytes2(0x39, 0xf0);
     };
     Assembler.prototype.compareEaxEdi = function () {
         if (this.macros) this.macros.push("cmp_eax_edi()");
-        this.emitByte(0x39); this.emitByte(0xf8);
+        this.emitBytes2(0x39, 0xf8);
     };
     Assembler.prototype.compareEaxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("cmp_eax_ptr_ebp(" + displacement + ")");
-        this.emitByte(0x3b); this.emitByte(0x85); this.word32(displacement);
+        this.emitBytes2(0x3b, 0x85); this.word32(displacement);
     };
     Assembler.prototype.compareEcxEax = function () {
         if (this.macros) this.macros.push("cmp_ecx_eax()");
-        this.emitByte(0x39); this.emitByte(0xc1);
+        this.emitBytes2(0x39, 0xc1);
     };
     Assembler.prototype.setNotEqualAl = function () {
         if (this.macros) this.macros.push("setne_al()");
-        this.emitByte(0x0f); this.emitByte(0x95); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x95, 0xc0);
     };
     Assembler.prototype.setLessAl = function () {
         if (this.macros) this.macros.push("setl_al()");
-        this.emitByte(0x0f); this.emitByte(0x9c); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x9c, 0xc0);
     };
     Assembler.prototype.setLessOrEqualAl = function () {
         if (this.macros) this.macros.push("setle_al()");
-        this.emitByte(0x0f); this.emitByte(0x9e); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x9e, 0xc0);
     };
     Assembler.prototype.setGreaterAl = function () {
         if (this.macros) this.macros.push("setg_al()");
-        this.emitByte(0x0f); this.emitByte(0x9f); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x9f, 0xc0);
     };
     Assembler.prototype.setGreaterOrEqualAl = function () {
         if (this.macros) this.macros.push("setge_al()");
-        this.emitByte(0x0f); this.emitByte(0x9d); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x9d, 0xc0);
     };
 
     Assembler.prototype.pushEax = function () {
@@ -120,7 +133,7 @@
             throw new RangeError("indirect call stack displacement is out of range");
         }
         if (this.macros) this.macros.push("call_dword_ptr_esp(" + displacement + ")");
-        this.emitByte(0xff); this.emitByte(0x54); this.emitByte(0x24);
+        this.emitBytes3(0xff, 0x54, 0x24);
         this.emitByte(displacement);
     };
 
@@ -129,7 +142,7 @@
     };
 
     Assembler.prototype.addEaxEcx = function () {
-        if (this.macros) this.macros.push("add_eax_ecx()"); this.emitByte(0x01); this.emitByte(0xc8);
+        if (this.macros) this.macros.push("add_eax_ecx()"); this.emitBytes2(0x01, 0xc8);
     };
     Assembler.prototype.addEaxImmediate = function (value) {
         if (this.macros) this.macros.push("add_eax_i32(" + (value | 0) + ")");
@@ -141,32 +154,32 @@
     };
     Assembler.prototype.multiplyEaxImmediate = function (value) {
         if (this.macros) this.macros.push("imul_eax_i32(" + (value | 0) + ")");
-        this.emitByte(0x69); this.emitByte(0xc0); this.word32(value);
+        this.emitBytes2(0x69, 0xc0); this.word32(value);
     };
     Assembler.prototype.addEaxEbx = function () {
-        if (this.macros) this.macros.push("add_eax_ebx()"); this.emitByte(0x01); this.emitByte(0xd8);
+        if (this.macros) this.macros.push("add_eax_ebx()"); this.emitBytes2(0x01, 0xd8);
     };
     Assembler.prototype.addEaxEsi = function () {
-        if (this.macros) this.macros.push("add_eax_esi()"); this.emitByte(0x01); this.emitByte(0xf0);
+        if (this.macros) this.macros.push("add_eax_esi()"); this.emitBytes2(0x01, 0xf0);
     };
     Assembler.prototype.addEaxEdi = function () {
-        if (this.macros) this.macros.push("add_eax_edi()"); this.emitByte(0x01); this.emitByte(0xf8);
+        if (this.macros) this.macros.push("add_eax_edi()"); this.emitBytes2(0x01, 0xf8);
     };
     Assembler.prototype.addEaxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("add_eax_ptr_ebp(" + displacement + ")");
-        this.emitByte(0x03); this.emitByte(0x85); this.word32(displacement);
+        this.emitBytes2(0x03, 0x85); this.word32(displacement);
     };
     Assembler.prototype.subEcxEax = function () {
         if (this.macros) this.macros.push("sub_ecx_eax()");
-        this.emitByte(0x29); this.emitByte(0xc1);
+        this.emitBytes2(0x29, 0xc1);
     };
     Assembler.prototype.movEaxEcx = function () {
         if (this.macros) this.macros.push("mov_eax_ecx()");
-        this.emitByte(0x89); this.emitByte(0xc8);
+        this.emitBytes2(0x89, 0xc8);
     };
     Assembler.prototype.imulEaxEcx = function () {
         if (this.macros) this.macros.push("imul_eax_ecx()");
-        this.emitByte(0x0f); this.emitByte(0xaf); this.emitByte(0xc1);
+        this.emitBytes3(0x0f, 0xaf, 0xc1);
     };
     Assembler.prototype.exchangeEaxEcx = function () {
         if (this.macros) this.macros.push("exchange_eax_ecx()");
@@ -178,62 +191,62 @@
     };
     Assembler.prototype.divideEaxByEcx = function () {
         if (this.macros) this.macros.push("divide_eax_by_ecx()");
-        this.emitByte(0xf7); this.emitByte(0xf9);
+        this.emitBytes2(0xf7, 0xf9);
     };
     Assembler.prototype.remainderEcxEax = function () {
         if (this.macros) this.macros.push("signed_remainder_ecx_eax()");
         this.emitByte(0x91);
         this.emitByte(0x99);
-        this.emitByte(0xf7); this.emitByte(0xf9);
-        this.emitByte(0x89); this.emitByte(0xd0);
+        this.emitBytes2(0xf7, 0xf9);
+        this.emitBytes2(0x89, 0xd0);
     };
     Assembler.prototype.andEaxEcx = function () {
-        if (this.macros) this.macros.push("and_eax_ecx()"); this.emitByte(0x21); this.emitByte(0xc8);
+        if (this.macros) this.macros.push("and_eax_ecx()"); this.emitBytes2(0x21, 0xc8);
     };
     Assembler.prototype.orEaxEcx = function () {
-        if (this.macros) this.macros.push("or_eax_ecx()"); this.emitByte(0x09); this.emitByte(0xc8);
+        if (this.macros) this.macros.push("or_eax_ecx()"); this.emitBytes2(0x09, 0xc8);
     };
     Assembler.prototype.xorEaxEcx = function () {
-        if (this.macros) this.macros.push("xor_eax_ecx()"); this.emitByte(0x31); this.emitByte(0xc8);
+        if (this.macros) this.macros.push("xor_eax_ecx()"); this.emitBytes2(0x31, 0xc8);
     };
     Assembler.prototype.negEax = function () {
-        if (this.macros) this.macros.push("neg_eax()"); this.emitByte(0xf7); this.emitByte(0xd8);
+        if (this.macros) this.macros.push("neg_eax()"); this.emitBytes2(0xf7, 0xd8);
     };
     Assembler.prototype.notEax = function () {
-        if (this.macros) this.macros.push("not_eax()"); this.emitByte(0xf7); this.emitByte(0xd0);
+        if (this.macros) this.macros.push("not_eax()"); this.emitBytes2(0xf7, 0xd0);
     };
     Assembler.prototype.movEdxEax = function () {
-        if (this.macros) this.macros.push("mov_edx_eax()"); this.emitByte(0x89); this.emitByte(0xc2);
+        if (this.macros) this.macros.push("mov_edx_eax()"); this.emitBytes2(0x89, 0xc2);
     };
     Assembler.prototype.movEcxEdx = function () {
-        if (this.macros) this.macros.push("mov_ecx_edx()"); this.emitByte(0x89); this.emitByte(0xd1);
+        if (this.macros) this.macros.push("mov_ecx_edx()"); this.emitBytes2(0x89, 0xd1);
     };
     Assembler.prototype.shiftLeftEaxCl = function () {
-        if (this.macros) this.macros.push("shl_eax_cl()"); this.emitByte(0xd3); this.emitByte(0xe0);
+        if (this.macros) this.macros.push("shl_eax_cl()"); this.emitBytes2(0xd3, 0xe0);
     };
     Assembler.prototype.shiftRightEaxCl = function () {
-        if (this.macros) this.macros.push("sar_eax_cl()"); this.emitByte(0xd3); this.emitByte(0xf8);
+        if (this.macros) this.macros.push("sar_eax_cl()"); this.emitBytes2(0xd3, 0xf8);
     };
     Assembler.prototype.shiftUnsignedRightEaxCl = function () {
-        if (this.macros) this.macros.push("shr_eax_cl()"); this.emitByte(0xd3); this.emitByte(0xe8);
+        if (this.macros) this.macros.push("shr_eax_cl()"); this.emitBytes2(0xd3, 0xe8);
     };
     Assembler.prototype.reserveStackBytes = function (count) {
         if (this.macros) this.macros.push("sub_esp_bytes(" + count + ")");
-        this.emitByte(0x83); this.emitByte(0xec); this.emitByte(count);
+        this.emitBytes3(0x83, 0xec, count);
     };
     Assembler.prototype.releaseStackBytes = function (count) {
         if (this.macros) this.macros.push("add_esp_bytes(" + count + ")");
-        this.emitByte(0x83); this.emitByte(0xc4); this.emitByte(count);
+        this.emitBytes3(0x83, 0xc4, count);
     };
     Assembler.prototype.storeX87ControlWordAtStack = function (offset) {
         if (this.macros) this.macros.push("fnstcw_stack(" + offset + ")");
-        this.emitByte(0xd9); this.emitByte(0x7c); this.emitByte(0x24);
+        this.emitBytes3(0xd9, 0x7c, 0x24);
         this.emitByte(offset);
     };
     Assembler.prototype.loadStackWordToEax = function (offset) {
         if (this.macros) this.macros.push("movzx_eax_word_stack(" + offset + ")");
-        this.emitByte(0x0f); this.emitByte(0xb7); this.emitByte(0x44);
-        this.emitByte(0x24); this.emitByte(offset);
+        this.emitBytes3(0x0f, 0xb7, 0x44);
+        this.emitBytes2(0x24, offset);
     };
     Assembler.prototype.orEaxImmediate = function (value) {
         if (this.macros) this.macros.push("or_eax_i32(" + (value | 0) + ")");
@@ -241,135 +254,135 @@
     };
     Assembler.prototype.storeAxAtStack = function (offset) {
         if (this.macros) this.macros.push("mov_word_stack_ax(" + offset + ")");
-        this.emitByte(0x66); this.emitByte(0x89); this.emitByte(0x44);
-        this.emitByte(0x24); this.emitByte(offset);
+        this.emitBytes3(0x66, 0x89, 0x44);
+        this.emitBytes2(0x24, offset);
     };
     Assembler.prototype.loadX87ControlWordFromStack = function (offset) {
         if (this.macros) this.macros.push("fldcw_stack(" + offset + ")");
-        this.emitByte(0xd9); this.emitByte(0x6c); this.emitByte(0x24);
+        this.emitBytes3(0xd9, 0x6c, 0x24);
         this.emitByte(offset);
     };
     Assembler.prototype.storeInt64AtStackFromF64Pop = function (offset) {
         if (this.macros) this.macros.push("fistp_i64_stack(" + offset + ")");
-        this.emitByte(0xdf); this.emitByte(0x7c); this.emitByte(0x24);
+        this.emitBytes3(0xdf, 0x7c, 0x24);
         this.emitByte(offset);
     };
     Assembler.prototype.loadStackDwordToEax = function (offset) {
         if (this.macros) this.macros.push("mov_eax_dword_stack(" + offset + ")");
-        this.emitByte(0x8b); this.emitByte(0x44); this.emitByte(0x24);
+        this.emitBytes3(0x8b, 0x44, 0x24);
         this.emitByte(offset);
     };
     Assembler.prototype.movDwordPtrEcxEax = function () {
         if (this.macros) this.macros.push("mov_dword_ptr_ecx_eax()");
-        this.emitByte(0x89); this.emitByte(0x01);
+        this.emitBytes2(0x89, 0x01);
     };
     Assembler.prototype.movBytePtrEcxAl = function () {
         if (this.macros) this.macros.push("mov_byte_ptr_ecx_al()");
-        this.emitByte(0x88); this.emitByte(0x01);
+        this.emitBytes2(0x88, 0x01);
     };
     Assembler.prototype.movzxEaxBytePtrEax = function () {
         if (this.macros) this.macros.push("movzx_eax_byte_ptr_eax()");
-        this.emitByte(0x0f); this.emitByte(0xb6); this.emitByte(0x00);
+        this.emitBytes3(0x0f, 0xb6, 0x00);
     };
     Assembler.prototype.loadF64Eax = function () {
         if (this.macros) this.macros.push("fld_f64_ptr_eax()");
-        this.emitByte(0xdd); this.emitByte(0x00);
+        this.emitBytes2(0xdd, 0x00);
     };
     Assembler.prototype.loadI32EaxAsF64 = function () {
         if (this.macros) this.macros.push("fild_i32_ptr_eax()");
-        this.emitByte(0xdb); this.emitByte(0x00);
+        this.emitBytes2(0xdb, 0x00);
     };
     Assembler.prototype.storeF64EcxPop = function () {
         if (this.macros) this.macros.push("fstp_f64_ptr_ecx()");
-        this.emitByte(0xdd); this.emitByte(0x19);
+        this.emitBytes2(0xdd, 0x19);
     };
     Assembler.prototype.addF64Pop = function () {
         if (this.macros) this.macros.push("faddp_st1_st0()");
-        this.emitByte(0xde); this.emitByte(0xc1);
+        this.emitBytes2(0xde, 0xc1);
     };
     Assembler.prototype.subtractF64Pop = function () {
         if (this.macros) this.macros.push("fsubp_st1_st0()");
-        this.emitByte(0xde); this.emitByte(0xe9);
+        this.emitBytes2(0xde, 0xe9);
     };
     Assembler.prototype.multiplyF64Pop = function () {
         if (this.macros) this.macros.push("fmulp_st1_st0()");
-        this.emitByte(0xde); this.emitByte(0xc9);
+        this.emitBytes2(0xde, 0xc9);
     };
     Assembler.prototype.divideF64Pop = function () {
         if (this.macros) this.macros.push("fdivp_st1_st0()");
-        this.emitByte(0xde); this.emitByte(0xf9);
+        this.emitBytes2(0xde, 0xf9);
     };
     Assembler.prototype.negateF64 = function () {
         if (this.macros) this.macros.push("fchs()");
-        this.emitByte(0xd9); this.emitByte(0xe0);
+        this.emitBytes2(0xd9, 0xe0);
     };
     Assembler.prototype.sqrtF64 = function () {
         if (this.macros) this.macros.push("fsqrt()");
-        this.emitByte(0xd9); this.emitByte(0xfa);
+        this.emitBytes2(0xd9, 0xfa);
     };
     Assembler.prototype.sinF64 = function () {
         if (this.macros) this.macros.push("fsin()");
-        this.emitByte(0xd9); this.emitByte(0xfe);
+        this.emitBytes2(0xd9, 0xfe);
     };
     Assembler.prototype.cosF64 = function () {
         if (this.macros) this.macros.push("fcos()");
-        this.emitByte(0xd9); this.emitByte(0xff);
+        this.emitBytes2(0xd9, 0xff);
     };
     Assembler.prototype.atan2F64Pop = function () {
         if (this.macros) this.macros.push("fpatan_st1_st0()");
-        this.emitByte(0xd9); this.emitByte(0xf3);
+        this.emitBytes2(0xd9, 0xf3);
     };
     Assembler.prototype.partialRemainderF64 = function () {
         if (this.macros) this.macros.push("fprem_st0_st1()");
-        this.emitByte(0xd9); this.emitByte(0xf8);
+        this.emitBytes2(0xd9, 0xf8);
     };
     Assembler.prototype.storeF64StatusInAx = function () {
         if (this.macros) this.macros.push("fnstsw_ax()");
-        this.emitByte(0xdf); this.emitByte(0xe0);
+        this.emitBytes2(0xdf, 0xe0);
     };
     Assembler.prototype.testF64RemainderIncomplete = function () {
         if (this.macros) this.macros.push("test_ah_fprem_incomplete()");
-        this.emitByte(0xf6); this.emitByte(0xc4); this.emitByte(0x04);
+        this.emitBytes3(0xf6, 0xc4, 0x04);
     };
     Assembler.prototype.absF64 = function () {
         if (this.macros) this.macros.push("fabs()");
-        this.emitByte(0xd9); this.emitByte(0xe1);
+        this.emitBytes2(0xd9, 0xe1);
     };
     Assembler.prototype.multiplyLog2F64Pop = function () {
         if (this.macros) this.macros.push("fyl2x()");
-        this.emitByte(0xd9); this.emitByte(0xf1);
+        this.emitBytes2(0xd9, 0xf1);
     };
     Assembler.prototype.duplicateF64 = function () {
         if (this.macros) this.macros.push("fld_st0()");
-        this.emitByte(0xd9); this.emitByte(0xc0);
+        this.emitBytes2(0xd9, 0xc0);
     };
     Assembler.prototype.roundF64ToIntegral = function () {
         if (this.macros) this.macros.push("frndint()");
-        this.emitByte(0xd9); this.emitByte(0xfc);
+        this.emitBytes2(0xd9, 0xfc);
     };
     Assembler.prototype.exchangeF64WithSt1 = function () {
         if (this.macros) this.macros.push("fxch_st1()");
-        this.emitByte(0xd9); this.emitByte(0xc9);
+        this.emitBytes2(0xd9, 0xc9);
     };
     Assembler.prototype.subtractSt1FromF64 = function () {
         if (this.macros) this.macros.push("fsub_st0_st1()");
-        this.emitByte(0xd8); this.emitByte(0xe1);
+        this.emitBytes2(0xd8, 0xe1);
     };
     Assembler.prototype.twoPowerF64MinusOne = function () {
         if (this.macros) this.macros.push("f2xm1()");
-        this.emitByte(0xd9); this.emitByte(0xf0);
+        this.emitBytes2(0xd9, 0xf0);
     };
     Assembler.prototype.loadOneF64 = function () {
         if (this.macros) this.macros.push("fld1()");
-        this.emitByte(0xd9); this.emitByte(0xe8);
+        this.emitBytes2(0xd9, 0xe8);
     };
     Assembler.prototype.scaleF64BySt1 = function () {
         if (this.macros) this.macros.push("fscale()");
-        this.emitByte(0xd9); this.emitByte(0xfd);
+        this.emitBytes2(0xd9, 0xfd);
     };
     Assembler.prototype.popSt1F64 = function () {
         if (this.macros) this.macros.push("fstp_st1()");
-        this.emitByte(0xdd); this.emitByte(0xd9);
+        this.emitBytes2(0xdd, 0xd9);
     };
     Assembler.prototype.ret = function () {
         if (this.stackWords !== 0) {
@@ -396,42 +409,42 @@
 
     Assembler.prototype.jumpNotEqual = function (name) {
         if (this.macros) this.macros.push("jne(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x85);
+        this.emitBytes2(0x0f, 0x85);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpNotZero = function (name) {
         if (this.macros) this.macros.push("jnz(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x85);
+        this.emitBytes2(0x0f, 0x85);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpEqual = function (name) {
         if (this.macros) this.macros.push("je(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x84);
+        this.emitBytes2(0x0f, 0x84);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpLess = function (name) {
         if (this.macros) this.macros.push("jl(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x8c);
+        this.emitBytes2(0x0f, 0x8c);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpGreaterOrEqual = function (name) {
         if (this.macros) this.macros.push("jge(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x8d);
+        this.emitBytes2(0x0f, 0x8d);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpGreater = function (name) {
         if (this.macros) this.macros.push("jg(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x8f);
+        this.emitBytes2(0x0f, 0x8f);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpLessOrEqual = function (name) {
         if (this.macros) this.macros.push("jle(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x8e);
+        this.emitBytes2(0x0f, 0x8e);
         this.relativeFixup(name);
     };
     Assembler.prototype.jumpParity = function (name) {
         if (this.macros) this.macros.push("jp(" + name + ")");
-        this.emitByte(0x0f); this.emitByte(0x8a);
+        this.emitBytes2(0x0f, 0x8a);
         this.relativeFixup(name);
     };
 
@@ -461,7 +474,7 @@
         if (this.macros) this.macros.push("push_ebp()"); this.emitByte(0x55);
     };
     Assembler.prototype.movEbpEsp = function () {
-        if (this.macros) this.macros.push("mov_ebp_esp()"); this.emitByte(0x89); this.emitByte(0xe5);
+        if (this.macros) this.macros.push("mov_ebp_esp()"); this.emitBytes2(0x89, 0xe5);
     };
     Assembler.prototype.pushEbx = function () {
         if (this.macros) this.macros.push("push_ebx()"); this.emitByte(0x53);
@@ -474,42 +487,42 @@
     };
     Assembler.prototype.movEbxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_ebx_ptr_ebp(" + displacement + ")");
-        this.emitByte(0x8b); this.emitByte(0x5d); this.emitByte(displacement);
+        this.emitBytes3(0x8b, 0x5d, displacement);
     };
     Assembler.prototype.movEsiEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_esi_ptr_ebp(" + displacement + ")");
-        this.emitByte(0x8b); this.emitByte(0x75); this.emitByte(displacement);
+        this.emitBytes3(0x8b, 0x75, displacement);
     };
     Assembler.prototype.movEdiEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_edi_ptr_ebp(" + displacement + ")");
-        this.emitByte(0x8b); this.emitByte(0x7d); this.emitByte(displacement);
+        this.emitBytes3(0x8b, 0x7d, displacement);
     };
     Assembler.prototype.movEaxEbx = function () {
         if (this.macros) this.macros.push("mov_eax_ebx()");
-        this.emitByte(0x89); this.emitByte(0xd8);
+        this.emitBytes2(0x89, 0xd8);
     };
     Assembler.prototype.movEaxEsi = function () {
         if (this.macros) this.macros.push("mov_eax_esi()");
-        this.emitByte(0x89); this.emitByte(0xf0);
+        this.emitBytes2(0x89, 0xf0);
     };
     Assembler.prototype.movEaxEdi = function () {
         if (this.macros) this.macros.push("mov_eax_edi()");
-        this.emitByte(0x89); this.emitByte(0xf8);
+        this.emitBytes2(0x89, 0xf8);
     };
     Assembler.prototype.movEbxEax = function () {
         if (this.macros) this.macros.push("mov_ebx_eax()");
-        this.emitByte(0x89); this.emitByte(0xc3);
+        this.emitBytes2(0x89, 0xc3);
     };
     Assembler.prototype.movEsiEax = function () {
         if (this.macros) this.macros.push("mov_esi_eax()");
-        this.emitByte(0x89); this.emitByte(0xc6);
+        this.emitBytes2(0x89, 0xc6);
     };
     Assembler.prototype.movEdiEax = function () {
         if (this.macros) this.macros.push("mov_edi_eax()");
-        this.emitByte(0x89); this.emitByte(0xc7);
+        this.emitBytes2(0x89, 0xc7);
     };
     Assembler.prototype.addEsiEbx = function () {
-        if (this.macros) this.macros.push("add_esi_ebx()"); this.emitByte(0x01); this.emitByte(0xde);
+        if (this.macros) this.macros.push("add_esi_ebx()"); this.emitBytes2(0x01, 0xde);
     };
     Assembler.prototype.popEsi = function () {
         if (this.macros) this.macros.push("pop_esi()"); this.emitByte(0x5e);
@@ -526,70 +539,70 @@
 
     Assembler.prototype.movEaxHeapWord = function (offset) {
         if (this.macros) this.macros.push("mov_eax_heap_word(" + offset + ")");
-        this.emitByte(0x8b); this.emitByte(0x83); this.word32(offset);
+        this.emitBytes2(0x8b, 0x83); this.word32(offset);
     };
     Assembler.prototype.movEaxFrameWord = function (offset) {
         if (this.macros) this.macros.push("mov_eax_frame_word(" + offset + ")");
-        this.emitByte(0x8b); this.emitByte(0x86); this.word32(offset);
+        this.emitBytes2(0x8b, 0x86); this.word32(offset);
     };
     Assembler.prototype.movFrameWordEax = function (offset) {
         if (this.macros) this.macros.push("mov_frame_word_eax(" + offset + ")");
-        this.emitByte(0x89); this.emitByte(0x86); this.word32(offset);
+        this.emitBytes2(0x89, 0x86); this.word32(offset);
     };
 
     Assembler.prototype.compareFrameTag = function (offset, tag) {
         if (this.macros) this.macros.push("cmp_frame_tag(" + offset + "," + tag + ")");
-        this.emitByte(0x83); this.emitByte(0xbe); this.word32(offset);
+        this.emitBytes2(0x83, 0xbe); this.word32(offset);
         this.emitByte(tag);
     };
 
     Assembler.prototype.loadFrameInt32AsF64 = function (offset) {
         if (this.macros) this.macros.push("fild_i32_frame(" + offset + ")");
-        this.emitByte(0xdb); this.emitByte(0x86); this.word32(offset);
+        this.emitBytes2(0xdb, 0x86); this.word32(offset);
     };
 
     Assembler.prototype.loadFrameF64 = function (offset) {
         if (this.macros) this.macros.push("fld_f64_frame(" + offset + ")");
-        this.emitByte(0xdd); this.emitByte(0x86); this.word32(offset);
+        this.emitBytes2(0xdd, 0x86); this.word32(offset);
     };
 
     Assembler.prototype.xorEaxOne = function () {
         if (this.macros) this.macros.push("xor_eax_1()");
-        this.emitByte(0x83); this.emitByte(0xf0); this.emitByte(0x01);
+        this.emitBytes3(0x83, 0xf0, 0x01);
     };
     Assembler.prototype.movFrameImmediate = function (offset, value) {
         if (this.macros) this.macros.push("mov_frame_i32(" + offset + "," + (value | 0) + ")");
-        this.emitByte(0xc7); this.emitByte(0x86); this.word32(offset); this.word32(value);
+        this.emitBytes2(0xc7, 0x86); this.word32(offset); this.word32(value);
     };
     Assembler.prototype.fstpFrameF64 = function (offset) {
         if (this.macros) this.macros.push("fstp_f64_frame(" + offset + ")");
-        this.emitByte(0xdd); this.emitByte(0x9e); this.word32(offset);
+        this.emitBytes2(0xdd, 0x9e); this.word32(offset);
     };
     Assembler.prototype.fucomipSt0St1 = function () {
-        if (this.macros) this.macros.push("fucomip_st0_st1()"); this.emitByte(0xdf); this.emitByte(0xe9);
+        if (this.macros) this.macros.push("fucomip_st0_st1()"); this.emitBytes2(0xdf, 0xe9);
     };
     Assembler.prototype.fstpSt0 = function () {
-        if (this.macros) this.macros.push("fstp_st0()"); this.emitByte(0xdd); this.emitByte(0xd8);
+        if (this.macros) this.macros.push("fstp_st0()"); this.emitBytes2(0xdd, 0xd8);
     };
     Assembler.prototype.setAboveAl = function () {
         if (this.macros) this.macros.push("seta_al()");
-        this.emitByte(0x0f); this.emitByte(0x97); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x97, 0xc0);
     };
     Assembler.prototype.setAboveOrEqualAl = function () {
         if (this.macros) this.macros.push("setae_al()");
-        this.emitByte(0x0f); this.emitByte(0x93); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x93, 0xc0);
     };
     Assembler.prototype.setEqualAl = function () {
         if (this.macros) this.macros.push("sete_al()");
-        this.emitByte(0x0f); this.emitByte(0x94); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0x94, 0xc0);
     };
     Assembler.prototype.movzxEaxAl = function () {
         if (this.macros) this.macros.push("movzx_eax_al()");
-        this.emitByte(0x0f); this.emitByte(0xb6); this.emitByte(0xc0);
+        this.emitBytes3(0x0f, 0xb6, 0xc0);
     };
     Assembler.prototype.addEaxImmediate8 = function (value) {
         if (this.macros) this.macros.push("add_eax_i8(" + value + ")");
-        this.emitByte(0x83); this.emitByte(0xc0); this.emitByte(value);
+        this.emitBytes3(0x83, 0xc0, value);
     };
 
     root.GuestVMX86Assembler = Assembler;

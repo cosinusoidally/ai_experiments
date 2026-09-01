@@ -538,24 +538,54 @@
     function specializeDispatchExpression(node, localIndex, value) {
         if (!node || typeof node !== "object") return node;
         if (typeof node.length === "number") {
-            var specializedExpressions = [];
+            var specializedExpressions = null;
             var expressionIndex = 0;
             while (expressionIndex < node.length) {
-                specializedExpressions.push(specializeDispatchExpression(
-                    node[expressionIndex++], localIndex, value));
+                var originalExpression = node[expressionIndex];
+                var specializedExpression = specializeDispatchExpression(
+                    originalExpression, localIndex, value);
+                if (specializedExpression !== originalExpression) {
+                    if (!specializedExpressions) {
+                        specializedExpressions = node.slice(0);
+                    }
+                    specializedExpressions[expressionIndex] =
+                        specializedExpression;
+                }
+                expressionIndex++;
             }
-            return specializedExpressions;
+            return specializedExpressions || node;
         }
         if (node.op === "local_i32" && node.index === localIndex) {
             return {op: "const_i32", value: value, type: "i32"};
         }
-        var result = {};
+        var result = null;
         var key;
         for (key in node) {
             if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
             var child = node[key];
-            result[key] = child && typeof child === "object" ?
+            var specializedChild = child && typeof child === "object" ?
                 specializeDispatchExpression(child, localIndex, value) : child;
+            if (specializedChild !== child) {
+                if (!result) {
+                    result = {};
+                    var copyKey;
+                    for (copyKey in node) {
+                        if (Object.prototype.hasOwnProperty.call(node, copyKey)) {
+                            result[copyKey] = node[copyKey];
+                        }
+                    }
+                }
+                result[key] = specializedChild;
+            }
+        }
+        if (!result) {
+            if (node.left && node.right &&
+                node.left.op === "const_i32" &&
+                node.right.op === "const_i32") {
+                return foldSpecializedInteger(node.op, node.left.value,
+                                              node.right.value);
+            }
+            return node;
         }
         if (result.left && result.right &&
             result.left.op === "const_i32" && result.right.op === "const_i32") {

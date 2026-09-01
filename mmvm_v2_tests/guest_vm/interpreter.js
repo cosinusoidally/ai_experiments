@@ -264,6 +264,29 @@
     };
 
     Execution.prototype.synchronizeNativeFrames = function (currentFrameAddress) {
+        /* Native execution commonly yields from the same logical call chain as
+         * the preceding fallback.  Rebuilding maps and arrays for that chain
+         * dominates short semantic exits.  First verify every authoritative
+         * caller link; only then reuse the existing frame objects and refresh
+         * the fields which native execution may have changed. */
+        var matchingAddress = currentFrameAddress;
+        var matchingIndex = this.frames.length - 1;
+        while (matchingIndex >= 0 && matchingAddress ===
+               this.frames[matchingIndex].heapAddress &&
+               this.runtime.programAddress(
+                   this.frames[matchingIndex].program) ===
+               this.runtime.heapRecords.frameProgram(matchingAddress)) {
+            matchingAddress = this.runtime.heapRecords.frameCaller(
+                matchingAddress);
+            matchingIndex--;
+        }
+        if (matchingIndex < 0 && matchingAddress === 0 && this.frames.length) {
+            var refreshIndex = 0;
+            while (refreshIndex < this.frames.length) {
+                this.refreshNativeFrame(this.frames[refreshIndex++]);
+            }
+            return this.frames[this.frames.length - 1];
+        }
         var existing = {};
         var index = 0;
         while (index < this.frames.length) {
@@ -328,26 +351,29 @@
              * environment.  Address plus program is therefore not a call
              * incarnation identity.  Refresh all per-invocation fields from
              * the authoritative guest frame whenever native execution yields. */
-            var refreshedEnvironmentAddress =
-                this.runtime.heapRecords.frameEnvironment(address);
-            var refreshedEnvironmentMetadata = refreshedEnvironmentAddress ?
-                this.runtime.environmentMetadata[
-                    "$" + refreshedEnvironmentAddress] : null;
-            if (refreshedEnvironmentAddress && !refreshedEnvironmentMetadata) {
-                refreshedEnvironmentMetadata = this.runtime.adoptEnvironment(
-                    refreshedEnvironmentAddress,
-                    frame.program.bindingSlots || {});
-            }
-            frame.environment = refreshedEnvironmentMetadata ?
-                                refreshedEnvironmentMetadata.handle : null;
-            frame.pc = this.runtime.heapRecords.framePC(address);
-            frame.returnRegister =
-                this.runtime.heapRecords.frameReturnSlot(address);
-            frame.nativeHeapCurrent = true;
+            this.refreshNativeFrame(frame);
             synchronizedFrames.push(frame);
         }
         this.frames = synchronizedFrames;
         return synchronizedFrames[synchronizedFrames.length - 1];
+    };
+
+    Execution.prototype.refreshNativeFrame = function (frame) {
+        var address = frame.heapAddress;
+        var environmentAddress =
+            this.runtime.heapRecords.frameEnvironment(address);
+        var environmentMetadata = environmentAddress ?
+            this.runtime.environmentMetadata["$" + environmentAddress] : null;
+        if (environmentAddress && !environmentMetadata) {
+            environmentMetadata = this.runtime.adoptEnvironment(
+                environmentAddress, frame.program.bindingSlots || {});
+        }
+        frame.environment = environmentMetadata ?
+                            environmentMetadata.handle : null;
+        frame.pc = this.runtime.heapRecords.framePC(address);
+        frame.returnRegister =
+            this.runtime.heapRecords.frameReturnSlot(address);
+        frame.nativeHeapCurrent = true;
     };
 
     Execution.prototype.resume = function (budget) {
