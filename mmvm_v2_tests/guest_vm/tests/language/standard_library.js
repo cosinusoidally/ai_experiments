@@ -74,3 +74,12 @@ var sparseIndexed = new Array(2);
 sparseIndexed[1] = undefined;
 assertEqual(sparseIndexed.indexOf(undefined), 1,
             "Array.indexOf skips sparse holes");
+var definedObject = {};
+Object.defineProperty(definedObject, "hidden", {value: 42});
+assertEqual(definedObject.hidden, 42, "Object.defineProperty data value");
+assertEqual(Object.keys(definedObject).length, 0,
+            "Object.defineProperty defaults to non-enumerable");
+var createdObject = Object.create(definedObject);
+assertEqual(createdObject.hidden, 42, "Object.create prototype lookup");
+assertEqual(Object.prototype.toString.call([]), "[object Array]",
+            "Object.prototype.toString array tag");

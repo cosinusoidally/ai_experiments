@@ -176,12 +176,12 @@
     var threadedControlVM = new VM({threadedCompile: true});
     threadedControlVM.run(readSource("language/object_control.js"),
                           "threaded_object_control.js");
-    if (threadedControlVM.runtime.assertions !== 8) {
+    if (threadedControlVM.runtime.assertions !== 12) {
         throw new Error("threaded compiler control-flow assertion count changed");
     }
     threadedControlVM.destroy();
     var threadedControlResult =
-        "structured compiler object/control flow passed: 8 assertion(s)";
+        "structured compiler object/control flow passed: 12 assertion(s)";
     if (typeof print === "function") print(threadedControlResult);
     else console.log(threadedControlResult);
 

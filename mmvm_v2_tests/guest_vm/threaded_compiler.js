@@ -1244,6 +1244,21 @@
             } else left = this.reference(node.left).source;
             result.push("for(" + left + " in hc.hostProperties(" +
                         this.expression(node.right) + "))" + this.statement(node.body));
+        } else if (node.type === "SwitchStatement") {
+            result.push("switch(" + this.expression(node.discriminant) + "){" );
+            index = 0;
+            while (index < node.cases.length) {
+                var switchCase = node.cases[index++];
+                result.push(switchCase.test ?
+                    "case " + this.expression(switchCase.test) + ":" :
+                    "default:");
+                var consequentIndex = 0;
+                while (consequentIndex < switchCase.consequent.length) {
+                    result.push(this.statement(
+                        switchCase.consequent[consequentIndex++]));
+                }
+            }
+            result.push("}");
         } else if (node.type === "BreakStatement") result.push("break;");
         else if (node.type === "ContinueStatement") result.push("continue;");
         else if (node.type === "ReturnStatement") {

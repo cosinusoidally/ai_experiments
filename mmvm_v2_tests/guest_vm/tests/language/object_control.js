@@ -32,3 +32,24 @@ var flags = 1;
 flags |= 4;
 flags &= 6;
 assertEqual(flags, 4, "compound bitwise assignment");
+
+function switchValue(value) {
+    var result = "";
+    switch (value) {
+    case 1:
+        result += "one";
+        break;
+    case 2:
+        result += "two";
+    default:
+        result += ":default";
+        break;
+    case 3:
+        result += "three";
+    }
+    return result;
+}
+assertEqual(switchValue(1), "one", "switch matching case and break");
+assertEqual(switchValue(2), "two:default", "switch fallthrough");
+assertEqual(switchValue(9), ":default", "switch default clause");
+assertEqual(switchValue(3), "three", "switch case after default");

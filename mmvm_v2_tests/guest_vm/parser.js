@@ -73,6 +73,7 @@
         if (this.isKeyword("do")) return this.parseDoWhileStatement();
         if (this.isKeyword("throw")) return this.parseThrowStatement();
         if (this.isKeyword("try")) return this.parseTryStatement();
+        if (this.isKeyword("switch")) return this.parseSwitchStatement();
         var expression = this.parseExpression();
         if (this.isPunctuator(";")) this.advance(true);
         return {type: "ExpressionStatement", expression: expression};
@@ -217,6 +218,41 @@
         this.expectPunctuator(")", true);
         return {type: "TryStatement", block: block, parameter: parameter,
                 handler: this.parseBlock()};
+    };
+
+    Parser.prototype.parseSwitchStatement = function () {
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var discriminant = this.parseExpression();
+        this.expectPunctuator(")", false);
+        this.expectPunctuator("{", true);
+        var cases = [];
+        var sawDefault = false;
+        while (!this.isPunctuator("}")) {
+            var test = null;
+            if (this.isKeyword("case")) {
+                this.advance(true);
+                test = this.parseExpression();
+            } else if (this.isKeyword("default")) {
+                if (sawDefault) this.error("duplicate default clause");
+                sawDefault = true;
+                this.advance(false);
+            } else {
+                this.error("expected case or default");
+            }
+            this.expectPunctuator(":", true);
+            var consequent = [];
+            while (!this.isKeyword("case") &&
+                   !this.isKeyword("default") &&
+                   !this.isPunctuator("}")) {
+                consequent.push(this.parseStatement());
+            }
+            cases.push({type: "SwitchCase", test: test,
+                        consequent: consequent});
+        }
+        this.expectPunctuator("}", true);
+        return {type: "SwitchStatement", discriminant: discriminant,
+                cases: cases};
     };
 
     Parser.prototype.parseFunction = function (declaration) {

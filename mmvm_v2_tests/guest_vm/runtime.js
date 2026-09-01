@@ -157,6 +157,19 @@
             "object"));
     };
 
+    Runtime.prototype.makeObjectWithPrototype = function (prototype) {
+        if (prototype !== null) {
+            this.assertOwned(prototype);
+            if (!prototype || !prototype.guestType) {
+                throw new TypeError("Object prototype must be an object or null");
+            }
+        }
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateObject(
+                prototype ? prototype.heapAddress : 0), "object"));
+    };
+
     Runtime.prototype.makeArray = function () {
         this.ensureLinearHeap();
         return this.trackObject(this.makeHeapHandle(
@@ -1001,7 +1014,10 @@
 
     Runtime.prototype.installBuiltins = function () {
         var runtime = this;
-        this.objectPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        /* The Object constructor and Object.create expose this record on both
+         * execution backends. It is guest-heap state even when Node supplies
+         * the low-level JavaScript backend. */
+        this.objectPrototype = this.makeObject();
         this.functionPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.stringPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
@@ -1194,9 +1210,32 @@
             "Object.hasOwnProperty", function (receiver, args) {
                 return runtime.hasOwnProperty(receiver, String(args[0]));
             }, "intrinsic", NativeIntrinsics.OBJECT_HAS_OWN_PROPERTY);
+        this.objectMethods.toString = this.makeNativeFunction(
+            "Object.toString", function (receiver) {
+                if (receiver === undefined) return "[object Undefined]";
+                if (receiver === null) return "[object Null]";
+                if (receiver && receiver.guestType === "array") {
+                    return "[object Array]";
+                }
+                if (receiver && receiver.guestType === "regexp") {
+                    return "[object RegExp]";
+                }
+                if (receiver && (receiver.guestType === "function" ||
+                                 receiver.guestType === "bytecodeFunction")) {
+                    return "[object Function]";
+                }
+                if (typeof receiver === "string") return "[object String]";
+                if (typeof receiver === "number") return "[object Number]";
+                if (typeof receiver === "boolean") return "[object Boolean]";
+                return "[object Object]";
+            });
         if (this.objectPrototype) {
             this.setProperty(this.objectPrototype, "hasOwnProperty",
                              this.objectMethods.hasOwnProperty);
+            this.setProperty(this.objectPrototype, "toString",
+                             this.objectMethods.toString);
+        }
+        if (this.arrayPrototype) {
             var arrayMethodName;
             for (arrayMethodName in this.arrayMethods) {
                 if (own(this.arrayMethods, arrayMethodName)) {
@@ -1205,6 +1244,74 @@
                 }
             }
         }
+        var objectConstructor = this.makeNativeFunction("Object",
+            function (receiver, args) {
+                var value = args.length ? args[0] : undefined;
+                if (value && value.guestType) return value;
+                return runtime.makeObject();
+            });
+        objectConstructor.constructCallback = function (args) {
+            var value = args.length ? args[0] : undefined;
+            if (value && value.guestType) return value;
+            return runtime.makeObject();
+        };
+        if (this.objectPrototype) {
+            this.setProperty(objectConstructor, "prototype",
+                             this.objectPrototype);
+            this.setProperty(this.objectPrototype, "constructor",
+                             objectConstructor);
+        }
+        this.setProperty(objectConstructor, "defineProperty",
+            this.makeNativeFunction("Object.defineProperty",
+                function (receiver, args) {
+                    var object = args[0];
+                    var key = runtime.propertyKey(args[1]);
+                    var descriptor = args[2];
+                    if (!object || !object.guestType) {
+                        throw new TypeError("Object.defineProperty target is not an object");
+                    }
+                    if (!descriptor || !descriptor.guestType) {
+                        throw new TypeError("property descriptor is not an object");
+                    }
+                    if (runtime.hasOwnProperty(descriptor, "get") ||
+                        runtime.hasOwnProperty(descriptor, "set")) {
+                        throw new TypeError("accessor descriptors are not implemented");
+                    }
+                    var attributes = 0;
+                    if (runtime.getProperty(descriptor, "writable")) {
+                        attributes |= 1;
+                    }
+                    if (runtime.getProperty(descriptor, "enumerable")) {
+                        attributes |= 2;
+                    }
+                    if (runtime.getProperty(descriptor, "configurable")) {
+                        attributes |= 4;
+                    }
+                    var keyAddress = runtime.internStringAddress(key);
+                    var property = runtime.heapRecords.defineOwnProperty(
+                        object.heapAddress, keyAddress, attributes);
+                    var propertyValue = runtime.hasOwnProperty(
+                        descriptor, "value") ?
+                        runtime.getProperty(descriptor, "value") : undefined;
+                    runtime.writeHeapValue(
+                        runtime.heapRecords.propertyValueCell(property),
+                        propertyValue);
+                    object.propertyVersion++;
+                    object.valueVersion++;
+                    return object;
+                }));
+        this.setProperty(objectConstructor, "create",
+            this.makeNativeFunction("Object.create", function (receiver, args) {
+                return runtime.makeObjectWithPrototype(args[0]);
+            }));
+        this.setProperty(objectConstructor, "keys",
+            this.makeNativeFunction("Object.keys", function (receiver, args) {
+                if (!args[0] || !args[0].guestType) {
+                    throw new TypeError("Object.keys target is not an object");
+                }
+                return runtime.keys(args[0]);
+            }));
+        this.setGlobal("Object", objectConstructor);
         this.functionMethods = {};
         this.functionMethods.call = this.makeNativeFunction("Function.call",
             function () {
@@ -1633,8 +1740,10 @@
             var property = this.heapRecords.objectPropertyHead(object.heapAddress);
             var heapKeys = [];
             while (property) {
-                heapKeys.push(this.heapRecords.readString(
-                    this.heapRecords.propertyKey(property)));
+                if (this.heapRecords.propertyAttributes(property) & 2) {
+                    heapKeys.push(this.heapRecords.readString(
+                        this.heapRecords.propertyKey(property)));
+                }
                 property = this.heapRecords.propertyNext(property);
             }
             var heapKeyIndex = heapKeys.length - 1;

@@ -329,6 +329,54 @@
             this.patch(catchEnd + 1, this.code.length);
             return;
         }
+        if (statement.type === "SwitchStatement") {
+            var switchValue = this.compileExpression(statement.discriminant);
+            var caseDispatches = [];
+            var defaultCaseIndex = -1;
+            index = 0;
+            while (index < statement.cases.length) {
+                var switchCase = statement.cases[index];
+                if (switchCase.test) {
+                    var caseValue = this.compileExpression(switchCase.test);
+                    var caseMatches = this.allocate();
+                    this.emit(op.STRICT_EQUAL, caseMatches,
+                              switchValue, caseValue);
+                    var nextCase = this.emit(op.JUMP_IF_FALSE,
+                                             caseMatches, 0);
+                    caseDispatches[index] = this.emit(op.JUMP, 0);
+                    this.patch(nextCase + 2, this.code.length);
+                } else defaultCaseIndex = index;
+                index++;
+            }
+            var defaultDispatch = this.emit(op.JUMP, 0);
+            var switchBreaks = [];
+            this.breakTargets.push(switchBreaks);
+            var casePositions = [];
+            index = 0;
+            while (index < statement.cases.length) {
+                casePositions[index] = this.code.length;
+                var consequentIndex = 0;
+                var caseConsequent = statement.cases[index].consequent;
+                while (consequentIndex < caseConsequent.length) {
+                    this.compileStatement(caseConsequent[consequentIndex++]);
+                }
+                index++;
+            }
+            this.breakTargets.pop();
+            var switchEnd = this.code.length;
+            index = 0;
+            while (index < caseDispatches.length) {
+                if (caseDispatches[index] !== undefined) {
+                    this.patch(caseDispatches[index] + 1,
+                               casePositions[index]);
+                }
+                index++;
+            }
+            this.patch(defaultDispatch + 1, defaultCaseIndex < 0 ?
+                       switchEnd : casePositions[defaultCaseIndex]);
+            patchBreaks(this, switchBreaks, switchEnd);
+            return;
+        }
         if (statement.type === "ReturnStatement") {
             var returned = statement.argument ?
                 this.compileExpression(statement.argument) :
@@ -786,6 +834,14 @@
                 add(statement.parameter);
                 visit(statement.block);
                 visit(statement.handler);
+            } else if (statement.type === "SwitchStatement") {
+                for (index = 0; index < statement.cases.length; index++) {
+                    var consequentIndex = 0;
+                    var consequent = statement.cases[index].consequent;
+                    while (consequentIndex < consequent.length) {
+                        visit(consequent[consequentIndex++]);
+                    }
+                }
             }
         }
         add(functionName);
@@ -989,6 +1045,12 @@
             } else if (statement.type === "TryStatement") {
                 collectFunctionDeclarations(statement.block.body, result);
                 collectFunctionDeclarations(statement.handler.body, result);
+            } else if (statement.type === "SwitchStatement") {
+                var caseIndex = 0;
+                while (caseIndex < statement.cases.length) {
+                    collectFunctionDeclarations(
+                        statement.cases[caseIndex++].consequent, result);
+                }
             }
         }
     }
@@ -1030,6 +1092,15 @@
             } else if (statement.type === "TryStatement") {
                 visit(statement.block);
                 visit(statement.handler);
+            } else if (statement.type === "SwitchStatement") {
+                index = 0;
+                while (index < statement.cases.length) {
+                    var consequentIndex = 0;
+                    var consequent = statement.cases[index++].consequent;
+                    while (consequentIndex < consequent.length) {
+                        visit(consequent[consequentIndex++]);
+                    }
+                }
             }
             /* Function bodies have their own variable environment. */
         }
