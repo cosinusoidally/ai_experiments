@@ -108,3 +108,18 @@ An improvement is accepted only if:
 Octane score work begins only after all suites complete correctly with stock
 settings. Optimization commits should state the affected general mechanism,
 the before/after measurements, and the regression checks performed.
+
+## Bring-up status
+
+The following baselines include native-interpreter compilation and process
+startup in the wall-clock time. They are not directly comparable with the
+score's internal benchmark interval.
+
+| Suite | Stock correctness | Score | Total wall time | Notes |
+| --- | --- | ---: | ---: | --- |
+| Richards | passing | 76.4 | 15.36 s | Native loose equality reduced a quick run to about 40 semantic exits. |
+| DeltaBlue | passing | 116 | 15.45 s | Native `Function.call`, `Array.pop`, and `Array` construction reduced a quick run from 2,912 semantic exits to 40. |
+
+The times above were measured on the current development machine with no
+snapshot. They are working baselines, not claimed stable performance numbers
+for other systems.

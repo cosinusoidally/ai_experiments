@@ -1153,7 +1153,7 @@
                 var result = values.pop();
                 runtime.replaceArray(receiver, values);
                 return result;
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_POP);
         this.arrayMethods.concat = this.makeNativeFunction("Array.concat",
             function (receiver, args) {
                 var result = runtime.arrayFrom(runtime.arrayToHost(receiver));
@@ -1316,7 +1316,7 @@
         this.functionMethods.call = this.makeNativeFunction("Function.call",
             function () {
                 throw new Error("Function.call must be dispatched by the VM");
-            });
+            }, "intrinsic", NativeIntrinsics.FUNCTION_CALL);
         this.functionMethods.call.intrinsicKind = "functionCall";
         this.functionMethods.apply = this.makeNativeFunction("Function.apply",
             function () {
@@ -1415,7 +1415,7 @@
                     while (index < args.length) runtime.arraySet(array, index, args[index++]);
                 }
                 return array;
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_CONSTRUCTOR);
         if (this.arrayPrototype) {
             this.setProperty(arrayConstructor, "prototype", this.arrayPrototype);
             this.setProperty(this.arrayPrototype, "constructor", arrayConstructor);

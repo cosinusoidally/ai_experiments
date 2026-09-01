@@ -19,7 +19,9 @@
                       STRING_CONSTRUCTOR: 35, MATH_ATAN2: 36,
                       ARRAY_JOIN: 37, ARRAY_SHIFT: 38, ARRAY_SLICE: 39,
                       ARRAY_CONCAT: 40, NUMBER_CONSTRUCTOR: 41,
-                      DATE_CONSTRUCTOR: 42, DATE_GET_TIME: 43};
+                      DATE_CONSTRUCTOR: 42, DATE_GET_TIME: 43,
+                      FUNCTION_CALL: 44, ARRAY_POP: 45,
+                      ARRAY_CONSTRUCTOR: 46};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

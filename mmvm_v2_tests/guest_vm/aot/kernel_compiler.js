@@ -56,6 +56,7 @@
         engineCurrentFrame: "ENGINE_CURRENT_FRAME",
         valueCellTag: "VALUE_CELL_TAG",
         valueCellReference: "VALUE_CELL_REFERENCE",
+        valueCellInt32: "VALUE_CELL_INT32",
         stringLength: "STRING_LENGTH",
         stringHash: "STRING_HASH",
         vectorLength: "VECTOR_LENGTH",
