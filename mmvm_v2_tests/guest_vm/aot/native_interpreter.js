@@ -7443,21 +7443,79 @@
             new Date().getTime() : 0;
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
-        this.ir = new KernelCompiler().compile(interpreterKernel, {
-            registerPreferences: ["heapBase", "pc", "bytecodeWords"],
-            timings: loweringTimings,
-            constantOverrides: {
-                PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
+        var snapshotRequested = runtime.nativeSnapshotRead ||
+                                runtime.nativeSnapshotWrite;
+        var kernelSource = snapshotRequested ? interpreterKernel.toString() : null;
+        var snapshotMetadata = null;
+        if (snapshotRequested) {
+            snapshotMetadata = {
+                /* Bump this whenever backend or macro-assembler changes alter
+                 * the executable contract without changing kernel source. */
+                compilerVersion: 1,
+                profileMode: runtime.profileOpcodeCounts ? 1 : 0,
+                sourceHash: hashKernelSource(kernelSource)
+            };
+        }
+        var x86Backend = new X86Backend({captureAssembly: false});
+        var loadedSnapshot = false;
+        if (runtime.nativeSnapshotRead) {
+            this.ir = null;
+            this.js = null;
+            this.nativeResult = x86Backend.loadExecutableSnapshot(
+                runtime.nativeSnapshotRead, snapshotMetadata);
+            this.nativeResult.registerAllocation = {
+                ebx: "argument:heapBase", esi: "local:pc",
+                edi: "local:bytecodeWords"
+            };
+            loadedSnapshot = true;
+            if (loweringTimings) {
+                loweringTimings.source = 0;
+                loweringTimings.parse = 0;
+                loweringTimings.collect = 0;
+                loweringTimings.lower = 0;
             }
-        });
+        } else {
+            var compilerOptions = {
+                registerPreferences: ["heapBase", "pc", "bytecodeWords"],
+                timings: loweringTimings,
+                constantOverrides: {
+                    PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
+                }
+            };
+            if (snapshotRequested) compilerOptions.source = kernelSource;
+            this.ir = new KernelCompiler().compile(interpreterKernel,
+                                                   compilerOptions);
+        }
         var loweringFinished = constructionStarted ?
             new Date().getTime() : 0;
-        this.js = new JSBackend().compile(this.ir);
+        if (!loadedSnapshot) this.js = new JSBackend().compile(this.ir);
         var jsBackendFinished = constructionStarted ?
             new Date().getTime() : 0;
         var backendTimings = runtime.profileOpcodeCounts ? {} : null;
-        this.nativeResult = new X86Backend({captureAssembly: false,
-            timings: backendTimings}).compile(this.ir);
+        if (!loadedSnapshot) {
+            x86Backend.timings = backendTimings;
+            this.nativeResult = x86Backend.compile(this.ir);
+            if (runtime.nativeSnapshotWrite) {
+                if (!x86Backend.writeExecutableSnapshot(
+                        runtime.nativeSnapshotWrite, this.nativeResult,
+                        snapshotMetadata)) {
+                    throw new Error("could not write native snapshot: " +
+                                    runtime.nativeSnapshotWrite);
+                }
+                reportSnapshot("wrote native snapshot: " +
+                               runtime.nativeSnapshotWrite + " (" +
+                               this.nativeResult.length + " bytes)");
+            }
+        } else {
+            backendTimings = backendTimings || {};
+            backendTimings.analysis = 0;
+            backendTimings.emit = 0;
+            backendTimings.resolve = 0;
+            backendTimings.install = 0;
+            reportSnapshot("loaded native snapshot: " +
+                           runtime.nativeSnapshotRead + " (" +
+                           this.nativeResult.length + " bytes)");
+        }
         var nativeBackendFinished = constructionStarted ?
             new Date().getTime() : 0;
         this.stateAddress = runtime.heapRecords.allocateEngineState();
@@ -7607,6 +7665,24 @@
     }
 
     NativeInterpreter.Exit = Exit;
+
+    function hashKernelSource(source) {
+        var hash = -2128831035;
+        var index = 0;
+        while (index < source.length) {
+            var code = source.charCodeAt(index++);
+            hash = ((hash ^ (code & 255)) * 16777619) | 0;
+            hash = ((hash ^ (code >>> 8)) * 16777619) | 0;
+        }
+        return hash >>> 0;
+    }
+
+    function reportSnapshot(message) {
+        if (typeof print === "function") print(message);
+        else if (typeof console !== "undefined" && console.log) {
+            console.log(message);
+        }
+    }
 
     NativeInterpreter.prototype.ensureIntrinsicHelper = function (callable) {
         if (!this.nativeResult.fn || !callable) return false;

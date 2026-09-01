@@ -181,11 +181,31 @@ The in-progress kernel-native interpreter is selected explicitly with
 `guest_runner.js --vm-native program.js`. Its portable dispatch benchmark and
 the current migration boundary are documented in `PERFORMANCE.md`.
 
+Native snapshots are an explicit, experimental startup option and are never
+read or written by default. Generate one into the ignored temporary artifacts
+directory, then opt into it on later runs:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --snapshot artifacts/native-interpreter.snapshot hello.js
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --with-snapshot artifacts/native-interpreter.snapshot hello.js
+```
+
+Both options imply `--vm-native`. `--snapshot FILE` compiles normally, writes
+`FILE`, and continues running the requested guest program. `--with-snapshot
+FILE` requires a compatible snapshot and fails rather than silently compiling
+when the file is absent, truncated, built for profiling mode, or stale. Remove
+snapshots with `./mk_clean`; they are temporary build artifacts and must not be
+committed.
+
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:
-demo6/demo7 are substantially heavier than demo1--demo5. No artifacts
-directory or generated framebuffer image is required or stored in
-`mmvm_v2_tests`.
+demo6/demo7 are substantially heavier than demo1--demo5. Generated snapshots
+and framebuffer images belong only in the ignored `artifacts/` directory.
 
 Current benchmark commands, measured demo2 progress, and the optional
 `guest_runner.js --vm-profile` opcode profiler are documented in

@@ -65,6 +65,42 @@ pointer and argument vector through `LinearMemory.callNativeI32`. Native FFI is
 therefore an execution-backend operation rather than a SpiderMonkey callback
 or an MMVM-specific instruction sequence scattered through guest semantics.
 
+## Optional native snapshots
+
+Snapshot loading is deliberately opt-in. The command runner accepts
+`--snapshot FILE` to compile the main interpreter with the ordinary kernel
+front end and macro assembler and atomically write its code, and
+`--with-snapshot FILE` to load that code on a later invocation. Neither option
+is a default cache policy. Embedders expose the same choice as the mutually
+exclusive `snapshot` and `withSnapshot` runtime options, both of which require
+`nativeInterpreter: true` and an MMVM host.
+
+A snapshot contains a 32-byte header followed by the macro assembler's i386
+output. The header records:
+
+- the snapshot magic and file-format version;
+- a manually maintained native compiler/ABI version;
+- whether opcode profiling was compiled into the kernel;
+- a hash of `interpreterKernel` source;
+- the exact code length.
+
+Loading validates every field and rejects an incompatible or truncated file.
+It allocates a new anonymous mapping, reads the code into that mapping, and
+changes it from read/write/execute to read/execute before entry. The snapshot
+does not store a preferred code address, heap address, runtime record, libc
+pointer, or lazy intrinsic-helper address. All internal branches are relative;
+the heap base and runtime-owned platform-service table remain entry arguments.
+Consequently snapshot use neither fixes the generated code at its original
+address nor places any additional constraint on the independently allocated,
+growable guest heap.
+
+Snapshots are architecture-, compiler-, profile-mode-, and source-specific
+temporary build products. The checked-in runner documentation places them in
+the ignored `artifacts/` directory, and `mk_clean` removes them. A backend or
+macro-assembler change that can alter emitted code without changing
+`interpreterKernel.toString()` must bump the snapshot compiler version in
+`native_interpreter.js`.
+
 ## Execution migration
 
 The migration remains runnable at each checkpoint:

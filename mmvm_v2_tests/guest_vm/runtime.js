@@ -77,6 +77,15 @@
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.verifyNativeHeap = !!options.verifyNativeHeap;
+        this.nativeSnapshotWrite = options.snapshot || null;
+        this.nativeSnapshotRead = options.withSnapshot || null;
+        if (this.nativeSnapshotWrite && this.nativeSnapshotRead) {
+            throw new Error("snapshot and withSnapshot are mutually exclusive");
+        }
+        if ((this.nativeSnapshotWrite || this.nativeSnapshotRead) &&
+            !options.nativeInterpreter) {
+            throw new Error("native snapshots require nativeInterpreter");
+        }
         this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;
         this.profileNextReport = 1000000;

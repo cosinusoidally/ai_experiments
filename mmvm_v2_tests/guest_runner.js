@@ -7,6 +7,8 @@ var guestRunnerProfile = false;
 var guestRunnerVerifyHeap = false;
 var guestRunnerThreaded = false;
 var guestRunnerNative = false;
+var guestRunnerSnapshot = null;
+var guestRunnerWithSnapshot = null;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -36,6 +38,22 @@ for (var guestRunnerOptionIndex = 0;
         guestRunnerThreaded = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
         guestRunnerNative = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--snapshot" ||
+               guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--with-snapshot") {
+        var guestSnapshotOption = guestRunnerArguments[guestRunnerOptionIndex];
+        guestRunnerOptionIndex++;
+        if (guestRunnerOptionIndex >= guestRunnerArguments.length) {
+            throw new Error(guestSnapshotOption + " requires a snapshot file");
+        }
+        if (guestSnapshotOption === "--snapshot") {
+            guestRunnerSnapshot =
+                guestRunnerArguments[guestRunnerOptionIndex];
+        } else {
+            guestRunnerWithSnapshot =
+                guestRunnerArguments[guestRunnerOptionIndex];
+        }
+        guestRunnerNative = true;
     } else {
         guestRunnerProgramArguments.push(guestRunnerArguments[guestRunnerOptionIndex]);
     }
@@ -45,7 +63,8 @@ guestRunnerArguments = guestRunnerProgramArguments;
 if (!guestRunnerArguments.length) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
-                     "[--vm-native] program.js";
+                     "[--vm-native] [--snapshot file | " +
+                     "--with-snapshot file] program.js";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -60,6 +79,8 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         verifyNativeHeap: guestRunnerVerifyHeap,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,
+                                        snapshot: guestRunnerSnapshot,
+                                        withSnapshot: guestRunnerWithSnapshot,
                                         threadedCompile: !guestRunnerNative &&
                                             (!guestRunnerIsNode ||
                                              guestRunnerThreaded)});

@@ -131,7 +131,8 @@
         options = options || {};
         var timings = options.timings || null;
         var started = timings ? new Date().getTime() : 0;
-        var source = functionObject.toString();
+        var source = options.source === undefined ?
+            functionObject.toString() : String(options.source);
         if (timings) timings.source = new Date().getTime() - started;
         var parser = new Parser("var __kernel = " + source + ";", "<kernel>",
                                 {captureRaw: false});

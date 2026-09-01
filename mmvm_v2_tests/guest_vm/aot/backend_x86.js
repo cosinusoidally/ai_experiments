@@ -151,27 +151,140 @@
         }
     }
 
-    X86Backend.prototype.loadExecutableCache = function (path) {
-        if (!this.ffi.isMMVM) return null;
+    var SNAPSHOT_MAGIC = 0x31535647;
+    var SNAPSHOT_FORMAT_VERSION = 1;
+    var SNAPSHOT_HEADER_BYTES = 32;
+
+    X86Backend.prototype.loadExecutableSnapshot = function (path, expected) {
+        if (!this.ffi.isMMVM) {
+            throw new Error("native snapshots require the js_min.exe host");
+        }
         var openPointer = this.ffi.resolve("open");
         var closePointer = this.ffi.resolve("close");
-        var seekPointer = this.ffi.resolve("lseek");
+        var readPointer = this.ffi.resolve("read");
+        var callocPointer = this.ffi.resolve("calloc");
+        var freePointer = this.ffi.resolve("free");
         var descriptor = this.ffi.call(openPointer, [path, 0, 0]);
-        if (descriptor < 0) return null;
-        var length = this.ffi.call(seekPointer, [descriptor, 0, 2]);
-        if (length <= 0 || length > 16 * 1024 * 1024) {
-            this.ffi.call(closePointer, [descriptor]);
-            return null;
+        if (descriptor < 0) {
+            throw new Error("could not open native snapshot: " + path);
         }
-        this.ffi.call(seekPointer, [descriptor, 0, 0]);
+        var header = this.ffi.call(callocPointer, [SNAPSHOT_HEADER_BYTES, 1]);
+        if (!header) {
+            this.ffi.call(closePointer, [descriptor]);
+            throw new Error("could not allocate native snapshot header");
+        }
+        if (!readExact(this.ffi, readPointer, descriptor, header,
+                       SNAPSHOT_HEADER_BYTES)) {
+            this.ffi.call(freePointer, [header]);
+            this.ffi.call(closePointer, [descriptor]);
+            throw new Error("native snapshot header is truncated: " + path);
+        }
+        var magic = peek32(header) >>> 0;
+        var formatVersion = peek32(header + 4) >>> 0;
+        var compilerVersion = peek32(header + 8) >>> 0;
+        var profileMode = peek32(header + 12) >>> 0;
+        var sourceHash = peek32(header + 16) >>> 0;
+        var length = peek32(header + 20) >>> 0;
+        this.ffi.call(freePointer, [header]);
+        if (magic !== SNAPSHOT_MAGIC ||
+            formatVersion !== SNAPSHOT_FORMAT_VERSION ||
+            compilerVersion !== (expected.compilerVersion >>> 0) ||
+            profileMode !== (expected.profileMode >>> 0) ||
+            sourceHash !== (expected.sourceHash >>> 0) ||
+            length <= 0 || length > 16 * 1024 * 1024) {
+            this.ffi.call(closePointer, [descriptor]);
+            throw new Error("native snapshot is incompatible with this VM: " +
+                            path);
+        }
         var pointer = this.ffi.call(this.mmap,
-            [0, length, 5, 2, descriptor, 0]);
+            [0, length, 7, 0x22, -1, 0]);
+        if (!pointer || pointer === -1) {
+            this.ffi.call(closePointer, [descriptor]);
+            throw new Error("could not map native snapshot code");
+        }
+        if (!readExact(this.ffi, readPointer, descriptor, pointer, length)) {
+            this.ffi.call(this.munmap, [pointer, length]);
+            this.ffi.call(closePointer, [descriptor]);
+            throw new Error("native snapshot code is truncated: " + path);
+        }
         this.ffi.call(closePointer, [descriptor]);
-        if (!pointer || pointer === -1) return null;
-        var ffi = this.ffi;
-        var munmap = this.munmap;
+        var mprotectPointer = this.ffi.resolve("mprotect");
+        if (this.ffi.call(mprotectPointer, [pointer, length, 5]) !== 0) {
+            this.ffi.call(this.munmap, [pointer, length]);
+            throw new Error("could not protect native snapshot code");
+        }
+        return executableResult(this.ffi, this.munmap, pointer, length,
+                                "i386-snapshot");
+    };
+
+    X86Backend.prototype.writeExecutableSnapshot = function (path, result,
+                                                              metadata) {
+        if (!this.ffi.isMMVM || !result || !result.pointer ||
+            result.length <= 0) return false;
+        var openPointer = this.ffi.resolve("open");
+        var closePointer = this.ffi.resolve("close");
+        var writePointer = this.ffi.resolve("write");
+        var renamePointer = this.ffi.resolve("rename");
+        var unlinkPointer = this.ffi.resolve("unlink");
+        var getpidPointer = this.ffi.resolve("getpid");
+        var callocPointer = this.ffi.resolve("calloc");
+        var freePointer = this.ffi.resolve("free");
+        var temporaryPath = path + ".tmp." +
+            this.ffi.call(getpidPointer, []);
+        var descriptor = this.ffi.call(openPointer,
+            [temporaryPath, 577, 384]);
+        if (descriptor < 0) return false;
+        var header = this.ffi.call(callocPointer, [SNAPSHOT_HEADER_BYTES, 1]);
+        if (!header) {
+            this.ffi.call(closePointer, [descriptor]);
+            this.ffi.call(unlinkPointer, [temporaryPath]);
+            return false;
+        }
+        poke32(header, SNAPSHOT_MAGIC);
+        poke32(header + 4, SNAPSHOT_FORMAT_VERSION);
+        poke32(header + 8, metadata.compilerVersion | 0);
+        poke32(header + 12, metadata.profileMode | 0);
+        poke32(header + 16, metadata.sourceHash | 0);
+        poke32(header + 20, result.length | 0);
+        var complete = writeExact(this.ffi, writePointer, descriptor, header,
+                                  SNAPSHOT_HEADER_BYTES) &&
+                       writeExact(this.ffi, writePointer, descriptor,
+                                  result.pointer, result.length);
+        this.ffi.call(freePointer, [header]);
+        this.ffi.call(closePointer, [descriptor]);
+        if (!complete ||
+            this.ffi.call(renamePointer, [temporaryPath, path]) !== 0) {
+            this.ffi.call(unlinkPointer, [temporaryPath]);
+            return false;
+        }
+        return true;
+    };
+
+    function readExact(ffi, readPointer, descriptor, pointer, length) {
+        var offset = 0;
+        while (offset < length) {
+            var amount = ffi.call(readPointer,
+                [descriptor, pointer + offset, length - offset]);
+            if (amount <= 0) return false;
+            offset += amount;
+        }
+        return true;
+    }
+
+    function writeExact(ffi, writePointer, descriptor, pointer, length) {
+        var offset = 0;
+        while (offset < length) {
+            var amount = ffi.call(writePointer,
+                [descriptor, pointer + offset, length - offset]);
+            if (amount <= 0) return false;
+            offset += amount;
+        }
+        return true;
+    }
+
+    function executableResult(ffi, munmap, pointer, length, backendName) {
         var result = {fn: null, pointer: pointer, length: length,
-            bytes: null, assembly: "", ir: null, backend: "i386-cache",
+            bytes: null, assembly: "", ir: null, backend: backendName,
             destroy: function () {}};
         result.fn = function () {
             var args = [];
@@ -189,38 +302,7 @@
             result.fn = null;
         };
         return result;
-    };
-
-    X86Backend.prototype.writeExecutableCache = function (path, result) {
-        if (!this.ffi.isMMVM || !result || !result.pointer ||
-            result.length <= 0) return false;
-        var openPointer = this.ffi.resolve("open");
-        var closePointer = this.ffi.resolve("close");
-        var writePointer = this.ffi.resolve("write");
-        var renamePointer = this.ffi.resolve("rename");
-        var unlinkPointer = this.ffi.resolve("unlink");
-        var getpidPointer = this.ffi.resolve("getpid");
-        var temporaryPath = path + ".tmp." +
-            this.ffi.call(getpidPointer, []);
-        var descriptor = this.ffi.call(openPointer,
-            [temporaryPath, 577, 384]);
-        if (descriptor < 0) return false;
-        var written = 0;
-        while (written < result.length) {
-            var amount = this.ffi.call(writePointer,
-                [descriptor, result.pointer + written,
-                 result.length - written]);
-            if (amount <= 0) break;
-            written += amount;
-        }
-        this.ffi.call(closePointer, [descriptor]);
-        if (written !== result.length ||
-            this.ffi.call(renamePointer, [temporaryPath, path]) !== 0) {
-            this.ffi.call(unlinkPointer, [temporaryPath]);
-            return false;
-        }
-        return true;
-    };
+    }
 
     function describeRegisterAllocation(ir, registerMap) {
         var description = {};
