@@ -530,8 +530,8 @@
                         arrayGetSupported = callNativeI32(
                             platformNumericPropertyPointer(heapBase,
                                 enginePlatformServices(heapBase, state)),
-                            heapBase, arrayGetTarget, arrayGetObject,
-                            arrayGetIndex);
+                            heapBase, state, arrayGetTarget, arrayGetObject,
+                            arrayGetIndex, 0, 0);
                         if (arrayGetSupported === 1) {
                             arrayGetSupported = 4;
                         } else arrayGetSupported = 0;
@@ -785,7 +785,21 @@
                     if (arraySetObjectType === HEAP_TYPE_BUFFER_VIEW) {
                         arraySetSupported = 2;
                     } else if (arraySetObjectType !== HEAP_TYPE_ARRAY) {
-                        arraySetSupported = 0;
+                        if (arraySetObjectType === HEAP_TYPE_OBJECT) {
+                            if (platformNumericPropertyPointer(heapBase,
+                                enginePlatformServices(heapBase, state)) !== 0) {
+                                var numericSetResult = callNativeI32(
+                                    platformNumericPropertyPointer(heapBase,
+                                        enginePlatformServices(heapBase, state)),
+                                    heapBase, state, 0, arraySetObject,
+                                    arraySetIndex, heapBase + registerCells +
+                                        arraySetSourceIndex * VALUE_CELL_BYTES,
+                                    1);
+                                if (numericSetResult === 1) {
+                                    arraySetSupported = 3;
+                                } else arraySetSupported = 0;
+                            } else arraySetSupported = 0;
+                        } else arraySetSupported = 0;
                     }
                 }
                 if (arraySetIndex < 0) arraySetSupported = 0;
@@ -902,7 +916,7 @@
                                 arraySetSource + VALUE_CELL_LOW,
                                 indexedSetBufferTag)));
                     }
-                } else {
+                } else if (arraySetSupported !== 3) {
                     var dynamicPropertyValid = 1;
                     if (load32(arraySetObjectCell) !== VALUE_TAG_REFERENCE) {
                         dynamicPropertyValid = 0;
@@ -7266,21 +7280,34 @@
      * Match the canonical decimal spelling in place so indexed access on an
      * ordinary object does not allocate a temporary string or leave the guest
      * engine. */
-    function numericPropertyGetKernel(heapBase, targetCell, object, index) {
+    function numericPropertyGetKernel(heapBase, state, targetCell, object,
+                                      index, sourceCell, operation) {
         var VALUE_CELL_LOW = 4;
         var VALUE_CELL_HIGH = 8;
         var VALUE_CELL_AUX = 12;
         var VALUE_TAG_UNDEFINED = 1;
         var HEAP_TYPE_OBJECT = 1;
         var HEAP_TYPE_BYTECODE_FUNCTION = 4;
+        var HEAP_TYPE_STRING = 7;
+        var HEAP_TYPE_PROPERTY = 6;
+        var PROPERTY_RECORD_BYTES = 48;
+        var DEFAULT_PROPERTY_ATTRIBUTES = 7;
         var RECORD_TYPE = 0;
+        var RECORD_SIZE = 4;
+        var RECORD_MARK = 8;
+        var RECORD_FLAGS = 12;
         var STRING_LENGTH = 16;
+        var STRING_HASH = 20;
         var STRING_CHARS = 24;
         var OBJECT_PROTOTYPE = 16;
         var OBJECT_PROPERTY_HEAD = 20;
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
+        var PROPERTY_ATTRIBUTES = 24;
+        var PROPERTY_RESERVED = 28;
         var PROPERTY_VALUE = 32;
+        var ENGINE_HEAP_BUMP = 16;
+        var ENGINE_HEAP_LIMIT = 20;
         if (index < 0) return 0;
         var currentObject = object;
         while (currentObject !== 0) {
@@ -7320,20 +7347,89 @@
                 }
                 if (matches === 1) {
                     if (parsed === index) {
-                        var source = heapBase + property + PROPERTY_VALUE;
-                        store32(targetCell, load32(source));
-                        store32(targetCell + VALUE_CELL_LOW,
-                                load32(source + VALUE_CELL_LOW));
-                        store32(targetCell + VALUE_CELL_HIGH,
-                                load32(source + VALUE_CELL_HIGH));
-                        store32(targetCell + VALUE_CELL_AUX,
-                                load32(source + VALUE_CELL_AUX));
+                        var propertyCell = heapBase + property + PROPERTY_VALUE;
+                        if (operation === 1) {
+                            store32(propertyCell, load32(sourceCell));
+                            store32(propertyCell + VALUE_CELL_LOW,
+                                    load32(sourceCell + VALUE_CELL_LOW));
+                            store32(propertyCell + VALUE_CELL_HIGH,
+                                    load32(sourceCell + VALUE_CELL_HIGH));
+                            store32(propertyCell + VALUE_CELL_AUX,
+                                    load32(sourceCell + VALUE_CELL_AUX));
+                        } else {
+                            store32(targetCell, load32(propertyCell));
+                            store32(targetCell + VALUE_CELL_LOW,
+                                    load32(propertyCell + VALUE_CELL_LOW));
+                            store32(targetCell + VALUE_CELL_HIGH,
+                                    load32(propertyCell + VALUE_CELL_HIGH));
+                            store32(targetCell + VALUE_CELL_AUX,
+                                    load32(propertyCell + VALUE_CELL_AUX));
+                        }
                         return 1;
                     }
                 }
                 property = propertyNext(heapBase, property);
             }
-            currentObject = objectPrototype(heapBase, currentObject);
+            if (operation === 1) currentObject = 0;
+            else currentObject = objectPrototype(heapBase, currentObject);
+        }
+        if (operation === 1) {
+            var digitCount = 1;
+            var measuredIndex = index;
+            while (measuredIndex >= 10) {
+                measuredIndex = divideI32(measuredIndex, 10);
+                digitCount = digitCount + 1;
+            }
+            var stringBytes = (STRING_CHARS + digitCount * 2 + 7) & -8;
+            var stringAddress = engineHeapBump(heapBase, state);
+            var propertyAddress = stringAddress + stringBytes;
+            if (propertyAddress + PROPERTY_RECORD_BYTES >
+                engineHeapLimit(heapBase, state)) return 2;
+            setRecordType(heapBase, stringAddress, HEAP_TYPE_STRING);
+            setRecordSize(heapBase, stringAddress, stringBytes);
+            setRecordMark(heapBase, stringAddress, 0);
+            setRecordFlags(heapBase, stringAddress, 0);
+            setStringLength(heapBase, stringAddress, digitCount);
+            var hash = -2128831035;
+            var digitIndex = 0;
+            while (digitIndex < digitCount) {
+                var place = digitCount - digitIndex - 1;
+                var digits = index;
+                while (place > 0) {
+                    digits = divideI32(digits, 10);
+                    place = place - 1;
+                }
+                var characterCode = 48 + digits % 10;
+                setStringCharacterByte(heapBase, stringAddress,
+                                       digitIndex * 2, characterCode);
+                setStringCharacterByte(heapBase, stringAddress,
+                                       digitIndex * 2 + 1, 0);
+                hash = (hash ^ characterCode) * 16777619;
+                digitIndex = digitIndex + 1;
+            }
+            setStringHash(heapBase, stringAddress, hash);
+            setRecordType(heapBase, propertyAddress, HEAP_TYPE_PROPERTY);
+            setRecordSize(heapBase, propertyAddress, PROPERTY_RECORD_BYTES);
+            setRecordMark(heapBase, propertyAddress, 0);
+            setRecordFlags(heapBase, propertyAddress, 0);
+            setPropertyNext(heapBase, propertyAddress,
+                            objectPropertyHead(heapBase, object));
+            setPropertyKey(heapBase, propertyAddress, stringAddress);
+            setPropertyAttributes(heapBase, propertyAddress,
+                                  DEFAULT_PROPERTY_ATTRIBUTES);
+            setPropertyReserved(heapBase, propertyAddress, 0);
+            propertyCell = heapBase + propertyAddress + PROPERTY_VALUE;
+            store32(propertyCell, load32(sourceCell));
+            store32(propertyCell + VALUE_CELL_LOW,
+                    load32(sourceCell + VALUE_CELL_LOW));
+            store32(propertyCell + VALUE_CELL_HIGH,
+                    load32(sourceCell + VALUE_CELL_HIGH));
+            store32(propertyCell + VALUE_CELL_AUX,
+                    load32(sourceCell + VALUE_CELL_AUX));
+            setObjectPropertyHead(heapBase, object, propertyAddress);
+            setEngineHeapBump(heapBase, state,
+                              propertyAddress + PROPERTY_RECORD_BYTES);
+            return 1;
         }
         store32(targetCell, VALUE_TAG_UNDEFINED);
         store32(targetCell + VALUE_CELL_LOW, 0);
@@ -7553,7 +7649,9 @@
     };
 
     NativeInterpreter.prototype.ensureOpcodeHelper = function (opcode) {
-        if (!this.nativeResult.fn || opcode !== Bytecode.GET_PROPERTY) {
+        if (!this.nativeResult.fn ||
+            (opcode !== Bytecode.GET_PROPERTY &&
+             opcode !== Bytecode.SET_PROPERTY)) {
             return false;
         }
         if (this.numericPropertyNativeResult) return false;
@@ -7564,7 +7662,7 @@
             this.platformServicesAddress, result.pointer);
         if (this.runtime.profileOpcodeCounts &&
             typeof print === "function") {
-            print("native guest helper compiled: numeric property get bytes=" +
+            print("native guest helper compiled: numeric object property bytes=" +
                   result.length);
         }
         return true;
