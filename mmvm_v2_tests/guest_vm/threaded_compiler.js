@@ -783,6 +783,10 @@
         else if (opcode === op.POSITIVE) lines.push(rr(1) + "=Number(" + rr(2) + ");");
         else if (opcode === op.BIT_NOT) lines.push(rr(1) + "=~" + rr(2) + ";");
         else if (opcode === op.TYPEOF) lines.push(rr(1) + "=runtime.typeOf(" + rr(2) + ");");
+        else if (opcode === op.TYPEOF_GLOBAL) {
+            lines.push(rr(1) + "=runtime.typeOfGlobal(context," +
+                       constant(2) + ");");
+        }
         else if (opcode === op.DELETE_PROPERTY) {
             lines.push(rr(1) + "=runtime.deleteProperty(" + rr(2) + "," + rr(3) + ");");
         } else if (opcode === op.DELETE_PROPERTY_CONST) {
@@ -2097,7 +2101,8 @@
             opcode === op.SET_GLOBAL || opcode === op.MOVE || opcode === op.NOT ||
             opcode === op.NEGATE || opcode === op.POSITIVE ||
             opcode === op.MAKE_FUNCTION || opcode === op.BIT_NOT ||
-            opcode === op.TYPEOF || opcode === op.GET_KEYS ||
+            opcode === op.TYPEOF || opcode === op.TYPEOF_GLOBAL ||
+            opcode === op.GET_KEYS ||
             opcode === op.PUSH_CATCH) return 3;
         if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
             opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||

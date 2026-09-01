@@ -1167,6 +1167,28 @@
                                 String(args[0]) : ",";
                 return runtime.joinArrayValues(receiver, separator);
             }, "intrinsic", NativeIntrinsics.ARRAY_JOIN);
+        this.arrayMethods.indexOf = this.makeNativeFunction("Array.indexOf",
+            function (receiver, args) {
+                var length = runtime.arrayLength(receiver);
+                if (!length) return -1;
+                var start = args.length > 1 ? Number(args[1]) : 0;
+                if (start !== start) start = 0;
+                else if (start !== 0 && start !== Infinity &&
+                         start !== -Infinity) {
+                    start = start < 0 ? Math.ceil(start) : Math.floor(start);
+                }
+                if (start >= length || start === Infinity) return -1;
+                if (start < 0) start = Math.max(length + start, 0);
+                var sought = args.length ? args[0] : undefined;
+                while (start < length) {
+                    if (runtime.arrayHas(receiver, start) &&
+                        runtime.arrayGet(receiver, start) === sought) {
+                        return start;
+                    }
+                    start++;
+                }
+                return -1;
+            });
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
@@ -1218,6 +1240,19 @@
         this.numberMethods.toFixed = this.makeNativeFunction("Number.toFixed",
             function (receiver, args) {
                 return Number(receiver).toFixed(args.length ? Number(args[0]) : 0);
+            });
+        this.numberMethods.toPrecision = this.makeNativeFunction(
+            "Number.toPrecision", function (receiver, args) {
+                var value = Number(receiver);
+                if (!args.length || args[0] === undefined) {
+                    return value.toString();
+                }
+                var precision = Number(args[0]);
+                if (precision !== Math.floor(precision) ||
+                    precision < 1 || precision > 21) {
+                    throw new RangeError("precision out of range");
+                }
+                return value.toPrecision(precision);
             });
         this.regexpMethods = {};
         this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
@@ -1621,6 +1656,12 @@
                       value.guestType === "bytecodeFunction")) return "function";
         if (value && value.guestType) return "object";
         return typeof value;
+    };
+
+    Runtime.prototype.typeOfGlobal = function (context, name) {
+        var globalObject = context ? context.globalObject : this.globalObject;
+        if (!this.hasOwnProperty(globalObject, name)) return "undefined";
+        return this.typeOf(this.getProperty(globalObject, name));
     };
 
     Runtime.prototype.toString = function (value) {

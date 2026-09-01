@@ -238,6 +238,7 @@
         var OP_SET_LOCAL = 44;
         var OP_GET_PROPERTY_CONST = 45;
         var OP_SET_PROPERTY_CONST = 46;
+        var OP_TYPEOF_GLOBAL = 48;
 
         /* Stable IDs from native_intrinsics.js. */
         var INTRINSIC_PEEK8 = 1;
@@ -327,7 +328,7 @@
                 setOpcodeExecutionCount(heapBase, state, opcode,
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
             }
-            beginOpcodeDispatch(opcode, OP_CONST, OP_SET_PROPERTY_CONST);
+            beginOpcodeDispatch(opcode, OP_CONST, OP_TYPEOF_GLOBAL);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -6287,6 +6288,76 @@
                 store32(typeofTarget + VALUE_CELL_HIGH, 0);
                 store32(typeofTarget + VALUE_CELL_AUX, 0);
                 pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_TYPEOF_GLOBAL) {
+                var typeofGlobalTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var typeofGlobalConstantIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var typeofGlobalKeyCell = heapBase + constantCells +
+                    typeofGlobalConstantIndex * VALUE_CELL_BYTES;
+                var typeofGlobalKey = valueCellReference(
+                    0, typeofGlobalKeyCell);
+                var typeofGlobalProperty = objectPropertyHead(
+                    heapBase, globalObject);
+                var typeofGlobalFoundProperty = 0;
+                while (typeofGlobalProperty !== 0) {
+                    if (propertyKey(heapBase, typeofGlobalProperty) ===
+                        typeofGlobalKey) {
+                        typeofGlobalFoundProperty = typeofGlobalProperty;
+                        typeofGlobalProperty = 0;
+                    } else typeofGlobalProperty = propertyNext(
+                               heapBase, typeofGlobalProperty);
+                }
+                var typeofGlobalSupportIndex =
+                    RUNTIME_SUPPORT_TYPE_UNDEFINED;
+                if (typeofGlobalFoundProperty !== 0) {
+                    var typeofGlobalTag = propertyValueTag(
+                        heapBase, typeofGlobalFoundProperty);
+                    if (typeofGlobalTag === VALUE_TAG_NULL) {
+                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_OBJECT;
+                    } else if (typeofGlobalTag === VALUE_TAG_FALSE) {
+                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
+                    } else if (typeofGlobalTag === VALUE_TAG_TRUE) {
+                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
+                    } else if (typeofGlobalTag === VALUE_TAG_INT32) {
+                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
+                    } else if (typeofGlobalTag === VALUE_TAG_DOUBLE) {
+                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
+                    } else if (typeofGlobalTag === VALUE_TAG_REFERENCE) {
+                        var typeofGlobalReference = propertyValueReference(
+                            heapBase, typeofGlobalFoundProperty);
+                        var typeofGlobalRecordType = recordType(
+                            heapBase, typeofGlobalReference);
+                        if (typeofGlobalRecordType === HEAP_TYPE_STRING) {
+                            typeofGlobalSupportIndex =
+                                RUNTIME_SUPPORT_TYPE_STRING;
+                        } else if (typeofGlobalRecordType ===
+                                   HEAP_TYPE_NATIVE_FUNCTION) {
+                            typeofGlobalSupportIndex =
+                                RUNTIME_SUPPORT_TYPE_FUNCTION;
+                        } else if (typeofGlobalRecordType ===
+                                   HEAP_TYPE_BYTECODE_FUNCTION) {
+                            typeofGlobalSupportIndex =
+                                RUNTIME_SUPPORT_TYPE_FUNCTION;
+                        } else {
+                            typeofGlobalSupportIndex =
+                                RUNTIME_SUPPORT_TYPE_OBJECT;
+                        }
+                    }
+                }
+                var typeofGlobalSupportCell = heapBase + stringSupport +
+                    VECTOR_CELLS + typeofGlobalSupportIndex *
+                    VALUE_CELL_BYTES;
+                var typeofGlobalTarget = heapBase + registerCells +
+                    typeofGlobalTargetIndex * VALUE_CELL_BYTES;
+                store32(typeofGlobalTarget, VALUE_TAG_REFERENCE);
+                store32(typeofGlobalTarget + VALUE_CELL_LOW,
+                    valueCellReference(0, typeofGlobalSupportCell));
+                store32(typeofGlobalTarget + VALUE_CELL_HIGH, 0);
+                store32(typeofGlobalTarget + VALUE_CELL_AUX, 0);
+                pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_KEYS) {
                 var keysTargetIndex = load32(
                     heapBase + bytecodeWords +
@@ -7454,7 +7525,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 2,
+                compilerVersion: 3,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,

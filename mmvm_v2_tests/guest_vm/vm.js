@@ -125,6 +125,16 @@
     JSContext.prototype.startProgram = function (program) {
         if (this.destroyed) throw new Error("context has been destroyed");
         if (this.execution) throw new Error("context already has an active execution");
+        var declarationIndex = 0;
+        while (program.globalDeclarations &&
+               declarationIndex < program.globalDeclarations.length) {
+            var declarationName = program.globalDeclarations[declarationIndex++];
+            if (!this.runtime.hasOwnProperty(this.globalObject,
+                                             declarationName)) {
+                this.runtime.setProperty(this.globalObject,
+                                         declarationName, undefined);
+            }
+        }
         this.execution = new Execution(program, this.runtime, this);
         return this.execution;
     };

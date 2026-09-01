@@ -46,7 +46,8 @@
         SET_LOCAL: 44,
         GET_PROPERTY_CONST: 45,
         SET_PROPERTY_CONST: 46,
-        DELETE_PROPERTY_CONST: 47
+        DELETE_PROPERTY_CONST: 47,
+        TYPEOF_GLOBAL: 48
     };
 
     op.NAMES = [];

@@ -185,6 +185,7 @@
             opcode === op.MAKE_ARRAY || opcode === op.MAKE_REGEXP ||
             (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
             opcode === op.BIT_NOT || opcode === op.TYPEOF ||
+            opcode === op.TYPEOF_GLOBAL ||
             opcode === op.DELETE_PROPERTY || opcode === op.GET_KEYS ||
             opcode === op.GET_LOCAL || opcode === op.GET_PROPERTY_CONST ||
             opcode === op.DELETE_PROPERTY_CONST;
@@ -648,6 +649,10 @@
                     frame.pc = pc + 3;
                 } else if (opcode === op.TYPEOF) {
                     registers[code[pc + 1]] = this.runtime.typeOf(registers[code[pc + 2]]);
+                    frame.pc = pc + 3;
+                } else if (opcode === op.TYPEOF_GLOBAL) {
+                    registers[code[pc + 1]] = this.runtime.typeOfGlobal(
+                        frame.context, constants[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.DELETE_PROPERTY) {
                     registers[code[pc + 1]] = this.runtime.deleteProperty(

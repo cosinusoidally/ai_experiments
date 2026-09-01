@@ -25,6 +25,7 @@ assertEqual("mixed".toUpperCase(), "MIXED", "String.toUpperCase");
 assertEqual(Number("12"), 12, "Number conversion");
 assertEqual((15).toString(16), "f", "Number.toString radix");
 assertEqual((1.25).toFixed(1), "1.3", "Number.toFixed");
+assertEqual((12.345).toPrecision(4), "12.35", "Number.toPrecision");
 assertEqual(Math.floor(2.9), 2, "Math.floor");
 assertEqual(Math.ceil(2.1), 3, "Math.ceil");
 assertEqual(Math.round(2.6), 3, "Math.round");
@@ -63,3 +64,13 @@ assertEqual(queue.pop(), 3, "Array.pop returns the last item");
 assertEqual(queue.length, 1, "Array shift/pop update length");
 assertEqual(queue.concat([4, 5], 6).join(","), "2,4,5,6",
             "Array.concat flattens array arguments once");
+var indexed = ["first", "second", "first"];
+assertEqual(indexed.indexOf("first"), 0, "Array.indexOf first match");
+assertEqual(indexed.indexOf("first", 1), 2, "Array.indexOf start offset");
+assertEqual(indexed.indexOf("second", -2), 1,
+            "Array.indexOf negative start offset");
+assertEqual(indexed.indexOf("missing"), -1, "Array.indexOf missing value");
+var sparseIndexed = new Array(2);
+sparseIndexed[1] = undefined;
+assertEqual(sparseIndexed.indexOf(undefined), 1,
+            "Array.indexOf skips sparse holes");

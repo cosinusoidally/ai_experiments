@@ -13,3 +13,15 @@ function outer() {
 }
 
 assertEqual(outer(), "nested", "nested function declaration hoisting");
+
+var selfReferencedGlobal = selfReferencedGlobal || 42;
+assertEqual(selfReferencedGlobal, 42,
+            "global var exists before its initializer is evaluated");
+
+var uninitialisedRedeclaration = 42;
+var uninitialisedRedeclaration;
+assertEqual(uninitialisedRedeclaration, 42,
+            "uninitialised var redeclaration preserves its value");
+
+assertEqual(typeof deliberatelyMissingGlobal, "undefined",
+            "typeof unresolvable global does not throw");

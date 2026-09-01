@@ -65,6 +65,10 @@
 
     Compiler.prototype.compile = function (program) {
         this.filename = program.filename || this.filename;
+        var globalDeclarations = [];
+        if (this.scopes.length === 0) {
+            collectVariableDeclarations(program.body, globalDeclarations);
+        }
         var declarations = [];
         collectFunctionDeclarations(program.body, declarations);
         var declarationIndex = 0;
@@ -93,7 +97,8 @@
                 filename: this.filename,
                 location: program.location || {filename: this.filename,
                                                 line: 1, column: 1},
-                sourceLocations: this.sourceLocations};
+                sourceLocations: this.sourceLocations,
+                globalDeclarations: globalDeclarations};
     };
 
     Compiler.prototype.compileFunction = function (expression) {
@@ -157,17 +162,21 @@
             index = 0;
             while (index < statement.declarations.length) {
                 var declaration = statement.declarations[index];
+                /* Declaration instantiation has already created the binding.
+                 * A var declaration without an initializer performs no
+                 * assignment and must not erase an earlier value. */
+                if (!declaration.initial) {
+                    index++;
+                    continue;
+                }
                 var declarationReference = this.referenceForName(declaration.name);
                 var value;
-                if (declaration.initial &&
-                    declarationReference.kind === "register" &&
+                if (declarationReference.kind === "register" &&
                     this.compileExpressionInto(
                         declaration.initial, declarationReference.register)) {
                     value = declarationReference.register;
                 } else {
-                    value = declaration.initial ?
-                        this.compileExpression(declaration.initial) :
-                        this.emitConstant(undefined);
+                    value = this.compileExpression(declaration.initial);
                     this.storeReference(declarationReference, value);
                 }
                 index++;
@@ -455,7 +464,17 @@
         }
         if (expression.type === "UnaryExpression" &&
             expression.operator !== "delete" && expression.operator !== "void") {
-            var argument = this.compileExpression(expression.argument);
+            var argument;
+            if (expression.operator === "typeof" &&
+                expression.argument.type === "Identifier") {
+                var typeofReference = this.referenceForName(
+                    expression.argument.name);
+                if (typeofReference.kind === "global") {
+                    this.emit(op.TYPEOF_GLOBAL, target, typeofReference.name);
+                    return true;
+                }
+            }
+            argument = this.compileExpression(expression.argument);
             if (expression.operator === "!") this.emit(op.NOT, target, argument);
             else if (expression.operator === "-") this.emit(op.NEGATE, target, argument);
             else if (expression.operator === "+") this.emit(op.POSITIVE, target, argument);
@@ -581,8 +600,17 @@
                 }
                 return deleteResult;
             }
-            var argument = this.compileExpression(expression.argument);
             var unary = this.allocate();
+            if (expression.operator === "typeof" &&
+                expression.argument.type === "Identifier") {
+                var typeofReference = this.referenceForName(
+                    expression.argument.name);
+                if (typeofReference.kind === "global") {
+                    this.emit(op.TYPEOF_GLOBAL, unary, typeofReference.name);
+                    return unary;
+                }
+            }
+            var argument = this.compileExpression(expression.argument);
             if (expression.operator === "!") this.emit(op.NOT, unary, argument);
             else if (expression.operator === "-") this.emit(op.NEGATE, unary, argument);
             else if (expression.operator === "+") this.emit(op.POSITIVE, unary, argument);
@@ -962,6 +990,52 @@
                 collectFunctionDeclarations(statement.block.body, result);
                 collectFunctionDeclarations(statement.handler.body, result);
             }
+        }
+    }
+
+    function collectVariableDeclarations(statements, result) {
+        var seen = {};
+        function add(name) {
+            var key = "$" + name;
+            if (!seen[key]) {
+                seen[key] = true;
+                result.push(name);
+            }
+        }
+        function visit(statement) {
+            var index;
+            if (!statement) return;
+            if (statement.type === "VariableStatement") {
+                index = 0;
+                while (index < statement.declarations.length) {
+                    add(statement.declarations[index++].name);
+                }
+            } else if (statement.type === "BlockStatement") {
+                index = 0;
+                while (index < statement.body.length) {
+                    visit(statement.body[index++]);
+                }
+            } else if (statement.type === "IfStatement") {
+                visit(statement.consequent);
+                visit(statement.alternate);
+            } else if (statement.type === "WhileStatement" ||
+                       statement.type === "DoWhileStatement") {
+                visit(statement.body);
+            } else if (statement.type === "ForStatement") {
+                visit(statement.initial);
+                visit(statement.body);
+            } else if (statement.type === "ForInStatement") {
+                visit(statement.left);
+                visit(statement.body);
+            } else if (statement.type === "TryStatement") {
+                visit(statement.block);
+                visit(statement.handler);
+            }
+            /* Function bodies have their own variable environment. */
+        }
+        var statementIndex = 0;
+        while (statementIndex < statements.length) {
+            visit(statements[statementIndex++]);
         }
     }
 

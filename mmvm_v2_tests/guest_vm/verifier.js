@@ -22,6 +22,7 @@
                 opcode === op.NOT || opcode === op.NEGATE ||
                 opcode === op.POSITIVE || opcode === op.MAKE_FUNCTION ||
                 opcode === op.BIT_NOT || opcode === op.TYPEOF ||
+                opcode === op.TYPEOF_GLOBAL ||
                 opcode === op.GET_KEYS) width = 3;
             else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                      opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
@@ -43,6 +44,7 @@
             if (pc + width > code.length) throw new Error("truncated bytecode at " + pc);
 
             if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
+                opcode === op.TYPEOF_GLOBAL ||
                 opcode === op.MAKE_FUNCTION) {
                 requireRegister(program, code[pc + 1], pc);
                 if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
