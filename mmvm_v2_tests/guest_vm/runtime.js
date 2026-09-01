@@ -878,7 +878,15 @@
          * headroom; the interpreter services it only after publishing the
          * native frame at the next ordinary yield. */
         if (bump >= Math.floor(this.linearHeap.allocationLimit * 3 / 4)) {
-            this.gcPending = true;
+            if (this.linearHeap.allocationLimit <
+                this.linearHeap.maximumAllocationLimit) {
+                /* The backing reservation and all guest references are stable
+                 * offsets, so logical growth is cheap and cannot invalidate a
+                 * pointer. Prefer the fresh contiguous tail to repeatedly
+                 * carving tiny regions out of a fragmented young heap. */
+                this.linearHeap.growToFit(
+                    this.linearHeap.allocationLimit + 1);
+            } else this.gcPending = true;
         }
     };
 
@@ -1235,7 +1243,8 @@
             }));
         this.setGlobal("String", stringConstructor);
         this.setGlobal("Number", this.makeNativeFunction("Number",
-            function (receiver, args) { return args.length ? Number(args[0]) : 0; }));
+            function (receiver, args) { return args.length ? Number(args[0]) : 0; },
+            "intrinsic", NativeIntrinsics.NUMBER_CONSTRUCTOR));
         var arrayConstructor = this.makeNativeFunction("Array",
             function (receiver, args) {
                 var array = runtime.makeArray();
@@ -1341,6 +1350,8 @@
         });
         if (this.nativeInterpreter) {
             this.nativeInterpreter.setDlsymPointer(bridge.getDlsym());
+            this.nativeInterpreter.setGettimeofdayPointer(
+                bridge.resolve("gettimeofday"));
         }
         this.setGlobal("peek8", this.makeNativeFunction("peek8",
             function (receiver, args) { return bridge.peek8(args[0]); },

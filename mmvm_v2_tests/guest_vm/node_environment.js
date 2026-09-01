@@ -2,6 +2,11 @@
  * in the js_min.exe host, not inside the guest.  The libc-backed compatibility
  * stack owns descriptors and polling; only guest values cross this boundary. */
 (function (root) {
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    if (typeof module !== "undefined" && module.exports) {
+        NativeIntrinsics = require("./native_intrinsics.js");
+    }
+
     function own(object, key) {
         return Object.prototype.hasOwnProperty.call(object, key);
     }
@@ -99,8 +104,10 @@
         return value;
     };
 
-    GuestNodeEnvironment.prototype.makeFunction = function (name, callback, intrinsic) {
-        return intrinsic ? this.runtime.makeNativeFunction(name, callback) :
+    GuestNodeEnvironment.prototype.makeFunction = function (
+            name, callback, intrinsic, intrinsicId) {
+        return intrinsic ? this.runtime.makeNativeFunction(
+            name, callback, "intrinsic", intrinsicId) :
                            this.runtime.makeHostFunction(name, callback);
     };
 
@@ -597,21 +604,38 @@
                 return decodeURIComponent(String(args[0]));
             }, true));
 
-        var dateConstructor = this.makeFunction("Date", function () {}, true);
+        var dateValueKey = "\x00DateValue";
+        var datePrototype = this.object({});
+        function dateValue(receiver) {
+            return Number(environment.runtime.getProperty(
+                receiver, dateValueKey));
+        }
+        function dateMethod(name, intrinsicId) {
+            environment.runtime.setProperty(datePrototype, name,
+                environment.makeFunction("Date." + name, function (receiver) {
+                    return new Date(dateValue(receiver))[name]();
+                }, true, intrinsicId));
+        }
+        dateMethod("getDate"); dateMethod("getMonth");
+        dateMethod("getFullYear"); dateMethod("getHours");
+        dateMethod("getMinutes"); dateMethod("getSeconds");
+        dateMethod("getTime", NativeIntrinsics.DATE_GET_TIME);
+        var dateConstructor = this.makeFunction("Date", function () {}, true,
+            NativeIntrinsics.DATE_CONSTRUCTOR);
         dateConstructor.constructCallback = function () {
-            var hostDate = new Date();
             var date = environment.object({});
-            function method(name) {
-                environment.runtime.setProperty(date, name,
-                    environment.makeFunction("Date." + name, function () {
-                        return hostDate[name]();
-                    }, true));
-            }
-            method("getDate"); method("getMonth"); method("getFullYear");
-            method("getHours"); method("getMinutes"); method("getSeconds");
-            method("getTime");
+            environment.runtime.heapRecords.setObjectPrototype(
+                date.heapAddress, datePrototype.heapAddress);
+            environment.runtime.setProperty(date, dateValueKey,
+                new Date().getTime());
             return date;
         };
+        this.runtime.setProperty(dateConstructor, "prototype", datePrototype);
+        this.runtime.setProperty(datePrototype, "constructor", dateConstructor);
+        if (this.runtime.nativeInterpreter) {
+            this.runtime.nativeInterpreter.setDateSupport(
+                datePrototype, dateValueKey);
+        }
         publish("Date", dateConstructor);
 
         var errorConstructor = this.makeFunction("Error", function (receiver, args) {

@@ -18,7 +18,8 @@
                       FUNCTION_APPLY: 33, OBJECT_HAS_OWN_PROPERTY: 34,
                       STRING_CONSTRUCTOR: 35, MATH_ATAN2: 36,
                       ARRAY_JOIN: 37, ARRAY_SHIFT: 38, ARRAY_SLICE: 39,
-                      ARRAY_CONCAT: 40};
+                      ARRAY_CONCAT: 40, NUMBER_CONSTRUCTOR: 41,
+                      DATE_CONSTRUCTOR: 42, DATE_GET_TIME: 43};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

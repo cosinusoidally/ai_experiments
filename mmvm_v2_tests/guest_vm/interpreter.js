@@ -425,7 +425,15 @@
                     var nativeResult = this.runtime.nativeInterpreter.run(
                         nativeFrame.heapAddress, nativeFrame.program, nativeBudget,
                         nativeFrame.context);
+                    var synchronizationStarted =
+                        this.runtime.profileOpcodeCounts ?
+                        new Date().getTime() : 0;
                     nativeFrame = this.synchronizeNativeFrames(nativeResult.frame);
+                    if (synchronizationStarted) {
+                        this.runtime.nativeInterpreter.synchronizationCount++;
+                        this.runtime.nativeInterpreter.synchronizationElapsedMs +=
+                            new Date().getTime() - synchronizationStarted;
+                    }
                     nativeFrame.pc = nativeResult.pc;
                     used += nativeResult.instructions;
                     this.totalInstructions += nativeResult.instructions;
@@ -483,6 +491,11 @@
                     if (nativeResult.reason !== 3) {
                         throw new Error("unknown native interpreter exit " +
                                         nativeResult.reason);
+                    }
+                    if (this.runtime.nativeInterpreter.ensureOpcodeHelper(
+                            nativeResult.opcode)) {
+                        nativeFrame.nativeHeapCurrent = true;
+                        continue;
                     }
                     this.runtime.nativeInterpreter.prepareSemanticFallback();
                     if (budget === 0) {
@@ -731,6 +744,13 @@
                         index++;
                     }
                     var constructorValue = registers[code[pc + 2]];
+                    if (this.runtime.nativeInterpreter &&
+                        this.runtime.nativeInterpreter.ensureIntrinsicHelper(
+                            constructorValue)) {
+                        frame.pc = pc;
+                        frame.nativeHeapCurrent = true;
+                        continue;
+                    }
                     var constructDestination = code[pc + 1];
                     frame.pc = pc + 4;
                     if (constructorValue && constructorValue.guestType === "function" &&

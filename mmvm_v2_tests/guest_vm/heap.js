@@ -73,6 +73,7 @@
         /* Zero is the null reference. Keep the first cache line inaccessible. */
         this.bump = 64;
         this.freeBlocks = [];
+        this.freeBlocksAreMaxHeap = false;
         this.allocationCount = 0;
         this.growthCount = 0;
         this.destroyed = false;
@@ -126,6 +127,7 @@
             var candidateSize = this.memory.readU32Trusted(
                 candidate + HEADER_SIZE_FIELD);
             if (candidateSize >= size) {
+                this.freeBlocksAreMaxHeap = false;
                 address = candidate;
                 var remainder = candidateSize - size;
                 if (remainder >= HEADER_SIZE + 8) {
@@ -253,6 +255,7 @@
         this.memory.writeU32Trusted(address + HEADER_MARK, 0);
         this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
         this.freeBlocks.push(address);
+        this.freeBlocksAreMaxHeap = false;
     };
 
     /* Rebuild the free-block index from authoritative record headers.  The
@@ -289,32 +292,80 @@
             blocks.pop();
         }
         this.freeBlocks = blocks;
+        this.freeBlocksAreMaxHeap = false;
         return blocks.length;
     };
 
-    Heap.prototype.claimLargestFreeBlock = function (minimumSize) {
-        var bestIndex = -1;
-        var bestSize = 0;
-        var index = 0;
-        while (index < this.freeBlocks.length) {
-            var address = this.freeBlocks[index];
-            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
-            var flags = this.memory.readU32Trusted(address + HEADER_FLAGS);
-            if (type !== Types.FREE || flags !== 0) {
-                throw new Error("stale guest free-block index: address=" +
-                    address + " type=" + type + " flags=" + flags +
-                    " index=" + index);
-            }
-            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
-            if (size >= minimumSize && size > bestSize) {
-                bestIndex = index;
-                bestSize = size;
-            }
-            index++;
+    Heap.prototype.buildFreeBlockMaxHeap = function () {
+        var blocks = this.freeBlocks;
+        var heap = this;
+        function sizeAt(index) {
+            return heap.memory.readU32Trusted(
+                blocks[index] + HEADER_SIZE_FIELD);
         }
-        if (bestIndex < 0) return null;
-        var claimedAddress = this.freeBlocks[bestIndex];
-        this.freeBlocks.splice(bestIndex, 1);
+        var parent = Math.floor(blocks.length / 2) - 1;
+        while (parent >= 0) {
+            var root = parent;
+            while (true) {
+                var left = root * 2 + 1;
+                if (left >= blocks.length) break;
+                var largest = left;
+                var right = left + 1;
+                if (right < blocks.length && sizeAt(right) > sizeAt(left)) {
+                    largest = right;
+                }
+                if (sizeAt(root) >= sizeAt(largest)) break;
+                var swap = blocks[root];
+                blocks[root] = blocks[largest];
+                blocks[largest] = swap;
+                root = largest;
+            }
+            parent--;
+        }
+        this.freeBlocksAreMaxHeap = true;
+    };
+
+    Heap.prototype.claimLargestFreeBlock = function (minimumSize) {
+        if (!this.freeBlocks.length) return null;
+        if (!this.freeBlocksAreMaxHeap) this.buildFreeBlockMaxHeap();
+        var claimedAddress = this.freeBlocks[0];
+        var bestSize = this.memory.readU32Trusted(
+            claimedAddress + HEADER_SIZE_FIELD);
+        if (bestSize < minimumSize) return null;
+        var type = this.memory.readU32Trusted(claimedAddress + HEADER_TYPE);
+        var flags = this.memory.readU32Trusted(claimedAddress + HEADER_FLAGS);
+        if (type !== Types.FREE || flags !== 0) {
+            throw new Error("stale guest free-block maximum: address=" +
+                            claimedAddress + " type=" + type +
+                            " flags=" + flags);
+        }
+        var last = this.freeBlocks.pop();
+        if (this.freeBlocks.length) {
+            this.freeBlocks[0] = last;
+            var root = 0;
+            while (true) {
+                var left = root * 2 + 1;
+                if (left >= this.freeBlocks.length) break;
+                var largest = left;
+                var right = left + 1;
+                var leftSize = this.memory.readU32Trusted(
+                    this.freeBlocks[left] + HEADER_SIZE_FIELD);
+                if (right < this.freeBlocks.length) {
+                    var rightSize = this.memory.readU32Trusted(
+                        this.freeBlocks[right] + HEADER_SIZE_FIELD);
+                    if (rightSize > leftSize) largest = right;
+                }
+                var rootSize = this.memory.readU32Trusted(
+                    this.freeBlocks[root] + HEADER_SIZE_FIELD);
+                var largestSize = this.memory.readU32Trusted(
+                    this.freeBlocks[largest] + HEADER_SIZE_FIELD);
+                if (rootSize >= largestSize) break;
+                var swap = this.freeBlocks[root];
+                this.freeBlocks[root] = this.freeBlocks[largest];
+                this.freeBlocks[largest] = swap;
+                root = largest;
+            }
+        }
         return {address: claimedAddress, size: bestSize};
     };
 

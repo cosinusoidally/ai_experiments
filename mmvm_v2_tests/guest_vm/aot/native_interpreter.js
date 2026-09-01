@@ -20,6 +20,9 @@
     var CallReject = {HEAP_SPACE: 4};
     var ARRAY_SLICE_INTRINSIC_ID = 39;
     var ARRAY_CONCAT_INTRINSIC_ID = 40;
+    var NUMBER_CONSTRUCTOR_INTRINSIC_ID = 41;
+    var DATE_CONSTRUCTOR_INTRINSIC_ID = 42;
+    var DATE_GET_TIME_INTRINSIC_ID = 43;
 
     function interpreterKernel(heapBase, frame, globalObject, arrayLengthKey,
                                arrayPrototype, stringSupport, budget, state) {
@@ -60,6 +63,7 @@
         var HEAP_TYPE_BUFFER_BACKING = 11;
         var HEAP_TYPE_VALUE_VECTOR = 13;
         var HEAP_TYPE_FRAME = 14;
+        var HEAP_TYPE_HANDLER = 18;
         var STRING_LENGTH = 16;
         var STRING_HASH = 20;
         var STRING_CHARS = 24;
@@ -82,6 +86,10 @@
         var FRAME_HANDLER = 40;
         var FRAME_CONTEXT = 44;
         var FRAME_REGISTERS = 48;
+        var HANDLER_NEXT = 16;
+        var HANDLER_TARGET = 20;
+        var HANDLER_NAME_CONSTANT = 24;
+        var HANDLER_RESERVED = 28;
         var PROGRAM_BYTECODE = 16;
         var PROGRAM_CONSTANTS = 20;
         var PROGRAM_CONSTANT_REGISTERS = 24;
@@ -161,6 +169,9 @@
         var PLATFORM_DLSYM_POINTER = 16;
         var PLATFORM_ARRAY_SLICE_POINTER = 36;
         var PLATFORM_ARRAY_CONCAT_POINTER = 40;
+        var PLATFORM_GETTIMEOFDAY_POINTER = 44;
+        var PLATFORM_DATE_INTRINSIC_POINTER = 48;
+        var PLATFORM_NUMERIC_PROPERTY_POINTER = 52;
         var PROFILE_OPCODES = 0;
         var CALL_REJECT_NONE = 0;
         var CALL_REJECT_ARGUMENT_LIST = 1;
@@ -176,6 +187,7 @@
         var ARRAY_RECORD_BYTES = 32;
         var INITIAL_ARRAY_CAPACITY = 4;
         var INITIAL_VECTOR_RECORD_BYTES = 88;
+        var HANDLER_RECORD_BYTES = 32;
 
         var EXIT_BUDGET = 1;
         var EXIT_RETURN = 2;
@@ -217,6 +229,8 @@
         var OP_SHIFT_RIGHT = 33;
         var OP_SHIFT_UNSIGNED_RIGHT = 34;
         var OP_CONSTRUCT = 36;
+        var OP_PUSH_CATCH = 37;
+        var OP_POP_CATCH = 38;
         var OP_BIT_NOT = 39;
         var OP_TYPEOF = 40;
         var OP_GET_KEYS = 42;
@@ -266,6 +280,9 @@
         var INTRINSIC_ARRAY_SHIFT = 38;
         var INTRINSIC_ARRAY_SLICE = 39;
         var INTRINSIC_ARRAY_CONCAT = 40;
+        var INTRINSIC_NUMBER_CONSTRUCTOR = 41;
+        var INTRINSIC_DATE_CONSTRUCTOR = 42;
+        var INTRINSIC_DATE_GET_TIME = 43;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -285,6 +302,8 @@
         var RUNTIME_SUPPORT_TYPE_FUNCTION = 270;
         var RUNTIME_SUPPORT_REGEXP_CLASS_BASE = 271;
         var RUNTIME_SUPPORT_FUNCTION_PROTOTYPE = 276;
+        var RUNTIME_SUPPORT_DATE_PROTOTYPE = 277;
+        var RUNTIME_SUPPORT_DATE_VALUE_KEY = 278;
 
         var currentContext = load32(heapBase + frame + FRAME_CONTEXT);
         var currentProgram = load32(heapBase + frame + FRAME_PROGRAM);
@@ -489,7 +508,9 @@
                     if (arrayGetObjectType === HEAP_TYPE_BUFFER_VIEW) {
                         arrayGetSupported = 2;
                     } else if (arrayGetObjectType !== HEAP_TYPE_ARRAY) {
-                        arrayGetSupported = 0;
+                        if (arrayGetObjectType === HEAP_TYPE_OBJECT) {
+                            arrayGetSupported = 5;
+                        } else arrayGetSupported = 0;
                     }
                 }
                 if (arrayGetSupported === 3) {
@@ -503,6 +524,19 @@
                 }
                 var arrayGetTarget = heapBase + registerCells +
                     arrayGetTargetIndex * VALUE_CELL_BYTES;
+                if (arrayGetSupported === 5) {
+                    if (platformNumericPropertyPointer(heapBase,
+                        enginePlatformServices(heapBase, state)) !== 0) {
+                        arrayGetSupported = callNativeI32(
+                            platformNumericPropertyPointer(heapBase,
+                                enginePlatformServices(heapBase, state)),
+                            heapBase, arrayGetTarget, arrayGetObject,
+                            arrayGetIndex);
+                        if (arrayGetSupported === 1) {
+                            arrayGetSupported = 4;
+                        } else arrayGetSupported = 0;
+                    } else arrayGetSupported = 0;
+                }
                 if (arrayGetSupported === 3) {
                     var namedGetObject = arrayGetObject;
                     var namedGetProperty = 0;
@@ -2473,7 +2507,6 @@
                 }
                 if (bytecodeCallHandled === 0) {
                 var intrinsicCallValid = 1;
-                if (callOperation === 2) intrinsicCallValid = 0;
                 if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
                     intrinsicCallValid = 0;
                 }
@@ -2491,7 +2524,17 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_ARRAY_CONCAT) {
+                    else if (intrinsicId > INTRINSIC_DATE_GET_TIME) {
+                        intrinsicCallValid = 0;
+                    }
+                }
+                if (callOperation === 2) {
+                    if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
+                        intrinsicCallValid = 0;
+                    }
+                }
+                if (callOperation === 1) {
+                    if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2521,6 +2564,12 @@
                 } else if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
+                    requiredIntrinsicArguments = 0;
+                } else if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
                     requiredIntrinsicArguments = 0;
                 } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
                     requiredIntrinsicArguments = 0;
@@ -2568,6 +2617,37 @@
                 var intrinsicTarget = heapBase + registerCells +
                     callTargetIndex * VALUE_CELL_BYTES;
                 var intrinsicHandled = 0;
+                if (intrinsicId >= INTRINSIC_NUMBER_CONSTRUCTOR) {
+                    receiverIndex = -1;
+                    if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
+                        receiverIndex = load32(heapBase + bytecodeWords +
+                            (pc + THIRD_OPERAND) * WORD_BYTES);
+                    }
+                    if (platformDateIntrinsicPointer(heapBase,
+                        enginePlatformServices(heapBase, state)) !== 0) {
+                        intrinsicHandled = callNativeI32(
+                            platformDateIntrinsicPointer(heapBase,
+                                enginePlatformServices(heapBase, state)),
+                            heapBase, state, intrinsicTarget, registerCells,
+                            receiverIndex, intrinsicId, stringSupport,
+                            intrinsicArgumentsVector);
+                    }
+                    if (intrinsicHandled === 2) {
+                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                                CALL_REJECT_HEAP_SPACE);
+                        intrinsicHandled = 0;
+                    }
+                    if (intrinsicHandled === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
+                    }
+                }
                 if (intrinsicId === INTRINSIC_GET_DLSYM) {
                     store32(intrinsicTarget, VALUE_TAG_INT32);
                     store32(intrinsicTarget + VALUE_CELL_LOW,
@@ -5590,8 +5670,55 @@
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                 }
                 }
-                pc = pc + FIVE_WORD_INSTRUCTION;
+                if (callOperation === 2) {
+                    pc = pc + FOUR_WORD_INSTRUCTION;
+                } else pc = pc + FIVE_WORD_INSTRUCTION;
                 }
+            } else if (opcode === OP_PUSH_CATCH) {
+                var pushedHandler = engineHeapBump(heapBase, state);
+                if (pushedHandler + HANDLER_RECORD_BYTES >
+                    engineHeapLimit(heapBase, state)) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                setRecordType(heapBase, pushedHandler, HEAP_TYPE_HANDLER);
+                setRecordSize(heapBase, pushedHandler, HANDLER_RECORD_BYTES);
+                setRecordMark(heapBase, pushedHandler, 0);
+                setRecordFlags(heapBase, pushedHandler, 0);
+                setHandlerNext(heapBase, pushedHandler,
+                               frameHandler(heapBase, frame));
+                setHandlerTarget(heapBase, pushedHandler, load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES));
+                setHandlerNameConstant(heapBase, pushedHandler, load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES));
+                setHandlerReserved(heapBase, pushedHandler, 0);
+                setFrameHandler(heapBase, frame, pushedHandler);
+                setEngineHeapBump(heapBase, state,
+                                  pushedHandler + HANDLER_RECORD_BYTES);
+                pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_POP_CATCH) {
+                var poppedHandler = frameHandler(heapBase, frame);
+                if (poppedHandler === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                setFrameHandler(heapBase, frame,
+                                handlerNext(heapBase, poppedHandler));
+                pc = pc + 1;
             } else if (opcode === OP_RETURN) {
                 var returnIndex = load32(heapBase + bytecodeWords + (pc + FIRST_OPERAND) * WORD_BYTES);
                 var nativeCallerFrame = load32(
@@ -6958,6 +7085,263 @@
         return 1;
     }
 
+    function dateIntrinsicKernel(heapBase, state, targetCell, registerCells,
+                                 receiverIndex, intrinsicId, stringSupport,
+                                 argumentsVector) {
+        var VALUE_CELL_BYTES = 16;
+        var VALUE_CELL_TAG = 0;
+        var VALUE_CELL_REFERENCE = 4;
+        var VALUE_CELL_LOW = 4;
+        var VALUE_CELL_HIGH = 8;
+        var VALUE_CELL_AUX = 12;
+        var VALUE_TAG_UNDEFINED = 1;
+        var VALUE_TAG_NULL = 2;
+        var VALUE_TAG_FALSE = 3;
+        var VALUE_TAG_TRUE = 4;
+        var VALUE_TAG_INT32 = 5;
+        var VALUE_TAG_DOUBLE = 6;
+        var VALUE_TAG_REFERENCE = 7;
+        var HEAP_TYPE_OBJECT = 1;
+        var HEAP_TYPE_PROPERTY = 6;
+        var RECORD_TYPE = 0;
+        var RECORD_SIZE = 4;
+        var RECORD_MARK = 8;
+        var RECORD_FLAGS = 12;
+        var OBJECT_PROTOTYPE = 16;
+        var OBJECT_PROPERTY_HEAD = 20;
+        var OBJECT_EXTENSIBLE = 24;
+        var OBJECT_RESERVED = 28;
+        var PROPERTY_NEXT = 16;
+        var PROPERTY_KEY = 20;
+        var PROPERTY_ATTRIBUTES = 24;
+        var PROPERTY_RESERVED = 28;
+        var PROPERTY_VALUE = 32;
+        var VECTOR_LENGTH = 16;
+        var VECTOR_CELLS = 24;
+        var ENGINE_HEAP_BUMP = 16;
+        var ENGINE_HEAP_LIMIT = 20;
+        var ENGINE_SCRATCH_LEFT = 36;
+        var ENGINE_PLATFORM_SERVICES = 44;
+        var PLATFORM_GETTIMEOFDAY_POINTER = 44;
+        var OBJECT_RECORD_BYTES = 32;
+        var PROPERTY_RECORD_BYTES = 48;
+        var INTRINSIC_NUMBER_CONSTRUCTOR = 41;
+        var INTRINSIC_DATE_CONSTRUCTOR = 42;
+        var RUNTIME_SUPPORT_DATE_PROTOTYPE = 277;
+        var RUNTIME_SUPPORT_DATE_VALUE_KEY = 278;
+        if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
+            if (vectorLength(heapBase, argumentsVector) === 0) {
+                store32(targetCell, VALUE_TAG_INT32);
+                store32(targetCell + VALUE_CELL_LOW, 0);
+                store32(targetCell + VALUE_CELL_HIGH, 0);
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            var descriptor = heapBase + argumentsVector + VECTOR_CELLS;
+            if (valueCellTag(0, descriptor) !== VALUE_TAG_INT32) return 0;
+            var sourceRegister = load32(descriptor + VALUE_CELL_LOW);
+            var source = heapBase + registerCells +
+                sourceRegister * VALUE_CELL_BYTES;
+            var sourceTag = valueCellTag(0, source);
+            if (sourceTag === VALUE_TAG_INT32) {
+                store32(targetCell, load32(source));
+                store32(targetCell + VALUE_CELL_LOW,
+                        load32(source + VALUE_CELL_LOW));
+                store32(targetCell + VALUE_CELL_HIGH,
+                        load32(source + VALUE_CELL_HIGH));
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            if (sourceTag === VALUE_TAG_DOUBLE) {
+                store32(targetCell, load32(source));
+                store32(targetCell + VALUE_CELL_LOW,
+                        load32(source + VALUE_CELL_LOW));
+                store32(targetCell + VALUE_CELL_HIGH,
+                        load32(source + VALUE_CELL_HIGH));
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            if (sourceTag === VALUE_TAG_NULL) sourceTag = VALUE_TAG_FALSE;
+            if (sourceTag === VALUE_TAG_FALSE) {
+                store32(targetCell, VALUE_TAG_INT32);
+                store32(targetCell + VALUE_CELL_LOW, 0);
+                store32(targetCell + VALUE_CELL_HIGH, 0);
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            if (sourceTag === VALUE_TAG_TRUE) {
+                store32(targetCell, VALUE_TAG_INT32);
+                store32(targetCell + VALUE_CELL_LOW, 1);
+                store32(targetCell + VALUE_CELL_HIGH, 0);
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            if (sourceTag === VALUE_TAG_UNDEFINED) {
+                store32(targetCell, VALUE_TAG_DOUBLE);
+                store32(targetCell + VALUE_CELL_LOW, 0);
+                store32(targetCell + VALUE_CELL_HIGH, 2146959360);
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            return 0;
+        }
+        if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
+            var dateNowPointer = platformGettimeofdayPointer(
+                heapBase, enginePlatformServices(heapBase, state));
+            if (dateNowPointer === 0) return 0;
+            var dateObject = engineHeapBump(heapBase, state);
+            var dateValueProperty = dateObject + OBJECT_RECORD_BYTES;
+            var dateAllocationEnd = dateValueProperty + PROPERTY_RECORD_BYTES;
+            if (dateAllocationEnd > engineHeapLimit(heapBase, state)) return 2;
+            var dateTimeval = heapBase + state + ENGINE_SCRATCH_LEFT;
+            if (callNativeI32(dateNowPointer, dateTimeval, 0) !== 0) return 0;
+            var datePrototypeCell = heapBase + stringSupport + VECTOR_CELLS +
+                RUNTIME_SUPPORT_DATE_PROTOTYPE * VALUE_CELL_BYTES;
+            var dateKeyCell = heapBase + stringSupport + VECTOR_CELLS +
+                RUNTIME_SUPPORT_DATE_VALUE_KEY * VALUE_CELL_BYTES;
+            setRecordType(heapBase, dateObject, HEAP_TYPE_OBJECT);
+            setRecordSize(heapBase, dateObject, OBJECT_RECORD_BYTES);
+            setRecordMark(heapBase, dateObject, 0);
+            setRecordFlags(heapBase, dateObject, 0);
+            setObjectPrototype(heapBase, dateObject,
+                valueCellReference(0, datePrototypeCell));
+            setObjectPropertyHead(heapBase, dateObject, dateValueProperty);
+            setObjectExtensible(heapBase, dateObject, 1);
+            setObjectReserved(heapBase, dateObject, 0);
+            setRecordType(heapBase, dateValueProperty, HEAP_TYPE_PROPERTY);
+            setRecordSize(heapBase, dateValueProperty, PROPERTY_RECORD_BYTES);
+            setRecordMark(heapBase, dateValueProperty, 0);
+            setRecordFlags(heapBase, dateValueProperty, 0);
+            setPropertyNext(heapBase, dateValueProperty, 0);
+            setPropertyKey(heapBase, dateValueProperty,
+                valueCellReference(0, dateKeyCell));
+            setPropertyAttributes(heapBase, dateValueProperty, 5);
+            setPropertyReserved(heapBase, dateValueProperty, 0);
+            var dateValueCell = heapBase + dateValueProperty + PROPERTY_VALUE;
+            store32(dateValueCell, VALUE_TAG_DOUBLE);
+            /* targetCell is not published until the result is complete, so
+             * its payload is safe conversion scratch.  Do not reuse the
+             * adjacent engine scratch word: it currently holds tv_usec. */
+            store32(targetCell + VALUE_CELL_LOW, 1000);
+            storeF64(dateValueCell + VALUE_CELL_LOW, addF64(
+                multiplyF64(loadI32F64(dateTimeval),
+                    loadI32F64(targetCell + VALUE_CELL_LOW)),
+                divideF64(loadI32F64(dateTimeval + 4),
+                    loadI32F64(targetCell + VALUE_CELL_LOW))));
+            store32(dateValueCell + VALUE_CELL_AUX, 0);
+            store32(targetCell, VALUE_TAG_REFERENCE);
+            store32(targetCell + VALUE_CELL_LOW, dateObject);
+            store32(targetCell + VALUE_CELL_HIGH, 0);
+            store32(targetCell + VALUE_CELL_AUX, 0);
+            setEngineHeapBump(heapBase, state, dateAllocationEnd);
+            return 1;
+        }
+        if (receiverIndex < 0) return 0;
+        var receiverCell = heapBase + registerCells +
+            receiverIndex * VALUE_CELL_BYTES;
+        if (valueCellTag(0, receiverCell) !== VALUE_TAG_REFERENCE) return 0;
+        var receiver = valueCellReference(0, receiverCell);
+        if (recordType(heapBase, receiver) !== HEAP_TYPE_OBJECT) return 0;
+        var keyCell = heapBase + stringSupport + VECTOR_CELLS +
+            RUNTIME_SUPPORT_DATE_VALUE_KEY * VALUE_CELL_BYTES;
+        var key = valueCellReference(0, keyCell);
+        var property = objectPropertyHead(heapBase, receiver);
+        while (property !== 0) {
+            if (propertyKey(heapBase, property) === key) {
+                var source = heapBase + property + PROPERTY_VALUE;
+                store32(targetCell, load32(source));
+                store32(targetCell + VALUE_CELL_LOW,
+                        load32(source + VALUE_CELL_LOW));
+                store32(targetCell + VALUE_CELL_HIGH,
+                        load32(source + VALUE_CELL_HIGH));
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            property = propertyNext(heapBase, property);
+        }
+        return 0;
+    }
+
+    /* Property keys are strings even when bracket syntax supplies an integer.
+     * Match the canonical decimal spelling in place so indexed access on an
+     * ordinary object does not allocate a temporary string or leave the guest
+     * engine. */
+    function numericPropertyGetKernel(heapBase, targetCell, object, index) {
+        var VALUE_CELL_LOW = 4;
+        var VALUE_CELL_HIGH = 8;
+        var VALUE_CELL_AUX = 12;
+        var VALUE_TAG_UNDEFINED = 1;
+        var HEAP_TYPE_OBJECT = 1;
+        var HEAP_TYPE_BYTECODE_FUNCTION = 4;
+        var RECORD_TYPE = 0;
+        var STRING_LENGTH = 16;
+        var STRING_CHARS = 24;
+        var OBJECT_PROTOTYPE = 16;
+        var OBJECT_PROPERTY_HEAD = 20;
+        var PROPERTY_NEXT = 16;
+        var PROPERTY_KEY = 20;
+        var PROPERTY_VALUE = 32;
+        if (index < 0) return 0;
+        var currentObject = object;
+        while (currentObject !== 0) {
+            var objectType = recordType(heapBase, currentObject);
+            if (objectType < HEAP_TYPE_OBJECT) return 0;
+            if (objectType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+            var property = objectPropertyHead(heapBase, currentObject);
+            while (property !== 0) {
+                var key = propertyKey(heapBase, property);
+                var length = stringLength(heapBase, key);
+                var matches = 1;
+                var parsed = 0;
+                var characterIndex = 0;
+                if (length === 0) matches = 0;
+                if (length > 1) {
+                    if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) ===
+                        48) matches = 0;
+                }
+                while (characterIndex < length) {
+                    var character = stringCharacterCodeUnit(
+                        heapBase, key, characterIndex) & 65535;
+                    if (matches === 0) {
+                        /* Keep the kernel loop structurally simple. */
+                    } else if (character < 48) {
+                        matches = 0;
+                    } else if (character > 57) {
+                        matches = 0;
+                    } else {
+                        if (parsed > 214748364) {
+                            matches = 0;
+                        } else {
+                            parsed = parsed * 10 + character - 48;
+                            if (parsed < 0) matches = 0;
+                        }
+                    }
+                    characterIndex = characterIndex + 1;
+                }
+                if (matches === 1) {
+                    if (parsed === index) {
+                        var source = heapBase + property + PROPERTY_VALUE;
+                        store32(targetCell, load32(source));
+                        store32(targetCell + VALUE_CELL_LOW,
+                                load32(source + VALUE_CELL_LOW));
+                        store32(targetCell + VALUE_CELL_HIGH,
+                                load32(source + VALUE_CELL_HIGH));
+                        store32(targetCell + VALUE_CELL_AUX,
+                                load32(source + VALUE_CELL_AUX));
+                        return 1;
+                    }
+                }
+                property = propertyNext(heapBase, property);
+            }
+            currentObject = objectPrototype(heapBase, currentObject);
+        }
+        store32(targetCell, VALUE_TAG_UNDEFINED);
+        store32(targetCell + VALUE_CELL_LOW, 0);
+        store32(targetCell + VALUE_CELL_HIGH, 0);
+        store32(targetCell + VALUE_CELL_AUX, 0);
+        return 1;
+    }
+
     function NativeInterpreter(runtime) {
         this.runtime = runtime;
         this.ir = new KernelCompiler().compile(interpreterKernel, {
@@ -6977,7 +7361,9 @@
             this.stateAddress, this.platformServicesAddress);
         this.arraySliceNativeResult = null;
         this.arrayConcatNativeResult = null;
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(277);
+        this.dateIntrinsicNativeResult = null;
+        this.numericPropertyNativeResult = null;
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(279);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -7045,11 +7431,21 @@
             runtime.valueCells.writeReferenceAt(functionPrototypeSupportCell,
                 runtime.functionPrototype.heapAddress);
         } else runtime.writeHeapValue(functionPrototypeSupportCell, undefined);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 277);
+        runtime.writeHeapValue(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 277), undefined);
+        runtime.writeHeapValue(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 278), undefined);
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 279);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
-        this.nextInstructionProfileReport = 5000000;
+        this.synchronizationCount = 0;
+        this.synchronizationElapsedMs = 0;
+        this.allocationExitCount = 0;
+        this.allocationRefillAttemptCount = 0;
+        this.allocationRefillCount = 0;
+        this.allocationRefillElapsedMs = 0;
+        this.nextInstructionProfileReport = 25000000;
         this.unsupportedExitCount = 0;
         this.unsupportedOpcodeCounts = [];
         this.unsupportedLocationCounts = {};
@@ -7099,6 +7495,18 @@
             this.runtime.heapRecords.setPlatformArrayConcatPointer(
                 this.platformServicesAddress, result.pointer);
             name = "Array.concat";
+        } else if (callable.nativeIntrinsic ===
+                   NUMBER_CONSTRUCTOR_INTRINSIC_ID ||
+                   callable.nativeIntrinsic ===
+                   DATE_CONSTRUCTOR_INTRINSIC_ID ||
+                   callable.nativeIntrinsic === DATE_GET_TIME_INTRINSIC_ID) {
+            if (this.dateIntrinsicNativeResult) return false;
+            result = new X86Backend().compile(
+                new KernelCompiler().compile(dateIntrinsicKernel));
+            this.dateIntrinsicNativeResult = result;
+            this.runtime.heapRecords.setPlatformDateIntrinsicPointer(
+                this.platformServicesAddress, result.pointer);
+            name = "Number/Date";
         } else return false;
         if (this.runtime.profileOpcodeCounts && typeof print === "function") {
             print("native guest helper compiled: " + name + " bytes=" +
@@ -7107,9 +7515,42 @@
         return true;
     };
 
+    NativeInterpreter.prototype.ensureOpcodeHelper = function (opcode) {
+        if (!this.nativeResult.fn || opcode !== Bytecode.GET_PROPERTY) {
+            return false;
+        }
+        if (this.numericPropertyNativeResult) return false;
+        var result = new X86Backend().compile(
+            new KernelCompiler().compile(numericPropertyGetKernel));
+        this.numericPropertyNativeResult = result;
+        this.runtime.heapRecords.setPlatformNumericPropertyPointer(
+            this.platformServicesAddress, result.pointer);
+        if (this.runtime.profileOpcodeCounts &&
+            typeof print === "function") {
+            print("native guest helper compiled: numeric property get bytes=" +
+                  result.length);
+        }
+        return true;
+    };
+
     NativeInterpreter.prototype.setDlsymPointer = function (pointer) {
         this.runtime.heapRecords.setPlatformDlsymPointer(
             this.platformServicesAddress, Number(pointer) | 0);
+    };
+
+    NativeInterpreter.prototype.setGettimeofdayPointer = function (pointer) {
+        this.runtime.heapRecords.setPlatformGettimeofdayPointer(
+            this.platformServicesAddress, Number(pointer) | 0);
+    };
+
+    NativeInterpreter.prototype.setDateSupport = function (prototype, key) {
+        this.runtime.valueCells.writeReferenceAt(
+            this.runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, 277), prototype.heapAddress);
+        this.runtime.valueCells.writeReferenceAt(
+            this.runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, 278),
+            this.runtime.internStringAddress(key));
     };
 
     /* A published native allocation suffix is private only between
@@ -7148,13 +7589,21 @@
 
     NativeInterpreter.prototype.tryRefillAllocationRegion = function () {
         if (this.allocationRegion) return false;
+        var refillStarted = this.runtime.profileOpcodeCounts ?
+            new Date().getTime() : 0;
         var claimedRegion = this.runtime.linearHeap.claimLargestFreeBlock(
             MIN_NATIVE_ALLOCATION_REGION_BYTES);
+        this.allocationRefillAttemptCount++;
+        if (refillStarted) {
+            this.allocationRefillElapsedMs +=
+                new Date().getTime() - refillStarted;
+        }
         if (!claimedRegion) return false;
         this.allocationRegion = {
             cursor: claimedRegion.address,
             end: claimedRegion.address + claimedRegion.size
         };
+        this.allocationRefillCount++;
         return true;
     };
 
@@ -7180,6 +7629,12 @@
         var heap = this.runtime.linearHeap;
         var allocationBump = heap.bump;
         var allocationLimit = heap.allocationLimit;
+        if (!this.allocationRegion &&
+            heap.bump >= Math.floor(heap.allocationLimit * 3 / 4) &&
+            heap.allocationLimit < heap.maximumAllocationLimit) {
+            heap.growToFit(heap.allocationLimit + 1);
+            allocationLimit = heap.allocationLimit;
+        }
         if (!this.allocationRegion &&
             heap.bump >= Math.floor(heap.allocationLimit * 3 / 4)) {
             var claimedRegion = heap.claimLargestFreeBlock(
@@ -7233,7 +7688,7 @@
             this.instructionCount >= this.nextInstructionProfileReport) {
             this.reportProfile();
             while (this.instructionCount >= this.nextInstructionProfileReport) {
-                this.nextInstructionProfileReport += 5000000;
+                this.nextInstructionProfileReport += 25000000;
             }
         }
         if (reason === Exit.UNSUPPORTED) {
@@ -7252,6 +7707,7 @@
                  records.engineCallRejectReason(this.stateAddress) ===
                  CallReject.HEAP_SPACE);
             if (allocationExit) reason = Exit.ALLOCATION;
+            if (allocationExit) this.allocationExitCount++;
         }
         if (reason === Exit.UNSUPPORTED) {
             this.unsupportedExitCount++;
@@ -7317,6 +7773,12 @@
         var line = "native guest profile: bytecodes=" + this.instructionCount +
                    " exits=" + this.unsupportedExitCount +
                    " nativeMs=" + this.nativeElapsedMs +
+                   " sync=" + this.synchronizationCount + "/" +
+                   this.synchronizationElapsedMs + "ms" +
+                   " allocation=" + this.allocationExitCount + "/" +
+                   this.allocationRefillAttemptCount + "/" +
+                   this.allocationRefillCount + "/" +
+                   this.allocationRefillElapsedMs + "ms" +
                    " runs=" + this.runCount + " " +
                    parts.join(" ");
         if (typeof print === "function") print(line);
@@ -7601,6 +8063,14 @@
             this.arrayConcatNativeResult.destroy();
         }
         this.arrayConcatNativeResult = null;
+        if (this.dateIntrinsicNativeResult) {
+            this.dateIntrinsicNativeResult.destroy();
+        }
+        this.dateIntrinsicNativeResult = null;
+        if (this.numericPropertyNativeResult) {
+            this.numericPropertyNativeResult.destroy();
+        }
+        this.numericPropertyNativeResult = null;
         if (this.nativeResult) this.nativeResult.destroy();
         this.nativeResult = null;
         this.js = null;

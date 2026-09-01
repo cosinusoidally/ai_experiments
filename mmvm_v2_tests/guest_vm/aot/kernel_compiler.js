@@ -72,7 +72,10 @@
         enginePlatformServices: "ENGINE_PLATFORM_SERVICES",
         platformDlsymPointer: "PLATFORM_DLSYM_POINTER",
         platformArraySlicePointer: "PLATFORM_ARRAY_SLICE_POINTER",
-        platformArrayConcatPointer: "PLATFORM_ARRAY_CONCAT_POINTER"
+        platformArrayConcatPointer: "PLATFORM_ARRAY_CONCAT_POINTER",
+        platformGettimeofdayPointer: "PLATFORM_GETTIMEOFDAY_POINTER",
+        platformDateIntrinsicPointer: "PLATFORM_DATE_INTRINSIC_POINTER",
+        platformNumericPropertyPointer: "PLATFORM_NUMERIC_PROPERTY_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {
@@ -112,6 +115,11 @@
         setPropertyKey: "PROPERTY_KEY",
         setPropertyAttributes: "PROPERTY_ATTRIBUTES",
         setPropertyReserved: "PROPERTY_RESERVED",
+        setFrameHandler: "FRAME_HANDLER",
+        setHandlerNext: "HANDLER_NEXT",
+        setHandlerTarget: "HANDLER_TARGET",
+        setHandlerNameConstant: "HANDLER_NAME_CONSTANT",
+        setHandlerReserved: "HANDLER_RESERVED",
         setVectorCapacity: "VECTOR_CAPACITY",
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
