@@ -450,9 +450,8 @@
         var opcode = node.minimum;
         while (opcode <= node.maximum) {
             assembler.label(dispatchCaseLabel(dispatchId, opcode));
-            emitStatement(assembler,
-                specializeDispatchStatement(node.body, node.value.index, opcode),
-                state);
+            emitSpecializedDispatchStatement(assembler, node.body,
+                node.value.index, opcode, state);
             assembler.jump(endLabel);
             opcode++;
         }
@@ -488,49 +487,52 @@
         return "kernel_dispatch_case_" + id + "_" + opcode;
     }
 
-    function specializeDispatchStatement(node, localIndex, value) {
-        if (!node || typeof node !== "object") return node;
+    /* Emit a dispatch case directly from the shared IR.  The former path
+     * cloned the complete surviving subtree for every opcode, even though the
+     * clone existed only until it was emitted.  Keeping specialization in the
+     * emitter preserves constant branch pruning without building that large
+     * temporary object graph. */
+    function emitSpecializedDispatchStatement(assembler, node, localIndex,
+                                               value, state) {
         if (typeof node.length === "number") {
-            var specializedStatements = [];
             var statementIndex = 0;
             while (statementIndex < node.length) {
-                specializedStatements.push(specializeDispatchStatement(
-                    node[statementIndex++], localIndex, value));
+                emitSpecializedDispatchStatement(assembler,
+                    node[statementIndex++], localIndex, value, state);
             }
-            return specializedStatements;
+            return;
+        }
+        if (node.op === "block") {
+            emitSpecializedDispatchStatement(assembler, node.body, localIndex,
+                                             value, state);
+            return;
         }
         if (node.op === "if") {
             var test = specializeDispatchExpression(node.test, localIndex, value);
             if (test.op === "const_i32") {
-                return specializeDispatchStatement(test.value ? node.consequent :
-                                                    node.alternate,
-                                                    localIndex, value);
+                emitSpecializedDispatchStatement(assembler,
+                    test.value ? node.consequent : node.alternate,
+                    localIndex, value, state);
+                return;
             }
-            return {op: "if", test: test,
-                consequent: specializeDispatchStatement(
-                    node.consequent, localIndex, value),
-                alternate: specializeDispatchStatement(
-                    node.alternate, localIndex, value)};
-        }
-        if (node.op === "block") {
-            var body = [];
-            var index = 0;
-            while (index < node.body.length) {
-                body.push(specializeDispatchStatement(
-                    node.body[index++], localIndex, value));
+            var alternateLabel = "kernel_else_" + state.nextLabel;
+            var endLabel = "kernel_if_end_" + state.nextLabel++;
+            if (!emitIntegerComparisonFalseJump(
+                    assembler, test, alternateLabel, state)) {
+                emitControlExpression(assembler, test, state);
+                assembler.testEaxEax();
+                assembler.jumpEqual(alternateLabel);
             }
-            return {op: "block", body: body};
+            emitSpecializedDispatchStatement(assembler, node.consequent,
+                                             localIndex, value, state);
+            assembler.jump(endLabel);
+            assembler.label(alternateLabel);
+            emitSpecializedDispatchStatement(assembler, node.alternate,
+                                             localIndex, value, state);
+            assembler.label(endLabel);
+            return;
         }
-        if (node.op === "while" || node.op === "opcode_dispatch") return node;
-        var result = {};
-        var key;
-        for (key in node) {
-            if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
-            var child = node[key];
-            result[key] = child && typeof child === "object" ?
-                specializeDispatchExpression(child, localIndex, value) : child;
-        }
-        return result;
+        emitStatement(assembler, node, state);
     }
 
     function specializeDispatchExpression(node, localIndex, value) {
