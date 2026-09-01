@@ -128,9 +128,16 @@
         if (typeof functionObject !== "function") {
             throw new TypeError("kernel compiler requires a function");
         }
+        options = options || {};
+        var timings = options.timings || null;
+        var started = timings ? new Date().getTime() : 0;
         var source = functionObject.toString();
-        var parser = new Parser("var __kernel = " + source + ";", "<kernel>");
+        if (timings) timings.source = new Date().getTime() - started;
+        var parser = new Parser("var __kernel = " + source + ";", "<kernel>",
+                                {captureRaw: false});
+        var parseStarted = timings ? new Date().getTime() : 0;
         var program = parser.parseProgram();
+        if (timings) timings.parse = new Date().getTime() - parseStarted;
         var declaration = program.body[0];
         var fn = declaration && declaration.declarations &&
                  declaration.declarations[0].initial;
@@ -138,7 +145,7 @@
             throw new SyntaxError("kernel source must contain one function");
         }
         if (needsControlFlow(fn.body.body)) {
-            return compileControlFlow(fn, source, options || {});
+            return compileControlFlow(fn, source, options, timings);
         }
         var locals = {};
         var parameterIndex = 0;
@@ -193,7 +200,7 @@
         return false;
     }
 
-    function compileControlFlow(fn, source, options) {
+    function compileControlFlow(fn, source, options, timings) {
         var symbols = {};
         var parameterIndex = 0;
         while (parameterIndex < fn.parameters.length) {
@@ -202,9 +209,13 @@
             parameterIndex++;
         }
         var localNames = [];
+        var collectStarted = timings ? new Date().getTime() : 0;
         collectLocals(fn.body, symbols, localNames,
                       options.constantOverrides || {});
+        if (timings) timings.collect = new Date().getTime() - collectStarted;
+        var lowerStarted = timings ? new Date().getTime() : 0;
         var body = lowerStatements(fn.body.body, symbols);
+        if (timings) timings.lower = new Date().getTime() - lowerStarted;
         var registerPreferences = resolveRegisterPreferences(
             options.registerPreferences || [], symbols);
         return {name: fn.name || "kernel", parameters: fn.parameters.slice(0),

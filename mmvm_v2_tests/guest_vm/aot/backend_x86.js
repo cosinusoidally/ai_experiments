@@ -8,7 +8,10 @@
         HostFFI = require("../host_ffi.js");
     }
 
-    function X86Backend() {
+    function X86Backend(options) {
+        options = options || {};
+        this.captureAssembly = options.captureAssembly !== false;
+        this.timings = options.timings || null;
         this.ffi = new HostFFI();
         this.mmap = this.ffi.isMMVM ? this.ffi.resolve("mmap") : 0;
         this.munmap = this.ffi.isMMVM ? this.ffi.resolve("munmap") : 0;
@@ -16,7 +19,7 @@
 
     X86Backend.prototype.compile = function (ir) {
         if (ir.controlFlow) return compileControlFlow(this, ir);
-        var assembler = new Assembler();
+        var assembler = new Assembler(this.captureAssembly);
         var instructionIndex = 0;
         while (instructionIndex < ir.instructions.length) {
             var instruction = ir.instructions[instructionIndex++];
@@ -48,11 +51,7 @@
         var pointer = this.ffi.call(this.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
-        var index = 0;
-        while (index < assembler.bytes.length) {
-            poke8(pointer + index, assembler.bytes[index]);
-            index++;
-        }
+        copyBytesToNative(pointer, assembler.bytes);
         var ffi = this.ffi;
         var munmap = this.munmap;
         result.pointer = pointer;
@@ -75,9 +74,13 @@
     };
 
     function compileControlFlow(backend, ir) {
-        var assembler = new Assembler();
+        var timings = backend.timings;
+        var started = timings ? new Date().getTime() : 0;
+        var assembler = new Assembler(backend.captureAssembly);
         var state = {nextLabel: 0, returnLabel: "kernel_return",
                      registerMap: allocateKernelRegisters(ir)};
+        if (timings) timings.analysis = new Date().getTime() - started;
+        var emitStarted = timings ? new Date().getTime() : 0;
         assembler.pushEbp();
         assembler.movEbpEsp();
         if (ir.locals.length) assembler.subEspImmediate(ir.locals.length * 4);
@@ -89,7 +92,10 @@
         restoreKernelRegisters(assembler);
         assembler.leave();
         assembler.ret();
+        if (timings) timings.emit = new Date().getTime() - emitStarted;
+        var resolveStarted = timings ? new Date().getTime() : 0;
         assembler.resolveLabels();
+        if (timings) timings.resolve = new Date().getTime() - resolveStarted;
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       ir: ir, backend: "i386",
@@ -102,11 +108,9 @@
         var pointer = backend.ffi.call(backend.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
-        var index = 0;
-        while (index < assembler.bytes.length) {
-            poke8(pointer + index, assembler.bytes[index]);
-            index++;
-        }
+        var copyStarted = timings ? new Date().getTime() : 0;
+        copyBytesToNative(pointer, assembler.bytes);
+        if (timings) timings.install = new Date().getTime() - copyStarted;
         var ffi = backend.ffi;
         var munmap = backend.munmap;
         result.pointer = pointer;
@@ -126,6 +130,25 @@
             result.fn = null;
         };
         return result;
+    }
+
+    /* MMVM's poke32 is explicitly little-endian.  Installing a large kernel
+     * a byte at a time makes more than a million JS/C boundary calls for the
+     * main interpreter; pack complete words and reserve poke8 for the tail. */
+    function copyBytesToNative(pointer, bytes) {
+        var index = 0;
+        while (index + 4 <= bytes.length) {
+            poke32(pointer + index,
+                   bytes[index] |
+                   (bytes[index + 1] << 8) |
+                   (bytes[index + 2] << 16) |
+                   (bytes[index + 3] << 24));
+            index += 4;
+        }
+        while (index < bytes.length) {
+            poke8(pointer + index, bytes[index]);
+            index++;
+        }
     }
 
     function describeRegisterAllocation(ir, registerMap) {

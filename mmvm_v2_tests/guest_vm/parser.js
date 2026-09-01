@@ -4,8 +4,9 @@
         Tokenizer = require("./tokenizer.js");
     }
 
-    function Parser(source, filename) {
-        this.tokenizer = new Tokenizer(source, filename);
+    function Parser(source, filename, options) {
+        this.tokenizer = new Tokenizer(source, filename,
+            !options || options.captureRaw !== false);
         this.current = this.tokenizer.next(true);
     }
 

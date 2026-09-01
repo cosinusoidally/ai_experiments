@@ -48,13 +48,14 @@
                code === 8287 || code === 12288 || code === 65279;
     }
 
-    function Tokenizer(source, filename) {
+    function Tokenizer(source, filename, captureRaw) {
         this.source = String(source);
         this.filename = filename || "<source>";
         this.length = this.source.length;
         this.index = 0;
         this.line = 1;
         this.column = 0;
+        this.captureRaw = captureRaw !== false;
     }
 
     Tokenizer.prototype.error = function (message, line, column) {
@@ -71,11 +72,12 @@
     };
 
     Tokenizer.prototype.advance = function () {
-        var code = this.codeAt(0);
-        if (code < 0) return -1;
+        if (this.index >= this.length) return -1;
+        var code = this.source.charCodeAt(this.index);
         this.index++;
         if (code === 13) {
-            if (this.codeAt(0) === 10) this.index++;
+            if (this.index < this.length &&
+                this.source.charCodeAt(this.index) === 10) this.index++;
             this.line++;
             this.column = 0;
             return 10;
@@ -93,7 +95,16 @@
         var sawLine = false;
         while (this.index < this.length) {
             var code = this.codeAt(0);
-            if (isWhitespace(code)) {
+            if (code === 32 || code === 9) {
+                /* Spaces and tabs dominate formatted source.  Neither can
+                 * affect line state, so consume a complete run directly. */
+                do {
+                    this.index++;
+                    this.column++;
+                    code = this.index < this.length ?
+                        this.source.charCodeAt(this.index) : -1;
+                } while (code === 32 || code === 9);
+            } else if (isWhitespace(code)) {
                 this.advance();
             } else if (isLineTerminator(code)) {
                 sawLine = true;
@@ -130,10 +141,11 @@
 
     Tokenizer.prototype.makeToken = function (kind, value, start, line,
                                                column, lineBefore) {
-        return {kind: kind, value: value,
-                raw: this.source.substring(start, this.index),
+        var token = {kind: kind, value: value,
                 start: start, end: this.index,
                 line: line, column: column, lineBefore: lineBefore};
+        if (this.captureRaw) token.raw = this.source.substring(start, this.index);
+        return token;
     };
 
     Tokenizer.prototype.scanUnicodeEscape = function () {
@@ -156,25 +168,34 @@
 
     Tokenizer.prototype.scanIdentifier = function (start, line, column,
                                                     lineBefore) {
-        var value = "";
+        var value = null;
+        var segmentStart = this.index;
         var first = true;
         while (this.index < this.length) {
             var code = this.codeAt(0);
             if (code === 92) {
+                if (value === null) value = this.source.substring(start, this.index);
+                else value += this.source.substring(segmentStart, this.index);
                 code = this.scanUnicodeEscape();
                 if (first ? !isIdentifierStart(code) : !isIdentifierPart(code)) {
                     this.error("escaped character is not valid in identifier",
                                line, column);
                 }
                 value += String.fromCharCode(code);
+                segmentStart = this.index;
             } else if (first ? isIdentifierStart(code) : isIdentifierPart(code)) {
-                value += this.source.charAt(this.index);
-                this.advance();
+                /* Identifiers cannot contain line terminators, so advancing the
+                 * source position directly avoids several calls per character
+                 * in the parser's hottest tokenization path. */
+                this.index++;
+                this.column++;
             } else {
                 break;
             }
             first = false;
         }
+        if (value === null) value = this.source.substring(start, this.index);
+        else value += this.source.substring(segmentStart, this.index);
         return this.makeToken(Object.prototype.hasOwnProperty.call(keywords, value) ?
                               "keyword" : "identifier",
                               value, start, line, column, lineBefore);
@@ -323,6 +344,15 @@
     Tokenizer.prototype.scanPunctuator = function (start, line, column,
                                                     lineBefore) {
         var first = this.source.charAt(this.index);
+        if (first === "{" || first === "}" || first === "(" ||
+            first === ")" || first === "[" || first === "]" ||
+            first === "." || first === ";" || first === "," ||
+            first === "?" || first === ":" || first === "~") {
+            this.index++;
+            this.column++;
+            return this.makeToken("punctuator", first, start, line, column,
+                                  lineBefore);
+        }
         var second = this.source.charAt(this.index + 1);
         var third = this.source.charAt(this.index + 2);
         var four = first + second + third + this.source.charAt(this.index + 3);

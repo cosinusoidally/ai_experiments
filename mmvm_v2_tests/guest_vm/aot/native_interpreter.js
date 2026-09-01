@@ -7343,15 +7343,27 @@
     }
 
     function NativeInterpreter(runtime) {
+        var constructionStarted = runtime.profileOpcodeCounts ?
+            new Date().getTime() : 0;
+        var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
         this.ir = new KernelCompiler().compile(interpreterKernel, {
             registerPreferences: ["heapBase", "pc", "bytecodeWords"],
+            timings: loweringTimings,
             constantOverrides: {
                 PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
             }
         });
+        var loweringFinished = constructionStarted ?
+            new Date().getTime() : 0;
         this.js = new JSBackend().compile(this.ir);
-        this.nativeResult = new X86Backend().compile(this.ir);
+        var jsBackendFinished = constructionStarted ?
+            new Date().getTime() : 0;
+        var backendTimings = runtime.profileOpcodeCounts ? {} : null;
+        this.nativeResult = new X86Backend({captureAssembly: false,
+            timings: backendTimings}).compile(this.ir);
+        var nativeBackendFinished = constructionStarted ?
+            new Date().getTime() : 0;
         this.stateAddress = runtime.heapRecords.allocateEngineState();
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
@@ -7470,6 +7482,31 @@
             else if (typeof console !== "undefined" && console.log) {
                 console.log(codeLine);
             }
+            var timingLine = "native guest compile: lower=" +
+                (loweringFinished - constructionStarted) + "ms js=" +
+                (jsBackendFinished - loweringFinished) + "ms x86=" +
+                (nativeBackendFinished - jsBackendFinished) + "ms total=" +
+                (nativeBackendFinished - constructionStarted) + "ms";
+            if (typeof print === "function") print(timingLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(timingLine);
+            }
+            timingLine = "native guest lower stages: source=" +
+                loweringTimings.source + "ms parse=" + loweringTimings.parse +
+                "ms collect=" + loweringTimings.collect + "ms lower=" +
+                loweringTimings.lower + "ms";
+            if (typeof print === "function") print(timingLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(timingLine);
+            }
+            timingLine = "native guest x86 stages: analysis=" +
+                backendTimings.analysis + "ms emit=" + backendTimings.emit +
+                "ms resolve=" + backendTimings.resolve + "ms install=" +
+                backendTimings.install + "ms";
+            if (typeof print === "function") print(timingLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(timingLine);
+            }
         }
     }
 
@@ -7481,7 +7518,7 @@
         var name = "";
         if (callable.nativeIntrinsic === ARRAY_SLICE_INTRINSIC_ID) {
             if (this.arraySliceNativeResult) return false;
-            result = new X86Backend().compile(
+            result = new X86Backend({captureAssembly: false}).compile(
                 new KernelCompiler().compile(arraySliceKernel));
             this.arraySliceNativeResult = result;
             this.runtime.heapRecords.setPlatformArraySlicePointer(
@@ -7489,7 +7526,7 @@
             name = "Array.slice";
         } else if (callable.nativeIntrinsic === ARRAY_CONCAT_INTRINSIC_ID) {
             if (this.arrayConcatNativeResult) return false;
-            result = new X86Backend().compile(
+            result = new X86Backend({captureAssembly: false}).compile(
                 new KernelCompiler().compile(arrayConcatKernel));
             this.arrayConcatNativeResult = result;
             this.runtime.heapRecords.setPlatformArrayConcatPointer(
@@ -7501,7 +7538,7 @@
                    DATE_CONSTRUCTOR_INTRINSIC_ID ||
                    callable.nativeIntrinsic === DATE_GET_TIME_INTRINSIC_ID) {
             if (this.dateIntrinsicNativeResult) return false;
-            result = new X86Backend().compile(
+            result = new X86Backend({captureAssembly: false}).compile(
                 new KernelCompiler().compile(dateIntrinsicKernel));
             this.dateIntrinsicNativeResult = result;
             this.runtime.heapRecords.setPlatformDateIntrinsicPointer(
@@ -7520,7 +7557,7 @@
             return false;
         }
         if (this.numericPropertyNativeResult) return false;
-        var result = new X86Backend().compile(
+        var result = new X86Backend({captureAssembly: false}).compile(
             new KernelCompiler().compile(numericPropertyGetKernel));
         this.numericPropertyNativeResult = result;
         this.runtime.heapRecords.setPlatformNumericPropertyPointer(
