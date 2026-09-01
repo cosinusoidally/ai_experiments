@@ -162,6 +162,43 @@
                 } finally {
                     toInt32X86.destroy();
                 }
+                function toNativeI32Kernel(base, address) {
+                    return toNativeI32F64(loadF64(base + address));
+                }
+                var toNativeI32IR = compiler.compile(toNativeI32Kernel);
+                var toNativeI32JS = new JSBackend().compile(toNativeI32IR);
+                var toNativeI32X86 = new X86Backend().compile(toNativeI32IR);
+                try {
+                    /* This is the signed i386 conversion used by js_min's
+                     * raw-memory boundary, not ECMAScript ToInt32. */
+                    var nativeCoercionInputs = [1.9, -1.9, 2147483647,
+                        2147483648, 3666283700, -2147483649, NaN, Infinity];
+                    var nativeCoercionExpected = [1, -1, 2147483647,
+                        -2147483648, -2147483648, -2147483648,
+                        -2147483648, -2147483648];
+                    var nativeCoercionIndex = 0;
+                    while (nativeCoercionIndex < nativeCoercionInputs.length) {
+                        f64Heap.memory.writeF64(
+                            96, nativeCoercionInputs[nativeCoercionIndex]);
+                        if (toNativeI32JS.fn(f64Heap.memory, 0, 96) !==
+                            nativeCoercionExpected[nativeCoercionIndex]) {
+                            throw new Error("JavaScript native-I32 conversion mismatch");
+                        }
+                        if (toNativeI32X86.fn &&
+                            toNativeI32X86.fn(
+                                f64Heap.memory.nativeAddress(0), 96) !==
+                            nativeCoercionExpected[nativeCoercionIndex]) {
+                            throw new Error("i386 native-I32 conversion mismatch");
+                        }
+                        nativeCoercionIndex++;
+                    }
+                    if (toNativeI32X86.assembly.indexOf(
+                            "fistp_i32_stack(4)") < 0) {
+                        throw new Error("i386 native-I32 conversion bypassed macro assembly");
+                    }
+                } finally {
+                    toNativeI32X86.destroy();
+                }
             } finally {
                 f64Heap.destroy();
                 f64X86.destroy();

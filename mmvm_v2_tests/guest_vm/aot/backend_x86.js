@@ -799,6 +799,23 @@
             assembler.loadStackDwordToEax(4);
             assembler.releaseStackBytes(12);
         }
+        else if (node.op === "to_native_i32_f64") {
+            /* js_min's raw-memory/native-call boundary truncates finite
+             * in-range values and returns i386's integer-indefinite value
+             * (INT32_MIN) for NaN, infinity, and signed overflow.  This is
+             * deliberately distinct from ECMAScript ToInt32 modulo 2^32. */
+            emitControlF64(assembler, node.value, state);
+            assembler.reserveStackBytes(8);
+            assembler.storeX87ControlWordAtStack(0);
+            assembler.loadStackWordToEax(0);
+            assembler.orEaxImmediate(0x0c00);
+            assembler.storeAxAtStack(2);
+            assembler.loadX87ControlWordFromStack(2);
+            assembler.storeInt32AtStackFromF64Pop(4);
+            assembler.loadX87ControlWordFromStack(0);
+            assembler.loadStackDwordToEax(4);
+            assembler.releaseStackBytes(8);
+        }
         else if (node.op === "arg_i32") {
             var argumentRegister = state.registerMap["argument:" + node.index];
             if (argumentRegister) moveRegisterToEax(assembler, argumentRegister);
@@ -1022,6 +1039,24 @@
             assembler.callDwordPtrEspDisplacement(node.arguments.length * 4);
             nativeArgumentIndex = node.arguments.length + 1;
             while (nativeArgumentIndex-- > 0) assembler.popEcx();
+        }
+        else if (node.op === "to_i32_f64" ||
+                 node.op === "to_native_i32_f64") {
+            emitF64Expression(assembler, node.value);
+            assembler.reserveStackBytes(12);
+            assembler.storeX87ControlWordAtStack(0);
+            assembler.loadStackWordToEax(0);
+            assembler.orEaxImmediate(0x0c00);
+            assembler.storeAxAtStack(2);
+            assembler.loadX87ControlWordFromStack(2);
+            if (node.op === "to_i32_f64") {
+                assembler.storeInt64AtStackFromF64Pop(4);
+            } else {
+                assembler.storeInt32AtStackFromF64Pop(4);
+            }
+            assembler.loadX87ControlWordFromStack(0);
+            assembler.loadStackDwordToEax(4);
+            assembler.releaseStackBytes(12);
         }
         else if (node.op === "neg_i32" || node.op === "not_i32" ||
                  node.op === "as_i32") {

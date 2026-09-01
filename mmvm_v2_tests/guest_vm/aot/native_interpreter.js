@@ -5672,7 +5672,7 @@
                             return EXIT_UNSUPPORTED;
                         }
                     }
-                    var intrinsicValue = toInt32F64(loadNumberF64(
+                    var intrinsicValue = toNativeI32F64(loadNumberF64(
                         intrinsicValueCell + VALUE_CELL_LOW,
                         intrinsicValueTag));
                     if (intrinsicId === INTRINSIC_POKE8) {
@@ -7454,7 +7454,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 1,
+                compilerVersion: 2,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,

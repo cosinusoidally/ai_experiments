@@ -538,6 +538,12 @@
                     value: lowerKernelF64Expression(node.arguments[0], symbols),
                     type: "i32"};
             }
+            if (node.callee.name === "toNativeI32F64" &&
+                node.arguments.length === 1) {
+                return {op: "to_native_i32_f64",
+                    value: lowerKernelF64Expression(node.arguments[0], symbols),
+                    type: "i32"};
+            }
             var comparisons = {equalF64: "eq_f64", lessF64: "lt_f64",
                 lessEqualF64: "le_f64", greaterF64: "gt_f64",
                 greaterEqualF64: "ge_f64"};
@@ -742,6 +748,15 @@
             return {op: "call_native_i32",
                 pointer: lower(node.arguments[0], locals),
                 arguments: nativeArguments, type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            (node.callee.name === "toInt32F64" ||
+             node.callee.name === "toNativeI32F64") &&
+            node.arguments.length === 1) {
+            return {op: node.callee.name === "toInt32F64" ?
+                        "to_i32_f64" : "to_native_i32_f64",
+                    value: lowerF64(node.arguments[0], locals), type: "i32"};
         }
         if (node.type === "UnaryExpression" &&
             (node.operator === "-" || node.operator === "~" ||

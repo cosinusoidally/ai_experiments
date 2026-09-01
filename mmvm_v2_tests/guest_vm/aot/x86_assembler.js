@@ -267,6 +267,11 @@
         this.emitBytes3(0xdf, 0x7c, 0x24);
         this.emitByte(offset);
     };
+    Assembler.prototype.storeInt32AtStackFromF64Pop = function (offset) {
+        if (this.macros) this.macros.push("fistp_i32_stack(" + offset + ")");
+        this.emitBytes3(0xdb, 0x5c, 0x24);
+        this.emitByte(offset);
+    };
     Assembler.prototype.loadStackDwordToEax = function (offset) {
         if (this.macros) this.macros.push("mov_eax_dword_stack(" + offset + ")");
         this.emitBytes3(0x8b, 0x44, 0x24);

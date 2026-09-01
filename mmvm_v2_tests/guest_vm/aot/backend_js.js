@@ -128,6 +128,15 @@
         if (node.op === "const_i32") return String(node.value | 0);
         if (node.op === "to_i32_f64") return "(" +
             emitControlF64(node.value, parameters, locals) + "|0)";
+        if (node.op === "to_native_i32_f64") {
+            var nativeIntegerValue = emitControlF64(
+                node.value, parameters, locals);
+            return "((" + nativeIntegerValue + ">=-2147483648&&" +
+                nativeIntegerValue + "<2147483648)?(" +
+                nativeIntegerValue + "<0?Math.ceil(" + nativeIntegerValue +
+                "):Math.floor(" + nativeIntegerValue +
+                ")):-2147483648)";
+        }
         var f64Comparisons = {eq_f64: "===", lt_f64: "<", le_f64: "<=",
                               gt_f64: ">", ge_f64: ">="};
         if (f64Comparisons[node.op]) {
@@ -216,6 +225,17 @@
             }
             return "(memory.callNativeI32(" + emit(node.pointer, parameters) +
                    ",[" + nativeArguments.join(",") + "])|0)";
+        }
+        if (node.op === "to_i32_f64") {
+            return "(" + emitF64(node.value, parameters) + "|0)";
+        }
+        if (node.op === "to_native_i32_f64") {
+            var nativeIntegerValue = emitF64(node.value, parameters);
+            return "((" + nativeIntegerValue + ">=-2147483648&&" +
+                nativeIntegerValue + "<2147483648)?(" +
+                nativeIntegerValue + "<0?Math.ceil(" + nativeIntegerValue +
+                "):Math.floor(" + nativeIntegerValue +
+                ")):-2147483648)";
         }
         if (node.op === "neg_i32") return "(-" + emit(node.value, parameters) + ")";
         if (node.op === "not_i32") return "(~" + emit(node.value, parameters) + ")";

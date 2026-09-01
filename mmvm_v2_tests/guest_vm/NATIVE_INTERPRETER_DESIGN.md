@@ -65,6 +65,18 @@ pointer and argument vector through `LinearMemory.callNativeI32`. Native FFI is
 therefore an execution-backend operation rather than a SpiderMonkey callback
 or an MMVM-specific instruction sequence scattered through guest semantics.
 
+The middle end deliberately distinguishes ECMAScript `ToInt32` from the
+signed i386 conversion at MMVM's raw-memory boundary. `to_i32_f64` implements
+the language operation, including reduction modulo 2^32. The
+`to_native_i32_f64` intrinsic is used for values passed to `poke8` and
+`poke32`: it truncates an in-range double toward zero and produces i386's
+integer-indefinite value (`INT32_MIN`) for NaN, infinity, or signed overflow.
+Both backends implement that distinction. The i386 backend uses named x87
+macro-assembler operations; the Node backend supplies the same observable
+conversion in JavaScript. Raw-memory code must not silently reuse the language
+coercion because large rasterizer edge coefficients depend on the native
+boundary behaviour.
+
 ## Optional native snapshots
 
 Snapshot loading is deliberately opt-in. The command runner accepts
