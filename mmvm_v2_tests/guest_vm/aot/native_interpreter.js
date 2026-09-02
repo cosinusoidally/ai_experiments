@@ -240,6 +240,9 @@
         var OP_GET_PROPERTY_CONST = 45;
         var OP_SET_PROPERTY_CONST = 46;
         var OP_TYPEOF_GLOBAL = 48;
+        var OP_IN = 49;
+        var OP_INSTANCEOF = 50;
+        var OP_GET_THIS = 51;
 
         /* Stable IDs from native_intrinsics.js. */
         var INTRINSIC_PEEK8 = 1;
@@ -332,7 +335,7 @@
                 setOpcodeExecutionCount(heapBase, state, opcode,
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
             }
-            beginOpcodeDispatch(opcode, OP_CONST, OP_TYPEOF_GLOBAL);
+            beginOpcodeDispatch(opcode, OP_CONST, OP_GET_THIS);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -350,6 +353,17 @@
                 store32(constantDestination + VALUE_CELL_AUX,
                         load32(constantSource + VALUE_CELL_AUX));
                 pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_GET_THIS) {
+                var getThisTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var getThisTarget = heapBase + registerCells +
+                    getThisTargetIndex * VALUE_CELL_BYTES;
+                store32(getThisTarget, VALUE_TAG_REFERENCE);
+                store32(getThisTarget + VALUE_CELL_LOW, globalObject);
+                store32(getThisTarget + VALUE_CELL_HIGH, 0);
+                store32(getThisTarget + VALUE_CELL_AUX, 0);
+                pc = pc + TWO_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_GLOBAL) {
                 var globalTargetIndex = load32(
                     heapBase + bytecodeWords + (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -6781,6 +6795,153 @@
                 store32(typeofGlobalTarget + VALUE_CELL_HIGH, 0);
                 store32(typeofGlobalTarget + VALUE_CELL_AUX, 0);
                 pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_IN) {
+                store32(heapBase + state + ENGINE_EXIT_REASON,
+                        EXIT_UNSUPPORTED);
+                store32(heapBase + state + ENGINE_PC, pc);
+                store32(heapBase + state + ENGINE_RESULT, opcode);
+                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                        instructions);
+                store32(heapBase + framePC, pc);
+                return EXIT_UNSUPPORTED;
+            } else if (opcode === OP_INSTANCEOF) {
+                var instanceTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var instanceValueIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var instanceConstructorIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                var instanceValueCell = heapBase + registerCells +
+                    instanceValueIndex * VALUE_CELL_BYTES;
+                var instanceConstructorCell = heapBase + registerCells +
+                    instanceConstructorIndex * VALUE_CELL_BYTES;
+                var instanceValid = 1;
+                if (valueCellTag(0, instanceConstructorCell) !==
+                    VALUE_TAG_REFERENCE) instanceValid = 0;
+                var instanceConstructor = valueCellReference(
+                    0, instanceConstructorCell);
+                var instanceConstructorType = 0;
+                if (instanceValid === 1) {
+                    instanceConstructorType = recordType(
+                        heapBase, instanceConstructor);
+                }
+                if (instanceValid === 1) {
+                    if (instanceConstructorType !==
+                        HEAP_TYPE_NATIVE_FUNCTION) {
+                        if (instanceConstructorType !==
+                            HEAP_TYPE_BYTECODE_FUNCTION) {
+                            instanceValid = 0;
+                        }
+                    }
+                }
+                var instancePrototypeKeyCell = heapBase + stringSupport +
+                    VECTOR_CELLS + RUNTIME_SUPPORT_PROTOTYPE_KEY *
+                    VALUE_CELL_BYTES;
+                var instancePrototypeKey = valueCellReference(
+                    0, instancePrototypeKeyCell);
+                var instanceProperty = 0;
+                var instanceExpectedPrototype = 0;
+                if (instanceValid === 1) {
+                    instanceProperty = objectPropertyHead(
+                        heapBase, instanceConstructor);
+                }
+                while (instanceProperty !== 0) {
+                    if (propertyKey(heapBase, instanceProperty) ===
+                        instancePrototypeKey) {
+                        if (propertyValueTag(heapBase,
+                            instanceProperty) !== VALUE_TAG_REFERENCE) {
+                            instanceValid = 0;
+                        }
+                        instanceExpectedPrototype = propertyValueReference(
+                            heapBase, instanceProperty);
+                        instanceProperty = 0;
+                    } else {
+                        instanceProperty = propertyNext(
+                            heapBase, instanceProperty);
+                    }
+                }
+                if (instanceExpectedPrototype === 0) instanceValid = 0;
+                var instanceExpectedType = 0;
+                if (instanceValid === 1) {
+                    instanceExpectedType = recordType(
+                        heapBase, instanceExpectedPrototype);
+                }
+                if (instanceValid === 1) {
+                    if (instanceExpectedType < HEAP_TYPE_OBJECT) {
+                        instanceValid = 0;
+                    } else if (instanceExpectedType >
+                               HEAP_TYPE_BUFFER_VIEW) {
+                        instanceValid = 0;
+                    }
+                }
+                if (instanceValid === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                var instanceMatches = 0;
+                var instanceCurrent = 0;
+                if (valueCellTag(0, instanceValueCell) ===
+                    VALUE_TAG_REFERENCE) {
+                    var instanceValue = valueCellReference(
+                        0, instanceValueCell);
+                    var instanceValueType = recordType(
+                        heapBase, instanceValue);
+                    if (instanceValueType >= HEAP_TYPE_OBJECT) {
+                        if (instanceValueType <= HEAP_TYPE_BYTECODE_FUNCTION) {
+                            instanceCurrent = objectPrototype(
+                                heapBase, instanceValue);
+                        } else if (instanceValueType === HEAP_TYPE_REGEXP) {
+                            instanceCurrent = regexpPrototype(
+                                heapBase, instanceValue);
+                        } else if (instanceValueType ===
+                                   HEAP_TYPE_BUFFER_VIEW) {
+                            instanceCurrent = bufferViewPrototype(
+                                heapBase, instanceValue);
+                        }
+                    }
+                }
+                while (instanceCurrent !== 0) {
+                    if (instanceCurrent === instanceExpectedPrototype) {
+                        instanceMatches = 1;
+                        instanceCurrent = 0;
+                    } else {
+                        var instanceCurrentType = recordType(
+                            heapBase, instanceCurrent);
+                        if (instanceCurrentType >= HEAP_TYPE_OBJECT) {
+                            if (instanceCurrentType <=
+                                HEAP_TYPE_BYTECODE_FUNCTION) {
+                                instanceCurrent = objectPrototype(
+                                    heapBase, instanceCurrent);
+                            } else if (instanceCurrentType ===
+                                       HEAP_TYPE_REGEXP) {
+                                instanceCurrent = regexpPrototype(
+                                    heapBase, instanceCurrent);
+                            } else if (instanceCurrentType ===
+                                       HEAP_TYPE_BUFFER_VIEW) {
+                                instanceCurrent = bufferViewPrototype(
+                                    heapBase, instanceCurrent);
+                            } else instanceCurrent = 0;
+                        } else instanceCurrent = 0;
+                    }
+                }
+                var instanceTarget = heapBase + registerCells +
+                    instanceTargetIndex * VALUE_CELL_BYTES;
+                if (instanceMatches === 1) {
+                    store32(instanceTarget, VALUE_TAG_TRUE);
+                } else store32(instanceTarget, VALUE_TAG_FALSE);
+                store32(instanceTarget + VALUE_CELL_LOW, 0);
+                store32(instanceTarget + VALUE_CELL_HIGH, 0);
+                store32(instanceTarget + VALUE_CELL_AUX, 0);
+                pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_KEYS) {
                 var keysTargetIndex = load32(
                     heapBase + bytecodeWords +

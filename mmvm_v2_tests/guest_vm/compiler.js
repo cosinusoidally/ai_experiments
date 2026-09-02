@@ -10,6 +10,7 @@
         this.registerCount = 0;
         this.breakTargets = [];
         this.continueTargets = [];
+        this.finallyBlocks = [];
         this.constantRegisters = [];
         this.registerHints = [];
         this.sourceLocations = [];
@@ -319,14 +320,49 @@
             return;
         }
         if (statement.type === "TryStatement") {
-            var catchPush = this.emit(op.PUSH_CATCH, 0,
-                                      this.constant(statement.parameter));
+            if (!statement.finalizer) {
+                var catchPush = this.emit(op.PUSH_CATCH, 0,
+                                          this.constant(statement.parameter));
+                this.compileStatement(statement.block);
+                this.emit(op.POP_CATCH);
+                var catchEnd = this.emit(op.JUMP, 0);
+                this.patch(catchPush + 1, this.code.length);
+                this.compileStatement(statement.handler);
+                this.patch(catchEnd + 1, this.code.length);
+                return;
+            }
+            var finallyPush = this.emit(op.PUSH_CATCH, 0,
+                this.constant(statement.finallyParameter));
+            var protectedHandlers = 1;
+            var userCatchPush = -1;
+            if (statement.handler) {
+                userCatchPush = this.emit(op.PUSH_CATCH, 0,
+                    this.constant(statement.parameter));
+                protectedHandlers = 2;
+            }
+            this.finallyBlocks.push({block: statement.finalizer,
+                                     popCount: protectedHandlers});
             this.compileStatement(statement.block);
+            this.finallyBlocks.pop();
+            if (statement.handler) this.emit(op.POP_CATCH);
+            var skipUserCatch = -1;
+            if (statement.handler) {
+                skipUserCatch = this.emit(op.JUMP, 0);
+                this.patch(userCatchPush + 1, this.code.length);
+                this.finallyBlocks.push({block: statement.finalizer,
+                                         popCount: 1});
+                this.compileStatement(statement.handler);
+                this.finallyBlocks.pop();
+                this.patch(skipUserCatch + 1, this.code.length);
+            }
             this.emit(op.POP_CATCH);
-            var catchEnd = this.emit(op.JUMP, 0);
-            this.patch(catchPush + 1, this.code.length);
-            this.compileStatement(statement.handler);
-            this.patch(catchEnd + 1, this.code.length);
+            this.compileStatement(statement.finalizer);
+            var finallyEnd = this.emit(op.JUMP, 0);
+            this.patch(finallyPush + 1, this.code.length);
+            this.compileStatement(statement.finalizer);
+            this.emit(op.THROW, this.loadReference(
+                this.referenceForName(statement.finallyParameter)));
+            this.patch(finallyEnd + 1, this.code.length);
             return;
         }
         if (statement.type === "SwitchStatement") {
@@ -381,6 +417,21 @@
             var returned = statement.argument ?
                 this.compileExpression(statement.argument) :
                 this.emitConstant(undefined);
+            if (this.finallyBlocks.length) {
+                var activeFinalizers = this.finallyBlocks.slice(0);
+                var finalizerIndex = activeFinalizers.length - 1;
+                while (finalizerIndex >= 0) {
+                    var activeFinalizer = activeFinalizers[finalizerIndex];
+                    var popIndex = 0;
+                    while (popIndex++ < activeFinalizer.popCount) {
+                        this.emit(op.POP_CATCH);
+                    }
+                    this.finallyBlocks.length = finalizerIndex;
+                    this.compileStatement(activeFinalizer.block);
+                    finalizerIndex--;
+                }
+                this.finallyBlocks = activeFinalizers;
+            }
             this.emit(op.RETURN, returned);
             return;
         }
@@ -405,6 +456,8 @@
         else if (operator === "<<") opcode = op.SHIFT_LEFT;
         else if (operator === ">>") opcode = op.SHIFT_RIGHT;
         else if (operator === ">>>") opcode = op.SHIFT_UNSIGNED_RIGHT;
+        else if (operator === "in") opcode = op.IN;
+        else if (operator === "instanceof") opcode = op.INSTANCEOF;
         if (operator === "!==" || operator === "!=") {
             var equalRegister = this.allocate();
             this.emit(operator === "!==" ? op.STRICT_EQUAL : op.EQUAL,
@@ -592,6 +645,11 @@
             return this.loadReference(identifierReference);
         }
         if (expression.type === "ThisExpression") {
+            if (this.scopes.length === 0) {
+                var globalThis = this.allocate();
+                this.emit(op.GET_THIS, globalThis);
+                return globalThis;
+            }
             return this.loadReference(this.referenceForName("this"));
         }
         if (expression.type === "BinaryExpression") {
@@ -832,9 +890,11 @@
                 if (statement.left && statement.left.type === "VariableStatement") visit(statement.left);
                 visit(statement.body);
             } else if (statement.type === "TryStatement") {
-                add(statement.parameter);
+                if (statement.parameter) add(statement.parameter);
+                if (statement.finallyParameter) add(statement.finallyParameter);
                 visit(statement.block);
-                visit(statement.handler);
+                if (statement.handler) visit(statement.handler);
+                if (statement.finalizer) visit(statement.finalizer);
             } else if (statement.type === "SwitchStatement") {
                 for (index = 0; index < statement.cases.length; index++) {
                     var consequentIndex = 0;
@@ -1045,7 +1105,12 @@
                 collectFunctionDeclarations([statement.body], result);
             } else if (statement.type === "TryStatement") {
                 collectFunctionDeclarations(statement.block.body, result);
-                collectFunctionDeclarations(statement.handler.body, result);
+                if (statement.handler) {
+                    collectFunctionDeclarations(statement.handler.body, result);
+                }
+                if (statement.finalizer) {
+                    collectFunctionDeclarations(statement.finalizer.body, result);
+                }
             } else if (statement.type === "SwitchStatement") {
                 var caseIndex = 0;
                 while (caseIndex < statement.cases.length) {
@@ -1092,7 +1157,8 @@
                 visit(statement.body);
             } else if (statement.type === "TryStatement") {
                 visit(statement.block);
-                visit(statement.handler);
+                if (statement.handler) visit(statement.handler);
+                if (statement.finalizer) visit(statement.finalizer);
             } else if (statement.type === "SwitchStatement") {
                 index = 0;
                 while (index < statement.cases.length) {

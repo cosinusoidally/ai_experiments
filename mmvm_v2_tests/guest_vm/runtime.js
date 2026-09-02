@@ -1019,7 +1019,7 @@
          * the low-level JavaScript backend. */
         this.objectPrototype = this.makeObject();
         this.functionPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
-        this.stringPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.stringPrototype = this.makeObject();
         this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         if (this.objectPrototype) {
             this.heapRecords.setObjectPrototype(
@@ -1392,6 +1392,8 @@
             function (receiver, args) {
                 return args.length ? runtime.toString(args[0]) : "";
             }, "intrinsic", NativeIntrinsics.STRING_CONSTRUCTOR);
+        this.setProperty(stringConstructor, "prototype", this.stringPrototype);
+        this.setProperty(this.stringPrototype, "constructor", stringConstructor);
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
                 return String.fromCharCode.apply(String, args);
@@ -1679,6 +1681,9 @@
         if (typeof object === "string") {
             if (key === "length") return object.length;
             if (isArrayIndex(key)) return object.charAt(Number(key));
+            if (this.stringPrototype) {
+                return this.getProperty(this.stringPrototype, key);
+            }
             return this.stringMethods[key];
         }
         if (typeof object === "number") return this.numberMethods[key];
@@ -1698,6 +1703,58 @@
             return !!this.heapOwnProperty(object, key, false);
         }
         return !!object.properties && own(object.properties, "$" + key);
+    };
+
+    Runtime.prototype.hasProperty = function (object, key) {
+        this.assertOwned(object);
+        if (!object || !object.guestType) {
+            throw new TypeError("right-hand side of 'in' is not an object");
+        }
+        key = this.propertyKey(key);
+        if (this.hasOwnProperty(object, key)) return true;
+        if (object.guestType === "array") {
+            if (key === "length") return true;
+            if (!this.arrayPrototype && this.arrayMethods[key]) return true;
+        } else if (object.guestType === "buffer") {
+            if (key === "length") return true;
+        } else if (object.guestType === "regexp") {
+            if (!this.regexpPrototype && this.regexpMethods[key]) return true;
+        } else if (object.guestType === "function" ||
+                   object.guestType === "bytecodeFunction") {
+            if (!this.functionPrototype && this.functionMethods[key]) return true;
+        }
+        if (object.heapAddress) {
+            var prototypeAddress = this.heapRecords.objectPrototype(
+                object.heapAddress);
+            if (prototypeAddress) {
+                return this.hasProperty(
+                    this.readHeapReference(prototypeAddress), key);
+            }
+        }
+        return !!this.objectMethods[key];
+    };
+
+    Runtime.prototype.instanceOf = function (value, constructor) {
+        this.assertOwned(value);
+        this.assertOwned(constructor);
+        if (!constructor ||
+            (constructor.guestType !== "function" &&
+             constructor.guestType !== "bytecodeFunction")) {
+            throw new TypeError("right-hand side of 'instanceof' is not callable");
+        }
+        var expected = this.getProperty(constructor, "prototype");
+        if (!expected || !expected.guestType) {
+            throw new TypeError("constructor prototype is not an object");
+        }
+        if (!value || !value.guestType || !value.heapAddress) return false;
+        var prototypeAddress = this.heapRecords.objectPrototype(
+            value.heapAddress);
+        while (prototypeAddress) {
+            if (prototypeAddress === expected.heapAddress) return true;
+            prototypeAddress = this.heapRecords.objectPrototype(
+                prototypeAddress);
+        }
+        return false;
     };
 
     Runtime.prototype.deleteProperty = function (object, key) {

@@ -83,3 +83,7 @@ var createdObject = Object.create(definedObject);
 assertEqual(createdObject.hidden, 42, "Object.create prototype lookup");
 assertEqual(Object.prototype.toString.call([]), "[object Array]",
             "Object.prototype.toString array tag");
+assertEqual(this.Object, Object, "top-level this is the context global object");
+String.prototype.guestExtension = function () { return this.charAt(1); };
+assertEqual("abc".guestExtension(), "b",
+            "primitive string uses guest String.prototype");

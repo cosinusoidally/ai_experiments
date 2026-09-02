@@ -135,7 +135,8 @@
             this.reloadNativeOperand(frame, code[pc + 3]);
         } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                    (opcode >= op.BIT_AND &&
-                    opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
+                    opcode <= op.SHIFT_UNSIGNED_RIGHT) || opcode === op.IN ||
+                   opcode === op.INSTANCEOF) {
             this.reloadNativeOperand(frame, code[pc + 2]);
             this.reloadNativeOperand(frame, code[pc + 3]);
         } else if (opcode === op.NOT || opcode === op.NEGATE ||
@@ -188,7 +189,8 @@
             opcode === op.TYPEOF_GLOBAL ||
             opcode === op.DELETE_PROPERTY || opcode === op.GET_KEYS ||
             opcode === op.GET_LOCAL || opcode === op.GET_PROPERTY_CONST ||
-            opcode === op.DELETE_PROPERTY_CONST;
+            opcode === op.DELETE_PROPERTY_CONST || opcode === op.IN ||
+            opcode === op.INSTANCEOF || opcode === op.GET_THIS;
     };
 
     Execution.prototype.synchronizeFallbackStep = function (frame, pc, opcode) {
@@ -562,6 +564,9 @@
                 if (opcode === op.CONST) {
                     registers[code[pc + 1]] = constants[code[pc + 2]];
                     frame.pc = pc + 3;
+                } else if (opcode === op.GET_THIS) {
+                    registers[code[pc + 1]] = frame.context.globalObject;
+                    frame.pc = pc + 2;
                 } else if (opcode === op.GET_GLOBAL) {
                     registers[code[pc + 1]] = this.runtime.getGlobal(
                         frame.context, constants[code[pc + 2]]);
@@ -611,6 +616,14 @@
                     this.runtime.setProperty(registers[code[pc + 1]],
                                              constants[code[pc + 2]],
                                              registers[code[pc + 3]]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.IN) {
+                    registers[code[pc + 1]] = this.runtime.hasProperty(
+                        registers[code[pc + 3]], registers[code[pc + 2]]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.INSTANCEOF) {
+                    registers[code[pc + 1]] = this.runtime.instanceOf(
+                        registers[code[pc + 2]], registers[code[pc + 3]]);
                     frame.pc = pc + 4;
                 } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                        (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {

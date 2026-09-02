@@ -7,6 +7,8 @@
     function Parser(source, filename, options) {
         this.tokenizer = new Tokenizer(source, filename,
             !options || options.captureRaw !== false);
+        this.allowIn = true;
+        this.finallySerial = 0;
         this.current = this.tokenizer.next(true);
     }
 
@@ -116,8 +118,11 @@
         this.advance(false);
         this.expectPunctuator("(", true);
         var initial = null;
+        var savedAllowIn = this.allowIn;
+        this.allowIn = false;
         if (this.isKeyword("var")) initial = this.parseVariableStatement(false);
         else if (!this.isPunctuator(";")) initial = this.parseExpression();
+        this.allowIn = savedAllowIn;
         if (this.isKeyword("in")) {
             this.advance(true);
             var right = this.parseExpression();
@@ -211,13 +216,30 @@
     Parser.prototype.parseTryStatement = function () {
         this.advance(true);
         var block = this.parseBlock();
-        if (!this.isKeyword("catch")) this.error("try requires catch");
-        this.advance(false);
-        this.expectPunctuator("(", false);
-        var parameter = this.expectIdentifier().value;
-        this.expectPunctuator(")", true);
+        var parameter = null;
+        var handler = null;
+        if (this.isKeyword("catch")) {
+            this.advance(false);
+            this.expectPunctuator("(", false);
+            parameter = this.expectIdentifier().value;
+            this.expectPunctuator(")", true);
+            handler = this.parseBlock();
+        }
+        var finalizer = null;
+        if (this.isKeyword("finally")) {
+            this.advance(true);
+            finalizer = this.parseBlock();
+        }
+        if (!handler && !finalizer) this.error("try requires catch or finally");
+        var finallyParameter = null;
+        if (finalizer) {
+            do {
+                finallyParameter = "$guestFinally" + this.finallySerial++;
+            } while (this.tokenizer.source.indexOf(finallyParameter) >= 0);
+        }
         return {type: "TryStatement", block: block, parameter: parameter,
-                handler: this.parseBlock()};
+                handler: handler, finalizer: finalizer,
+                finallyParameter: finallyParameter};
     };
 
     Parser.prototype.parseSwitchStatement = function () {
@@ -347,8 +369,10 @@
                                 {"==": 1, "!=": 1, "===": 1, "!==": 1});
     };
     Parser.prototype.parseRelational = function () {
-        return this.parseBinary(this.parseShift,
-                                {"<": 1, "<=": 1, ">": 1, ">=": 1});
+        var operators = {"<": 1, "<=": 1, ">": 1, ">=": 1};
+        if (this.allowIn) operators["in"] = 1;
+        operators["instanceof"] = 1;
+        return this.parseBinary(this.parseShift, operators);
     };
     Parser.prototype.parseShift = function () {
         return this.parseBinary(this.parseAdditive,

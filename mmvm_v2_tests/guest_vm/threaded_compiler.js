@@ -736,6 +736,7 @@
         function rr(index) { return "r" + c[pc + index]; }
         function constant(index) { return "p.constants[" + c[pc + index] + "]"; }
         if (opcode === op.CONST) lines.push(rr(1) + "=" + constant(2) + ";");
+        else if (opcode === op.GET_THIS) lines.push(rr(1) + "=context.globalObject;");
         else if (opcode === op.GET_GLOBAL) {
             lines.push(rr(1) + "=runtime.getGlobal(context," + constant(2) + ");");
         } else if (opcode === op.SET_GLOBAL) {
@@ -778,6 +779,8 @@
         else if (opcode === op.SHIFT_LEFT) lines.push(rr(1) + "=" + rr(2) + "<<" + rr(3) + ";");
         else if (opcode === op.SHIFT_RIGHT) lines.push(rr(1) + "=" + rr(2) + ">>" + rr(3) + ";");
         else if (opcode === op.SHIFT_UNSIGNED_RIGHT) lines.push(rr(1) + "=" + rr(2) + ">>>" + rr(3) + ";");
+        else if (opcode === op.IN) lines.push(rr(1) + "=runtime.hasProperty(" + rr(3) + "," + rr(2) + ");");
+        else if (opcode === op.INSTANCEOF) lines.push(rr(1) + "=runtime.instanceOf(" + rr(2) + "," + rr(3) + ");");
         else if (opcode === op.NOT) lines.push(rr(1) + "=!" + rr(2) + ";");
         else if (opcode === op.NEGATE) lines.push(rr(1) + "=-runtime.toNumber(" + rr(2) + ");");
         else if (opcode === op.POSITIVE) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ");");
@@ -1261,6 +1264,16 @@
             result.push("}");
         } else if (node.type === "BreakStatement") result.push("break;");
         else if (node.type === "ContinueStatement") result.push("continue;");
+        else if (node.type === "TryStatement") {
+            result.push("try" + this.statement(node.block));
+            if (node.handler) {
+                result.push("catch(" + this.local(node.parameter) + ")" +
+                            this.statement(node.handler));
+            }
+            if (node.finalizer) {
+                result.push("finally" + this.statement(node.finalizer));
+            }
+        }
         else if (node.type === "ReturnStatement") {
             result.push("return " + (node.argument ? this.expression(node.argument) :
                                      "undefined") + ";");
@@ -2123,12 +2136,13 @@
             opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
             opcode === op.GET_PROPERTY_CONST || opcode === op.SET_PROPERTY_CONST ||
             opcode === op.DELETE_PROPERTY_CONST || opcode === op.DELETE_PROPERTY ||
+            opcode === op.IN || opcode === op.INSTANCEOF ||
             (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
             (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
             opcode === op.MAKE_REGEXP || opcode === op.CONSTRUCT) return 4;
         if (opcode === op.JUMP || opcode === op.RETURN ||
             opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
-            opcode === op.THROW) return 2;
+            opcode === op.THROW || opcode === op.GET_THIS) return 2;
         if (opcode === op.POP_CATCH) return 1;
         if (opcode === op.JUMP_IF_FALSE) return 3;
         if (opcode === op.CALL) return 5;

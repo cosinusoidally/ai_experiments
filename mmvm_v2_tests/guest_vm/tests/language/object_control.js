@@ -61,3 +61,21 @@ assertEqual(switchValue(1), "one", "switch matching case and break");
 assertEqual(switchValue(2), "two:default", "switch fallthrough");
 assertEqual(switchValue(9), ":default", "switch default clause");
 assertEqual(switchValue(3), "three", "switch case after default");
+
+var inheritedMembership = {inherited: undefined};
+var membership = Object.create(inheritedMembership);
+membership.own = undefined;
+assertEqual("own" in membership, true, "in sees undefined own property");
+assertEqual("inherited" in membership, true, "in follows prototypes");
+assertEqual("missing" in membership, false, "in rejects missing property");
+
+function MembershipBase() {}
+function MembershipChild() {}
+MembershipChild.prototype = new MembershipBase();
+var membershipChild = new MembershipChild();
+assertEqual(membershipChild instanceof MembershipChild, true,
+            "instanceof matches direct prototype");
+assertEqual(membershipChild instanceof MembershipBase, true,
+            "instanceof follows prototype chain");
+assertEqual({} instanceof MembershipBase, false,
+            "instanceof rejects unrelated object");

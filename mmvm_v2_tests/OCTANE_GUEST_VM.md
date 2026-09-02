@@ -121,6 +121,7 @@ score's internal benchmark interval.
 | DeltaBlue | passing | 116 | 15.45 s | Native `Function.call`, `Array.pop`, and `Array` construction reduced a quick run from 2,912 semantic exits to 40. |
 | Crypto | passing | 129 | 48.02 s | Required general compound `<<=`, `>>=`, and `>>>=` parsing and bytecode lowering. |
 | RayTrace | passing | 104 | 37.66 s | Passed with the existing ES5.1 and native-interpreter facilities. |
+| EarleyBoyer | passing | 138 | 119.65 s | Added `in`, native `instanceof`, `try`/`finally`, script-level `this`, and extensible guest string prototypes. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers

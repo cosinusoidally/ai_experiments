@@ -29,12 +29,13 @@
                      opcode === op.GET_PROPERTY_CONST ||
                      opcode === op.SET_PROPERTY_CONST ||
                      opcode === op.DELETE_PROPERTY_CONST ||
+                     opcode === op.IN || opcode === op.INSTANCEOF ||
                      (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                      (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                      opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
             else if (opcode === op.JUMP || opcode === op.RETURN ||
                      opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
-                     opcode === op.THROW) width = 2;
+                     opcode === op.THROW || opcode === op.GET_THIS) width = 2;
             else if (opcode === op.PUSH_CATCH) width = 3;
             else if (opcode === op.POP_CATCH) width = 1;
             else if (opcode === op.JUMP_IF_FALSE) width = 3;
@@ -50,6 +51,8 @@
                 if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
                     throw new Error("invalid constant at bytecode " + pc);
                 }
+            } else if (opcode === op.GET_THIS) {
+                requireRegister(program, code[pc + 1], pc);
             } else if (opcode === op.SET_GLOBAL) {
                 if (code[pc + 1] < 0 || code[pc + 1] >= program.constants.length) {
                     throw new Error("invalid global name at bytecode " + pc);
@@ -65,7 +68,8 @@
             } else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                        (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                        (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
-                       opcode === op.DELETE_PROPERTY) {
+                       opcode === op.DELETE_PROPERTY || opcode === op.IN ||
+                       opcode === op.INSTANCEOF) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
                 requireRegister(program, code[pc + 3], pc);
