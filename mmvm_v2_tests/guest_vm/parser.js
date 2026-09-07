@@ -546,9 +546,51 @@
                     this.error("expected object property name");
                 }
                 this.advance(false);
-                this.expectPunctuator(":", true);
-                properties.push({key: String(keyToken.value),
-                                 value: this.parseAssignment()});
+                if ((keyToken.value === "get" || keyToken.value === "set") &&
+                    !this.isPunctuator(":")) {
+                    var accessorKind = keyToken.value;
+                    var accessorKey = this.current;
+                    if (accessorKey.kind !== "identifier" &&
+                        accessorKey.kind !== "keyword" &&
+                        accessorKey.kind !== "string" &&
+                        accessorKey.kind !== "number") {
+                        this.error("expected accessor property name");
+                    }
+                    this.advance(false);
+                    this.expectPunctuator("(", false);
+                    var accessorParameters = [];
+                    if (!this.isPunctuator(")")) {
+                        accessorParameters.push(this.expectIdentifier().value);
+                        if (this.isPunctuator(",")) {
+                            this.error("accessor has too many parameters");
+                        }
+                    }
+                    if (accessorKind === "get" &&
+                        accessorParameters.length !== 0) {
+                        this.error("getter must not have parameters");
+                    }
+                    if (accessorKind === "set" &&
+                        accessorParameters.length !== 1) {
+                        this.error("setter must have one parameter");
+                    }
+                    this.expectPunctuator(")", true);
+                    var accessorBody = this.parseBlock();
+                    properties.push({key: String(accessorKey.value),
+                        kind: accessorKind,
+                        value: {type: "FunctionExpression",
+                            name: String(accessorKey.value),
+                            parameters: accessorParameters,
+                            body: accessorBody,
+                            source: this.tokenizer.source.substring(
+                                keyToken.start, accessorBody.sourceEnd),
+                            location: {filename: this.tokenizer.filename,
+                                line: keyToken.line,
+                                column: keyToken.column + 1}}});
+                } else {
+                    this.expectPunctuator(":", true);
+                    properties.push({key: String(keyToken.value), kind: "init",
+                                     value: this.parseAssignment()});
+                }
                 if (!this.isPunctuator(",")) break;
                 this.advance(true);
             }

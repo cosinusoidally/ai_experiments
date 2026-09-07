@@ -30,6 +30,8 @@
         load("guest_vm/aot/native_interpreter.js");
         load("guest_vm/threaded_compiler.js");
         load("guest_vm/buffer.js");
+        load("guest_vm/typed_array.js");
+        load("guest_vm/json.js");
         load("guest_vm/runtime.js");
         load("guest_vm/interpreter.js");
         load("guest_vm/vm.js");

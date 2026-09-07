@@ -29,6 +29,7 @@
         var HEAP_TYPE_STRING = 7;
         var HEAP_TYPE_REGEXP = 9;
         var HEAP_TYPE_BUFFER_VIEW = 10;
+        var HEAP_TYPE_BUFFER_BACKING = 11;
         var HEAP_TYPE_ROOT_SLOT = 12;
         var HEAP_TYPE_VALUE_VECTOR = 13;
         var HEAP_TYPE_FRAME = 14;
@@ -51,7 +52,10 @@
         var ENVIRONMENT_CELLS = 24;
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
+        var PROPERTY_ATTRIBUTES = 24;
+        var PROPERTY_SETTER = 28;
         var PROPERTY_VALUE = 32;
+        var PROPERTY_ATTRIBUTE_ACCESSOR = 8;
         var REGEXP_PATTERN = 16;
         var REGEXP_FLAGS = 20;
         var REGEXP_PROTOTYPE = 24;
@@ -59,6 +63,7 @@
         var BUFFER_VIEW_BACKING = 16;
         var BUFFER_VIEW_PROTOTYPE = 28;
         var BUFFER_VIEW_PROPERTY_HEAD = 32;
+        var BUFFER_BACKING_METADATA = 24;
         var VECTOR_LENGTH = 16;
         var VECTOR_CAPACITY = 20;
         var VECTOR_CELLS = 24;
@@ -156,6 +161,12 @@
                     if (referenceIndex === 0) target = propertyNext(heapBase, address);
                     else if (referenceIndex === 1) target = propertyKey(heapBase, address);
                     else if (referenceIndex === 2) cellAddress = address + PROPERTY_VALUE;
+                    else if (referenceIndex === 3) {
+                        if ((propertyAttributes(heapBase, address) &
+                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                            target = propertySetter(heapBase, address);
+                        }
+                    }
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_REGEXP) {
                     if (referenceIndex === 0) target = regexpPattern(heapBase, address);
@@ -168,6 +179,10 @@
                     else if (referenceIndex === 1) target = bufferViewPrototype(heapBase, address);
                     else if (referenceIndex === 2) target = bufferViewPropertyHead(heapBase, address);
                     else referenceIndex = -2;
+                } else if (type === HEAP_TYPE_BUFFER_BACKING) {
+                    if (referenceIndex === 0) {
+                        target = bufferBackingMetadata(heapBase, address);
+                    } else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ROOT_SLOT) {
                     if (referenceIndex === 0) cellAddress = address + 16;
                     else referenceIndex = -2;

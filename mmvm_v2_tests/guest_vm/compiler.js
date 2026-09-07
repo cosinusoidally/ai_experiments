@@ -611,8 +611,16 @@
                 var property = expression.properties[propertyIndex];
                 var propertyKey = this.emitConstant(property.key);
                 var propertyValue = this.compileExpression(property.value);
-                this.emit(op.SET_PROPERTY, objectRegister, propertyKey,
-                          propertyValue);
+                if (property.kind === "get") {
+                    this.emit(op.DEFINE_GETTER, objectRegister, propertyKey,
+                              propertyValue);
+                } else if (property.kind === "set") {
+                    this.emit(op.DEFINE_SETTER, objectRegister, propertyKey,
+                              propertyValue);
+                } else {
+                    this.emit(op.SET_PROPERTY, objectRegister, propertyKey,
+                              propertyValue);
+                }
                 propertyIndex++;
             }
             return objectRegister;

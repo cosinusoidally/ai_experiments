@@ -1,4 +1,12 @@
 assertEqual(parseInt("8000", 10), 8000, "parseInt decimal");
+assertEqual(parseFloat("12.5px"), 12.5, "parseFloat prefix");
+assertEqual(isNaN("not a number"), true, "isNaN conversion");
+assertEqual(isFinite("12"), true, "isFinite conversion");
+var jsonValue = JSON.parse('{"name":"guest","values":[1,true,null]}');
+assertEqual(jsonValue.name, "guest", "JSON.parse object");
+assertEqual(jsonValue.values[1], true, "JSON.parse array");
+assertEqual(JSON.stringify(jsonValue),
+            '{"name":"guest","values":[1,true,null]}', "JSON.stringify");
 assertEqual(String(42), "42", "String conversion");
 assertEqual(String.fromCharCode(65, 66), "AB", "String.fromCharCode");
 
@@ -6,12 +14,22 @@ var text = "hello.txt";
 assertEqual(text.charAt(1), "e", "String.charAt");
 assertEqual(text.charCodeAt(0), 104, "String.charCodeAt");
 assertEqual(text.indexOf("lo"), 3, "String.indexOf");
+assertEqual(text.lastIndexOf("l"), 3, "String.lastIndexOf");
 assertEqual(text.substring(1, 4), "ell", "String.substring");
 assertEqual(text.substr(1, 3), "ell", "String.substr");
 
 var parts = "/one/two".split("/");
 assertEqual(parts.length, 3, "String.split length");
 assertEqual(parts[2], "two", "String.split values");
+var forEachTotal = 0;
+[2, 3, 4].forEach(function (value, index) {
+    forEachTotal += value + index;
+});
+assertEqual(forEachTotal, 12, "Array.forEach callback");
+var spliceValues = [1, 2, 3, 4];
+var spliceRemoved = spliceValues.splice(1, 2, 8, 9);
+assertEqual(spliceValues.join(","), "1,8,9,4", "Array.splice replacement");
+assertEqual(spliceRemoved.join(","), "2,3", "Array.splice removed values");
 var regexpParts = "one, two;three".split(/[,;]\s*/);
 assertEqual(regexpParts.length, 3, "String.split regexp length");
 assertEqual(regexpParts[1], "two", "String.split regexp values");
@@ -31,6 +49,7 @@ assertEqual(sizeMatch[1], "320", "RegExp.exec first capture");
 assertEqual(sizeMatch[2], "240", "RegExp.exec second capture");
 
 assertEqual("mixed".toUpperCase(), "MIXED", "String.toUpperCase");
+assertEqual("  spaced \n".trim(), "spaced", "String.trim");
 assertEqual(Number("12"), 12, "Number conversion");
 assertEqual((15).toString(16), "f", "Number.toString radix");
 assertEqual((1.25).toFixed(1), "1.3", "Number.toFixed");

@@ -429,8 +429,10 @@ guest Buffer back to the host compatibility buffer byte-for-byte; strings use
 UTF-8. HTTP sockets remain nonblocking even though the current file adapters
 perform their libc file work when their queued host task runs.
 
-Node-hosted guest Buffer storage continues to use `host_memory.js` array
-emulation. It does not substitute a host Node Buffer into guest semantics.
+Node-hosted guest storage uses `host_memory.js` paged linear-memory emulation.
+Its 64 KiB byte pages are allocated lazily so untouched portions of the
+reserved guest heap consume no per-byte host-object metadata. It does not
+substitute a host Node Buffer or typed array into guest semantics.
 Byte and little-endian word operations implement the same private memory API
 as MMVM's peek/poke-backed allocation. A Node-hosted guest receives no forged
 numeric address, so code branches to guest Buffer access; MMVM-native backing

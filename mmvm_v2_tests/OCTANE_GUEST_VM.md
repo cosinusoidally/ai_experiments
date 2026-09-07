@@ -125,10 +125,18 @@ score's internal benchmark interval.
 | RegExp | bring-up passing on Node; native stock baseline pending | — | — | Added regexp literals beginning with `=`, `String.match`, regexp `split`, cached host patterns, native substring/fromCharCode, and corrected the single-character replace fast path so semantic escapes cannot be treated as literal characters. Native execution remains dominated by general RegExp semantic transitions. |
 | Splay | quick correctness passing; stock baseline pending | — | 20.65 s quick | Added `Date.now`. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. Exact-capacity Array literals subsequently reduced the guest bump from 269,996,280 to 183,119,272 bytes. |
 | NavierStokes | passing | 283 | 26.05 s | Added ES5.1 non-strict receiver normalization for bare calls and `Function.call`/`apply` with nullish receivers. |
+| PdfJS | bring-up in progress | — | — | Object-literal accessors, heap-backed ArrayBuffer/typed arrays, `bind`, `forEach`, `splice`, `trim`, and JSON are implemented. The renderer now reaches asynchronous font loading; its stock checksum is not yet passing. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers
 for other systems.
+
+PdfJS exposed a separate Node-host memory problem in the low-level heap
+emulator. Storing each written guest byte as a property on one host object
+exhausted Node's heap during the renderer. `host_memory.js` now uses lazily
+allocated 64 KiB byte pages. This remains a peek/poke-style linear-memory
+backend: guest objects and typed-array elements are not represented by host
+objects, and the MMVM `calloc` backing is unchanged.
 
 For memory context, the initial corrected quick Splay run peaked at 442,860
 KiB RSS in the guest VM. Emitting an initial-capacity operand for `MAKE_ARRAY`

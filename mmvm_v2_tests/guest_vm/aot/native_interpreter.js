@@ -128,6 +128,7 @@
         var BUFFER_VIEW_BACKING = 16;
         var BUFFER_VIEW_OFFSET = 20;
         var BUFFER_VIEW_LENGTH = 24;
+        var BUFFER_VIEW_KIND = 36;
         var BUFFER_VIEW_RECORD_BYTES = 40;
         var BUFFER_BACKING_POINTER = 16;
         var BUFFER_BACKING_LENGTH = 20;
@@ -155,6 +156,8 @@
         var PROPERTY_ATTRIBUTES = 24;
         var PROPERTY_RESERVED = 28;
         var DEFAULT_PROPERTY_ATTRIBUTES = 7;
+        var PROPERTY_ATTRIBUTE_WRITABLE = 1;
+        var PROPERTY_ATTRIBUTE_ACCESSOR = 8;
         var PROPERTY_RECORD_BYTES = 48;
         var FRAME_FIXED_BYTES = 48;
         var FRAME_FLAG_NATIVE_CALL = 1;
@@ -396,17 +399,22 @@
                 while (globalProperty > 0) {
                     if (load32(heapBase + globalProperty + PROPERTY_KEY) ===
                         globalKey) {
-                        var globalValue = heapBase + globalProperty + PROPERTY_VALUE;
-                        var globalDestination = heapBase + registerCells +
-                            globalTargetIndex * VALUE_CELL_BYTES;
-                        store32(globalDestination, load32(globalValue));
-                        store32(globalDestination + VALUE_CELL_LOW,
-                                load32(globalValue + VALUE_CELL_LOW));
-                        store32(globalDestination + VALUE_CELL_HIGH,
-                                load32(globalValue + VALUE_CELL_HIGH));
-                        store32(globalDestination + VALUE_CELL_AUX,
-                                load32(globalValue + VALUE_CELL_AUX));
-                        globalProperty = PROPERTY_FOUND_SENTINEL;
+                        if ((propertyAttributes(heapBase, globalProperty) &
+                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                            globalProperty = 0;
+                        } else {
+                            var globalValue = heapBase + globalProperty + PROPERTY_VALUE;
+                            var globalDestination = heapBase + registerCells +
+                                globalTargetIndex * VALUE_CELL_BYTES;
+                            store32(globalDestination, load32(globalValue));
+                            store32(globalDestination + VALUE_CELL_LOW,
+                                    load32(globalValue + VALUE_CELL_LOW));
+                            store32(globalDestination + VALUE_CELL_HIGH,
+                                    load32(globalValue + VALUE_CELL_HIGH));
+                            store32(globalDestination + VALUE_CELL_AUX,
+                                    load32(globalValue + VALUE_CELL_AUX));
+                            globalProperty = PROPERTY_FOUND_SENTINEL;
+                        }
                     } else {
                         globalProperty = load32(
                             heapBase + globalProperty + PROPERTY_NEXT);
@@ -535,7 +543,9 @@
                     var arrayGetObjectType = recordType(
                         heapBase, arrayGetObject);
                     if (arrayGetObjectType === HEAP_TYPE_BUFFER_VIEW) {
-                        arrayGetSupported = 2;
+                        if (bufferViewKind(heapBase, arrayGetObject) === 0) {
+                            arrayGetSupported = 2;
+                        } else arrayGetSupported = 0;
                     } else if (arrayGetObjectType !== HEAP_TYPE_ARRAY) {
                         if (arrayGetObjectType === HEAP_TYPE_OBJECT) {
                             arrayGetSupported = 5;
@@ -690,15 +700,20 @@
                             namedGetProperty = PROPERTY_FOUND_SENTINEL;
                         } else arrayGetSupported = 0;
                     } else if (namedGetProperty !== PROPERTY_FOUND_SENTINEL) {
-                        var namedGetSource = heapBase + namedGetProperty +
-                            PROPERTY_VALUE;
-                        store32(arrayGetTarget, load32(namedGetSource));
-                        store32(arrayGetTarget + VALUE_CELL_LOW,
-                            load32(namedGetSource + VALUE_CELL_LOW));
-                        store32(arrayGetTarget + VALUE_CELL_HIGH,
-                            load32(namedGetSource + VALUE_CELL_HIGH));
-                        store32(arrayGetTarget + VALUE_CELL_AUX,
-                            load32(namedGetSource + VALUE_CELL_AUX));
+                        if ((propertyAttributes(heapBase, namedGetProperty) &
+                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                            arrayGetSupported = 0;
+                        } else {
+                            var namedGetSource = heapBase + namedGetProperty +
+                                PROPERTY_VALUE;
+                            store32(arrayGetTarget, load32(namedGetSource));
+                            store32(arrayGetTarget + VALUE_CELL_LOW,
+                                load32(namedGetSource + VALUE_CELL_LOW));
+                            store32(arrayGetTarget + VALUE_CELL_HIGH,
+                                load32(namedGetSource + VALUE_CELL_HIGH));
+                            store32(arrayGetTarget + VALUE_CELL_AUX,
+                                load32(namedGetSource + VALUE_CELL_AUX));
+                        }
                     }
                     if (arrayGetSupported === 3) arrayGetSupported = 4;
                 }
@@ -812,7 +827,9 @@
                     var arraySetObjectType = recordType(
                         heapBase, arraySetObject);
                     if (arraySetObjectType === HEAP_TYPE_BUFFER_VIEW) {
-                        arraySetSupported = 2;
+                        if (bufferViewKind(heapBase, arraySetObject) === 0) {
+                            arraySetSupported = 2;
+                        } else arraySetSupported = 0;
                     } else if (arraySetObjectType !== HEAP_TYPE_ARRAY) {
                         if (arraySetObjectType === HEAP_TYPE_OBJECT) {
                             if (platformNumericPropertyPointer(heapBase,
@@ -1071,6 +1088,20 @@
                         setEngineHeapBump(heapBase, state,
                                           dynamicPropertyRecord +
                                           PROPERTY_RECORD_BYTES);
+                    } else if ((propertyAttributes(heapBase,
+                                dynamicPropertyRecord) &
+                                PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                        dynamicPropertyValid = 0;
+                    }
+                    if (dynamicPropertyValid === 0) {
+                        store32(heapBase + state + ENGINE_EXIT_REASON,
+                                EXIT_UNSUPPORTED);
+                        store32(heapBase + state + ENGINE_PC, pc);
+                        store32(heapBase + state + ENGINE_RESULT, opcode);
+                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                                instructions);
+                        store32(heapBase + framePC, pc);
+                        return EXIT_UNSUPPORTED;
                     }
                     var dynamicPropertyDestination = heapBase +
                         dynamicPropertyRecord + PROPERTY_VALUE;
@@ -7510,6 +7541,14 @@
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                     }
                 }
+                if (propertyRecord !== 0) {
+                    if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
+                        if ((propertyAttributes(heapBase, propertyRecord) &
+                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                            propertyRecord = 0;
+                        }
+                    }
+                }
                 if (propertyRecord === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
@@ -7631,6 +7670,102 @@
                     }
                 }
                 if (setPropertyRecord === 0) {
+                    var inheritedSetObject = 0;
+                    if (setPropertyObjectType >= HEAP_TYPE_OBJECT) {
+                        if (setPropertyObjectType <=
+                            HEAP_TYPE_BYTECODE_FUNCTION) {
+                            inheritedSetObject = objectPrototype(
+                                heapBase, setPropertyObject);
+                        }
+                    }
+                    if (setPropertyObjectType === HEAP_TYPE_REGEXP) {
+                        inheritedSetObject = regexpPrototype(
+                            heapBase, setPropertyObject);
+                    } else if (setPropertyObjectType ===
+                               HEAP_TYPE_BUFFER_VIEW) {
+                        inheritedSetObject = bufferViewPrototype(
+                            heapBase, setPropertyObject);
+                    }
+                    while (inheritedSetObject !== 0) {
+                        var inheritedSetType = recordType(
+                            heapBase, inheritedSetObject);
+                        var inheritedSetHead = 0;
+                        var inheritedSetPrototype = 0;
+                        if (inheritedSetType >= HEAP_TYPE_OBJECT) {
+                            if (inheritedSetType <=
+                                HEAP_TYPE_BYTECODE_FUNCTION) {
+                                inheritedSetHead = objectPropertyHead(
+                                    heapBase, inheritedSetObject);
+                                inheritedSetPrototype = objectPrototype(
+                                    heapBase, inheritedSetObject);
+                            }
+                        }
+                        if (inheritedSetType === HEAP_TYPE_REGEXP) {
+                            inheritedSetHead = regexpPropertyHead(
+                                heapBase, inheritedSetObject);
+                            inheritedSetPrototype = regexpPrototype(
+                                heapBase, inheritedSetObject);
+                        } else if (inheritedSetType ===
+                                   HEAP_TYPE_BUFFER_VIEW) {
+                            inheritedSetHead = bufferViewPropertyHead(
+                                heapBase, inheritedSetObject);
+                            inheritedSetPrototype = bufferViewPrototype(
+                                heapBase, inheritedSetObject);
+                        }
+                        while (inheritedSetHead !== 0) {
+                            var inheritedSetKey = propertyKey(
+                                heapBase, inheritedSetHead);
+                            var inheritedSetMatches = 0;
+                            if (inheritedSetKey === setPropertyConstantKey) {
+                                inheritedSetMatches = 1;
+                            } else if (stringHash(heapBase,
+                                inheritedSetKey) === stringHash(heapBase,
+                                setPropertyConstantKey)) {
+                                if (stringLength(heapBase,
+                                    inheritedSetKey) === stringLength(heapBase,
+                                    setPropertyConstantKey)) {
+                                    inheritedSetMatches = 1;
+                                    var inheritedSetCharacter = 0;
+                                    var inheritedSetLength = stringLength(
+                                        heapBase, setPropertyConstantKey);
+                                    while (inheritedSetCharacter <
+                                           inheritedSetLength) {
+                                        if ((stringCharacterCodeUnit(heapBase,
+                                            inheritedSetKey,
+                                            inheritedSetCharacter) & 65535) !==
+                                            (stringCharacterCodeUnit(heapBase,
+                                            setPropertyConstantKey,
+                                            inheritedSetCharacter) & 65535)) {
+                                            inheritedSetMatches = 0;
+                                            inheritedSetCharacter =
+                                                inheritedSetLength;
+                                        } else inheritedSetCharacter =
+                                            inheritedSetCharacter + 1;
+                                    }
+                                }
+                            }
+                            if (inheritedSetMatches === 1) {
+                                var inheritedSetAttributes =
+                                    propertyAttributes(heapBase,
+                                                       inheritedSetHead);
+                                if ((inheritedSetAttributes &
+                                     PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                                    setPropertyRecord = inheritedSetHead;
+                                } else if ((inheritedSetAttributes &
+                                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                                    setPropertyRecord = inheritedSetHead;
+                                }
+                                inheritedSetHead = 0;
+                                inheritedSetObject = 0;
+                            } else inheritedSetHead = propertyNext(
+                                heapBase, inheritedSetHead);
+                        }
+                        if (inheritedSetObject !== 0) {
+                            inheritedSetObject = inheritedSetPrototype;
+                        }
+                    }
+                }
+                if (setPropertyRecord === 0) {
                     if (setPropertyHeadOffset === 0) {
                         store32(heapBase + state + ENGINE_EXIT_REASON,
                                 EXIT_UNSUPPORTED);
@@ -7671,6 +7806,16 @@
                             setPropertyRecord);
                     store32(heapBase + state + ENGINE_HEAP_BUMP,
                             setPropertyRecord + PROPERTY_RECORD_BYTES);
+                } else if ((propertyAttributes(heapBase, setPropertyRecord) &
+                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
                 }
                 var setPropertyDestination = heapBase + setPropertyRecord +
                                              PROPERTY_VALUE;

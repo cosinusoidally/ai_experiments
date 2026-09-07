@@ -19,6 +19,7 @@
     var PROPERTY_NEXT = 0;
     var PROPERTY_KEY = 4;
     var PROPERTY_ATTRIBUTES = 8;
+    var PROPERTY_SETTER = 12;
     var PROPERTY_VALUE = 16;
     var PROPERTY_BYTES = PROPERTY_VALUE + CELL_BYTES;
 
@@ -109,7 +110,8 @@
     var BUFFER_VIEW_LENGTH = 8;
     var BUFFER_VIEW_PROTOTYPE = 12;
     var BUFFER_VIEW_PROPERTIES = 16;
-    var BUFFER_VIEW_BYTES = 20;
+    var BUFFER_VIEW_KIND = 20;
+    var BUFFER_VIEW_BYTES = 24;
 
     var BUFFER_BACKING_POINTER = 0;
     var BUFFER_BACKING_LENGTH = 4;
@@ -131,6 +133,7 @@
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
     var ATTR_CONFIGURABLE = 4;
+    var ATTR_ACCESSOR = 8;
     var DEFAULT_ATTRIBUTES = ATTR_WRITABLE | ATTR_ENUMERABLE | ATTR_CONFIGURABLE;
 
     function Records(heap, cells) {
@@ -144,6 +147,7 @@
     Records.Attributes = {WRITABLE: ATTR_WRITABLE,
                           ENUMERABLE: ATTR_ENUMERABLE,
                           CONFIGURABLE: ATTR_CONFIGURABLE,
+                          ACCESSOR: ATTR_ACCESSOR,
                           DEFAULT: DEFAULT_ATTRIBUTES};
 
     Records.prototype.makeHandle = function (runtime, address) {
@@ -225,6 +229,9 @@
         if (type === Heap.Types.REGEXP) {
             return this.heap.readTrustedFieldU32(address, REGEXP_PROTOTYPE, type);
         }
+        if (type === Heap.Types.BUFFER_VIEW) {
+            return this.heap.readTrustedFieldU32(address, BUFFER_VIEW_PROTOTYPE, type);
+        }
         return this.heap.readTrustedFieldU32(address, OBJECT_PROTOTYPE, type);
     };
 
@@ -232,7 +239,8 @@
         if (prototype) this.heap.requireRecord(prototype);
         var type = this.heap.recordType(address);
         this.heap.writeTrustedFieldU32(address,
-            type === Heap.Types.REGEXP ? REGEXP_PROTOTYPE : OBJECT_PROTOTYPE,
+            type === Heap.Types.REGEXP ? REGEXP_PROTOTYPE :
+            type === Heap.Types.BUFFER_VIEW ? BUFFER_VIEW_PROTOTYPE : OBJECT_PROTOTYPE,
             prototype || 0, type);
     };
 
@@ -286,6 +294,22 @@
     Records.prototype.propertyAttributes = function (property) {
         return this.heap.readTrustedFieldU32(property, PROPERTY_ATTRIBUTES,
                                       Heap.Types.PROPERTY);
+    };
+
+    Records.prototype.setPropertyAttributes = function (property, attributes) {
+        this.heap.writeTrustedFieldU32(property, PROPERTY_ATTRIBUTES,
+            attributes, Heap.Types.PROPERTY);
+    };
+
+    Records.prototype.propertySetter = function (property) {
+        return this.heap.readTrustedFieldU32(property, PROPERTY_SETTER,
+                                             Heap.Types.PROPERTY);
+    };
+
+    Records.prototype.setPropertySetter = function (property, setter) {
+        if (setter) this.heap.requireRecord(setter);
+        this.heap.writeTrustedFieldU32(property, PROPERTY_SETTER, setter || 0,
+                                       Heap.Types.PROPERTY);
     };
 
     Records.prototype.propertyKey = function (property) {
@@ -459,9 +483,12 @@
     };
 
     Records.prototype.allocateBufferView = function (backing, offset, length,
-                                                       prototype) {
-        return this.heap.allocateRecordWords(Heap.Types.BUFFER_VIEW,
+                                                       prototype, kind) {
+        var address = this.heap.allocateRecordWords(Heap.Types.BUFFER_VIEW,
             BUFFER_VIEW_BYTES, backing, offset, length, prototype || 0);
+        this.heap.writeTrustedFieldU32(address, BUFFER_VIEW_KIND, kind || 0,
+                                       Heap.Types.BUFFER_VIEW);
+        return address;
     };
 
     Records.prototype.bufferViewBacking = function (view) {
@@ -479,9 +506,20 @@
                                       Heap.Types.BUFFER_VIEW);
     };
 
+    Records.prototype.bufferViewKind = function (view) {
+        return this.heap.readTrustedFieldU32(view, BUFFER_VIEW_KIND,
+                                      Heap.Types.BUFFER_VIEW);
+    };
+
     Records.prototype.bufferBackingMetadata = function (backing) {
         return this.heap.readTrustedFieldU32(backing, BUFFER_BACKING_METADATA,
                                       Heap.Types.BUFFER_BACKING);
+    };
+
+    Records.prototype.setBufferBackingMetadata = function (backing, metadata) {
+        if (metadata) this.heap.requireRecord(metadata, Heap.Types.BUFFER_VIEW);
+        this.heap.writeTrustedFieldU32(backing, BUFFER_BACKING_METADATA,
+            metadata || 0, Heap.Types.BUFFER_BACKING);
     };
 
     Records.prototype.bufferBackingPointer = function (backing) {
@@ -1029,6 +1067,9 @@
             reference(records.propertyNext(address));
             reference(records.propertyKey(address));
             cell(records.propertyValueCell(address));
+            if (records.propertyAttributes(address) & ATTR_ACCESSOR) {
+                reference(records.propertySetter(address));
+            }
         } else if (type === Heap.Types.REGEXP) {
             reference(this.heap.readTrustedFieldU32(
                 address, REGEXP_PATTERN, Heap.Types.REGEXP));
@@ -1040,6 +1081,8 @@
             reference(this.heap.readTrustedFieldU32(
                 address, BUFFER_VIEW_PROTOTYPE, Heap.Types.BUFFER_VIEW));
             reference(records.objectPropertyHead(address));
+        } else if (type === Heap.Types.BUFFER_BACKING) {
+            reference(records.bufferBackingMetadata(address));
         } else if (type === Heap.Types.ROOT_SLOT) {
             cell(this.heap.trustedPayloadAddress(address, 0));
         } else if (type === Heap.Types.VALUE_VECTOR) {

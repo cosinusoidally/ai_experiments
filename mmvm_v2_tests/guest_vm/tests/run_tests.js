@@ -90,6 +90,7 @@
         {path: "language/declaration_hoisting.js"},
         {path: "language/closure_fallback.js"},
         {path: "language/compiled_stability.js"},
+        {path: "language/typed_arrays.js"},
         {path: "buffer/buffer_guest.js"}
     ];
     var totalAssertions = 0;
@@ -165,11 +166,11 @@
     var threadedVM = new VM({threadedCompile: true});
     threadedVM.run(readSource("language/functions_objects.js"),
                    "threaded_functions_objects.js");
-    if (threadedVM.runtime.assertions !== 26) {
+    if (threadedVM.runtime.assertions !== 36) {
         throw new Error("threaded compiler assertion count changed");
     }
     threadedVM.destroy();
-    var threadedResult = "structured compiler closures passed: 26 assertion(s)";
+    var threadedResult = "structured compiler closures passed: 36 assertion(s)";
     if (typeof print === "function") print(threadedResult);
     else console.log(threadedResult);
 

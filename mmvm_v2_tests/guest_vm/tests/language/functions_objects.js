@@ -26,6 +26,9 @@ assertEqual(addToThis.call({base: 9}, 4), 13,
             "Function.prototype.call supplies an explicit receiver");
 assertEqual(addToThis.apply({base: 8}, [5]), 13,
             "Function.prototype.apply supplies a receiver and argument array");
+var boundAdd = addToThis.bind({base: 10}, 6);
+assertEqual(boundAdd(), 16,
+            "Function.prototype.bind supplies receiver and leading arguments");
 function setThroughBareThis(value) {
     this.bareReceiverValue = value;
     return this;
@@ -36,6 +39,39 @@ assertEqual(bareReceiverValue, 17,
             "bare-call global receiver is the active context global");
 assertEqual(setThroughBareThis.call(null, 19) === this, true,
             "non-strict null receiver becomes the global object");
+var accessorObject = {
+    stored: 4,
+    get doubled() { return this.stored * 2; },
+    set doubled(value) { this.stored = value / 2; }
+};
+assertEqual(accessorObject.doubled, 8,
+            "object literal getter receives the access receiver");
+accessorObject.doubled = 18;
+assertEqual(accessorObject.stored, 9,
+            "object literal setter updates through its receiver");
+var accessorPrototype = {
+    get inheritedValue() { return this.stored + 1; },
+    set inheritedValue(value) { this.stored = value - 1; }
+};
+var accessorChild = Object.create(accessorPrototype);
+accessorChild.stored = 10;
+assertEqual(accessorChild.inheritedValue, 11,
+            "inherited getter retains the original receiver");
+accessorChild.inheritedValue = 15;
+assertEqual(accessorChild.stored, 14,
+            "inherited setter retains the original receiver");
+var definedAccessor = {stored: 3};
+Object.defineProperty(definedAccessor, "tripled", {
+    get: function () { return this.stored * 3; },
+    set: function (value) { this.stored = value / 3; },
+    enumerable: true,
+    configurable: true
+});
+assertEqual(definedAccessor.tripled, 9,
+            "Object.defineProperty installs a getter");
+definedAccessor.tripled = 21;
+assertEqual(definedAccessor.stored, 7,
+            "Object.defineProperty installs a setter");
 assertEqual(addToThis.toString().indexOf("function addToThis") === 0, true,
             "Function.prototype.toString preserves guest source");
 
@@ -43,6 +79,22 @@ var values = [9, 8, 7];
 values[1] = 6;
 assertEqual(values.length, 3, "array length");
 assertEqual(values[1], 6, "array indexing");
+
+function PrototypeConstructor() { this.value = 5; }
+PrototypeConstructor.prototype = {
+    set data(value) { this.value = value; },
+    get data() { return this.value; },
+    read: function () { return this.value; }
+};
+var prototypeInstance = new PrototypeConstructor();
+assertEqual(prototypeInstance.read(), 5,
+            "constructed object uses the assigned function prototype");
+prototypeInstance.data = 8;
+assertEqual(prototypeInstance.read(), 8,
+            "methods following accessors remain on an assigned prototype");
+guestCollect();
+assertEqual(prototypeInstance.read(), 8,
+            "constructed object retains its assigned prototype across GC");
 
 assertEqual((5 & 3) | 8, 9, "bitwise operators");
 assertEqual(255 >>> 4, 15, "unsigned shift");

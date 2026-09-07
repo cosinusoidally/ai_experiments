@@ -33,6 +33,8 @@
                      opcode === op.SET_PROPERTY_CONST ||
                      opcode === op.DELETE_PROPERTY_CONST ||
                      opcode === op.IN || opcode === op.INSTANCEOF ||
+                     opcode === op.DEFINE_GETTER ||
+                     opcode === op.DEFINE_SETTER ||
                      (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                      (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                      opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
@@ -72,7 +74,9 @@
                        (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                        (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                        opcode === op.DELETE_PROPERTY || opcode === op.IN ||
-                       opcode === op.INSTANCEOF) {
+                       opcode === op.INSTANCEOF ||
+                       opcode === op.DEFINE_GETTER ||
+                       opcode === op.DEFINE_SETTER) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
                 requireRegister(program, code[pc + 3], pc);

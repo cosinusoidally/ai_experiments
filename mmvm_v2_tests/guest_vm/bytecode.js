@@ -50,7 +50,9 @@
         TYPEOF_GLOBAL: 48,
         IN: 49,
         INSTANCEOF: 50,
-        GET_THIS: 51
+        GET_THIS: 51,
+        DEFINE_GETTER: 52,
+        DEFINE_SETTER: 53
     };
 
     op.NAMES = [];

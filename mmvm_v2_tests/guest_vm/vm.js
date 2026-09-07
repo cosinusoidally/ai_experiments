@@ -20,8 +20,24 @@
         this.runtime = new SemanticRuntime(options || {});
         this.contexts = [];
         this.destroyed = false;
+        var semanticRuntime = this.runtime;
+        this.runtime.interpretGuest = function (callable, receiver, args,
+                                                context) {
+            var execution = Execution.fromFunction(callable, semanticRuntime,
+                callable.homeContext || context, receiver, args || []);
+            execution.compiledEntry = null;
+            while (true) {
+                var result = execution.resume(
+                    semanticRuntime.synchronousExecutionBudget());
+                if (result.status === "hostCall") execution.serviceHostCall();
+                else if (result.status === "budget") {
+                    semanticRuntime.gcSafePoint();
+                } else if (result.status === "completed") return result.value;
+                else if (result.status === "threw") throw result.exception;
+                else throw new Error("guest callback did not complete");
+            }
+        };
         if (this.runtime.threadedCompiler) {
-            var semanticRuntime = this.runtime;
             this.runtime.threadedCompiler.setFallback(function (
                     callable, receiver, args, context) {
                 var execution = Execution.fromFunction(

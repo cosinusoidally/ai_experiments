@@ -194,6 +194,11 @@
         } else if (opcode === op.SET_PROPERTY_CONST) {
             this.reloadNativeOperand(frame, code[pc + 1]);
             this.reloadNativeOperand(frame, code[pc + 3]);
+        } else if (opcode === op.DEFINE_GETTER ||
+                   opcode === op.DEFINE_SETTER) {
+            this.reloadNativeOperand(frame, code[pc + 1]);
+            this.reloadNativeOperand(frame, code[pc + 2]);
+            this.reloadNativeOperand(frame, code[pc + 3]);
         } else if (opcode === op.RETURN) {
             this.reloadNativeOperand(frame, code[pc + 1]);
         }
@@ -654,6 +659,13 @@
                     this.runtime.setProperty(registers[code[pc + 1]],
                                              registers[code[pc + 2]],
                                              registers[code[pc + 3]]);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.DEFINE_GETTER ||
+                           opcode === op.DEFINE_SETTER) {
+                    this.runtime.defineLiteralAccessor(
+                        registers[code[pc + 1]], registers[code[pc + 2]],
+                        registers[code[pc + 3]],
+                        opcode === op.DEFINE_SETTER);
                     frame.pc = pc + 4;
                 } else if (opcode === op.GET_PROPERTY_CONST) {
                     registers[code[pc + 1]] = this.runtime.getProperty(

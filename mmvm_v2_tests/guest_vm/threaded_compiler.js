@@ -834,6 +834,11 @@
         }
         else if (opcode === op.MAKE_REGEXP) {
             lines.push(rr(1) + "=runtime.makeRegExp(" + constant(2) + "," + constant(3) + ");");
+        } else if (opcode === op.DEFINE_GETTER ||
+                   opcode === op.DEFINE_SETTER) {
+            lines.push("runtime.defineLiteralAccessor(" + rr(1) + "," +
+                rr(2) + "," + rr(3) + "," +
+                (opcode === op.DEFINE_SETTER ? "true" : "false") + ");");
         } else if (opcode === op.RETURN) lines.push("return " + rr(1) + ";");
         else if (opcode === op.THROW) lines.push("throw " + rr(1) + ";");
         else throw new Error("unsupported threaded opcode " + opcode);
@@ -2146,6 +2151,7 @@
             opcode === op.GET_PROPERTY_CONST || opcode === op.SET_PROPERTY_CONST ||
             opcode === op.DELETE_PROPERTY_CONST || opcode === op.DELETE_PROPERTY ||
             opcode === op.IN || opcode === op.INSTANCEOF ||
+            opcode === op.DEFINE_GETTER || opcode === op.DEFINE_SETTER ||
             (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
             (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
             opcode === op.MAKE_REGEXP || opcode === op.CONSTRUCT) return 4;
