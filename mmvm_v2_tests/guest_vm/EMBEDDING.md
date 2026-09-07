@@ -387,7 +387,7 @@ precise for the implemented object graph.
 ## Heap capacity and growth
 
 The default `JSRuntime` begins with a 64 MiB logical guest heap and can grow it
-automatically to 256 MiB. Growth doubles the logical allocation limit as needed.
+automatically to 512 MiB. Growth doubles the logical allocation limit as needed.
 It does not relocate records: guest references remain heap-relative offsets and
 native pointers into Buffer backing data remain valid.
 

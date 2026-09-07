@@ -61,6 +61,7 @@
         this.gcAllocationDebt = 0;
         this.gcPending = false;
         this.gcCollecting = false;
+        this.gcHeapPressureBump = 0;
         this.compiledDepth = 0;
         this.collectionCount = 0;
         this.activeRegisterFrames = [];
@@ -77,7 +78,7 @@
          * fixed-capacity embedding behavior. The normal default runtime starts
          * small but reserves a stable native address range for automatic growth. */
         this.maximumLinearHeapBytes = options.maxHeapBytes === undefined ?
-            (options.heapBytes === undefined ? 256 * 1024 * 1024 :
+            (options.heapBytes === undefined ? 512 * 1024 * 1024 :
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.traceExceptions = !!options.traceExceptions;
@@ -123,8 +124,20 @@
             this.linearHeap.setRecordInitializer(
                 new RecordInitializer(this.linearHeap));
             this.heapSweeper = new HeapSweeper(this.linearHeap);
+            this.resetHeapPressureBump(0);
         }
         return this.linearHeap;
+    };
+
+    Runtime.prototype.resetHeapPressureBump = function (minimumBump) {
+        var heap = this.linearHeap;
+        var pressureBump = Math.floor(heap.allocationLimit * 3 / 4);
+        minimumBump = Number(minimumBump) || 0;
+        if (pressureBump < minimumBump) pressureBump = minimumBump;
+        if (pressureBump > heap.maximumAllocationLimit) {
+            pressureBump = heap.maximumAllocationLimit;
+        }
+        this.gcHeapPressureBump = pressureBump;
     };
 
     Runtime.prototype.rebuildFreeBlockIndex = function () {
@@ -922,7 +935,7 @@
          * registers and frame links are live. Request collection with ample
          * headroom; the interpreter services it only after publishing the
          * native frame at the next ordinary yield. */
-        if (bump >= Math.floor(this.linearHeap.allocationLimit * 3 / 4)) {
+        if (bump >= this.gcHeapPressureBump) {
             if (this.linearHeap.allocationLimit <
                 this.linearHeap.maximumAllocationLimit) {
                 /* The backing reservation and all guest references are stable
@@ -931,6 +944,7 @@
                  * carving tiny regions out of a fragmented young heap. */
                 this.linearHeap.growToFit(
                     this.linearHeap.allocationLimit + 1);
+                this.resetHeapPressureBump(0);
             } else this.gcPending = true;
         }
     };
@@ -2459,6 +2473,15 @@
                 }
             }
             this.collectionCount++;
+            /* A large live graph can leave the bump above the ordinary 75%
+             * pressure mark.  Do not collect that same live graph again at
+             * every native/semantic boundary.  Give it useful bump headroom;
+             * an allocation exit still forces a collection if fragmented
+             * free space or the remaining tail cannot satisfy a record. */
+            var postCollectionHeadroom = Math.max(1024 * 1024,
+                Math.floor(sweepResult.bytes / 2));
+            this.resetHeapPressureBump(
+                this.linearHeap.bump + postCollectionHeadroom);
             if (this.profileOpcodeCounts) {
                 var collectionLine = "guest heap collection " +
                     this.collectionCount + ": bump=" +
@@ -2469,7 +2492,9 @@
                     " freeBlocks=" +
                     this.linearHeap.freeBlocks.length + " markMs=" +
                     (markingFinished - collectionStarted) + " sweepMs=" +
-                    (sweepingFinished - markingFinished);
+                    (sweepingFinished - markingFinished) + " nextPressure=" +
+                    this.gcHeapPressureBump + " limit=" +
+                    this.linearHeap.allocationLimit;
                 if (typeof print === "function") print(collectionLine);
                 else if (typeof console !== "undefined" && console.log) {
                     console.log(collectionLine);

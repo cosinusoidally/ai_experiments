@@ -8689,13 +8689,14 @@
         var allocationBump = heap.bump;
         var allocationLimit = heap.allocationLimit;
         if (!this.allocationRegion &&
-            heap.bump >= Math.floor(heap.allocationLimit * 3 / 4) &&
+            heap.bump >= this.runtime.gcHeapPressureBump &&
             heap.allocationLimit < heap.maximumAllocationLimit) {
             heap.growToFit(heap.allocationLimit + 1);
+            this.runtime.resetHeapPressureBump(0);
             allocationLimit = heap.allocationLimit;
         }
         if (!this.allocationRegion &&
-            heap.bump >= Math.floor(heap.allocationLimit * 3 / 4)) {
+            heap.bump >= this.runtime.gcHeapPressureBump) {
             var claimedRegion = heap.claimLargestFreeBlock(
                 MIN_NATIVE_ALLOCATION_REGION_BYTES);
             if (claimedRegion) {
@@ -8840,6 +8841,15 @@
                    this.allocationRefillElapsedMs + "ms" +
                    " runs=" + this.runCount + " " +
                    parts.join(" ");
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
+        var heap = this.runtime.linearHeap;
+        line = "native guest heap: bump=" + heap.bump + " limit=" +
+               heap.allocationLimit + " maximum=" +
+               heap.maximumAllocationLimit + " nextPressure=" +
+               this.runtime.gcHeapPressureBump + " growths=" +
+               heap.growthCount + " collections=" +
+               this.runtime.collectionCount;
         if (typeof print === "function") print(line);
         else if (typeof console !== "undefined" && console.log) console.log(line);
         var locationEntries = [];

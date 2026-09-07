@@ -495,9 +495,14 @@ index. Flagged engine-owned regions remain separate. Node uses the equivalent
 JavaScript pass.
 
 Collection is automatic. Semantic host-side allocation uses the configurable
-allocation-unit threshold. Native execution additionally requests a collection
-when its bump allocation reaches three quarters of the heap, leaving stack and
-allocation headroom. The request is serviced only after the native engine has
+allocation-unit threshold. Native execution grows the logical heap when its
+bump allocation reaches three quarters of the current limit, leaving stack and
+allocation headroom. At the hard limit it requests a collection instead. After
+a collection, its next pressure point is raised above the surviving bump by at
+least 1 MiB. This prevents a large live graph from causing a full collection at
+every subsequent native/semantic boundary merely because its survivors remain
+above the original three-quarter watermark. A genuine allocation failure still
+forces a collection. The request is serviced only after the native engine has
 published its current frame and a semantic fallback has published its result;
 the collector never runs over private register state.
 
@@ -508,7 +513,7 @@ configured `heapBytes` is the initial logical allocation limit and remains
 entirely available for guest records. When a record cannot fit, the allocator
 doubles that logical limit, capped at `maxHeapBytes`; no records move and guest
 offsets remain unchanged. The default runtime starts at 64 MiB and reserves up
-to 256 MiB. Supplying `heapBytes` without `maxHeapBytes` deliberately preserves
+to 512 MiB. Supplying `heapBytes` without `maxHeapBytes` deliberately preserves
 a fixed-size heap for embedders and allocator tests that require a hard bound.
 
 Reserving the maximum range up front is essential on the native backend.

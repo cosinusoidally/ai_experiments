@@ -633,6 +633,10 @@
         };
         this.runtime.setProperty(dateConstructor, "prototype", datePrototype);
         this.runtime.setProperty(datePrototype, "constructor", dateConstructor);
+        this.runtime.setProperty(dateConstructor, "now",
+            this.makeFunction("Date.now", function () {
+                return environment.hostNow();
+            }, true));
         if (this.runtime.nativeInterpreter) {
             this.runtime.nativeInterpreter.setDateSupport(
                 datePrototype, dateValueKey);

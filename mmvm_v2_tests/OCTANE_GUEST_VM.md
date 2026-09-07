@@ -123,10 +123,26 @@ score's internal benchmark interval.
 | RayTrace | passing | 104 | 37.66 s | Passed with the existing ES5.1 and native-interpreter facilities. |
 | EarleyBoyer | passing | 138 | 119.65 s | Added `in`, native `instanceof`, `try`/`finally`, script-level `this`, and extensible guest string prototypes. |
 | RegExp | bring-up passing on Node; native stock baseline pending | — | — | Added regexp literals beginning with `=`, `String.match`, regexp `split`, cached host patterns, native substring/fromCharCode, and corrected the single-character replace fast path so semantic escapes cannot be treated as literal characters. Native execution remains dominated by general RegExp semantic transitions. |
+| Splay | quick correctness passing; stock baseline pending | — | 20.07 s quick | Added `Date.now`. The quick run reaches a 269,996,280-byte guest bump with no collection after the default maximum was raised to 512 MiB. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers
 for other systems.
+
+For memory context, the quick Splay run peaks at 442,860 KiB RSS in the guest
+VM. Node v24.14.1 running the same unmodified suite and quick wrapper peaks at
+134,792 KiB RSS and takes 0.43 s. The guest's current representation stores
+each ordinary property in a separate 48-byte linked heap record and each value
+cell in 16 bytes. Splay creates roughly half a million recursively nested
+payload objects, so compact per-object property storage and denser value cells
+are high-value general representation work, independent of Octane.
+
+Native heap-pressure profiling reports bump, current logical limit, reserved
+maximum, next pressure point, growth count, and collection count. Once a full
+collection leaves a large live graph above the normal three-quarter pressure
+mark, the next pressure point is placed at least 1 MiB above the surviving
+bump. Actual allocation failure still forces collection; an unchanged live set
+does not cause collection again at every semantic boundary.
 
 The RegExp workload also exposed a cross-context collector invariant: a yield
 must publish the youngest active frame separately for each owning `JSContext`.
