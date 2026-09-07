@@ -338,6 +338,52 @@
                     throw new Error("native unsigned shift binary64 mismatch");
                 }
 
+                /* Exercise the mixed int32/double coercions used by common
+                 * deterministic hash and PRNG code as one high-level unit. */
+                var hashContext = integratedVM.jsRuntime.createContext();
+                hashContext.run(
+                    "var seed = 49734321; for (var hashIndex = 0; hashIndex < 20000; hashIndex++) {" +
+                    "seed = ((seed + 0x7ed55d16) + (seed << 12)) & 0xffffffff;" +
+                    "seed = ((seed ^ 0xc761c23c) ^ (seed >>> 19)) & 0xffffffff;" +
+                    "seed = ((seed + 0x165667b1) + (seed << 5)) & 0xffffffff;" +
+                    "seed = ((seed + 0xd3a2646c) ^ (seed << 9)) & 0xffffffff;" +
+                    "seed = ((seed + 0xfd7046c5) + (seed << 3)) & 0xffffffff;" +
+                    "seed = ((seed ^ 0xb55a4f09) ^ (seed >>> 16)) & 0xffffffff;}" +
+                    "", "native_hash_pipeline.js");
+                var hashResult = integratedVM.runtime.getGlobal(
+                    hashContext, "seed");
+                if (hashResult !== 16991930) {
+                    throw new Error("native 32-bit hash pipeline mismatch: " +
+                                    hashResult);
+                }
+
+                var variantContext = integratedVM.jsRuntime.createContext();
+                variantContext.run(
+                    "var variantSeed=49734321;" +
+                    "function variantRandom(){" +
+                    "variantSeed=((variantSeed+0x7ed55d16)+(variantSeed<<12))&0xffffffff;" +
+                    "variantSeed=((variantSeed^0xc761c23c)^(variantSeed>>>19))&0xffffffff;" +
+                    "variantSeed=((variantSeed+0x165667b1)+(variantSeed<<5))&0xffffffff;" +
+                    "variantSeed=((variantSeed+0xd3a2646c)^(variantSeed<<9))&0xffffffff;" +
+                    "variantSeed=((variantSeed+0xfd7046c5)+(variantSeed<<3))&0xffffffff;" +
+                    "variantSeed=((variantSeed^0xb55a4f09)^(variantSeed>>>16))&0xffffffff;" +
+                    "return (variantSeed&0xfffffff)/0x10000000;}" +
+                    "var variantSource='uggc://jjj.snprobbx.pbz/ybtva.cuc';" +
+                    "var variantHash=0;" +
+                    "for(var variantIndex=1;variantIndex<1000;variantIndex++){" +
+                    "var variantPosition=Math.floor(variantRandom()*variantSource.length);" +
+                    "var variantCharacter=String.fromCharCode((variantSource.charCodeAt(variantPosition)+Math.floor(variantRandom()*128))%128);" +
+                    "var variant=variantSource.substring(0,variantPosition)+variantCharacter+variantSource.substring(variantPosition+1,variantSource.length);" +
+                    "for(var characterIndex=0;characterIndex<variant.length;characterIndex++)" +
+                    "variantHash=((variantHash*33)^variant.charCodeAt(characterIndex))|0;}",
+                    "native_input_variants.js");
+                var variantHash = integratedVM.runtime.getGlobal(
+                    variantContext, "variantHash");
+                if (variantHash !== 1420876352) {
+                    throw new Error("native input variant pipeline mismatch: " +
+                                    variantHash);
+                }
+
                 var wordBuffer = integratedVM.runtime.bufferSupport.allocate(8);
                 var writeUInt32LE = integratedVM.runtime.getProperty(
                     wordBuffer, "writeUInt32LE");

@@ -4,6 +4,7 @@ var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
 var guestRunnerProfile = false;
+var guestRunnerTraceExceptions = false;
 var guestRunnerVerifyHeap = false;
 var guestRunnerThreaded = false;
 var guestRunnerNative = false;
@@ -32,6 +33,9 @@ for (var guestRunnerOptionIndex = 0;
      guestRunnerOptionIndex++) {
     if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
         guestRunnerProfile = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--vm-trace-exceptions") {
+        guestRunnerTraceExceptions = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-verify-heap") {
         guestRunnerVerifyHeap = true;
@@ -67,6 +71,7 @@ guestRunnerArguments = guestRunnerProgramArguments;
 
 if (!guestRunnerArguments.length) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
+                     "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-native] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] program.js";
@@ -81,6 +86,8 @@ var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
+                                        traceExceptions:
+                                            guestRunnerTraceExceptions,
                                         verifyNativeHeap: guestRunnerVerifyHeap,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,

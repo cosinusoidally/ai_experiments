@@ -18,6 +18,14 @@
             runtime.programAddress(program), environment ? environment.heapAddress : 0,
             caller ? caller.heapAddress : 0, returnRegister,
             program.registerCount || 0, context ? context.heapAddress : 0);
+        /* Publishing must precede register spilling: converting a register
+         * value can allocate (notably when interning a string) and therefore
+         * collect. The new frame is otherwise only a host local at that point
+         * and is not yet reachable from Execution.frames. */
+        if (context) {
+            runtime.heapRecords.setContextActiveFrame(context.heapAddress,
+                                                      frame.heapAddress);
+        }
         if (runtime.nativeInterpreter) {
             runtime.heapRecords.setFramePC(frame.heapAddress, 0);
             var initializedRegister = 0;
@@ -80,7 +88,20 @@
     Execution.prototype.result = function (status, used) {
         this.spillFrames();
         this.runtime.heapRecords.setContextActiveFrame(this.context.heapAddress,
-            this.frames.length ? this.frames[this.frames.length - 1].heapAddress : 0);
+                                                        0);
+        /* Calls may cross JSContext boundaries through a function exported by
+         * a loaded script. Publish the youngest frame in each owning context;
+         * assigning the overall top frame to the entry context creates a
+         * dangling root as soon as that foreign callee returns. */
+        var frameIndex = 0;
+        while (frameIndex < this.frames.length) {
+            var publishedFrame = this.frames[frameIndex++];
+            if (publishedFrame.context) {
+                this.runtime.heapRecords.setContextActiveFrame(
+                    publishedFrame.context.heapAddress,
+                    publishedFrame.heapAddress);
+            }
+        }
         var result = {status: status, instructions: used,
                       totalInstructions: this.totalInstructions};
         if (status === "completed") result.value = this.value;
@@ -261,6 +282,26 @@
                     frame.heapAddress))) {
             this.runtime.linearHeap.freeRecord(handler,
                                                "frame-handler cleanup");
+        }
+        /* A frame can belong to a different context from the execution's
+         * entry frame (for example, a function exported by a loaded script).
+         * Clear that context's published root before reclaiming the frame.
+         * Completion also publishes the entry context, but doing this at the
+         * lifetime boundary prevents nested and cross-context calls from ever
+         * leaving a dangling heap edge between those two operations. */
+        var frameContext = this.runtime.heapRecords.frameContext(
+            frame.heapAddress);
+        if (frameContext &&
+            this.runtime.heapRecords.contextActiveFrame(frameContext) ===
+                frame.heapAddress) {
+            var caller = this.runtime.heapRecords.frameCaller(
+                frame.heapAddress);
+            if (caller && this.runtime.heapRecords.frameContext(caller) !==
+                          frameContext) {
+                caller = 0;
+            }
+            this.runtime.heapRecords.setContextActiveFrame(frameContext,
+                                                            caller);
         }
         this.runtime.linearHeap.freeRecord(frame.heapAddress,
                                            "execution frame");
@@ -870,6 +911,9 @@
                     frame.pc = pc + 4;
                 } else if (opcode === op.THROW) {
                     var thrownValue = registers[code[pc + 1]];
+                    thrownValue = this.runtime.locateError(
+                        thrownValue, frame.program, pc);
+                    this.runtime.reportExceptionState(thrownValue, frame);
                     if (!this.handleException(thrownValue)) {
                         return this.finish("threw", thrownValue, used);
                     }
@@ -908,6 +952,7 @@
             return this.finish("completed", undefined, used);
         } catch (error) {
             error = this.runtime.locateError(error, frame && frame.program, pc);
+            this.runtime.reportExceptionState(error, frame);
             if (this.handleException(error)) {
                 if (this.runtime.nativeInterpreter && this.frames.length) {
                     this.frames[this.frames.length - 1].nativeHeapCurrent = false;

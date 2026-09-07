@@ -41,6 +41,10 @@
         /* Strings are immutable. This is a decoded representation cache keyed
          * only by the authoritative heap address, never semantic storage. */
         this.decodedStrings = {};
+        /* Transitional compiled-pattern cache for semantic regexp calls.
+         * Guest-visible state never lives here: lastIndex is reset before
+         * each use, matching the current guest record semantics. */
+        this.hostRegExpCache = {};
         this.assertions = 0;
         this.heapObjects = [];
         this.heapHandles = {};
@@ -76,6 +80,7 @@
             (options.heapBytes === undefined ? 256 * 1024 * 1024 :
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
+        this.traceExceptions = !!options.traceExceptions;
         this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.nativeSnapshotWrite = options.snapshot || null;
         this.nativeSnapshotRead = options.withSnapshot || null;
@@ -208,6 +213,20 @@
             this.heapRecords.allocateRegExp(pattern, flags,
                 this.regexpPrototype ? this.regexpPrototype.heapAddress : 0),
             "regexp"));
+    };
+
+    Runtime.prototype.hostRegExp = function (regexp) {
+        this.assertOwned(regexp);
+        var pattern = this.heapRecords.regexpPattern(regexp.heapAddress);
+        var flags = this.heapRecords.regexpFlags(regexp.heapAddress);
+        var key = "$" + pattern.length + ":" + pattern + ":" + flags;
+        var compiled = this.hostRegExpCache[key];
+        if (!compiled) {
+            compiled = new RegExp(pattern, flags);
+            this.hostRegExpCache[key] = compiled;
+        }
+        compiled.lastIndex = 0;
+        return compiled;
     };
 
     Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
@@ -1073,7 +1092,7 @@
             function (receiver, args) {
                 return args.length > 1 ? String(receiver).substring(Number(args[0]), Number(args[1])) :
                                          String(receiver).substring(Number(args[0]));
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_SUBSTRING);
         this.stringMethods.substr = this.makeNativeFunction("String.substr",
             function (receiver, args) {
                 return args.length > 1 ? String(receiver).substr(Number(args[0]),
@@ -1083,18 +1102,44 @@
             function (receiver) { return String(receiver).toLowerCase(); });
         this.stringMethods.split = this.makeNativeFunction("String.split",
             function (receiver, args) {
-                var parts = String(receiver).split(args.length ? String(args[0]) : undefined);
+                var separator = args.length ? args[0] : undefined;
+                if (separator && separator.guestType === "regexp") {
+                    separator = runtime.hostRegExp(separator);
+                } else if (separator !== undefined) {
+                    separator = String(separator);
+                }
+                var parts = args.length > 1 ?
+                    String(receiver).split(separator, Number(args[1])) :
+                    String(receiver).split(separator);
                 return runtime.arrayFrom(parts);
+            });
+        this.stringMethods.match = this.makeNativeFunction("String.match",
+            function (receiver, args) {
+                var regexp = args.length ? args[0] : undefined;
+                if (regexp && regexp.guestType === "regexp") {
+                    regexp = runtime.hostRegExp(regexp);
+                } else {
+                    regexp = new RegExp(regexp === undefined ? "" :
+                                        String(regexp));
+                }
+                var match = String(receiver).match(regexp);
+                if (!match) return null;
+                var result = runtime.arrayFrom(match);
+                if (match.index !== undefined) {
+                    runtime.setProperty(result, "index", match.index);
+                    runtime.setProperty(result, "input", match.input);
+                }
+                return result;
             });
         this.stringMethods.replace = this.makeNativeFunction("String.replace",
             function (receiver, args) {
                 var search = args[0];
+                var replacementInput = String(receiver);
                 if (search && search.guestType === "regexp") {
-                    search = new RegExp(runtime.heapRecords.regexpPattern(
-                        search.heapAddress), runtime.heapRecords.regexpFlags(
-                        search.heapAddress));
+                    search = runtime.hostRegExp(search);
                 }
-                return String(receiver).replace(search, String(args[1]));
+                var replaced = replacementInput.replace(search, String(args[1]));
+                return replaced;
             }, "intrinsic", NativeIntrinsics.STRING_REPLACE);
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
             function (receiver) { return String(receiver).toUpperCase(); });
@@ -1364,15 +1409,11 @@
         this.regexpMethods = {};
         this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
             function (receiver, args) {
-                return new RegExp(runtime.heapRecords.regexpPattern(
-                    receiver.heapAddress), runtime.heapRecords.regexpFlags(
-                    receiver.heapAddress)).test(String(args[0]));
+                return runtime.hostRegExp(receiver).test(String(args[0]));
             }, "intrinsic", NativeIntrinsics.REGEXP_TEST);
         this.regexpMethods.exec = this.makeNativeFunction("RegExp.exec",
             function (receiver, args) {
-                var match = new RegExp(runtime.heapRecords.regexpPattern(
-                    receiver.heapAddress), runtime.heapRecords.regexpFlags(
-                    receiver.heapAddress)).exec(String(args[0]));
+                var match = runtime.hostRegExp(receiver).exec(String(args[0]));
                 if (!match) return null;
                 var result = runtime.arrayFrom(match);
                 runtime.setProperty(result, "index", match.index);
@@ -1397,7 +1438,7 @@
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
                 return String.fromCharCode.apply(String, args);
-            }));
+            }, "intrinsic", NativeIntrinsics.STRING_FROM_CHAR_CODE));
         this.setGlobal("String", stringConstructor);
         this.setGlobal("Number", this.makeNativeFunction("Number",
             function (receiver, args) { return args.length ? Number(args[0]) : 0; },
@@ -1578,6 +1619,46 @@
                 (error.stack ? "\n" + error.stack : "");
         } catch (ignored) {}
         return error;
+    };
+
+    Runtime.prototype.reportExceptionState = function (error, frame) {
+        if (!this.traceExceptions || !frame) return;
+        var line = "guest exception " +
+            (error.guestFilename || frame.program.filename || "<guest>") +
+            ":" + (error.guestLine || 1) + ":" +
+            (error.guestColumn || 1);
+        var bindings = frame.program.bindings || [];
+        var bindingSlots = frame.program.bindingSlots || {};
+        var index = 0;
+        while (index < bindings.length) {
+            var name = bindings[index++];
+            var value;
+            try {
+                var slot = bindingSlots["$" + name];
+                var bindingRegister = frame.program.bindingRegisters &&
+                    frame.program.bindingRegisters[slot];
+                if (bindingRegister !== undefined && bindingRegister >= 0) {
+                    value = this.readHeapValue(
+                        this.heapRecords.frameRegisterCell(
+                            frame.heapAddress, bindingRegister));
+                } else {
+                    value = this.getBinding(frame.context,
+                                            frame.environment, name);
+                }
+                if (value && value.guestType) {
+                    value = "<" + value.guestType + "@" +
+                            value.heapAddress + ">";
+                } else {
+                    value = String(value);
+                    if (value.length > 80) value = value.substring(0, 77) + "...";
+                }
+                line += " " + name + "=" + value;
+            } catch (ignored) {
+                line += " " + name + "=<unavailable>";
+            }
+        }
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
     };
 
     Runtime.prototype.importCaughtException = function (error) {
@@ -2027,9 +2108,14 @@
     Runtime.prototype.markAuthoritativeHeap = function (generation) {
         var runtime = this;
         var pending = [];
-        function enqueue(address) {
+        function enqueue(address, source) {
             if (!address) return;
-            if (runtime.linearHeap.mark(address) === generation) return;
+            try {
+                if (runtime.linearHeap.mark(address) === generation) return;
+            } catch (error) {
+                throw new Error(error.message +
+                    (source ? " referenced by " + source : ""));
+            }
             runtime.linearHeap.setMark(address, generation);
             pending.push(address);
         }
@@ -2068,7 +2154,12 @@
 
         index = 0;
         while (index < pending.length) {
-            this.heapRecords.visitReferences(pending[index++], enqueue);
+            var owner = pending[index++];
+            var ownerType = this.linearHeap.recordType(owner);
+            this.heapRecords.visitReferences(owner, function (target) {
+                enqueue(target, "heap record " + owner + " (type " +
+                        ownerType + ")");
+            });
         }
     };
 

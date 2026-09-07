@@ -60,6 +60,10 @@
     token(slash, false, "punctuator", "/");
     token(slash, true, "number", 2);
     token(slash, false, "punctuator", "/=");
+
+    var equalsRegexp = new Tokenizer("/=/", "equals-regexp.js");
+    equal(token(equalsRegexp, true, "regexp").value.pattern, "=",
+          "regexp may begin with equals");
     token(slash, true, "number", 3);
 
     var longest = new Tokenizer(">>>= === !== ++ -- && ||", "punct.js");

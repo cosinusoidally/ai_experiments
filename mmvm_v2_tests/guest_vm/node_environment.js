@@ -516,23 +516,22 @@
                 return environment.loadModule(name, environment.runnerArguments[0]);
             }));
 
-        if (!this.nodeHost) {
-            publish("load", this.makeFunction("load", function (receiver, args) {
-                if (!args.length) throw new TypeError("load requires a filename");
-                var filename = String(args[0]);
-                var sourceBuffer = environment.hostFs.readFileSync(filename);
-                var source = sourceBuffer.toString("utf8");
-                var loadContext = environment.vm.jsRuntime.createContext();
-                /* SpiderMonkey shell load() executes against the caller's
-                 * global object. Sharing this binding table preserves that
-                 * observable behavior while retaining an independent active
-                 * execution slot for nested guest evaluation. */
-                loadContext.shareGlobalObject(environment.context);
-                environment.moduleContexts.push(loadContext);
-                loadContext.run(source, filename);
-                return undefined;
-            }));
-        }
+        publish("load", this.makeFunction("load", function (receiver, args) {
+            if (!args.length) throw new TypeError("load requires a filename");
+            var filename = String(args[0]);
+            var sourceBuffer = environment.hostFs.readFileSync(filename);
+            var source = sourceBuffer.toString("utf8");
+            var loadContext = environment.vm.jsRuntime.createContext();
+            /* SpiderMonkey shell load() executes against the caller's global
+             * object. Sharing this binding table preserves that observable
+             * behavior while retaining an independent active execution slot
+             * for nested guest evaluation. This path is intentionally the
+             * same on both supported hosts. */
+            loadContext.shareGlobalObject(environment.context);
+            environment.moduleContexts.push(loadContext);
+            loadContext.run(source, filename);
+            return undefined;
+        }));
 
         var argv = ["artifacts/js_min.exe", this.runnerArguments[0]];
         var index = 1;

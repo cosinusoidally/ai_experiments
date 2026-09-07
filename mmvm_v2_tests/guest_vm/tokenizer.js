@@ -405,7 +405,7 @@
         if (code === 34 || code === 39) {
             return this.scanString(start, line, column, lineBefore);
         }
-        if (code === 47 && allowRegexp && this.codeAt(1) !== 61) {
+        if (code === 47 && allowRegexp) {
             return this.scanRegexp(start, line, column, lineBefore);
         }
         return this.scanPunctuator(start, line, column, lineBefore);

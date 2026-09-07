@@ -122,7 +122,15 @@ score's internal benchmark interval.
 | Crypto | passing | 129 | 48.02 s | Required general compound `<<=`, `>>=`, and `>>>=` parsing and bytecode lowering. |
 | RayTrace | passing | 104 | 37.66 s | Passed with the existing ES5.1 and native-interpreter facilities. |
 | EarleyBoyer | passing | 138 | 119.65 s | Added `in`, native `instanceof`, `try`/`finally`, script-level `this`, and extensible guest string prototypes. |
+| RegExp | bring-up passing on Node; native stock baseline pending | — | — | Added regexp literals beginning with `=`, `String.match`, regexp `split`, cached host patterns, native substring/fromCharCode, and corrected the single-character replace fast path so semantic escapes cannot be treated as literal characters. Native execution remains dominated by general RegExp semantic transitions. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers
 for other systems.
+
+The RegExp workload also exposed a cross-context collector invariant: a yield
+must publish the youngest active frame separately for each owning `JSContext`.
+Publishing a loaded script's callee under the entry context could leave a freed
+frame reachable after return. Frame construction is now rooted before any
+allocation-capable value conversion, frame release clears its owning context,
+and yielded executions publish active roots per context.

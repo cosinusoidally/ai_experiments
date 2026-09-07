@@ -8,6 +8,19 @@
  * or patches ../../js_tests/octane.
  */
 (function (runnerArguments) {
+    /* Keep the wrapper usable directly by the ES3-era js_min host as a
+     * reference run. Octane's harness assumes this ES5 Array method even
+     * before an individual benchmark is entered. */
+    if (Array.prototype && !Array.prototype.indexOf) {
+        Array.prototype.indexOf = function (value) {
+            var index = 0;
+            while (index < this.length) {
+                if (index in this && this[index] === value) return index;
+                index++;
+            }
+            return -1;
+        };
+    }
     var octaneDirectory = "../../js_tests/octane/";
     var suiteFiles = {
         Richards: ["richards.js"],
@@ -98,7 +111,12 @@
     }
     function reportError(name, error) {
         failed = true;
-        reportResult(name, "FAILED: " + error);
+        var location = "";
+        if (error && error.fileName) {
+            location = " at " + error.fileName + ":" +
+                (error.lineNumber || 1) + ":" + (error.columnNumber || 1);
+        }
+        print(name + ": FAILED: " + error + location);
     }
     function reportScore(score) {
         if (!failed && !quick) {

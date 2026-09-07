@@ -12,6 +12,15 @@ assertEqual(text.substr(1, 3), "ell", "String.substr");
 var parts = "/one/two".split("/");
 assertEqual(parts.length, 3, "String.split length");
 assertEqual(parts[2], "two", "String.split values");
+var regexpParts = "one, two;three".split(/[,;]\s*/);
+assertEqual(regexpParts.length, 3, "String.split regexp length");
+assertEqual(regexpParts[1], "two", "String.split regexp values");
+var globalMatches = "one ox".match(/o./g);
+assertEqual(globalMatches.length, 2, "String.match global length");
+assertEqual(globalMatches[1], "ox", "String.match global value");
+var captureMatch = "size=320x240".match(/size=(\d+)x(\d+)/);
+assertEqual(captureMatch[1], "320", "String.match capture");
+assertEqual(captureMatch.index, 0, "String.match index");
 assertEqual("<&".replace(/</g, "&lt;").replace(/&/g, "&amp;"),
             "&amp;lt;&amp;", "regexp String.replace");
 

@@ -156,8 +156,11 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   guest_runner.js demo8_runner.js demo8.js --size 320x240 --fps 20
 ```
 
-The guest `load()` binding is available on the MMVM host and evaluates the
-second file in the same guest global environment. The demo retains its normal
+The guest `load()` binding is available on both supported hosts and evaluates
+the second file in the same guest global environment. Each loaded source has a
+separate `JSContext` execution slot under the shared `JSRuntime`; this permits
+nested evaluation without moving guest objects onto the host heap. Demo8 still
+requires MMVM for its raw native facilities. The demo retains its normal
 resolution, FPS, menu, and rasterizer-selection options.
 
 The covered progression is demo1's bitmap framebuffer UI; demo2's software 3D
@@ -180,6 +183,13 @@ Node-hosted guest should exercise that same tier.
 The in-progress kernel-native interpreter is selected explicitly with
 `guest_runner.js --vm-native program.js`. Its portable dispatch benchmark and
 the current migration boundary are documented in `PERFORMANCE.md`.
+
+`--vm-trace-exceptions` is an opt-in debugger aid. At every guest `throw`, even
+one subsequently caught in guest code, it prints the source location and the
+visible primitive bindings from the authoritative environment or register
+cells. Object values are represented by guest type and heap address so the
+diagnostic does not recursively traverse or retain them. It is disabled by
+default and should not be used for benchmark timings.
 
 Native snapshots are an explicit, experimental startup option and are never
 read or written by default. Generate one into the ignored temporary artifacts

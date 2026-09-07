@@ -21,7 +21,8 @@
                       ARRAY_CONCAT: 40, NUMBER_CONSTRUCTOR: 41,
                       DATE_CONSTRUCTOR: 42, DATE_GET_TIME: 43,
                       FUNCTION_CALL: 44, ARRAY_POP: 45,
-                      ARRAY_CONSTRUCTOR: 46};
+                      ARRAY_CONSTRUCTOR: 46, STRING_SUBSTRING: 47,
+                      STRING_FROM_CHAR_CODE: 48};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;
