@@ -26,6 +26,16 @@ assertEqual(addToThis.call({base: 9}, 4), 13,
             "Function.prototype.call supplies an explicit receiver");
 assertEqual(addToThis.apply({base: 8}, [5]), 13,
             "Function.prototype.apply supplies a receiver and argument array");
+function setThroughBareThis(value) {
+    this.bareReceiverValue = value;
+    return this;
+}
+assertEqual(setThroughBareThis(17) === this, true,
+            "non-strict bare call receives the global object");
+assertEqual(bareReceiverValue, 17,
+            "bare-call global receiver is the active context global");
+assertEqual(setThroughBareThis.call(null, 19) === this, true,
+            "non-strict null receiver becomes the global object");
 assertEqual(addToThis.toString().indexOf("function addToThis") === 0, true,
             "Function.prototype.toString preserves guest source");
 

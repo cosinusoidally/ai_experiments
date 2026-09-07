@@ -124,6 +124,7 @@ score's internal benchmark interval.
 | EarleyBoyer | passing | 138 | 119.65 s | Added `in`, native `instanceof`, `try`/`finally`, script-level `this`, and extensible guest string prototypes. |
 | RegExp | bring-up passing on Node; native stock baseline pending | — | — | Added regexp literals beginning with `=`, `String.match`, regexp `split`, cached host patterns, native substring/fromCharCode, and corrected the single-character replace fast path so semantic escapes cannot be treated as literal characters. Native execution remains dominated by general RegExp semantic transitions. |
 | Splay | quick correctness passing; stock baseline pending | — | 20.65 s quick | Added `Date.now`. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. Exact-capacity Array literals subsequently reduced the guest bump from 269,996,280 to 183,119,272 bytes. |
+| NavierStokes | passing | 283 | 26.05 s | Added ES5.1 non-strict receiver normalization for bare calls and `Function.call`/`apply` with nullish receivers. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers

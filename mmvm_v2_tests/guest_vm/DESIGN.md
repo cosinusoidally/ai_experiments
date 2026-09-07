@@ -149,6 +149,15 @@ the shared kernel IR's signed-int32 division operation; the JS backend emits an
 integer-truncating division expression and the i386 backend composes exchange,
 sign-extension, and signed-division macro-assembler instructions.
 
+All currently compiled guest functions are non-strict. On entry, a null or
+undefined receiver is replaced with the global object owned by the callee's
+`JSContext`, including cross-context calls and calls forwarded through
+`Function.prototype.call` or `apply`. The native interpreter writes that guest
+reference directly into the callee frame; the JavaScript/threaded backend uses
+the same runtime normalization rule. Primitive receiver boxing will be added
+with strict-mode compilation rather than conflating primitives with the global
+object.
+
 The MMVM Node profile also binds `NodeLibc.memmove` as an inline structured-tier
 intrinsic for demo7's already-allocated Buffer spans. The embedder supplies the
 native callback; the compiler contains no address or machine-code constant.

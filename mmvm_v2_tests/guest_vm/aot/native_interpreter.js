@@ -2670,13 +2670,29 @@
                                 }
                             }
                             if (thisSource !== 0) {
-                                store32(thisTarget, load32(thisSource));
+                                var thisSourceTag = load32(thisSource);
+                                var copyThisSource = 0;
+                                if (thisSourceTag !== VALUE_TAG_UNDEFINED) {
+                                    if (thisSourceTag !== VALUE_TAG_NULL) {
+                                        copyThisSource = 1;
+                                    }
+                                }
+                                if (copyThisSource === 1) {
+                                    store32(thisTarget, thisSourceTag);
+                                    store32(thisTarget + VALUE_CELL_LOW,
+                                        load32(thisSource + VALUE_CELL_LOW));
+                                    store32(thisTarget + VALUE_CELL_HIGH,
+                                        load32(thisSource + VALUE_CELL_HIGH));
+                                    store32(thisTarget + VALUE_CELL_AUX,
+                                        load32(thisSource + VALUE_CELL_AUX));
+                                } else thisSource = 0;
+                            }
+                            if (thisSource === 0) {
+                                store32(thisTarget, VALUE_TAG_REFERENCE);
                                 store32(thisTarget + VALUE_CELL_LOW,
-                                    load32(thisSource + VALUE_CELL_LOW));
-                                store32(thisTarget + VALUE_CELL_HIGH,
-                                    load32(thisSource + VALUE_CELL_HIGH));
-                                store32(thisTarget + VALUE_CELL_AUX,
-                                    load32(thisSource + VALUE_CELL_AUX));
+                                    contextGlobal(heapBase, calleeContext));
+                                store32(thisTarget + VALUE_CELL_HIGH, 0);
+                                store32(thisTarget + VALUE_CELL_AUX, 0);
                             }
                             var functionNameSlot = programFunctionNameSlot(
                                 heapBase, calleeProgram);

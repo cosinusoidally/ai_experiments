@@ -193,6 +193,8 @@
         }
         this.runtime.assertOwned(callable);
         if (!callable) throw new TypeError("value is not callable");
+        receiver = this.runtime.normalizeCallReceiver(
+            callable.homeContext || context, receiver);
         if (callable.guestType === "bytecodeFunction") {
             var compiled = this.compile(callable.program);
             if (compiled) {
@@ -211,6 +213,8 @@
         if (!this.runtime.profileOpcodeCounts && callable &&
             callable.threadedCompiler === this &&
             callable.threadedFunction) {
+            receiver = this.runtime.normalizeCallReceiver(
+                callable.homeContext || context, receiver);
             return callable.threadedFunction(this.runtime,
                 callable.homeContext || context, receiver, null,
                 this.runtime.functionClosure(callable),
@@ -219,6 +223,8 @@
         this.runtime.assertOwned(callable);
         if (!callable) throw new TypeError("value is not callable");
         if (callable.guestType === "bytecodeFunction") {
+            receiver = this.runtime.normalizeCallReceiver(
+                callable.homeContext || context, receiver);
             var compiled = this.compile(callable.program);
             if (compiled) {
                 callable.threadedCompiler = this;

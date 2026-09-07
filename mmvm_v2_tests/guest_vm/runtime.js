@@ -313,6 +313,19 @@
         return environment;
     };
 
+    Runtime.prototype.normalizeCallReceiver = function (context, receiver) {
+        /* Strict-mode functions are not compiled yet, so every guest function
+         * currently has ES5.1 non-strict Call semantics. Null and undefined
+         * become the global object belonging to the callee's context. */
+        if (receiver === null || receiver === undefined) {
+            if (!context || !context.globalObject) {
+                throw new Error("call receiver normalization needs a JSContext");
+            }
+            return context.globalObject;
+        }
+        return receiver;
+    };
+
     Runtime.prototype.initializeFrameRegisters = function (program, registers,
                                                             receiver, args, callable) {
         var constantRegisters = program.constantRegisters || [];

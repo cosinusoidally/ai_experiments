@@ -5,6 +5,7 @@
     function makeFrame(program, runtime, context, receiver, args, closure, callable,
                        returnRegister, caller) {
         args = args || [];
+        receiver = runtime.normalizeCallReceiver(context, receiver);
         var registers = [];
         runtime.initializeFrameRegisters(program, registers, receiver, args, callable);
         var environment = runtime.makeCallEnvironment(
@@ -782,6 +783,10 @@
                     }
                     var destination = code[pc + 1];
                     frame.pc = pc + 5;
+                    receiver = this.runtime.normalizeCallReceiver(
+                        callableValue && callableValue.homeContext ?
+                            callableValue.homeContext : frame.context,
+                        receiver);
                     if (callableValue && callableValue.guestType === "bytecodeFunction") {
                         var threaded = budget === Infinity &&
                             this.runtime.threadedCompiler &&
