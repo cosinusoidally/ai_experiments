@@ -123,19 +123,28 @@ score's internal benchmark interval.
 | RayTrace | passing | 104 | 37.66 s | Passed with the existing ES5.1 and native-interpreter facilities. |
 | EarleyBoyer | passing | 138 | 119.65 s | Added `in`, native `instanceof`, `try`/`finally`, script-level `this`, and extensible guest string prototypes. |
 | RegExp | bring-up passing on Node; native stock baseline pending | — | — | Added regexp literals beginning with `=`, `String.match`, regexp `split`, cached host patterns, native substring/fromCharCode, and corrected the single-character replace fast path so semantic escapes cannot be treated as literal characters. Native execution remains dominated by general RegExp semantic transitions. |
-| Splay | quick correctness passing; stock baseline pending | — | 20.07 s quick | Added `Date.now`. The quick run reaches a 269,996,280-byte guest bump with no collection after the default maximum was raised to 512 MiB. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. |
+| Splay | quick correctness passing; stock baseline pending | — | 20.65 s quick | Added `Date.now`. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. Exact-capacity Array literals subsequently reduced the guest bump from 269,996,280 to 183,119,272 bytes. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers
 for other systems.
 
-For memory context, the quick Splay run peaks at 442,860 KiB RSS in the guest
-VM. Node v24.14.1 running the same unmodified suite and quick wrapper peaks at
-134,792 KiB RSS and takes 0.43 s. The guest's current representation stores
+For memory context, the initial corrected quick Splay run peaked at 442,860
+KiB RSS in the guest VM. Emitting an initial-capacity operand for `MAKE_ARRAY`
+reduced that to 358,156 KiB by preventing literal construction from allocating
+and abandoning multiple successively larger element vectors. Node v24.14.1
+running the same unmodified suite and quick wrapper peaks at 134,792 KiB RSS
+and takes 0.43 s. The guest's current representation stores
 each ordinary property in a separate 48-byte linked heap record and each value
 cell in 16 bytes. Splay creates roughly half a million recursively nested
 payload objects, so compact per-object property storage and denser value cells
 are high-value general representation work, independent of Octane.
+
+The measured preallocation heap delta is 86,877,008 bytes: value-vector records
+fell from 776,068 records / 134,766,064 bytes to 258,951 records / 47,888,968
+bytes. The bytecode verifier bounds the capacity operand, and both the native
+and JavaScript interpreter backends implement the same instruction. Dynamic
+arrays retain their ordinary growth behavior.
 
 Native heap-pressure profiling reports bump, current logical limit, reserved
 maximum, next pressure point, growth count, and collection count. Once a full

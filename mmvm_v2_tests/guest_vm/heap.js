@@ -236,6 +236,28 @@
                " records(type=count/bytes): " + parts.join(",");
     };
 
+    Heap.prototype.recordStatistics = function () {
+        var counts = [];
+        var bytes = [];
+        var totalRecords = 0;
+        var totalBytes = 0;
+        var address = 64;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                throw new Error("corrupt guest heap record at " + address);
+            }
+            counts[type] = (counts[type] || 0) + 1;
+            bytes[type] = (bytes[type] || 0) + size;
+            totalRecords++;
+            totalBytes += size;
+            address += size;
+        }
+        return {counts: counts, bytes: bytes, records: totalRecords,
+                totalBytes: totalBytes};
+    };
+
     Heap.prototype.freeRecord = function (address, source) {
         address = Number(address);
         if (!address || address !== Math.floor(address) || address < 64 ||

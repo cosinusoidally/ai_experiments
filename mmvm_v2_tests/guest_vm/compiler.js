@@ -619,7 +619,7 @@
         }
         if (expression.type === "ArrayExpression") {
             var arrayRegister = this.allocate();
-            this.emit(op.MAKE_ARRAY, arrayRegister);
+            this.emit(op.MAKE_ARRAY, arrayRegister, expression.elements.length);
             var elementIndex = 0;
             while (elementIndex < expression.elements.length) {
                 var elementKey = this.emitConstant(elementIndex);

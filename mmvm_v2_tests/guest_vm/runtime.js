@@ -28,6 +28,8 @@
         return Object.prototype.hasOwnProperty.call(object, key);
     }
 
+    var MAX_ARRAY_CAPACITY = 67108860;
+
     function Runtime(options) {
         options = options || {};
         this.contexts = [];
@@ -188,11 +190,17 @@
                 prototype ? prototype.heapAddress : 0), "object"));
     };
 
-    Runtime.prototype.makeArray = function () {
+    Runtime.prototype.makeArray = function (capacity) {
+        capacity = capacity === undefined ? 4 : Number(capacity);
+        if (capacity < 0 || capacity > MAX_ARRAY_CAPACITY ||
+            capacity !== Math.floor(capacity)) {
+            throw new RangeError("invalid initial Array capacity");
+        }
         this.ensureLinearHeap();
         return this.trackObject(this.makeHeapHandle(
             this.heapRecords.allocateArray(
-                this.arrayPrototype ? this.arrayPrototype.heapAddress : 0, 4),
+                this.arrayPrototype ? this.arrayPrototype.heapAddress : 0,
+                capacity),
             "array"));
     };
 
@@ -2553,6 +2561,29 @@
             result.homeContext = this.heapRecords.functionHomeContext(address);
         }
         return result;
+    };
+
+    Runtime.prototype.inspectHeapStatistics = function () {
+        this.ensureLinearHeap();
+        var statistics = this.linearHeap.recordStatistics();
+        var names = ["free", "object", "array", "native-function",
+            "bytecode-function", "environment", "property", "string",
+            "number", "regexp", "buffer-view", "buffer-backing",
+            "root-slot", "value-vector", "frame", "program", "bytecode",
+            "context", "handler", "engine-state", "platform-services"];
+        var types = {};
+        var type = 0;
+        while (type < statistics.counts.length) {
+            if (statistics.counts[type]) {
+                types[names[type] || String(type)] = {
+                    count: statistics.counts[type],
+                    bytes: statistics.bytes[type]
+                };
+            }
+            type++;
+        }
+        return {records: statistics.records, bytes: statistics.totalBytes,
+                types: types};
     };
 
     Runtime.prototype.inspectExecution = function (execution) {

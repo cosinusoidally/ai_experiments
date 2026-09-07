@@ -823,7 +823,9 @@
             lines.push(rr(1) + "=hc.construct(" + rr(2) + "," +
                        argumentSource(program.constants[c[pc + 3]]) + ",context);");
         } else if (opcode === op.MAKE_OBJECT) lines.push(rr(1) + "=runtime.makeObject();");
-        else if (opcode === op.MAKE_ARRAY) lines.push(rr(1) + "=runtime.makeArray();");
+        else if (opcode === op.MAKE_ARRAY) {
+            lines.push(rr(1) + "=runtime.makeArray(" + c[pc + 2] + ");");
+        }
         else if (opcode === op.MAKE_REGEXP) {
             lines.push(rr(1) + "=runtime.makeRegExp(" + constant(2) + "," + constant(3) + ");");
         } else if (opcode === op.RETURN) lines.push("return " + rr(1) + ";");
@@ -2128,7 +2130,8 @@
         if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
             opcode === op.SET_GLOBAL || opcode === op.MOVE || opcode === op.NOT ||
             opcode === op.NEGATE || opcode === op.POSITIVE ||
-            opcode === op.MAKE_FUNCTION || opcode === op.BIT_NOT ||
+            opcode === op.MAKE_FUNCTION || opcode === op.MAKE_ARRAY ||
+            opcode === op.BIT_NOT ||
             opcode === op.TYPEOF || opcode === op.TYPEOF_GLOBAL ||
             opcode === op.GET_KEYS ||
             opcode === op.PUSH_CATCH) return 3;
@@ -2141,7 +2144,7 @@
             (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
             opcode === op.MAKE_REGEXP || opcode === op.CONSTRUCT) return 4;
         if (opcode === op.JUMP || opcode === op.RETURN ||
-            opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
+            opcode === op.MAKE_OBJECT ||
             opcode === op.THROW || opcode === op.GET_THIS) return 2;
         if (opcode === op.POP_CATCH) return 1;
         if (opcode === op.JUMP_IF_FALSE) return 3;

@@ -567,7 +567,12 @@
                         nativeFrame.nativeHeapCurrent = true;
                         continue;
                     }
-                    this.runtime.nativeInterpreter.prepareSemanticFallback();
+                    if (this.runtime.nativeInterpreter.
+                            prepareSemanticFallback()) {
+                        this.runtime.gcPending = true;
+                        this.runtime.gcSafePoint();
+                        nativeFrame.nativeHeapCurrent = true;
+                    }
                     if (budget === 0) {
                         this.status = "budget";
                         return this.result("budget", used);
@@ -897,11 +902,12 @@
                     }
                     frame.pc = pc + 2;
                 } else if (opcode === op.MAKE_ARRAY) {
-                    registers[code[pc + 1]] = this.runtime.makeArray();
+                    registers[code[pc + 1]] = this.runtime.makeArray(
+                        code[pc + 2]);
                     if (!this.runtime.nativeInterpreter) {
                         this.runtime.gcSafePoint();
                     }
-                    frame.pc = pc + 2;
+                    frame.pc = pc + 3;
                 } else if (opcode === op.MAKE_REGEXP) {
                     registers[code[pc + 1]] = this.runtime.makeRegExp(
                         constants[code[pc + 2]], constants[code[pc + 3]]);

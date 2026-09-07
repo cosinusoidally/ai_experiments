@@ -161,7 +161,8 @@
                 });
                 var allocationContext = integratedVM.jsRuntime.createContext();
                 var nativeArray = allocationContext.runProgram({
-                    code: [bytecode.MAKE_ARRAY, 0, bytecode.RETURN, 0],
+                    code: [bytecode.MAKE_ARRAY, 0, 0,
+                           bytecode.RETURN, 0],
                     constants: [], registerCount: 1
                 });
                 if (!nativeObject || nativeObject.guestType !== "object" ||

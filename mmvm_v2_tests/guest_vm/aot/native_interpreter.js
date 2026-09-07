@@ -196,7 +196,6 @@
         var OBJECT_RECORD_BYTES = 32;
         var ARRAY_RECORD_BYTES = 32;
         var INITIAL_ARRAY_CAPACITY = 4;
-        var INITIAL_VECTOR_RECORD_BYTES = 88;
         var HANDLER_RECORD_BYTES = 32;
 
         var EXIT_BUDGET = 1;
@@ -6619,9 +6618,14 @@
                 var makeArrayTargetIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
+                var makeArrayCapacity = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var makeArrayVectorBytes = VECTOR_CELLS +
+                    makeArrayCapacity * VALUE_CELL_BYTES;
                 var makeVectorAddress = engineHeapBump(heapBase, state);
                 var makeArrayAddress = makeVectorAddress +
-                                       INITIAL_VECTOR_RECORD_BYTES;
+                                       makeArrayVectorBytes;
                 var makeArrayLimit = engineHeapLimit(heapBase, state);
                 if (makeArrayAddress + ARRAY_RECORD_BYTES > makeArrayLimit) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
@@ -6635,12 +6639,12 @@
                 setRecordType(heapBase, makeVectorAddress,
                               HEAP_TYPE_VALUE_VECTOR);
                 setRecordSize(heapBase, makeVectorAddress,
-                              INITIAL_VECTOR_RECORD_BYTES);
+                              makeArrayVectorBytes);
                 setRecordMark(heapBase, makeVectorAddress, 0);
                 setRecordFlags(heapBase, makeVectorAddress, 0);
                 setVectorLength(heapBase, makeVectorAddress, 0);
                 setVectorCapacity(heapBase, makeVectorAddress,
-                                  INITIAL_ARRAY_CAPACITY);
+                                  makeArrayCapacity);
                 setRecordType(heapBase, makeArrayAddress, HEAP_TYPE_ARRAY);
                 setRecordSize(heapBase, makeArrayAddress, ARRAY_RECORD_BYTES);
                 setRecordMark(heapBase, makeArrayAddress, 0);
@@ -6657,7 +6661,7 @@
                 store32(makeArrayTarget + VALUE_CELL_AUX, 0);
                 setEngineHeapBump(heapBase, state,
                                   makeArrayAddress + ARRAY_RECORD_BYTES);
-                pc = pc + TWO_WORD_INSTRUCTION;
+                pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MAKE_REGEXP) {
                 var makeRegexpTargetIndex = load32(
                     heapBase + bytecodeWords +
@@ -8510,6 +8514,20 @@
                 console.log(timingLine);
             }
         }
+        if (this.nativeResult.fn) {
+            /* The installed native entry point and its mapping are the only
+             * executable state needed after compilation. Keeping the shared
+             * IR, generated JS reference source, and assembler byte array
+             * alive makes large guest heaps compete with bootstrap compiler
+             * products that the MMVM backend can never execute again. The
+             * snapshot writer has already consumed the bytes above. Node's
+             * backend has no native fn and deliberately retains this.js. */
+            this.ir = null;
+            this.js = null;
+            this.nativeResult.ir = null;
+            this.nativeResult.bytes = null;
+            this.nativeResult.assembly = "";
+        }
     }
 
     NativeInterpreter.Exit = Exit;
@@ -8631,7 +8649,13 @@
     };
 
     NativeInterpreter.prototype.prepareSemanticFallback = function () {
-        if (!this.allocationRegion) return;
+        if (!this.allocationRegion) {
+            return this.runtime.linearHeap.bump +
+                       MIN_NATIVE_ALLOCATION_REGION_BYTES >
+                       this.runtime.linearHeap.allocationLimit &&
+                   this.runtime.linearHeap.largestFreeBlockSize() <
+                       MIN_NATIVE_ALLOCATION_REGION_BYTES;
+        }
         var heap = this.runtime.linearHeap;
         /* Most semantic operations allocate nothing and should not disturb
          * the native bump region. If the ordinary allocator has neither tail
@@ -8641,9 +8665,13 @@
         if (heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES <=
                 heap.allocationLimit ||
             heap.largestFreeBlockSize() >= MIN_NATIVE_ALLOCATION_REGION_BYTES) {
-            return;
+            return false;
         }
         this.releaseAllocationRegionForCollection();
+        return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
+                   heap.allocationLimit &&
+               heap.largestFreeBlockSize() <
+                   MIN_NATIVE_ALLOCATION_REGION_BYTES;
     };
 
     NativeInterpreter.prototype.tryRefillAllocationRegion = function () {

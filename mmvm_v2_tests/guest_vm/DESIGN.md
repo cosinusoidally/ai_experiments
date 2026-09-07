@@ -155,6 +155,14 @@ native callback; the compiler contains no address or machine-code constant.
 A Node-hosted guest has no native Buffer pointer and stays on the ordinary
 Buffer-copy path, so it never invokes this intrinsic.
 
+After the i386 interpreter has been installed (and an optional snapshot has
+been written), the native runtime discards the bootstrap compiler's IR, the
+generated JavaScript reference body, and the macro assembler byte array. The
+executable mapping and its callable entry point are sufficient at run time.
+This keeps compiler products from competing with the independent guest heap.
+The Node backend retains the generated JavaScript function because that is its
+low-level execution backend.
+
 ## Module boundaries and load order
 
 | Module | Responsibility |
@@ -466,6 +474,12 @@ Per-object property metadata and structured inline caches retain only guest
 record addresses and versions, never property values. Constant-key inline
 caches intern the key once per compiled site and pass its address to the named
 property-record lookup.
+`Runtime.inspectHeapStatistics()` explicitly walks record headers and returns
+count/byte totals by authoritative record type. This is read-only VM
+introspection used to distinguish guest live-data costs from compiler and host
+process memory; it is not part of allocation policy. It is intentionally not
+run by ordinary profile reporting because a host-side walk over millions of
+records would materially distort a benchmark.
 The structured tier also keeps a bounded polymorphic property-cell cache for a
 constant-key site. Each entry contains only a heap address, allocation identity,
 property version, and property-cell address. The allocation identity prevents a

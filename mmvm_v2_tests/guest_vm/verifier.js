@@ -2,6 +2,8 @@
     var op = root.GuestVMBytecode;
     if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
 
+    var MAX_ARRAY_CAPACITY = 67108860;
+
     function requireRegister(program, value, pc) {
         if (value < 0 || value >= program.registerCount || value !== Math.floor(value)) {
             throw new Error("invalid register " + value + " at bytecode " + pc);
@@ -21,6 +23,7 @@
                 opcode === op.SET_GLOBAL || opcode === op.MOVE ||
                 opcode === op.NOT || opcode === op.NEGATE ||
                 opcode === op.POSITIVE || opcode === op.MAKE_FUNCTION ||
+                opcode === op.MAKE_ARRAY ||
                 opcode === op.BIT_NOT || opcode === op.TYPEOF ||
                 opcode === op.TYPEOF_GLOBAL ||
                 opcode === op.GET_KEYS) width = 3;
@@ -34,7 +37,7 @@
                      (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                      opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
             else if (opcode === op.JUMP || opcode === op.RETURN ||
-                     opcode === op.MAKE_OBJECT || opcode === op.MAKE_ARRAY ||
+                     opcode === op.MAKE_OBJECT ||
                      opcode === op.THROW || opcode === op.GET_THIS) width = 2;
             else if (opcode === op.PUSH_CATCH) width = 3;
             else if (opcode === op.POP_CATCH) width = 1;
@@ -121,8 +124,14 @@
                     code[pc + 3] < 0 || code[pc + 3] >= program.constants.length) {
                     throw new Error("invalid regexp constant at bytecode " + pc);
                 }
+            } else if (opcode === op.MAKE_ARRAY) {
+                requireRegister(program, code[pc + 1], pc);
+                if (code[pc + 2] < 0 || code[pc + 2] > MAX_ARRAY_CAPACITY ||
+                    code[pc + 2] !== Math.floor(code[pc + 2])) {
+                    throw new Error("invalid initial Array capacity at bytecode " + pc);
+                }
             } else if (opcode === op.RETURN || opcode === op.MAKE_OBJECT ||
-                       opcode === op.MAKE_ARRAY || opcode === op.THROW) {
+                       opcode === op.THROW) {
                 requireRegister(program, code[pc + 1], pc);
             }
             pc += width;
