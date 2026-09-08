@@ -77,6 +77,35 @@ conversion in JavaScript. Raw-memory code must not silently reuse the language
 coercion because large rasterizer edge coefficients depend on the native
 boundary behaviour.
 
+### Function graphs and accessor inlining
+
+The kernel is a statically linked graph of named functions, not one monolithic
+JavaScript function. `KernelCompiler.compileGraph(entry, dependencies)` parses
+and validates every member with the same kernel rules. A call whose target is a
+member of that graph becomes a typed `call_kernel_i32` IR node. Dynamic calls
+remain forbidden. The JavaScript backend emits ordinary local function calls;
+the i386 backend emits relative calls through the named macro-assembler
+`call(label)` operation. This supports transitive and recursive helper calls
+without introducing host callbacks, native pointers in the heap, or raw
+instruction bytes in semantic source.
+
+Out-of-line calls are for logical operations: allocation, conversion, builtin
+semantics, services, and substantial opcode families. They are not the
+implementation of record access. Record fields, value-cell fields, bytecode
+words, vector elements, and frame registers are expressed as named typed
+accessors in kernel source. The middle end validates the record/index contract
+and lowers an accessor directly to address arithmetic and a load or store; the
+backend therefore inlines it without a native call. Raw `heapBase + record +
+OFFSET` expressions are confined to the compiler's accessor lowering and are
+not duplicated through interpreter semantics.
+
+`guest_vm/benchmarks/kernel_call_benchmark.js` compares a tight inline integer
+loop with the same loop calling a one-operation kernel helper. On the current
+development machine, 50 million native helper calls changed 174 ms to 229 ms:
+about 1.1 ns per call. This is small enough for substantial helpers but large
+enough to justify compiler-inlined field access in dispatch hot paths. The
+benchmark is diagnostic rather than a fixed performance assertion.
+
 ## Optional native snapshots
 
 Snapshot loading is deliberately opt-in. The command runner accepts

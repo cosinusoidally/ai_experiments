@@ -137,6 +137,12 @@
         this.emitByte(displacement);
     };
 
+    Assembler.prototype.callLabel = function (name) {
+        if (this.macros) this.macros.push("call(" + name + ")");
+        this.emitByte(0xe8);
+        this.relativeFixup(name);
+    };
+
     Assembler.prototype.popEcx = function () {
         if (this.macros) this.macros.push("pop_ecx()"); this.emitByte(0x59); this.stackWords--;
     };

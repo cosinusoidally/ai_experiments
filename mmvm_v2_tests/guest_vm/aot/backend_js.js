@@ -4,6 +4,7 @@
     function JSBackend() {}
 
     JSBackend.prototype.compile = function (ir) {
+        if (ir.kernelGraph) return compileGraph(ir);
         if (ir.controlFlow) return compileControlFlow(ir);
         var parameters = ir.parameters.slice(0);
         var body = "";
@@ -25,13 +26,41 @@
         return {fn: Function(source)(), source: source, ir: ir, backend: "js"};
     };
 
-    function compileControlFlow(ir) {
+    function compileGraph(graph) {
+        var source = "return (function(){";
+        var index = 0;
+        while (index < graph.functions.length) {
+            source += controlFlowFunctionSource(graph.functions[index++]);
+        }
+        source += "return {entry:" + graph.entry + ",functions:{";
+        index = 0;
+        while (index < graph.functions.length) {
+            if (index) source += ",";
+            source += graph.functions[index].name + ":" +
+                      graph.functions[index].name;
+            index++;
+        }
+        source += "}};}());";
+        var compiled = Function(source)();
+        return {fn: compiled.entry, functions: compiled.functions,
+                source: source, ir: graph, backend: "js"};
+    }
+
+    function controlFlowFunctionSource(ir) {
+        if (!ir.controlFlow) {
+            throw new TypeError("kernel graph members require control-flow IR");
+        }
         var parameters = ir.parameters.slice(0);
         var body = "";
         if (ir.locals.length) body += "var " + ir.locals.join(",") + ";";
         body += emitStatements(ir.body, parameters, ir.locals);
-        var source = "return function(memory," + parameters.join(",") + "){" +
-                     body + "};";
+        return "function " + ir.name + "(memory" +
+               (parameters.length ? "," + parameters.join(",") : "") +
+               "){" + body + "}";
+    }
+
+    function compileControlFlow(ir) {
+        var source = "return " + controlFlowFunctionSource(ir) + ";";
         return {fn: Function(source)(), source: source, ir: ir, backend: "js"};
     }
 
@@ -104,6 +133,17 @@
 
     function emitControlExpression(node, parameters, locals) {
         if (node.op === "local_i32") return "(" + locals[node.index] + "|0)";
+        if (node.op === "call_kernel_i32") {
+            var kernelArguments = [];
+            var kernelArgumentIndex = 0;
+            while (kernelArgumentIndex < node.arguments.length) {
+                kernelArguments.push(emitControlExpression(
+                    node.arguments[kernelArgumentIndex++], parameters, locals));
+            }
+            return "(" + node.name + "(memory" +
+                (kernelArguments.length ? "," + kernelArguments.join(",") : "") +
+                ")|0)";
+        }
         if (node.op === "call_native_i32") {
             var nativeArguments = [];
             var nativeArgumentIndex = 0;

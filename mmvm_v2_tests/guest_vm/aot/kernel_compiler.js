@@ -8,6 +8,62 @@
 
     function KernelCompiler() {}
 
+    KernelCompiler.prototype.compileGraph = function (entry, dependencies,
+                                                       options) {
+        dependencies = dependencies || {};
+        options = options || {};
+        var functions = [];
+        var signatures = {};
+        function addFunction(name, fn) {
+            if (typeof fn !== "function") {
+                throw new TypeError("kernel graph member " + name +
+                                    " is not a function");
+            }
+            var actualName = fn.name || name;
+            if (actualName !== name) {
+                throw new SyntaxError("kernel graph key " + name +
+                                      " does not match function " + actualName);
+            }
+            if (signatures[name]) {
+                throw new SyntaxError("duplicate kernel function " + name);
+            }
+            signatures[name] = {name: name, arity: fn.length};
+            functions.push({name: name, fn: fn});
+        }
+        if (!entry || typeof entry !== "function" || !entry.name) {
+            throw new TypeError("kernel graph entry must be a named function");
+        }
+        addFunction(entry.name, entry);
+        var names = [];
+        var name;
+        for (name in dependencies) {
+            if (Object.prototype.hasOwnProperty.call(dependencies, name)) {
+                names.push(name);
+            }
+        }
+        names.sort();
+        var nameIndex = 0;
+        while (nameIndex < names.length) {
+            name = names[nameIndex++];
+            addFunction(name, dependencies[name]);
+        }
+        var compiled = [];
+        var index = 0;
+        while (index < functions.length) {
+            var memberOptions = {};
+            var optionName;
+            for (optionName in options) {
+                if (Object.prototype.hasOwnProperty.call(options, optionName)) {
+                    memberOptions[optionName] = options[optionName];
+                }
+            }
+            memberOptions.kernelFunctions = signatures;
+            compiled.push(this.compile(functions[index++].fn, memberOptions));
+        }
+        return {kernelGraph: true, entry: entry.name, functions: compiled,
+                signatures: signatures};
+    };
+
     var READ_FIELD_ACCESSORS = {
         recordType: "RECORD_TYPE",
         recordSize: "RECORD_SIZE",
@@ -167,7 +223,7 @@
         if (!fn || fn.type !== "FunctionExpression") {
             throw new SyntaxError("kernel source must contain one function");
         }
-        if (needsControlFlow(fn.body.body)) {
+        if (needsControlFlow(fn.body.body) || options.kernelFunctions) {
             return compileControlFlow(fn, source, options, timings);
         }
         var locals = {};
@@ -235,6 +291,8 @@
         var collectStarted = timings ? new Date().getTime() : 0;
         collectLocals(fn.body, symbols, localNames,
                       options.constantOverrides || {});
+        symbols.$kernelFunctions = options.kernelFunctions || null;
+        symbols.$kernelFunctionName = fn.name || "kernel";
         if (timings) timings.collect = new Date().getTime() - collectStarted;
         var lowerStarted = timings ? new Date().getTime() : 0;
         var body = lowerStatements(fn.body.body, symbols);
@@ -542,6 +600,23 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier") {
+            var kernelFunctions = symbols.$kernelFunctions;
+            var kernelFunction = kernelFunctions &&
+                kernelFunctions[node.callee.name];
+            if (kernelFunction) {
+                if (node.arguments.length !== kernelFunction.arity) {
+                    throw new SyntaxError("kernel call " + node.callee.name +
+                        " expects " + kernelFunction.arity + " argument(s)");
+                }
+                var kernelArguments = [];
+                var kernelArgumentIndex = 0;
+                while (kernelArgumentIndex < node.arguments.length) {
+                    kernelArguments.push(lowerKernelExpression(
+                        node.arguments[kernelArgumentIndex++], symbols));
+                }
+                return {op: "call_kernel_i32", name: node.callee.name,
+                        arguments: kernelArguments, type: "i32"};
+            }
             if (node.callee.name === "callNativeI32" &&
                 node.arguments.length >= 1 && node.arguments.length <= 9) {
                 var nativeArguments = [];

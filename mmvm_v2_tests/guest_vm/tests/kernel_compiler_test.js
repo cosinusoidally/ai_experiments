@@ -324,6 +324,44 @@
                 dispatchHeap.destroy();
                 dispatchX86.destroy();
             }
+            function graphEntry(base, address, value) {
+                return graphMiddle(base, address, value) + 1;
+            }
+            function graphMiddle(base, address, value) {
+                return graphLeaf(base, address, value * 3);
+            }
+            function graphLeaf(base, address, value) {
+                store32(base + address, value);
+                return value;
+            }
+            var graphIR = compiler.compileGraph(graphEntry, {
+                graphMiddle: graphMiddle,
+                graphLeaf: graphLeaf
+            });
+            var graphJS = new JSBackend().compile(graphIR);
+            var graphX86 = new X86Backend().compile(graphIR);
+            var graphHeap = new Heap({heapBytes: 4096});
+            try {
+                if (graphJS.fn(graphHeap.memory, 0, 64, 7) !== 22 ||
+                    graphHeap.memory.readU32(64) !== 21) {
+                    throw new Error("JavaScript kernel function graph mismatch");
+                }
+                graphHeap.memory.writeU32(64, 0);
+                if (graphX86.fn &&
+                    (graphX86.fn(graphHeap.memory.nativeAddress(0), 64, 9) !== 28 ||
+                     graphHeap.memory.readU32(64) !== 27)) {
+                    throw new Error("i386 kernel function graph mismatch");
+                }
+                if (graphX86.assembly.indexOf(
+                        "call(kernel_function_graphMiddle)") < 0 ||
+                    graphX86.assembly.indexOf(
+                        "call(kernel_function_graphLeaf)") < 0) {
+                    throw new Error("kernel graph calls bypassed macro assembly");
+                }
+            } finally {
+                graphHeap.destroy();
+                graphX86.destroy();
+            }
             return "shared kernel IR passed on JS" +
                    (x86Result.fn ? " and native i386" :
                     "; i386 macro output validated");

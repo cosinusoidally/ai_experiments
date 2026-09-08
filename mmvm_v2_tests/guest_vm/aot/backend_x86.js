@@ -18,6 +18,7 @@
     }
 
     X86Backend.prototype.compile = function (ir) {
+        if (ir.kernelGraph) return compileGraph(this, ir);
         if (ir.controlFlow) return compileControlFlow(this, ir);
         var assembler = new Assembler(this.captureAssembly);
         var instructionIndex = 0;
@@ -72,6 +73,87 @@
         };
         return result;
     };
+
+    function emitControlFlowFunction(assembler, ir, functionIndex) {
+        var prefix = "kernel_function_" + ir.name;
+        var state = {nextLabel: (functionIndex + 1) * 1000000,
+                     returnLabel: prefix + "_return",
+                     registerMap: allocateKernelRegisters(ir)};
+        assembler.label(prefix);
+        assembler.pushEbp();
+        assembler.movEbpEsp();
+        if (ir.locals.length) assembler.subEspImmediate(ir.locals.length * 4);
+        saveKernelRegisters(assembler);
+        initializeKernelArgumentRegisters(assembler, state.registerMap);
+        emitStatements(assembler, ir.body, state);
+        assembler.movEaxImmediate(0);
+        assembler.label(state.returnLabel);
+        restoreKernelRegisters(assembler);
+        assembler.leave();
+        assembler.ret();
+        return state.registerMap;
+    }
+
+    function compileGraph(backend, graph) {
+        var assembler = new Assembler(backend.captureAssembly);
+        var registerAllocations = {};
+        var ordered = [];
+        var index = 0;
+        while (index < graph.functions.length) {
+            if (graph.functions[index].name === graph.entry) {
+                ordered.push(graph.functions[index]);
+                break;
+            }
+            index++;
+        }
+        index = 0;
+        while (index < graph.functions.length) {
+            if (graph.functions[index].name !== graph.entry) {
+                ordered.push(graph.functions[index]);
+            }
+            index++;
+        }
+        index = 0;
+        while (index < ordered.length) {
+            var ir = ordered[index];
+            var registerMap = emitControlFlowFunction(assembler, ir, index);
+            registerAllocations[ir.name] = describeRegisterAllocation(
+                ir, registerMap);
+            index++;
+        }
+        assembler.resolveLabels();
+        var result = {fn: null, pointer: 0, length: assembler.bytes.length,
+                      bytes: assembler.bytes, assembly: assembler.dump(),
+                      ir: graph, backend: "i386",
+                      registerAllocation: registerAllocations,
+                      destroy: function () {}};
+        if (!backend.ffi.isMMVM) return result;
+        var allocationLength = Math.max(4096,
+            Math.ceil(assembler.bytes.length / 4096) * 4096);
+        var pointer = backend.ffi.call(backend.mmap,
+            [0, allocationLength, 7, 0x22, -1, 0]);
+        if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
+        copyBytesToNative(pointer, assembler.bytes);
+        var ffi = backend.ffi;
+        var munmap = backend.munmap;
+        result.pointer = pointer;
+        result.fn = function () {
+            var args = [];
+            var argumentIndex = 0;
+            while (argumentIndex < arguments.length && argumentIndex < 8) {
+                args[argumentIndex] = Number(arguments[argumentIndex]) | 0;
+                argumentIndex++;
+            }
+            return ffi.call(pointer, args) | 0;
+        };
+        result.destroy = function () {
+            if (!result.pointer) return;
+            ffi.call(munmap, [result.pointer, allocationLength]);
+            result.pointer = 0;
+            result.fn = null;
+        };
+        return result;
+    }
 
     function compileControlFlow(backend, ir) {
         var timings = backend.timings;
@@ -770,6 +852,17 @@
 
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
+        else if (node.op === "call_kernel_i32") {
+            var kernelArgumentIndex = node.arguments.length;
+            while (kernelArgumentIndex > 0) {
+                emitControlExpression(assembler,
+                    node.arguments[--kernelArgumentIndex], state);
+                assembler.pushEax();
+            }
+            assembler.callLabel("kernel_function_" + node.name);
+            kernelArgumentIndex = node.arguments.length;
+            while (kernelArgumentIndex-- > 0) assembler.popEcx();
+        }
         else if (node.op === "call_native_i32") {
             /* Keep the target below the cdecl arguments. Every operand can
              * then use the ordinary expression emitter without naming a
