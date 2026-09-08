@@ -5,11 +5,14 @@
     }
 
     function Parser(source, filename, options) {
+        /* Token.raw is not part of the AST and the parser never consumes it.
+         * Raw function source is obtained once from token offsets below. */
         this.tokenizer = new Tokenizer(source, filename,
-            !options || options.captureRaw !== false);
+            !!options && options.captureRaw === true);
         this.allowIn = true;
         this.finallySerial = 0;
         this.current = this.tokenizer.next(true);
+        this.spareToken = {};
     }
 
     Parser.prototype.error = function (message) {
@@ -18,7 +21,8 @@
 
     Parser.prototype.advance = function (allowRegexp) {
         var previous = this.current;
-        this.current = this.tokenizer.next(!!allowRegexp);
+        this.current = this.tokenizer.next(!!allowRegexp, this.spareToken);
+        this.spareToken = previous;
         return previous;
     };
 
@@ -49,11 +53,12 @@
     };
 
     Parser.prototype.parseStatement = function () {
-        var start = this.current;
+        var startLine = this.current.line;
+        var startColumn = this.current.column;
         var statement = this.parseStatementWithoutLocation();
         if (!statement.location) {
             statement.location = {filename: this.tokenizer.filename,
-                                  line: start.line, column: start.column + 1};
+                                  line: startLine, column: startColumn + 1};
         }
         return statement;
     };
@@ -278,7 +283,9 @@
     };
 
     Parser.prototype.parseFunction = function (declaration) {
-        var start = this.current;
+        var startOffset = this.current.start;
+        var startLine = this.current.line;
+        var startColumn = this.current.column;
         this.advance(false);
         var name = null;
         if (this.current.kind === "identifier") name = this.advance(false).value;
@@ -296,9 +303,9 @@
         var body = this.parseBlock();
         return {type: declaration ? "FunctionDeclaration" : "FunctionExpression",
                 name: name, parameters: parameters, body: body,
-                source: this.tokenizer.source.substring(start.start, body.sourceEnd),
+                source: this.tokenizer.source.substring(startOffset, body.sourceEnd),
                 location: {filename: this.tokenizer.filename,
-                           line: start.line, column: start.column + 1}};
+                           line: startLine, column: startColumn + 1}};
     };
 
     Parser.prototype.parseExpression = function () {
@@ -337,52 +344,48 @@
                 consequent: consequent, alternate: this.parseAssignment()};
     };
 
-    Parser.prototype.parseBinary = function (next, operators) {
-        var left = next.call(this);
-        while (operators[this.current.value] &&
-               (this.current.kind === "punctuator" ||
-                this.current.kind === "keyword")) {
+    Parser.prototype.binaryPrecedence = function () {
+        var value = this.current.value;
+        var kind = this.current.kind;
+        if (kind === "keyword") {
+            if (value === "instanceof") return 7;
+            if (value === "in" && this.allowIn) return 7;
+            return 0;
+        }
+        if (kind !== "punctuator") return 0;
+        if (value === "||") return 1;
+        if (value === "&&") return 2;
+        if (value === "|") return 3;
+        if (value === "^") return 4;
+        if (value === "&") return 5;
+        if (value === "==" || value === "!=" || value === "===" ||
+            value === "!==") return 6;
+        if (value === "<" || value === "<=" || value === ">" ||
+            value === ">=") return 7;
+        if (value === "<<" || value === ">>" || value === ">>>") return 8;
+        if (value === "+" || value === "-") return 9;
+        if (value === "*" || value === "/" || value === "%") return 10;
+        return 0;
+    };
+
+    /* Precedence climbing avoids sending every primary expression through ten
+     * mutually recursive functions.  Passing precedence + 1 on the right
+     * preserves ECMAScript's left associativity for all binary operators. */
+    Parser.prototype.parseBinaryExpression = function (minimumPrecedence) {
+        var left = this.parseUnary();
+        var precedence = this.binaryPrecedence();
+        while (precedence >= minimumPrecedence) {
             var operator = this.advance(true).value;
+            var right = this.parseBinaryExpression(precedence + 1);
             left = {type: "BinaryExpression", operator: operator,
-                    left: left, right: next.call(this)};
+                    left: left, right: right};
+            precedence = this.binaryPrecedence();
         }
         return left;
     };
 
     Parser.prototype.parseLogicalOr = function () {
-        return this.parseBinary(this.parseLogicalAnd, {"||": 1});
-    };
-    Parser.prototype.parseLogicalAnd = function () {
-        return this.parseBinary(this.parseBitwiseOr, {"&&": 1});
-    };
-    Parser.prototype.parseBitwiseOr = function () {
-        return this.parseBinary(this.parseBitwiseXor, {"|": 1});
-    };
-    Parser.prototype.parseBitwiseXor = function () {
-        return this.parseBinary(this.parseBitwiseAnd, {"^": 1});
-    };
-    Parser.prototype.parseBitwiseAnd = function () {
-        return this.parseBinary(this.parseEquality, {"&": 1});
-    };
-    Parser.prototype.parseEquality = function () {
-        return this.parseBinary(this.parseRelational,
-                                {"==": 1, "!=": 1, "===": 1, "!==": 1});
-    };
-    Parser.prototype.parseRelational = function () {
-        var operators = {"<": 1, "<=": 1, ">": 1, ">=": 1};
-        if (this.allowIn) operators["in"] = 1;
-        operators["instanceof"] = 1;
-        return this.parseBinary(this.parseShift, operators);
-    };
-    Parser.prototype.parseShift = function () {
-        return this.parseBinary(this.parseAdditive,
-                                {"<<": 1, ">>": 1, ">>>": 1});
-    };
-    Parser.prototype.parseAdditive = function () {
-        return this.parseBinary(this.parseMultiplicative, {"+": 1, "-": 1});
-    };
-    Parser.prototype.parseMultiplicative = function () {
-        return this.parseBinary(this.parseUnary, {"*": 1, "/": 1, "%": 1});
+        return this.parseBinaryExpression(1);
     };
 
     Parser.prototype.parseUnary = function () {
@@ -541,15 +544,20 @@
             var properties = [];
             while (!this.isPunctuator("}")) {
                 var keyToken = this.current;
+                var keyValue = keyToken.value;
+                var keyStart = keyToken.start;
+                var keyLine = keyToken.line;
+                var keyColumn = keyToken.column;
                 if (keyToken.kind !== "identifier" && keyToken.kind !== "keyword" &&
                     keyToken.kind !== "string" && keyToken.kind !== "number") {
                     this.error("expected object property name");
                 }
                 this.advance(false);
-                if ((keyToken.value === "get" || keyToken.value === "set") &&
+                if ((keyValue === "get" || keyValue === "set") &&
                     !this.isPunctuator(":")) {
-                    var accessorKind = keyToken.value;
+                    var accessorKind = keyValue;
                     var accessorKey = this.current;
+                    var accessorKeyValue = accessorKey.value;
                     if (accessorKey.kind !== "identifier" &&
                         accessorKey.kind !== "keyword" &&
                         accessorKey.kind !== "string" &&
@@ -575,20 +583,20 @@
                     }
                     this.expectPunctuator(")", true);
                     var accessorBody = this.parseBlock();
-                    properties.push({key: String(accessorKey.value),
+                    properties.push({key: String(accessorKeyValue),
                         kind: accessorKind,
                         value: {type: "FunctionExpression",
-                            name: String(accessorKey.value),
+                            name: String(accessorKeyValue),
                             parameters: accessorParameters,
                             body: accessorBody,
                             source: this.tokenizer.source.substring(
-                                keyToken.start, accessorBody.sourceEnd),
+                                keyStart, accessorBody.sourceEnd),
                             location: {filename: this.tokenizer.filename,
-                                line: keyToken.line,
-                                column: keyToken.column + 1}}});
+                                line: keyLine,
+                                column: keyColumn + 1}}});
                 } else {
                     this.expectPunctuator(":", true);
-                    properties.push({key: String(keyToken.value), kind: "init",
+                    properties.push({key: String(keyValue), kind: "init",
                                      value: this.parseAssignment()});
                 }
                 if (!this.isPunctuator(",")) break;

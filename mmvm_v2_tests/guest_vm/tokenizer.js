@@ -2,12 +2,12 @@
  * contains no regular-expression based token recognition. */
 (function (root) {
     var keywords = {
-        "break": 1, "case": 1, "catch": 1, "continue": 1, "debugger": 1,
-        "default": 1, "delete": 1, "do": 1, "else": 1, "finally": 1,
-        "for": 1, "function": 1, "if": 1, "in": 1, "instanceof": 1,
-        "new": 1, "return": 1, "switch": 1, "this": 1, "throw": 1,
-        "try": 1, "typeof": 1, "var": 1, "void": 1, "while": 1,
-        "with": 1, "null": 1, "true": 1, "false": 1
+        "$break": 1, "$case": 1, "$catch": 1, "$continue": 1, "$debugger": 1,
+        "$default": 1, "$delete": 1, "$do": 1, "$else": 1, "$finally": 1,
+        "$for": 1, "$function": 1, "$if": 1, "$in": 1, "$instanceof": 1,
+        "$new": 1, "$return": 1, "$switch": 1, "$this": 1, "$throw": 1,
+        "$try": 1, "$typeof": 1, "$var": 1, "$void": 1, "$while": 1,
+        "$with": 1, "$null": 1, "$true": 1, "$false": 1
     };
 
     function isDecimalDigit(code) {
@@ -141,9 +141,14 @@
 
     Tokenizer.prototype.makeToken = function (kind, value, start, line,
                                                column, lineBefore) {
-        var token = {kind: kind, value: value,
-                start: start, end: this.index,
-                line: line, column: column, lineBefore: lineBefore};
+        var token = this.targetToken || {};
+        token.kind = kind;
+        token.value = value;
+        token.start = start;
+        token.end = this.index;
+        token.line = line;
+        token.column = column;
+        token.lineBefore = lineBefore;
         if (this.captureRaw) token.raw = this.source.substring(start, this.index);
         return token;
     };
@@ -196,48 +201,72 @@
         }
         if (value === null) value = this.source.substring(start, this.index);
         else value += this.source.substring(segmentStart, this.index);
-        return this.makeToken(Object.prototype.hasOwnProperty.call(keywords, value) ?
+        /* The prefix makes inherited Object names impossible dictionary hits,
+         * avoiding Function.call in the self-hosted tokenizer. */
+        return this.makeToken(keywords["$" + value] === 1 ?
                               "keyword" : "identifier",
                               value, start, line, column, lineBefore);
     };
 
     Tokenizer.prototype.scanNumber = function (start, line, column,
                                                 lineBefore) {
-        var code = this.codeAt(0);
-        if (code === 48 && (this.codeAt(1) === 120 || this.codeAt(1) === 88)) {
-            this.advance();
-            this.advance();
+        /* Numeric literals never contain a line terminator.  Keep the source
+         * cursor local while scanning them: large generated tables otherwise
+         * pay several JS calls for every digit. */
+        var source = this.source;
+        var length = this.length;
+        var index = this.index;
+        var code = index < length ? source.charCodeAt(index) : -1;
+        var next = index + 1 < length ? source.charCodeAt(index + 1) : -1;
+        if (code === 48 && (next === 120 || next === 88)) {
+            index += 2;
             var digits = 0;
-            while (isHexDigit(this.codeAt(0))) {
-                this.advance();
+            code = index < length ? source.charCodeAt(index) : -1;
+            while (isHexDigit(code)) {
+                index++;
                 digits++;
+                code = index < length ? source.charCodeAt(index) : -1;
             }
             if (!digits) this.error("hexadecimal literal requires a digit",
                                     line, column);
         } else {
             if (code !== 46) {
-                while (isDecimalDigit(this.codeAt(0))) this.advance();
+                while (isDecimalDigit(code)) {
+                    index++;
+                    code = index < length ? source.charCodeAt(index) : -1;
+                }
             }
-            if (this.codeAt(0) === 46) {
-                this.advance();
-                while (isDecimalDigit(this.codeAt(0))) this.advance();
+            if (code === 46) {
+                index++;
+                code = index < length ? source.charCodeAt(index) : -1;
+                while (isDecimalDigit(code)) {
+                    index++;
+                    code = index < length ? source.charCodeAt(index) : -1;
+                }
             }
-            code = this.codeAt(0);
             if (code === 101 || code === 69) {
-                this.advance();
-                code = this.codeAt(0);
-                if (code === 43 || code === 45) this.advance();
-                if (!isDecimalDigit(this.codeAt(0))) {
+                index++;
+                code = index < length ? source.charCodeAt(index) : -1;
+                if (code === 43 || code === 45) {
+                    index++;
+                    code = index < length ? source.charCodeAt(index) : -1;
+                }
+                if (!isDecimalDigit(code)) {
                     this.error("exponent requires a digit", line, column);
                 }
-                while (isDecimalDigit(this.codeAt(0))) this.advance();
+                while (isDecimalDigit(code)) {
+                    index++;
+                    code = index < length ? source.charCodeAt(index) : -1;
+                }
             }
         }
-        if (isIdentifierStart(this.codeAt(0))) {
+        if (isIdentifierStart(code)) {
             this.error("identifier immediately follows numeric literal",
                        line, column);
         }
-        var raw = this.source.substring(start, this.index);
+        this.column += index - this.index;
+        this.index = index;
+        var raw = source.substring(start, index);
         return this.makeToken("number", Number(raw), start, line, column,
                               lineBefore);
     };
@@ -245,6 +274,25 @@
     Tokenizer.prototype.scanString = function (start, line, column,
                                                 lineBefore) {
         var quote = this.codeAt(0);
+        /* Most strings, including embedded benchmark/document data, contain
+         * no escape.  Materialize those with one substring instead of one
+         * concatenation and two method calls per character. */
+        var fastIndex = this.index + 1;
+        while (fastIndex < this.length) {
+            var fastCode = this.source.charCodeAt(fastIndex);
+            if (fastCode === quote) {
+                var fastValue = this.source.substring(this.index + 1, fastIndex);
+                this.column += fastIndex + 1 - this.index;
+                this.index = fastIndex + 1;
+                return this.makeToken("string", fastValue, start, line, column,
+                                      lineBefore);
+            }
+            if (fastCode === 92) break;
+            if (isLineTerminator(fastCode)) {
+                this.error("unterminated string literal", line, column);
+            }
+            fastIndex++;
+        }
         this.advance();
         var value = "";
         while (this.index < this.length) {
@@ -386,7 +434,8 @@
                               lineBefore);
     };
 
-    Tokenizer.prototype.next = function (allowRegexp) {
+    Tokenizer.prototype.next = function (allowRegexp, targetToken) {
+        this.targetToken = targetToken || null;
         var lineBefore = this.skipTrivia();
         var start = this.index;
         var line = this.line;

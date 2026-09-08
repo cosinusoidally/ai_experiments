@@ -25,6 +25,11 @@ IR, dual-backend boundary, and migration gates are specified in
 
 The current implementation has completed these preparatory steps:
 
+- `self_hosted_frontend.js` can execute tokenization, parsing, compilation, and
+  verification inside a guest context, so its AST and compiler state are owned
+  by the runtime heap; program-record adoption and a compact native AST layout
+  remain migration boundaries before this can replace bootstrap compilation;
+
 - function locals are resolved to numeric lexical slots;
 - non-capturing leaf bindings and constants have fixed VM register numbers;
 - `JSRuntime` lazily owns a private `Heap` and `ValueCells` accessor;

@@ -7,6 +7,8 @@
     function Compiler(scopeBindings, outerScopes, registerBindings) {
         this.code = [];
         this.constants = [];
+        this.primitiveConstantIndexes = {};
+        this.smallIntegerConstantIndexes = [];
         this.registerCount = 0;
         this.breakTargets = [];
         this.continueTargets = [];
@@ -40,11 +42,40 @@
     };
 
     Compiler.prototype.constant = function (value) {
-        var index = 0;
-        while (index < this.constants.length) {
-            if (this.constants[index] === value) return index;
-            index++;
+        var type = typeof value;
+        if (type === "number") {
+            /* Large generated numeric tables are overwhelmingly unique.  Do
+             * not stringify and hash every element merely to prove that.  A
+             * compact direct-index cache still shares the small integers that
+             * occur repeatedly in ordinary code. */
+            if (value >= -1 && value <= 255 && value === (value | 0)) {
+                var smallSlot = value + 1;
+                var encodedIndex = this.smallIntegerConstantIndexes[smallSlot];
+                if (encodedIndex) return encodedIndex - 1;
+                var smallIndex = this.constants.length;
+                this.constants.push(value);
+                this.smallIntegerConstantIndexes[smallSlot] = smallIndex + 1;
+                return smallIndex;
+            }
+            this.constants.push(value);
+            return this.constants.length - 1;
         }
+        if (value === null || type === "undefined" || type === "boolean" ||
+            type === "string") {
+            /* Prefixing the type keeps 1, "1", true, and "true" distinct.
+             * The historical strict-equality scan treated +0 and -0 as the
+             * same constant. Numeric constants use the path above. */
+            var key = "$" + type + ":" + String(value);
+            var existing = this.primitiveConstantIndexes[key];
+            if (existing !== undefined) return existing;
+            var primitiveIndex = this.constants.length;
+            this.constants.push(value);
+            this.primitiveConstantIndexes[key] = primitiveIndex;
+            return primitiveIndex;
+        }
+        /* Program descriptors and argument-register vectors are newly built
+         * compiler structures. Identity scans cannot normally deduplicate
+         * them and make large sources quadratic, so append them directly. */
         this.constants.push(value);
         return this.constants.length - 1;
     };
@@ -855,7 +886,8 @@
         }
         var key;
         for (key in node) {
-            if (Object.prototype.hasOwnProperty.call(node, key) && key !== "type" &&
+            if (key !== "type" &&
+                key !== "location" && key !== "guestProgramConstant" &&
                 this.expressionWritesRegister(node[key], register)) return true;
         }
         return false;
@@ -988,7 +1020,7 @@
         }
         var key;
         for (key in node) {
-            if (Object.prototype.hasOwnProperty.call(node, key) && key !== "type" &&
+            if (key !== "type" &&
                 containsNestedFunctionOrTry(node[key])) return true;
         }
         return false;
@@ -1001,7 +1033,7 @@
             node.type === "FunctionExpression") return false;
         var key;
         for (key in node) {
-            if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key)) {
+            if (key !== "loc") {
                 var value = node[key];
                 if (value && typeof value === "object") {
                     if (typeof value.length === "number") {
@@ -1046,8 +1078,7 @@
             }
             var property;
             for (property in node) {
-                if (property !== "loc" &&
-                    Object.prototype.hasOwnProperty.call(node, property)) {
+                if (property !== "loc") {
                     var value = node[property];
                     if (value && typeof value === "object") {
                         if (typeof value.length === "number") {
@@ -1078,7 +1109,7 @@
             }
             var key;
             for (key in node) {
-                if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key)) {
+                if (key !== "loc") {
                     var value = node[key];
                     if (value && typeof value === "object") {
                         if (typeof value.length === "number") {

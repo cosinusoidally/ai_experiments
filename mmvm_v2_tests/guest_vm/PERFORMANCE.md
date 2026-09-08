@@ -407,3 +407,42 @@ native compilation path. This mode still validates snapshot magic, format and
 compiler versions, profile mode, code length, and file length; only source
 identity is unchecked. It is opt-in because stale native code would otherwise
 be indistinguishable from code for the current interpreter kernel.
+
+## 2026-09-08: uncached front-end baseline and quadratic fix
+
+`frontend_benchmark.js` measures parsing, bytecode compilation, and verification
+separately and never reads or writes a source parse cache. On the 1,466,203-byte
+Octane PdfJS source, the old js_min front end was still consuming one CPU after
+579 seconds and was stopped. The dominant algorithmic defect was
+`Compiler.constant` linearly searching a growing constant array for every
+literal. Large numeric tables made compilation quadratic.
+
+Primitive constant indexing, direct append for normally unique structural and
+large numeric constants, a precedence-climbing expression parser, removal of
+unused token raw-source copies, and direct hot numeric/string scans reduced the
+same uncached js_min front end to approximately:
+
+| phase | elapsed |
+| --- | ---: |
+| parse | 9.63 s |
+| compile | 8.26 s |
+| verify | 0.00 s |
+| total | 17.90 s |
+
+The corresponding Node measurement was 0.27 seconds parsing, 0.32 seconds
+compiling, and 0.59 seconds total. These figures measure the bootstrap-hosted
+front end; they are not an acceptable final self-hosted result, but they remove
+the multi-minute algorithmic failure without recognizing PdfJS or caching its
+parse.
+
+`self_hosted_frontend.js` is the first executable self-hosted boundary. When it
+is required by a program launched through `guest_runner.js`, its tokenizer,
+parser, AST, compiler state, and result are guest code and guest-heap objects.
+The companion benchmark always reparses its input. A 26,330-byte parser source
+currently takes about 0.24 seconds to parse on the native guest interpreter,
+but the 1.46 MiB PdfJS parse remained incomplete after 102 seconds. Profiling
+shows that fixed-shape AST nodes represented as generic objects expand the
+workload to millions of property bytecodes. The next large step is a compact
+guest-heap AST arena with named accessors and a kernel-dialect scanning loop;
+merely enabling the existing generic-object path by default would regress
+startup and is intentionally not being mislabeled as completion.
