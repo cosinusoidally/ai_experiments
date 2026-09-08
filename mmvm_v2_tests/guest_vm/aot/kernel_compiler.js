@@ -27,13 +27,21 @@
             if (signatures[name]) {
                 throw new SyntaxError("duplicate kernel function " + name);
             }
-            signatures[name] = {name: name, arity: fn.length};
+            /* Function.length is absent on the Firefox 1 era shell used by
+             * js_min.  The kernel source is authoritative in every backend,
+             * so obtain the arity from that source as well. */
+            signatures[name] = {
+                name: name,
+                arity: kernelFunctionExpression(fn).parameters.length
+            };
             functions.push({name: name, fn: fn});
         }
         if (!entry || typeof entry !== "function" || !entry.name) {
             throw new TypeError("kernel graph entry must be a named function");
         }
         addFunction(entry.name, entry);
+        var sharedConstants = collectFunctionConstants(
+            entry, options.constantOverrides || {});
         var names = [];
         var name;
         for (name in dependencies) {
@@ -68,8 +76,16 @@
             var memberTimings = aggregateTimings ? {} : null;
             if (memberTimings) memberOptions.timings = memberTimings;
             memberOptions.kernelFunctions = signatures;
+            memberOptions.constantBindings = sharedConstants;
             if (index !== 0) memberOptions.registerPreferences = [];
-            compiled.push(this.compile(functions[index++].fn, memberOptions));
+            var member = functions[index++];
+            try {
+                compiled.push(this.compile(member.fn, memberOptions));
+            } catch (error) {
+                error.message = "kernel function " + member.name + ": " +
+                                error.message;
+                throw error;
+            }
             if (aggregateTimings) {
                 aggregateTimings.source += memberTimings.source || 0;
                 aggregateTimings.parse += memberTimings.parse || 0;
@@ -80,6 +96,50 @@
         return {kernelGraph: true, entry: entry.name, functions: compiled,
                 signatures: signatures};
     };
+
+    function kernelFunctionExpression(functionObject) {
+        var source = functionObject.toString();
+        var parsed = new Parser("var __kernel = " + source + ";",
+                                "<kernel-constants>", {captureRaw: false});
+        var program = parsed.parseProgram();
+        return program.body[0].declarations[0].initial;
+    }
+
+    function collectFunctionConstants(functionObject, overrides) {
+        var expression = kernelFunctionExpression(functionObject);
+        var result = {};
+        function visit(node) {
+            if (!node || typeof node !== "object") return;
+            if (node.type === "VariableStatement") {
+                var declarationIndex = 0;
+                while (declarationIndex < node.declarations.length) {
+                    var declaration = node.declarations[declarationIndex++];
+                    if (isKernelConstantDeclaration(declaration)) {
+                        result[declaration.name] =
+                            Object.prototype.hasOwnProperty.call(
+                                overrides, declaration.name) ?
+                            overrides[declaration.name] | 0 :
+                            kernelConstantValue(declaration.initial);
+                    }
+                }
+            }
+            var key;
+            for (key in node) {
+                if (key !== "loc" &&
+                    Object.prototype.hasOwnProperty.call(node, key)) {
+                    var value = node[key];
+                    if (value && typeof value === "object") {
+                        if (typeof value.length === "number") {
+                            var index = 0;
+                            while (index < value.length) visit(value[index++]);
+                        } else visit(value);
+                    }
+                }
+            }
+        }
+        visit(expression.body);
+        return result;
+    }
 
     var READ_FIELD_ACCESSORS = {
         recordType: "RECORD_TYPE",
@@ -125,6 +185,7 @@
         programThisSlot: "PROGRAM_THIS_SLOT",
         programFunctionNameSlot: "PROGRAM_FUNCTION_NAME_SLOT",
         programFlags: "PROGRAM_FLAGS",
+        bytecodeLength: "BYTECODE_LENGTH",
         contextGlobal: "CONTEXT_GLOBAL",
         contextActiveFrame: "CONTEXT_ACTIVE_FRAME",
         handlerNext: "HANDLER_NEXT",
@@ -220,6 +281,7 @@
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {
+        valueCellAddress: {fieldValue: 0, stride: "VALUE_CELL_BYTES"},
         vectorCellAddress: {field: "VECTOR_CELLS",
                             stride: "VALUE_CELL_BYTES"},
         frameRegisterCellAddress: {field: "FRAME_REGISTERS",
@@ -310,6 +372,16 @@
 
     function compileControlFlow(fn, source, options, timings) {
         var symbols = {};
+        var constantBindings = options.constantBindings || {};
+        var constantName;
+        for (constantName in constantBindings) {
+            if (Object.prototype.hasOwnProperty.call(
+                    constantBindings, constantName)) {
+                symbols["$" + constantName] = {
+                    kind: "constant", value: constantBindings[constantName]
+                };
+            }
+        }
         var parameterIndex = 0;
         while (parameterIndex < fn.parameters.length) {
             symbols["$" + fn.parameters[parameterIndex]] =
@@ -863,10 +935,10 @@
 
     function indexedAddress(name, argumentsList, symbols) {
         var descriptor = INDEXED_ADDRESS_ACCESSORS[name];
-        var field = symbols["$" + descriptor.field];
+        var field = descriptor.field ? symbols["$" + descriptor.field] : null;
         var stride = descriptor.stride ?
             symbols["$" + descriptor.stride] : null;
-        if (!field || field.kind !== "constant" ||
+        if (descriptor.field && (!field || field.kind !== "constant") ||
             descriptor.stride && (!stride || stride.kind !== "constant")) {
             throw new SyntaxError("kernel indexed accessor " + name +
                                   " requires layout constants");
@@ -877,7 +949,10 @@
                 right: lowerKernelExpression(argumentsList[1], symbols),
                 type: "i32"},
             right: {op: "add_i32",
-                left: {op: "const_i32", value: field.value, type: "i32"},
+                left: {op: "const_i32",
+                    value: descriptor.fieldValue === undefined ?
+                        field.value : descriptor.fieldValue,
+                    type: "i32"},
                 right: {op: "mul_i32",
                     left: lowerKernelExpression(argumentsList[2], symbols),
                     right: {op: "const_i32",

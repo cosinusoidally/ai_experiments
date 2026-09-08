@@ -72,6 +72,8 @@
         var STRING_CHARS = 24;
         var IEEE754_SIGN_BIT = -2147483648;
         var MINIMUM_INT32 = -2147483648;
+        var INVALID_PROGRAM_INTEGER = -2147483648;
+        var INVALID_PROGRAM_BOOLEAN = -1;
         var IEEE754_ABSOLUTE_MASK = 2147483647;
         var MAX_SIGNED_INT32 = 2147483647;
         var ASCII_DIGIT_ZERO = 48;
@@ -88,6 +90,7 @@
         var UINT32_LOW_UNUSED_MASK = 2097151;
         var UINT32_MANTISSA_LOW_SHIFT = 21;
         var UINT32_MANTISSA_HIGH_SHIFT = 11;
+        var MAX_VECTOR_LENGTH = 134217726;
 
         var FRAME_ENVIRONMENT = 20;
         var FRAME_PROGRAM = 16;
@@ -3026,6 +3029,43 @@
                 var intrinsicTarget = heapBase + registerCells +
                     callTargetIndex * VALUE_CELL_BYTES;
                 var intrinsicHandled = 0;
+                if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
+                    intrinsicHandled = programCreateKernel(
+                        heapBase, state, intrinsicTarget, registerCells,
+                        intrinsicArgumentsVector, currentContext,
+                        stringSupport);
+                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
+                    intrinsicHandled = programSetCodeKernel(
+                        heapBase, intrinsicTarget, registerCells,
+                        intrinsicArgumentsVector);
+                } else if (intrinsicId ===
+                           INTRINSIC_PROGRAM_SET_CONSTANT) {
+                    intrinsicHandled = programSetConstantKernel(
+                        heapBase, intrinsicTarget, registerCells,
+                        intrinsicArgumentsVector);
+                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
+                    intrinsicHandled = programSetVectorKernel(
+                        heapBase, intrinsicTarget, registerCells,
+                        intrinsicArgumentsVector);
+                }
+                if (intrinsicId >= INTRINSIC_PROGRAM_CREATE) {
+                if (intrinsicId <= INTRINSIC_PROGRAM_SET_VECTOR) {
+                if (intrinsicHandled !== 1) {
+                    if (intrinsicHandled === 2) {
+                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                                CALL_REJECT_HEAP_SPACE);
+                    }
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
+                }
+                }
+                }
                 if (intrinsicId === INTRINSIC_FUNCTION_CALL) {
                     /* Bytecode callees were forwarded above. Native and host
                      * callees retain the ordinary semantic call boundary. */
@@ -8017,6 +8057,292 @@
         return EXIT_BUDGET;
     }
 
+    function programArgumentCellKernel(heapBase, argumentsVector,
+                                       registerCells, argumentIndex) {
+        var descriptor = vectorCellAddress(
+            heapBase, argumentsVector, argumentIndex);
+        if (valueCellTag(0, descriptor) !== VALUE_TAG_INT32) return 0;
+        var registerIndex = valueCellInt32(0, descriptor);
+        if (registerIndex < 0) return 0;
+        return valueCellAddress(heapBase, registerCells, registerIndex);
+    }
+
+    function programIntArgumentKernel(heapBase, argumentsVector,
+                                      registerCells, argumentIndex) {
+        var cell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, argumentIndex);
+        if (cell === 0) return INVALID_PROGRAM_INTEGER;
+        if (valueCellTag(0, cell) !== VALUE_TAG_INT32) {
+            return INVALID_PROGRAM_INTEGER;
+        }
+        return valueCellInt32(0, cell);
+    }
+
+    function programBooleanArgumentKernel(heapBase, argumentsVector,
+                                          registerCells, argumentIndex) {
+        var cell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, argumentIndex);
+        if (cell === 0) return INVALID_PROGRAM_BOOLEAN;
+        var tag = valueCellTag(0, cell);
+        if (tag === VALUE_TAG_FALSE) return 0;
+        if (tag === VALUE_TAG_TRUE) return 1;
+        return INVALID_PROGRAM_BOOLEAN;
+    }
+
+    function initializeProgramVectorKernel(heapBase, vector, length,
+                                           initialInteger) {
+        var bytes = VECTOR_FIXED_BYTES + length * VALUE_CELL_BYTES;
+        setRecordType(heapBase, vector, HEAP_TYPE_VALUE_VECTOR);
+        setRecordSize(heapBase, vector, bytes);
+        setRecordMark(heapBase, vector, 0);
+        setRecordFlags(heapBase, vector, 0);
+        setVectorLength(heapBase, vector, length);
+        setVectorCapacity(heapBase, vector, length);
+        var index = 0;
+        while (index < length) {
+            var cell = vectorCellAddress(heapBase, vector, index);
+            if (initialInteger === INVALID_PROGRAM_INTEGER) {
+                setValueCellUndefined(cell);
+            } else setValueCellInt32(cell, initialInteger);
+            index = index + 1;
+        }
+        return bytes;
+    }
+
+    function initializeProgramCallableKernel(heapBase, callable, program,
+                                             context, stringSupport) {
+        var prototype = callable + FUNCTION_RECORD_BYTES;
+        var prototypeProperty = prototype + OBJECT_RECORD_BYTES;
+        var constructorProperty = prototypeProperty + PROPERTY_RECORD_BYTES;
+        var functionPrototypeCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_FUNCTION_PROTOTYPE);
+        var objectPrototypeCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_OBJECT_PROTOTYPE);
+        var prototypeKeyCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_PROTOTYPE_KEY);
+        var constructorKeyCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_CONSTRUCTOR_KEY);
+        setRecordType(heapBase, callable, HEAP_TYPE_BYTECODE_FUNCTION);
+        setRecordSize(heapBase, callable, FUNCTION_RECORD_BYTES);
+        setRecordMark(heapBase, callable, 0);
+        setRecordFlags(heapBase, callable, 0);
+        setObjectPrototype(heapBase, callable,
+                           valueCellReference(0, functionPrototypeCell));
+        setObjectPropertyHead(heapBase, callable, prototypeProperty);
+        setFunctionClosure(heapBase, callable, 0);
+        setFunctionMetadata(heapBase, callable, program);
+        setFunctionHomeContext(heapBase, callable, context);
+        setRecordType(heapBase, prototype, HEAP_TYPE_OBJECT);
+        setRecordSize(heapBase, prototype, OBJECT_RECORD_BYTES);
+        setRecordMark(heapBase, prototype, 0);
+        setRecordFlags(heapBase, prototype, 0);
+        setObjectPrototype(heapBase, prototype,
+                           valueCellReference(0, objectPrototypeCell));
+        setObjectPropertyHead(heapBase, prototype, constructorProperty);
+        setObjectExtensible(heapBase, prototype, 1);
+        setObjectReserved(heapBase, prototype, 0);
+        setRecordType(heapBase, prototypeProperty, HEAP_TYPE_PROPERTY);
+        setRecordSize(heapBase, prototypeProperty, PROPERTY_RECORD_BYTES);
+        setRecordMark(heapBase, prototypeProperty, 0);
+        setRecordFlags(heapBase, prototypeProperty, 0);
+        setPropertyNext(heapBase, prototypeProperty, 0);
+        setPropertyKey(heapBase, prototypeProperty,
+                       valueCellReference(0, prototypeKeyCell));
+        setPropertyAttributes(heapBase, prototypeProperty,
+                              DEFAULT_PROPERTY_ATTRIBUTES);
+        setPropertyReserved(heapBase, prototypeProperty, 0);
+        setValueCellReference(
+            propertyValueCellAddress(heapBase, prototypeProperty), prototype);
+        setRecordType(heapBase, constructorProperty, HEAP_TYPE_PROPERTY);
+        setRecordSize(heapBase, constructorProperty, PROPERTY_RECORD_BYTES);
+        setRecordMark(heapBase, constructorProperty, 0);
+        setRecordFlags(heapBase, constructorProperty, 0);
+        setPropertyNext(heapBase, constructorProperty, 0);
+        setPropertyKey(heapBase, constructorProperty,
+                       valueCellReference(0, constructorKeyCell));
+        setPropertyAttributes(heapBase, constructorProperty,
+                              DEFAULT_PROPERTY_ATTRIBUTES);
+        setPropertyReserved(heapBase, constructorProperty, 0);
+        setValueCellReference(
+            propertyValueCellAddress(heapBase, constructorProperty), callable);
+        return constructorProperty + PROPERTY_RECORD_BYTES;
+    }
+
+    function programCreateKernel(heapBase, state, targetCell, registerCells,
+                                 argumentsVector, context, stringSupport) {
+        var codeLength = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 0);
+        var constantLength = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 1);
+        var bindingLength = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 2);
+        var parameterLength = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 3);
+        var registerCount = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 4);
+        var argumentsSlot = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 5);
+        var thisSlot = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 6);
+        var functionNameSlot = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 7);
+        var usesArguments = programBooleanArgumentKernel(
+            heapBase, argumentsVector, registerCells, 8);
+        var bindingCount = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 9);
+        if (codeLength < 0) return 0;
+        if (constantLength < 0) return 0;
+        if (bindingLength < 0) return 0;
+        if (parameterLength < 0) return 0;
+        if (registerCount < 0) return 0;
+        if (bindingCount < 0) return 0;
+        if (argumentsSlot === INVALID_PROGRAM_INTEGER) return 0;
+        if (thisSlot === INVALID_PROGRAM_INTEGER) return 0;
+        if (functionNameSlot === INVALID_PROGRAM_INTEGER) return 0;
+        if (usesArguments < 0) return 0;
+        var bytecodeBytes = (BYTECODE_FIXED_BYTES + codeLength * 4 + 7) & -8;
+        var constantBytes = 24 + constantLength * VALUE_CELL_BYTES;
+        var bindingBytes = 24 + bindingLength * VALUE_CELL_BYTES;
+        var parameterBytes = 24 + parameterLength * VALUE_CELL_BYTES;
+        var bytecode = engineHeapBump(heapBase, state);
+        var constants = bytecode + bytecodeBytes;
+        var constantRegisters = constants + constantBytes;
+        var bindingRegisters = constantRegisters + constantBytes;
+        var parameters = bindingRegisters + bindingBytes;
+        var program = parameters + parameterBytes;
+        var callable = program + PROGRAM_RECORD_BYTES;
+        var end = callable + FUNCTION_RECORD_BYTES + OBJECT_RECORD_BYTES +
+            PROPERTY_RECORD_BYTES * 2;
+        if (end < callable) return 0;
+        if (end > engineHeapLimit(heapBase, state)) return 2;
+        setRecordType(heapBase, bytecode, HEAP_TYPE_BYTECODE);
+        setRecordSize(heapBase, bytecode, bytecodeBytes);
+        setRecordMark(heapBase, bytecode, 0);
+        setRecordFlags(heapBase, bytecode, 0);
+        setBytecodeLength(heapBase, bytecode, codeLength);
+        var index = 0;
+        while (index < codeLength) {
+            store32(bytecodeWordAddress(heapBase, bytecode, index), 0);
+            index = index + 1;
+        }
+        var initializedBytes = initializeProgramVectorKernel(
+            heapBase, constants, constantLength, INVALID_PROGRAM_INTEGER);
+        initializedBytes = initializeProgramVectorKernel(
+            heapBase, constantRegisters, constantLength, -1);
+        initializedBytes = initializeProgramVectorKernel(
+            heapBase, bindingRegisters, bindingLength, -1);
+        initializedBytes = initializeProgramVectorKernel(
+            heapBase, parameters, parameterLength, -1);
+        setRecordType(heapBase, program, HEAP_TYPE_PROGRAM);
+        setRecordSize(heapBase, program, PROGRAM_RECORD_BYTES);
+        setRecordMark(heapBase, program, 0);
+        setRecordFlags(heapBase, program, 0);
+        setProgramBytecode(heapBase, program, bytecode);
+        setProgramConstants(heapBase, program, constants);
+        setProgramConstantRegisters(heapBase, program, constantRegisters);
+        if (bindingLength === 0) {
+            setProgramBindingRegisters(heapBase, program, 0);
+        } else setProgramBindingRegisters(heapBase, program, bindingRegisters);
+        setProgramParameterSlots(heapBase, program, parameters);
+        setProgramRegisterCount(heapBase, program, registerCount);
+        setProgramArgumentsSlot(heapBase, program, argumentsSlot);
+        setProgramThisSlot(heapBase, program, thisSlot);
+        setProgramFunctionNameSlot(heapBase, program, functionNameSlot);
+        setProgramMetadata(heapBase, program, 0);
+        setProgramFlags(heapBase, program, usesArguments);
+        setProgramBindingCount(heapBase, program, bindingCount);
+        initializedBytes = initializeProgramCallableKernel(
+            heapBase, callable, program, context, stringSupport);
+        setEngineHeapBump(heapBase, state, end);
+        setValueCellReference(targetCell, callable);
+        return 1;
+    }
+
+    function programCallableKernel(heapBase, argumentsVector, registerCells) {
+        var cell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 0);
+        if (cell === 0) return 0;
+        if (valueCellTag(0, cell) !== VALUE_TAG_REFERENCE) return 0;
+        var callable = valueCellReference(0, cell);
+        if (recordType(heapBase, callable) !== HEAP_TYPE_BYTECODE_FUNCTION) {
+            return 0;
+        }
+        return callable;
+    }
+
+    function programSetCodeKernel(heapBase, targetCell, registerCells,
+                                  argumentsVector) {
+        var callable = programCallableKernel(
+            heapBase, argumentsVector, registerCells);
+        var index = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 1);
+        var value = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 2);
+        if (callable === 0) return 0;
+        if (index < 0) return 0;
+        if (value === INVALID_PROGRAM_INTEGER) return 0;
+        var program = functionMetadata(heapBase, callable);
+        var bytecode = programBytecode(heapBase, program);
+        if (index >= bytecodeLength(heapBase, bytecode)) return 0;
+        store32(bytecodeWordAddress(heapBase, bytecode, index), value);
+        setValueCellReference(targetCell, callable);
+        return 1;
+    }
+
+    function programSetConstantKernel(heapBase, targetCell, registerCells,
+                                     argumentsVector) {
+        var callable = programCallableKernel(
+            heapBase, argumentsVector, registerCells);
+        var index = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 1);
+        var source = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 2);
+        if (callable === 0) return 0;
+        if (index < 0) return 0;
+        if (source === 0) return 0;
+        var program = functionMetadata(heapBase, callable);
+        var constants = programConstants(heapBase, program);
+        if (index >= vectorLength(heapBase, constants)) return 0;
+        var target = vectorCellAddress(heapBase, constants, index);
+        copyValueCell(target, source);
+        if (valueCellTag(0, target) === VALUE_TAG_REFERENCE) {
+            var reference = valueCellReference(0, target);
+            if (recordType(heapBase, reference) === HEAP_TYPE_BYTECODE_FUNCTION) {
+                setValueCellReference(
+                    target, functionMetadata(heapBase, reference));
+            }
+        }
+        setValueCellReference(targetCell, callable);
+        return 1;
+    }
+
+    function programSetVectorKernel(heapBase, targetCell, registerCells,
+                                   argumentsVector) {
+        var callable = programCallableKernel(
+            heapBase, argumentsVector, registerCells);
+        var kind = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 1);
+        var index = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 2);
+        var value = programIntArgumentKernel(
+            heapBase, argumentsVector, registerCells, 3);
+        if (callable === 0) return 0;
+        if (kind < 0) return 0;
+        if (kind > 2) return 0;
+        if (index < 0) return 0;
+        if (value === INVALID_PROGRAM_INTEGER) return 0;
+        var program = functionMetadata(heapBase, callable);
+        var vector = 0;
+        if (kind === 0) vector = programConstantRegisters(heapBase, program);
+        else if (kind === 1) vector = programBindingRegisters(heapBase, program);
+        else vector = programParameterSlots(heapBase, program);
+        if (vector === 0) return 0;
+        if (index >= vectorLength(heapBase, vector)) return 0;
+        setValueCellInt32(vectorCellAddress(heapBase, vector, index), value);
+        setValueCellReference(targetCell, callable);
+        return 1;
+    }
+
     function arraySliceKernel(heapBase, state, targetCell, registerCells,
                               receiverIndex, argumentsVector, argumentCount,
                               arrayPrototype) {
@@ -8673,13 +8999,43 @@
             new Date().getTime() : 0;
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
+        var kernelDependencies = {
+            dateIntrinsicKernel: dateIntrinsicKernel,
+            initializeProgramCallableKernel: initializeProgramCallableKernel,
+            initializeProgramVectorKernel: initializeProgramVectorKernel,
+            programArgumentCellKernel: programArgumentCellKernel,
+            programBooleanArgumentKernel: programBooleanArgumentKernel,
+            programCallableKernel: programCallableKernel,
+            programCreateKernel: programCreateKernel,
+            programIntArgumentKernel: programIntArgumentKernel,
+            programSetCodeKernel: programSetCodeKernel,
+            programSetConstantKernel: programSetConstantKernel,
+            programSetVectorKernel: programSetVectorKernel
+        };
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
         var snapshotNeedsSource = runtime.nativeSnapshotWrite ||
             (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
-        var kernelSource = snapshotNeedsSource ?
-            interpreterKernel.toString() + "\n" +
-            dateIntrinsicKernel.toString() : null;
+        var kernelSource = null;
+        if (snapshotNeedsSource) {
+            kernelSource = interpreterKernel.toString();
+            var kernelDependencyNames = [];
+            var kernelDependencyName;
+            for (kernelDependencyName in kernelDependencies) {
+                if (Object.prototype.hasOwnProperty.call(
+                        kernelDependencies, kernelDependencyName)) {
+                    kernelDependencyNames.push(kernelDependencyName);
+                }
+            }
+            kernelDependencyNames.sort();
+            var kernelDependencyIndex = 0;
+            while (kernelDependencyIndex < kernelDependencyNames.length) {
+                kernelDependencyName =
+                    kernelDependencyNames[kernelDependencyIndex++];
+                kernelSource += "\n" +
+                    kernelDependencies[kernelDependencyName].toString();
+            }
+        }
         var snapshotMetadata = null;
         if (snapshotRequested) {
             snapshotMetadata = {
@@ -8718,13 +9074,19 @@
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
                 }
             };
-            this.ir = new KernelCompiler().compileGraph(interpreterKernel, {
-                dateIntrinsicKernel: dateIntrinsicKernel
-            }, compilerOptions);
+            this.ir = new KernelCompiler().compileGraph(
+                interpreterKernel, kernelDependencies, compilerOptions);
         }
         var loweringFinished = constructionStarted ?
             new Date().getTime() : 0;
-        if (!loadedSnapshot) this.js = new JSBackend().compile(this.ir);
+        /* The MMVM host executes the i386 backend directly.  Building the
+         * enormous JavaScript reference function there wastes startup time,
+         * and Firefox 1's emitter cannot safely compile the growing function
+         * graph.  Node has no executable-memory backend, so it continues to
+         * compile and execute this exact IR through the JS backend. */
+        if (!loadedSnapshot && !x86Backend.ffi.isMMVM) {
+            this.js = new JSBackend().compile(this.ir);
+        } else this.js = null;
         var jsBackendFinished = constructionStarted ?
             new Date().getTime() : 0;
         var backendTimings = runtime.profileOpcodeCounts ? {} : null;
