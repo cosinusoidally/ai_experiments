@@ -60,6 +60,51 @@
                 nativeCallHeap.destroy();
                 nativeCallX86.destroy();
             }
+            function nativeF64CallKernel(pointer, input, output) {
+                storeF64(output, callNativeF64(pointer, input));
+                return output;
+            }
+            var nativeF64IR = compiler.compile(nativeF64CallKernel);
+            var nativeF64JS = new JSBackend().compile(nativeF64IR);
+            var nativeF64Backend = new X86Backend();
+            var nativeF64X86 = nativeF64Backend.compile(nativeF64IR);
+            var nativeF64Heap = new Heap({heapBytes: 4096});
+            try {
+                nativeF64Heap.memory.setNativeF64Caller(
+                    function (pointer, args) {
+                        if (pointer !== 5678 || args.length !== 1 ||
+                            args[0] !== 64) {
+                            throw new Error("JavaScript binary64 native-call ABI mismatch");
+                        }
+                        return 12.5;
+                    });
+                nativeF64JS.fn(nativeF64Heap.memory, 5678, 64, 80);
+                assertF64(nativeF64Heap.memory.readF64(80), 12.5,
+                          "JavaScript binary64 native-call result");
+                if (nativeF64X86.fn) {
+                    var numberText = "-1234.5e-2";
+                    var textIndex = 0;
+                    while (textIndex < numberText.length) {
+                        nativeF64Heap.memory.writeU8(
+                            64 + textIndex, numberText.charCodeAt(textIndex));
+                        textIndex++;
+                    }
+                    nativeF64Heap.memory.writeU8(64 + textIndex, 0);
+                    var atof = nativeF64Backend.ffi.resolve("atof");
+                    nativeF64X86.fn(atof,
+                        nativeF64Heap.memory.nativeAddress(64),
+                        nativeF64Heap.memory.nativeAddress(80));
+                    assertF64(nativeF64Heap.memory.readF64(80), -12.345,
+                              "i386 binary64 native-call result");
+                }
+                if (nativeF64X86.assembly.indexOf(
+                        "call_dword_ptr_esp(4)") < 0) {
+                    throw new Error("binary64 native call bypassed macro assembly");
+                }
+            } finally {
+                nativeF64Heap.destroy();
+                nativeF64X86.destroy();
+            }
             function recordInitializer(base, address, type, size,
                                        word0, word1, word2, word3) {
                 store32(base + address, type);

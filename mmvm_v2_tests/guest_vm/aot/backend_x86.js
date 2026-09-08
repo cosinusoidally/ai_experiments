@@ -953,6 +953,20 @@
     }
 
     function emitControlF64(assembler, node, state) {
+        if (node.op === "call_native_f64") {
+            emitControlExpression(assembler, node.pointer, state);
+            assembler.pushEax();
+            var nativeArgumentIndex = node.arguments.length;
+            while (nativeArgumentIndex > 0) {
+                emitControlExpression(assembler,
+                    node.arguments[--nativeArgumentIndex], state);
+                assembler.pushEax();
+            }
+            assembler.callDwordPtrEspDisplacement(node.arguments.length * 4);
+            nativeArgumentIndex = node.arguments.length + 1;
+            while (nativeArgumentIndex-- > 0) assembler.popEcx();
+            return;
+        }
         if (node.op === "abs_f64") {
             emitControlF64(assembler, node.value, state);
             assembler.absF64();
@@ -1088,6 +1102,19 @@
     }
 
     function emitF64Expression(assembler, node) {
+        if (node.op === "call_native_f64") {
+            emitExpression(assembler, node.pointer);
+            assembler.pushEax();
+            var nativeArgumentIndex = node.arguments.length;
+            while (nativeArgumentIndex > 0) {
+                emitExpression(assembler, node.arguments[--nativeArgumentIndex]);
+                assembler.pushEax();
+            }
+            assembler.callDwordPtrEspDisplacement(node.arguments.length * 4);
+            nativeArgumentIndex = node.arguments.length + 1;
+            while (nativeArgumentIndex-- > 0) assembler.popEcx();
+            return;
+        }
         if (node.op === "sin_f64" || node.op === "cos_f64") {
             emitF64Expression(assembler, node.value);
             if (node.op === "sin_f64") assembler.sinF64();

@@ -438,11 +438,33 @@ parse.
 `self_hosted_frontend.js` is the first executable self-hosted boundary. When it
 is required by a program launched through `guest_runner.js`, its tokenizer,
 parser, AST, compiler state, and result are guest code and guest-heap objects.
-The companion benchmark always reparses its input. A 26,330-byte parser source
-currently takes about 0.24 seconds to parse on the native guest interpreter,
-but the 1.46 MiB PdfJS parse remained incomplete after 102 seconds. Profiling
-shows that fixed-shape AST nodes represented as generic objects expand the
-workload to millions of property bytecodes. The next large step is a compact
-guest-heap AST arena with named accessors and a kernel-dialect scanning loop;
-merely enabling the existing generic-object path by default would regress
-startup and is intentionally not being mislabeled as completion.
+The companion benchmark always reparses its input.
+
+The first self-hosted PdfJS attempt did not finish parsing in 102 seconds. Its
+profile was dominated by roughly 68,000 guest-to-host numeric-conversion exits
+from the tokenizer. The compact front end now accumulates decimal integers of
+up to nine digits and hexadecimal integers of up to seven digits directly.
+Those bounds make the conversion exact in binary64; longer, fractional, and
+exponent forms keep the general `Number` path. The native interpreter's string
+`Number` path can call libc `strtod` through the general typed native-call IR,
+and validates that the complete string was consumed before accepting the
+result. This is a general language implementation path, not a PdfJS cache or a
+benchmark-specific parser.
+
+On the same 1,466,203-byte source, an uncached, fully guest-owned run measured:
+
+| self-hosted phase | elapsed |
+| --- | ---: |
+| parse | 11.25 s |
+| compile | 6.21 s |
+| total | 17.46 s |
+
+A repeated parse-only run measured 11.48 seconds inside the benchmark and
+45.30 seconds for the complete process. The latter includes normal module
+loading and generation of the native interpreter, so it is recorded separately
+from front-end execution. The parser run executed about 230 million guest
+bytecodes while making only a few hundred semantic exits. The remaining cost
+is consequently in generic guest object/property traffic and bytecode dispatch,
+not host numeric conversion. A compact guest-heap AST representation remains a
+promising structural improvement, but is not required for correctness and has
+not been substituted for the real parser in these measurements.

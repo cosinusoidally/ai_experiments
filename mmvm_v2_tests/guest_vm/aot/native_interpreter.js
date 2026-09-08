@@ -8219,6 +8219,7 @@
         var VALUE_TAG_REFERENCE = 7;
         var HEAP_TYPE_OBJECT = 1;
         var HEAP_TYPE_PROPERTY = 6;
+        var HEAP_TYPE_STRING = 7;
         var RECORD_TYPE = 0;
         var RECORD_SIZE = 4;
         var RECORD_MARK = 8;
@@ -8232,6 +8233,8 @@
         var PROPERTY_ATTRIBUTES = 24;
         var PROPERTY_RESERVED = 28;
         var PROPERTY_VALUE = 32;
+        var STRING_LENGTH = 16;
+        var STRING_CHARS = 24;
         var VECTOR_LENGTH = 16;
         var VECTOR_CELLS = 24;
         var ENGINE_HEAP_BUMP = 16;
@@ -8239,6 +8242,9 @@
         var ENGINE_SCRATCH_LEFT = 36;
         var ENGINE_PLATFORM_SERVICES = 44;
         var PLATFORM_GETTIMEOFDAY_POINTER = 44;
+        var PLATFORM_STRTOD_POINTER = 56;
+        var PLATFORM_MALLOC_POINTER = 60;
+        var PLATFORM_FREE_POINTER = 64;
         var OBJECT_RECORD_BYTES = 32;
         var PROPERTY_RECORD_BYTES = 48;
         var INTRINSIC_NUMBER_CONSTRUCTOR = 41;
@@ -8296,6 +8302,55 @@
                 store32(targetCell, VALUE_TAG_DOUBLE);
                 store32(targetCell + VALUE_CELL_LOW, 0);
                 store32(targetCell + VALUE_CELL_HIGH, 2146959360);
+                store32(targetCell + VALUE_CELL_AUX, 0);
+                return 1;
+            }
+            if (sourceTag === VALUE_TAG_REFERENCE) {
+                var numericString = valueCellReference(0, source);
+                if (recordType(heapBase, numericString) !== HEAP_TYPE_STRING) {
+                    return 0;
+                }
+                var numericLength = stringLength(heapBase, numericString);
+                if (numericLength === 0) {
+                    store32(targetCell, VALUE_TAG_INT32);
+                    store32(targetCell + VALUE_CELL_LOW, 0);
+                    store32(targetCell + VALUE_CELL_HIGH, 0);
+                    store32(targetCell + VALUE_CELL_AUX, 0);
+                    return 1;
+                }
+                var services = enginePlatformServices(heapBase, state);
+                var mallocPointer = platformMallocPointer(heapBase, services);
+                var freePointer = platformFreePointer(heapBase, services);
+                var strtodPointer = platformStrtodPointer(heapBase, services);
+                if (mallocPointer === 0) return 0;
+                if (freePointer === 0) return 0;
+                if (strtodPointer === 0) return 0;
+                var numericNative = callNativeI32(
+                    mallocPointer, numericLength + 8);
+                if (numericNative === 0) return 0;
+                var numericIndex = 0;
+                var numericValid = 1;
+                while (numericIndex < numericLength) {
+                    var numericCharacter = stringCharacterCodeUnit(
+                        heapBase, numericString, numericIndex);
+                    if (numericCharacter > 127) numericValid = 0;
+                    storeRaw8(numericNative + numericIndex,
+                              numericCharacter);
+                    numericIndex = numericIndex + 1;
+                }
+                storeRaw8(numericNative + numericLength, 0);
+                var numericEndSlot = (numericNative + numericLength + 4) & -4;
+                storeRaw32(numericEndSlot, 0);
+                if (numericValid === 1) {
+                    storeF64(targetCell + VALUE_CELL_LOW,
+                        callNativeF64(strtodPointer, numericNative,
+                                      numericEndSlot));
+                    if (loadRaw32(numericEndSlot) !==
+                        numericNative + numericLength) numericValid = 0;
+                }
+                numericIndex = callNativeI32(freePointer, numericNative);
+                if (numericValid === 0) return 0;
+                store32(targetCell, VALUE_TAG_DOUBLE);
                 store32(targetCell + VALUE_CELL_AUX, 0);
                 return 1;
             }
@@ -8634,6 +8689,14 @@
             runtime.heapRecords.allocatePlatformServices();
         runtime.heapRecords.setEnginePlatformServices(
             this.stateAddress, this.platformServicesAddress);
+        if (this.nativeResult.fn) {
+            runtime.heapRecords.setPlatformStrtodPointer(
+                this.platformServicesAddress, x86Backend.ffi.resolve("strtod"));
+            runtime.heapRecords.setPlatformMallocPointer(
+                this.platformServicesAddress, x86Backend.ffi.resolve("malloc"));
+            runtime.heapRecords.setPlatformFreePointer(
+                this.platformServicesAddress, x86Backend.ffi.resolve("free"));
+        }
         this.arraySliceNativeResult = null;
         this.arrayConcatNativeResult = null;
         this.dateIntrinsicNativeResult = null;

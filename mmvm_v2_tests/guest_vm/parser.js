@@ -8,7 +8,8 @@
         /* Token.raw is not part of the AST and the parser never consumes it.
          * Raw function source is obtained once from token offsets below. */
         this.tokenizer = new Tokenizer(source, filename,
-            !!options && options.captureRaw === true);
+            !!options && options.captureRaw === true,
+            !!options && options.compactLiterals === true);
         this.allowIn = true;
         this.finallySerial = 0;
         this.compactLiterals = !!options && options.compactLiterals === true;
@@ -21,7 +22,10 @@
     };
 
     Parser.prototype.makeLiteral = function (value) {
-        return this.compactLiterals ? value : {type: "Literal", value: value};
+        /* null is also the parser's optional-expression sentinel, so retain
+         * an explicit node for a null literal even in the compact form. */
+        return this.compactLiterals && value !== null ? value :
+            {type: "Literal", value: value};
     };
 
     Parser.prototype.advance = function (allowRegexp) {

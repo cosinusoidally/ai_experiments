@@ -128,7 +128,10 @@
     var PLATFORM_GETTIMEOFDAY_POINTER = 28;
     var PLATFORM_DATE_INTRINSIC_POINTER = 32;
     var PLATFORM_NUMERIC_PROPERTY_POINTER = 36;
-    var PLATFORM_SERVICES_BYTES = 40;
+    var PLATFORM_STRTOD_POINTER = 40;
+    var PLATFORM_MALLOC_POINTER = 44;
+    var PLATFORM_FREE_POINTER = 48;
+    var PLATFORM_SERVICES_BYTES = 52;
 
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
@@ -948,6 +951,42 @@
     Records.prototype.platformNumericPropertyPointer = function (services) {
         return this.heap.readTrustedFieldU32(
             services, PLATFORM_NUMERIC_PROPERTY_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.setPlatformStrtodPointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_STRTOD_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformStrtodPointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_STRTOD_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.setPlatformMallocPointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_MALLOC_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformMallocPointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_MALLOC_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.setPlatformFreePointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_FREE_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformFreePointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_FREE_POINTER,
             Heap.Types.PLATFORM_SERVICES);
     };
 

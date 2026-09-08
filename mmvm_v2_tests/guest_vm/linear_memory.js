@@ -20,10 +20,22 @@
         this.byteLength = byteLength;
         this.destroyed = false;
         this.nativeCaller = null;
+        this.nativeF64Caller = null;
     }
 
     LinearMemory.prototype.setNativeCaller = function (caller) {
         this.nativeCaller = caller || null;
+    };
+
+    LinearMemory.prototype.setNativeF64Caller = function (caller) {
+        this.nativeF64Caller = caller || null;
+    };
+
+    LinearMemory.prototype.callNativeF64 = function (pointer, args) {
+        if (!this.nativeF64Caller) {
+            throw new Error("binary64 native calls are unavailable in this execution backend");
+        }
+        return Number(this.nativeF64Caller(pointer | 0, args));
     };
 
     LinearMemory.prototype.callNativeI32 = function (pointer, args) {

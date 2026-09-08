@@ -48,7 +48,7 @@
                code === 8287 || code === 12288 || code === 65279;
     }
 
-    function Tokenizer(source, filename, captureRaw) {
+    function Tokenizer(source, filename, captureRaw, fastNumericConversion) {
         this.source = String(source);
         this.filename = filename || "<source>";
         this.length = this.source.length;
@@ -56,6 +56,7 @@
         this.line = 1;
         this.column = 0;
         this.captureRaw = captureRaw !== false;
+        this.fastNumericConversion = fastNumericConversion === true;
     }
 
     Tokenizer.prototype.error = function (message, line, column) {
@@ -218,25 +219,37 @@
         var index = this.index;
         var code = index < length ? source.charCodeAt(index) : -1;
         var next = index + 1 < length ? source.charCodeAt(index + 1) : -1;
+        var numericValue = 0;
+        var numericDigits = 0;
+        var simpleInteger = true;
         if (code === 48 && (next === 120 || next === 88)) {
             index += 2;
             var digits = 0;
             code = index < length ? source.charCodeAt(index) : -1;
             while (isHexDigit(code)) {
+                if (this.fastNumericConversion && digits < 7) {
+                    numericValue = numericValue * 16 + hexValue(code);
+                }
                 index++;
                 digits++;
                 code = index < length ? source.charCodeAt(index) : -1;
             }
+            numericDigits = digits;
             if (!digits) this.error("hexadecimal literal requires a digit",
                                     line, column);
         } else {
             if (code !== 46) {
                 while (isDecimalDigit(code)) {
+                    if (this.fastNumericConversion && numericDigits < 9) {
+                        numericValue = numericValue * 10 + code - 48;
+                    }
+                    numericDigits++;
                     index++;
                     code = index < length ? source.charCodeAt(index) : -1;
                 }
             }
             if (code === 46) {
+                simpleInteger = false;
                 index++;
                 code = index < length ? source.charCodeAt(index) : -1;
                 while (isDecimalDigit(code)) {
@@ -245,6 +258,7 @@
                 }
             }
             if (code === 101 || code === 69) {
+                simpleInteger = false;
                 index++;
                 code = index < length ? source.charCodeAt(index) : -1;
                 if (code === 43 || code === 45) {
@@ -267,7 +281,12 @@
         this.column += index - this.index;
         this.index = index;
         var raw = source.substring(start, index);
-        return this.makeToken("number", Number(raw), start, line, column,
+        var converted = this.fastNumericConversion && simpleInteger &&
+            ((raw.length > 1 && (raw.charCodeAt(1) === 120 ||
+                                 raw.charCodeAt(1) === 88)) ?
+                numericDigits <= 7 : numericDigits <= 9) ?
+            numericValue : Number(raw);
+        return this.makeToken("number", converted, start, line, column,
                               lineBefore);
     };
 

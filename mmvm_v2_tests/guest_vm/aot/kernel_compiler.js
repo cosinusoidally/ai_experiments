@@ -80,7 +80,10 @@
         platformArrayConcatPointer: "PLATFORM_ARRAY_CONCAT_POINTER",
         platformGettimeofdayPointer: "PLATFORM_GETTIMEOFDAY_POINTER",
         platformDateIntrinsicPointer: "PLATFORM_DATE_INTRINSIC_POINTER",
-        platformNumericPropertyPointer: "PLATFORM_NUMERIC_PROPERTY_POINTER"
+        platformNumericPropertyPointer: "PLATFORM_NUMERIC_PROPERTY_POINTER",
+        platformStrtodPointer: "PLATFORM_STRTOD_POINTER",
+        platformMallocPointer: "PLATFORM_MALLOC_POINTER",
+        platformFreePointer: "PLATFORM_FREE_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {
@@ -696,6 +699,18 @@
             throw new SyntaxError("kernel binary64 value must be an intrinsic call");
         }
         var name = node.callee.name;
+        if (name === "callNativeF64" && node.arguments.length >= 1 &&
+            node.arguments.length <= 9) {
+            var nativeArguments = [];
+            var nativeArgumentIndex = 1;
+            while (nativeArgumentIndex < node.arguments.length) {
+                nativeArguments.push(lowerKernelExpression(
+                    node.arguments[nativeArgumentIndex++], symbols));
+            }
+            return {op: "call_native_f64",
+                pointer: lowerKernelExpression(node.arguments[0], symbols),
+                arguments: nativeArguments, type: "f64"};
+        }
         if ((name === "loadF64" || name === "loadI32F64") &&
             node.arguments.length === 1) {
             return {op: name === "loadF64" ? "load_f64" : "load_i32_f64",
@@ -798,6 +813,18 @@
             throw new SyntaxError("binary64 kernel expression must be an intrinsic call");
         }
         var name = node.callee.name;
+        if (name === "callNativeF64" && node.arguments.length >= 1 &&
+            node.arguments.length <= 9) {
+            var nativeArguments = [];
+            var nativeArgumentIndex = 1;
+            while (nativeArgumentIndex < node.arguments.length) {
+                nativeArguments.push(lower(
+                    node.arguments[nativeArgumentIndex++], locals));
+            }
+            return {op: "call_native_f64",
+                pointer: lower(node.arguments[0], locals),
+                arguments: nativeArguments, type: "f64"};
+        }
         if (name === "loadF64" && node.arguments.length === 1) {
             return {op: "load_f64", address: lower(node.arguments[0], locals),
                     type: "f64"};

@@ -60,16 +60,19 @@ polling, sockets, files, output, and scheduling—must use this native service
 path instead of returning to SpiderMonkey. Node implements the same service
 contract with JavaScript and its event loop.
 
-The first part of that service ABI is now live. Shared kernel IR has a typed
-`callNativeI32(pointer, ...)` operation accepting up to eight cdecl arguments.
-The i386 backend emits the indirect call exclusively through named macro
+The first part of that service ABI is now live. Shared kernel IR has typed
+`callNativeI32(pointer, ...)` and `callNativeF64(pointer, ...)` operations. The
+i386 backend emits each indirect cdecl call exclusively through named macro
 assembler operations; the JavaScript backend invokes the same operation
-through the linear-memory service contract. Guest `get_dlsym` and `ffi_call`
-are native interpreter intrinsics on MMVM. Integer/pointer arguments and
-temporary NUL-terminated string arguments are prepared in runtime-owned memory,
-then libc is entered without a semantic exit to SpiderMonkey. This is the
-foundation for the remaining timer, polling, file, socket, output, and event
-scheduler services.
+through the linear-memory service contract. The floating-point result remains
+on x87 `ST0` for the native backend and is an ordinary Number in the JavaScript
+reference backend. Guest `get_dlsym` and `ffi_call` are native interpreter
+intrinsics on MMVM. Integer/pointer arguments and temporary NUL-terminated
+string arguments are prepared in runtime-owned memory, then libc is entered
+without a semantic exit to SpiderMonkey. The service table contains named
+`strtod`, `malloc`, and `free` fields used by exact guest string-to-number
+conversion. This is the foundation for the remaining timer, polling, file,
+socket, output, and event scheduler services.
 
 Bootstrap-resolved native entry points live in a dedicated
 `PLATFORM_SERVICES` heap record referenced by `ENGINE_STATE`; they are not

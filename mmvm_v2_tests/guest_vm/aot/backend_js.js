@@ -167,6 +167,17 @@
     }
 
     function emitControlF64(node, parameters, locals) {
+        if (node.op === "call_native_f64") {
+            var nativeArguments = [];
+            var nativeArgumentIndex = 0;
+            while (nativeArgumentIndex < node.arguments.length) {
+                nativeArguments.push(emitControlExpression(
+                    node.arguments[nativeArgumentIndex++], parameters, locals));
+            }
+            return "memory.callNativeF64(" +
+                emitControlExpression(node.pointer, parameters, locals) +
+                ",[" + nativeArguments.join(",") + "])";
+        }
         if (node.op === "abs_f64") {
             return "Math.abs(" +
                 emitControlF64(node.value, parameters, locals) + ")";
@@ -252,6 +263,16 @@
     }
 
     function emitF64(node, parameters) {
+        if (node.op === "call_native_f64") {
+            var nativeArguments = [];
+            var nativeArgumentIndex = 0;
+            while (nativeArgumentIndex < node.arguments.length) {
+                nativeArguments.push(emit(
+                    node.arguments[nativeArgumentIndex++], parameters));
+            }
+            return "memory.callNativeF64(" + emit(node.pointer, parameters) +
+                ",[" + nativeArguments.join(",") + "])";
+        }
         if (node.op === "sin_f64" || node.op === "cos_f64") {
             return "Math." + (node.op === "sin_f64" ? "sin" : "cos") + "(" +
                 emitF64(node.value, parameters) + ")";

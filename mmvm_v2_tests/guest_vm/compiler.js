@@ -207,7 +207,7 @@
                 /* Declaration instantiation has already created the binding.
                  * A var declaration without an initializer performs no
                  * assignment and must not erase an earlier value. */
-                if (!declaration.initial) {
+                if (declaration.initial === null) {
                     index++;
                     continue;
                 }
@@ -259,7 +259,7 @@
             return;
         }
         if (statement.type === "ForStatement") {
-            if (statement.initial) {
+            if (statement.initial !== null) {
                 if (statement.initial.type === "VariableStatement") {
                     this.compileStatement(statement.initial);
                 } else {
@@ -268,7 +268,7 @@
             }
             var forStart = this.code.length;
             var forEnd = -1;
-            if (statement.test) {
+            if (statement.test !== null) {
                 condition = this.compileExpression(statement.test);
                 forEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
             }
@@ -280,7 +280,7 @@
             this.continueTargets.pop();
             this.breakTargets.pop();
             patchBreaks(this, forContinues, this.code.length);
-            if (statement.update) this.compileExpression(statement.update);
+            if (statement.update !== null) this.compileExpression(statement.update);
             this.emit(op.JUMP, forStart);
             if (forEnd >= 0) this.patch(forEnd + 2, this.code.length);
             patchBreaks(this, forBreaks, this.code.length);
@@ -455,7 +455,7 @@
             return;
         }
         if (statement.type === "ReturnStatement") {
-            var returned = statement.argument ?
+            var returned = statement.argument !== null ?
                 this.compileExpression(statement.argument) :
                 this.emitConstant(undefined);
             if (this.finallyBlocks.length) {
@@ -598,6 +598,7 @@
      * ECMAScript meaning. Returning false asks the ordinary expression path to
      * produce a value followed by a MOVE. */
     Compiler.prototype.compileExpressionInto = function (expression, target) {
+        if (isLiteralExpression(expression)) return false;
         if (expression.type === "BinaryExpression" &&
             expression.operator !== "&&" && expression.operator !== "||") {
             var left = this.compileExpression(expression.left, expression.right);
