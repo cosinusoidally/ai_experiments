@@ -27,3 +27,12 @@ assertEqual(bytes[3], 9, "typed array set");
 var floats = new Float32Array([1.5, -2.25]);
 assertEqual(floats[0], 1.5, "Float32Array positive value");
 assertEqual(floats[1], -2.25, "Float32Array negative value");
+
+var signedBytes = new Int8Array([255, 128, 127]);
+assertEqual(signedBytes[0], -1, "Int8Array wraps and sign extends");
+assertEqual(signedBytes[1], -128, "Int8Array minimum value");
+var signedWords = new Int16Array([65535, 32768, 32767]);
+assertEqual(signedWords[0], -1, "Int16Array wraps and sign extends");
+assertEqual(signedWords[1], -32768, "Int16Array minimum value");
+signedBytes.set([12, 13], 1);
+assertEqual(signedBytes[2], 13, "typed array set accepts an Array source");

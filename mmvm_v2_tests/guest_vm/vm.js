@@ -113,6 +113,18 @@
             this.runtime.setProperty(this.globalObject, key,
                 this.runtime.getProperty(this.runtime.globalObject, key));
         }
+        var definingContext = this;
+        this.runtime.setProperty(this.globalObject, "eval",
+            this.runtime.makeHostFunction("eval", function (receiver, args) {
+                var source = args.length ? args[0] : undefined;
+                /* ES5.1 eval returns a non-string argument without parsing it.
+                 * Calls enter through the host-call yield because the current
+                 * bootstrap front end is not yet part of the native engine. */
+                if (typeof source !== "string") return source;
+                var evalContext = jsRuntime.createContext();
+                evalContext.shareGlobalObject(definingContext);
+                return evalContext.run(source, "<eval>");
+            }));
     }
 
     JSContext.prototype.compile = function (source, filename) {

@@ -11,6 +11,27 @@
         return Object.prototype.hasOwnProperty.call(object, key);
     }
 
+    function normalizePosixPath(path) {
+        path = String(path);
+        var absolute = path.charAt(0) === "/";
+        var parts = path.split("/");
+        var normalized = [];
+        var index = 0;
+        while (index < parts.length) {
+            var part = parts[index++];
+            if (!part || part === ".") continue;
+            if (part === "..") {
+                if (normalized.length &&
+                    normalized[normalized.length - 1] !== "..") {
+                    normalized.pop();
+                } else if (!absolute) normalized.push(part);
+            } else normalized.push(part);
+        }
+        var result = normalized.join("/");
+        if (absolute) result = "/" + result;
+        return result || (absolute ? "/" : ".");
+    }
+
     function GuestNodeEnvironment(vm, runnerArguments) {
         this.vm = vm;
         this.runtime = vm.runtime;
@@ -503,12 +524,53 @@
         return http;
     };
 
+    GuestNodeEnvironment.prototype.makePath = function () {
+        var environment = this;
+        var path = this.object({sep: "/", delimiter: ":"});
+        this.runtime.setProperty(path, "normalize",
+            this.makeFunction("path.normalize", function (receiver, args) {
+                return normalizePosixPath(args.length ? args[0] : ".");
+            }));
+        this.runtime.setProperty(path, "join",
+            this.makeFunction("path.join", function (receiver, args) {
+                var joined = "";
+                var index = 0;
+                while (index < args.length) {
+                    if (String(args[index])) {
+                        if (joined) joined += "/";
+                        joined += String(args[index]);
+                    }
+                    index++;
+                }
+                return normalizePosixPath(joined || ".");
+            }));
+        this.runtime.setProperty(path, "resolve",
+            this.makeFunction("path.resolve", function (receiver, args) {
+                var resolved = "";
+                var index = args.length - 1;
+                while (index >= 0) {
+                    var part = String(args[index--]);
+                    if (!part) continue;
+                    resolved = resolved ? part + "/" + resolved : part;
+                    if (part.charAt(0) === "/") {
+                        return normalizePosixPath(resolved);
+                    }
+                }
+                var cwd = environment.nodeHost ?
+                    environment.hostProcess.cwd() :
+                    environment.environmentValue("PWD") || ".";
+                return normalizePosixPath(String(cwd) + "/" + resolved);
+            }));
+        return path;
+    };
+
     GuestNodeEnvironment.prototype.installGlobals = function () {
         var environment = this;
         var fs = this.makeFs();
         var http = this.makeHttp();
         var net = this.makeNet();
-        this.builtinModules = {fs: fs, http: http, net: net};
+        var path = this.makePath();
+        this.builtinModules = {fs: fs, http: http, net: net, path: path};
 
         function publish(name, value) {
             environment.runtime.setGlobal(name, value);

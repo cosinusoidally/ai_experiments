@@ -31,6 +31,15 @@ The primary embedder model is `JSRuntime` -> `JSContext` -> resumable
 external host call. The legacy `VM` facade retains one default context and
 auto-services host callbacks for existing tests and examples.
 
+Each context provides the ES5.1 global `eval` function. Indirect eval executes
+against that context's global object, and non-string arguments are returned
+unchanged. At the current migration checkpoint eval deliberately yields as a
+host call: source is compiled by the bootstrap front end and the resulting
+bytecode executes in a nested context on the same `JSRuntime`. Direct eval's
+access to the caller's lexical environment and a fully native/self-hosted eval
+front end remain implementation work; embedders must not mistake this bootstrap
+boundary for the intended final engine architecture.
+
 Load the complete VM into the minimal shell with one call:
 
 ```js
@@ -234,6 +243,13 @@ and framebuffer images belong only in the ignored `artifacts/` directory.
 Current benchmark commands, measured demo2 progress, and the optional
 `guest_runner.js --vm-profile` opcode profiler are documented in
 `PERFORMANCE.md`.
+
+For a clean profile of a long-running workload,
+`--vm-profile-duration MILLISECONDS` enables profiling and stops the command
+runner at an instruction-budget boundary after approximately that interval.
+It is a cooperative diagnostic rather than a hard deadline: synchronous
+nested compilation/evaluation is allowed to finish before the outer execution
+can yield. Use an operating-system timeout when a hard process limit is needed.
 
 ### Runtime introspection
 

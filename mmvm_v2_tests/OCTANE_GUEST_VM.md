@@ -126,10 +126,41 @@ score's internal benchmark interval.
 | Splay | quick correctness passing; stock baseline pending | — | 20.65 s quick | Added `Date.now`. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. Exact-capacity Array literals subsequently reduced the guest bump from 269,996,280 to 183,119,272 bytes. |
 | NavierStokes | passing | 283 | 26.05 s | Added ES5.1 non-strict receiver normalization for bare calls and `Function.call`/`apply` with nullish receivers. |
 | PdfJS | bring-up in progress | — | — | Object-literal accessors, heap-backed ArrayBuffer/typed arrays, `bind`, `forEach`, `splice`, `trim`, and JSON are implemented. The renderer now reaches asynchronous font loading; its stock checksum is not yet passing. |
+| zlib | passing | 257 | 600.14 s | Original ten-iteration validation, using an explicitly selected unchecked native snapshot. Quick correctness passes in 141.70 s. |
 
 The times above were measured on the current development machine with no
 snapshot. They are working baselines, not claimed stable performance numbers
 for other systems.
+
+The zlib row is the stated exception to the no-snapshot measurements. Its exact
+stock invocation was:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --with-snapshot artifacts/zlib-native.snapshot \
+  --skip-snapshot-hash octane_runner.js zlib
+```
+
+The snapshot affects native-interpreter startup only; Zlib's dynamically
+evaluated 185 KiB generated program is still parsed and compiled on every run.
+The snapshot file is an ignored temporary artifact and is not part of the
+repository.
+
+Zlib bring-up added general ES5 facilities rather than source accommodations:
+indirect global eval, labelled statements and labelled abrupt control flow,
+the global `NaN`, `Infinity`, and `Boolean` bindings, Annex B `escape` and
+`unescape`, signed 8- and 16-bit typed arrays, and the Node-compatible POSIX
+`path` subset. A 128 MiB ArrayBuffer allocation exposed that typed-array
+prototype tables were missing from the collector's strong root set; both
+collector backends now retain those runtime-owned prototypes explicitly.
+
+The dominant initial execution bottleneck was also general. Generated code
+uses non-short-circuit `&` and `|` to combine boolean comparisons. The native
+interpreter previously accepted only numeric-tagged operands for bitwise
+operations, causing repeated semantic exits even though ES conversion is
+simple. Native `ToInt32` handling now covers booleans, null, and undefined for
+all bitwise operations, while strings and objects retain the semantic path.
 
 PdfJS exposed a separate Node-host memory problem in the low-level heap
 emulator. Storing each written guest byte as a property on one host object

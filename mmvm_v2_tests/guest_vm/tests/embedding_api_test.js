@@ -13,6 +13,11 @@
         if (vm.runtime.getGlobal("cached") !== 7) {
             throw new Error("compile/execute did not preserve the runtime global");
         }
+        vm.run("var indirectEval = eval;" +
+               "indirectEval('var evaluated = 6 * 7;');" +
+               "assertEqual(evaluated, 42, 'indirect eval global');" +
+               "assertEqual(indirectEval(19), 19, 'eval non-string');",
+               "embedding-eval.js");
         var threw = false;
         try { vm.run("missingGlobal;", "embedding-error.js"); }
         catch (error) { threw = error && error.name === "ReferenceError"; }

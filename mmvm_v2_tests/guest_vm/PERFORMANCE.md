@@ -408,6 +408,26 @@ compiler versions, profile mode, code length, and file length; only source
 identity is unchecked. It is opt-in because stale native code would otherwise
 be indistinguishable from code for the current interpreter kernel.
 
+## 2026-09-08: bounded profiling and Zlib bitwise exits
+
+`guest_runner.js --vm-profile-duration MILLISECONDS` enables the ordinary
+native profile and asks the command-line embedder to stop at the first
+instruction-budget boundary after that wall-clock interval. The diagnostic
+uses finite one-million-instruction slices, so it does not add a timer check to
+the interpreter dispatch loop. Bootstrap work that synchronously evaluates a
+nested context can finish before the outer execution reaches a budget boundary;
+the option is therefore a bounded steady-execution profiler, not a hard process
+deadline.
+
+An initial Zlib profile showed almost all semantic exits at general `BIT_AND`
+and `BIT_OR` bytecodes whose operands were boolean comparison results. ES5.1
+`ToInt32` maps true to 1 and false, null, and undefined to 0 (undefined through
+NaN). Handling those immediate tags in the native bitwise path removes the
+guest/host transitions without specializing generated code or Zlib. With the
+same explicitly loaded unchecked snapshot, quick correctness completes in
+141.70 seconds and the original stock benchmark completes in 600.14 seconds
+with score 257. Peak RSS was approximately 280,000 KiB for both measurements.
+
 ## 2026-09-08: uncached front-end baseline and quadratic fix
 
 `frontend_benchmark.js` measures parsing, bytecode compilation, and verification

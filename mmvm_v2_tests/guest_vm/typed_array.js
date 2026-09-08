@@ -28,7 +28,9 @@
         UINT32: 4,
         INT32: 5,
         FLOAT32: 6,
-        FLOAT64: 7
+        FLOAT64: 7,
+        INT8: 8,
+        INT16: 9
     };
 
     var Descriptions = [
@@ -38,7 +40,9 @@
         {name: "Uint32Array", bytes: 4, kind: Kinds.UINT32},
         {name: "Int32Array", bytes: 4, kind: Kinds.INT32},
         {name: "Float32Array", bytes: 4, kind: Kinds.FLOAT32},
-        {name: "Float64Array", bytes: 8, kind: Kinds.FLOAT64}
+        {name: "Float64Array", bytes: 8, kind: Kinds.FLOAT64},
+        {name: "Int8Array", bytes: 1, kind: Kinds.INT8},
+        {name: "Int16Array", bytes: 2, kind: Kinds.INT16}
     ];
 
     function subarrayCallback(receiver, args) {
@@ -103,6 +107,8 @@
             this.installTypedConstructor(Descriptions[kind]);
             kind++;
         }
+        this.installTypedConstructor(Descriptions[Kinds.INT8]);
+        this.installTypedConstructor(Descriptions[Kinds.INT16]);
     };
 
     TypedArraySupport.prototype.installTypedConstructor = function (description) {
@@ -234,9 +240,18 @@
         var memory = this.runtime.linearHeap.memory;
         var address = this.dataAddress(view, index);
         if (description.kind === Kinds.UINT8) return memory.readU8Trusted(address);
+        if (description.kind === Kinds.INT8) {
+            var int8 = memory.readU8Trusted(address);
+            return int8 & 128 ? int8 - 256 : int8;
+        }
         if (description.kind === Kinds.UINT16) {
             return memory.readU8Trusted(address) |
                    (memory.readU8Trusted(address + 1) << 8);
+        }
+        if (description.kind === Kinds.INT16) {
+            var int16 = memory.readU8Trusted(address) |
+                        (memory.readU8Trusted(address + 1) << 8);
+            return int16 & 32768 ? int16 - 65536 : int16;
         }
         if (description.kind === Kinds.UINT32) return memory.readU32Trusted(address) >>> 0;
         if (description.kind === Kinds.INT32) return memory.readU32Trusted(address) | 0;
@@ -251,8 +266,11 @@
         var memory = this.runtime.linearHeap.memory;
         var address = this.dataAddress(view, index);
         value = Number(value);
-        if (description.kind === Kinds.UINT8) memory.writeU8Trusted(address, value & 255);
-        else if (description.kind === Kinds.UINT16) {
+        if (description.kind === Kinds.UINT8 ||
+            description.kind === Kinds.INT8) {
+            memory.writeU8Trusted(address, value & 255);
+        } else if (description.kind === Kinds.UINT16 ||
+                   description.kind === Kinds.INT16) {
             memory.writeU8Trusted(address, value & 255);
             memory.writeU8Trusted(address + 1, (value >>> 8) & 255);
         } else if (description.kind === Kinds.UINT32 ||

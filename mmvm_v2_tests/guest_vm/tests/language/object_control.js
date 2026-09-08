@@ -79,3 +79,18 @@ assertEqual(membershipChild instanceof MembershipBase, true,
             "instanceof follows prototype chain");
 assertEqual({} instanceof MembershipBase, false,
             "instanceof rejects unrelated object");
+
+var labelledTotal = 0;
+outerLoop: for (var labelledOuter = 0; labelledOuter < 4; labelledOuter++) {
+    for (var labelledInner = 0; labelledInner < 4; labelledInner++) {
+        if (labelledInner === 1) continue outerLoop;
+        labelledTotal++;
+    }
+}
+assertEqual(labelledTotal, 4, "labelled continue targets its loop");
+labelledBlock: {
+    labelledTotal = 9;
+    break labelledBlock;
+    labelledTotal = 100;
+}
+assertEqual(labelledTotal, 9, "labelled break leaves its statement");

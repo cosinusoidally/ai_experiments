@@ -11,6 +11,7 @@ var guestRunnerNative = false;
 var guestRunnerSnapshot = null;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
+var guestRunnerProfileDuration = 0;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -63,6 +64,18 @@ for (var guestRunnerOptionIndex = 0;
                "--skip-snapshot-hash") {
         guestRunnerSkipSnapshotHash = true;
         guestRunnerNative = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--vm-profile-duration") {
+        guestRunnerOptionIndex++;
+        if (guestRunnerOptionIndex >= guestRunnerArguments.length) {
+            throw new Error("--vm-profile-duration requires milliseconds");
+        }
+        guestRunnerProfileDuration =
+            Number(guestRunnerArguments[guestRunnerOptionIndex]);
+        if (!(guestRunnerProfileDuration > 0)) {
+            throw new Error("--vm-profile-duration must be positive");
+        }
+        guestRunnerProfile = true;
     } else {
         guestRunnerProgramArguments.push(guestRunnerArguments[guestRunnerOptionIndex]);
     }
@@ -73,6 +86,7 @@ if (!guestRunnerArguments.length) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
                      "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
+                     "[--vm-profile-duration milliseconds] " +
                      "[--vm-native] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] program.js";
     if (typeof print === "function") print(guestUsage);
@@ -144,9 +158,13 @@ try {
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
     var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
+    var guestRunnerProfileStarted = new Date().getTime();
+    var guestRunnerStoppedForProfile = false;
+    var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
+        1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
     while (true) {
         var guestExecutionResult = guestExecution.resume(
-            guestProgramVM.runtime.synchronousExecutionBudget());
+            guestRunnerResumeBudget);
         if (guestExecutionResult.status === "budget") {
             /* The command-line embedder grants another cooperative time slice. */
         } else if (guestExecutionResult.status === "hostCall") {
@@ -160,8 +178,21 @@ try {
             throw new Error("unknown guest execution status: " +
                             guestExecutionResult.status);
         }
+        if (guestRunnerProfileDuration > 0 &&
+            new Date().getTime() - guestRunnerProfileStarted >=
+                guestRunnerProfileDuration) {
+            guestRunnerStoppedForProfile = true;
+            break;
+        }
     }
-    if (!guestNodeEnvironment.exiting) {
+    if (guestRunnerStoppedForProfile) {
+        if (typeof print === "function") {
+            print("guest runner: stopped at an instruction-budget boundary " +
+                  "after " + guestRunnerProfileDuration + " ms");
+        } else console.log(
+            "guest runner: stopped at an instruction-budget boundary after " +
+            guestRunnerProfileDuration + " ms");
+    } else if (!guestNodeEnvironment.exiting) {
         guestNodeEnvironment.run();
     }
     if (guestRunnerIsNode) {

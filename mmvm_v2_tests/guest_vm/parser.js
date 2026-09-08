@@ -14,6 +14,7 @@
         this.finallySerial = 0;
         this.compactLiterals = !!options && options.compactLiterals === true;
         this.current = this.tokenizer.next(true);
+        this.lookahead = null;
         this.spareToken = {};
     }
 
@@ -30,9 +31,21 @@
 
     Parser.prototype.advance = function (allowRegexp) {
         var previous = this.current;
-        this.current = this.tokenizer.next(!!allowRegexp, this.spareToken);
+        if (this.lookahead) {
+            this.current = this.lookahead;
+            this.lookahead = null;
+        } else {
+            this.current = this.tokenizer.next(!!allowRegexp, this.spareToken);
+        }
         this.spareToken = previous;
         return previous;
+    };
+
+    Parser.prototype.peek = function (allowRegexp) {
+        if (!this.lookahead) {
+            this.lookahead = this.tokenizer.next(!!allowRegexp, {});
+        }
+        return this.lookahead;
     };
 
     Parser.prototype.isPunctuator = function (value) {
@@ -90,6 +103,14 @@
         if (this.isKeyword("throw")) return this.parseThrowStatement();
         if (this.isKeyword("try")) return this.parseTryStatement();
         if (this.isKeyword("switch")) return this.parseSwitchStatement();
+        if (this.current.kind === "identifier" &&
+            this.peek(false).kind === "punctuator" &&
+            this.lookahead.value === ":") {
+            var label = this.advance(false).value;
+            this.expectPunctuator(":", true);
+            return {type: "LabeledStatement", label: label,
+                    body: this.parseStatement()};
+        }
         var expression = this.parseExpression();
         if (this.isPunctuator(";")) this.advance(true);
         return {type: "ExpressionStatement", expression: expression};
@@ -191,20 +212,22 @@
 
     Parser.prototype.parseBreakStatement = function () {
         this.advance(false);
+        var label = null;
         if (this.current.kind === "identifier" && !this.current.lineBefore) {
-            this.error("labelled break is not implemented");
+            label = this.advance(false).value;
         }
         if (this.isPunctuator(";")) this.advance(true);
-        return {type: "BreakStatement"};
+        return {type: "BreakStatement", label: label};
     };
 
     Parser.prototype.parseContinueStatement = function () {
         this.advance(false);
+        var label = null;
         if (this.current.kind === "identifier" && !this.current.lineBefore) {
-            this.error("labelled continue is not implemented");
+            label = this.advance(false).value;
         }
         if (this.isPunctuator(";")) this.advance(true);
-        return {type: "ContinueStatement"};
+        return {type: "ContinueStatement", label: label};
     };
 
     Parser.prototype.parseDoWhileStatement = function () {

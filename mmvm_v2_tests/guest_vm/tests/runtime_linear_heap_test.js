@@ -3,8 +3,8 @@
         /* This remains a deliberately small, fixed-capacity heap.  Do not tie
          * the isolation test to the exact byte footprint of the standard
          * library installed before the test's own allocations. */
-        var first = new VM.JSRuntime({heapBytes: 16384});
-        var second = new VM.JSRuntime({heapBytes: 16384});
+        var first = new VM.JSRuntime({heapBytes: 32768});
+        var second = new VM.JSRuntime({heapBytes: 32768});
         try {
             var firstHeap = first.runtime.ensureLinearHeap();
             var secondHeap = second.runtime.ensureLinearHeap();

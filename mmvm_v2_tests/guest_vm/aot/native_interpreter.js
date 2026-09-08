@@ -130,6 +130,16 @@
         var BUFFER_VIEW_LENGTH = 24;
         var BUFFER_VIEW_KIND = 36;
         var BUFFER_VIEW_RECORD_BYTES = 40;
+        var BUFFER_KIND_NATIVE = 0;
+        var BUFFER_KIND_ARRAY_BUFFER = 1;
+        var BUFFER_KIND_UINT8 = 2;
+        var BUFFER_KIND_UINT16 = 3;
+        var BUFFER_KIND_UINT32 = 4;
+        var BUFFER_KIND_INT32 = 5;
+        var BUFFER_KIND_FLOAT32 = 6;
+        var BUFFER_KIND_FLOAT64 = 7;
+        var BUFFER_KIND_INT8 = 8;
+        var BUFFER_KIND_INT16 = 9;
         var BUFFER_BACKING_POINTER = 16;
         var BUFFER_BACKING_LENGTH = 20;
         var BUFFER_BACKING_METADATA = 24;
@@ -545,8 +555,8 @@
                     if (arrayGetObjectType === HEAP_TYPE_BUFFER_VIEW) {
                         var arrayGetViewKind = bufferViewKind(
                             heapBase, arrayGetObject);
-                        if (arrayGetViewKind !== 1) {
-                            if (arrayGetViewKind !== 6) {
+                        if (arrayGetViewKind !== BUFFER_KIND_ARRAY_BUFFER) {
+                            if (arrayGetViewKind !== BUFFER_KIND_FLOAT32) {
                                 arrayGetSupported = 2;
                             } else arrayGetSupported = 0;
                         } else arrayGetSupported = 0;
@@ -761,30 +771,44 @@
                             bufferViewOffset(heapBase, arrayGetObject);
                         var indexedViewValue = 0;
                         var indexedByteView = 0;
-                        if (indexedViewKind === 0) indexedByteView = 1;
-                        if (indexedViewKind === 2) indexedByteView = 1;
+                        if (indexedViewKind === BUFFER_KIND_NATIVE) indexedByteView = 1;
+                        if (indexedViewKind === BUFFER_KIND_UINT8) indexedByteView = 1;
+                        if (indexedViewKind === BUFFER_KIND_INT8) indexedByteView = 1;
                         if (indexedByteView === 1) {
                             indexedViewValue = loadRaw8(
                                 indexedViewAddress + arrayGetIndex);
-                        } else if (indexedViewKind === 3) {
+                            if (indexedViewKind === BUFFER_KIND_INT8) {
+                                if ((indexedViewValue & 128) !== 0) {
+                                    indexedViewValue = indexedViewValue - 256;
+                                }
+                            }
+                        } else if (indexedViewKind === BUFFER_KIND_UINT16) {
                             indexedViewAddress = indexedViewAddress +
                                 arrayGetIndex * 2;
                             indexedViewValue = loadRaw8(indexedViewAddress) |
                                 (loadRaw8(indexedViewAddress + 1) << 8);
-                        } else if (indexedViewKind === 4) {
+                        } else if (indexedViewKind === BUFFER_KIND_INT16) {
+                            indexedViewAddress = indexedViewAddress +
+                                arrayGetIndex * 2;
+                            indexedViewValue = loadRaw8(indexedViewAddress) |
+                                (loadRaw8(indexedViewAddress + 1) << 8);
+                            if ((indexedViewValue & 32768) !== 0) {
+                                indexedViewValue = indexedViewValue - 65536;
+                            }
+                        } else if (indexedViewKind === BUFFER_KIND_UINT32) {
                             indexedViewValue = loadRaw32(indexedViewAddress +
                                 arrayGetIndex * 4);
-                        } else if (indexedViewKind === 5) {
+                        } else if (indexedViewKind === BUFFER_KIND_INT32) {
                             indexedViewValue = loadRaw32(indexedViewAddress +
                                 arrayGetIndex * 4);
                         }
-                        if (indexedViewKind === 7) {
+                        if (indexedViewKind === BUFFER_KIND_FLOAT64) {
                             store32(arrayGetTarget, VALUE_TAG_DOUBLE);
                             storeF64(arrayGetTarget + VALUE_CELL_LOW,
                                 loadF64(indexedViewAddress + arrayGetIndex * 8));
                         } else {
                             var indexedViewStored = 0;
-                            if (indexedViewKind === 4) {
+                            if (indexedViewKind === BUFFER_KIND_UINT32) {
                                 if (indexedViewValue < 0) {
                                     var indexedUnsignedMantissa =
                                         indexedViewValue & IEEE754_ABSOLUTE_MASK;
@@ -879,8 +903,8 @@
                     if (arraySetObjectType === HEAP_TYPE_BUFFER_VIEW) {
                         var arraySetViewKind = bufferViewKind(
                             heapBase, arraySetObject);
-                        if (arraySetViewKind !== 1) {
-                            if (arraySetViewKind !== 6) {
+                        if (arraySetViewKind !== BUFFER_KIND_ARRAY_BUFFER) {
+                            if (arraySetViewKind !== BUFFER_KIND_FLOAT32) {
                                 arraySetSupported = 2;
                             } else arraySetSupported = 0;
                         } else arraySetSupported = 0;
@@ -1018,24 +1042,31 @@
                         var indexedSetAddress = indexedSetBufferPointer +
                             bufferViewOffset(heapBase, arraySetObject);
                         var indexedSetByteView = 0;
-                        if (indexedSetViewKind === 0) indexedSetByteView = 1;
-                        if (indexedSetViewKind === 2) indexedSetByteView = 1;
+                        if (indexedSetViewKind === BUFFER_KIND_NATIVE) indexedSetByteView = 1;
+                        if (indexedSetViewKind === BUFFER_KIND_UINT8) indexedSetByteView = 1;
+                        if (indexedSetViewKind === BUFFER_KIND_INT8) indexedSetByteView = 1;
                         if (indexedSetByteView === 1) {
                             storeRaw8(indexedSetAddress + arraySetIndex,
                                       indexedSetValue);
-                        } else if (indexedSetViewKind === 3) {
+                        } else if (indexedSetViewKind === BUFFER_KIND_UINT16) {
                             indexedSetAddress = indexedSetAddress +
                                 arraySetIndex * 2;
                             storeRaw8(indexedSetAddress, indexedSetValue);
                             storeRaw8(indexedSetAddress + 1,
                                       indexedSetValue >>> 8);
-                        } else if (indexedSetViewKind === 4) {
+                        } else if (indexedSetViewKind === BUFFER_KIND_INT16) {
+                            indexedSetAddress = indexedSetAddress +
+                                arraySetIndex * 2;
+                            storeRaw8(indexedSetAddress, indexedSetValue);
+                            storeRaw8(indexedSetAddress + 1,
+                                      indexedSetValue >>> 8);
+                        } else if (indexedSetViewKind === BUFFER_KIND_UINT32) {
                             storeRaw32(indexedSetAddress + arraySetIndex * 4,
                                        indexedSetValue);
-                        } else if (indexedSetViewKind === 5) {
+                        } else if (indexedSetViewKind === BUFFER_KIND_INT32) {
                             storeRaw32(indexedSetAddress + arraySetIndex * 4,
                                        indexedSetValue);
-                        } else if (indexedSetViewKind === 7) {
+                        } else if (indexedSetViewKind === BUFFER_KIND_FLOAT64) {
                             storeF64(indexedSetAddress + arraySetIndex * 8,
                                 loadNumberF64(arraySetSource + VALUE_CELL_LOW,
                                               indexedSetBufferTag));
@@ -6879,8 +6910,19 @@
                     var bitValid = 0;
                     if (bitLeftTag === VALUE_TAG_INT32) bitValid = 1;
                     else if (bitLeftTag === VALUE_TAG_DOUBLE) bitValid = 1;
-                    if (bitRightTag !== VALUE_TAG_INT32) {
-                        if (bitRightTag !== VALUE_TAG_DOUBLE) bitValid = 0;
+                    else if (bitLeftTag === VALUE_TAG_FALSE) bitValid = 1;
+                    else if (bitLeftTag === VALUE_TAG_TRUE) bitValid = 1;
+                    else if (bitLeftTag === VALUE_TAG_NULL) bitValid = 1;
+                    else if (bitLeftTag === VALUE_TAG_UNDEFINED) bitValid = 1;
+                    var bitRightValid = 0;
+                    if (bitRightTag === VALUE_TAG_INT32) bitRightValid = 1;
+                    else if (bitRightTag === VALUE_TAG_DOUBLE) bitRightValid = 1;
+                    else if (bitRightTag === VALUE_TAG_FALSE) bitRightValid = 1;
+                    else if (bitRightTag === VALUE_TAG_TRUE) bitRightValid = 1;
+                    else if (bitRightTag === VALUE_TAG_NULL) bitRightValid = 1;
+                    else if (bitRightTag === VALUE_TAG_UNDEFINED) bitRightValid = 1;
+                    if (bitRightValid === 0) {
+                        bitValid = 0;
                     }
                     if (bitValid === 0) {
                         store32(heapBase + state + ENGINE_EXIT_REASON,
@@ -6892,10 +6934,22 @@
                         store32(heapBase + framePC, pc);
                         return EXIT_UNSUPPORTED;
                     }
-                    var bitLeftValue = toInt32F64(loadNumberF64(
-                        bitLeft + VALUE_CELL_LOW, bitLeftTag));
-                    var bitRightValue = toInt32F64(loadNumberF64(
-                        bitRight + VALUE_CELL_LOW, bitRightTag));
+                    var bitLeftValue = 0;
+                    if (bitLeftTag === VALUE_TAG_TRUE) bitLeftValue = 1;
+                    else if (bitLeftTag === VALUE_TAG_INT32) {
+                        bitLeftValue = load32(bitLeft + VALUE_CELL_LOW);
+                    } else if (bitLeftTag === VALUE_TAG_DOUBLE) {
+                        bitLeftValue = toInt32F64(loadF64(
+                            bitLeft + VALUE_CELL_LOW));
+                    }
+                    var bitRightValue = 0;
+                    if (bitRightTag === VALUE_TAG_TRUE) bitRightValue = 1;
+                    else if (bitRightTag === VALUE_TAG_INT32) {
+                        bitRightValue = load32(bitRight + VALUE_CELL_LOW);
+                    } else if (bitRightTag === VALUE_TAG_DOUBLE) {
+                        bitRightValue = toInt32F64(loadF64(
+                            bitRight + VALUE_CELL_LOW));
+                    }
                     var bitResult = 0;
                     if (opcode === OP_BIT_AND) {
                         bitResult = bitLeftValue & bitRightValue;
@@ -6955,8 +7009,14 @@
                     var bitNotSource = heapBase + registerCells +
                         bitNotSourceIndex * VALUE_CELL_BYTES;
                     var bitNotTag = load32(bitNotSource);
-                    if (bitNotTag !== VALUE_TAG_INT32) {
-                        if (bitNotTag !== VALUE_TAG_DOUBLE) {
+                    var bitNotValid = 0;
+                    if (bitNotTag === VALUE_TAG_INT32) bitNotValid = 1;
+                    else if (bitNotTag === VALUE_TAG_DOUBLE) bitNotValid = 1;
+                    else if (bitNotTag === VALUE_TAG_FALSE) bitNotValid = 1;
+                    else if (bitNotTag === VALUE_TAG_TRUE) bitNotValid = 1;
+                    else if (bitNotTag === VALUE_TAG_NULL) bitNotValid = 1;
+                    else if (bitNotTag === VALUE_TAG_UNDEFINED) bitNotValid = 1;
+                    if (bitNotValid === 0) {
                             store32(heapBase + state + ENGINE_EXIT_REASON,
                                     EXIT_UNSUPPORTED);
                             store32(heapBase + state + ENGINE_PC, pc);
@@ -6965,14 +7025,19 @@
                                     instructions);
                             store32(heapBase + framePC, pc);
                             return EXIT_UNSUPPORTED;
-                        }
                     }
                     var bitNotTarget = heapBase + registerCells +
                         bitNotTargetIndex * VALUE_CELL_BYTES;
+                    var bitNotValue = 0;
+                    if (bitNotTag === VALUE_TAG_TRUE) bitNotValue = 1;
+                    else if (bitNotTag === VALUE_TAG_INT32) {
+                        bitNotValue = load32(bitNotSource + VALUE_CELL_LOW);
+                    } else if (bitNotTag === VALUE_TAG_DOUBLE) {
+                        bitNotValue = toInt32F64(loadF64(
+                            bitNotSource + VALUE_CELL_LOW));
+                    }
                     store32(bitNotTarget, VALUE_TAG_INT32);
-                    store32(bitNotTarget + VALUE_CELL_LOW,
-                        ~toInt32F64(loadNumberF64(
-                            bitNotSource + VALUE_CELL_LOW, bitNotTag)));
+                    store32(bitNotTarget + VALUE_CELL_LOW, ~bitNotValue);
                     store32(bitNotTarget + VALUE_CELL_HIGH, 0);
                     store32(bitNotTarget + VALUE_CELL_AUX, 0);
                     pc = pc + THREE_WORD_INSTRUCTION;

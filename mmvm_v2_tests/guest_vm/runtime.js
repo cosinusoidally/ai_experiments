@@ -32,6 +32,72 @@
         return Object.prototype.hasOwnProperty.call(object, key);
     }
 
+    function hexDigitValue(code) {
+        if (code >= 48 && code <= 57) return code - 48;
+        if (code >= 65 && code <= 70) return code - 55;
+        if (code >= 97 && code <= 102) return code - 87;
+        return -1;
+    }
+
+    function legacyUnescape(value) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            if (value.charCodeAt(index) === 37) {
+                var unicode = index + 5 < value.length &&
+                    value.charCodeAt(index + 1) === 117;
+                var digits = unicode ? 4 : 2;
+                var start = index + (unicode ? 2 : 1);
+                if (start + digits <= value.length) {
+                    var decoded = 0;
+                    var digitIndex = 0;
+                    while (digitIndex < digits) {
+                        var digit = hexDigitValue(
+                            value.charCodeAt(start + digitIndex));
+                        if (digit < 0) break;
+                        decoded = decoded * 16 + digit;
+                        digitIndex++;
+                    }
+                    if (digitIndex === digits) {
+                        result += String.fromCharCode(decoded);
+                        index = start + digits;
+                        continue;
+                    }
+                }
+            }
+            result += value.charAt(index++);
+        }
+        return result;
+    }
+
+    function hexadecimal(value, digits) {
+        var alphabet = "0123456789ABCDEF";
+        var result = "";
+        while (digits-- > 0) {
+            result = alphabet.charAt(value & 15) + result;
+            value >>>= 4;
+        }
+        return result;
+    }
+
+    function legacyEscape(value) {
+        value = String(value);
+        var result = "";
+        var safe = "@*_+-./";
+        var index = 0;
+        while (index < value.length) {
+            var code = value.charCodeAt(index++);
+            var alphaNumeric = code >= 48 && code <= 57 ||
+                code >= 65 && code <= 90 || code >= 97 && code <= 122;
+            if (alphaNumeric || safe.indexOf(String.fromCharCode(code)) >= 0) {
+                result += String.fromCharCode(code);
+            } else if (code < 256) result += "%" + hexadecimal(code, 2);
+            else result += "%u" + hexadecimal(code, 4);
+        }
+        return result;
+    }
+
     var MAX_ARRAY_CAPACITY = 67108860;
 
     function Runtime(options) {
@@ -1220,6 +1286,8 @@
                 this.globalObject.heapAddress, this.objectPrototype.heapAddress);
         }
         this.setGlobal("undefined", undefined);
+        this.setGlobal("NaN", NaN);
+        this.setGlobal("Infinity", Infinity);
         this.setGlobal("assertEqual", this.makeNativeFunction("assertEqual",
             function (receiver, args) {
                 if (args[0] !== args[1]) {
@@ -1260,6 +1328,14 @@
         this.setGlobal("isFinite", this.makeNativeFunction("isFinite",
             function (receiver, args) {
                 return isFinite(Number(args[0]));
+            }));
+        this.setGlobal("escape", this.makeNativeFunction("escape",
+            function (receiver, args) {
+                return legacyEscape(args.length ? args[0] : undefined);
+            }));
+        this.setGlobal("unescape", this.makeNativeFunction("unescape",
+            function (receiver, args) {
+                return legacyUnescape(args.length ? args[0] : undefined);
             }));
         this.stringMethods = {};
         this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
@@ -1749,6 +1825,10 @@
         this.setGlobal("Number", this.makeNativeFunction("Number",
             function (receiver, args) { return args.length ? Number(args[0]) : 0; },
             "intrinsic", NativeIntrinsics.NUMBER_CONSTRUCTOR));
+        this.setGlobal("Boolean", this.makeNativeFunction("Boolean",
+            function (receiver, args) {
+                return args.length ? runtime.truthy(args[0]) : false;
+            }));
         var arrayConstructor = this.makeNativeFunction("Array",
             function (receiver, args) {
                 var array = runtime.makeArray();
@@ -2322,7 +2402,15 @@
         this.assertOwned(callable);
         this.assertOwned(receiver);
         if (!callable || callable.guestType !== "function") {
-            throw new TypeError("value is not callable");
+            var callableKind = callable === null ? "null" : typeof callable;
+            var receiverKind = receiver && receiver.guestType ?
+                receiver.guestType : typeof receiver;
+            if (receiver && receiver.guestType === "typedArray") {
+                receiverKind += " kind " +
+                    this.heapRecords.bufferViewKind(receiver.heapAddress);
+            }
+            throw new TypeError("value is not callable (got " + callableKind +
+                                "; receiver " + receiverKind + ")");
         }
         if (callable.callMode === "host") {
             throw new Error("external host function must be serviced by the embedder");
@@ -2530,6 +2618,14 @@
         }
         value(this.globalObject);
         value(this.bufferSupport.prototype);
+        value(this.typedArraySupport.arrayBufferPrototype,
+              "typedArraySupport.arrayBufferPrototype");
+        var typedPrototypeIndex = 0;
+        while (typedPrototypeIndex < this.typedArraySupport.prototypes.length) {
+            value(this.typedArraySupport.prototypes[typedPrototypeIndex],
+                  "typedArraySupport.prototypes[" + typedPrototypeIndex + "]");
+            typedPrototypeIndex++;
+        }
         if (this.nativeInterpreter) {
             this.linearHeap.setMark(
                 this.nativeInterpreter.stringSupportAddress, generation);
@@ -2685,6 +2781,15 @@
             } else {
             this.markValue(this.globalObject, generation);
             this.markValue(this.bufferSupport.prototype, generation);
+            this.markValue(this.typedArraySupport.arrayBufferPrototype,
+                           generation);
+            var typedPrototypeIndex = 0;
+            while (typedPrototypeIndex <
+                   this.typedArraySupport.prototypes.length) {
+                this.markValue(
+                    this.typedArraySupport.prototypes[typedPrototypeIndex++],
+                    generation);
+            }
             var builtinTables = [this.stringMethods, this.arrayMethods,
                 this.objectMethods, this.functionMethods, this.numberMethods,
                 this.regexpMethods];

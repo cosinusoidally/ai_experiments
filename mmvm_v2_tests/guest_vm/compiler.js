@@ -12,6 +12,7 @@
         this.registerCount = 0;
         this.breakTargets = [];
         this.continueTargets = [];
+        this.labelTargets = [];
         this.finallyBlocks = [];
         this.constantRegisters = [];
         this.registerHints = [];
@@ -200,6 +201,19 @@
             }
             return;
         }
+        if (statement.type === "LabeledStatement") {
+            var labelledTarget = {
+                name: statement.label,
+                breaks: [],
+                iteration: labelledIteration(statement.body),
+                continueTarget: null
+            };
+            this.labelTargets.push(labelledTarget);
+            this.compileStatement(statement.body);
+            this.labelTargets.pop();
+            patchBreaks(this, labelledTarget.breaks, this.code.length);
+            return;
+        }
         if (statement.type === "VariableStatement") {
             index = 0;
             while (index < statement.declarations.length) {
@@ -250,6 +264,7 @@
             var whileBreaks = [];
             this.breakTargets.push(whileBreaks);
             this.continueTargets.push(whileStart);
+            bindLabelContinues(this, statement, whileStart);
             this.compileStatement(statement.body);
             this.continueTargets.pop();
             this.breakTargets.pop();
@@ -276,6 +291,7 @@
             var forContinues = [];
             this.breakTargets.push(forBreaks);
             this.continueTargets.push(forContinues);
+            bindLabelContinues(this, statement, forContinues);
             this.compileStatement(statement.body);
             this.continueTargets.pop();
             this.breakTargets.pop();
@@ -292,6 +308,7 @@
             var doContinues = [];
             this.breakTargets.push(doBreaks);
             this.continueTargets.push(doContinues);
+            bindLabelContinues(this, statement, doContinues);
             this.compileStatement(statement.body);
             this.continueTargets.pop();
             this.breakTargets.pop();
@@ -333,6 +350,7 @@
             var forInContinues = [];
             this.breakTargets.push(forInBreaks);
             this.continueTargets.push(forInContinues);
+            bindLabelContinues(this, statement, forInContinues);
             this.compileStatement(statement.body);
             this.continueTargets.pop();
             this.breakTargets.pop();
@@ -345,13 +363,30 @@
             return;
         }
         if (statement.type === "BreakStatement") {
+            if (statement.label !== null) {
+                var labelledBreak = findLabel(this, statement.label);
+                labelledBreak.breaks.push(this.emit(op.JUMP, 0));
+                return;
+            }
             if (!this.breakTargets.length) throw new SyntaxError("break outside loop");
             this.breakTargets[this.breakTargets.length - 1].push(this.emit(op.JUMP, 0));
             return;
         }
         if (statement.type === "ContinueStatement") {
-            if (!this.continueTargets.length) throw new SyntaxError("continue outside loop");
-            var continueTarget = this.continueTargets[this.continueTargets.length - 1];
+            var continueTarget;
+            if (statement.label !== null) {
+                var labelledContinue = findLabel(this, statement.label);
+                if (labelledContinue.continueTarget === null) {
+                    throw new SyntaxError("continue label is not an iteration statement");
+                }
+                continueTarget = labelledContinue.continueTarget;
+            } else {
+                if (!this.continueTargets.length) {
+                    throw new SyntaxError("continue outside loop");
+                }
+                continueTarget = this.continueTargets[
+                    this.continueTargets.length - 1];
+            }
             if (typeof continueTarget === "number") this.emit(op.JUMP, continueTarget);
             else continueTarget.push(this.emit(op.JUMP, 0));
             return;
@@ -915,6 +950,38 @@
         }
     }
 
+    function labelledIteration(statement) {
+        while (statement && statement.type === "LabeledStatement") {
+            statement = statement.body;
+        }
+        if (!statement) return null;
+        return statement.type === "WhileStatement" ||
+               statement.type === "ForStatement" ||
+               statement.type === "DoWhileStatement" ||
+               statement.type === "ForInStatement" ? statement : null;
+    }
+
+    function bindLabelContinues(compiler, statement, target) {
+        var index = compiler.labelTargets.length - 1;
+        while (index >= 0) {
+            if (compiler.labelTargets[index].iteration === statement) {
+                compiler.labelTargets[index].continueTarget = target;
+            }
+            index--;
+        }
+    }
+
+    function findLabel(compiler, name) {
+        var index = compiler.labelTargets.length - 1;
+        while (index >= 0) {
+            if (compiler.labelTargets[index].name === name) {
+                return compiler.labelTargets[index];
+            }
+            index--;
+        }
+        throw new SyntaxError("unknown statement label " + name);
+    }
+
     function collectLocals(body, functionName) {
         var names = {};
         var result = [];
@@ -934,6 +1001,8 @@
                 add(statement.name);
             } else if (statement.type === "BlockStatement") {
                 for (index = 0; index < statement.body.length; index++) visit(statement.body[index]);
+            } else if (statement.type === "LabeledStatement") {
+                visit(statement.body);
             } else if (statement.type === "IfStatement") {
                 visit(statement.consequent);
                 if (statement.alternate) visit(statement.alternate);
@@ -1146,6 +1215,8 @@
                 result.push(statement);
             } else if (statement.type === "BlockStatement") {
                 collectFunctionDeclarations(statement.body, result);
+            } else if (statement.type === "LabeledStatement") {
+                collectFunctionDeclarations([statement.body], result);
             } else if (statement.type === "IfStatement") {
                 collectFunctionDeclarations([statement.consequent], result);
                 if (statement.alternate) {
