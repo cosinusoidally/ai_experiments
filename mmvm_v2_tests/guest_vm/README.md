@@ -165,12 +165,13 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   guest_runner.js demo8_runner.js demo8.js --size 320x240 --fps 20
 ```
 
-The guest `load()` binding is available on both supported hosts and evaluates
-the second file in the same guest global environment. Each loaded source has a
-separate `JSContext` execution slot under the shared `JSRuntime`; this permits
-nested evaluation without moving guest objects onto the host heap. Demo8 still
-requires MMVM for its raw native facilities. The demo retains its normal
-resolution, FPS, menu, and rasterizer-selection options.
+The transitional guest `load()` binding is available on both supported hosts
+and evaluates the second file in the same guest global environment. Each
+loaded source has a separate `JSContext` execution slot under the shared
+`JSRuntime`; this permits nested evaluation without moving guest objects onto
+the host heap. Demo8 still requires MMVM for its raw native facilities. The
+demo retains its normal resolution, FPS, menu, and rasterizer-selection
+options.
 
 The covered progression is demo1's bitmap framebuffer UI; demo2's software 3D
 renderer; demo3's full-frame blit; demo4's procedural normal mapping; demo5's

@@ -130,6 +130,19 @@
         setHandlerNameConstant: "HANDLER_NAME_CONSTANT",
         setHandlerReserved: "HANDLER_RESERVED",
         setVectorCapacity: "VECTOR_CAPACITY",
+        setBytecodeLength: "BYTECODE_LENGTH",
+        setProgramBytecode: "PROGRAM_BYTECODE",
+        setProgramConstants: "PROGRAM_CONSTANTS",
+        setProgramConstantRegisters: "PROGRAM_CONSTANT_REGISTERS",
+        setProgramBindingRegisters: "PROGRAM_BINDING_REGISTERS",
+        setProgramParameterSlots: "PROGRAM_PARAMETER_SLOTS",
+        setProgramRegisterCount: "PROGRAM_REGISTER_COUNT",
+        setProgramArgumentsSlot: "PROGRAM_ARGUMENTS_SLOT",
+        setProgramThisSlot: "PROGRAM_THIS_SLOT",
+        setProgramFunctionNameSlot: "PROGRAM_FUNCTION_NAME_SLOT",
+        setProgramMetadata: "PROGRAM_METADATA",
+        setProgramFlags: "PROGRAM_FLAGS",
+        setProgramBindingCount: "PROGRAM_BINDING_COUNT",
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 

@@ -185,6 +185,7 @@
         this.jsonSupport = new JSONSupport(this);
         this.nativeInterpreter = options.nativeInterpreter ?
             new NativeInterpreter(this) : null;
+        this.installProgramBuilder();
         if (options.rawFFI) this.installRawFFI();
     }
 
@@ -1954,6 +1955,127 @@
                 quit(args.length ? Number(args[0]) : 0);
                 return undefined;
             }));
+    };
+
+    /* Private ABI used by the self-hosted compiler to turn its ordinary guest
+     * descriptor objects into authoritative heap bytecode.  The native
+     * interpreter will implement these IDs without entering host JavaScript.
+     * The callbacks below define the reference-backend semantics. */
+    Runtime.prototype.installProgramBuilder = function () {
+        var runtime = this;
+        function integer(value, name) {
+            value = Number(value);
+            if (value !== Math.floor(value)) {
+                throw new TypeError(name + " must be an integer");
+            }
+            return value;
+        }
+        function programFor(callable) {
+            if (!callable || callable.guestType !== "bytecodeFunction") {
+                throw new TypeError("program handle is not callable bytecode");
+            }
+            runtime.assertOwned(callable);
+            return callable.program;
+        }
+        this.setGlobal("__guestVMProgramCreate", this.makeNativeFunction(
+            "__guestVMProgramCreate", function (receiver, args) {
+                var codeLength = integer(args[0], "code length");
+                var constantLength = integer(args[1], "constant length");
+                var bindingLength = integer(args[2], "binding-register length");
+                var parameterLength = integer(args[3], "parameter length");
+                if (codeLength < 0 || constantLength < 0 || bindingLength < 0 ||
+                    parameterLength < 0) throw new RangeError("negative program length");
+                var program = {
+                    code: new Array(codeLength),
+                    constants: new Array(constantLength),
+                    constantRegisters: new Array(constantLength),
+                    bindingRegisters: bindingLength ? new Array(bindingLength) : null,
+                    parameterSlots: new Array(parameterLength),
+                    registerCount: integer(args[4], "register count"),
+                    argumentsSlot: integer(args[5], "arguments slot"),
+                    thisSlot: integer(args[6], "this slot"),
+                    functionNameSlot: integer(args[7], "function-name slot"),
+                    usesArguments: !!args[8],
+                    bindings: new Array(integer(args[9], "binding count")),
+                    globalDeclarations: []
+                };
+                var index = 0;
+                while (index < constantLength) {
+                    program.constants[index] = undefined;
+                    program.constantRegisters[index] = -1;
+                    index++;
+                }
+                index = 0;
+                while (program.bindingRegisters &&
+                       index < program.bindingRegisters.length) {
+                    program.bindingRegisters[index++] = -1;
+                }
+                index = 0;
+                while (index < parameterLength) program.parameterSlots[index++] = -1;
+                runtime.registerProgram(program);
+                return runtime.makeGuestFunction(program, null, null);
+            }, "intrinsic", NativeIntrinsics.PROGRAM_CREATE));
+        this.setGlobal("__guestVMProgramSetCode", this.makeNativeFunction(
+            "__guestVMProgramSetCode", function (receiver, args) {
+                var program = programFor(args[0]);
+                var index = integer(args[1], "code index");
+                var value = integer(args[2], "bytecode word");
+                if (index < 0 || index >= program.code.length) {
+                    throw new RangeError("bytecode index is out of bounds");
+                }
+                program.code[index] = value;
+                runtime.heapRecords.setBytecodeWord(
+                    program.heapBytecodeAddress, index, value);
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_CODE));
+        this.setGlobal("__guestVMProgramSetConstant", this.makeNativeFunction(
+            "__guestVMProgramSetConstant", function (receiver, args) {
+                var program = programFor(args[0]);
+                var index = integer(args[1], "constant index");
+                var value = args[2];
+                if (index < 0 || index >= program.constants.length) {
+                    throw new RangeError("constant index is out of bounds");
+                }
+                if (value && value.guestType === "bytecodeFunction") {
+                    value = value.program;
+                    runtime.valueCells.writeReferenceAt(
+                        runtime.heapRecords.vectorCell(
+                            program.heapConstantsAddress, index),
+                        runtime.programAddress(value));
+                } else {
+                    runtime.writeConstantHeapValue(
+                        runtime.heapRecords.vectorCell(
+                            program.heapConstantsAddress, index), value);
+                }
+                program.constants[index] = value;
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_CONSTANT));
+        this.setGlobal("__guestVMProgramSetVector", this.makeNativeFunction(
+            "__guestVMProgramSetVector", function (receiver, args) {
+                var program = programFor(args[0]);
+                var kind = integer(args[1], "program vector kind");
+                var index = integer(args[2], "program vector index");
+                var value = integer(args[3], "program vector value");
+                var values;
+                var address;
+                if (kind === 0) {
+                    values = program.constantRegisters;
+                    address = program.heapConstantRegistersAddress;
+                } else if (kind === 1) {
+                    values = program.bindingRegisters;
+                    address = program.heapBindingRegistersAddress;
+                } else if (kind === 2) {
+                    values = program.parameterSlots;
+                    address = program.heapParameterSlotsAddress;
+                } else throw new RangeError("unknown program vector kind");
+                if (!values || index < 0 || index >= values.length) {
+                    throw new RangeError("program vector index is out of bounds");
+                }
+                values[index] = value;
+                runtime.writeHeapValue(
+                    runtime.heapRecords.vectorCell(address, index), value);
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_VECTOR));
     };
 
     Runtime.prototype.getGlobal = function (context, name) {

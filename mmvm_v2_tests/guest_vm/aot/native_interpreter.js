@@ -65,6 +65,8 @@
         var HEAP_TYPE_VALUE_VECTOR = 13;
         var HEAP_TYPE_FRAME = 14;
         var HEAP_TYPE_HANDLER = 18;
+        var HEAP_TYPE_PROGRAM = 15;
+        var HEAP_TYPE_BYTECODE = 16;
         var STRING_LENGTH = 16;
         var STRING_HASH = 20;
         var STRING_CHARS = 24;
@@ -111,8 +113,12 @@
         var PROGRAM_FUNCTION_NAME_SLOT = 48;
         var PROGRAM_FLAGS = 56;
         var PROGRAM_BINDING_COUNT = 60;
+        var PROGRAM_METADATA = 52;
         var PROGRAM_FLAG_USES_ARGUMENTS = 1;
+        var PROGRAM_RECORD_BYTES = 64;
+        var BYTECODE_LENGTH = 16;
         var BYTECODE_WORDS = 24;
+        var BYTECODE_FIXED_BYTES = 24;
         var CONTEXT_GLOBAL = 16;
         var OBJECT_PROPERTY_HEAD = 20;
         var OBJECT_PROTOTYPE = 16;
@@ -151,6 +157,7 @@
         var VECTOR_LENGTH = 16;
         var VECTOR_CAPACITY = 20;
         var VECTOR_CELLS = 24;
+        var VECTOR_FIXED_BYTES = 24;
         var NATIVE_FUNCTION_METADATA = 28;
         var FUNCTION_CLOSURE = 24;
         var FUNCTION_METADATA = 28;
@@ -314,6 +321,10 @@
         var INTRINSIC_ARRAY_CONSTRUCTOR = 46;
         var INTRINSIC_STRING_SUBSTRING = 47;
         var INTRINSIC_STRING_FROM_CHAR_CODE = 48;
+        var INTRINSIC_PROGRAM_CREATE = 49;
+        var INTRINSIC_PROGRAM_SET_CODE = 50;
+        var INTRINSIC_PROGRAM_SET_CONSTANT = 51;
+        var INTRINSIC_PROGRAM_SET_VECTOR = 52;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -2908,8 +2919,7 @@
                     intrinsicId = load32(
                         heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
                     if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId >
-                             INTRINSIC_STRING_FROM_CHAR_CODE) {
+                    else if (intrinsicId > INTRINSIC_PROGRAM_SET_VECTOR) {
                         intrinsicCallValid = 0;
                     }
                 }
@@ -2991,6 +3001,15 @@
                     requiredIntrinsicArguments = 2;
                 } else if (intrinsicId === INTRINSIC_POKE32) {
                     requiredIntrinsicArguments = 2;
+                } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
+                    requiredIntrinsicArguments = 10;
+                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
+                    requiredIntrinsicArguments = 3;
+                } else if (intrinsicId ===
+                           INTRINSIC_PROGRAM_SET_CONSTANT) {
+                    requiredIntrinsicArguments = 3;
+                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
+                    requiredIntrinsicArguments = 4;
                 } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
                     requiredIntrinsicArguments = 2;
                 } else if (intrinsicId >= INTRINSIC_BUFFER_WRITE_U16_LE) {

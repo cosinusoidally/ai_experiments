@@ -159,6 +159,23 @@ with internal platform services. At minimum these include:
 - allocation and release of runtime heap regions;
 - the controlled libc/FFI surface required by existing MMVM examples.
 
+`load()` is not an embedding callback on the MMVM backend.  It is a guest VM
+operation composed from those facilities: the guest opens and reads the file
+through its direct FFI service, tokenizes and compiles the resulting source with
+the self-hosted front end, verifies the produced bytecode, and enters it in the
+requesting context.  None of those stages may produce a `hostCall` yield.  In
+particular, an embedder-side file read followed by `JSContext.compile()` is only
+a bootstrap implementation and is not the implementation used by the finished
+MMVM runner.
+
+The Test262 runner uses one `JSRuntime` for a complete invocation and creates a
+fresh `JSContext` for each test variant.  This shares runtime-owned immutable
+infrastructure and native code without sharing test globals.  After recording a
+result the runner destroys the context, removing its global object and active
+frame roots; ordinary automatic heap-pressure collection then reclaims dead
+test, parser, AST, compiler, and bytecode records in batches.  A collection is
+not forced after every test.
+
 An internal service may suspend one guest context and schedule another without
 leaving the engine. Completion is written into the suspended frame's destination
 cell before it is made runnable again. Node maps the same request/completion

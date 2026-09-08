@@ -747,6 +747,13 @@
         return word >= 2147483648 ? word - 4294967296 : word;
     };
 
+    Records.prototype.setBytecodeWord = function (bytecode, index, value) {
+        if (index < 0 || index >= this.bytecodeLength(bytecode) ||
+            index !== Math.floor(index)) throw new RangeError("invalid bytecode index");
+        this.heap.writeTrustedFieldU32(bytecode,
+            BYTECODE_WORDS + index * 4, value >>> 0, Heap.Types.BYTECODE);
+    };
+
     Records.prototype.bytecodeWordsAddress = function (bytecode) {
         return this.heap.trustedPayloadAddress(
             bytecode, BYTECODE_WORDS, 0, Heap.Types.BYTECODE);
