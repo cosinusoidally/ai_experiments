@@ -49,16 +49,33 @@
         }
         var compiled = [];
         var index = 0;
+        var aggregateTimings = options.timings || null;
+        if (aggregateTimings) {
+            aggregateTimings.source = 0;
+            aggregateTimings.parse = 0;
+            aggregateTimings.collect = 0;
+            aggregateTimings.lower = 0;
+        }
         while (index < functions.length) {
             var memberOptions = {};
             var optionName;
             for (optionName in options) {
-                if (Object.prototype.hasOwnProperty.call(options, optionName)) {
+                if (optionName !== "source" && optionName !== "timings" &&
+                    Object.prototype.hasOwnProperty.call(options, optionName)) {
                     memberOptions[optionName] = options[optionName];
                 }
             }
+            var memberTimings = aggregateTimings ? {} : null;
+            if (memberTimings) memberOptions.timings = memberTimings;
             memberOptions.kernelFunctions = signatures;
+            if (index !== 0) memberOptions.registerPreferences = [];
             compiled.push(this.compile(functions[index++].fn, memberOptions));
+            if (aggregateTimings) {
+                aggregateTimings.source += memberTimings.source || 0;
+                aggregateTimings.parse += memberTimings.parse || 0;
+                aggregateTimings.collect += memberTimings.collect || 0;
+                aggregateTimings.lower += memberTimings.lower || 0;
+            }
         }
         return {kernelGraph: true, entry: entry.name, functions: compiled,
                 signatures: signatures};

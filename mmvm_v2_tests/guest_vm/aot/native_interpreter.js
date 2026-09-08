@@ -3193,15 +3193,10 @@
                         receiverIndex = load32(heapBase + bytecodeWords +
                             (pc + THIRD_OPERAND) * WORD_BYTES);
                     }
-                    if (platformDateIntrinsicPointer(heapBase,
-                        enginePlatformServices(heapBase, state)) !== 0) {
-                        intrinsicHandled = callNativeI32(
-                            platformDateIntrinsicPointer(heapBase,
-                                enginePlatformServices(heapBase, state)),
-                            heapBase, state, intrinsicTarget, registerCells,
-                            receiverIndex, intrinsicId, stringSupport,
-                            intrinsicArgumentsVector);
-                    }
+                    intrinsicHandled = dateIntrinsicKernel(
+                        heapBase, state, intrinsicTarget, registerCells,
+                        receiverIndex, intrinsicId, stringSupport,
+                        intrinsicArgumentsVector);
                     if (intrinsicHandled === 2) {
                         store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
                                 CALL_REJECT_HEAP_SPACE);
@@ -8683,7 +8678,8 @@
         var snapshotNeedsSource = runtime.nativeSnapshotWrite ||
             (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
         var kernelSource = snapshotNeedsSource ?
-            interpreterKernel.toString() : null;
+            interpreterKernel.toString() + "\n" +
+            dateIntrinsicKernel.toString() : null;
         var snapshotMetadata = null;
         if (snapshotRequested) {
             snapshotMetadata = {
@@ -8722,9 +8718,9 @@
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
                 }
             };
-            if (snapshotNeedsSource) compilerOptions.source = kernelSource;
-            this.ir = new KernelCompiler().compile(interpreterKernel,
-                                                   compilerOptions);
+            this.ir = new KernelCompiler().compileGraph(interpreterKernel, {
+                dateIntrinsicKernel: dateIntrinsicKernel
+            }, compilerOptions);
         }
         var loweringFinished = constructionStarted ?
             new Date().getTime() : 0;
@@ -8877,6 +8873,7 @@
                 this.nativeResult.pointer + " bytes=" + this.nativeResult.length;
             var allocation = this.nativeResult.registerAllocation;
             if (allocation) {
+                allocation = allocation.interpreterKernel || allocation;
                 codeLine += " registers=" +
                     "ebx:" + allocation.ebx + "," +
                     "esi:" + allocation.esi + "," +
@@ -8968,18 +8965,6 @@
             this.runtime.heapRecords.setPlatformArrayConcatPointer(
                 this.platformServicesAddress, result.pointer);
             name = "Array.concat";
-        } else if (callable.nativeIntrinsic ===
-                   NUMBER_CONSTRUCTOR_INTRINSIC_ID ||
-                   callable.nativeIntrinsic ===
-                   DATE_CONSTRUCTOR_INTRINSIC_ID ||
-                   callable.nativeIntrinsic === DATE_GET_TIME_INTRINSIC_ID) {
-            if (this.dateIntrinsicNativeResult) return false;
-            result = new X86Backend({captureAssembly: false}).compile(
-                new KernelCompiler().compile(dateIntrinsicKernel));
-            this.dateIntrinsicNativeResult = result;
-            this.runtime.heapRecords.setPlatformDateIntrinsicPointer(
-                this.platformServicesAddress, result.pointer);
-            name = "Number/Date";
         } else return false;
         if (this.runtime.profileOpcodeCounts && typeof print === "function") {
             print("native guest helper compiled: " + name + " bytes=" +
