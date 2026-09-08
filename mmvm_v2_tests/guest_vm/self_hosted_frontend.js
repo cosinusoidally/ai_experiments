@@ -9,7 +9,8 @@ var SelfHostedCompiler = require("./compiler.js");
 var selfHostedVerify = require("./verifier.js");
 
 exports.parse = function (source, filename) {
-    return new SelfHostedParser(source, filename).parseProgram();
+    return new SelfHostedParser(source, filename,
+        {compactLiterals: true}).parseProgram();
 };
 
 exports.compileAst = function (ast) {

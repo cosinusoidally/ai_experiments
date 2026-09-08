@@ -11,12 +11,17 @@
             !!options && options.captureRaw === true);
         this.allowIn = true;
         this.finallySerial = 0;
+        this.compactLiterals = !!options && options.compactLiterals === true;
         this.current = this.tokenizer.next(true);
         this.spareToken = {};
     }
 
     Parser.prototype.error = function (message) {
         this.tokenizer.error(message, this.current.line, this.current.column);
+    };
+
+    Parser.prototype.makeLiteral = function (value) {
+        return this.compactLiterals ? value : {type: "Literal", value: value};
     };
 
     Parser.prototype.advance = function (allowRegexp) {
@@ -415,7 +420,7 @@
         while (this.isPunctuator(".")) {
             this.advance(false);
             callee = {type: "MemberExpression", object: callee,
-                      property: {type: "Literal", value: this.expectIdentifier().value},
+                      property: this.makeLiteral(this.expectIdentifier().value),
                       computed: false};
         }
         var args = [];
@@ -435,8 +440,8 @@
             if (this.isPunctuator(".")) {
                 this.advance(false);
                 expression = {type: "MemberExpression", object: expression,
-                              property: {type: "Literal",
-                                         value: this.expectIdentifier().value},
+                              property: this.makeLiteral(
+                                  this.expectIdentifier().value),
                               computed: false};
             } else if (this.isPunctuator("(")) {
                 this.advance(true);
@@ -473,7 +478,7 @@
                 this.advance(false);
                 var property = this.expectIdentifier().value;
                 expression = {type: "MemberExpression", object: expression,
-                              property: {type: "Literal", value: property},
+                              property: this.makeLiteral(property),
                               computed: false};
             } else if (this.isPunctuator("[")) {
                 this.advance(true);
@@ -511,14 +516,14 @@
         }
         if (token.kind === "number" || token.kind === "string") {
             this.advance(false);
-            return {type: "Literal", value: token.value};
+            return this.makeLiteral(token.value);
         }
         if (token.kind === "keyword" &&
             (token.value === "true" || token.value === "false" ||
              token.value === "null")) {
             this.advance(false);
-            return {type: "Literal", value: token.value === "true" ? true :
-                    token.value === "false" ? false : null};
+            return this.makeLiteral(token.value === "true" ? true :
+                token.value === "false" ? false : null);
         }
         if (token.kind === "identifier") {
             this.advance(false);

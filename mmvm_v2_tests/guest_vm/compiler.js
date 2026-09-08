@@ -29,6 +29,16 @@
         }
     }
 
+    function isLiteralExpression(expression) {
+        return expression === null || typeof expression !== "object" ||
+               expression.type === "Literal";
+    }
+
+    function literalExpressionValue(expression) {
+        return expression !== null && typeof expression === "object" ?
+            expression.value : expression;
+    }
+
     Compiler.prototype.allocate = function () {
         var register = this.registerCount;
         this.registerCount++;
@@ -508,9 +518,10 @@
             var objectFuture = expression.computed ?
                 [expression.property, future] : future;
             var object = this.compileExpression(expression.object, objectFuture);
-            if (!expression.computed && expression.property.type === "Literal") {
+            if (!expression.computed && isLiteralExpression(expression.property)) {
                 return {kind: "constantProperty", object: object,
-                        key: this.constant(expression.property.value)};
+                        key: this.constant(literalExpressionValue(
+                            expression.property))};
             }
             return {kind: "property",
                     object: object,
@@ -624,7 +635,9 @@
     };
 
     Compiler.prototype.compileExpression = function (expression, future) {
-        if (expression.type === "Literal") return this.emitConstant(expression.value);
+        if (isLiteralExpression(expression)) {
+            return this.emitConstant(literalExpressionValue(expression));
+        }
         if (expression.type === "FunctionExpression") {
             var functionRegister = this.allocate();
             var functionProgram = this.compileFunction(expression);

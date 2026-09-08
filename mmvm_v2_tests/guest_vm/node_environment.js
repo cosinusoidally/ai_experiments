@@ -293,7 +293,12 @@
             }));
         this.runtime.setProperty(fs, "readFileSync", this.makeFunction("fs.readFileSync",
             function (receiver, args) {
-                return environment.guestBuffer(environment.hostFs.readFileSync(String(args[0])));
+                var data = environment.hostFs.readFileSync(String(args[0]));
+                if (args.length > 1 && args[1] !== undefined &&
+                    args[1] !== null) {
+                    return data.toString(String(args[1]));
+                }
+                return environment.guestBuffer(data);
             }));
         return fs;
     };
