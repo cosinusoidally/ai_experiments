@@ -30,6 +30,9 @@ var spliceValues = [1, 2, 3, 4];
 var spliceRemoved = spliceValues.splice(1, 2, 8, 9);
 assertEqual(spliceValues.join(","), "1,8,9,4", "Array.splice replacement");
 assertEqual(spliceRemoved.join(","), "2,3", "Array.splice removed values");
+var sortedValues = [10, 2, 5];
+sortedValues.sort(function (left, right) { return left - right; });
+assertEqual(sortedValues.join(","), "2,5,10", "Array.sort comparator");
 var regexpParts = "one, two;three".split(/[,;]\s*/);
 assertEqual(regexpParts.length, 3, "String.split regexp length");
 assertEqual(regexpParts[1], "two", "String.split regexp values");
@@ -41,6 +44,9 @@ assertEqual(captureMatch[1], "320", "String.match capture");
 assertEqual(captureMatch.index, 0, "String.match index");
 assertEqual("<&".replace(/</g, "&lt;").replace(/&/g, "&amp;"),
             "&amp;lt;&amp;", "regexp String.replace");
+assertEqual("a12b".replace(/(\d+)/, function (whole, digits) {
+    return String(Number(digits) + 1);
+}), "a13b", "String.replace callback captures");
 
 assertEqual(/^[0-9]+$/.test("65535"), true, "RegExp.test match");
 assertEqual(/^[0-9]+$/.test("65x"), false, "RegExp.test rejection");

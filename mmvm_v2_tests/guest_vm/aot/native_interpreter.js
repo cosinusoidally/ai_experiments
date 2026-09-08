@@ -543,8 +543,12 @@
                     var arrayGetObjectType = recordType(
                         heapBase, arrayGetObject);
                     if (arrayGetObjectType === HEAP_TYPE_BUFFER_VIEW) {
-                        if (bufferViewKind(heapBase, arrayGetObject) === 0) {
-                            arrayGetSupported = 2;
+                        var arrayGetViewKind = bufferViewKind(
+                            heapBase, arrayGetObject);
+                        if (arrayGetViewKind !== 1) {
+                            if (arrayGetViewKind !== 6) {
+                                arrayGetSupported = 2;
+                            } else arrayGetSupported = 0;
                         } else arrayGetSupported = 0;
                     } else if (arrayGetObjectType !== HEAP_TYPE_ARRAY) {
                         if (arrayGetObjectType === HEAP_TYPE_OBJECT) {
@@ -751,11 +755,57 @@
                             store32(heapBase + framePC, pc);
                             return EXIT_UNSUPPORTED;
                         }
-                        store32(arrayGetTarget, VALUE_TAG_INT32);
-                        store32(arrayGetTarget + VALUE_CELL_LOW, loadRaw8(
-                            indexedBufferPointer + bufferViewOffset(
-                                heapBase, arrayGetObject) + arrayGetIndex));
-                        store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
+                        var indexedViewKind = bufferViewKind(
+                            heapBase, arrayGetObject);
+                        var indexedViewAddress = indexedBufferPointer +
+                            bufferViewOffset(heapBase, arrayGetObject);
+                        var indexedViewValue = 0;
+                        var indexedByteView = 0;
+                        if (indexedViewKind === 0) indexedByteView = 1;
+                        if (indexedViewKind === 2) indexedByteView = 1;
+                        if (indexedByteView === 1) {
+                            indexedViewValue = loadRaw8(
+                                indexedViewAddress + arrayGetIndex);
+                        } else if (indexedViewKind === 3) {
+                            indexedViewAddress = indexedViewAddress +
+                                arrayGetIndex * 2;
+                            indexedViewValue = loadRaw8(indexedViewAddress) |
+                                (loadRaw8(indexedViewAddress + 1) << 8);
+                        } else if (indexedViewKind === 4) {
+                            indexedViewValue = loadRaw32(indexedViewAddress +
+                                arrayGetIndex * 4);
+                        } else if (indexedViewKind === 5) {
+                            indexedViewValue = loadRaw32(indexedViewAddress +
+                                arrayGetIndex * 4);
+                        }
+                        if (indexedViewKind === 7) {
+                            store32(arrayGetTarget, VALUE_TAG_DOUBLE);
+                            storeF64(arrayGetTarget + VALUE_CELL_LOW,
+                                loadF64(indexedViewAddress + arrayGetIndex * 8));
+                        } else {
+                            var indexedViewStored = 0;
+                            if (indexedViewKind === 4) {
+                                if (indexedViewValue < 0) {
+                                    var indexedUnsignedMantissa =
+                                        indexedViewValue & IEEE754_ABSOLUTE_MASK;
+                                    store32(arrayGetTarget, VALUE_TAG_DOUBLE);
+                                    store32(arrayGetTarget + VALUE_CELL_LOW,
+                                        indexedUnsignedMantissa <<
+                                        UINT32_MANTISSA_LOW_SHIFT);
+                                    store32(arrayGetTarget + VALUE_CELL_HIGH,
+                                        POSITIVE_2147483648_HIGH |
+                                        (indexedUnsignedMantissa >>>
+                                         UINT32_MANTISSA_HIGH_SHIFT));
+                                    indexedViewStored = 1;
+                                }
+                            }
+                            if (indexedViewStored === 0) {
+                                store32(arrayGetTarget, VALUE_TAG_INT32);
+                                store32(arrayGetTarget + VALUE_CELL_LOW,
+                                        indexedViewValue);
+                                store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
+                            }
+                        }
                         store32(arrayGetTarget + VALUE_CELL_AUX, 0);
                     }
                 } else {
@@ -827,8 +877,12 @@
                     var arraySetObjectType = recordType(
                         heapBase, arraySetObject);
                     if (arraySetObjectType === HEAP_TYPE_BUFFER_VIEW) {
-                        if (bufferViewKind(heapBase, arraySetObject) === 0) {
-                            arraySetSupported = 2;
+                        var arraySetViewKind = bufferViewKind(
+                            heapBase, arraySetObject);
+                        if (arraySetViewKind !== 1) {
+                            if (arraySetViewKind !== 6) {
+                                arraySetSupported = 2;
+                            } else arraySetSupported = 0;
                         } else arraySetSupported = 0;
                     } else if (arraySetObjectType !== HEAP_TYPE_ARRAY) {
                         if (arraySetObjectType === HEAP_TYPE_OBJECT) {
@@ -956,11 +1010,36 @@
                         return EXIT_UNSUPPORTED;
                     }
                     if (indexedSetBufferValid === 1) {
-                        storeRaw8(indexedSetBufferPointer + bufferViewOffset(
-                            heapBase, arraySetObject) + arraySetIndex,
-                            toInt32F64(loadNumberF64(
-                                arraySetSource + VALUE_CELL_LOW,
-                                indexedSetBufferTag)));
+                        var indexedSetViewKind = bufferViewKind(
+                            heapBase, arraySetObject);
+                        var indexedSetValue = toInt32F64(loadNumberF64(
+                            arraySetSource + VALUE_CELL_LOW,
+                            indexedSetBufferTag));
+                        var indexedSetAddress = indexedSetBufferPointer +
+                            bufferViewOffset(heapBase, arraySetObject);
+                        var indexedSetByteView = 0;
+                        if (indexedSetViewKind === 0) indexedSetByteView = 1;
+                        if (indexedSetViewKind === 2) indexedSetByteView = 1;
+                        if (indexedSetByteView === 1) {
+                            storeRaw8(indexedSetAddress + arraySetIndex,
+                                      indexedSetValue);
+                        } else if (indexedSetViewKind === 3) {
+                            indexedSetAddress = indexedSetAddress +
+                                arraySetIndex * 2;
+                            storeRaw8(indexedSetAddress, indexedSetValue);
+                            storeRaw8(indexedSetAddress + 1,
+                                      indexedSetValue >>> 8);
+                        } else if (indexedSetViewKind === 4) {
+                            storeRaw32(indexedSetAddress + arraySetIndex * 4,
+                                       indexedSetValue);
+                        } else if (indexedSetViewKind === 5) {
+                            storeRaw32(indexedSetAddress + arraySetIndex * 4,
+                                       indexedSetValue);
+                        } else if (indexedSetViewKind === 7) {
+                            storeF64(indexedSetAddress + arraySetIndex * 8,
+                                loadNumberF64(arraySetSource + VALUE_CELL_LOW,
+                                              indexedSetBufferTag));
+                        }
                     }
                 } else if (arraySetSupported !== 3) {
                     var dynamicPropertyValid = 1;
@@ -7132,6 +7211,13 @@
                         0, instanceValueCell);
                     var instanceValueType = recordType(
                         heapBase, instanceValue);
+                    if (instanceValueType === HEAP_TYPE_BUFFER_VIEW) {
+                        /* Typed-array constructors carry their element kind
+                         * in runtime metadata until constructor metadata is
+                         * itself represented in the heap. Preserve exact
+                         * instanceof semantics through the semantic path. */
+                        instanceValid = 0;
+                    }
                     if (instanceValueType >= HEAP_TYPE_OBJECT) {
                         if (instanceValueType <= HEAP_TYPE_BYTECODE_FUNCTION) {
                             instanceCurrent = objectPrototype(
@@ -7145,6 +7231,16 @@
                                 heapBase, instanceValue);
                         }
                     }
+                }
+                if (instanceValid === 0) {
+                    store32(heapBase + state + ENGINE_EXIT_REASON,
+                            EXIT_UNSUPPORTED);
+                    store32(heapBase + state + ENGINE_PC, pc);
+                    store32(heapBase + state + ENGINE_RESULT, opcode);
+                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                            instructions);
+                    store32(heapBase + framePC, pc);
+                    return EXIT_UNSUPPORTED;
                 }
                 while (instanceCurrent !== 0) {
                     if (instanceCurrent === instanceExpectedPrototype) {

@@ -1331,7 +1331,22 @@
                 if (search && search.guestType === "regexp") {
                     search = runtime.hostRegExp(search);
                 }
-                var replaced = replacementInput.replace(search, String(args[1]));
+                var replacement = args[1];
+                var replaced;
+                if (replacement && (replacement.guestType === "function" ||
+                                    replacement.guestType === "bytecodeFunction")) {
+                    replaced = replacementInput.replace(search, function () {
+                        var callbackArguments = [];
+                        var callbackIndex = 0;
+                        while (callbackIndex < arguments.length) {
+                            callbackArguments.push(arguments[callbackIndex++]);
+                        }
+                        return runtime.toString(runtime.invokePropertyFunction(
+                            replacement, undefined, callbackArguments));
+                    });
+                } else {
+                    replaced = replacementInput.replace(search, String(replacement));
+                }
                 return replaced;
             }, "intrinsic", NativeIntrinsics.STRING_REPLACE);
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
@@ -1361,9 +1376,19 @@
                 return runtime.arrayLength(receiver);
             }, "intrinsic", NativeIntrinsics.ARRAY_PUSH);
         this.arrayMethods.sort = this.makeNativeFunction("Array.sort",
-            function (receiver) {
+            function (receiver, args) {
                 var values = runtime.arrayToHost(receiver);
-                values.sort();
+                var comparator = args[0];
+                if (comparator !== undefined) {
+                    if (!comparator || (comparator.guestType !== "function" &&
+                                        comparator.guestType !== "bytecodeFunction")) {
+                        throw new TypeError("Array.sort comparator is not callable");
+                    }
+                    values.sort(function (left, right) {
+                        return Number(runtime.invokePropertyFunction(
+                            comparator, undefined, [left, right])) || 0;
+                    });
+                } else values.sort();
                 runtime.replaceArray(receiver, values);
                 return receiver;
             });
