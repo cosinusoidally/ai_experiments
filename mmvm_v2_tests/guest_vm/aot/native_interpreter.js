@@ -379,13 +379,7 @@
                                      constantIndex * VALUE_CELL_BYTES;
                 var constantDestination = heapBase + registerCells +
                                           constantTarget * VALUE_CELL_BYTES;
-                store32(constantDestination, load32(constantSource));
-                store32(constantDestination + VALUE_CELL_LOW,
-                        load32(constantSource + VALUE_CELL_LOW));
-                store32(constantDestination + VALUE_CELL_HIGH,
-                        load32(constantSource + VALUE_CELL_HIGH));
-                store32(constantDestination + VALUE_CELL_AUX,
-                        load32(constantSource + VALUE_CELL_AUX));
+                copyValueCell(constantDestination, constantSource);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_THIS) {
                 var getThisTargetIndex = load32(

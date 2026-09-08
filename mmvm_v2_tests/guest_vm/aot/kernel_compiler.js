@@ -443,6 +443,23 @@
             var expression = statement.expression;
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
+                expression.callee.name === "copyValueCell" &&
+                expression.arguments.length === 2) {
+                return copyValueCellBlock(expression.arguments[0],
+                                          expression.arguments[1], symbols);
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
+                (expression.callee.name === "setValueCellUndefined" ||
+                 expression.callee.name === "setValueCellInt32" ||
+                 expression.callee.name === "setValueCellReference") &&
+                (expression.arguments.length === 1 ||
+                 expression.arguments.length === 2)) {
+                return setValueCellBlock(expression.callee.name,
+                                         expression.arguments, symbols);
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
                 expression.callee.name === "beginOpcodeDispatch" &&
                 expression.arguments.length === 3) {
                 var minimum = lowerKernelExpression(
@@ -555,6 +572,66 @@
             throw new SyntaxError("kernel local is not declared: " + name);
         }
         return symbol;
+    }
+
+    function valueCellFieldAddress(expression, fieldName, symbols) {
+        var field = symbols["$" + fieldName];
+        if (!field || field.kind !== "constant") {
+            throw new SyntaxError("value-cell operation requires " + fieldName);
+        }
+        return {op: "add_i32",
+                left: lowerKernelExpression(expression, symbols),
+                right: {op: "const_i32", value: field.value, type: "i32"},
+                type: "i32"};
+    }
+
+    function copyValueCellBlock(target, source, symbols) {
+        var fields = ["VALUE_CELL_TAG", "VALUE_CELL_LOW",
+                      "VALUE_CELL_HIGH", "VALUE_CELL_AUX"];
+        var body = [];
+        var index = 0;
+        while (index < fields.length) {
+            var field = fields[index++];
+            body.push({op: "store_u32",
+                address: valueCellFieldAddress(target, field, symbols),
+                value: {op: "load_u32",
+                    address: valueCellFieldAddress(source, field, symbols),
+                    type: "i32"}});
+        }
+        return {op: "block", body: body};
+    }
+
+    function setValueCellBlock(name, argumentsList, symbols) {
+        var tagName = name === "setValueCellUndefined" ?
+            "VALUE_TAG_UNDEFINED" : name === "setValueCellInt32" ?
+            "VALUE_TAG_INT32" : "VALUE_TAG_REFERENCE";
+        var tag = symbols["$" + tagName];
+        if (!tag || tag.kind !== "constant") {
+            throw new SyntaxError("value-cell operation requires " + tagName);
+        }
+        if (name === "setValueCellUndefined" && argumentsList.length !== 1 ||
+            name !== "setValueCellUndefined" && argumentsList.length !== 2) {
+            throw new SyntaxError("invalid value-cell operation arity");
+        }
+        var payload = name === "setValueCellUndefined" ?
+            {op: "const_i32", value: 0, type: "i32"} :
+            lowerKernelExpression(argumentsList[1], symbols);
+        var target = argumentsList[0];
+        var fields = ["VALUE_CELL_TAG", "VALUE_CELL_LOW",
+                      "VALUE_CELL_HIGH", "VALUE_CELL_AUX"];
+        var values = [{op: "const_i32", value: tag.value, type: "i32"},
+                      payload,
+                      {op: "const_i32", value: 0, type: "i32"},
+                      {op: "const_i32", value: 0, type: "i32"}];
+        var body = [];
+        var index = 0;
+        while (index < fields.length) {
+            body.push({op: "store_u32",
+                address: valueCellFieldAddress(target, fields[index], symbols),
+                value: values[index]});
+            index++;
+        }
+        return {op: "block", body: body};
     }
 
     function lowerKernelExpression(node, symbols) {
