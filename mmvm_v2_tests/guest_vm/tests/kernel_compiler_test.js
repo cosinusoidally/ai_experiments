@@ -331,7 +331,9 @@
                 return graphLeaf(base, address, value * 3);
             }
             function graphLeaf(base, address, value) {
-                store32(base + address, value);
+                var VECTOR_CELLS = 24;
+                var VALUE_CELL_BYTES = 16;
+                store32(vectorCellAddress(base, address, 1), value);
                 return value;
             }
             var graphIR = compiler.compileGraph(graphEntry, {
@@ -343,13 +345,13 @@
             var graphHeap = new Heap({heapBytes: 4096});
             try {
                 if (graphJS.fn(graphHeap.memory, 0, 64, 7) !== 22 ||
-                    graphHeap.memory.readU32(64) !== 21) {
+                    graphHeap.memory.readU32(104) !== 21) {
                     throw new Error("JavaScript kernel function graph mismatch");
                 }
-                graphHeap.memory.writeU32(64, 0);
+                graphHeap.memory.writeU32(104, 0);
                 if (graphX86.fn &&
                     (graphX86.fn(graphHeap.memory.nativeAddress(0), 64, 9) !== 28 ||
-                     graphHeap.memory.readU32(64) !== 27)) {
+                     graphHeap.memory.readU32(104) !== 27)) {
                     throw new Error("i386 kernel function graph mismatch");
                 }
                 if (graphX86.assembly.indexOf(

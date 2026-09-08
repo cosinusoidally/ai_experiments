@@ -202,6 +202,18 @@
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 
+    var INDEXED_ADDRESS_ACCESSORS = {
+        vectorCellAddress: {field: "VECTOR_CELLS",
+                            stride: "VALUE_CELL_BYTES"},
+        frameRegisterCellAddress: {field: "FRAME_REGISTERS",
+                                   stride: "VALUE_CELL_BYTES"},
+        bytecodeWordAddress: {field: "BYTECODE_WORDS", strideValue: 4}
+    };
+
+    var FIELD_ADDRESS_ACCESSORS = {
+        propertyValueCellAddress: "PROPERTY_VALUE"
+    };
+
     KernelCompiler.prototype.compile = function (functionObject, options) {
         if (typeof functionObject !== "function") {
             throw new TypeError("kernel compiler requires a function");
@@ -561,6 +573,18 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
+            INDEXED_ADDRESS_ACCESSORS[node.callee.name] &&
+            node.arguments.length === 3) {
+            return indexedAddress(node.callee.name, node.arguments, symbols);
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            FIELD_ADDRESS_ACCESSORS[node.callee.name] &&
+            node.arguments.length === 2) {
+            return fieldAddress(node.callee.name, node.arguments, symbols);
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
             READ_FIELD_ACCESSORS[node.callee.name] &&
             node.arguments.length === 2) {
             return {op: "load_u32",
@@ -724,6 +748,49 @@
                 right: lowerKernelExpression(argumentsList[1], symbols),
                 type: "i32"},
             right: {op: "const_i32", value: field.value, type: "i32"},
+            type: "i32"};
+    }
+
+    function fieldAddress(name, argumentsList, symbols) {
+        var fieldName = FIELD_ADDRESS_ACCESSORS[name];
+        var field = symbols["$" + fieldName];
+        if (!field || field.kind !== "constant") {
+            throw new SyntaxError("kernel address accessor " + name +
+                                  " requires " + fieldName);
+        }
+        return {op: "add_i32",
+            left: {op: "add_i32",
+                left: lowerKernelExpression(argumentsList[0], symbols),
+                right: lowerKernelExpression(argumentsList[1], symbols),
+                type: "i32"},
+            right: {op: "const_i32", value: field.value, type: "i32"},
+            type: "i32"};
+    }
+
+    function indexedAddress(name, argumentsList, symbols) {
+        var descriptor = INDEXED_ADDRESS_ACCESSORS[name];
+        var field = symbols["$" + descriptor.field];
+        var stride = descriptor.stride ?
+            symbols["$" + descriptor.stride] : null;
+        if (!field || field.kind !== "constant" ||
+            descriptor.stride && (!stride || stride.kind !== "constant")) {
+            throw new SyntaxError("kernel indexed accessor " + name +
+                                  " requires layout constants");
+        }
+        return {op: "add_i32",
+            left: {op: "add_i32",
+                left: lowerKernelExpression(argumentsList[0], symbols),
+                right: lowerKernelExpression(argumentsList[1], symbols),
+                type: "i32"},
+            right: {op: "add_i32",
+                left: {op: "const_i32", value: field.value, type: "i32"},
+                right: {op: "mul_i32",
+                    left: lowerKernelExpression(argumentsList[2], symbols),
+                    right: {op: "const_i32",
+                        value: descriptor.strideValue || stride.value,
+                        type: "i32"},
+                    type: "i32"},
+                type: "i32"},
             type: "i32"};
     }
 
