@@ -6759,11 +6759,10 @@
                 var makeObjectTargetIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var makeObjectAddress = load32(
-                    heapBase + state + ENGINE_HEAP_BUMP);
-                var makeObjectLimit = load32(
-                    heapBase + state + ENGINE_HEAP_LIMIT);
-                if (makeObjectAddress + OBJECT_RECORD_BYTES > makeObjectLimit) {
+                if (allocateObjectKernel(heapBase, state,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             makeObjectTargetIndex),
+                    stringSupport) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
@@ -6772,28 +6771,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                store32(heapBase + makeObjectAddress + RECORD_TYPE,
-                        HEAP_TYPE_OBJECT);
-                store32(heapBase + makeObjectAddress + RECORD_SIZE,
-                        OBJECT_RECORD_BYTES);
-                store32(heapBase + makeObjectAddress + RECORD_MARK, 0);
-                store32(heapBase + makeObjectAddress + RECORD_FLAGS, 0);
-                var makeObjectPrototypeCell = heapBase + stringSupport +
-                    VECTOR_CELLS + RUNTIME_SUPPORT_OBJECT_PROTOTYPE *
-                    VALUE_CELL_BYTES;
-                store32(heapBase + makeObjectAddress + OBJECT_PROTOTYPE,
-                    load32(makeObjectPrototypeCell + VALUE_CELL_LOW));
-                store32(heapBase + makeObjectAddress + OBJECT_PROPERTY_HEAD, 0);
-                store32(heapBase + makeObjectAddress + OBJECT_EXTENSIBLE, 1);
-                store32(heapBase + makeObjectAddress + OBJECT_RESERVED, 0);
-                var makeObjectTarget = heapBase + registerCells +
-                    makeObjectTargetIndex * VALUE_CELL_BYTES;
-                store32(makeObjectTarget, VALUE_TAG_REFERENCE);
-                store32(makeObjectTarget + VALUE_CELL_LOW, makeObjectAddress);
-                store32(makeObjectTarget + VALUE_CELL_HIGH, 0);
-                store32(makeObjectTarget + VALUE_CELL_AUX, 0);
-                store32(heapBase + state + ENGINE_HEAP_BUMP,
-                        makeObjectAddress + OBJECT_RECORD_BYTES);
                 pc = pc + TWO_WORD_INSTRUCTION;
             } else if (opcode === OP_MAKE_ARRAY) {
                 var makeArrayTargetIndex = load32(
@@ -6802,13 +6779,10 @@
                 var makeArrayCapacity = load32(
                     heapBase + bytecodeWords +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var makeArrayVectorBytes = VECTOR_CELLS +
-                    makeArrayCapacity * VALUE_CELL_BYTES;
-                var makeVectorAddress = engineHeapBump(heapBase, state);
-                var makeArrayAddress = makeVectorAddress +
-                                       makeArrayVectorBytes;
-                var makeArrayLimit = engineHeapLimit(heapBase, state);
-                if (makeArrayAddress + ARRAY_RECORD_BYTES > makeArrayLimit) {
+                if (allocateArrayKernel(heapBase, state,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             makeArrayTargetIndex),
+                    makeArrayCapacity, arrayPrototype) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
@@ -6817,31 +6791,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                setRecordType(heapBase, makeVectorAddress,
-                              HEAP_TYPE_VALUE_VECTOR);
-                setRecordSize(heapBase, makeVectorAddress,
-                              makeArrayVectorBytes);
-                setRecordMark(heapBase, makeVectorAddress, 0);
-                setRecordFlags(heapBase, makeVectorAddress, 0);
-                setVectorLength(heapBase, makeVectorAddress, 0);
-                setVectorCapacity(heapBase, makeVectorAddress,
-                                  makeArrayCapacity);
-                setRecordType(heapBase, makeArrayAddress, HEAP_TYPE_ARRAY);
-                setRecordSize(heapBase, makeArrayAddress, ARRAY_RECORD_BYTES);
-                setRecordMark(heapBase, makeArrayAddress, 0);
-                setRecordFlags(heapBase, makeArrayAddress, 0);
-                setArrayPrototype(heapBase, makeArrayAddress, arrayPrototype);
-                setArrayPropertyHead(heapBase, makeArrayAddress, 0);
-                setArrayElements(heapBase, makeArrayAddress, makeVectorAddress);
-                setArrayReserved(heapBase, makeArrayAddress, 0);
-                var makeArrayTarget = heapBase + registerCells +
-                    makeArrayTargetIndex * VALUE_CELL_BYTES;
-                store32(makeArrayTarget, VALUE_TAG_REFERENCE);
-                store32(makeArrayTarget + VALUE_CELL_LOW, makeArrayAddress);
-                store32(makeArrayTarget + VALUE_CELL_HIGH, 0);
-                store32(makeArrayTarget + VALUE_CELL_AUX, 0);
-                setEngineHeapBump(heapBase, state,
-                                  makeArrayAddress + ARRAY_RECORD_BYTES);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MAKE_REGEXP) {
                 var makeRegexpTargetIndex = load32(
@@ -6853,9 +6802,15 @@
                 var makeRegexpFlagsIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var makeRegexpAddress = engineHeapBump(heapBase, state);
-                if (makeRegexpAddress + REGEXP_RECORD_BYTES >
-                    engineHeapLimit(heapBase, state)) {
+                var makeRegexpPatternCell = valueCellAddress(
+                    heapBase, constantCells, makeRegexpPatternIndex);
+                var makeRegexpFlagsCell = valueCellAddress(
+                    heapBase, constantCells, makeRegexpFlagsIndex);
+                if (allocateRegexpKernel(heapBase, state,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             makeRegexpTargetIndex),
+                    makeRegexpPatternCell, makeRegexpFlagsCell,
+                    stringSupport) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
@@ -6865,51 +6820,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                var makeRegexpPatternCell = heapBase + constantCells +
-                    makeRegexpPatternIndex * VALUE_CELL_BYTES;
-                var makeRegexpFlagsCell = heapBase + constantCells +
-                    makeRegexpFlagsIndex * VALUE_CELL_BYTES;
-                var makeRegexpConstantsValid = 1;
-                if (load32(makeRegexpPatternCell) !== VALUE_TAG_REFERENCE) {
-                    makeRegexpConstantsValid = 0;
-                }
-                if (load32(makeRegexpFlagsCell) !== VALUE_TAG_REFERENCE) {
-                    makeRegexpConstantsValid = 0;
-                }
-                if (makeRegexpConstantsValid === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
-                }
-                setRecordType(heapBase, makeRegexpAddress, HEAP_TYPE_REGEXP);
-                setRecordSize(heapBase, makeRegexpAddress,
-                              REGEXP_RECORD_BYTES);
-                setRecordMark(heapBase, makeRegexpAddress, 0);
-                setRecordFlags(heapBase, makeRegexpAddress, 0);
-                setRegexpPattern(heapBase, makeRegexpAddress,
-                    load32(makeRegexpPatternCell + VALUE_CELL_LOW));
-                setRegexpFlags(heapBase, makeRegexpAddress,
-                    load32(makeRegexpFlagsCell + VALUE_CELL_LOW));
-                var makeRegexpPrototypeCell = heapBase + stringSupport +
-                    VECTOR_CELLS + RUNTIME_SUPPORT_REGEXP_PROTOTYPE *
-                    VALUE_CELL_BYTES;
-                setRegexpPrototype(heapBase, makeRegexpAddress,
-                    load32(makeRegexpPrototypeCell + VALUE_CELL_LOW));
-                setRegexpPropertyHead(heapBase, makeRegexpAddress, 0);
-                var makeRegexpTarget = heapBase + registerCells +
-                    makeRegexpTargetIndex * VALUE_CELL_BYTES;
-                store32(makeRegexpTarget, VALUE_TAG_REFERENCE);
-                store32(makeRegexpTarget + VALUE_CELL_LOW,
-                        makeRegexpAddress);
-                store32(makeRegexpTarget + VALUE_CELL_HIGH, 0);
-                store32(makeRegexpTarget + VALUE_CELL_AUX, 0);
-                setEngineHeapBump(heapBase, state,
-                    makeRegexpAddress + REGEXP_RECORD_BYTES);
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode <= OP_BIT_NOT) {
                 if (opcode >= OP_BIT_AND) {
@@ -7987,6 +7897,81 @@
         return EXIT_BUDGET;
     }
 
+    function allocateObjectKernel(heapBase, state, targetCell,
+                                  stringSupport) {
+        var object = engineHeapBump(heapBase, state);
+        if (object + OBJECT_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
+            return 0;
+        }
+        var prototypeCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_OBJECT_PROTOTYPE);
+        setRecordType(heapBase, object, HEAP_TYPE_OBJECT);
+        setRecordSize(heapBase, object, OBJECT_RECORD_BYTES);
+        setRecordMark(heapBase, object, 0);
+        setRecordFlags(heapBase, object, 0);
+        setObjectPrototype(heapBase, object,
+                           valueCellReference(0, prototypeCell));
+        setObjectPropertyHead(heapBase, object, 0);
+        setObjectExtensible(heapBase, object, 1);
+        setObjectReserved(heapBase, object, 0);
+        setValueCellReference(targetCell, object);
+        setEngineHeapBump(heapBase, state, object + OBJECT_RECORD_BYTES);
+        return 1;
+    }
+
+    function allocateArrayKernel(heapBase, state, targetCell, capacity,
+                                 arrayPrototype) {
+        var vectorBytes = VECTOR_CELLS + capacity * VALUE_CELL_BYTES;
+        var vector = engineHeapBump(heapBase, state);
+        var array = vector + vectorBytes;
+        if (array + ARRAY_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
+            return 0;
+        }
+        setRecordType(heapBase, vector, HEAP_TYPE_VALUE_VECTOR);
+        setRecordSize(heapBase, vector, vectorBytes);
+        setRecordMark(heapBase, vector, 0);
+        setRecordFlags(heapBase, vector, 0);
+        setVectorLength(heapBase, vector, 0);
+        setVectorCapacity(heapBase, vector, capacity);
+        setRecordType(heapBase, array, HEAP_TYPE_ARRAY);
+        setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
+        setRecordMark(heapBase, array, 0);
+        setRecordFlags(heapBase, array, 0);
+        setArrayPrototype(heapBase, array, arrayPrototype);
+        setArrayPropertyHead(heapBase, array, 0);
+        setArrayElements(heapBase, array, vector);
+        setArrayReserved(heapBase, array, 0);
+        setValueCellReference(targetCell, array);
+        setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
+        return 1;
+    }
+
+    function allocateRegexpKernel(heapBase, state, targetCell, patternCell,
+                                  flagsCell, stringSupport) {
+        if (valueCellTag(0, patternCell) !== VALUE_TAG_REFERENCE) return 0;
+        if (valueCellTag(0, flagsCell) !== VALUE_TAG_REFERENCE) return 0;
+        var regexp = engineHeapBump(heapBase, state);
+        if (regexp + REGEXP_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
+            return 0;
+        }
+        var prototypeCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_REGEXP_PROTOTYPE);
+        setRecordType(heapBase, regexp, HEAP_TYPE_REGEXP);
+        setRecordSize(heapBase, regexp, REGEXP_RECORD_BYTES);
+        setRecordMark(heapBase, regexp, 0);
+        setRecordFlags(heapBase, regexp, 0);
+        setRegexpPattern(heapBase, regexp,
+                         valueCellReference(0, patternCell));
+        setRegexpFlags(heapBase, regexp,
+                       valueCellReference(0, flagsCell));
+        setRegexpPrototype(heapBase, regexp,
+                           valueCellReference(0, prototypeCell));
+        setRegexpPropertyHead(heapBase, regexp, 0);
+        setValueCellReference(targetCell, regexp);
+        setEngineHeapBump(heapBase, state, regexp + REGEXP_RECORD_BYTES);
+        return 1;
+    }
+
     function localBindingKernel(heapBase, destinationCell, sourceCell,
                                 environment, depth, slot, write) {
         var resolvedEnvironment = environment;
@@ -8826,6 +8811,9 @@
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
         var kernelDependencies = {
+            allocateArrayKernel: allocateArrayKernel,
+            allocateObjectKernel: allocateObjectKernel,
+            allocateRegexpKernel: allocateRegexpKernel,
             arrayConcatKernel: arrayConcatKernel,
             arraySliceKernel: arraySliceKernel,
             dateIntrinsicKernel: dateIntrinsicKernel,
