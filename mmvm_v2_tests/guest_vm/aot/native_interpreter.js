@@ -1127,26 +1127,11 @@
                     while (dynamicPropertyHead !== 0) {
                         var dynamicStoredKey = propertyKey(
                             heapBase, dynamicPropertyHead);
-                        var dynamicKeyMatches = 0;
-                        if (dynamicStoredKey === dynamicPropertyKey) {
-                            dynamicKeyMatches = 1;
-                        } else if (stringLength(heapBase,
-                            dynamicStoredKey) === stringLength(heapBase,
-                            dynamicPropertyKey)) {
-                            dynamicKeyMatches = 1;
-                            var dynamicKeyIndex = 0;
-                            var dynamicKeyLength = stringLength(
-                                heapBase, dynamicPropertyKey);
-                            while (dynamicKeyIndex < dynamicKeyLength) {
-                                if ((stringCharacterCodeUnit(heapBase,
-                                    dynamicStoredKey, dynamicKeyIndex) &
-                                    65535) !== (stringCharacterCodeUnit(
-                                    heapBase, dynamicPropertyKey,
-                                    dynamicKeyIndex) & 65535)) {
-                                    dynamicKeyMatches = 0;
-                                    dynamicKeyIndex = dynamicKeyLength;
-                                } else dynamicKeyIndex = dynamicKeyIndex + 1;
-                            }
+                        var dynamicKeyMatches = 1;
+                        if (dynamicStoredKey !== dynamicPropertyKey) {
+                            dynamicKeyMatches = stringKeysEqualKernel(
+                                heapBase, dynamicStoredKey,
+                                dynamicPropertyKey);
                         }
                         if (dynamicKeyMatches === 1) {
                             dynamicPropertyRecord = dynamicPropertyHead;
@@ -7239,36 +7224,11 @@
                     while (propertyHead !== 0) {
                         var propertyStoredKey = propertyKey(
                             heapBase, propertyHead);
-                        var propertyKeysMatch = 0;
-                        if (propertyStoredKey === propertyConstantKey) {
-                            propertyKeysMatch = 1;
-                        } else if (stringHash(heapBase,
-                                   propertyStoredKey) === stringHash(
-                                   heapBase, propertyConstantKey)) {
-                            if (stringLength(heapBase,
-                                propertyStoredKey) === stringLength(
-                                heapBase, propertyConstantKey)) {
-                                propertyKeysMatch = 1;
-                                var propertyKeyCharacter = 0;
-                                var propertyKeyLength = stringLength(
-                                    heapBase, propertyConstantKey);
-                                while (propertyKeyCharacter <
-                                       propertyKeyLength) {
-                                    if ((stringCharacterCodeUnit(heapBase,
-                                         propertyStoredKey,
-                                         propertyKeyCharacter) & 65535) !==
-                                        (stringCharacterCodeUnit(heapBase,
-                                         propertyConstantKey,
-                                         propertyKeyCharacter) & 65535)) {
-                                        propertyKeysMatch = 0;
-                                        propertyKeyCharacter =
-                                            propertyKeyLength;
-                                    } else {
-                                        propertyKeyCharacter =
-                                            propertyKeyCharacter + 1;
-                                    }
-                                }
-                            }
+                        var propertyKeysMatch = 1;
+                        if (propertyStoredKey !== propertyConstantKey) {
+                            propertyKeysMatch = stringKeysEqualKernel(
+                                heapBase, propertyStoredKey,
+                                propertyConstantKey);
                         }
                         if (propertyKeysMatch === 1) {
                             propertyRecord = propertyHead;
@@ -7394,36 +7354,11 @@
                 while (setPropertyHead !== 0) {
                     var setPropertyStoredKey = propertyKey(
                         heapBase, setPropertyHead);
-                    var setPropertyKeysMatch = 0;
-                    if (setPropertyStoredKey === setPropertyConstantKey) {
-                        setPropertyKeysMatch = 1;
-                    } else if (stringHash(heapBase,
-                               setPropertyStoredKey) === stringHash(
-                               heapBase, setPropertyConstantKey)) {
-                        if (stringLength(heapBase,
-                            setPropertyStoredKey) === stringLength(
-                            heapBase, setPropertyConstantKey)) {
-                            setPropertyKeysMatch = 1;
-                            var setPropertyKeyCharacter = 0;
-                            var setPropertyKeyLength = stringLength(
-                                heapBase, setPropertyConstantKey);
-                            while (setPropertyKeyCharacter <
-                                   setPropertyKeyLength) {
-                                if ((stringCharacterCodeUnit(heapBase,
-                                     setPropertyStoredKey,
-                                     setPropertyKeyCharacter) & 65535) !==
-                                    (stringCharacterCodeUnit(heapBase,
-                                     setPropertyConstantKey,
-                                     setPropertyKeyCharacter) & 65535)) {
-                                    setPropertyKeysMatch = 0;
-                                    setPropertyKeyCharacter =
-                                        setPropertyKeyLength;
-                                } else {
-                                    setPropertyKeyCharacter =
-                                        setPropertyKeyCharacter + 1;
-                                }
-                            }
-                        }
+                    var setPropertyKeysMatch = 1;
+                    if (setPropertyStoredKey !== setPropertyConstantKey) {
+                        setPropertyKeysMatch = stringKeysEqualKernel(
+                            heapBase, setPropertyStoredKey,
+                            setPropertyConstantKey);
                     }
                     if (setPropertyKeysMatch === 1) {
                         setPropertyRecord = setPropertyHead;
@@ -7479,34 +7414,11 @@
                         while (inheritedSetHead !== 0) {
                             var inheritedSetKey = propertyKey(
                                 heapBase, inheritedSetHead);
-                            var inheritedSetMatches = 0;
-                            if (inheritedSetKey === setPropertyConstantKey) {
-                                inheritedSetMatches = 1;
-                            } else if (stringHash(heapBase,
-                                inheritedSetKey) === stringHash(heapBase,
-                                setPropertyConstantKey)) {
-                                if (stringLength(heapBase,
-                                    inheritedSetKey) === stringLength(heapBase,
-                                    setPropertyConstantKey)) {
-                                    inheritedSetMatches = 1;
-                                    var inheritedSetCharacter = 0;
-                                    var inheritedSetLength = stringLength(
-                                        heapBase, setPropertyConstantKey);
-                                    while (inheritedSetCharacter <
-                                           inheritedSetLength) {
-                                        if ((stringCharacterCodeUnit(heapBase,
-                                            inheritedSetKey,
-                                            inheritedSetCharacter) & 65535) !==
-                                            (stringCharacterCodeUnit(heapBase,
-                                            setPropertyConstantKey,
-                                            inheritedSetCharacter) & 65535)) {
-                                            inheritedSetMatches = 0;
-                                            inheritedSetCharacter =
-                                                inheritedSetLength;
-                                        } else inheritedSetCharacter =
-                                            inheritedSetCharacter + 1;
-                                    }
-                                }
+                            var inheritedSetMatches = 1;
+                            if (inheritedSetKey !== setPropertyConstantKey) {
+                                inheritedSetMatches = stringKeysEqualKernel(
+                                    heapBase, inheritedSetKey,
+                                    setPropertyConstantKey);
                             }
                             if (inheritedSetMatches === 1) {
                                 var inheritedSetAttributes =
@@ -7750,6 +7662,24 @@
             heapBase, resolvedEnvironment, slot);
         if (write === 0) copyValueCell(destinationCell, bindingCell);
         else copyValueCell(bindingCell, sourceCell);
+        return 1;
+    }
+
+    function stringKeysEqualKernel(heapBase, left, right) {
+        if (left === right) return 1;
+        if (stringHash(heapBase, left) !== stringHash(heapBase, right)) {
+            return 0;
+        }
+        var length = stringLength(heapBase, left);
+        if (length !== stringLength(heapBase, right)) return 0;
+        var index = 0;
+        while (index < length) {
+            if ((stringCharacterCodeUnit(heapBase, left, index) & 65535) !==
+                (stringCharacterCodeUnit(heapBase, right, index) & 65535)) {
+                return 0;
+            }
+            index = index + 1;
+        }
         return 1;
     }
 
@@ -8689,6 +8619,7 @@
             programSetCodeKernel: programSetCodeKernel,
             programSetConstantKernel: programSetConstantKernel,
             programSetVectorKernel: programSetVectorKernel,
+            stringKeysEqualKernel: stringKeysEqualKernel,
             typeofValueKernel: typeofValueKernel
         };
         var snapshotRequested = runtime.nativeSnapshotRead ||

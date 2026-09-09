@@ -89,6 +89,14 @@ the i386 backend emits relative calls through the named macro-assembler
 without introducing host callbacks, native pointers in the heap, or raw
 instruction bytes in semantic source.
 
+Graph construction parses each member's `toString()` source exactly once and
+reuses that immutable syntax tree for its signature, constant validation, and
+IR lowering. This is an important part of the abstraction boundary rather than
+merely a compiler optimization: splitting a large kernel into maintainable
+helpers must not multiply bootstrap parsing cost. Kernel-wide numeric constants
+are declared once by the entry function and supplied as shared bindings to all
+members; helper-local copies of layout or opcode constants are rejected.
+
 Out-of-line calls are for logical operations: allocation, conversion, builtin
 semantics, services, and substantial opcode families. They are not the
 implementation of record access. Record fields, value-cell fields, bytecode
@@ -98,6 +106,15 @@ and lowers an accessor directly to address arithmetic and a load or store; the
 backend therefore inlines it without a native call. Raw `heapBase + record +
 OFFSET` expressions are confined to the compiler's accessor lowering and are
 not duplicated through interpreter semantics.
+
+Current graph members include guest object/array/RegExp allocation, lexical
+binding access, `typeof` classification, `instanceof` prototype traversal,
+property enumeration, string-key comparison, self-hosted program construction,
+array builtins, date operations, and numeric-property lookup. Arithmetic,
+branching, and common interned-key pointer comparisons deliberately remain in
+the dispatch entry because adding a call to those smallest hot operations would
+be a performance regression. Refactoring proceeds by semantic family, with the
+dual-host suite and native benchmarks run at every committed boundary.
 
 `guest_vm/benchmarks/kernel_call_benchmark.js` compares a tight inline integer
 loop with the same loop calling a one-operation kernel helper. On the current
