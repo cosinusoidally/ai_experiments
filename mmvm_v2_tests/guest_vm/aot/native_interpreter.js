@@ -3570,527 +3570,15 @@
                 }
                 }
                 if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
-                    var concatReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var concatHelperResult = arrayConcatKernel(
+                    var arrayIntrinsicResult = arrayIntrinsicKernel(
                         heapBase, state, intrinsicTarget, registerCells,
-                        concatReceiverIndex, intrinsicArgumentsVector,
-                        intrinsicArgumentCount, arrayPrototype);
-                    if (concatHelperResult === 1) intrinsicHandled = 1;
-                    else if (concatHelperResult === 2) {
-                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_SPACE);
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
+                        intrinsicArgumentsVector, intrinsicArgumentCount,
+                        arrayPrototype, bytecodeWords, pc, opcode, intrinsicId,
+                        instructions, framePC);
+                    if (arrayIntrinsicResult === EXIT_UNSUPPORTED) {
                         return EXIT_UNSUPPORTED;
                     }
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
-                    var sliceReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var sliceHelperResult = arraySliceKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        sliceReceiverIndex, intrinsicArgumentsVector,
-                        intrinsicArgumentCount, arrayPrototype);
-                    if (sliceHelperResult === 1) intrinsicHandled = 1;
-                    else if (sliceHelperResult === 2) {
-                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_SPACE);
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_ARRAY_POP) {
-                    var popValid = 1;
-                    var popReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    if (popReceiverIndex < 0) popValid = 0;
-                    var popReceiverCell = heapBase + registerCells +
-                        popReceiverIndex * VALUE_CELL_BYTES;
-                    if (valueCellTag(0, popReceiverCell) !==
-                        VALUE_TAG_REFERENCE) popValid = 0;
-                    var popArray = valueCellReference(0, popReceiverCell);
-                    if (popValid === 1) {
-                        if (recordType(heapBase, popArray) !==
-                            HEAP_TYPE_ARRAY) popValid = 0;
-                    }
-                    if (popValid === 1) {
-                        var popVector = arrayElements(heapBase, popArray);
-                        var popLength = vectorLength(heapBase, popVector);
-                        if (popLength === 0) {
-                            store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-                            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                        } else {
-                            var popLastCell = heapBase + popVector +
-                                VECTOR_CELLS +
-                                (popLength - 1) * VALUE_CELL_BYTES;
-                            if (valueCellTag(0, popLastCell) === 0) {
-                                store32(intrinsicTarget,
-                                        VALUE_TAG_UNDEFINED);
-                                store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                            } else {
-                                store32(intrinsicTarget,
-                                        valueCellTag(0, popLastCell));
-                                store32(intrinsicTarget + VALUE_CELL_LOW,
-                                    load32(popLastCell + VALUE_CELL_LOW));
-                                store32(intrinsicTarget + VALUE_CELL_HIGH,
-                                    load32(popLastCell + VALUE_CELL_HIGH));
-                                store32(intrinsicTarget + VALUE_CELL_AUX,
-                                    load32(popLastCell + VALUE_CELL_AUX));
-                            }
-                            store32(popLastCell, VALUE_TAG_UNDEFINED);
-                            store32(popLastCell + VALUE_CELL_LOW, 0);
-                            store32(popLastCell + VALUE_CELL_HIGH, 0);
-                            store32(popLastCell + VALUE_CELL_AUX, 0);
-                            setVectorLength(heapBase, popVector,
-                                            popLength - 1);
-                        }
-                        intrinsicHandled = 1;
-                    }
-                }
-                }
-                if (intrinsicId === INTRINSIC_ARRAY_POP) {
-                    if (intrinsicHandled === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
-                    var shiftValid = 1;
-                    var shiftReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    if (shiftReceiverIndex < 0) shiftValid = 0;
-                    var shiftReceiverCell = heapBase + registerCells +
-                        shiftReceiverIndex * VALUE_CELL_BYTES;
-                    if (valueCellTag(0, shiftReceiverCell) !==
-                        VALUE_TAG_REFERENCE) shiftValid = 0;
-                    var shiftArray = valueCellReference(0, shiftReceiverCell);
-                    if (shiftValid === 1) {
-                        if (recordType(heapBase, shiftArray) !==
-                            HEAP_TYPE_ARRAY) shiftValid = 0;
-                    }
-                    if (shiftValid === 1) {
-                        var shiftVector = arrayElements(heapBase, shiftArray);
-                        var shiftLength = vectorLength(heapBase, shiftVector);
-                        if (shiftLength === 0) {
-                            store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-                            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                        } else {
-                            var shiftFirstCell = heapBase + shiftVector +
-                                VECTOR_CELLS;
-                            var shiftFirstTag = valueCellTag(0, shiftFirstCell);
-                            if (shiftFirstTag === 0) {
-                                store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-                                store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                            } else {
-                                store32(intrinsicTarget,
-                                        load32(shiftFirstCell));
-                                store32(intrinsicTarget + VALUE_CELL_LOW,
-                                    load32(shiftFirstCell + VALUE_CELL_LOW));
-                                store32(intrinsicTarget + VALUE_CELL_HIGH,
-                                    load32(shiftFirstCell + VALUE_CELL_HIGH));
-                                store32(intrinsicTarget + VALUE_CELL_AUX,
-                                    load32(shiftFirstCell + VALUE_CELL_AUX));
-                            }
-                            var shiftIndex = 1;
-                            while (shiftIndex < shiftLength) {
-                                var shiftSourceCell = heapBase + shiftVector +
-                                    VECTOR_CELLS +
-                                    shiftIndex * VALUE_CELL_BYTES;
-                                var shiftTargetCell = shiftSourceCell -
-                                    VALUE_CELL_BYTES;
-                                store32(shiftTargetCell,
-                                        load32(shiftSourceCell));
-                                store32(shiftTargetCell + VALUE_CELL_LOW,
-                                    load32(shiftSourceCell + VALUE_CELL_LOW));
-                                store32(shiftTargetCell + VALUE_CELL_HIGH,
-                                    load32(shiftSourceCell + VALUE_CELL_HIGH));
-                                store32(shiftTargetCell + VALUE_CELL_AUX,
-                                    load32(shiftSourceCell + VALUE_CELL_AUX));
-                                shiftIndex = shiftIndex + 1;
-                            }
-                            var shiftLastCell = heapBase + shiftVector +
-                                VECTOR_CELLS +
-                                (shiftLength - 1) * VALUE_CELL_BYTES;
-                            store32(shiftLastCell, VALUE_TAG_UNDEFINED);
-                            store32(shiftLastCell + VALUE_CELL_LOW, 0);
-                            store32(shiftLastCell + VALUE_CELL_HIGH, 0);
-                            store32(shiftLastCell + VALUE_CELL_AUX, 0);
-                            setVectorLength(heapBase, shiftVector,
-                                            shiftLength - 1);
-                        }
-                        intrinsicHandled = 1;
-                    }
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_ARRAY_JOIN) {
-                    var joinValid = 1;
-                    var joinAllocationFailed = 0;
-                    if (intrinsicArgumentCount !== 1) joinValid = 0;
-                    var joinReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    if (joinReceiverIndex < 0) joinValid = 0;
-                    var joinReceiverCell = heapBase + registerCells +
-                        joinReceiverIndex * VALUE_CELL_BYTES;
-                    if (valueCellTag(0, joinReceiverCell) !==
-                        VALUE_TAG_REFERENCE) joinValid = 0;
-                    var joinArray = valueCellReference(0, joinReceiverCell);
-                    if (joinValid === 1) {
-                        if (recordType(heapBase, joinArray) !==
-                            HEAP_TYPE_ARRAY) joinValid = 0;
-                    }
-                    var joinSeparator = 0;
-                    if (joinValid === 1) {
-                        var joinSeparatorRegisterCell = heapBase +
-                            intrinsicArgumentsVector + VECTOR_CELLS;
-                        if (valueCellTag(0, joinSeparatorRegisterCell) !==
-                            VALUE_TAG_INT32) joinValid = 0;
-                        var joinSeparatorRegister = load32(
-                            joinSeparatorRegisterCell + VALUE_CELL_LOW);
-                        var joinSeparatorCell = heapBase + registerCells +
-                            joinSeparatorRegister * VALUE_CELL_BYTES;
-                        if (valueCellTag(0, joinSeparatorCell) !==
-                            VALUE_TAG_REFERENCE) joinValid = 0;
-                        joinSeparator = valueCellReference(
-                            0, joinSeparatorCell);
-                        if (joinValid === 1) {
-                            if (recordType(heapBase, joinSeparator) !==
-                                HEAP_TYPE_STRING) joinValid = 0;
-                        }
-                    }
-                    var joinVector = 0;
-                    var joinLength = 0;
-                    var joinSeparatorLength = 0;
-                    var joinCharacterLength = 0;
-                    if (joinValid === 1) {
-                        joinVector = arrayElements(heapBase, joinArray);
-                        joinLength = vectorLength(heapBase, joinVector);
-                    }
-                    var joinMaximumCharacters = 0;
-                    if (joinValid === 1) {
-                        joinSeparatorLength = stringLength(
-                            heapBase, joinSeparator);
-                        var joinAvailableBytes = engineHeapLimit(
-                            heapBase, state) - engineHeapBump(heapBase, state);
-                        if (joinAvailableBytes < STRING_CHARS + 7) {
-                            joinValid = 0;
-                            joinAllocationFailed = 1;
-                        } else {
-                            joinMaximumCharacters = divideI32(
-                                joinAvailableBytes - STRING_CHARS - 7, 2);
-                        }
-                    }
-                    var joinMeasureIndex = 0;
-                    while (joinMeasureIndex < joinLength) {
-                        if (joinMeasureIndex > 0) {
-                            if (joinSeparatorLength >
-                                joinMaximumCharacters - joinCharacterLength) {
-                                joinValid = 0;
-                                joinAllocationFailed = 1;
-                                joinMeasureIndex = joinLength;
-                            } else {
-                                joinCharacterLength = joinCharacterLength +
-                                    joinSeparatorLength;
-                            }
-                        }
-                        var joinMeasureCell = heapBase + joinVector +
-                            VECTOR_CELLS +
-                            joinMeasureIndex * VALUE_CELL_BYTES;
-                        var joinMeasureTag = 0;
-                        if (joinMeasureIndex < joinLength) {
-                            joinMeasureTag = valueCellTag(0, joinMeasureCell);
-                        }
-                        if (joinMeasureIndex < joinLength) {
-                        if (joinMeasureTag === VALUE_TAG_REFERENCE) {
-                            var joinMeasureString = valueCellReference(
-                                0, joinMeasureCell);
-                            if (recordType(heapBase, joinMeasureString) !==
-                                HEAP_TYPE_STRING) joinValid = 0;
-                            if (joinValid === 1) {
-                                var joinElementCharacters = stringLength(
-                                    heapBase, joinMeasureString);
-                                if (joinElementCharacters >
-                                    joinMaximumCharacters -
-                                    joinCharacterLength) {
-                                    joinValid = 0;
-                                    joinAllocationFailed = 1;
-                                } else {
-                                    joinCharacterLength =
-                                        joinCharacterLength +
-                                        joinElementCharacters;
-                                }
-                            }
-                        } else if (joinMeasureTag !== 0) {
-                            if (joinMeasureTag !== VALUE_TAG_UNDEFINED) {
-                                if (joinMeasureTag !== VALUE_TAG_NULL) {
-                                    joinValid = 0;
-                                }
-                            }
-                        }
-                        }
-                        joinMeasureIndex = joinMeasureIndex + 1;
-                    }
-                    var joinBytes = 0;
-                    var joinResult = 0;
-                    if (joinValid === 1) {
-                        joinBytes = (STRING_CHARS +
-                                     joinCharacterLength * 2 + 7) & -8;
-                        joinResult = engineHeapBump(heapBase, state);
-                        if (joinResult + joinBytes >
-                            engineHeapLimit(heapBase, state)) {
-                            joinValid = 0;
-                            joinAllocationFailed = 1;
-                        }
-                    }
-                    if (joinValid === 1) {
-                        setRecordType(heapBase, joinResult, HEAP_TYPE_STRING);
-                        setRecordSize(heapBase, joinResult, joinBytes);
-                        setRecordMark(heapBase, joinResult, 0);
-                        setRecordFlags(heapBase, joinResult, 0);
-                        setStringLength(heapBase, joinResult,
-                                        joinCharacterLength);
-                        var joinHash = -2128831035;
-                        var joinOutputIndex = 0;
-                        var joinElementIndex = 0;
-                        while (joinElementIndex < joinLength) {
-                            var joinCopySource = 0;
-                            var joinCopyLength = 0;
-                            if (joinElementIndex > 0) {
-                                joinCopySource = joinSeparator;
-                                joinCopyLength = joinSeparatorLength;
-                            }
-                            var joinCopyIndex = 0;
-                            while (joinCopyIndex < joinCopyLength) {
-                                var joinCode = stringCharacterCodeUnit(
-                                    heapBase, joinCopySource,
-                                    joinCopyIndex) & 65535;
-                                setStringCharacterByte(heapBase, joinResult,
-                                    joinOutputIndex * 2, joinCode & 255);
-                                setStringCharacterByte(heapBase, joinResult,
-                                    joinOutputIndex * 2 + 1,
-                                    (joinCode >>> 8) & 255);
-                                joinHash = (joinHash ^ joinCode) * 16777619;
-                                joinOutputIndex = joinOutputIndex + 1;
-                                joinCopyIndex = joinCopyIndex + 1;
-                            }
-                            var joinElementCell = heapBase + joinVector +
-                                VECTOR_CELLS +
-                                joinElementIndex * VALUE_CELL_BYTES;
-                            if (valueCellTag(0, joinElementCell) ===
-                                VALUE_TAG_REFERENCE) {
-                                joinCopySource = valueCellReference(
-                                    0, joinElementCell);
-                                joinCopyLength = stringLength(
-                                    heapBase, joinCopySource);
-                                joinCopyIndex = 0;
-                                while (joinCopyIndex < joinCopyLength) {
-                                    joinCode = stringCharacterCodeUnit(
-                                        heapBase, joinCopySource,
-                                        joinCopyIndex) & 65535;
-                                    setStringCharacterByte(heapBase, joinResult,
-                                        joinOutputIndex * 2, joinCode & 255);
-                                    setStringCharacterByte(heapBase, joinResult,
-                                        joinOutputIndex * 2 + 1,
-                                        (joinCode >>> 8) & 255);
-                                    joinHash = (joinHash ^ joinCode) * 16777619;
-                                    joinOutputIndex = joinOutputIndex + 1;
-                                    joinCopyIndex = joinCopyIndex + 1;
-                                }
-                            }
-                            joinElementIndex = joinElementIndex + 1;
-                        }
-                        setStringHash(heapBase, joinResult, joinHash);
-                        setEngineHeapBump(heapBase, state,
-                                          joinResult + joinBytes);
-                        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                        store32(intrinsicTarget + VALUE_CELL_LOW, joinResult);
-                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                        intrinsicHandled = 1;
-                    }
-                    if (joinAllocationFailed === 1) {
-                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_SPACE);
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                }
-                }
-                if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
-                    var pushReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var pushValid = 1;
-                    if (pushReceiverIndex < 0) pushValid = 0;
-                    var pushReceiverCell = heapBase + registerCells +
-                        pushReceiverIndex * VALUE_CELL_BYTES;
-                    if (load32(pushReceiverCell) !== VALUE_TAG_REFERENCE) {
-                        pushValid = 0;
-                    }
-                    var pushArray = load32(pushReceiverCell + VALUE_CELL_LOW);
-                    if (pushValid === 1) {
-                        if (load32(heapBase + pushArray) !== HEAP_TYPE_ARRAY) {
-                            pushValid = 0;
-                        }
-                    }
-                    var pushVector = 0;
-                    var pushLength = 0;
-                    if (pushValid === 1) {
-                        pushVector = arrayElements(heapBase, pushArray);
-                        pushLength = vectorLength(heapBase, pushVector);
-                        var pushCapacity = vectorCapacity(heapBase, pushVector);
-                        if (pushLength + intrinsicArgumentCount > pushCapacity) {
-                            var grownPushCapacity = pushCapacity;
-                            if (grownPushCapacity < INITIAL_ARRAY_CAPACITY) {
-                                grownPushCapacity = INITIAL_ARRAY_CAPACITY;
-                            }
-                            while (grownPushCapacity <
-                                   pushLength + intrinsicArgumentCount) {
-                                grownPushCapacity = grownPushCapacity * 2;
-                            }
-                            var grownPushVectorBytes = VECTOR_CELLS +
-                                grownPushCapacity * VALUE_CELL_BYTES;
-                            var grownPushVector = engineHeapBump(heapBase, state);
-                            if (grownPushVector + grownPushVectorBytes >
-                                engineHeapLimit(heapBase, state)) {
-                                pushValid = 0;
-                            } else {
-                                setRecordType(heapBase, grownPushVector,
-                                              HEAP_TYPE_VALUE_VECTOR);
-                                setRecordSize(heapBase, grownPushVector,
-                                              grownPushVectorBytes);
-                                setRecordMark(heapBase, grownPushVector, 0);
-                                setRecordFlags(heapBase, grownPushVector, 0);
-                                setVectorLength(heapBase, grownPushVector,
-                                                pushLength);
-                                setVectorCapacity(heapBase, grownPushVector,
-                                                  grownPushCapacity);
-                                var grownPushIndex = 0;
-                                while (grownPushIndex < grownPushCapacity) {
-                                    var grownPushTarget = heapBase +
-                                        grownPushVector + VECTOR_CELLS +
-                                        grownPushIndex * VALUE_CELL_BYTES;
-                                    if (grownPushIndex < pushLength) {
-                                        var grownPushSource = heapBase +
-                                            pushVector + VECTOR_CELLS +
-                                            grownPushIndex * VALUE_CELL_BYTES;
-                                        store32(grownPushTarget,
-                                                load32(grownPushSource));
-                                        store32(grownPushTarget + VALUE_CELL_LOW,
-                                            load32(grownPushSource +
-                                                   VALUE_CELL_LOW));
-                                        store32(grownPushTarget + VALUE_CELL_HIGH,
-                                            load32(grownPushSource +
-                                                   VALUE_CELL_HIGH));
-                                        store32(grownPushTarget + VALUE_CELL_AUX,
-                                            load32(grownPushSource +
-                                                   VALUE_CELL_AUX));
-                                    } else {
-                                        store32(grownPushTarget, 0);
-                                        store32(grownPushTarget + VALUE_CELL_LOW, 0);
-                                        store32(grownPushTarget + VALUE_CELL_HIGH, 0);
-                                        store32(grownPushTarget + VALUE_CELL_AUX, 0);
-                                    }
-                                    grownPushIndex = grownPushIndex + 1;
-                                }
-                                setArrayElements(heapBase, pushArray,
-                                                 grownPushVector);
-                                setEngineHeapBump(heapBase, state,
-                                    grownPushVector + grownPushVectorBytes);
-                                pushVector = grownPushVector;
-                            }
-                        }
-                    }
-                    var pushIndex = 0;
-                    while (pushIndex < intrinsicArgumentCount) {
-                        var pushRegisterCell = heapBase +
-                            intrinsicArgumentsVector + VECTOR_CELLS +
-                            pushIndex * VALUE_CELL_BYTES;
-                        if (load32(pushRegisterCell) !== VALUE_TAG_INT32) {
-                            pushValid = 0;
-                        }
-                        pushIndex = pushIndex + 1;
-                    }
-                    if (pushValid === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                    pushIndex = 0;
-                    while (pushIndex < intrinsicArgumentCount) {
-                        var pushSourceRegisterCell = heapBase +
-                            intrinsicArgumentsVector + VECTOR_CELLS +
-                            pushIndex * VALUE_CELL_BYTES;
-                        var pushSourceRegister = load32(
-                            pushSourceRegisterCell + VALUE_CELL_LOW);
-                        var pushSource = heapBase + registerCells +
-                            pushSourceRegister * VALUE_CELL_BYTES;
-                        var pushTarget = heapBase + pushVector + VECTOR_CELLS +
-                            (pushLength + pushIndex) * VALUE_CELL_BYTES;
-                        store32(pushTarget, load32(pushSource));
-                        store32(pushTarget + VALUE_CELL_LOW,
-                                load32(pushSource + VALUE_CELL_LOW));
-                        store32(pushTarget + VALUE_CELL_HIGH,
-                                load32(pushSource + VALUE_CELL_HIGH));
-                        store32(pushTarget + VALUE_CELL_AUX,
-                                load32(pushSource + VALUE_CELL_AUX));
-                        pushIndex = pushIndex + 1;
-                    }
-                    pushLength = pushLength + intrinsicArgumentCount;
-                    setVectorLength(heapBase, pushVector, pushLength);
-                    store32(intrinsicTarget, VALUE_TAG_INT32);
-                    store32(intrinsicTarget + VALUE_CELL_LOW, pushLength);
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                    intrinsicHandled = 1;
+                    if (arrayIntrinsicResult === 1) intrinsicHandled = 1;
                 }
                 if (intrinsicHandled === 0) {
                 var isMathIntrinsic = 0;
@@ -5156,6 +4644,538 @@
         store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
         store32(heapBase + framePC, pc);
         return EXIT_BUDGET;
+    }
+
+    function arrayIntrinsicKernel(
+            heapBase, state, intrinsicTarget, registerCells,
+            intrinsicArgumentsVector, intrinsicArgumentCount,
+            arrayPrototype, bytecodeWords, pc, opcode, intrinsicId, instructions,
+            framePC) {
+        var intrinsicHandled = 0;
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
+            var concatReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var concatHelperResult = arrayConcatKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                concatReceiverIndex, intrinsicArgumentsVector,
+                intrinsicArgumentCount, arrayPrototype);
+            if (concatHelperResult === 1) intrinsicHandled = 1;
+            else if (concatHelperResult === 2) {
+                store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                        CALL_REJECT_HEAP_SPACE);
+                store32(heapBase + state + ENGINE_EXIT_REASON,
+                        EXIT_UNSUPPORTED);
+                store32(heapBase + state + ENGINE_PC, pc);
+                store32(heapBase + state + ENGINE_RESULT, opcode);
+                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                        instructions);
+                store32(heapBase + framePC, pc);
+                return EXIT_UNSUPPORTED;
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
+            var sliceReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var sliceHelperResult = arraySliceKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                sliceReceiverIndex, intrinsicArgumentsVector,
+                intrinsicArgumentCount, arrayPrototype);
+            if (sliceHelperResult === 1) intrinsicHandled = 1;
+            else if (sliceHelperResult === 2) {
+                store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                        CALL_REJECT_HEAP_SPACE);
+                store32(heapBase + state + ENGINE_EXIT_REASON,
+                        EXIT_UNSUPPORTED);
+                store32(heapBase + state + ENGINE_PC, pc);
+                store32(heapBase + state + ENGINE_RESULT, opcode);
+                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                        instructions);
+                store32(heapBase + framePC, pc);
+                return EXIT_UNSUPPORTED;
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_ARRAY_POP) {
+            var popValid = 1;
+            var popReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            if (popReceiverIndex < 0) popValid = 0;
+            var popReceiverCell = heapBase + registerCells +
+                popReceiverIndex * VALUE_CELL_BYTES;
+            if (valueCellTag(0, popReceiverCell) !==
+                VALUE_TAG_REFERENCE) popValid = 0;
+            var popArray = valueCellReference(0, popReceiverCell);
+            if (popValid === 1) {
+                if (recordType(heapBase, popArray) !==
+                    HEAP_TYPE_ARRAY) popValid = 0;
+            }
+            if (popValid === 1) {
+                var popVector = arrayElements(heapBase, popArray);
+                var popLength = vectorLength(heapBase, popVector);
+                if (popLength === 0) {
+                    store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
+                    store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                } else {
+                    var popLastCell = heapBase + popVector +
+                        VECTOR_CELLS +
+                        (popLength - 1) * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, popLastCell) === 0) {
+                        store32(intrinsicTarget,
+                                VALUE_TAG_UNDEFINED);
+                        store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    } else {
+                        store32(intrinsicTarget,
+                                valueCellTag(0, popLastCell));
+                        store32(intrinsicTarget + VALUE_CELL_LOW,
+                            load32(popLastCell + VALUE_CELL_LOW));
+                        store32(intrinsicTarget + VALUE_CELL_HIGH,
+                            load32(popLastCell + VALUE_CELL_HIGH));
+                        store32(intrinsicTarget + VALUE_CELL_AUX,
+                            load32(popLastCell + VALUE_CELL_AUX));
+                    }
+                    store32(popLastCell, VALUE_TAG_UNDEFINED);
+                    store32(popLastCell + VALUE_CELL_LOW, 0);
+                    store32(popLastCell + VALUE_CELL_HIGH, 0);
+                    store32(popLastCell + VALUE_CELL_AUX, 0);
+                    setVectorLength(heapBase, popVector,
+                                    popLength - 1);
+                }
+                intrinsicHandled = 1;
+            }
+        }
+        }
+        if (intrinsicId === INTRINSIC_ARRAY_POP) {
+            if (intrinsicHandled === 0) {
+                store32(heapBase + state + ENGINE_EXIT_REASON,
+                        EXIT_UNSUPPORTED);
+                store32(heapBase + state + ENGINE_PC, pc);
+                store32(heapBase + state + ENGINE_RESULT, opcode);
+                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                        instructions);
+                store32(heapBase + framePC, pc);
+                return EXIT_UNSUPPORTED;
+            }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
+            var shiftValid = 1;
+            var shiftReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            if (shiftReceiverIndex < 0) shiftValid = 0;
+            var shiftReceiverCell = heapBase + registerCells +
+                shiftReceiverIndex * VALUE_CELL_BYTES;
+            if (valueCellTag(0, shiftReceiverCell) !==
+                VALUE_TAG_REFERENCE) shiftValid = 0;
+            var shiftArray = valueCellReference(0, shiftReceiverCell);
+            if (shiftValid === 1) {
+                if (recordType(heapBase, shiftArray) !==
+                    HEAP_TYPE_ARRAY) shiftValid = 0;
+            }
+            if (shiftValid === 1) {
+                var shiftVector = arrayElements(heapBase, shiftArray);
+                var shiftLength = vectorLength(heapBase, shiftVector);
+                if (shiftLength === 0) {
+                    store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
+                    store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                } else {
+                    var shiftFirstCell = heapBase + shiftVector +
+                        VECTOR_CELLS;
+                    var shiftFirstTag = valueCellTag(0, shiftFirstCell);
+                    if (shiftFirstTag === 0) {
+                        store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
+                        store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    } else {
+                        store32(intrinsicTarget,
+                                load32(shiftFirstCell));
+                        store32(intrinsicTarget + VALUE_CELL_LOW,
+                            load32(shiftFirstCell + VALUE_CELL_LOW));
+                        store32(intrinsicTarget + VALUE_CELL_HIGH,
+                            load32(shiftFirstCell + VALUE_CELL_HIGH));
+                        store32(intrinsicTarget + VALUE_CELL_AUX,
+                            load32(shiftFirstCell + VALUE_CELL_AUX));
+                    }
+                    var shiftIndex = 1;
+                    while (shiftIndex < shiftLength) {
+                        var shiftSourceCell = heapBase + shiftVector +
+                            VECTOR_CELLS +
+                            shiftIndex * VALUE_CELL_BYTES;
+                        var shiftTargetCell = shiftSourceCell -
+                            VALUE_CELL_BYTES;
+                        store32(shiftTargetCell,
+                                load32(shiftSourceCell));
+                        store32(shiftTargetCell + VALUE_CELL_LOW,
+                            load32(shiftSourceCell + VALUE_CELL_LOW));
+                        store32(shiftTargetCell + VALUE_CELL_HIGH,
+                            load32(shiftSourceCell + VALUE_CELL_HIGH));
+                        store32(shiftTargetCell + VALUE_CELL_AUX,
+                            load32(shiftSourceCell + VALUE_CELL_AUX));
+                        shiftIndex = shiftIndex + 1;
+                    }
+                    var shiftLastCell = heapBase + shiftVector +
+                        VECTOR_CELLS +
+                        (shiftLength - 1) * VALUE_CELL_BYTES;
+                    store32(shiftLastCell, VALUE_TAG_UNDEFINED);
+                    store32(shiftLastCell + VALUE_CELL_LOW, 0);
+                    store32(shiftLastCell + VALUE_CELL_HIGH, 0);
+                    store32(shiftLastCell + VALUE_CELL_AUX, 0);
+                    setVectorLength(heapBase, shiftVector,
+                                    shiftLength - 1);
+                }
+                intrinsicHandled = 1;
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_ARRAY_JOIN) {
+            var joinValid = 1;
+            var joinAllocationFailed = 0;
+            if (intrinsicArgumentCount !== 1) joinValid = 0;
+            var joinReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            if (joinReceiverIndex < 0) joinValid = 0;
+            var joinReceiverCell = heapBase + registerCells +
+                joinReceiverIndex * VALUE_CELL_BYTES;
+            if (valueCellTag(0, joinReceiverCell) !==
+                VALUE_TAG_REFERENCE) joinValid = 0;
+            var joinArray = valueCellReference(0, joinReceiverCell);
+            if (joinValid === 1) {
+                if (recordType(heapBase, joinArray) !==
+                    HEAP_TYPE_ARRAY) joinValid = 0;
+            }
+            var joinSeparator = 0;
+            if (joinValid === 1) {
+                var joinSeparatorRegisterCell = heapBase +
+                    intrinsicArgumentsVector + VECTOR_CELLS;
+                if (valueCellTag(0, joinSeparatorRegisterCell) !==
+                    VALUE_TAG_INT32) joinValid = 0;
+                var joinSeparatorRegister = load32(
+                    joinSeparatorRegisterCell + VALUE_CELL_LOW);
+                var joinSeparatorCell = heapBase + registerCells +
+                    joinSeparatorRegister * VALUE_CELL_BYTES;
+                if (valueCellTag(0, joinSeparatorCell) !==
+                    VALUE_TAG_REFERENCE) joinValid = 0;
+                joinSeparator = valueCellReference(
+                    0, joinSeparatorCell);
+                if (joinValid === 1) {
+                    if (recordType(heapBase, joinSeparator) !==
+                        HEAP_TYPE_STRING) joinValid = 0;
+                }
+            }
+            var joinVector = 0;
+            var joinLength = 0;
+            var joinSeparatorLength = 0;
+            var joinCharacterLength = 0;
+            if (joinValid === 1) {
+                joinVector = arrayElements(heapBase, joinArray);
+                joinLength = vectorLength(heapBase, joinVector);
+            }
+            var joinMaximumCharacters = 0;
+            if (joinValid === 1) {
+                joinSeparatorLength = stringLength(
+                    heapBase, joinSeparator);
+                var joinAvailableBytes = engineHeapLimit(
+                    heapBase, state) - engineHeapBump(heapBase, state);
+                if (joinAvailableBytes < STRING_CHARS + 7) {
+                    joinValid = 0;
+                    joinAllocationFailed = 1;
+                } else {
+                    joinMaximumCharacters = divideI32(
+                        joinAvailableBytes - STRING_CHARS - 7, 2);
+                }
+            }
+            var joinMeasureIndex = 0;
+            while (joinMeasureIndex < joinLength) {
+                if (joinMeasureIndex > 0) {
+                    if (joinSeparatorLength >
+                        joinMaximumCharacters - joinCharacterLength) {
+                        joinValid = 0;
+                        joinAllocationFailed = 1;
+                        joinMeasureIndex = joinLength;
+                    } else {
+                        joinCharacterLength = joinCharacterLength +
+                            joinSeparatorLength;
+                    }
+                }
+                var joinMeasureCell = heapBase + joinVector +
+                    VECTOR_CELLS +
+                    joinMeasureIndex * VALUE_CELL_BYTES;
+                var joinMeasureTag = 0;
+                if (joinMeasureIndex < joinLength) {
+                    joinMeasureTag = valueCellTag(0, joinMeasureCell);
+                }
+                if (joinMeasureIndex < joinLength) {
+                if (joinMeasureTag === VALUE_TAG_REFERENCE) {
+                    var joinMeasureString = valueCellReference(
+                        0, joinMeasureCell);
+                    if (recordType(heapBase, joinMeasureString) !==
+                        HEAP_TYPE_STRING) joinValid = 0;
+                    if (joinValid === 1) {
+                        var joinElementCharacters = stringLength(
+                            heapBase, joinMeasureString);
+                        if (joinElementCharacters >
+                            joinMaximumCharacters -
+                            joinCharacterLength) {
+                            joinValid = 0;
+                            joinAllocationFailed = 1;
+                        } else {
+                            joinCharacterLength =
+                                joinCharacterLength +
+                                joinElementCharacters;
+                        }
+                    }
+                } else if (joinMeasureTag !== 0) {
+                    if (joinMeasureTag !== VALUE_TAG_UNDEFINED) {
+                        if (joinMeasureTag !== VALUE_TAG_NULL) {
+                            joinValid = 0;
+                        }
+                    }
+                }
+                }
+                joinMeasureIndex = joinMeasureIndex + 1;
+            }
+            var joinBytes = 0;
+            var joinResult = 0;
+            if (joinValid === 1) {
+                joinBytes = (STRING_CHARS +
+                             joinCharacterLength * 2 + 7) & -8;
+                joinResult = engineHeapBump(heapBase, state);
+                if (joinResult + joinBytes >
+                    engineHeapLimit(heapBase, state)) {
+                    joinValid = 0;
+                    joinAllocationFailed = 1;
+                }
+            }
+            if (joinValid === 1) {
+                setRecordType(heapBase, joinResult, HEAP_TYPE_STRING);
+                setRecordSize(heapBase, joinResult, joinBytes);
+                setRecordMark(heapBase, joinResult, 0);
+                setRecordFlags(heapBase, joinResult, 0);
+                setStringLength(heapBase, joinResult,
+                                joinCharacterLength);
+                var joinHash = -2128831035;
+                var joinOutputIndex = 0;
+                var joinElementIndex = 0;
+                while (joinElementIndex < joinLength) {
+                    var joinCopySource = 0;
+                    var joinCopyLength = 0;
+                    if (joinElementIndex > 0) {
+                        joinCopySource = joinSeparator;
+                        joinCopyLength = joinSeparatorLength;
+                    }
+                    var joinCopyIndex = 0;
+                    while (joinCopyIndex < joinCopyLength) {
+                        var joinCode = stringCharacterCodeUnit(
+                            heapBase, joinCopySource,
+                            joinCopyIndex) & 65535;
+                        setStringCharacterByte(heapBase, joinResult,
+                            joinOutputIndex * 2, joinCode & 255);
+                        setStringCharacterByte(heapBase, joinResult,
+                            joinOutputIndex * 2 + 1,
+                            (joinCode >>> 8) & 255);
+                        joinHash = (joinHash ^ joinCode) * 16777619;
+                        joinOutputIndex = joinOutputIndex + 1;
+                        joinCopyIndex = joinCopyIndex + 1;
+                    }
+                    var joinElementCell = heapBase + joinVector +
+                        VECTOR_CELLS +
+                        joinElementIndex * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, joinElementCell) ===
+                        VALUE_TAG_REFERENCE) {
+                        joinCopySource = valueCellReference(
+                            0, joinElementCell);
+                        joinCopyLength = stringLength(
+                            heapBase, joinCopySource);
+                        joinCopyIndex = 0;
+                        while (joinCopyIndex < joinCopyLength) {
+                            joinCode = stringCharacterCodeUnit(
+                                heapBase, joinCopySource,
+                                joinCopyIndex) & 65535;
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2, joinCode & 255);
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2 + 1,
+                                (joinCode >>> 8) & 255);
+                            joinHash = (joinHash ^ joinCode) * 16777619;
+                            joinOutputIndex = joinOutputIndex + 1;
+                            joinCopyIndex = joinCopyIndex + 1;
+                        }
+                    }
+                    joinElementIndex = joinElementIndex + 1;
+                }
+                setStringHash(heapBase, joinResult, joinHash);
+                setEngineHeapBump(heapBase, state,
+                                  joinResult + joinBytes);
+                store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+                store32(intrinsicTarget + VALUE_CELL_LOW, joinResult);
+                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                intrinsicHandled = 1;
+            }
+            if (joinAllocationFailed === 1) {
+                store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                        CALL_REJECT_HEAP_SPACE);
+                store32(heapBase + state + ENGINE_EXIT_REASON,
+                        EXIT_UNSUPPORTED);
+                store32(heapBase + state + ENGINE_PC, pc);
+                store32(heapBase + state + ENGINE_RESULT, opcode);
+                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                        instructions);
+                store32(heapBase + framePC, pc);
+                return EXIT_UNSUPPORTED;
+            }
+        }
+        }
+        if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
+            var pushReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var pushValid = 1;
+            if (pushReceiverIndex < 0) pushValid = 0;
+            var pushReceiverCell = heapBase + registerCells +
+                pushReceiverIndex * VALUE_CELL_BYTES;
+            if (load32(pushReceiverCell) !== VALUE_TAG_REFERENCE) {
+                pushValid = 0;
+            }
+            var pushArray = load32(pushReceiverCell + VALUE_CELL_LOW);
+            if (pushValid === 1) {
+                if (load32(heapBase + pushArray) !== HEAP_TYPE_ARRAY) {
+                    pushValid = 0;
+                }
+            }
+            var pushVector = 0;
+            var pushLength = 0;
+            if (pushValid === 1) {
+                pushVector = arrayElements(heapBase, pushArray);
+                pushLength = vectorLength(heapBase, pushVector);
+                var pushCapacity = vectorCapacity(heapBase, pushVector);
+                if (pushLength + intrinsicArgumentCount > pushCapacity) {
+                    var grownPushCapacity = pushCapacity;
+                    if (grownPushCapacity < INITIAL_ARRAY_CAPACITY) {
+                        grownPushCapacity = INITIAL_ARRAY_CAPACITY;
+                    }
+                    while (grownPushCapacity <
+                           pushLength + intrinsicArgumentCount) {
+                        grownPushCapacity = grownPushCapacity * 2;
+                    }
+                    var grownPushVectorBytes = VECTOR_CELLS +
+                        grownPushCapacity * VALUE_CELL_BYTES;
+                    var grownPushVector = engineHeapBump(heapBase, state);
+                    if (grownPushVector + grownPushVectorBytes >
+                        engineHeapLimit(heapBase, state)) {
+                        pushValid = 0;
+                    } else {
+                        setRecordType(heapBase, grownPushVector,
+                                      HEAP_TYPE_VALUE_VECTOR);
+                        setRecordSize(heapBase, grownPushVector,
+                                      grownPushVectorBytes);
+                        setRecordMark(heapBase, grownPushVector, 0);
+                        setRecordFlags(heapBase, grownPushVector, 0);
+                        setVectorLength(heapBase, grownPushVector,
+                                        pushLength);
+                        setVectorCapacity(heapBase, grownPushVector,
+                                          grownPushCapacity);
+                        var grownPushIndex = 0;
+                        while (grownPushIndex < grownPushCapacity) {
+                            var grownPushTarget = heapBase +
+                                grownPushVector + VECTOR_CELLS +
+                                grownPushIndex * VALUE_CELL_BYTES;
+                            if (grownPushIndex < pushLength) {
+                                var grownPushSource = heapBase +
+                                    pushVector + VECTOR_CELLS +
+                                    grownPushIndex * VALUE_CELL_BYTES;
+                                store32(grownPushTarget,
+                                        load32(grownPushSource));
+                                store32(grownPushTarget + VALUE_CELL_LOW,
+                                    load32(grownPushSource +
+                                           VALUE_CELL_LOW));
+                                store32(grownPushTarget + VALUE_CELL_HIGH,
+                                    load32(grownPushSource +
+                                           VALUE_CELL_HIGH));
+                                store32(grownPushTarget + VALUE_CELL_AUX,
+                                    load32(grownPushSource +
+                                           VALUE_CELL_AUX));
+                            } else {
+                                store32(grownPushTarget, 0);
+                                store32(grownPushTarget + VALUE_CELL_LOW, 0);
+                                store32(grownPushTarget + VALUE_CELL_HIGH, 0);
+                                store32(grownPushTarget + VALUE_CELL_AUX, 0);
+                            }
+                            grownPushIndex = grownPushIndex + 1;
+                        }
+                        setArrayElements(heapBase, pushArray,
+                                         grownPushVector);
+                        setEngineHeapBump(heapBase, state,
+                            grownPushVector + grownPushVectorBytes);
+                        pushVector = grownPushVector;
+                    }
+                }
+            }
+            var pushIndex = 0;
+            while (pushIndex < intrinsicArgumentCount) {
+                var pushRegisterCell = heapBase +
+                    intrinsicArgumentsVector + VECTOR_CELLS +
+                    pushIndex * VALUE_CELL_BYTES;
+                if (load32(pushRegisterCell) !== VALUE_TAG_INT32) {
+                    pushValid = 0;
+                }
+                pushIndex = pushIndex + 1;
+            }
+            if (pushValid === 0) {
+                store32(heapBase + state + ENGINE_EXIT_REASON,
+                        EXIT_UNSUPPORTED);
+                store32(heapBase + state + ENGINE_PC, pc);
+                store32(heapBase + state + ENGINE_RESULT, opcode);
+                store32(heapBase + state + ENGINE_INSTRUCTIONS,
+                        instructions);
+                store32(heapBase + framePC, pc);
+                return EXIT_UNSUPPORTED;
+            }
+            pushIndex = 0;
+            while (pushIndex < intrinsicArgumentCount) {
+                var pushSourceRegisterCell = heapBase +
+                    intrinsicArgumentsVector + VECTOR_CELLS +
+                    pushIndex * VALUE_CELL_BYTES;
+                var pushSourceRegister = load32(
+                    pushSourceRegisterCell + VALUE_CELL_LOW);
+                var pushSource = heapBase + registerCells +
+                    pushSourceRegister * VALUE_CELL_BYTES;
+                var pushTarget = heapBase + pushVector + VECTOR_CELLS +
+                    (pushLength + pushIndex) * VALUE_CELL_BYTES;
+                store32(pushTarget, load32(pushSource));
+                store32(pushTarget + VALUE_CELL_LOW,
+                        load32(pushSource + VALUE_CELL_LOW));
+                store32(pushTarget + VALUE_CELL_HIGH,
+                        load32(pushSource + VALUE_CELL_HIGH));
+                store32(pushTarget + VALUE_CELL_AUX,
+                        load32(pushSource + VALUE_CELL_AUX));
+                pushIndex = pushIndex + 1;
+            }
+            pushLength = pushLength + intrinsicArgumentCount;
+            setVectorLength(heapBase, pushVector, pushLength);
+            store32(intrinsicTarget, VALUE_TAG_INT32);
+            store32(intrinsicTarget + VALUE_CELL_LOW, pushLength);
+            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            intrinsicHandled = 1;
+        }
+        return intrinsicHandled;
     }
 
     function bufferAllocKernel(heapBase, state, intrinsicTarget,
@@ -8329,6 +8349,7 @@
             allocateObjectKernel: allocateObjectKernel,
             allocateRegexpKernel: allocateRegexpKernel,
             arrayConcatKernel: arrayConcatKernel,
+            arrayIntrinsicKernel: arrayIntrinsicKernel,
             arraySliceKernel: arraySliceKernel,
             bufferAllocKernel: bufferAllocKernel,
             bufferCopyKernel: bufferCopyKernel,
