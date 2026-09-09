@@ -6985,45 +6985,12 @@
                 var typeofSourceIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var typeofSource = heapBase + registerCells +
-                    typeofSourceIndex * VALUE_CELL_BYTES;
-                var typeofTag = valueCellTag(0, typeofSource);
-                var typeofSupportIndex = RUNTIME_SUPPORT_TYPE_UNDEFINED;
-                if (typeofTag === VALUE_TAG_NULL) {
-                    typeofSupportIndex = RUNTIME_SUPPORT_TYPE_OBJECT;
-                } else if (typeofTag === VALUE_TAG_FALSE) {
-                    typeofSupportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
-                } else if (typeofTag === VALUE_TAG_TRUE) {
-                    typeofSupportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
-                } else if (typeofTag === VALUE_TAG_INT32) {
-                    typeofSupportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
-                } else if (typeofTag === VALUE_TAG_DOUBLE) {
-                    typeofSupportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
-                } else if (typeofTag === VALUE_TAG_REFERENCE) {
-                    var typeofReference = valueCellReference(0, typeofSource);
-                    var typeofRecordType = recordType(heapBase,
-                                                      typeofReference);
-                    if (typeofRecordType === HEAP_TYPE_STRING) {
-                        typeofSupportIndex = RUNTIME_SUPPORT_TYPE_STRING;
-                    } else if (typeofRecordType ===
-                               HEAP_TYPE_NATIVE_FUNCTION) {
-                        typeofSupportIndex = RUNTIME_SUPPORT_TYPE_FUNCTION;
-                    } else if (typeofRecordType ===
-                               HEAP_TYPE_BYTECODE_FUNCTION) {
-                        typeofSupportIndex = RUNTIME_SUPPORT_TYPE_FUNCTION;
-                    } else {
-                        typeofSupportIndex = RUNTIME_SUPPORT_TYPE_OBJECT;
-                    }
-                }
-                var typeofSupportCell = heapBase + stringSupport +
-                    VECTOR_CELLS + typeofSupportIndex * VALUE_CELL_BYTES;
-                var typeofTarget = heapBase + registerCells +
-                    typeofTargetIndex * VALUE_CELL_BYTES;
-                store32(typeofTarget, VALUE_TAG_REFERENCE);
-                store32(typeofTarget + VALUE_CELL_LOW,
-                    valueCellReference(0, typeofSupportCell));
-                store32(typeofTarget + VALUE_CELL_HIGH, 0);
-                store32(typeofTarget + VALUE_CELL_AUX, 0);
+                var typeofResult = typeofValueKernel(heapBase,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             typeofTargetIndex),
+                    frameRegisterCellAddress(heapBase, frame,
+                                             typeofSourceIndex),
+                    stringSupport);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_TYPEOF_GLOBAL) {
                 var typeofGlobalTargetIndex = load32(
@@ -7047,53 +7014,15 @@
                     } else typeofGlobalProperty = propertyNext(
                                heapBase, typeofGlobalProperty);
                 }
-                var typeofGlobalSupportIndex =
-                    RUNTIME_SUPPORT_TYPE_UNDEFINED;
+                var typeofGlobalValueCell = 0;
                 if (typeofGlobalFoundProperty !== 0) {
-                    var typeofGlobalTag = propertyValueTag(
+                    typeofGlobalValueCell = propertyValueCellAddress(
                         heapBase, typeofGlobalFoundProperty);
-                    if (typeofGlobalTag === VALUE_TAG_NULL) {
-                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_OBJECT;
-                    } else if (typeofGlobalTag === VALUE_TAG_FALSE) {
-                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
-                    } else if (typeofGlobalTag === VALUE_TAG_TRUE) {
-                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
-                    } else if (typeofGlobalTag === VALUE_TAG_INT32) {
-                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
-                    } else if (typeofGlobalTag === VALUE_TAG_DOUBLE) {
-                        typeofGlobalSupportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
-                    } else if (typeofGlobalTag === VALUE_TAG_REFERENCE) {
-                        var typeofGlobalReference = propertyValueReference(
-                            heapBase, typeofGlobalFoundProperty);
-                        var typeofGlobalRecordType = recordType(
-                            heapBase, typeofGlobalReference);
-                        if (typeofGlobalRecordType === HEAP_TYPE_STRING) {
-                            typeofGlobalSupportIndex =
-                                RUNTIME_SUPPORT_TYPE_STRING;
-                        } else if (typeofGlobalRecordType ===
-                                   HEAP_TYPE_NATIVE_FUNCTION) {
-                            typeofGlobalSupportIndex =
-                                RUNTIME_SUPPORT_TYPE_FUNCTION;
-                        } else if (typeofGlobalRecordType ===
-                                   HEAP_TYPE_BYTECODE_FUNCTION) {
-                            typeofGlobalSupportIndex =
-                                RUNTIME_SUPPORT_TYPE_FUNCTION;
-                        } else {
-                            typeofGlobalSupportIndex =
-                                RUNTIME_SUPPORT_TYPE_OBJECT;
-                        }
-                    }
                 }
-                var typeofGlobalSupportCell = heapBase + stringSupport +
-                    VECTOR_CELLS + typeofGlobalSupportIndex *
-                    VALUE_CELL_BYTES;
-                var typeofGlobalTarget = heapBase + registerCells +
-                    typeofGlobalTargetIndex * VALUE_CELL_BYTES;
-                store32(typeofGlobalTarget, VALUE_TAG_REFERENCE);
-                store32(typeofGlobalTarget + VALUE_CELL_LOW,
-                    valueCellReference(0, typeofGlobalSupportCell));
-                store32(typeofGlobalTarget + VALUE_CELL_HIGH, 0);
-                store32(typeofGlobalTarget + VALUE_CELL_AUX, 0);
+                var typeofGlobalResult = typeofValueKernel(heapBase,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             typeofGlobalTargetIndex),
+                    typeofGlobalValueCell, stringSupport);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_IN) {
                 store32(heapBase + state + ENGINE_EXIT_REASON,
@@ -7976,6 +7905,39 @@
         return 1;
     }
 
+    function typeofValueKernel(heapBase, targetCell, sourceCell,
+                               stringSupport) {
+        var tag = VALUE_TAG_UNDEFINED;
+        if (sourceCell !== 0) tag = valueCellTag(0, sourceCell);
+        var supportIndex = RUNTIME_SUPPORT_TYPE_UNDEFINED;
+        if (tag === VALUE_TAG_NULL) {
+            supportIndex = RUNTIME_SUPPORT_TYPE_OBJECT;
+        } else if (tag === VALUE_TAG_FALSE) {
+            supportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
+        } else if (tag === VALUE_TAG_TRUE) {
+            supportIndex = RUNTIME_SUPPORT_TYPE_BOOLEAN;
+        } else if (tag === VALUE_TAG_INT32) {
+            supportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
+        } else if (tag === VALUE_TAG_DOUBLE) {
+            supportIndex = RUNTIME_SUPPORT_TYPE_NUMBER;
+        } else if (tag === VALUE_TAG_REFERENCE) {
+            var reference = valueCellReference(0, sourceCell);
+            var type = recordType(heapBase, reference);
+            if (type === HEAP_TYPE_STRING) {
+                supportIndex = RUNTIME_SUPPORT_TYPE_STRING;
+            } else if (type === HEAP_TYPE_NATIVE_FUNCTION) {
+                supportIndex = RUNTIME_SUPPORT_TYPE_FUNCTION;
+            } else if (type === HEAP_TYPE_BYTECODE_FUNCTION) {
+                supportIndex = RUNTIME_SUPPORT_TYPE_FUNCTION;
+            } else supportIndex = RUNTIME_SUPPORT_TYPE_OBJECT;
+        }
+        var supportCell = vectorCellAddress(
+            heapBase, stringSupport, supportIndex);
+        setValueCellReference(targetCell,
+                              valueCellReference(0, supportCell));
+        return 1;
+    }
+
     function programArgumentCellKernel(heapBase, argumentsVector,
                                        registerCells, argumentIndex) {
         var descriptor = vectorCellAddress(
@@ -8813,7 +8775,8 @@
             programIntArgumentKernel: programIntArgumentKernel,
             programSetCodeKernel: programSetCodeKernel,
             programSetConstantKernel: programSetConstantKernel,
-            programSetVectorKernel: programSetVectorKernel
+            programSetVectorKernel: programSetVectorKernel,
+            typeofValueKernel: typeofValueKernel
         };
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
