@@ -4106,360 +4106,14 @@
                     isMathIntrinsic = 1;
                 }
                 if (isMathIntrinsic === 1) {
-                    var mathArgumentsValid = 1;
-                    var mathArgumentIndex = 0;
-                    var minimumCell = 0;
-                    var unaryMathCell = 0;
-                    var powerExponentCell = 0;
-                    var selectExtreme = 0;
-                    if (intrinsicId === INTRINSIC_MATH_MIN) selectExtreme = 1;
-                    else if (intrinsicId === INTRINSIC_MATH_MAX) {
-                        selectExtreme = 1;
+                    intrinsicHandled = mathIntrinsicKernel(
+                        heapBase, state, intrinsicTarget, registerCells,
+                        intrinsicArgumentsVector, intrinsicArgumentCount,
+                        intrinsicId);
+                    if (intrinsicHandled === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
-                    while (mathArgumentIndex < intrinsicArgumentCount) {
-                        var mathRegisterCell = heapBase +
-                            intrinsicArgumentsVector + VECTOR_CELLS +
-                            mathArgumentIndex * VALUE_CELL_BYTES;
-                        if (load32(mathRegisterCell) !== VALUE_TAG_INT32) {
-                            mathArgumentsValid = 0;
-                        }
-                        var mathRegister = load32(
-                            mathRegisterCell + VALUE_CELL_LOW);
-                        var mathValueCell = heapBase + registerCells +
-                            mathRegister * VALUE_CELL_BYTES;
-                        var mathValueTag = load32(mathValueCell);
-                        if (mathArgumentIndex === 0) unaryMathCell = mathValueCell;
-                        else if (mathArgumentIndex === 1) {
-                            powerExponentCell = mathValueCell;
-                        }
-                        if (mathValueTag !== VALUE_TAG_INT32) {
-                            if (mathValueTag !== VALUE_TAG_DOUBLE) {
-                                mathArgumentsValid = 0;
-                            }
-                        }
-                        if (selectExtreme === 1) {
-                            if (mathValueTag === VALUE_TAG_DOUBLE) {
-                                if (load32(mathValueCell + VALUE_CELL_LOW) === 0) {
-                                    if ((load32(mathValueCell + VALUE_CELL_HIGH) &
-                                        IEEE754_ABSOLUTE_MASK) === 0) {
-                                        if (load32(mathValueCell +
-                                            VALUE_CELL_HIGH) < 0) {
-                                            mathArgumentsValid = 0;
-                                        }
-                                    }
-                                }
-                            }
-                            if (mathArgumentIndex === 0) {
-                                minimumCell = mathValueCell;
-                            } else {
-                                var minimumTag = load32(minimumCell);
-                                if (equalF64(loadNumberF64(
-                                        mathValueCell + VALUE_CELL_LOW,
-                                        mathValueTag), loadNumberF64(
-                                        mathValueCell + VALUE_CELL_LOW,
-                                        mathValueTag)) === 0) {
-                                    minimumCell = mathValueCell;
-                                } else if (intrinsicId === INTRINSIC_MATH_MIN) {
-                                    if (lessF64(loadNumberF64(
-                                            mathValueCell + VALUE_CELL_LOW,
-                                            mathValueTag), loadNumberF64(
-                                            minimumCell + VALUE_CELL_LOW,
-                                            minimumTag)) === 1) {
-                                        minimumCell = mathValueCell;
-                                    }
-                                } else {
-                                    if (greaterF64(loadNumberF64(
-                                            mathValueCell + VALUE_CELL_LOW,
-                                            mathValueTag), loadNumberF64(
-                                            minimumCell + VALUE_CELL_LOW,
-                                            minimumTag)) === 1) {
-                                        minimumCell = mathValueCell;
-                                    }
-                                }
-                            }
-                        }
-                        mathArgumentIndex = mathArgumentIndex + 1;
-                    }
-                    if (mathArgumentsValid === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                    if (intrinsicId === INTRINSIC_MATH_ATAN2) {
-                        if (intrinsicArgumentCount !== 2) {
-                            mathArgumentsValid = 0;
-                        }
-                        if (mathArgumentsValid === 0) {
-                            store32(heapBase + state + ENGINE_EXIT_REASON,
-                                    EXIT_UNSUPPORTED);
-                            store32(heapBase + state + ENGINE_PC, pc);
-                            store32(heapBase + state + ENGINE_RESULT, opcode);
-                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                    instructions);
-                            store32(heapBase + framePC, pc);
-                            return EXIT_UNSUPPORTED;
-                        }
-                        var atan2YTag = load32(unaryMathCell);
-                        var atan2XTag = load32(powerExponentCell);
-                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
-                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
-                            atan2F64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, atan2YTag),
-                                loadNumberF64(powerExponentCell +
-                                    VALUE_CELL_LOW, atan2XTag)));
-                    } else if (intrinsicId === INTRINSIC_MATH_POW) {
-                        if (intrinsicArgumentCount !== 2) {
-                            mathArgumentsValid = 0;
-                        }
-                        var powerBaseTag = load32(unaryMathCell);
-                        var powerExponentTag = load32(powerExponentCell);
-                        store32(heapBase + state + ENGINE_SCRATCH_LEFT, 0);
-                        if (greaterF64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
-                                loadI32F64(heapBase + state +
-                                           ENGINE_SCRATCH_LEFT)) === 0) {
-                            mathArgumentsValid = 0;
-                        }
-                        if (equalF64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
-                                loadNumberF64(unaryMathCell + VALUE_CELL_LOW,
-                                              powerBaseTag)) === 0) {
-                            mathArgumentsValid = 0;
-                        }
-                        if (equalF64(loadNumberF64(
-                                powerExponentCell + VALUE_CELL_LOW,
-                                powerExponentTag), loadNumberF64(
-                                powerExponentCell + VALUE_CELL_LOW,
-                                powerExponentTag)) === 0) {
-                            mathArgumentsValid = 0;
-                        }
-                        if (mathArgumentsValid === 0) {
-                            store32(heapBase + state + ENGINE_EXIT_REASON,
-                                    EXIT_UNSUPPORTED);
-                            store32(heapBase + state + ENGINE_PC, pc);
-                            store32(heapBase + state + ENGINE_RESULT, opcode);
-                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                    instructions);
-                            store32(heapBase + framePC, pc);
-                            return EXIT_UNSUPPORTED;
-                        }
-                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
-                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
-                            powF64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
-                                loadNumberF64(
-                                    powerExponentCell + VALUE_CELL_LOW,
-                                    powerExponentTag)));
-                    } else if (intrinsicId >= INTRINSIC_MATH_SIN) {
-                        var trigTag = load32(unaryMathCell);
-                        var trigSupported = 1;
-                        if (trigTag === VALUE_TAG_DOUBLE) {
-                            if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
-                                 IEEE754_ABSOLUTE_MASK) >= 1138753536) {
-                                trigSupported = 0;
-                            }
-                        }
-                        if (trigSupported === 0) {
-                            store32(heapBase + state + ENGINE_EXIT_REASON,
-                                    EXIT_UNSUPPORTED);
-                            store32(heapBase + state + ENGINE_PC, pc);
-                            store32(heapBase + state + ENGINE_RESULT, opcode);
-                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                    instructions);
-                            store32(heapBase + framePC, pc);
-                            return EXIT_UNSUPPORTED;
-                        }
-                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
-                        if (intrinsicId === INTRINSIC_MATH_SIN) {
-                            storeF64(intrinsicTarget + VALUE_CELL_LOW,
-                                sinF64(loadNumberF64(
-                                    unaryMathCell + VALUE_CELL_LOW, trigTag)));
-                        } else {
-                            storeF64(intrinsicTarget + VALUE_CELL_LOW,
-                                cosF64(loadNumberF64(
-                                    unaryMathCell + VALUE_CELL_LOW, trigTag)));
-                        }
-                    } else if (intrinsicId === INTRINSIC_MATH_SQRT) {
-                        var sqrtRegisterCell = heapBase +
-                            intrinsicArgumentsVector + VECTOR_CELLS;
-                        var sqrtRegister = load32(
-                            sqrtRegisterCell + VALUE_CELL_LOW);
-                        var sqrtValueCell = heapBase + registerCells +
-                            sqrtRegister * VALUE_CELL_BYTES;
-                        var sqrtValueTag = load32(sqrtValueCell);
-                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
-                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
-                            sqrtF64(loadNumberF64(
-                                sqrtValueCell + VALUE_CELL_LOW, sqrtValueTag)));
-                    } else if (intrinsicId === INTRINSIC_MATH_ABS) {
-                        var absRegisterCell = heapBase +
-                            intrinsicArgumentsVector + VECTOR_CELLS;
-                        var absRegister = load32(
-                            absRegisterCell + VALUE_CELL_LOW);
-                        var absValueCell = heapBase + registerCells +
-                            absRegister * VALUE_CELL_BYTES;
-                        var absValueTag = load32(absValueCell);
-                        store32(intrinsicTarget, VALUE_TAG_DOUBLE);
-                        storeF64(intrinsicTarget + VALUE_CELL_LOW,
-                            absF64(loadNumberF64(
-                                absValueCell + VALUE_CELL_LOW, absValueTag)));
-                    } else if (intrinsicId === INTRINSIC_MATH_ROUND) {
-                        /* Doubling makes the half-way boundary integral, so
-                         * common-range Math.round needs no host callback or
-                         * embedded floating-point constant. Arithmetic right
-                         * shift supplies floor division for a negative,
-                         * non-tie odd value. Exact negative odd values are the
-                         * ES tie case and round toward positive infinity. */
-                        var roundTag = load32(unaryMathCell);
-                        var roundTwiceInteger = toInt32F64(addF64(
-                            loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundTag),
-                            loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundTag)));
-                        store32(heapBase + state + ENGINE_SCRATCH_LEFT,
-                                roundTwiceInteger);
-                        var roundTwiceExact = equalF64(addF64(
-                            loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundTag),
-                            loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundTag)),
-                            loadI32F64(heapBase + state +
-                                       ENGINE_SCRATCH_LEFT));
-                        var roundSafe = 1;
-                        if (roundTwiceInteger === MINIMUM_INT32) {
-                            if (roundTwiceExact === 0) roundSafe = 0;
-                        }
-                        if (equalF64(loadNumberF64(
-                            unaryMathCell + VALUE_CELL_LOW, roundTag),
-                            loadNumberF64(
-                            unaryMathCell + VALUE_CELL_LOW, roundTag)) === 0) {
-                            roundSafe = 0;
-                        }
-                        if (roundSafe === 0) {
-                            store32(heapBase + state + ENGINE_EXIT_REASON,
-                                    EXIT_UNSUPPORTED);
-                            store32(heapBase + state + ENGINE_PC, pc);
-                            store32(heapBase + state + ENGINE_RESULT, opcode);
-                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                    instructions);
-                            store32(heapBase + framePC, pc);
-                            return EXIT_UNSUPPORTED;
-                        }
-                        var roundResult = roundTwiceInteger >> 1;
-                        if (roundTwiceInteger >= 0) {
-                            roundResult = roundResult +
-                                          (roundTwiceInteger & 1);
-                        } else if ((roundTwiceInteger & 1) !== 0) {
-                            if (roundTwiceExact === 1) {
-                                roundResult = roundResult + 1;
-                            }
-                        }
-                        var roundNegativeZero = 0;
-                        if (roundResult === 0) {
-                            store32(heapBase + state + ENGINE_SCRATCH_RIGHT, 0);
-                            if (lessF64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundTag),
-                                loadI32F64(heapBase + state +
-                                           ENGINE_SCRATCH_RIGHT)) === 1) {
-                                roundNegativeZero = 1;
-                            } else if (roundTag === VALUE_TAG_DOUBLE) {
-                                if (load32(unaryMathCell + VALUE_CELL_LOW) === 0) {
-                                    if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
-                                         IEEE754_ABSOLUTE_MASK) === 0) {
-                                        if (load32(unaryMathCell +
-                                                   VALUE_CELL_HIGH) < 0) {
-                                            roundNegativeZero = 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if (roundNegativeZero === 1) {
-                            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
-                            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                            store32(intrinsicTarget + VALUE_CELL_HIGH,
-                                    MINIMUM_INT32);
-                        } else {
-                            store32(intrinsicTarget, VALUE_TAG_INT32);
-                            store32(intrinsicTarget + VALUE_CELL_LOW,
-                                    roundResult);
-                            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                        }
-                    } else if (intrinsicId >= INTRINSIC_MATH_FLOOR) {
-                        var roundingTag = load32(unaryMathCell);
-                        var roundingValue = toInt32F64(loadNumberF64(
-                            unaryMathCell + VALUE_CELL_LOW, roundingTag));
-                        store32(heapBase + state + ENGINE_SCRATCH_LEFT,
-                                roundingValue);
-                        store32(heapBase + state + ENGINE_SCRATCH_RIGHT, 0);
-                        var roundingExact = equalF64(loadNumberF64(
-                            unaryMathCell + VALUE_CELL_LOW, roundingTag),
-                            loadI32F64(heapBase + state +
-                                       ENGINE_SCRATCH_LEFT));
-                        var roundingSafe = 1;
-                        if (roundingTag === VALUE_TAG_DOUBLE) {
-                            if (load32(unaryMathCell + VALUE_CELL_LOW) === 0) {
-                                if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
-                                     IEEE754_ABSOLUTE_MASK) === 0) {
-                                    if (load32(unaryMathCell +
-                                               VALUE_CELL_HIGH) < 0) {
-                                        roundingSafe = 0;
-                                    }
-                                }
-                            }
-                        }
-                        if (roundingExact === 0) {
-                            if (roundingValue === MINIMUM_INT32) {
-                                roundingSafe = 0;
-                            } else if (equalF64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundingTag),
-                                loadNumberF64(unaryMathCell + VALUE_CELL_LOW,
-                                              roundingTag)) === 0) {
-                                roundingSafe = 0;
-                            } else if (greaterF64(loadNumberF64(
-                                unaryMathCell + VALUE_CELL_LOW, roundingTag),
-                                loadI32F64(heapBase + state +
-                                           ENGINE_SCRATCH_RIGHT)) === 1) {
-                                if (roundingValue < 0) roundingSafe = 0;
-                                else if (intrinsicId === INTRINSIC_MATH_CEIL) {
-                                    if (roundingValue === 2147483647) {
-                                        roundingSafe = 0;
-                                    } else roundingValue = roundingValue + 1;
-                                }
-                            } else {
-                                if (roundingValue > 0) roundingSafe = 0;
-                                else if (intrinsicId === INTRINSIC_MATH_FLOOR) {
-                                    roundingValue = roundingValue - 1;
-                                }
-                            }
-                        }
-                        if (roundingSafe === 0) {
-                            store32(heapBase + state + ENGINE_EXIT_REASON,
-                                    EXIT_UNSUPPORTED);
-                            store32(heapBase + state + ENGINE_PC, pc);
-                            store32(heapBase + state + ENGINE_RESULT, opcode);
-                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                    instructions);
-                            store32(heapBase + framePC, pc);
-                            return EXIT_UNSUPPORTED;
-                        }
-                        store32(intrinsicTarget, VALUE_TAG_INT32);
-                        store32(intrinsicTarget + VALUE_CELL_LOW, roundingValue);
-                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    } else {
-                        store32(intrinsicTarget, load32(minimumCell));
-                        store32(intrinsicTarget + VALUE_CELL_LOW,
-                                load32(minimumCell + VALUE_CELL_LOW));
-                        store32(intrinsicTarget + VALUE_CELL_HIGH,
-                                load32(minimumCell + VALUE_CELL_HIGH));
-                    }
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                    intrinsicHandled = 1;
                 }
                 }
                 if (intrinsicHandled === 0) {
@@ -7273,6 +6927,323 @@
         return EXIT_BUDGET;
     }
 
+    function mathIntrinsicKernel(heapBase, state, intrinsicTarget,
+                                 registerCells, intrinsicArgumentsVector,
+                                 intrinsicArgumentCount, intrinsicId) {
+        var mathArgumentsValid = 1;
+        var mathArgumentIndex = 0;
+        var minimumCell = 0;
+        var unaryMathCell = 0;
+        var powerExponentCell = 0;
+        var selectExtreme = 0;
+        if (intrinsicId === INTRINSIC_MATH_MIN) selectExtreme = 1;
+        else if (intrinsicId === INTRINSIC_MATH_MAX) {
+            selectExtreme = 1;
+        }
+        while (mathArgumentIndex < intrinsicArgumentCount) {
+            var mathRegisterCell = heapBase +
+                intrinsicArgumentsVector + VECTOR_CELLS +
+                mathArgumentIndex * VALUE_CELL_BYTES;
+            if (load32(mathRegisterCell) !== VALUE_TAG_INT32) {
+                mathArgumentsValid = 0;
+            }
+            var mathRegister = load32(
+                mathRegisterCell + VALUE_CELL_LOW);
+            var mathValueCell = heapBase + registerCells +
+                mathRegister * VALUE_CELL_BYTES;
+            var mathValueTag = load32(mathValueCell);
+            if (mathArgumentIndex === 0) unaryMathCell = mathValueCell;
+            else if (mathArgumentIndex === 1) {
+                powerExponentCell = mathValueCell;
+            }
+            if (mathValueTag !== VALUE_TAG_INT32) {
+                if (mathValueTag !== VALUE_TAG_DOUBLE) {
+                    mathArgumentsValid = 0;
+                }
+            }
+            if (selectExtreme === 1) {
+                if (mathValueTag === VALUE_TAG_DOUBLE) {
+                    if (load32(mathValueCell + VALUE_CELL_LOW) === 0) {
+                        if ((load32(mathValueCell + VALUE_CELL_HIGH) &
+                            IEEE754_ABSOLUTE_MASK) === 0) {
+                            if (load32(mathValueCell +
+                                VALUE_CELL_HIGH) < 0) {
+                                mathArgumentsValid = 0;
+                            }
+                        }
+                    }
+                }
+                if (mathArgumentIndex === 0) {
+                    minimumCell = mathValueCell;
+                } else {
+                    var minimumTag = load32(minimumCell);
+                    if (equalF64(loadNumberF64(
+                            mathValueCell + VALUE_CELL_LOW,
+                            mathValueTag), loadNumberF64(
+                            mathValueCell + VALUE_CELL_LOW,
+                            mathValueTag)) === 0) {
+                        minimumCell = mathValueCell;
+                    } else if (intrinsicId === INTRINSIC_MATH_MIN) {
+                        if (lessF64(loadNumberF64(
+                                mathValueCell + VALUE_CELL_LOW,
+                                mathValueTag), loadNumberF64(
+                                minimumCell + VALUE_CELL_LOW,
+                                minimumTag)) === 1) {
+                            minimumCell = mathValueCell;
+                        }
+                    } else {
+                        if (greaterF64(loadNumberF64(
+                                mathValueCell + VALUE_CELL_LOW,
+                                mathValueTag), loadNumberF64(
+                                minimumCell + VALUE_CELL_LOW,
+                                minimumTag)) === 1) {
+                            minimumCell = mathValueCell;
+                        }
+                    }
+                }
+            }
+            mathArgumentIndex = mathArgumentIndex + 1;
+        }
+        if (mathArgumentsValid === 0) {
+            return 0;
+        }
+        if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+            if (intrinsicArgumentCount !== 2) {
+                mathArgumentsValid = 0;
+            }
+            if (mathArgumentsValid === 0) {
+                return 0;
+            }
+            var atan2YTag = load32(unaryMathCell);
+            var atan2XTag = load32(powerExponentCell);
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                atan2F64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, atan2YTag),
+                    loadNumberF64(powerExponentCell +
+                        VALUE_CELL_LOW, atan2XTag)));
+        } else if (intrinsicId === INTRINSIC_MATH_POW) {
+            if (intrinsicArgumentCount !== 2) {
+                mathArgumentsValid = 0;
+            }
+            var powerBaseTag = load32(unaryMathCell);
+            var powerExponentTag = load32(powerExponentCell);
+            store32(heapBase + state + ENGINE_SCRATCH_LEFT, 0);
+            if (greaterF64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
+                    loadI32F64(heapBase + state +
+                               ENGINE_SCRATCH_LEFT)) === 0) {
+                mathArgumentsValid = 0;
+            }
+            if (equalF64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
+                    loadNumberF64(unaryMathCell + VALUE_CELL_LOW,
+                                  powerBaseTag)) === 0) {
+                mathArgumentsValid = 0;
+            }
+            if (equalF64(loadNumberF64(
+                    powerExponentCell + VALUE_CELL_LOW,
+                    powerExponentTag), loadNumberF64(
+                    powerExponentCell + VALUE_CELL_LOW,
+                    powerExponentTag)) === 0) {
+                mathArgumentsValid = 0;
+            }
+            if (mathArgumentsValid === 0) {
+                return 0;
+            }
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                powF64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, powerBaseTag),
+                    loadNumberF64(
+                        powerExponentCell + VALUE_CELL_LOW,
+                        powerExponentTag)));
+        } else if (intrinsicId >= INTRINSIC_MATH_SIN) {
+            var trigTag = load32(unaryMathCell);
+            var trigSupported = 1;
+            if (trigTag === VALUE_TAG_DOUBLE) {
+                if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
+                     IEEE754_ABSOLUTE_MASK) >= 1138753536) {
+                    trigSupported = 0;
+                }
+            }
+            if (trigSupported === 0) {
+                return 0;
+            }
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            if (intrinsicId === INTRINSIC_MATH_SIN) {
+                storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                    sinF64(loadNumberF64(
+                        unaryMathCell + VALUE_CELL_LOW, trigTag)));
+            } else {
+                storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                    cosF64(loadNumberF64(
+                        unaryMathCell + VALUE_CELL_LOW, trigTag)));
+            }
+        } else if (intrinsicId === INTRINSIC_MATH_SQRT) {
+            var sqrtRegisterCell = heapBase +
+                intrinsicArgumentsVector + VECTOR_CELLS;
+            var sqrtRegister = load32(
+                sqrtRegisterCell + VALUE_CELL_LOW);
+            var sqrtValueCell = heapBase + registerCells +
+                sqrtRegister * VALUE_CELL_BYTES;
+            var sqrtValueTag = load32(sqrtValueCell);
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                sqrtF64(loadNumberF64(
+                    sqrtValueCell + VALUE_CELL_LOW, sqrtValueTag)));
+        } else if (intrinsicId === INTRINSIC_MATH_ABS) {
+            var absRegisterCell = heapBase +
+                intrinsicArgumentsVector + VECTOR_CELLS;
+            var absRegister = load32(
+                absRegisterCell + VALUE_CELL_LOW);
+            var absValueCell = heapBase + registerCells +
+                absRegister * VALUE_CELL_BYTES;
+            var absValueTag = load32(absValueCell);
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                absF64(loadNumberF64(
+                    absValueCell + VALUE_CELL_LOW, absValueTag)));
+        } else if (intrinsicId === INTRINSIC_MATH_ROUND) {
+            /* Doubling makes the half-way boundary integral, so
+             * common-range Math.round needs no host callback or
+             * embedded floating-point constant. Arithmetic right
+             * shift supplies floor division for a negative,
+             * non-tie odd value. Exact negative odd values are the
+             * ES tie case and round toward positive infinity. */
+            var roundTag = load32(unaryMathCell);
+            var roundTwiceInteger = toInt32F64(addF64(
+                loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundTag),
+                loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundTag)));
+            store32(heapBase + state + ENGINE_SCRATCH_LEFT,
+                    roundTwiceInteger);
+            var roundTwiceExact = equalF64(addF64(
+                loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundTag),
+                loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundTag)),
+                loadI32F64(heapBase + state +
+                           ENGINE_SCRATCH_LEFT));
+            var roundSafe = 1;
+            if (roundTwiceInteger === MINIMUM_INT32) {
+                if (roundTwiceExact === 0) roundSafe = 0;
+            }
+            if (equalF64(loadNumberF64(
+                unaryMathCell + VALUE_CELL_LOW, roundTag),
+                loadNumberF64(
+                unaryMathCell + VALUE_CELL_LOW, roundTag)) === 0) {
+                roundSafe = 0;
+            }
+            if (roundSafe === 0) {
+                return 0;
+            }
+            var roundResult = roundTwiceInteger >> 1;
+            if (roundTwiceInteger >= 0) {
+                roundResult = roundResult +
+                              (roundTwiceInteger & 1);
+            } else if ((roundTwiceInteger & 1) !== 0) {
+                if (roundTwiceExact === 1) {
+                    roundResult = roundResult + 1;
+                }
+            }
+            var roundNegativeZero = 0;
+            if (roundResult === 0) {
+                store32(heapBase + state + ENGINE_SCRATCH_RIGHT, 0);
+                if (lessF64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundTag),
+                    loadI32F64(heapBase + state +
+                               ENGINE_SCRATCH_RIGHT)) === 1) {
+                    roundNegativeZero = 1;
+                } else if (roundTag === VALUE_TAG_DOUBLE) {
+                    if (load32(unaryMathCell + VALUE_CELL_LOW) === 0) {
+                        if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
+                             IEEE754_ABSOLUTE_MASK) === 0) {
+                            if (load32(unaryMathCell +
+                                       VALUE_CELL_HIGH) < 0) {
+                                roundNegativeZero = 1;
+                            }
+                        }
+                    }
+                }
+            }
+            if (roundNegativeZero === 1) {
+                store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+                store32(intrinsicTarget + VALUE_CELL_LOW, 0);
+                store32(intrinsicTarget + VALUE_CELL_HIGH,
+                        MINIMUM_INT32);
+            } else {
+                store32(intrinsicTarget, VALUE_TAG_INT32);
+                store32(intrinsicTarget + VALUE_CELL_LOW,
+                        roundResult);
+                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+            }
+        } else if (intrinsicId >= INTRINSIC_MATH_FLOOR) {
+            var roundingTag = load32(unaryMathCell);
+            var roundingValue = toInt32F64(loadNumberF64(
+                unaryMathCell + VALUE_CELL_LOW, roundingTag));
+            store32(heapBase + state + ENGINE_SCRATCH_LEFT,
+                    roundingValue);
+            store32(heapBase + state + ENGINE_SCRATCH_RIGHT, 0);
+            var roundingExact = equalF64(loadNumberF64(
+                unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                loadI32F64(heapBase + state +
+                           ENGINE_SCRATCH_LEFT));
+            var roundingSafe = 1;
+            if (roundingTag === VALUE_TAG_DOUBLE) {
+                if (load32(unaryMathCell + VALUE_CELL_LOW) === 0) {
+                    if ((load32(unaryMathCell + VALUE_CELL_HIGH) &
+                         IEEE754_ABSOLUTE_MASK) === 0) {
+                        if (load32(unaryMathCell +
+                                   VALUE_CELL_HIGH) < 0) {
+                            roundingSafe = 0;
+                        }
+                    }
+                }
+            }
+            if (roundingExact === 0) {
+                if (roundingValue === MINIMUM_INT32) {
+                    roundingSafe = 0;
+                } else if (equalF64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                    loadNumberF64(unaryMathCell + VALUE_CELL_LOW,
+                                  roundingTag)) === 0) {
+                    roundingSafe = 0;
+                } else if (greaterF64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                    loadI32F64(heapBase + state +
+                               ENGINE_SCRATCH_RIGHT)) === 1) {
+                    if (roundingValue < 0) roundingSafe = 0;
+                    else if (intrinsicId === INTRINSIC_MATH_CEIL) {
+                        if (roundingValue === 2147483647) {
+                            roundingSafe = 0;
+                        } else roundingValue = roundingValue + 1;
+                    }
+                } else {
+                    if (roundingValue > 0) roundingSafe = 0;
+                    else if (intrinsicId === INTRINSIC_MATH_FLOOR) {
+                        roundingValue = roundingValue - 1;
+                    }
+                }
+            }
+            if (roundingSafe === 0) {
+                return 0;
+            }
+            store32(intrinsicTarget, VALUE_TAG_INT32);
+            store32(intrinsicTarget + VALUE_CELL_LOW, roundingValue);
+            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+        } else {
+            store32(intrinsicTarget, load32(minimumCell));
+            store32(intrinsicTarget + VALUE_CELL_LOW,
+                    load32(minimumCell + VALUE_CELL_LOW));
+            store32(intrinsicTarget + VALUE_CELL_HIGH,
+                    load32(minimumCell + VALUE_CELL_HIGH));
+        }
+        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        return 1;
+    }
+
     function allocateObjectKernel(heapBase, state, targetCell,
                                   stringSupport) {
         var object = engineHeapBump(heapBase, state);
@@ -8369,6 +8340,7 @@
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             instanceofKernel: instanceofKernel,
             localBindingKernel: localBindingKernel,
+            mathIntrinsicKernel: mathIntrinsicKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,
