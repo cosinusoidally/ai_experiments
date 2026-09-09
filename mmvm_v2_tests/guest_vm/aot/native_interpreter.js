@@ -6616,14 +6616,8 @@
                     makeFunctionProgramIndex * VALUE_CELL_BYTES;
                 if (valueCellTag(0, makeFunctionProgramCell) !==
                     VALUE_TAG_REFERENCE) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 var makeFunctionProgram = valueCellReference(
                     0, makeFunctionProgramCell);
@@ -6637,14 +6631,8 @@
                 var makeFunctionEnd = makeFunctionConstructorProperty +
                     PROPERTY_RECORD_BYTES;
                 if (makeFunctionEnd > engineHeapLimit(heapBase, state)) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 var makeFunctionObjectPrototypeCell = vectorCellAddress(
                     heapBase, stringSupport,
@@ -6733,13 +6721,8 @@
                     frameRegisterCellAddress(heapBase, frame,
                                              makeObjectTargetIndex),
                     stringSupport) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + TWO_WORD_INSTRUCTION;
             } else if (opcode === OP_MAKE_ARRAY) {
@@ -6753,13 +6736,8 @@
                     frameRegisterCellAddress(heapBase, frame,
                                              makeArrayTargetIndex),
                     makeArrayCapacity, arrayPrototype) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MAKE_REGEXP) {
@@ -6781,14 +6759,8 @@
                                              makeRegexpTargetIndex),
                     makeRegexpPatternCell, makeRegexpFlagsCell,
                     stringSupport) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode <= OP_BIT_NOT) {
@@ -6829,14 +6801,8 @@
                         bitValid = 0;
                     }
                     if (bitValid === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                     var bitLeftValue = 0;
                     if (bitLeftTag === VALUE_TAG_TRUE) bitLeftValue = 1;
@@ -6921,14 +6887,8 @@
                     else if (bitNotTag === VALUE_TAG_NULL) bitNotValid = 1;
                     else if (bitNotTag === VALUE_TAG_UNDEFINED) bitNotValid = 1;
                     if (bitNotValid === 0) {
-                            store32(heapBase + state + ENGINE_EXIT_REASON,
-                                    EXIT_UNSUPPORTED);
-                            store32(heapBase + state + ENGINE_PC, pc);
-                            store32(heapBase + state + ENGINE_RESULT, opcode);
-                            store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                    instructions);
-                            store32(heapBase + framePC, pc);
-                            return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                     var bitNotTarget = heapBase + registerCells +
                         bitNotTargetIndex * VALUE_CELL_BYTES;
@@ -6946,22 +6906,12 @@
                     store32(bitNotTarget + VALUE_CELL_AUX, 0);
                     pc = pc + THREE_WORD_INSTRUCTION;
                     } else {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                 } else {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
             } else if (opcode === OP_TYPEOF) {
                 var typeofTargetIndex = load32(
@@ -7010,14 +6960,8 @@
                     typeofGlobalValueCell, stringSupport);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_IN) {
-                store32(heapBase + state + ENGINE_EXIT_REASON,
-                        EXIT_UNSUPPORTED);
-                store32(heapBase + state + ENGINE_PC, pc);
-                store32(heapBase + state + ENGINE_RESULT, opcode);
-                store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                        instructions);
-                store32(heapBase + framePC, pc);
-                return EXIT_UNSUPPORTED;
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
             } else if (opcode === OP_INSTANCEOF) {
                 var instanceTargetIndex = load32(
                     heapBase + bytecodeWords +
@@ -7036,14 +6980,8 @@
                     frameRegisterCellAddress(heapBase, frame,
                                              instanceConstructorIndex),
                     stringSupport) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_KEYS) {
@@ -7059,14 +6997,8 @@
                     frameRegisterCellAddress(heapBase, frame,
                                              keysSourceIndex),
                     arrayPrototype) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_LOCAL) {
@@ -7080,12 +7012,8 @@
                     heapBase, frame, localTargetIndex);
                 if (localBindingKernel(heapBase, localDestination, 0,
                     environment, localDepth, localSlot, 0) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_LOCAL) {
@@ -7099,12 +7027,8 @@
                     heapBase, frame, setLocalSourceIndex);
                 if (localBindingKernel(heapBase, 0, setLocalSource,
                     environment, setLocalDepth, setLocalSlot, 1) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_PROPERTY_CONST) {
@@ -7681,6 +7605,16 @@
             index = index + 1;
         }
         return 1;
+    }
+
+    function unsupportedExitKernel(heapBase, state, frame, pc, opcode,
+                                   instructions) {
+        setEngineExitReason(heapBase, state, EXIT_UNSUPPORTED);
+        setEnginePC(heapBase, state, pc);
+        setEngineResult(heapBase, state, opcode);
+        setEngineInstructions(heapBase, state, instructions);
+        setFramePC(heapBase, frame, pc);
+        return EXIT_UNSUPPORTED;
     }
 
     function typeofValueKernel(heapBase, targetCell, sourceCell,
@@ -8620,7 +8554,8 @@
             programSetConstantKernel: programSetConstantKernel,
             programSetVectorKernel: programSetVectorKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
-            typeofValueKernel: typeofValueKernel
+            typeofValueKernel: typeofValueKernel,
+            unsupportedExitKernel: unsupportedExitKernel
         };
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
