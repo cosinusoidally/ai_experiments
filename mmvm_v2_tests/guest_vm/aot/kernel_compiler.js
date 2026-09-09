@@ -28,20 +28,24 @@
                 throw new SyntaxError("duplicate kernel function " + name);
             }
             /* Function.length is absent on the Firefox 1 era shell used by
-             * js_min.  The kernel source is authoritative in every backend,
-             * so obtain the arity from that source as well. */
+             * js_min. Parse each graph member exactly once: the same tree is
+             * authoritative for arity, constant validation, and lowering. */
+            var source = fn.toString();
+            var expression = parseKernelFunctionSource(
+                source, "<kernel-graph>");
             signatures[name] = {
                 name: name,
-                arity: kernelFunctionExpression(fn).parameters.length
+                arity: expression.parameters.length
             };
-            functions.push({name: name, fn: fn});
+            functions.push({name: name, fn: fn, source: source,
+                            expression: expression});
         }
         if (!entry || typeof entry !== "function" || !entry.name) {
             throw new TypeError("kernel graph entry must be a named function");
         }
         addFunction(entry.name, entry);
         var sharedConstants = collectFunctionConstants(
-            entry, options.constantOverrides || {});
+            entry, options.constantOverrides || {}, functions[0].expression);
         var names = [];
         var name;
         for (name in dependencies) {
@@ -58,7 +62,8 @@
         var constantMemberIndex = 1;
         while (constantMemberIndex < functions.length) {
             var memberConstants = collectFunctionConstants(
-                functions[constantMemberIndex].fn, {});
+                functions[constantMemberIndex].fn, {},
+                functions[constantMemberIndex].expression);
             var memberConstantName;
             for (memberConstantName in memberConstants) {
                 if (Object.prototype.hasOwnProperty.call(
@@ -91,10 +96,14 @@
             }
             var memberTimings = aggregateTimings ? {} : null;
             if (memberTimings) memberOptions.timings = memberTimings;
+            var member = functions[index++];
             memberOptions.kernelFunctions = signatures;
             memberOptions.constantBindings = sharedConstants;
-            if (index !== 0) memberOptions.registerPreferences = [];
-            var member = functions[index++];
+            memberOptions.source = member.source;
+            memberOptions.functionExpression = member.expression;
+            if (member.name !== entry.name) {
+                memberOptions.registerPreferences = [];
+            }
             try {
                 compiled.push(this.compile(member.fn, memberOptions));
             } catch (error) {
@@ -113,16 +122,22 @@
                 signatures: signatures};
     };
 
-    function kernelFunctionExpression(functionObject) {
-        var source = functionObject.toString();
+    function parseKernelFunctionSource(source, filename) {
         var parsed = new Parser("var __kernel = " + source + ";",
-                                "<kernel-constants>", {captureRaw: false});
+                                filename, {captureRaw: false});
         var program = parsed.parseProgram();
         return program.body[0].declarations[0].initial;
     }
 
-    function collectFunctionConstants(functionObject, overrides) {
-        var expression = kernelFunctionExpression(functionObject);
+    function kernelFunctionExpression(functionObject) {
+        return parseKernelFunctionSource(functionObject.toString(),
+                                         "<kernel-constants>");
+    }
+
+    function collectFunctionConstants(functionObject, overrides,
+                                      parsedExpression) {
+        var expression = parsedExpression ||
+            kernelFunctionExpression(functionObject);
         var result = {};
         function visit(node) {
             if (!node || typeof node !== "object") return;
@@ -326,14 +341,10 @@
         var source = options.source === undefined ?
             functionObject.toString() : String(options.source);
         if (timings) timings.source = new Date().getTime() - started;
-        var parser = new Parser("var __kernel = " + source + ";", "<kernel>",
-                                {captureRaw: false});
+        var fn = options.functionExpression || null;
         var parseStarted = timings ? new Date().getTime() : 0;
-        var program = parser.parseProgram();
+        if (!fn) fn = parseKernelFunctionSource(source, "<kernel>");
         if (timings) timings.parse = new Date().getTime() - parseStarted;
-        var declaration = program.body[0];
-        var fn = declaration && declaration.declarations &&
-                 declaration.declarations[0].initial;
         if (!fn || fn.type !== "FunctionExpression") {
             throw new SyntaxError("kernel source must contain one function");
         }
