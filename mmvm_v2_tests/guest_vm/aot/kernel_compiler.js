@@ -279,6 +279,7 @@
         setHandlerTarget: "HANDLER_TARGET",
         setHandlerNameConstant: "HANDLER_NAME_CONSTANT",
         setHandlerReserved: "HANDLER_RESERVED",
+        setFramePC: "FRAME_PC",
         setVectorCapacity: "VECTOR_CAPACITY",
         setBytecodeLength: "BYTECODE_LENGTH",
         setProgramBytecode: "PROGRAM_BYTECODE",
@@ -293,6 +294,10 @@
         setProgramMetadata: "PROGRAM_METADATA",
         setProgramFlags: "PROGRAM_FLAGS",
         setProgramBindingCount: "PROGRAM_BINDING_COUNT",
+        setEngineExitReason: "ENGINE_EXIT_REASON",
+        setEnginePC: "ENGINE_PC",
+        setEngineResult: "ENGINE_RESULT",
+        setEngineInstructions: "ENGINE_INSTRUCTIONS",
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 
@@ -302,6 +307,8 @@
                             stride: "VALUE_CELL_BYTES"},
         frameRegisterCellAddress: {field: "FRAME_REGISTERS",
                                    stride: "VALUE_CELL_BYTES"},
+        environmentCellAddress: {field: "ENVIRONMENT_CELLS",
+                                 stride: "VALUE_CELL_BYTES"},
         bytecodeWordAddress: {field: "BYTECODE_WORDS", strideValue: 4}
     };
 

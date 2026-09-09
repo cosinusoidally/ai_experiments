@@ -7466,25 +7466,10 @@
                     heapBase + bytecodeWords + (pc + SECOND_OPERAND) * WORD_BYTES);
                 var localSlot = load32(
                     heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
-                var localEnvironment = environment;
-                while (localDepth > 0) {
-                    if (localEnvironment === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                    localEnvironment = load32(
-                        heapBase + localEnvironment + ENVIRONMENT_PARENT);
-                    localDepth = localDepth - 1;
-                }
-                var localInvalid = 0;
-                if (localEnvironment === 0) localInvalid = 1;
-                else if (localSlot >= load32(
-                         heapBase + localEnvironment + ENVIRONMENT_COUNT)) localInvalid = 1;
-                if (localInvalid === 1) {
+                var localDestination = frameRegisterCellAddress(
+                    heapBase, frame, localTargetIndex);
+                if (localBindingKernel(heapBase, localDestination, 0,
+                    environment, localDepth, localSlot, 0) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
                     store32(heapBase + state + ENGINE_RESULT, opcode);
@@ -7492,14 +7477,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                var localSource = heapBase + localEnvironment + ENVIRONMENT_CELLS +
-                                  localSlot * VALUE_CELL_BYTES;
-                var localDestination = heapBase + registerCells +
-                                       localTargetIndex * VALUE_CELL_BYTES;
-                store32(localDestination, load32(localSource));
-                store32(localDestination + VALUE_CELL_LOW, load32(localSource + VALUE_CELL_LOW));
-                store32(localDestination + VALUE_CELL_HIGH, load32(localSource + VALUE_CELL_HIGH));
-                store32(localDestination + VALUE_CELL_AUX, load32(localSource + VALUE_CELL_AUX));
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_LOCAL) {
                 var setLocalDepth = load32(
@@ -7508,25 +7485,10 @@
                     heapBase + bytecodeWords + (pc + SECOND_OPERAND) * WORD_BYTES);
                 var setLocalSourceIndex = load32(
                     heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
-                var setLocalEnvironment = environment;
-                while (setLocalDepth > 0) {
-                    if (setLocalEnvironment === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
-                    }
-                    setLocalEnvironment = load32(
-                        heapBase + setLocalEnvironment + ENVIRONMENT_PARENT);
-                    setLocalDepth = setLocalDepth - 1;
-                }
-                var setLocalInvalid = 0;
-                if (setLocalEnvironment === 0) setLocalInvalid = 1;
-                else if (setLocalSlot >= load32(
-                         heapBase + setLocalEnvironment + ENVIRONMENT_COUNT)) setLocalInvalid = 1;
-                if (setLocalInvalid === 1) {
+                var setLocalSource = frameRegisterCellAddress(
+                    heapBase, frame, setLocalSourceIndex);
+                if (localBindingKernel(heapBase, 0, setLocalSource,
+                    environment, setLocalDepth, setLocalSlot, 1) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
                     store32(heapBase + state + ENGINE_RESULT, opcode);
@@ -7534,14 +7496,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                var setLocalDestination = heapBase + setLocalEnvironment + ENVIRONMENT_CELLS +
-                                          setLocalSlot * VALUE_CELL_BYTES;
-                var setLocalSource = heapBase + registerCells +
-                                     setLocalSourceIndex * VALUE_CELL_BYTES;
-                store32(setLocalDestination, load32(setLocalSource));
-                store32(setLocalDestination + VALUE_CELL_LOW, load32(setLocalSource + VALUE_CELL_LOW));
-                store32(setLocalDestination + VALUE_CELL_HIGH, load32(setLocalSource + VALUE_CELL_HIGH));
-                store32(setLocalDestination + VALUE_CELL_AUX, load32(setLocalSource + VALUE_CELL_AUX));
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_PROPERTY_CONST) {
                 var propertyTargetIndex = load32(
@@ -8031,6 +7985,25 @@
         store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
         store32(heapBase + framePC, pc);
         return EXIT_BUDGET;
+    }
+
+    function localBindingKernel(heapBase, destinationCell, sourceCell,
+                                environment, depth, slot, write) {
+        var resolvedEnvironment = environment;
+        while (depth > 0) {
+            if (resolvedEnvironment === 0) return 0;
+            resolvedEnvironment = environmentParent(
+                heapBase, resolvedEnvironment);
+            depth = depth - 1;
+        }
+        if (resolvedEnvironment === 0) return 0;
+        if (slot < 0) return 0;
+        if (slot >= environmentCount(heapBase, resolvedEnvironment)) return 0;
+        var bindingCell = environmentCellAddress(
+            heapBase, resolvedEnvironment, slot);
+        if (write === 0) copyValueCell(destinationCell, bindingCell);
+        else copyValueCell(bindingCell, sourceCell);
+        return 1;
     }
 
     function programArgumentCellKernel(heapBase, argumentsVector,
@@ -8858,6 +8831,7 @@
             dateIntrinsicKernel: dateIntrinsicKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
+            localBindingKernel: localBindingKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,
