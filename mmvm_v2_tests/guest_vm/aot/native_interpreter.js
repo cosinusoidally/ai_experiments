@@ -2927,28 +2927,16 @@
                         store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
                                 CALL_REJECT_HEAP_SPACE);
                     }
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 }
                 }
                 if (intrinsicId === INTRINSIC_FUNCTION_CALL) {
                     /* Bytecode callees were forwarded above. Native and host
                      * callees retain the ordinary semantic call boundary. */
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
                     var arrayConstructValid = 1;
@@ -3088,14 +3076,8 @@
                 }
                 if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
                     if (intrinsicHandled === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                 }
                 if (intrinsicId >= INTRINSIC_NUMBER_CONSTRUCTOR) {
@@ -3115,14 +3097,8 @@
                         intrinsicHandled = 0;
                     }
                     if (intrinsicHandled === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                 }
                 }
@@ -7023,14 +6999,8 @@
                         propertyPrototypeOffset = BUFFER_VIEW_PROTOTYPE;
                     }
                     if (propertyPrototypeOffset === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                     while (propertyHead !== 0) {
                         var propertyStoredKey = propertyKey(
@@ -7085,13 +7055,8 @@
                     }
                 }
                 if (propertyRecord === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
                     var propertySource = heapBase + propertyRecord + PROPERTY_VALUE;
@@ -7128,13 +7093,8 @@
                     setPropertyOperandsValid = 0;
                 }
                 if (setPropertyOperandsValid === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 var setPropertyObject = load32(
                     setPropertyObjectCell + VALUE_CELL_LOW);
@@ -7254,27 +7214,15 @@
                 }
                 if (setPropertyRecord === 0) {
                     if (setPropertyHeadOffset === 0) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                     setPropertyRecord = load32(
                         heapBase + state + ENGINE_HEAP_BUMP);
                     if (setPropertyRecord + PROPERTY_RECORD_BYTES > load32(
                         heapBase + state + ENGINE_HEAP_LIMIT)) {
-                        store32(heapBase + state + ENGINE_EXIT_REASON,
-                                EXIT_UNSUPPORTED);
-                        store32(heapBase + state + ENGINE_PC, pc);
-                        store32(heapBase + state + ENGINE_RESULT, opcode);
-                        store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                                instructions);
-                        store32(heapBase + framePC, pc);
-                        return EXIT_UNSUPPORTED;
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
                     }
                     store32(heapBase + setPropertyRecord + RECORD_TYPE,
                             HEAP_TYPE_PROPERTY);
@@ -7295,14 +7243,8 @@
                             setPropertyRecord + PROPERTY_RECORD_BYTES);
                 } else if ((propertyAttributes(heapBase, setPropertyRecord) &
                             PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
                 }
                 var setPropertyDestination = heapBase + setPropertyRecord +
                                              PROPERTY_VALUE;
@@ -7317,12 +7259,8 @@
                         load32(setPropertySource + VALUE_CELL_AUX));
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else {
-                store32(heapBase + state + ENGINE_EXIT_REASON, EXIT_UNSUPPORTED);
-                store32(heapBase + state + ENGINE_PC, pc);
-                store32(heapBase + state + ENGINE_RESULT, opcode);
-                store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
-                store32(heapBase + framePC, pc);
-                return EXIT_UNSUPPORTED;
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
             }
             budget = budget - 1;
             instructions = instructions + 1;
