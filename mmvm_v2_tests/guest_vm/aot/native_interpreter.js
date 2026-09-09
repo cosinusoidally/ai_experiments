@@ -7195,39 +7195,12 @@
                 var keysSourceIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var keysSourceCell = heapBase + registerCells +
-                    keysSourceIndex * VALUE_CELL_BYTES;
-                var keysValid = 1;
-                if (valueCellTag(0, keysSourceCell) !== VALUE_TAG_REFERENCE) {
-                    keysValid = 0;
-                }
-                var keysObject = valueCellReference(0, keysSourceCell);
-                var keysObjectType = 0;
-                var keysProperty = 0;
-                if (keysValid === 1) {
-                    keysObjectType = recordType(heapBase, keysObject);
-                    if (keysObjectType >= HEAP_TYPE_OBJECT) {
-                        if (keysObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
-                            keysProperty = objectPropertyHead(
-                                heapBase, keysObject);
-                        } else keysValid = 0;
-                    } else keysValid = 0;
-                }
-                var keysCount = 0;
-                var keysCountProperty = keysProperty;
-                while (keysCountProperty !== 0) {
-                    keysCount = keysCount + 1;
-                    keysCountProperty = propertyNext(
-                        heapBase, keysCountProperty);
-                }
-                var keysVectorBytes = VECTOR_CELLS +
-                    keysCount * VALUE_CELL_BYTES;
-                var keysVector = engineHeapBump(heapBase, state);
-                var keysArray = keysVector + keysVectorBytes;
-                if (keysVectorBytes < VECTOR_CELLS) keysValid = 0;
-                if (keysArray + ARRAY_RECORD_BYTES >
-                    engineHeapLimit(heapBase, state)) keysValid = 2;
-                if (keysValid === 0) {
+                if (getKeysKernel(heapBase, state,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             keysTargetIndex),
+                    frameRegisterCellAddress(heapBase, frame,
+                                             keysSourceIndex),
+                    arrayPrototype) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
@@ -7237,51 +7210,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                if (keysValid === 2) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
-                }
-                setRecordType(heapBase, keysVector,
-                              HEAP_TYPE_VALUE_VECTOR);
-                setRecordSize(heapBase, keysVector, keysVectorBytes);
-                setRecordMark(heapBase, keysVector, 0);
-                setRecordFlags(heapBase, keysVector, 0);
-                setVectorLength(heapBase, keysVector, keysCount);
-                setVectorCapacity(heapBase, keysVector, keysCount);
-                var keysIndex = keysCount - 1;
-                while (keysProperty !== 0) {
-                    var keysCell = heapBase + keysVector + VECTOR_CELLS +
-                        keysIndex * VALUE_CELL_BYTES;
-                    store32(keysCell, VALUE_TAG_REFERENCE);
-                    store32(keysCell + VALUE_CELL_LOW,
-                        propertyKey(heapBase, keysProperty));
-                    store32(keysCell + VALUE_CELL_HIGH, 0);
-                    store32(keysCell + VALUE_CELL_AUX, 0);
-                    keysIndex = keysIndex - 1;
-                    keysProperty = propertyNext(heapBase, keysProperty);
-                }
-                setRecordType(heapBase, keysArray, HEAP_TYPE_ARRAY);
-                setRecordSize(heapBase, keysArray, ARRAY_RECORD_BYTES);
-                setRecordMark(heapBase, keysArray, 0);
-                setRecordFlags(heapBase, keysArray, 0);
-                setArrayPrototype(heapBase, keysArray, arrayPrototype);
-                setArrayPropertyHead(heapBase, keysArray, 0);
-                setArrayElements(heapBase, keysArray, keysVector);
-                setArrayReserved(heapBase, keysArray, 0);
-                var keysTarget = heapBase + registerCells +
-                    keysTargetIndex * VALUE_CELL_BYTES;
-                store32(keysTarget, VALUE_TAG_REFERENCE);
-                store32(keysTarget + VALUE_CELL_LOW, keysArray);
-                store32(keysTarget + VALUE_CELL_HIGH, 0);
-                store32(keysTarget + VALUE_CELL_AUX, 0);
-                setEngineHeapBump(heapBase, state,
-                                  keysArray + ARRAY_RECORD_BYTES);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_LOCAL) {
                 var localTargetIndex = load32(
@@ -7883,6 +7811,53 @@
         setRegexpPropertyHead(heapBase, regexp, 0);
         setValueCellReference(targetCell, regexp);
         setEngineHeapBump(heapBase, state, regexp + REGEXP_RECORD_BYTES);
+        return 1;
+    }
+
+    function getKeysKernel(heapBase, state, targetCell, sourceCell,
+                           arrayPrototype) {
+        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, sourceCell);
+        var type = recordType(heapBase, object);
+        if (type < HEAP_TYPE_OBJECT) return 0;
+        if (type > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        var property = objectPropertyHead(heapBase, object);
+        var count = 0;
+        var countedProperty = property;
+        while (countedProperty !== 0) {
+            count = count + 1;
+            countedProperty = propertyNext(heapBase, countedProperty);
+        }
+        var vectorBytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+        if (vectorBytes < VECTOR_FIXED_BYTES) return 0;
+        var vector = engineHeapBump(heapBase, state);
+        var array = vector + vectorBytes;
+        if (array + ARRAY_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
+            return 0;
+        }
+        setRecordType(heapBase, vector, HEAP_TYPE_VALUE_VECTOR);
+        setRecordSize(heapBase, vector, vectorBytes);
+        setRecordMark(heapBase, vector, 0);
+        setRecordFlags(heapBase, vector, 0);
+        setVectorLength(heapBase, vector, count);
+        setVectorCapacity(heapBase, vector, count);
+        var index = count - 1;
+        while (property !== 0) {
+            setValueCellReference(vectorCellAddress(
+                heapBase, vector, index), propertyKey(heapBase, property));
+            index = index - 1;
+            property = propertyNext(heapBase, property);
+        }
+        setRecordType(heapBase, array, HEAP_TYPE_ARRAY);
+        setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
+        setRecordMark(heapBase, array, 0);
+        setRecordFlags(heapBase, array, 0);
+        setArrayPrototype(heapBase, array, arrayPrototype);
+        setArrayPropertyHead(heapBase, array, 0);
+        setArrayElements(heapBase, array, vector);
+        setArrayReserved(heapBase, array, 0);
+        setValueCellReference(targetCell, array);
+        setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
         return 1;
     }
 
@@ -8764,6 +8739,7 @@
             arrayConcatKernel: arrayConcatKernel,
             arraySliceKernel: arraySliceKernel,
             dateIntrinsicKernel: dateIntrinsicKernel,
+            getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             localBindingKernel: localBindingKernel,
