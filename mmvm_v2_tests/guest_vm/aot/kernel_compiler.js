@@ -313,6 +313,7 @@
         setEnginePC: "ENGINE_PC",
         setEngineResult: "ENGINE_RESULT",
         setEngineInstructions: "ENGINE_INSTRUCTIONS",
+        setEngineCallRejectReason: "ENGINE_CALL_REJECT_REASON",
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 
