@@ -563,6 +563,8 @@
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
                 (expression.callee.name === "setValueCellUndefined" ||
+                 expression.callee.name === "setValueCellFalse" ||
+                 expression.callee.name === "setValueCellTrue" ||
                  expression.callee.name === "setValueCellInt32" ||
                  expression.callee.name === "setValueCellReference") &&
                 (expression.arguments.length === 1 ||
@@ -715,17 +717,22 @@
 
     function setValueCellBlock(name, argumentsList, symbols) {
         var tagName = name === "setValueCellUndefined" ?
-            "VALUE_TAG_UNDEFINED" : name === "setValueCellInt32" ?
+            "VALUE_TAG_UNDEFINED" : name === "setValueCellFalse" ?
+            "VALUE_TAG_FALSE" : name === "setValueCellTrue" ?
+            "VALUE_TAG_TRUE" : name === "setValueCellInt32" ?
             "VALUE_TAG_INT32" : "VALUE_TAG_REFERENCE";
         var tag = symbols["$" + tagName];
         if (!tag || tag.kind !== "constant") {
             throw new SyntaxError("value-cell operation requires " + tagName);
         }
-        if (name === "setValueCellUndefined" && argumentsList.length !== 1 ||
-            name !== "setValueCellUndefined" && argumentsList.length !== 2) {
+        var tagOnly = name === "setValueCellUndefined" ||
+                      name === "setValueCellFalse" ||
+                      name === "setValueCellTrue";
+        if (tagOnly && argumentsList.length !== 1 ||
+            !tagOnly && argumentsList.length !== 2) {
             throw new SyntaxError("invalid value-cell operation arity");
         }
-        var payload = name === "setValueCellUndefined" ?
+        var payload = tagOnly ?
             {op: "const_i32", value: 0, type: "i32"} :
             lowerKernelExpression(argumentsList[1], symbols);
         var target = argumentsList[0];

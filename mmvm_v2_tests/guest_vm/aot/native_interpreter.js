@@ -7043,70 +7043,14 @@
                 var instanceConstructorIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var instanceValueCell = heapBase + registerCells +
-                    instanceValueIndex * VALUE_CELL_BYTES;
-                var instanceConstructorCell = heapBase + registerCells +
-                    instanceConstructorIndex * VALUE_CELL_BYTES;
-                var instanceValid = 1;
-                if (valueCellTag(0, instanceConstructorCell) !==
-                    VALUE_TAG_REFERENCE) instanceValid = 0;
-                var instanceConstructor = valueCellReference(
-                    0, instanceConstructorCell);
-                var instanceConstructorType = 0;
-                if (instanceValid === 1) {
-                    instanceConstructorType = recordType(
-                        heapBase, instanceConstructor);
-                }
-                if (instanceValid === 1) {
-                    if (instanceConstructorType !==
-                        HEAP_TYPE_NATIVE_FUNCTION) {
-                        if (instanceConstructorType !==
-                            HEAP_TYPE_BYTECODE_FUNCTION) {
-                            instanceValid = 0;
-                        }
-                    }
-                }
-                var instancePrototypeKeyCell = heapBase + stringSupport +
-                    VECTOR_CELLS + RUNTIME_SUPPORT_PROTOTYPE_KEY *
-                    VALUE_CELL_BYTES;
-                var instancePrototypeKey = valueCellReference(
-                    0, instancePrototypeKeyCell);
-                var instanceProperty = 0;
-                var instanceExpectedPrototype = 0;
-                if (instanceValid === 1) {
-                    instanceProperty = objectPropertyHead(
-                        heapBase, instanceConstructor);
-                }
-                while (instanceProperty !== 0) {
-                    if (propertyKey(heapBase, instanceProperty) ===
-                        instancePrototypeKey) {
-                        if (propertyValueTag(heapBase,
-                            instanceProperty) !== VALUE_TAG_REFERENCE) {
-                            instanceValid = 0;
-                        }
-                        instanceExpectedPrototype = propertyValueReference(
-                            heapBase, instanceProperty);
-                        instanceProperty = 0;
-                    } else {
-                        instanceProperty = propertyNext(
-                            heapBase, instanceProperty);
-                    }
-                }
-                if (instanceExpectedPrototype === 0) instanceValid = 0;
-                var instanceExpectedType = 0;
-                if (instanceValid === 1) {
-                    instanceExpectedType = recordType(
-                        heapBase, instanceExpectedPrototype);
-                }
-                if (instanceValid === 1) {
-                    if (instanceExpectedType < HEAP_TYPE_OBJECT) {
-                        instanceValid = 0;
-                    } else if (instanceExpectedType >
-                               HEAP_TYPE_BUFFER_VIEW) {
-                        instanceValid = 0;
-                    }
-                }
-                if (instanceValid === 0) {
+                if (instanceofKernel(heapBase,
+                    frameRegisterCellAddress(heapBase, frame,
+                                             instanceTargetIndex),
+                    frameRegisterCellAddress(heapBase, frame,
+                                             instanceValueIndex),
+                    frameRegisterCellAddress(heapBase, frame,
+                                             instanceConstructorIndex),
+                    stringSupport) === 0) {
                     store32(heapBase + state + ENGINE_EXIT_REASON,
                             EXIT_UNSUPPORTED);
                     store32(heapBase + state + ENGINE_PC, pc);
@@ -7116,77 +7060,6 @@
                     store32(heapBase + framePC, pc);
                     return EXIT_UNSUPPORTED;
                 }
-                var instanceMatches = 0;
-                var instanceCurrent = 0;
-                if (valueCellTag(0, instanceValueCell) ===
-                    VALUE_TAG_REFERENCE) {
-                    var instanceValue = valueCellReference(
-                        0, instanceValueCell);
-                    var instanceValueType = recordType(
-                        heapBase, instanceValue);
-                    if (instanceValueType === HEAP_TYPE_BUFFER_VIEW) {
-                        /* Typed-array constructors carry their element kind
-                         * in runtime metadata until constructor metadata is
-                         * itself represented in the heap. Preserve exact
-                         * instanceof semantics through the semantic path. */
-                        instanceValid = 0;
-                    }
-                    if (instanceValueType >= HEAP_TYPE_OBJECT) {
-                        if (instanceValueType <= HEAP_TYPE_BYTECODE_FUNCTION) {
-                            instanceCurrent = objectPrototype(
-                                heapBase, instanceValue);
-                        } else if (instanceValueType === HEAP_TYPE_REGEXP) {
-                            instanceCurrent = regexpPrototype(
-                                heapBase, instanceValue);
-                        } else if (instanceValueType ===
-                                   HEAP_TYPE_BUFFER_VIEW) {
-                            instanceCurrent = bufferViewPrototype(
-                                heapBase, instanceValue);
-                        }
-                    }
-                }
-                if (instanceValid === 0) {
-                    store32(heapBase + state + ENGINE_EXIT_REASON,
-                            EXIT_UNSUPPORTED);
-                    store32(heapBase + state + ENGINE_PC, pc);
-                    store32(heapBase + state + ENGINE_RESULT, opcode);
-                    store32(heapBase + state + ENGINE_INSTRUCTIONS,
-                            instructions);
-                    store32(heapBase + framePC, pc);
-                    return EXIT_UNSUPPORTED;
-                }
-                while (instanceCurrent !== 0) {
-                    if (instanceCurrent === instanceExpectedPrototype) {
-                        instanceMatches = 1;
-                        instanceCurrent = 0;
-                    } else {
-                        var instanceCurrentType = recordType(
-                            heapBase, instanceCurrent);
-                        if (instanceCurrentType >= HEAP_TYPE_OBJECT) {
-                            if (instanceCurrentType <=
-                                HEAP_TYPE_BYTECODE_FUNCTION) {
-                                instanceCurrent = objectPrototype(
-                                    heapBase, instanceCurrent);
-                            } else if (instanceCurrentType ===
-                                       HEAP_TYPE_REGEXP) {
-                                instanceCurrent = regexpPrototype(
-                                    heapBase, instanceCurrent);
-                            } else if (instanceCurrentType ===
-                                       HEAP_TYPE_BUFFER_VIEW) {
-                                instanceCurrent = bufferViewPrototype(
-                                    heapBase, instanceCurrent);
-                            } else instanceCurrent = 0;
-                        } else instanceCurrent = 0;
-                    }
-                }
-                var instanceTarget = heapBase + registerCells +
-                    instanceTargetIndex * VALUE_CELL_BYTES;
-                if (instanceMatches === 1) {
-                    store32(instanceTarget, VALUE_TAG_TRUE);
-                } else store32(instanceTarget, VALUE_TAG_FALSE);
-                store32(instanceTarget + VALUE_CELL_LOW, 0);
-                store32(instanceTarget + VALUE_CELL_HIGH, 0);
-                store32(instanceTarget + VALUE_CELL_AUX, 0);
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_KEYS) {
                 var keysTargetIndex = load32(
@@ -7910,6 +7783,69 @@
             heapBase, stringSupport, supportIndex);
         setValueCellReference(targetCell,
                               valueCellReference(0, supportCell));
+        return 1;
+    }
+
+    function instanceofKernel(heapBase, targetCell, valueCell,
+                              constructorCell, stringSupport) {
+        if (valueCellTag(0, constructorCell) !== VALUE_TAG_REFERENCE) return 0;
+        var constructor = valueCellReference(0, constructorCell);
+        var constructorType = recordType(heapBase, constructor);
+        if (constructorType !== HEAP_TYPE_NATIVE_FUNCTION) {
+            if (constructorType !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        }
+        var prototypeKeyCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_PROTOTYPE_KEY);
+        var prototypeKey = valueCellReference(0, prototypeKeyCell);
+        var property = objectPropertyHead(heapBase, constructor);
+        var expectedPrototype = 0;
+        while (property !== 0) {
+            if (propertyKey(heapBase, property) === prototypeKey) {
+                if (propertyValueTag(heapBase, property) !==
+                    VALUE_TAG_REFERENCE) return 0;
+                expectedPrototype = propertyValueReference(heapBase, property);
+                property = 0;
+            } else property = propertyNext(heapBase, property);
+        }
+        if (expectedPrototype === 0) return 0;
+        var expectedType = recordType(heapBase, expectedPrototype);
+        if (expectedType < HEAP_TYPE_OBJECT) return 0;
+        if (expectedType > HEAP_TYPE_BUFFER_VIEW) return 0;
+        var current = 0;
+        if (valueCellTag(0, valueCell) === VALUE_TAG_REFERENCE) {
+            var value = valueCellReference(0, valueCell);
+            var valueType = recordType(heapBase, value);
+            /* Typed-array constructor identity remains in runtime metadata.
+             * Defer it until constructor metadata is heap-owned as well. */
+            if (valueType === HEAP_TYPE_BUFFER_VIEW) return 0;
+            if (valueType >= HEAP_TYPE_OBJECT) {
+                if (valueType <= HEAP_TYPE_BYTECODE_FUNCTION) {
+                    current = objectPrototype(heapBase, value);
+                } else if (valueType === HEAP_TYPE_REGEXP) {
+                    current = regexpPrototype(heapBase, value);
+                }
+            }
+        }
+        var matches = 0;
+        while (current !== 0) {
+            if (current === expectedPrototype) {
+                matches = 1;
+                current = 0;
+            } else {
+                var currentType = recordType(heapBase, current);
+                if (currentType >= HEAP_TYPE_OBJECT) {
+                    if (currentType <= HEAP_TYPE_BYTECODE_FUNCTION) {
+                        current = objectPrototype(heapBase, current);
+                    } else if (currentType === HEAP_TYPE_REGEXP) {
+                        current = regexpPrototype(heapBase, current);
+                    } else if (currentType === HEAP_TYPE_BUFFER_VIEW) {
+                        current = bufferViewPrototype(heapBase, current);
+                    } else current = 0;
+                } else current = 0;
+            }
+        }
+        if (matches === 1) setValueCellTrue(targetCell);
+        else setValueCellFalse(targetCell);
         return 1;
     }
 
@@ -8742,6 +8678,7 @@
             getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
+            instanceofKernel: instanceofKernel,
             localBindingKernel: localBindingKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
             programArgumentCellKernel: programArgumentCellKernel,
