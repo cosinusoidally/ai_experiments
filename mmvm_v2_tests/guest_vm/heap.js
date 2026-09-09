@@ -246,7 +246,9 @@
             var type = this.memory.readU32Trusted(address + HEADER_TYPE);
             var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
             if (!size || size % 8 || address + size > this.bump) {
-                throw new Error("corrupt guest heap record at " + address);
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
             }
             counts[type] = (counts[type] || 0) + 1;
             bytes[type] = (bytes[type] || 0) + size;
@@ -288,11 +290,14 @@
         var blocks = [];
         var address = 64;
         while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
             var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
             if (!size || size % 8 || address + size > this.bump) {
-                throw new Error("corrupt guest heap record at " + address);
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
             }
-            if (this.memory.readU32Trusted(address + HEADER_TYPE) === Types.FREE &&
+            if (type === Types.FREE &&
                 this.memory.readU32Trusted(address + HEADER_FLAGS) === 0) {
                 if (blocks.length) {
                     var previous = blocks[blocks.length - 1];
@@ -421,7 +426,9 @@
             var type = this.memory.readU32Trusted(address + HEADER_TYPE);
             var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
             if (!size || size % 8 || address + size > this.bump) {
-                throw new Error("corrupt guest heap record at " + address);
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
             }
             if (type !== Types.FREE &&
                 this.memory.readU32Trusted(address + HEADER_MARK) !== generation) {
@@ -443,7 +450,9 @@
             var type = this.memory.readU32Trusted(address + HEADER_TYPE);
             var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
             if (!size || size % 8 || address + size > this.bump) {
-                throw new Error("corrupt guest heap record at " + address);
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
             }
             visitor(address, type, size,
                     this.memory.readU32Trusted(address + HEADER_MARK));
