@@ -55,6 +55,22 @@
             name = names[nameIndex++];
             addFunction(name, dependencies[name]);
         }
+        var constantMemberIndex = 1;
+        while (constantMemberIndex < functions.length) {
+            var memberConstants = collectFunctionConstants(
+                functions[constantMemberIndex].fn, {});
+            var memberConstantName;
+            for (memberConstantName in memberConstants) {
+                if (Object.prototype.hasOwnProperty.call(
+                        memberConstants, memberConstantName)) {
+                    throw new SyntaxError("kernel graph constant " +
+                        memberConstantName + " must be declared once by " +
+                        entry.name + ", not by " +
+                        functions[constantMemberIndex].name);
+                }
+            }
+            constantMemberIndex++;
+        }
         var compiled = [];
         var index = 0;
         var aggregateTimings = options.timings || null;

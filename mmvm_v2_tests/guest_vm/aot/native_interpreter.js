@@ -203,6 +203,9 @@
         var PLATFORM_GETTIMEOFDAY_POINTER = 44;
         var PLATFORM_DATE_INTRINSIC_POINTER = 48;
         var PLATFORM_NUMERIC_PROPERTY_POINTER = 52;
+        var PLATFORM_STRTOD_POINTER = 56;
+        var PLATFORM_MALLOC_POINTER = 60;
+        var PLATFORM_FREE_POINTER = 64;
         var PROFILE_OPCODES = 0;
         var CALL_REJECT_NONE = 0;
         var CALL_REJECT_ARGUMENT_LIST = 1;
@@ -8526,53 +8529,6 @@
     function dateIntrinsicKernel(heapBase, state, targetCell, registerCells,
                                  receiverIndex, intrinsicId, stringSupport,
                                  argumentsVector) {
-        var VALUE_CELL_BYTES = 16;
-        var VALUE_CELL_TAG = 0;
-        var VALUE_CELL_REFERENCE = 4;
-        var VALUE_CELL_LOW = 4;
-        var VALUE_CELL_HIGH = 8;
-        var VALUE_CELL_AUX = 12;
-        var VALUE_TAG_UNDEFINED = 1;
-        var VALUE_TAG_NULL = 2;
-        var VALUE_TAG_FALSE = 3;
-        var VALUE_TAG_TRUE = 4;
-        var VALUE_TAG_INT32 = 5;
-        var VALUE_TAG_DOUBLE = 6;
-        var VALUE_TAG_REFERENCE = 7;
-        var HEAP_TYPE_OBJECT = 1;
-        var HEAP_TYPE_PROPERTY = 6;
-        var HEAP_TYPE_STRING = 7;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_MARK = 8;
-        var RECORD_FLAGS = 12;
-        var OBJECT_PROTOTYPE = 16;
-        var OBJECT_PROPERTY_HEAD = 20;
-        var OBJECT_EXTENSIBLE = 24;
-        var OBJECT_RESERVED = 28;
-        var PROPERTY_NEXT = 16;
-        var PROPERTY_KEY = 20;
-        var PROPERTY_ATTRIBUTES = 24;
-        var PROPERTY_RESERVED = 28;
-        var PROPERTY_VALUE = 32;
-        var STRING_LENGTH = 16;
-        var STRING_CHARS = 24;
-        var VECTOR_LENGTH = 16;
-        var VECTOR_CELLS = 24;
-        var ENGINE_HEAP_BUMP = 16;
-        var ENGINE_HEAP_LIMIT = 20;
-        var ENGINE_SCRATCH_LEFT = 36;
-        var ENGINE_PLATFORM_SERVICES = 44;
-        var PLATFORM_GETTIMEOFDAY_POINTER = 44;
-        var PLATFORM_STRTOD_POINTER = 56;
-        var PLATFORM_MALLOC_POINTER = 60;
-        var PLATFORM_FREE_POINTER = 64;
-        var OBJECT_RECORD_BYTES = 32;
-        var PROPERTY_RECORD_BYTES = 48;
-        var INTRINSIC_NUMBER_CONSTRUCTOR = 41;
-        var INTRINSIC_DATE_CONSTRUCTOR = 42;
-        var RUNTIME_SUPPORT_DATE_PROTOTYPE = 277;
-        var RUNTIME_SUPPORT_DATE_VALUE_KEY = 278;
         if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
             if (vectorLength(heapBase, argumentsVector) === 0) {
                 store32(targetCell, VALUE_TAG_INT32);

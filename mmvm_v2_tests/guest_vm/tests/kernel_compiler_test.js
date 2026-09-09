@@ -325,14 +325,14 @@
                 dispatchX86.destroy();
             }
             function graphEntry(base, address, value) {
+                var VECTOR_CELLS = 24;
+                var VALUE_CELL_BYTES = 16;
                 return graphMiddle(base, address, value) + 1;
             }
             function graphMiddle(base, address, value) {
                 return graphLeaf(base, address, value * 3);
             }
             function graphLeaf(base, address, value) {
-                var VECTOR_CELLS = 24;
-                var VALUE_CELL_BYTES = 16;
                 store32(vectorCellAddress(base, address, 1), value);
                 return value;
             }
