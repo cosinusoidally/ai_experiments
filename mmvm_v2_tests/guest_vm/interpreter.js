@@ -362,11 +362,7 @@
             }
             if (!frame) {
                 var programAddress = authoritativeProgram;
-                var program = this.runtime.programMetadata["$" + programAddress];
-                if (!program) {
-                    throw new Error("native frame references unknown guest program " +
-                                    programAddress);
-                }
+                var program = this.runtime.adoptHeapProgram(programAddress);
                 var contextAddress = this.runtime.heapRecords.frameContext(address);
                 var context = null;
                 var contextIndex = 0;

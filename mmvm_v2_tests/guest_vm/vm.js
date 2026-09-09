@@ -26,15 +26,20 @@
             var execution = Execution.fromFunction(callable, semanticRuntime,
                 callable.homeContext || context, receiver, args || []);
             execution.compiledEntry = null;
-            while (true) {
-                var result = execution.resume(
-                    semanticRuntime.synchronousExecutionBudget());
-                if (result.status === "hostCall") execution.serviceHostCall();
-                else if (result.status === "budget") {
-                    semanticRuntime.gcSafePoint();
-                } else if (result.status === "completed") return result.value;
-                else if (result.status === "threw") throw result.exception;
-                else throw new Error("guest callback did not complete");
+            semanticRuntime.activeExecutions.push(execution);
+            try {
+                while (true) {
+                    var result = execution.resume(
+                        semanticRuntime.synchronousExecutionBudget());
+                    if (result.status === "hostCall") execution.serviceHostCall();
+                    else if (result.status === "budget") {
+                        semanticRuntime.gcSafePoint();
+                    } else if (result.status === "completed") return result.value;
+                    else if (result.status === "threw") throw result.exception;
+                    else throw new Error("guest callback did not complete");
+                }
+            } finally {
+                semanticRuntime.activeExecutions.pop();
             }
         };
         if (this.runtime.threadedCompiler) {
@@ -43,12 +48,17 @@
                 var execution = Execution.fromFunction(
                     callable, semanticRuntime, context, receiver, args);
                 execution.compiledEntry = null;
-                while (true) {
-                    var result = execution.resume(Infinity);
-                    if (result.status === "hostCall") execution.serviceHostCall();
-                    else if (result.status === "completed") return result.value;
-                    else if (result.status === "threw") throw result.exception;
-                    else throw new Error("threaded fallback did not complete");
+                semanticRuntime.activeExecutions.push(execution);
+                try {
+                    while (true) {
+                        var result = execution.resume(Infinity);
+                        if (result.status === "hostCall") execution.serviceHostCall();
+                        else if (result.status === "completed") return result.value;
+                        else if (result.status === "threw") throw result.exception;
+                        else throw new Error("threaded fallback did not complete");
+                    }
+                } finally {
+                    semanticRuntime.activeExecutions.pop();
                 }
             });
         }

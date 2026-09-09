@@ -810,6 +810,11 @@
             program, PROGRAM_BINDING_COUNT, Heap.Types.PROGRAM);
     };
 
+    Records.prototype.programFlags = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_FLAGS, Heap.Types.PROGRAM);
+    };
+
     Records.prototype.programParameterSlots = function (program) {
         return this.heap.readTrustedFieldU32(
             program, PROGRAM_PARAMETER_SLOTS, Heap.Types.PROGRAM);

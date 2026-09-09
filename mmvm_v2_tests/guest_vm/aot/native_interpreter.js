@@ -9563,8 +9563,9 @@
                 this.reportProfile();
             }
         }
+        var returnedCurrentFrame = records.engineCurrentFrame(this.stateAddress);
         return {reason: reason,
-                frame: records.engineCurrentFrame(this.stateAddress),
+                frame: returnedCurrentFrame,
                 pc: records.enginePC(this.stateAddress),
                 resultCell: records.engineResultCell(this.stateAddress),
                 opcode: reason === Exit.UNSUPPORTED ||

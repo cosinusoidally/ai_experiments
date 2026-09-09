@@ -138,6 +138,11 @@
         this.collectionCount = 0;
         this.activeRegisterFrames = [];
         this.activeEnvironmentFrames = [];
+        /* Synchronous guest callbacks can be nested beneath a context's
+         * published execution (for example while a module loader is serving
+         * require). They are independent live call stacks and must remain GC
+         * roots without replacing JSContext.execution. */
+        this.activeExecutions = [];
         this.activeRegisters = null;
         this.interpretGuest = null;
         this.linearHeap = null;
@@ -358,9 +363,11 @@
     Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
                                                        closure, callable) {
         if (program.bindingRegisters) return closure || null;
-        if (!program.bindings && !closure && !callable) {
-            return null;
-        }
+        /* A top-level program adopted as an executable callable has no
+         * function environment or argument/this slots.  The presence of the
+         * callable handle does not manufacture slots that its program does
+         * not describe. */
+        if (!program.bindings) return null;
         var bindings = program.bindings || [];
         this.ensureLinearHeap();
         var environment = {heapAddress: this.heapRecords.allocateEnvironment(
@@ -658,11 +665,7 @@
         if (existing) return existing;
         this.linearHeap.requireRecord(address, Heap.Types.BYTECODE_FUNCTION);
         var programAddress = this.heapRecords.functionMetadata(address);
-        var program = this.programMetadata["$" + programAddress];
-        if (!program) {
-            throw new Error("native function references unknown guest program " +
-                            programAddress);
-        }
+        var program = this.adoptHeapProgram(programAddress);
         var callable = this.makeHeapHandle(address, "bytecodeFunction");
         callable.program = program;
         callable.name = program.name || "";
@@ -1007,6 +1010,7 @@
         }
         this.programObjects.push(program);
         this.programAddresses.push(address);
+        program.heapAddress = address;
         this.programMetadata["$" + address] = program;
         index = 0;
         while (program.constants && index < program.constants.length) {
@@ -1054,7 +1058,94 @@
     };
 
     Runtime.prototype.programAddress = function (program) {
+        if (program && program.heapAddress) {
+            this.linearHeap.requireRecord(program.heapAddress,
+                                          Heap.Types.PROGRAM);
+            return program.heapAddress;
+        }
         return this.registerProgram(program);
+    };
+
+    /* Materialize only the semantic adapter needed when heap-native bytecode
+     * reaches the transitional JavaScript interpreter. The Program record and
+     * its vectors remain authoritative; this object does not allocate or
+     * register a second guest program. */
+    Runtime.prototype.adoptHeapProgram = function (address) {
+        var key = "$" + address;
+        var existing = this.programMetadata[key];
+        if (existing) return existing;
+        this.linearHeap.requireRecord(address, Heap.Types.PROGRAM);
+        var records = this.heapRecords;
+        var bytecode = records.programBytecode(address);
+        var codeLength = records.bytecodeLength(bytecode);
+        var code = new Array(codeLength);
+        var index = 0;
+        while (index < codeLength) {
+            code[index] = records.bytecodeWord(bytecode, index);
+            index++;
+        }
+        var runtime = this;
+        function integerVector(vector) {
+            if (!vector) return null;
+            var length = records.vectorLength(vector);
+            var values = new Array(length);
+            var vectorIndex = 0;
+            while (vectorIndex < length) {
+                values[vectorIndex] = runtime.readHeapValue(
+                    records.vectorCell(vector, vectorIndex));
+                vectorIndex++;
+            }
+            return values;
+        }
+        var constantsAddress = records.programConstants(address);
+        var constantLength = records.vectorLength(constantsAddress);
+        var constants = new Array(constantLength);
+        index = 0;
+        while (index < constantLength) {
+            var cell = records.vectorCell(constantsAddress, index);
+            if (this.valueCells.tagAt(cell) === ValueCells.Tags.REFERENCE) {
+                var reference = this.valueCells.referenceAddressAt(cell);
+                if (this.linearHeap.recordType(reference) ===
+                    Heap.Types.PROGRAM) {
+                    constants[index] = this.adoptHeapProgram(reference);
+                } else constants[index] = this.readHeapReference(reference, cell);
+            } else constants[index] = this.readHeapValue(cell);
+            index++;
+        }
+        var bindingCount = records.programBindingCount(address);
+        var parameterSlots = integerVector(
+            records.programParameterSlots(address)) || [];
+        var program = {
+            heapAddress: address,
+            heapBytecodeAddress: bytecode,
+            heapConstantsAddress: constantsAddress,
+            heapConstantRegistersAddress:
+                records.programConstantRegisters(address),
+            heapBindingRegistersAddress:
+                records.programBindingRegisters(address),
+            heapParameterSlotsAddress:
+                records.programParameterSlots(address),
+            code: code,
+            constants: constants,
+            constantRegisters: integerVector(
+                records.programConstantRegisters(address)) || [],
+            bindingRegisters: integerVector(
+                records.programBindingRegisters(address)),
+            parameterSlots: parameterSlots,
+            parameters: new Array(parameterSlots.length),
+            bindings: bindingCount ? new Array(bindingCount) : null,
+            bindingSlots: {},
+            registerCount: records.programRegisterCount(address),
+            argumentsSlot: records.programArgumentsSlot(address),
+            thisSlot: records.programThisSlot(address),
+            functionNameSlot: records.programFunctionNameSlot(address),
+            usesArguments: !!(records.programFlags(address) & 1),
+            globalDeclarations: [],
+            filename: "<guest-heap-program>",
+            name: ""
+        };
+        this.programMetadata[key] = program;
+        return program;
     };
 
     Runtime.prototype.spillFrame = function (frame) {
@@ -1983,20 +2074,24 @@
                 var constantLength = integer(args[1], "constant length");
                 var bindingLength = integer(args[2], "binding-register length");
                 var parameterLength = integer(args[3], "parameter length");
+                var bindingCount = integer(args[9], "binding count");
                 if (codeLength < 0 || constantLength < 0 || bindingLength < 0 ||
-                    parameterLength < 0) throw new RangeError("negative program length");
+                    parameterLength < 0 || bindingCount < 0) {
+                    throw new RangeError("negative program length");
+                }
                 var program = {
                     code: new Array(codeLength),
                     constants: new Array(constantLength),
                     constantRegisters: new Array(constantLength),
                     bindingRegisters: bindingLength ? new Array(bindingLength) : null,
+                    parameters: new Array(parameterLength),
                     parameterSlots: new Array(parameterLength),
                     registerCount: integer(args[4], "register count"),
                     argumentsSlot: integer(args[5], "arguments slot"),
                     thisSlot: integer(args[6], "this slot"),
                     functionNameSlot: integer(args[7], "function-name slot"),
                     usesArguments: !!args[8],
-                    bindings: new Array(integer(args[9], "binding count")),
+                    bindings: bindingCount ? new Array(bindingCount) : null,
                     globalDeclarations: []
                 };
                 var index = 0;
@@ -2738,6 +2833,33 @@
                 runtime.linearHeap.setMark(candidate.heapAddress, generation);
             }
         }
+        function execution(candidate) {
+            if (!candidate) return;
+            var frameIndex = 0;
+            while (frameIndex < candidate.frames.length) {
+                var hostFrame = candidate.frames[frameIndex++];
+                runtime.linearHeap.setMark(hostFrame.heapAddress, generation);
+                if (!runtime.nativeInterpreter ||
+                    !hostFrame.nativeHeapCurrent) {
+                    var hostRegisterIndex = 0;
+                    while (hostRegisterIndex < hostFrame.registers.length) {
+                        value(hostFrame.registers[hostRegisterIndex],
+                            "frame " + hostFrame.heapAddress + " register " +
+                            hostRegisterIndex);
+                        hostRegisterIndex++;
+                    }
+                }
+                environment(hostFrame.environment);
+                value(hostFrame.constructReceiver);
+            }
+            if (candidate.pendingHostCall) {
+                value(candidate.pendingHostCall.receiver);
+                var argumentIndex = 0;
+                while (argumentIndex < candidate.pendingHostCall.args.length) {
+                    value(candidate.pendingHostCall.args[argumentIndex++]);
+                }
+            }
+        }
         value(this.globalObject);
         value(this.bufferSupport.prototype);
         value(this.typedArraySupport.arrayBufferPrototype,
@@ -2751,6 +2873,11 @@
         if (this.nativeInterpreter) {
             this.linearHeap.setMark(
                 this.nativeInterpreter.stringSupportAddress, generation);
+        }
+        var contextRootIndex = 0;
+        while (contextRootIndex < this.contexts.length) {
+            this.linearHeap.setMark(
+                this.contexts[contextRootIndex++].heapAddress, generation);
         }
         var index = 0;
         while (index < this.hostRoots.length) {
@@ -2773,35 +2900,11 @@
         }
         index = 0;
         while (index < this.contexts.length) {
-            var execution = this.contexts[index++].execution;
-            if (execution) {
-                var frameIndex = 0;
-                while (frameIndex < execution.frames.length) {
-                    var hostFrame = execution.frames[frameIndex++];
-                    runtime.linearHeap.setMark(
-                        hostFrame.heapAddress, generation);
-                    if (!runtime.nativeInterpreter ||
-                        !hostFrame.nativeHeapCurrent) {
-                        var hostRegisterIndex = 0;
-                        while (hostRegisterIndex < hostFrame.registers.length) {
-                            value(hostFrame.registers[hostRegisterIndex],
-                                "frame " + hostFrame.heapAddress + " register " +
-                                hostRegisterIndex);
-                            hostRegisterIndex++;
-                        }
-                    }
-                    environment(hostFrame.environment);
-                    value(hostFrame.constructReceiver);
-                }
-                if (execution.pendingHostCall) {
-                    value(execution.pendingHostCall.receiver);
-                    var argumentIndex = 0;
-                    while (argumentIndex <
-                           execution.pendingHostCall.args.length) {
-                        value(execution.pendingHostCall.args[argumentIndex++]);
-                    }
-                }
-            }
+            execution(this.contexts[index++].execution);
+        }
+        index = 0;
+        while (index < this.activeExecutions.length) {
+            execution(this.activeExecutions[index++]);
         }
         if (this.functionConstructionCallable) {
             value(this.functionConstructionCallable);
@@ -2948,6 +3051,7 @@
             var contextIndex = 0;
             while (contextIndex < this.contexts.length) {
                 var context = this.contexts[contextIndex];
+                this.linearHeap.setMark(context.heapAddress, generation);
                 this.markValue(context.globalObject, generation);
                 if (context.execution) markExecution(context.execution, generation, this);
                 contextIndex++;
