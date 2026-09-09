@@ -18,8 +18,6 @@
     var NATIVE_ALLOCATION_REGION_FLAG = 2;
     var NATIVE_PROPERTY_RECORD_BYTES = 48;
     var CallReject = {HEAP_SPACE: 4};
-    var ARRAY_SLICE_INTRINSIC_ID = 39;
-    var ARRAY_CONCAT_INTRINSIC_ID = 40;
     var NUMBER_CONSTRUCTOR_INTRINSIC_ID = 41;
     var DATE_CONSTRUCTOR_INTRINSIC_ID = 42;
     var DATE_GET_TIME_INTRINSIC_ID = 43;
@@ -586,17 +584,11 @@
                 var arrayGetTarget = heapBase + registerCells +
                     arrayGetTargetIndex * VALUE_CELL_BYTES;
                 if (arrayGetSupported === 5) {
-                    if (platformNumericPropertyPointer(heapBase,
-                        enginePlatformServices(heapBase, state)) !== 0) {
-                        arrayGetSupported = callNativeI32(
-                            platformNumericPropertyPointer(heapBase,
-                                enginePlatformServices(heapBase, state)),
-                            heapBase, state, arrayGetTarget, arrayGetObject,
-                            arrayGetIndex, 0, 0);
-                        if (arrayGetSupported === 1) {
-                            arrayGetSupported = 4;
-                        } else arrayGetSupported = 0;
-                    } else arrayGetSupported = 0;
+                    arrayGetSupported = numericPropertyGetKernel(
+                        heapBase, state, arrayGetTarget, arrayGetObject,
+                        arrayGetIndex, 0, 0);
+                    if (arrayGetSupported === 1) arrayGetSupported = 4;
+                    else arrayGetSupported = 0;
                 }
                 if (arrayGetSupported === 3) {
                     var namedGetObject = arrayGetObject;
@@ -918,18 +910,13 @@
                         } else arraySetSupported = 0;
                     } else if (arraySetObjectType !== HEAP_TYPE_ARRAY) {
                         if (arraySetObjectType === HEAP_TYPE_OBJECT) {
-                            if (platformNumericPropertyPointer(heapBase,
-                                enginePlatformServices(heapBase, state)) !== 0) {
-                                var numericSetResult = callNativeI32(
-                                    platformNumericPropertyPointer(heapBase,
-                                        enginePlatformServices(heapBase, state)),
-                                    heapBase, state, 0, arraySetObject,
-                                    arraySetIndex, heapBase + registerCells +
-                                        arraySetSourceIndex * VALUE_CELL_BYTES,
-                                    1);
-                                if (numericSetResult === 1) {
-                                    arraySetSupported = 3;
-                                } else arraySetSupported = 0;
+                            var numericSetResult = numericPropertyGetKernel(
+                                heapBase, state, 0, arraySetObject,
+                                arraySetIndex, heapBase + registerCells +
+                                    arraySetSourceIndex * VALUE_CELL_BYTES,
+                                1);
+                            if (numericSetResult === 1) {
+                                arraySetSupported = 3;
                             } else arraySetSupported = 0;
                         } else arraySetSupported = 0;
                     }
@@ -3726,16 +3713,10 @@
                     var concatReceiverIndex = load32(
                         heapBase + bytecodeWords +
                         (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var concatHelperPointer = platformArrayConcatPointer(
-                        heapBase, enginePlatformServices(heapBase, state));
-                    var concatHelperResult = 0;
-                    if (concatHelperPointer !== 0) {
-                        concatHelperResult = callNativeI32(
-                            concatHelperPointer, heapBase, state,
-                            intrinsicTarget, registerCells,
-                            concatReceiverIndex, intrinsicArgumentsVector,
-                            intrinsicArgumentCount, arrayPrototype);
-                    }
+                    var concatHelperResult = arrayConcatKernel(
+                        heapBase, state, intrinsicTarget, registerCells,
+                        concatReceiverIndex, intrinsicArgumentsVector,
+                        intrinsicArgumentCount, arrayPrototype);
                     if (concatHelperResult === 1) intrinsicHandled = 1;
                     else if (concatHelperResult === 2) {
                         store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
@@ -3756,18 +3737,10 @@
                     var sliceReceiverIndex = load32(
                         heapBase + bytecodeWords +
                         (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var sliceReceiverCell = heapBase + registerCells +
-                        sliceReceiverIndex * VALUE_CELL_BYTES;
-                    var sliceHelperPointer = platformArraySlicePointer(
-                        heapBase, enginePlatformServices(heapBase, state));
-                    var sliceHelperResult = 0;
-                    if (sliceHelperPointer !== 0) {
-                        sliceHelperResult = callNativeI32(sliceHelperPointer,
-                            heapBase, state, intrinsicTarget,
-                            registerCells, sliceReceiverIndex,
-                            intrinsicArgumentsVector, intrinsicArgumentCount,
-                            arrayPrototype);
-                    }
+                    var sliceHelperResult = arraySliceKernel(
+                        heapBase, state, intrinsicTarget, registerCells,
+                        sliceReceiverIndex, intrinsicArgumentsVector,
+                        intrinsicArgumentCount, arrayPrototype);
                     if (sliceHelperResult === 1) intrinsicHandled = 1;
                     else if (sliceHelperResult === 2) {
                         store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
@@ -8346,31 +8319,6 @@
     function arraySliceKernel(heapBase, state, targetCell, registerCells,
                               receiverIndex, argumentsVector, argumentCount,
                               arrayPrototype) {
-        var VALUE_CELL_BYTES = 16;
-        var VALUE_CELL_TAG = 0;
-        var VALUE_CELL_REFERENCE = 4;
-        var VALUE_CELL_LOW = 4;
-        var VALUE_CELL_HIGH = 8;
-        var VALUE_CELL_AUX = 12;
-        var VALUE_TAG_UNDEFINED = 1;
-        var VALUE_TAG_INT32 = 5;
-        var VALUE_TAG_REFERENCE = 7;
-        var HEAP_TYPE_ARRAY = 2;
-        var HEAP_TYPE_VALUE_VECTOR = 13;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_MARK = 8;
-        var RECORD_FLAGS = 12;
-        var ARRAY_PROTOTYPE = 16;
-        var ARRAY_PROPERTY_HEAD = 20;
-        var ARRAY_ELEMENTS = 24;
-        var ARRAY_RESERVED = 28;
-        var VECTOR_LENGTH = 16;
-        var VECTOR_CAPACITY = 20;
-        var VECTOR_CELLS = 24;
-        var ENGINE_HEAP_BUMP = 16;
-        var ENGINE_HEAP_LIMIT = 20;
-        var ARRAY_RECORD_BYTES = 32;
         if (argumentCount > 2) return 11;
         var receiverCell = heapBase + registerCells +
             receiverIndex * VALUE_CELL_BYTES;
@@ -8460,31 +8408,6 @@
     function arrayConcatKernel(heapBase, state, targetCell, registerCells,
                                receiverIndex, argumentsVector, argumentCount,
                                arrayPrototype) {
-        var VALUE_CELL_BYTES = 16;
-        var VALUE_CELL_TAG = 0;
-        var VALUE_CELL_REFERENCE = 4;
-        var VALUE_CELL_LOW = 4;
-        var VALUE_CELL_HIGH = 8;
-        var VALUE_CELL_AUX = 12;
-        var VALUE_TAG_INT32 = 5;
-        var VALUE_TAG_REFERENCE = 7;
-        var HEAP_TYPE_ARRAY = 2;
-        var HEAP_TYPE_VALUE_VECTOR = 13;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_MARK = 8;
-        var RECORD_FLAGS = 12;
-        var ARRAY_PROTOTYPE = 16;
-        var ARRAY_PROPERTY_HEAD = 20;
-        var ARRAY_ELEMENTS = 24;
-        var ARRAY_RESERVED = 28;
-        var VECTOR_LENGTH = 16;
-        var VECTOR_CAPACITY = 20;
-        var VECTOR_CELLS = 24;
-        var ENGINE_HEAP_BUMP = 16;
-        var ENGINE_HEAP_LIMIT = 20;
-        var ARRAY_RECORD_BYTES = 32;
-        var MAX_VECTOR_LENGTH = 134217726;
         if (receiverIndex < 0) return 0;
         var receiverCell = heapBase + registerCells +
             receiverIndex * VALUE_CELL_BYTES;
@@ -8838,32 +8761,6 @@
      * engine. */
     function numericPropertyGetKernel(heapBase, state, targetCell, object,
                                       index, sourceCell, operation) {
-        var VALUE_CELL_LOW = 4;
-        var VALUE_CELL_HIGH = 8;
-        var VALUE_CELL_AUX = 12;
-        var VALUE_TAG_UNDEFINED = 1;
-        var HEAP_TYPE_OBJECT = 1;
-        var HEAP_TYPE_BYTECODE_FUNCTION = 4;
-        var HEAP_TYPE_STRING = 7;
-        var HEAP_TYPE_PROPERTY = 6;
-        var PROPERTY_RECORD_BYTES = 48;
-        var DEFAULT_PROPERTY_ATTRIBUTES = 7;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_MARK = 8;
-        var RECORD_FLAGS = 12;
-        var STRING_LENGTH = 16;
-        var STRING_HASH = 20;
-        var STRING_CHARS = 24;
-        var OBJECT_PROTOTYPE = 16;
-        var OBJECT_PROPERTY_HEAD = 20;
-        var PROPERTY_NEXT = 16;
-        var PROPERTY_KEY = 20;
-        var PROPERTY_ATTRIBUTES = 24;
-        var PROPERTY_RESERVED = 28;
-        var PROPERTY_VALUE = 32;
-        var ENGINE_HEAP_BUMP = 16;
-        var ENGINE_HEAP_LIMIT = 20;
         if (index < 0) return 0;
         var currentObject = object;
         while (currentObject !== 0) {
@@ -9000,9 +8897,12 @@
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
         var kernelDependencies = {
+            arrayConcatKernel: arrayConcatKernel,
+            arraySliceKernel: arraySliceKernel,
             dateIntrinsicKernel: dateIntrinsicKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
+            numericPropertyGetKernel: numericPropertyGetKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,
             programCallableKernel: programCallableKernel,
@@ -9133,10 +9033,6 @@
             runtime.heapRecords.setPlatformFreePointer(
                 this.platformServicesAddress, x86Backend.ffi.resolve("free"));
         }
-        this.arraySliceNativeResult = null;
-        this.arrayConcatNativeResult = null;
-        this.dateIntrinsicNativeResult = null;
-        this.numericPropertyNativeResult = null;
         this.stringSupportAddress = runtime.heapRecords.allocateValueVector(279);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
@@ -9308,51 +9204,11 @@
     }
 
     NativeInterpreter.prototype.ensureIntrinsicHelper = function (callable) {
-        if (!this.nativeResult.fn || !callable) return false;
-        var result = null;
-        var name = "";
-        if (callable.nativeIntrinsic === ARRAY_SLICE_INTRINSIC_ID) {
-            if (this.arraySliceNativeResult) return false;
-            result = new X86Backend({captureAssembly: false}).compile(
-                new KernelCompiler().compile(arraySliceKernel));
-            this.arraySliceNativeResult = result;
-            this.runtime.heapRecords.setPlatformArraySlicePointer(
-                this.platformServicesAddress, result.pointer);
-            name = "Array.slice";
-        } else if (callable.nativeIntrinsic === ARRAY_CONCAT_INTRINSIC_ID) {
-            if (this.arrayConcatNativeResult) return false;
-            result = new X86Backend({captureAssembly: false}).compile(
-                new KernelCompiler().compile(arrayConcatKernel));
-            this.arrayConcatNativeResult = result;
-            this.runtime.heapRecords.setPlatformArrayConcatPointer(
-                this.platformServicesAddress, result.pointer);
-            name = "Array.concat";
-        } else return false;
-        if (this.runtime.profileOpcodeCounts && typeof print === "function") {
-            print("native guest helper compiled: " + name + " bytes=" +
-                  result.length);
-        }
-        return true;
+        return false;
     };
 
     NativeInterpreter.prototype.ensureOpcodeHelper = function (opcode) {
-        if (!this.nativeResult.fn ||
-            (opcode !== Bytecode.GET_PROPERTY &&
-             opcode !== Bytecode.SET_PROPERTY)) {
-            return false;
-        }
-        if (this.numericPropertyNativeResult) return false;
-        var result = new X86Backend({captureAssembly: false}).compile(
-            new KernelCompiler().compile(numericPropertyGetKernel));
-        this.numericPropertyNativeResult = result;
-        this.runtime.heapRecords.setPlatformNumericPropertyPointer(
-            this.platformServicesAddress, result.pointer);
-        if (this.runtime.profileOpcodeCounts &&
-            typeof print === "function") {
-            print("native guest helper compiled: numeric object property bytes=" +
-                  result.length);
-        }
-        return true;
+        return false;
     };
 
     NativeInterpreter.prototype.setDlsymPointer = function (pointer) {
@@ -9898,22 +9754,6 @@
     };
 
     NativeInterpreter.prototype.destroy = function () {
-        if (this.arraySliceNativeResult) {
-            this.arraySliceNativeResult.destroy();
-        }
-        this.arraySliceNativeResult = null;
-        if (this.arrayConcatNativeResult) {
-            this.arrayConcatNativeResult.destroy();
-        }
-        this.arrayConcatNativeResult = null;
-        if (this.dateIntrinsicNativeResult) {
-            this.dateIntrinsicNativeResult.destroy();
-        }
-        this.dateIntrinsicNativeResult = null;
-        if (this.numericPropertyNativeResult) {
-            this.numericPropertyNativeResult.destroy();
-        }
-        this.numericPropertyNativeResult = null;
         if (this.nativeResult) this.nativeResult.destroy();
         this.nativeResult = null;
         this.js = null;
