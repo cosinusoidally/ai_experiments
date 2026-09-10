@@ -34,6 +34,26 @@ function strictFunctionRejectsEvalOctal() {
 }
 assertEqual(strictFunctionRejectsEvalOctal(), "undefined",
             "direct eval inherits strict function parsing");
+assertEqual(eval("'\\141'"), "a", "non-strict legacy octal string escape");
+var strictOctalEscapeRejected = false;
+try {
+    eval("'use strict'; '\\141'");
+} catch (strictOctalEscapeError) {
+    strictOctalEscapeRejected = strictOctalEscapeError instanceof SyntaxError;
+}
+assertEqual(strictOctalEscapeRejected, true,
+            "strict eval rejects legacy octal string escape");
+var directiveOctalEscapeRejected = false;
+try {
+    eval("'\\141'; 'use strict';");
+} catch (directiveOctalEscapeError) {
+    directiveOctalEscapeRejected =
+        directiveOctalEscapeError instanceof SyntaxError;
+}
+assertEqual(directiveOctalEscapeRejected, true,
+            "strict directive rejects preceding directive octal escape");
+assertEqual(eval("'use\\x20strict'; 010"), 8,
+            "escaped strict text is not a strict-mode directive");
 var syntaxError = new SyntaxError("bad source");
 assertEqual(syntaxError instanceof SyntaxError, true,
             "native Error subtype has its guest prototype");

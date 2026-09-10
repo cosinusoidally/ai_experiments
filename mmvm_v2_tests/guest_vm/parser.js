@@ -29,16 +29,24 @@
         this.tokenizer.error(message, this.current.line, this.current.column);
     };
 
-    Parser.prototype.makeLiteral = function (value) {
+    Parser.prototype.makeLiteral = function (value, token) {
         /* null is also the parser's optional-expression sentinel, so retain
          * an explicit node for a null literal even in the compact form. */
-        return this.compactLiterals && value !== null ? value :
-            {type: "Literal", value: value};
+        if (this.compactLiterals && value !== null &&
+            !(token && token.hasEscapeSequence)) return value;
+        var literal = {type: "Literal", value: value};
+        if (token && token.hasEscapeSequence) {
+            literal.hasEscapeSequence = true;
+            literal.legacyOctalEscape = token.legacyOctalEscape;
+        }
+        return literal;
     };
 
     Parser.prototype.rejectStrictOctal = function (token) {
-        if (this.strict && token.kind === "number" && token.legacyOctal) {
-            this.error("legacy octal literal is not permitted in strict code");
+        if (this.strict &&
+            (token.kind === "number" && token.legacyOctal ||
+             token.kind === "string" && token.legacyOctalEscape)) {
+            this.error("legacy octal syntax is not permitted in strict code");
         }
     };
 
@@ -94,6 +102,7 @@
     Parser.prototype.parseProgram = function () {
         var body = [];
         var directivePrologue = true;
+        var directiveHadOctalEscape = false;
         while (this.current.kind !== "eof") {
             var statement = this.parseStatement();
             body.push(statement);
@@ -105,7 +114,19 @@
                      typeof statement.expression === "string")) {
                     var directiveValue = typeof statement.expression === "string" ?
                         statement.expression : statement.expression.value;
-                    if (directiveValue === "use strict") this.strict = true;
+                    var directiveHasEscape = statement.expression &&
+                        statement.expression.hasEscapeSequence;
+                    if (statement.expression &&
+                        statement.expression.legacyOctalEscape) {
+                        directiveHadOctalEscape = true;
+                    }
+                    if (directiveValue === "use strict" &&
+                        !directiveHasEscape) {
+                        if (directiveHadOctalEscape) {
+                            this.error("legacy octal escape in strict directive prologue");
+                        }
+                        this.strict = true;
+                    }
                 } else {
                     directivePrologue = false;
                 }
@@ -408,6 +429,7 @@
         this.expectPunctuator("{", true);
         var body = [];
         var directivePrologue = true;
+        var directiveHadOctalEscape = false;
         while (!this.isPunctuator("}")) {
             if (this.current.kind === "eof") this.error("unterminated block");
             var statement = this.parseStatement();
@@ -420,7 +442,19 @@
                      typeof statement.expression === "string")) {
                     var directiveValue = typeof statement.expression === "string" ?
                         statement.expression : statement.expression.value;
-                    if (directiveValue === "use strict") this.strict = true;
+                    var directiveHasEscape = statement.expression &&
+                        statement.expression.hasEscapeSequence;
+                    if (statement.expression &&
+                        statement.expression.legacyOctalEscape) {
+                        directiveHadOctalEscape = true;
+                    }
+                    if (directiveValue === "use strict" &&
+                        !directiveHasEscape) {
+                        if (directiveHadOctalEscape) {
+                            this.error("legacy octal escape in strict directive prologue");
+                        }
+                        this.strict = true;
+                    }
                 } else {
                     directivePrologue = false;
                 }
@@ -635,7 +669,7 @@
         if (token.kind === "number" || token.kind === "string") {
             this.rejectStrictOctal(token);
             this.advance(false);
-            return this.makeLiteral(token.value);
+            return this.makeLiteral(token.value, token);
         }
         if (token.kind === "keyword" &&
             (token.value === "true" || token.value === "false" ||

@@ -197,6 +197,24 @@ performance are separate mandatory regression gates.
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 
+### 2026-09-11 00:52 BST — strict string literal grammar
+
+- Complete focused native run: `ch07/7.8/7.8.4`, 78 files, 120 variants,
+  120 passed, 0 failed, 0 timed out. The earlier combined lexical run had
+  35 failures in this selection.
+- Elapsed: 55.97 seconds. Peak RSS: 166,032 KiB.
+- String tokens now retain lexical metadata for escape sequences and decode
+  the non-strict legacy octal extension correctly. Strict code rejects decimal
+  and octal escape forms while retaining the permitted `\\0` form when it is
+  not followed by a decimal digit.
+- Directive-prologue handling now rejects an octal escape in an earlier
+  directive when a later exact `use strict` directive makes the whole body
+  strict. Escaped spellings such as `use\\x20strict` remain ordinary string
+  directives and do not enable strict mode.
+- Regression gates: Node and `js_min.exe` suites pass with 262 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
+  native interpreter, and three-context checks remain green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

@@ -174,6 +174,8 @@
         /* Tokens are recycled by Parser.advance(). Clear optional lexical
          * metadata so it cannot leak from a previous token. */
         token.legacyOctal = false;
+        token.hasEscapeSequence = false;
+        token.legacyOctalEscape = false;
         if (this.captureRaw) token.raw = this.source.substring(start, this.index);
         return token;
     };
@@ -356,12 +358,16 @@
         }
         this.advance();
         var value = "";
+        var legacyOctalEscape = false;
         while (this.index < this.length) {
             var code = this.codeAt(0);
             if (code === quote) {
                 this.advance();
-                return this.makeToken("string", value, start, line, column,
-                                      lineBefore);
+                var stringToken = this.makeToken(
+                    "string", value, start, line, column, lineBefore);
+                stringToken.hasEscapeSequence = true;
+                stringToken.legacyOctalEscape = legacyOctalEscape;
+                return stringToken;
             }
             if (isLineTerminator(code)) {
                 this.error("unterminated string literal", line, column);
@@ -385,7 +391,30 @@
             else if (code === 98) value += "\b";
             else if (code === 102) value += "\f";
             else if (code === 118) value += "\v";
-            else if (code === 48) value += "\0";
+            else if (code >= 48 && code <= 57) {
+                var nextEscapeCode = this.codeAt(0);
+                if (code === 48 && !isDecimalDigit(nextEscapeCode)) {
+                    value += "\0";
+                } else if (code <= 55) {
+                    legacyOctalEscape = true;
+                    var octalEscapeValue = code - 48;
+                    var remainingOctalDigits = code <= 51 ? 2 : 1;
+                    while (remainingOctalDigits > 0 &&
+                           this.codeAt(0) >= 48 && this.codeAt(0) <= 55) {
+                        octalEscapeValue = octalEscapeValue * 8 +
+                                           this.codeAt(0) - 48;
+                        this.advance();
+                        remainingOctalDigits--;
+                    }
+                    value += String.fromCharCode(octalEscapeValue);
+                } else {
+                    /* Annex-B-compatible non-strict identity escapes for 8
+                     * and 9 are still DecimalDigit escapes and forbidden by
+                     * the strict StringLiteral grammar. */
+                    legacyOctalEscape = true;
+                    value += String.fromCharCode(code);
+                }
+            }
             else if (code === 120 || code === 117) {
                 var required = code === 120 ? 2 : 4;
                 var escaped = 0;
