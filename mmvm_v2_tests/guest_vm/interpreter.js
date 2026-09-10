@@ -1050,8 +1050,16 @@
 
     Execution.prototype.abort = function () {
         if (this.status === "completed" || this.status === "threw") return;
-        this.frames = [];
+        while (this.frames.length) {
+            this.releaseFrame(this.frames.pop());
+        }
+        if (this.context && this.context.heapAddress) {
+            this.runtime.heapRecords.setContextActiveFrame(
+                this.context.heapAddress, 0);
+        }
         this.pendingHostCall = null;
+        this.injectedHostException = undefined;
+        this.hasInjectedHostException = false;
         this.status = "aborted";
         if (this.context.execution === this) this.context.execution = null;
     };

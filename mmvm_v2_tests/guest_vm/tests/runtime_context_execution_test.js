@@ -180,6 +180,22 @@
                firstRuntime.runtime.bufferSupport.read(retainedBytes, 0) === 63,
                "collection did not retain a suspended execution value");
 
+        var abortedExecution = firstContext.start(
+            "while (true) {}", "aborted_execution.js");
+        var abortedResult = abortedExecution.resume(8);
+        assert(abortedResult.status === "budget",
+               "abort lifecycle test did not suspend");
+        var abortedFrameAddress = abortedExecution.frames[0].heapAddress;
+        abortedExecution.abort();
+        assert(abortedExecution.status === "aborted" &&
+               abortedExecution.frames.length === 0,
+               "abort retained the execution frame stack");
+        assert(firstRuntime.runtime.heapRecords.contextActiveFrame(
+                   firstContext.heapAddress) === 0,
+               "abort retained the context's published frame root");
+        assert(firstRuntime.runtime.linearHeap.isFreeRecord(abortedFrameAddress),
+               "abort did not release the guest frame record");
+
         firstRuntime.destroy();
         otherRuntime.destroy();
         return "runtime/context isolation and resumable execution passed";
