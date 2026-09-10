@@ -171,6 +171,9 @@
         token.line = line;
         token.column = column;
         token.lineBefore = lineBefore;
+        /* Tokens are recycled by Parser.advance(). Clear optional lexical
+         * metadata so it cannot leak from a previous token. */
+        token.legacyOctal = false;
         if (this.captureRaw) token.raw = this.source.substring(start, this.index);
         return token;
     };
@@ -302,13 +305,31 @@
         this.column += index - this.index;
         this.index = index;
         var raw = source.substring(start, index);
+        var legacyOctal = simpleInteger && raw.length > 1 &&
+                          raw.charCodeAt(0) === 48 &&
+                          raw.charCodeAt(1) !== 120 &&
+                          raw.charCodeAt(1) !== 88;
+        var octalIndex = 1;
+        while (legacyOctal && octalIndex < raw.length) {
+            var octalCode = raw.charCodeAt(octalIndex++);
+            if (octalCode < 48 || octalCode > 55) legacyOctal = false;
+        }
         var converted = this.fastNumericConversion && simpleInteger &&
             ((raw.length > 1 && (raw.charCodeAt(1) === 120 ||
                                  raw.charCodeAt(1) === 88)) ?
                 numericDigits <= 7 : numericDigits <= 9) ?
             numericValue : Number(raw);
-        return this.makeToken("number", converted, start, line, column,
-                              lineBefore);
+        if (legacyOctal) {
+            converted = 0;
+            octalIndex = 1;
+            while (octalIndex < raw.length) {
+                converted = converted * 8 + raw.charCodeAt(octalIndex++) - 48;
+            }
+        }
+        var token = this.makeToken("number", converted, start, line, column,
+                                   lineBefore);
+        token.legacyOctal = legacyOctal;
+        return token;
     };
 
     Tokenizer.prototype.scanString = function (start, line, column,

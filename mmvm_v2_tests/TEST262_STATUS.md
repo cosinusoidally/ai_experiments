@@ -171,6 +171,32 @@ performance are separate mandatory regression gates.
   assertions. Existing networking, `node_web.js`, demo1, demo2, heap, GC,
   context, native-interpreter, and three-context checks remain green.
 
+### 2026-09-10 18:25 BST — strict octal and native catch stability
+
+- Pre-fix complete focused run at revision `8429e50`: `ch07/7.7`,
+  `ch07/7.8`, and `ch07/7.9`, 326 files, 606 variants, 515 passed,
+  91 failed, 0 timed out. Elapsed: 411.40 seconds. Peak RSS: 182,216 KiB.
+  The failures cluster in strict octal string/numeric syntax, RegExp, and six
+  automatic-semicolon-insertion cases.
+- Intermediate numeric-literal run after strict lexical recognition:
+  `ch07/7.8/7.8.3`, 80 files, 150 variants, 143 passed, 7 failed,
+  0 timed out. Elapsed: 70.81 seconds. Peak RSS: 169,496 KiB. All seven
+  remaining failures were dynamic strict-eval cases in the native engine.
+- Post-fix complete native run: `ch07/7.8/7.8.3`, 80 files, 150 variants,
+  150 passed, 0 failed, 0 timed out. Elapsed: 72.87 seconds. Peak RSS:
+  169,484 KiB.
+- Numeric tokens now distinguish and correctly evaluate the non-strict legacy
+  octal extension, while the parser rejects it in strict programs, strict
+  functions, direct eval, and numeric object-property names.
+- Fixed a general native continuation bug: after a semantic exception entered
+  a guest catch handler, the partially reloaded semantic register mirror was
+  incorrectly spilled over authoritative native-heap registers. Catch
+  continuations now retain heap authority, preventing stale constants and
+  temporaries from corrupting subsequent operations.
+- Regression gates: Node and `js_min.exe` suites pass with 258 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
+  native interpreter, and three-context checks remain green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

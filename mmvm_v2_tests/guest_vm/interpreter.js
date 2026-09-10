@@ -1004,7 +1004,12 @@
             this.runtime.reportExceptionState(error, frame);
             if (this.handleException(error)) {
                 if (this.runtime.nativeInterpreter && this.frames.length) {
-                    this.frames[this.frames.length - 1].nativeHeapCurrent = false;
+                    /* handleException publishes the catch PC and binding to
+                     * the authoritative heap. The semantic register array is
+                     * intentionally only partially reloaded at native exits;
+                     * marking it newer here would spill stale registers over
+                     * live native values before entering the catch block. */
+                    this.frames[this.frames.length - 1].nativeHeapCurrent = true;
                 }
                 var resumed = this.resume(budget);
                 resumed.instructions += used;

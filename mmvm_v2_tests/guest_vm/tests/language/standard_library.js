@@ -12,6 +12,28 @@ assertEqual(dynamicAdd(19, 23), 42,
             "Function constructor compiles a guest function");
 assertEqual(new Function("return 7;")(), 7,
             "Function constructor is constructible");
+assertEqual(eval("010"), 8, "non-strict legacy octal literal");
+var strictOctalRejected = false;
+try {
+    eval("'use strict'; 010");
+} catch (strictOctalError) {
+    strictOctalRejected = strictOctalError instanceof SyntaxError;
+}
+assertEqual(strictOctalRejected, true, "strict eval rejects legacy octal");
+function strictFunctionRejectsEvalOctal() {
+    "use strict";
+    try {
+        eval("var rejectedOctalBinding = 010;");
+        return "completed";
+    } catch (strictFunctionOctalError) {
+        if (!(strictFunctionOctalError instanceof SyntaxError)) {
+            return "wrong error";
+        }
+        return typeof rejectedOctalBinding;
+    }
+}
+assertEqual(strictFunctionRejectsEvalOctal(), "undefined",
+            "direct eval inherits strict function parsing");
 var syntaxError = new SyntaxError("bad source");
 assertEqual(syntaxError instanceof SyntaxError, true,
             "native Error subtype has its guest prototype");

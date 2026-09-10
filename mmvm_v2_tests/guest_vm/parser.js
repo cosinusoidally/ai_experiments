@@ -36,6 +36,12 @@
             {type: "Literal", value: value};
     };
 
+    Parser.prototype.rejectStrictOctal = function (token) {
+        if (this.strict && token.kind === "number" && token.legacyOctal) {
+            this.error("legacy octal literal is not permitted in strict code");
+        }
+    };
+
     Parser.prototype.advance = function (allowRegexp) {
         var previous = this.current;
         if (this.lookahead) {
@@ -627,6 +633,7 @@
                     flags: token.value.flags};
         }
         if (token.kind === "number" || token.kind === "string") {
+            this.rejectStrictOctal(token);
             this.advance(false);
             return this.makeLiteral(token.value);
         }
@@ -673,6 +680,7 @@
                     keyToken.kind !== "string" && keyToken.kind !== "number") {
                     this.error("expected object property name");
                 }
+                this.rejectStrictOctal(keyToken);
                 this.advance(false);
                 if ((keyValue === "get" || keyValue === "set") &&
                     !this.isPunctuator(":")) {
@@ -685,6 +693,7 @@
                         accessorKey.kind !== "number") {
                         this.error("expected accessor property name");
                     }
+                    this.rejectStrictOctal(accessorKey);
                     this.advance(false);
                     this.expectPunctuator("(", false);
                     var accessorParameters = [];
