@@ -314,6 +314,7 @@
         setEngineResult: "ENGINE_RESULT",
         setEngineInstructions: "ENGINE_INSTRUCTIONS",
         setEngineCallRejectReason: "ENGINE_CALL_REJECT_REASON",
+        setEngineCurrentFrame: "ENGINE_CURRENT_FRAME",
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 
