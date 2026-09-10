@@ -2775,376 +2775,18 @@
                     }
                 }
                 if (bytecodeCallHandled === 0) {
-                var intrinsicCallValid = 1;
-                if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
-                    intrinsicCallValid = 0;
+                var intrinsicDispatchResult = intrinsicCallKernel(
+                    heapBase, state, frame, callFunctionCell,
+                    callArgumentsCell, callOperation, callTargetIndex,
+                    currentContext, stringSupport, arrayPrototype,
+                    bytecodeWords, registerCells, pc, opcode, instructions,
+                    framePC);
+                if (intrinsicDispatchResult === EXIT_UNSUPPORTED) {
+                    return EXIT_UNSUPPORTED;
                 }
-                if (load32(callArgumentsCell) !== VALUE_TAG_REFERENCE) {
-                    intrinsicCallValid = 0;
-                }
-                var intrinsicFunction = load32(
-                    callFunctionCell + VALUE_CELL_LOW);
-                if (intrinsicCallValid === 1) {
-                    if (load32(heapBase + intrinsicFunction) !==
-                        HEAP_TYPE_NATIVE_FUNCTION) intrinsicCallValid = 0;
-                }
-                var intrinsicId = 0;
-                if (intrinsicCallValid === 1) {
-                    intrinsicId = load32(
-                        heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
-                    if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-                    else if (intrinsicId > INTRINSIC_PROGRAM_SET_VECTOR) {
-                        intrinsicCallValid = 0;
-                    }
-                }
-                if (callOperation === 2) {
-                    if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
-                    if (intrinsicId !== INTRINSIC_ARRAY_CONSTRUCTOR) {
-                        intrinsicCallValid = 0;
-                    }
-                    }
-                }
-                if (callOperation === 1) {
-                    if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
-                        intrinsicCallValid = 0;
-                    }
-                }
-                var intrinsicArgumentsArray = load32(
-                    callArgumentsCell + VALUE_CELL_LOW);
-                var intrinsicArgumentsVector = 0;
-                var intrinsicArgumentCount = 0;
-                if (intrinsicCallValid === 1) {
-                    if (load32(heapBase + intrinsicArgumentsArray) !==
-                        HEAP_TYPE_ARRAY) intrinsicCallValid = 0;
-                    else {
-                        intrinsicArgumentsVector = load32(
-                            heapBase + intrinsicArgumentsArray + ARRAY_ELEMENTS);
-                        intrinsicArgumentCount = load32(
-                            heapBase + intrinsicArgumentsVector + VECTOR_LENGTH);
-                    }
-                }
-                var requiredIntrinsicArguments = 1;
-                if (intrinsicId === INTRINSIC_GET_DLSYM) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_STRING_SUBSTRING) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId ===
-                           INTRINSIC_STRING_FROM_CHAR_CODE) {
-                    requiredIntrinsicArguments = 0;
-                } else if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
-                    requiredIntrinsicArguments = 1;
-                } else if (intrinsicId === INTRINSIC_REGEXP_TEST) {
-                    requiredIntrinsicArguments = 1;
-                } else if (intrinsicId === INTRINSIC_STRING_REPLACE) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId === INTRINSIC_FUNCTION_APPLY) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId === INTRINSIC_MATH_POW) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId === INTRINSIC_POKE8) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId === INTRINSIC_POKE32) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
-                    requiredIntrinsicArguments = 10;
-                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
-                    requiredIntrinsicArguments = 3;
-                } else if (intrinsicId ===
-                           INTRINSIC_PROGRAM_SET_CONSTANT) {
-                    requiredIntrinsicArguments = 3;
-                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
-                    requiredIntrinsicArguments = 4;
-                } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
-                    requiredIntrinsicArguments = 2;
-                } else if (intrinsicId >= INTRINSIC_BUFFER_WRITE_U16_LE) {
-                    if (intrinsicId <= INTRINSIC_BUFFER_WRITE_I16_LE) {
-                        requiredIntrinsicArguments = 2;
-                    }
-                }
-                if (intrinsicArgumentCount < requiredIntrinsicArguments) {
-                    intrinsicCallValid = 0;
-                }
-                if (intrinsicCallValid === 0) {
+                if (intrinsicDispatchResult !== 1) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
-                }
-                var intrinsicTarget = heapBase + registerCells +
-                    callTargetIndex * VALUE_CELL_BYTES;
-                var intrinsicHandled = 0;
-                if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
-                    intrinsicHandled = programCreateKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, currentContext,
-                        stringSupport);
-                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
-                    intrinsicHandled = programSetCodeKernel(
-                        heapBase, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector);
-                } else if (intrinsicId ===
-                           INTRINSIC_PROGRAM_SET_CONSTANT) {
-                    intrinsicHandled = programSetConstantKernel(
-                        heapBase, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector);
-                } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
-                    intrinsicHandled = programSetVectorKernel(
-                        heapBase, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector);
-                }
-                if (intrinsicId >= INTRINSIC_PROGRAM_CREATE) {
-                if (intrinsicId <= INTRINSIC_PROGRAM_SET_VECTOR) {
-                if (intrinsicHandled !== 1) {
-                    if (intrinsicHandled === 2) {
-                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_SPACE);
-                    }
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, instructions);
-                }
-                }
-                }
-                if (intrinsicId === INTRINSIC_FUNCTION_CALL) {
-                    /* Bytecode callees were forwarded above. Native and host
-                     * callees retain the ordinary semantic call boundary. */
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, instructions);
-                }
-                if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
-                    intrinsicHandled = arrayConstructorKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        arrayPrototype, intrinsicId);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                if (intrinsicId >= INTRINSIC_NUMBER_CONSTRUCTOR) {
-                if (intrinsicId <= INTRINSIC_DATE_GET_TIME) {
-                    receiverIndex = -1;
-                    if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
-                        receiverIndex = load32(heapBase + bytecodeWords +
-                            (pc + THIRD_OPERAND) * WORD_BYTES);
-                    }
-                    intrinsicHandled = dateIntrinsicKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        receiverIndex, intrinsicId, stringSupport,
-                        intrinsicArgumentsVector);
-                    if (intrinsicHandled === 2) {
-                        store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
-                                CALL_REJECT_HEAP_SPACE);
-                        intrinsicHandled = 0;
-                    }
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                }
-                if (intrinsicId === INTRINSIC_GET_DLSYM) {
-                    store32(intrinsicTarget, VALUE_TAG_INT32);
-                    store32(intrinsicTarget + VALUE_CELL_LOW,
-                        platformDlsymPointer(heapBase,
-                            enginePlatformServices(heapBase, state)));
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
-                    intrinsicHandled = 1;
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
-                    var stringConstructorResult = stringConstructorKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        stringSupport, intrinsicId, pc, opcode, instructions,
-                        framePC);
-                    if (stringConstructorResult === EXIT_UNSUPPORTED) {
-                        return EXIT_UNSUPPORTED;
-                    }
-                    if (stringConstructorResult === 1) intrinsicHandled = 1;
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
-                    intrinsicHandled = objectHasOwnPropertyKernel(
-                        heapBase, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, bytecodeWords, pc,
-                        intrinsicId);
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_FFI_CALL) {
-                    var ffiCallResult = ffiCallKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        intrinsicId, pc, opcode, instructions, framePC);
-                    if (ffiCallResult === EXIT_UNSUPPORTED) {
-                        return EXIT_UNSUPPORTED;
-                    }
-                    if (ffiCallResult === 1) intrinsicHandled = 1;
-                }
-                }
-                if (intrinsicHandled === 0) {
-                    var arrayIntrinsicResult = arrayIntrinsicKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        arrayPrototype, bytecodeWords, pc, opcode, intrinsicId,
-                        instructions, framePC);
-                    if (arrayIntrinsicResult === EXIT_UNSUPPORTED) {
-                        return EXIT_UNSUPPORTED;
-                    }
-                    if (arrayIntrinsicResult === 1) intrinsicHandled = 1;
-                }
-                if (intrinsicHandled === 0) {
-                var isMathIntrinsic = 0;
-                if (intrinsicId >= INTRINSIC_MATH_SQRT) {
-                    if (intrinsicId <= INTRINSIC_MATH_COS) {
-                        isMathIntrinsic = 1;
-                    }
-                }
-                if (intrinsicId === INTRINSIC_MATH_POW) {
-                    isMathIntrinsic = 1;
-                }
-                if (intrinsicId === INTRINSIC_MATH_ATAN2) {
-                    isMathIntrinsic = 1;
-                }
-                if (isMathIntrinsic === 1) {
-                    intrinsicHandled = mathIntrinsicKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        intrinsicId);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_BUFFER_COPY) {
-                    var copyReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var copyReceiverCell = 0;
-                    if (copyReceiverIndex >= 0) {
-                        copyReceiverCell = frameRegisterCellAddress(
-                            heapBase, frame, copyReceiverIndex);
-                    }
-                    intrinsicHandled = bufferCopyKernel(
-                        heapBase, intrinsicTarget, copyReceiverCell,
-                        registerCells, intrinsicArgumentsVector,
-                        intrinsicArgumentCount);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_BUFFER_ALLOC) {
-                    intrinsicHandled = bufferAllocKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        stringSupport);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                }
-                if (intrinsicHandled === 0) {
-                if (intrinsicId === INTRINSIC_STRING_REPLACE) {
-                    var replaceReceiverIndex = load32(
-                        heapBase + bytecodeWords +
-                        (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var replaceReceiverCell = 0;
-                    if (replaceReceiverIndex >= 0) {
-                        replaceReceiverCell = frameRegisterCellAddress(
-                            heapBase, frame, replaceReceiverIndex);
-                    }
-                    intrinsicHandled = stringReplaceKernel(
-                        heapBase, state, intrinsicTarget, replaceReceiverCell,
-                        registerCells, intrinsicArgumentsVector);
-                    if (intrinsicHandled !== 1) {
-                        if (intrinsicHandled === 2) {
-                            setEngineCallRejectReason(
-                                heapBase, state, CALL_REJECT_HEAP_SPACE);
-                        }
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                }
-                if (intrinsicId === INTRINSIC_REGEXP_TEST) {
-                    intrinsicHandled = regexpTestKernel(
-                        heapBase, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, stringSupport,
-                        bytecodeWords, pc);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                var isStringIntrinsic = 0;
-                if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
-                    isStringIntrinsic = 1;
-                } else if (intrinsicId === INTRINSIC_STRING_FROM_CHAR_CODE) {
-                    isStringIntrinsic = 1;
-                } else if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
-                    isStringIntrinsic = 1;
-                } else if (intrinsicId === INTRINSIC_STRING_SUBSTRING) {
-                    isStringIntrinsic = 1;
-                } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
-                    isStringIntrinsic = 1;
-                } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
-                    isStringIntrinsic = 1;
-                }
-                if (isStringIntrinsic === 1) {
-                    intrinsicHandled = stringIntrinsicKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        stringSupport, bytecodeWords, pc, intrinsicId);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                }
-                if (intrinsicHandled === 0) {
-                    intrinsicHandled = bufferIntrinsicKernel(
-                        heapBase, state, intrinsicTarget, registerCells,
-                        intrinsicArgumentsVector, intrinsicArgumentCount,
-                        stringSupport, bytecodeWords, pc, intrinsicId);
-                    if (intrinsicHandled === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
                 }
                 if (callOperation === 2) {
                     pc = pc + FOUR_WORD_INSTRUCTION;
@@ -4087,6 +3729,386 @@
         store32(heapBase + state + ENGINE_INSTRUCTIONS, instructions);
         store32(heapBase + framePC, pc);
         return EXIT_BUDGET;
+    }
+
+    function intrinsicCallKernel(
+            heapBase, state, frame, callFunctionCell, callArgumentsCell,
+            callOperation, callTargetIndex, currentContext, stringSupport,
+            arrayPrototype, bytecodeWords, registerCells, pc, opcode,
+            instructions, framePC) {
+        var receiverIndex = -1;
+        var intrinsicCallValid = 1;
+        if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
+            intrinsicCallValid = 0;
+        }
+        if (load32(callArgumentsCell) !== VALUE_TAG_REFERENCE) {
+            intrinsicCallValid = 0;
+        }
+        var intrinsicFunction = load32(
+            callFunctionCell + VALUE_CELL_LOW);
+        if (intrinsicCallValid === 1) {
+            if (load32(heapBase + intrinsicFunction) !==
+                HEAP_TYPE_NATIVE_FUNCTION) intrinsicCallValid = 0;
+        }
+        var intrinsicId = 0;
+        if (intrinsicCallValid === 1) {
+            intrinsicId = load32(
+                heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
+            if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
+            else if (intrinsicId > INTRINSIC_PROGRAM_SET_VECTOR) {
+                intrinsicCallValid = 0;
+            }
+        }
+        if (callOperation === 2) {
+            if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
+            if (intrinsicId !== INTRINSIC_ARRAY_CONSTRUCTOR) {
+                intrinsicCallValid = 0;
+            }
+            }
+        }
+        if (callOperation === 1) {
+            if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
+                intrinsicCallValid = 0;
+            }
+        }
+        var intrinsicArgumentsArray = load32(
+            callArgumentsCell + VALUE_CELL_LOW);
+        var intrinsicArgumentsVector = 0;
+        var intrinsicArgumentCount = 0;
+        if (intrinsicCallValid === 1) {
+            if (load32(heapBase + intrinsicArgumentsArray) !==
+                HEAP_TYPE_ARRAY) intrinsicCallValid = 0;
+            else {
+                intrinsicArgumentsVector = load32(
+                    heapBase + intrinsicArgumentsArray + ARRAY_ELEMENTS);
+                intrinsicArgumentCount = load32(
+                    heapBase + intrinsicArgumentsVector + VECTOR_LENGTH);
+            }
+        }
+        var requiredIntrinsicArguments = 1;
+        if (intrinsicId === INTRINSIC_GET_DLSYM) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_SUBSTRING) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId ===
+                   INTRINSIC_STRING_FROM_CHAR_CODE) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
+            requiredIntrinsicArguments = 1;
+        } else if (intrinsicId === INTRINSIC_REGEXP_TEST) {
+            requiredIntrinsicArguments = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_REPLACE) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId === INTRINSIC_FUNCTION_APPLY) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId === INTRINSIC_MATH_POW) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId === INTRINSIC_POKE8) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId === INTRINSIC_POKE32) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
+            requiredIntrinsicArguments = 10;
+        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
+            requiredIntrinsicArguments = 3;
+        } else if (intrinsicId ===
+                   INTRINSIC_PROGRAM_SET_CONSTANT) {
+            requiredIntrinsicArguments = 3;
+        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
+            requiredIntrinsicArguments = 4;
+        } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
+            requiredIntrinsicArguments = 2;
+        } else if (intrinsicId >= INTRINSIC_BUFFER_WRITE_U16_LE) {
+            if (intrinsicId <= INTRINSIC_BUFFER_WRITE_I16_LE) {
+                requiredIntrinsicArguments = 2;
+            }
+        }
+        if (intrinsicArgumentCount < requiredIntrinsicArguments) {
+            intrinsicCallValid = 0;
+        }
+        if (intrinsicCallValid === 0) {
+            return unsupportedExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        var intrinsicTarget = heapBase + registerCells +
+            callTargetIndex * VALUE_CELL_BYTES;
+        var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
+            intrinsicHandled = programCreateKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, currentContext,
+                stringSupport);
+        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
+            intrinsicHandled = programSetCodeKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector);
+        } else if (intrinsicId ===
+                   INTRINSIC_PROGRAM_SET_CONSTANT) {
+            intrinsicHandled = programSetConstantKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector);
+        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
+            intrinsicHandled = programSetVectorKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector);
+        }
+        if (intrinsicId >= INTRINSIC_PROGRAM_CREATE) {
+        if (intrinsicId <= INTRINSIC_PROGRAM_SET_VECTOR) {
+        if (intrinsicHandled !== 1) {
+            if (intrinsicHandled === 2) {
+                store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                        CALL_REJECT_HEAP_SPACE);
+            }
+            return unsupportedExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        }
+        }
+        if (intrinsicId === INTRINSIC_FUNCTION_CALL) {
+            /* Bytecode callees were forwarded above. Native and host
+             * callees retain the ordinary semantic call boundary. */
+            return unsupportedExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
+            intrinsicHandled = arrayConstructorKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                arrayPrototype, intrinsicId);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        if (intrinsicId >= INTRINSIC_NUMBER_CONSTRUCTOR) {
+        if (intrinsicId <= INTRINSIC_DATE_GET_TIME) {
+            receiverIndex = -1;
+            if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
+                receiverIndex = load32(heapBase + bytecodeWords +
+                    (pc + THIRD_OPERAND) * WORD_BYTES);
+            }
+            intrinsicHandled = dateIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                receiverIndex, intrinsicId, stringSupport,
+                intrinsicArgumentsVector);
+            if (intrinsicHandled === 2) {
+                store32(heapBase + state + ENGINE_CALL_REJECT_REASON,
+                        CALL_REJECT_HEAP_SPACE);
+                intrinsicHandled = 0;
+            }
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicId === INTRINSIC_GET_DLSYM) {
+            store32(intrinsicTarget, VALUE_TAG_INT32);
+            store32(intrinsicTarget + VALUE_CELL_LOW,
+                platformDlsymPointer(heapBase,
+                    enginePlatformServices(heapBase, state)));
+            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
+            var stringConstructorResult = stringConstructorKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                stringSupport, intrinsicId, pc, opcode, instructions,
+                framePC);
+            if (stringConstructorResult === EXIT_UNSUPPORTED) {
+                return EXIT_UNSUPPORTED;
+            }
+            if (stringConstructorResult === 1) intrinsicHandled = 1;
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
+            intrinsicHandled = objectHasOwnPropertyKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, bytecodeWords, pc,
+                intrinsicId);
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_FFI_CALL) {
+            var ffiCallResult = ffiCallKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                intrinsicId, pc, opcode, instructions, framePC);
+            if (ffiCallResult === EXIT_UNSUPPORTED) {
+                return EXIT_UNSUPPORTED;
+            }
+            if (ffiCallResult === 1) intrinsicHandled = 1;
+        }
+        }
+        if (intrinsicHandled === 0) {
+            var arrayIntrinsicResult = arrayIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                arrayPrototype, bytecodeWords, pc, opcode, intrinsicId,
+                instructions, framePC);
+            if (arrayIntrinsicResult === EXIT_UNSUPPORTED) {
+                return EXIT_UNSUPPORTED;
+            }
+            if (arrayIntrinsicResult === 1) intrinsicHandled = 1;
+        }
+        if (intrinsicHandled === 0) {
+        var isMathIntrinsic = 0;
+        if (intrinsicId >= INTRINSIC_MATH_SQRT) {
+            if (intrinsicId <= INTRINSIC_MATH_COS) {
+                isMathIntrinsic = 1;
+            }
+        }
+        if (intrinsicId === INTRINSIC_MATH_POW) {
+            isMathIntrinsic = 1;
+        }
+        if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+            isMathIntrinsic = 1;
+        }
+        if (isMathIntrinsic === 1) {
+            intrinsicHandled = mathIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                intrinsicId);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_BUFFER_COPY) {
+            var copyReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var copyReceiverCell = 0;
+            if (copyReceiverIndex >= 0) {
+                copyReceiverCell = frameRegisterCellAddress(
+                    heapBase, frame, copyReceiverIndex);
+            }
+            intrinsicHandled = bufferCopyKernel(
+                heapBase, intrinsicTarget, copyReceiverCell,
+                registerCells, intrinsicArgumentsVector,
+                intrinsicArgumentCount);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_BUFFER_ALLOC) {
+            intrinsicHandled = bufferAllocKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                stringSupport);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_STRING_REPLACE) {
+            var replaceReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var replaceReceiverCell = 0;
+            if (replaceReceiverIndex >= 0) {
+                replaceReceiverCell = frameRegisterCellAddress(
+                    heapBase, frame, replaceReceiverIndex);
+            }
+            intrinsicHandled = stringReplaceKernel(
+                heapBase, state, intrinsicTarget, replaceReceiverCell,
+                registerCells, intrinsicArgumentsVector);
+            if (intrinsicHandled !== 1) {
+                if (intrinsicHandled === 2) {
+                    setEngineCallRejectReason(
+                        heapBase, state, CALL_REJECT_HEAP_SPACE);
+                }
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicId === INTRINSIC_REGEXP_TEST) {
+            intrinsicHandled = regexpTestKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, stringSupport,
+                bytecodeWords, pc);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        var isStringIntrinsic = 0;
+        if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_FROM_CHAR_CODE) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_SUBSTRING) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
+            isStringIntrinsic = 1;
+        }
+        if (isStringIntrinsic === 1) {
+            intrinsicHandled = stringIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                stringSupport, bytecodeWords, pc, intrinsicId);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        if (intrinsicHandled === 0) {
+            intrinsicHandled = bufferIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                stringSupport, bytecodeWords, pc, intrinsicId);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        return intrinsicHandled;
     }
 
     function ffiCallKernel(
@@ -8428,6 +8450,7 @@
             getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
+            intrinsicCallKernel: intrinsicCallKernel,
             instanceofKernel: instanceofKernel,
             localBindingKernel: localBindingKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
