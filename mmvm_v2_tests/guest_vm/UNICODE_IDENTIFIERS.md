@@ -14,11 +14,13 @@ Unicode Consortium's Unicode 3.0 update data. Its SHA-256 digest is:
 f41d967bc458ee106f0c3948bfad71cd0860d96c49304e3fd02eaf2bbae4b6d9
 ```
 
-The file is checked in deliberately. Depending on the host's Unicode library,
+The authoritative input is checked in deliberately. Depending on the host's Unicode library,
 regular-expression implementation, C locale, or installed data files would
 make guest syntax vary by host and would prevent the VM from becoming
-self-contained. This is the sole exception for generated Unicode data; do not
-replace it with whatever Unicode version happens to be installed locally.
+self-contained. The derived `unicode_identifier_data.js` lookup is the
+deliberate exception to the normal rule against checked-in generated files;
+do not replace either file with whatever Unicode version happens to be
+installed locally.
 
 This lexical table does not implement or imply the ECMAScript International-
 ization API. ECMAScript 5.1 does not require `Intl`, and this VM does not expose

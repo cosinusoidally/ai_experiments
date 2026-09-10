@@ -155,6 +155,22 @@ performance are separate mandatory regression gates.
   assertions plus networking, `node_web.js`, demo1, demo2, heap/GC/context,
   and three-context checks.
 
+### 2026-09-10 18:01 BST — authoritative Unicode identifiers
+
+- Revision: `1dd5005`.
+- Complete focused native run: `ch07/7.6`, 271 files, 503 variants,
+  503 passed, 0 failed, 0 timed out.
+- Elapsed: 282.16 seconds. Peak RSS: 169,456 KiB.
+- Replaced the permissive non-ASCII identifier fallback with a compact,
+  host-independent BMP category lookup generated from the pinned Unicode
+  3.0.0 `UnicodeData` source. The lookup covers ES5.1 identifier-start and
+  identifier-part categories plus U+200C and U+200D without regular
+  expressions, locale functions, host callbacks, or `Intl`.
+- Byte-for-byte deterministic regeneration was verified with `js_min.exe`.
+- Regression gates: Node and `js_min.exe` suites pass with 255 guest
+  assertions. Existing networking, `node_web.js`, demo1, demo2, heap, GC,
+  context, native-interpreter, and three-context checks remain green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure
