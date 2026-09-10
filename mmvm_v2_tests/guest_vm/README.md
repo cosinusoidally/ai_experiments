@@ -31,6 +31,15 @@ The primary embedder model is `JSRuntime` -> `JSContext` -> resumable
 external host call. The legacy `VM` facade retains one default context and
 auto-services host callbacks for existing tests and examples.
 
+Use `guest_runner.js --vm-no-host-calls program.js` to turn an attempted
+embedder callback into a source-located `HostCallError`. The enforcement is in
+the execution engine, so it also covers nested execution rather than merely
+refusing calls in the command-line loop. Direct guest/native intrinsics are
+not host calls. This mode is currently opt-in because output, timers,
+transitional `load()`, and compatibility services still cross the embedding
+boundary. It becomes the default only after those services have moved into
+MMVM platform code.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a

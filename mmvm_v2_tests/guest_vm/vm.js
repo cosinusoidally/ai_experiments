@@ -124,6 +124,39 @@
                 this.runtime.getProperty(this.runtime.globalObject, key));
         }
         var definingContext = this;
+        var functionConstructor = this.runtime.makeNativeFunction(
+            "Function", function (receiver, args) {
+                var parameterParts = [];
+                var argumentIndex = 0;
+                while (argumentIndex + 1 < args.length) {
+                    parameterParts.push(String(args[argumentIndex++]));
+                }
+                var body = args.length ? String(args[args.length - 1]) : "";
+                var source = "function anonymous(" +
+                    parameterParts.join(",") + ") {\n" + body + "\n}";
+                var parsed = new Parser(source, "<Function>").parseProgram();
+                if (!parsed.body.length ||
+                    parsed.body[0].type !== "FunctionDeclaration") {
+                    throw new SyntaxError("invalid Function constructor source");
+                }
+                var compiler = new Compiler();
+                compiler.filename = "<Function>";
+                var program = verify(compiler.compileFunction(parsed.body[0]));
+                definingContext.runtime.registerProgram(program);
+                return definingContext.runtime.makeGuestFunction(
+                    program, null, definingContext);
+            });
+        functionConstructor.constructCallback = function (args) {
+            return functionConstructor.callback(undefined, args);
+        };
+        if (this.runtime.functionPrototype) {
+            this.runtime.setProperty(functionConstructor, "prototype",
+                                     this.runtime.functionPrototype);
+            this.runtime.setProperty(this.runtime.functionPrototype,
+                                     "constructor", functionConstructor);
+        }
+        this.runtime.setProperty(this.globalObject, "Function",
+                                 functionConstructor);
         this.runtime.setProperty(this.globalObject, "eval",
             this.runtime.makeHostFunction("eval", function (receiver, args) {
                 var source = args.length ? args[0] : undefined;

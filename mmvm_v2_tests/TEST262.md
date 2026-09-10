@@ -1,5 +1,8 @@
 # Test262 execution plan
 
+Ongoing measurements and failure groups are recorded in
+`TEST262_STATUS.md`.
+
 ## Scope and immutable corpus
 
 The guest VM targets ECMAScript 5.1.  Its applicable Test262 corpus is the
@@ -98,6 +101,12 @@ be backed by the existing embedder-side parser/context machinery.  That is a
 transitional implementation, not conformance with the self-hosting boundary.
 Migration moves the same operations behind the interface into guest/native
 runtime services without changing test selection, reporting, or semantics.
+
+`guest_runner.js --vm-no-host-calls` is the executable audit for this boundary.
+Any attempted callback fails with `HostCallError` at its guest source
+location. A Test262 run is not considered self-hosted until it completes in
+that mode; ordinary conformance counts and the remaining bootstrap-call count
+are tracked separately.
 
 The required end state is:
 

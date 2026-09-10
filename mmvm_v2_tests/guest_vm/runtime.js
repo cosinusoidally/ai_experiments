@@ -159,6 +159,7 @@
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.traceExceptions = !!options.traceExceptions;
+        this.forbidHostCalls = !!options.forbidHostCalls;
         this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.nativeSnapshotWrite = options.snapshot || null;
         this.nativeSnapshotRead = options.withSnapshot || null;

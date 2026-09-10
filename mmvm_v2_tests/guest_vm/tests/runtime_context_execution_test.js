@@ -145,6 +145,24 @@
                String(failedResult.exception).indexOf("host failed") >= 0,
                "host failure was not injected when execution resumed");
 
+        var forbiddenCallbackCount = 0;
+        var forbiddenRuntime = new JSRuntime({forbidHostCalls: true});
+        var forbiddenContext = forbiddenRuntime.createContext();
+        forbiddenContext.installGlobal("forbiddenHost",
+            forbiddenContext.makeHostFunction("forbiddenHost", function () {
+                forbiddenCallbackCount++;
+            }));
+        var forbiddenExecution = forbiddenContext.start(
+            "forbiddenHost();", "forbidden_host.js");
+        var forbiddenResult = forbiddenExecution.resume(Infinity);
+        assert(forbiddenResult.status === "threw" &&
+               forbiddenResult.exception.name === "HostCallError" &&
+               String(forbiddenResult.exception).indexOf("forbiddenHost") >= 0,
+               "no-host-calls mode did not reject an embedder callback");
+        assert(forbiddenCallbackCount === 0,
+               "no-host-calls mode invoked the forbidden callback");
+        forbiddenRuntime.destroy();
+
         var gcExecution = firstContext.start(
             "var suspendedBytes = Buffer.alloc(4);" +
             "suspendedBytes[0] = 63;" +

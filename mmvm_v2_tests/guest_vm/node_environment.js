@@ -40,6 +40,7 @@
         this.servers = [];
         this.moduleCache = {};
         this.moduleContexts = [];
+        this.test262ProgramCache = {};
         this.runnerArguments = runnerArguments;
         this.nodeHost = typeof module !== "undefined" && module.exports &&
                         typeof require === "function";
@@ -360,13 +361,17 @@
     };
 
     GuestNodeEnvironment.prototype.runTest262Source = function (
-            globalContext, source, filename, instructionLimit) {
+            globalContext, source, filename, instructionLimit, cacheKey) {
         var context = this.vm.jsRuntime.createContext();
         context.shareGlobalObject(globalContext);
         var program;
         try {
             try {
-                program = context.compile(source, filename);
+                program = cacheKey ? this.test262ProgramCache[cacheKey] : null;
+                if (!program) {
+                    program = context.compile(source, filename);
+                    if (cacheKey) this.test262ProgramCache[cacheKey] = program;
+                }
             } catch (compileError) {
                 return this.test262ErrorResult(
                     "threw", "compile", compileError, 0);
@@ -434,7 +439,7 @@
                             harnessFilename).toString("utf8");
                         var harnessResult = environment.runTest262Source(
                             globalContext, harnessSource, harnessFilename,
-                            instructionLimit);
+                            instructionLimit, "$" + harnessFilename);
                         if (environment.runtime.getProperty(
                                 harnessResult, "status") !== "completed") {
                             environment.runtime.setProperty(

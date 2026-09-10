@@ -828,6 +828,13 @@
                         }
                     } else if (callableValue && callableValue.guestType === "function" &&
                                callableValue.callMode === "host") {
+                        if (this.runtime.forbidHostCalls) {
+                            var forbiddenCallError = new Error(
+                                "guest attempted host call " +
+                                (callableValue.name || "<anonymous>"));
+                            forbiddenCallError.name = "HostCallError";
+                            throw forbiddenCallError;
+                        }
                         this.pendingHostCall = {callable: callableValue,
                                                 receiver: receiver, args: args,
                                                 frame: frame, destination: destination,
@@ -864,6 +871,13 @@
                     frame.pc = pc + 4;
                     if (constructorValue && constructorValue.guestType === "function" &&
                         constructorValue.callMode === "host") {
+                        if (this.runtime.forbidHostCalls) {
+                            var forbiddenConstructError = new Error(
+                                "guest attempted host constructor " +
+                                (constructorValue.name || "<anonymous>"));
+                            forbiddenConstructError.name = "HostCallError";
+                            throw forbiddenConstructError;
+                        }
                         this.pendingHostCall = {callable: constructorValue,
                                                 receiver: undefined, args: args,
                                                 frame: frame,

@@ -6,6 +6,12 @@ assertEqual(NaN !== NaN, true, "global NaN");
 assertEqual(Infinity > 1e308, true, "global Infinity");
 assertEqual(Boolean(0), false, "Boolean false conversion");
 assertEqual(Boolean("guest"), true, "Boolean true conversion");
+assertEqual(typeof Function, "function", "Function constructor exists");
+var dynamicAdd = Function("left", "right", "return left + right;");
+assertEqual(dynamicAdd(19, 23), 42,
+            "Function constructor compiles a guest function");
+assertEqual(new Function("return 7;")(), 7,
+            "Function constructor is constructible");
 assertEqual(unescape("A%20B%u0021"), "A B!", "legacy unescape");
 assertEqual(escape("A B!"), "A%20B%21", "legacy escape");
 var jsonValue = JSON.parse('{"name":"guest","values":[1,true,null]}');
