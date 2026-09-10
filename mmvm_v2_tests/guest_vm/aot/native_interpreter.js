@@ -1676,18 +1676,26 @@
                                          * handled above. */
                                     } else if (comparisonRightTag ===
                                                VALUE_TAG_FALSE) {
+                                        var looseRightBoolean =
+                                            engineScratchRightAddress(
+                                                heapBase, state);
+                                        store32(looseRightBoolean, 0);
                                         comparisonValue = equalF64(
                                             loadNumberF64(comparisonLeft +
                                                 VALUE_CELL_LOW,
                                                 comparisonLeftTag),
-                                            loadI32F64(0));
+                                            loadI32F64(looseRightBoolean));
                                     } else if (comparisonRightTag ===
                                                VALUE_TAG_TRUE) {
+                                        looseRightBoolean =
+                                            engineScratchRightAddress(
+                                                heapBase, state);
+                                        store32(looseRightBoolean, 1);
                                         comparisonValue = equalF64(
                                             loadNumberF64(comparisonLeft +
                                                 VALUE_CELL_LOW,
                                                 comparisonLeftTag),
-                                            loadI32F64(1));
+                                            loadI32F64(looseRightBoolean));
                                     } else if (comparisonRightTag ===
                                                VALUE_TAG_UNDEFINED) {
                                         comparisonValue = 0;
@@ -1697,15 +1705,25 @@
                                     } else comparisonValid = 0;
                                 } else if (looseRightNumeric === 1) {
                                     if (comparisonLeftTag === VALUE_TAG_FALSE) {
+                                        var looseLeftBoolean =
+                                            engineScratchLeftAddress(
+                                                heapBase, state);
+                                        store32(looseLeftBoolean, 0);
                                         comparisonValue = equalF64(
-                                            loadI32F64(0), loadNumberF64(
+                                            loadI32F64(looseLeftBoolean),
+                                            loadNumberF64(
                                                 comparisonRight +
                                                 VALUE_CELL_LOW,
                                                 comparisonRightTag));
                                     } else if (comparisonLeftTag ===
                                                VALUE_TAG_TRUE) {
+                                        looseLeftBoolean =
+                                            engineScratchLeftAddress(
+                                                heapBase, state);
+                                        store32(looseLeftBoolean, 1);
                                         comparisonValue = equalF64(
-                                            loadI32F64(1), loadNumberF64(
+                                            loadI32F64(looseLeftBoolean),
+                                            loadNumberF64(
                                                 comparisonRight +
                                                 VALUE_CELL_LOW,
                                                 comparisonRightTag));

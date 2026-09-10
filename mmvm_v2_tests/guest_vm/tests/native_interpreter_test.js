@@ -339,6 +339,21 @@
                     throw new Error("native unsigned shift binary64 mismatch");
                 }
 
+                var looseEqualityContext =
+                    integratedVM.jsRuntime.createContext();
+                looseEqualityContext.run(
+                    "var looseBooleanNumber = " +
+                    "(false == 0) && (0 == false) && " +
+                    "(true == 1) && (1 == true) && " +
+                    "((1 == 6) != 7);",
+                    "native_loose_boolean_number.js");
+                if (integratedVM.runtime.getGlobal(
+                        looseEqualityContext,
+                        "looseBooleanNumber") !== true) {
+                    throw new Error(
+                        "native Boolean/Number loose equality mismatch");
+                }
+
                 /* Exercise the mixed int32/double coercions used by common
                  * deterministic hash and PRNG code as one high-level unit. */
                 var hashContext = integratedVM.jsRuntime.createContext();
