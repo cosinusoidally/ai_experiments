@@ -65,9 +65,14 @@ performance are separate mandatory regression gates.
 1. Runner bootstrap: isolated context execution and filesystem reads are
    still embedder services and must migrate behind guest/native runtime
    operations.
-2. Test-level groups already observed: eval completion/lexing, constructor
-   prototypes, Unicode line terminators, and identifier handling.
-3. Full classification remains pending the first uninterrupted suite run.
+2. Stability: repeated fresh-context creation/teardown currently reaches a
+   native-host crash after roughly 380 files. A short run over the same file
+   boundary succeeds; accumulated runtime state is under investigation.
+3. Test-level groups remaining from partial output include complete Unicode
+   identifier classification, strict runtime semantics beyond parsing, and
+   long-running Unicode lexical tests that exceed the diagnostic instruction
+   allowance.
+4. Full classification remains pending the first uninterrupted suite run.
 
 ### 2026-09-10 09:40 BST — runnable harness and chapter sample
 
@@ -89,6 +94,66 @@ performance are separate mandatory regression gates.
 - Regression gates: Node and `js_min.exe` suites pass with 249 guest
   assertions; networking, `node_web.js`, demo1, demo2, heap/GC/context tests,
   and three-context scheduling remain passing.
+
+### 2026-09-10 09:44 BST — unbounded-timeout run stopped
+
+- Revision: `78fb446`.
+- Selection: all 3,292 files; provisional 20,000,000-instruction limit.
+- Outcome: deliberately terminated after 1,185.69 seconds. The run reported
+  its 100-file checkpoint (160 passed, 40 failed) and then spent more than 15
+  minutes in one small failing variant. This is not a completed-suite count.
+- Peak RSS: 185,380 KiB.
+- Action: use a bounded diagnostic allowance so a faulty infinite path cannot
+  make the suite operationally unfinishable. A timeout remains a failure and
+  therefore cannot inflate conformance.
+
+### 2026-09-10 10:04 BST — lexical and Error-object checkpoint
+
+- Revision: `e926acc`.
+- Complete focused run: `ch07/7.3`, 59 files, 118 variants, 118 passed,
+  0 failed, 0 timed out. The same selection previously had 36 failures.
+- Fixed general guest behavior: U+2028/U+2029 token boundaries, guest-owned
+  Error subtype prototypes, Error construction, inherited `instanceof`, and
+  `Error.prototype.toString`.
+- Regression gates: Node and `js_min.exe` suites pass with 252 guest
+  assertions plus the existing networking, demo, heap, GC, and context checks.
+
+### 2026-09-10 10:12 BST — eval completion checkpoint
+
+- Revision: `e8907b6`.
+- Complete focused run: `ch07/7.2`, 45 files, 90 variants, 90 passed,
+  0 failed, 0 timed out.
+- Eval now returns the value of a top-level expression completion rather than
+  unconditionally returning `undefined`.
+- Regression gates remain green on Node and `js_min.exe`.
+
+### 2026-09-10 10:17 BST — bounded complete-run attempt exposed a crash
+
+- Revision: `e926acc`; all 3,292 files; 20,000-instruction diagnostic limit.
+- Outcome: the process received SIGSEGV after approximately 380 files, so no
+  full-suite conformance count is claimed. Its last complete progress line was
+  300 files / 600 variants: 532 passed and 68 failed. Later output reached
+  `ch07/7.6/S7.6_A1.3_T3.js` before the crash.
+- Elapsed at crash: 745.80 seconds. Peak RSS: 179,644 KiB.
+- A five-file run spanning the apparent crash boundary subsequently completed
+  all 10 variants, which points to accumulated runtime/context/GC state rather
+  than one intrinsically crashing source file.
+
+### 2026-09-10 17:10 BST — strict parsing and direct eval checkpoint
+
+- Revision: `b7193b2`.
+- Complete focused run: `ch07/7.6/7.6.1/7.6.1.2`, 62 files, 86 variants,
+  86 passed, 0 failed, 0 timed out. Before direct strict eval, 18 strict
+  variants in this selection failed.
+- ES5.1 future-reserved words, strict directive prologues, function strictness,
+  and reserved-word property names are handled by the guest tokenizer/parser.
+- Syntactically direct eval no longer yields through an embedder host call. It
+  inherits strict parsing and can address existing caller bindings through
+  guest lexical-environment slots; indirect eval continues to use the global
+  environment.
+- Regression gates: Node and `js_min.exe` suites pass with 253 guest
+  assertions plus networking, `node_web.js`, demo1, demo2, heap/GC/context,
+  and three-context checks.
 
 ## Rules for subsequent entries
 
