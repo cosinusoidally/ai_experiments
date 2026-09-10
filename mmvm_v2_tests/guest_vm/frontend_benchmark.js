@@ -18,6 +18,7 @@
         sourcePath = process.argv[2];
         if (sourcePath) source = require("fs").readFileSync(sourcePath, "utf8");
     } else {
+        load("guest_vm/unicode_identifier_data.js");
         load("guest_vm/tokenizer.js");
         load("guest_vm/parser.js");
         load("guest_vm/bytecode.js");

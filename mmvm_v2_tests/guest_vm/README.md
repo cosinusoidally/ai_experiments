@@ -23,6 +23,9 @@ Read these documents before changing or embedding the VM:
   native functions, explicit roots, execution, errors, and shutdown.
 - [`LINEAR_HEAP.md`](LINEAR_HEAP.md) defines the mandatory runtime-owned heap,
   record layouts, accessor boundary, and host-independent memory model.
+- [`UNICODE_IDENTIFIERS.md`](UNICODE_IDENTIFIERS.md) documents the pinned
+  Unicode 3.0.0 lexical data, its necessity, compact lookup, and deterministic
+  `js_min.exe` regeneration procedure.
 - [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md) records the intended route from
   this bootstrap to a conforming ES5.1 interpreter and later optional kernel AOT.
 

@@ -1,6 +1,11 @@
 /* Character-by-character ECMAScript tokenizer.  This module deliberately
  * contains no regular-expression based token recognition. */
 (function (root) {
+    var unicodeIdentifiers = root.GuestVMUnicodeIdentifierData;
+    if (typeof module !== "undefined" && module.exports) {
+        unicodeIdentifiers = require("./unicode_identifier_data.js");
+    }
+
     var keywords = {
         "$break": 1, "$case": 1, "$catch": 1, "$continue": 1, "$debugger": 1,
         "$default": 1, "$delete": 1, "$do": 1, "$else": 1, "$finally": 1,
@@ -32,13 +37,25 @@
         return code === 36 || code === 95 ||
                (code >= 65 && code <= 90) ||
                (code >= 97 && code <= 122) ||
-               (code >= 128 && !isWhitespace(code) &&
-                !isLineTerminator(code));
+               (code >= 128 &&
+                (unicodeIdentifierFlags(code) &
+                 unicodeIdentifiers.startFlag) !== 0);
     }
 
     function isIdentifierPart(code) {
         return isIdentifierStart(code) || isDecimalDigit(code) ||
-               code === 8204 || code === 8205;
+               (code >= 128 &&
+                (unicodeIdentifierFlags(code) &
+                 unicodeIdentifiers.partFlag) !== 0);
+    }
+
+    function unicodeIdentifierFlags(code) {
+        if (code < 0 || code > 65535) return 0;
+        var block = unicodeIdentifiers.blockMap.charCodeAt(
+            code >>> unicodeIdentifiers.blockSizeShift);
+        return unicodeIdentifiers.characterFlags.charCodeAt(
+            (block << unicodeIdentifiers.blockSizeShift) |
+            (code & unicodeIdentifiers.blockSizeMask));
     }
 
     function isLineTerminator(code) {

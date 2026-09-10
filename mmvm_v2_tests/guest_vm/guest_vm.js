@@ -7,6 +7,7 @@
     }
 
     if (typeof root.GuestVM === "undefined") {
+        load("guest_vm/unicode_identifier_data.js");
         load("guest_vm/tokenizer.js");
         load("guest_vm/parser.js");
         load("guest_vm/bytecode.js");

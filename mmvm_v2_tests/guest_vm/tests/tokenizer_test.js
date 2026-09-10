@@ -78,6 +78,21 @@
     var escapedIdentifier = new Tokenizer("v\\u0061lue", "identifier.js");
     token(escapedIdentifier, true, "identifier", "value");
 
+    var unicodeIdentifier = new Tokenizer(
+        "\\u03B1 a\\u0301 \\u2160 x\\u0661 x\\u203F x\\u200C", "unicode.js");
+    token(unicodeIdentifier, true, "identifier", "\u03B1");
+    token(unicodeIdentifier, true, "identifier", "a\u0301");
+    token(unicodeIdentifier, true, "identifier", "\u2160");
+    token(unicodeIdentifier, true, "identifier", "x\u0661");
+    token(unicodeIdentifier, true, "identifier", "x\u203F");
+    token(unicodeIdentifier, true, "identifier", "x\u200C");
+    throwsSyntax(function () {
+        new Tokenizer("\\u0301", "mark-start.js").next(true);
+    }, "combining mark cannot start identifier");
+    throwsSyntax(function () {
+        new Tokenizer("\\u00D7", "symbol-start.js").next(true);
+    }, "symbol cannot start identifier");
+
     var unicodeLines = new Tokenizer("left" + String.fromCharCode(8232) +
         "right" + String.fromCharCode(8233) + "last", "lines.js");
     token(unicodeLines, true, "identifier", "left");

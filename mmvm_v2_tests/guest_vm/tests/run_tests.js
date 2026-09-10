@@ -89,6 +89,7 @@
         {path: "language/object_control.js"},
         {path: "language/declaration_hoisting.js"},
         {path: "language/closure_fallback.js"},
+        {path: "language/unicode_identifiers.js"},
         {path: "language/compiled_stability.js"},
         {path: "language/typed_arrays.js"},
         {path: "buffer/buffer_guest.js"}
