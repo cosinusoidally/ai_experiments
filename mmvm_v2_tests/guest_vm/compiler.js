@@ -151,7 +151,8 @@
                 location: program.location || {filename: this.filename,
                                                 line: 1, column: 1},
                 sourceLocations: this.sourceLocations,
-                globalDeclarations: globalDeclarations};
+                globalDeclarations: globalDeclarations,
+                strict: !!program.strict};
     };
 
     Compiler.prototype.compileFunction = function (expression) {
@@ -162,7 +163,8 @@
         var bodyProgram = {body: expression.body.body,
                            filename: expression.location ?
                                expression.location.filename : this.filename,
-                           location: expression.location || null};
+                           location: expression.location || null,
+                           strict: !!expression.strict};
         var program = nested.compile(bodyProgram);
         program.parameters = expression.parameters.slice(0);
         program.locals = locals;
@@ -882,6 +884,8 @@
             } else {
                 callee = this.compileExpression(expression.callee,
                                                 expression.arguments);
+                if (expression.callee.type === "Identifier" &&
+                    expression.callee.name === "eval") receiver = -2;
             }
             var values = [];
             var index = 0;
@@ -1104,6 +1108,12 @@
             node.type === "FunctionExpression" || node.type === "TryStatement") {
             return true;
         }
+        /* A direct eval must be able to address the caller's bindings by
+         * lexical slot. Keep those bindings in the guest environment rather
+         * than in registers that dynamically compiled code cannot name. */
+        if (node.type === "CallExpression" &&
+            node.callee && node.callee.type === "Identifier" &&
+            node.callee.name === "eval") return true;
         if (typeof node.length === "number" && node.type === undefined) {
             var arrayIndex = 0;
             while (arrayIndex < node.length) {
@@ -1310,6 +1320,19 @@
             visit(statements[statementIndex++]);
         }
     }
+
+    Compiler.environmentScopeForProgram = function (program) {
+        if (!program || !program.bindingSlots) return null;
+        var bindings = {};
+        var key;
+        for (key in program.bindingSlots) {
+            if (Object.prototype.hasOwnProperty.call(program.bindingSlots, key)) {
+                bindings[key] = {kind: "environment",
+                                 slot: program.bindingSlots[key]};
+            }
+        }
+        return {bindings: bindings, createsEnvironment: true};
+    };
 
     root.GuestVMCompiler = Compiler;
     if (typeof module !== "undefined" && module.exports) module.exports = Compiler;

@@ -7,7 +7,9 @@
         "$for": 1, "$function": 1, "$if": 1, "$in": 1, "$instanceof": 1,
         "$new": 1, "$return": 1, "$switch": 1, "$this": 1, "$throw": 1,
         "$try": 1, "$typeof": 1, "$var": 1, "$void": 1, "$while": 1,
-        "$with": 1, "$null": 1, "$true": 1, "$false": 1
+        "$with": 1, "$null": 1, "$true": 1, "$false": 1,
+        "$class": 1, "$const": 1, "$enum": 1, "$export": 1,
+        "$extends": 1, "$import": 1, "$super": 1
     };
 
     function isDecimalDigit(code) {

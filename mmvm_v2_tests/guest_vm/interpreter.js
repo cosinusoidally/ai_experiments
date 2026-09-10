@@ -3,13 +3,14 @@
     if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
 
     function makeFrame(program, runtime, context, receiver, args, closure, callable,
-                       returnRegister, caller) {
+                       returnRegister, caller, environmentOverride) {
         args = args || [];
         receiver = runtime.normalizeCallReceiver(context, receiver);
         var registers = [];
         runtime.initializeFrameRegisters(program, registers, receiver, args, callable);
-        var environment = runtime.makeCallEnvironment(
-            program, receiver, args, closure, callable);
+        var environment = environmentOverride !== undefined ?
+            environmentOverride : runtime.makeCallEnvironment(
+                program, receiver, args, closure, callable);
         var frame = {program: program, code: program.code, constants: program.constants,
                 registers: registers, pc: 0,
                 context: context,
@@ -790,12 +791,27 @@
                         } else args = [];
                     }
                     var destination = code[pc + 1];
+                    var directEval = code[pc + 3] === -2 &&
+                        callableValue && callableValue.directEval;
                     frame.pc = pc + 5;
                     receiver = this.runtime.normalizeCallReceiver(
                         callableValue && callableValue.homeContext ?
                             callableValue.homeContext : frame.context,
                         receiver);
-                    if (callableValue && callableValue.guestType === "bytecodeFunction") {
+                    if (directEval) {
+                        if (!args.length || typeof args[0] !== "string") {
+                            registers[destination] = args.length ?
+                                args[0] : undefined;
+                        } else {
+                            var evalProgram = frame.context.compileEval(
+                                args[0], "<eval>", !!frame.program.strict,
+                                frame.program);
+                            var evalFrame = makeFrame(evalProgram, this.runtime,
+                                frame.context, undefined, [], frame.environment,
+                                null, destination, frame, frame.environment);
+                            this.frames.push(evalFrame);
+                        }
+                    } else if (callableValue && callableValue.guestType === "bytecodeFunction") {
                         var threaded = budget === Infinity &&
                             this.runtime.threadedCompiler &&
                             this.runtime.threadedCompiler.compile(callableValue.program);

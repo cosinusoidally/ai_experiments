@@ -4,6 +4,12 @@
         Tokenizer = require("./tokenizer.js");
     }
 
+    var strictFutureReserved = {
+        "$implements": 1, "$interface": 1, "$let": 1, "$package": 1,
+        "$private": 1, "$protected": 1, "$public": 1, "$static": 1,
+        "$yield": 1
+    };
+
     function Parser(source, filename, options) {
         /* Token.raw is not part of the AST and the parser never consumes it.
          * Raw function source is obtained once from token offsets below. */
@@ -11,6 +17,7 @@
             !!options && options.captureRaw === true,
             !!options && options.compactLiterals === true);
         this.allowIn = true;
+        this.strict = !!options && options.strict === true;
         this.finallySerial = 0;
         this.compactLiterals = !!options && options.compactLiterals === true;
         this.current = this.tokenizer.next(true);
@@ -63,6 +70,10 @@
 
     Parser.prototype.expectIdentifier = function () {
         if (this.current.kind !== "identifier") this.error("expected identifier");
+        if (this.strict &&
+            strictFutureReserved["$" + this.current.value] === 1) {
+            this.error("reserved word is not an identifier in strict code");
+        }
         return this.advance(false);
     };
 
@@ -76,8 +87,26 @@
 
     Parser.prototype.parseProgram = function () {
         var body = [];
-        while (this.current.kind !== "eof") body.push(this.parseStatement());
+        var directivePrologue = true;
+        while (this.current.kind !== "eof") {
+            var statement = this.parseStatement();
+            body.push(statement);
+            if (directivePrologue) {
+                if (statement.type === "ExpressionStatement" &&
+                    ((statement.expression &&
+                      statement.expression.type === "Literal" &&
+                      typeof statement.expression.value === "string") ||
+                     typeof statement.expression === "string")) {
+                    var directiveValue = typeof statement.expression === "string" ?
+                        statement.expression : statement.expression.value;
+                    if (directiveValue === "use strict") this.strict = true;
+                } else {
+                    directivePrologue = false;
+                }
+            }
+        }
         return {type: "Program", body: body, filename: this.tokenizer.filename,
+                strict: this.strict,
                 location: body.length ? body[0].location :
                     {filename: this.tokenizer.filename, line: 1, column: 1}};
     };
@@ -328,7 +357,7 @@
         var startColumn = this.current.column;
         this.advance(false);
         var name = null;
-        if (this.current.kind === "identifier") name = this.advance(false).value;
+        if (this.current.kind === "identifier") name = this.expectIdentifier().value;
         else if (declaration) this.error("function declaration requires a name");
         this.expectPunctuator("(", false);
         var parameters = [];
@@ -340,12 +369,59 @@
             }
         }
         this.expectPunctuator(")", true);
-        var body = this.parseBlock();
+        var outerStrict = this.strict;
+        var body = this.parseFunctionBody();
+        var functionStrict = this.strict;
+        this.strict = outerStrict;
+        if (functionStrict) {
+            var seenParameters = {};
+            var parameterIndex = 0;
+            while (parameterIndex < parameters.length) {
+                var parameterName = parameters[parameterIndex++];
+                if (parameterName === "eval" || parameterName === "arguments" ||
+                    strictFutureReserved["$" + parameterName] === 1 ||
+                    seenParameters["$" + parameterName]) {
+                    this.error("invalid function parameter in strict code");
+                }
+                seenParameters["$" + parameterName] = 1;
+            }
+            if (name === "eval" || name === "arguments" ||
+                strictFutureReserved["$" + name] === 1) {
+                this.error("invalid function name in strict code");
+            }
+        }
         return {type: declaration ? "FunctionDeclaration" : "FunctionExpression",
                 name: name, parameters: parameters, body: body,
+                strict: functionStrict,
                 source: this.tokenizer.source.substring(startOffset, body.sourceEnd),
                 location: {filename: this.tokenizer.filename,
                            line: startLine, column: startColumn + 1}};
+    };
+
+    Parser.prototype.parseFunctionBody = function () {
+        this.expectPunctuator("{", true);
+        var body = [];
+        var directivePrologue = true;
+        while (!this.isPunctuator("}")) {
+            if (this.current.kind === "eof") this.error("unterminated block");
+            var statement = this.parseStatement();
+            body.push(statement);
+            if (directivePrologue) {
+                if (statement.type === "ExpressionStatement" &&
+                    ((statement.expression &&
+                      statement.expression.type === "Literal" &&
+                      typeof statement.expression.value === "string") ||
+                     typeof statement.expression === "string")) {
+                    var directiveValue = typeof statement.expression === "string" ?
+                        statement.expression : statement.expression.value;
+                    if (directiveValue === "use strict") this.strict = true;
+                } else {
+                    directivePrologue = false;
+                }
+            }
+        }
+        var close = this.expectPunctuator("}", true);
+        return {type: "BlockStatement", body: body, sourceEnd: close.end};
     };
 
     Parser.prototype.parseExpression = function () {
@@ -562,6 +638,10 @@
                 token.value === "false" ? false : null);
         }
         if (token.kind === "identifier") {
+            if (this.strict &&
+                strictFutureReserved["$" + token.value] === 1) {
+                this.error("reserved word is not an identifier in strict code");
+            }
             this.advance(false);
             return {type: "Identifier", name: token.value};
         }

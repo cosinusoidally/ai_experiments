@@ -157,17 +157,18 @@
         }
         this.runtime.setProperty(this.globalObject, "Function",
                                  functionConstructor);
-        this.runtime.setProperty(this.globalObject, "eval",
-            this.runtime.makeHostFunction("eval", function (receiver, args) {
+        var evalFunction = this.runtime.makeNativeFunction(
+            "eval", function (receiver, args) {
                 var source = args.length ? args[0] : undefined;
                 /* ES5.1 eval returns a non-string argument without parsing it.
-                 * Calls enter through the host-call yield because the current
-                 * bootstrap front end is not yet part of the native engine. */
+                 * Indirect calls execute in the defining global environment. */
                 if (typeof source !== "string") return source;
                 var evalContext = jsRuntime.createContext();
                 evalContext.shareGlobalObject(definingContext);
                 return evalContext.runEval(source, "<eval>");
-            }));
+            });
+        evalFunction.directEval = true;
+        this.runtime.setProperty(this.globalObject, "eval", evalFunction);
     }
 
     JSContext.prototype.compile = function (source, filename) {
@@ -178,10 +179,14 @@
         return program;
     };
 
-    JSContext.prototype.compileEval = function (source, filename) {
+    JSContext.prototype.compileEval = function (source, filename, strict,
+                                                callerProgram) {
         if (this.destroyed) throw new Error("context has been destroyed");
-        var ast = new Parser(source, filename).parseProgram();
-        var program = verify(new Compiler().compile(ast, true));
+        var ast = new Parser(source, filename, {strict: !!strict}).parseProgram();
+        var callerScope = Compiler.environmentScopeForProgram(callerProgram);
+        var outerScopes = callerScope ? [callerScope] : null;
+        var program = verify(
+            new Compiler(null, outerScopes).compile(ast, true));
         this.runtime.registerProgram(program);
         return program;
     };

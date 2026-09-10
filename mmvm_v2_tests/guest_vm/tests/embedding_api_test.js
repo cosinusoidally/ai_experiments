@@ -20,6 +20,21 @@
                "embedding-eval.js");
         vm.run("assertEqual(eval(\"'eval completion'\"), 'eval completion'," +
                " 'eval expression completion');", "embedding-eval-value.js");
+        vm.run("function evalLocal() { var local = 20;" +
+               " eval('local = local + 22;'); return local; }" +
+               " assertEqual(evalLocal(), 42, 'direct eval lexical binding');",
+               "embedding-direct-eval.js");
+        var strictReservedThrew = false;
+        try {
+            vm.compile("'use strict'; var static = 1;",
+                       "embedding-strict-reserved.js");
+        } catch (strictReservedError) {
+            strictReservedThrew = strictReservedError &&
+                strictReservedError.name === "SyntaxError";
+        }
+        if (!strictReservedThrew) {
+            throw new Error("strict future reserved word was accepted");
+        }
         var threw = false;
         try { vm.run("missingGlobal;", "embedding-error.js"); }
         catch (error) { threw = error && error.name === "ReferenceError"; }
