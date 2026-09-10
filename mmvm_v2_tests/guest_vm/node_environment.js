@@ -274,6 +274,16 @@
     GuestNodeEnvironment.prototype.makeFs = function () {
         var environment = this;
         var fs = this.object({});
+        this.runtime.setProperty(fs, "statSync", this.makeFunction("fs.statSync",
+            function (receiver, args) {
+                return environment.makeStats(
+                    environment.hostFs.statSync(String(args[0])));
+            }));
+        this.runtime.setProperty(fs, "readdirSync", this.makeFunction("fs.readdirSync",
+            function (receiver, args) {
+                return environment.runtime.arrayFrom(
+                    environment.hostFs.readdirSync(String(args[0])));
+            }));
         this.runtime.setProperty(fs, "stat", this.makeFunction("fs.stat",
             function (receiver, args) {
                 var path = String(args[0]);
@@ -322,6 +332,130 @@
                 return environment.guestBuffer(data);
             }));
         return fs;
+    };
+
+    GuestNodeEnvironment.prototype.test262ErrorResult = function (
+            status, phase, error, instructions) {
+        var visible = this.hostVisibleError(error);
+        var runtime = this.runtime;
+        function property(name) {
+            if (!error || !error.guestType) return undefined;
+            try { return runtime.getProperty(error, name); }
+            catch (ignored) { return undefined; }
+        }
+        return this.object({
+            status: status,
+            phase: phase,
+            name: property("name") || error && error.name || "Error",
+            message: property("message") || error && error.message ||
+                String(visible || error),
+            filename: property("fileName") || error &&
+                (error.guestFilename || error.fileName) || "",
+            line: Number(property("lineNumber") || error &&
+                (error.guestLine || error.lineNumber) || 0),
+            column: Number(property("columnNumber") || error &&
+                (error.guestColumn || error.columnNumber) || 0),
+            instructions: instructions || 0
+        });
+    };
+
+    GuestNodeEnvironment.prototype.runTest262Source = function (
+            globalContext, source, filename, instructionLimit) {
+        var context = this.vm.jsRuntime.createContext();
+        context.shareGlobalObject(globalContext);
+        var program;
+        try {
+            try {
+                program = context.compile(source, filename);
+            } catch (compileError) {
+                return this.test262ErrorResult(
+                    "threw", "compile", compileError, 0);
+            }
+
+            var execution = context.startProgram(program);
+            var used = 0;
+            var slice = 100000;
+            while (true) {
+                var remaining = instructionLimit - used;
+                if (remaining <= 0) {
+                    execution.abort();
+                    return this.object({status: "timeout", phase: "runtime",
+                        name: "TimeoutError",
+                        message: "instruction limit exhausted",
+                        filename: filename, line: 0, column: 0,
+                        instructions: used});
+                }
+                var result = execution.resume(remaining < slice ? remaining : slice);
+                used += result.instructions || 0;
+                if (result.status === "budget") {
+                    this.runtime.gcSafePoint();
+                } else if (result.status === "hostCall") {
+                    execution.serviceHostCall();
+                } else if (result.status === "completed") {
+                    return this.object({status: "completed", phase: "runtime",
+                        name: "", message: "", filename: filename,
+                        line: 0, column: 0, instructions: used});
+                } else if (result.status === "threw") {
+                    return this.test262ErrorResult(
+                        "threw", "runtime", result.exception, used);
+                } else {
+                    return this.object({status: "threw", phase: "runtime",
+                        name: "InternalError",
+                        message: "unknown execution status " + result.status,
+                        filename: filename, line: 0, column: 0,
+                        instructions: used});
+                }
+            }
+        } finally {
+            context.destroy();
+        }
+    };
+
+    GuestNodeEnvironment.prototype.makeTest262Service = function () {
+        var environment = this;
+        var service = this.object({});
+        this.runtime.setProperty(service, "runVariant",
+            this.makeFunction("Test262VM.runVariant", function (receiver, args) {
+                var filename = String(args[0]);
+                var strict = !!args[1];
+                var harnessFiles = environment.runtime.arrayToHost(args[2]);
+                var instructionLimit = Number(args[3]);
+                if (!(instructionLimit > 0)) instructionLimit = 20000000;
+
+                var globalContext = environment.vm.jsRuntime.createContext();
+                /* The runner control object is not part of an ES5.1 realm. */
+                environment.runtime.deleteProperty(
+                    globalContext.globalObject, "Test262VM");
+                try {
+                    var harnessIndex = 0;
+                    while (harnessIndex < harnessFiles.length) {
+                        var harnessFilename = String(harnessFiles[harnessIndex++]);
+                        var harnessSource = environment.hostFs.readFileSync(
+                            harnessFilename).toString("utf8");
+                        var harnessResult = environment.runTest262Source(
+                            globalContext, harnessSource, harnessFilename,
+                            instructionLimit);
+                        if (environment.runtime.getProperty(
+                                harnessResult, "status") !== "completed") {
+                            environment.runtime.setProperty(
+                                harnessResult, "phase", "harness");
+                            return harnessResult;
+                        }
+                    }
+
+                    var source = environment.hostFs.readFileSync(filename).
+                        toString("utf8");
+                    if (strict) source = "\"use strict\";\n" + source;
+                    return environment.runTest262Source(
+                        globalContext, source, filename, instructionLimit);
+                } catch (serviceError) {
+                    return environment.test262ErrorResult(
+                        "threw", "service", serviceError, 0);
+                } finally {
+                    globalContext.destroy();
+                }
+            }));
+        return service;
     };
 
     GuestNodeEnvironment.prototype.makeSocket = function (hostSocket) {
@@ -599,6 +733,12 @@
             loadContext.run(source, filename);
             return undefined;
         }));
+
+        /* Bootstrap implementation for the checked-in Test262 runner.  The
+         * stable guest-facing interface deliberately contains only isolated
+         * variant execution.  TEST262.md specifies its migration from this
+         * host-call implementation to the self-hosted MMVM execution service. */
+        publish("Test262VM", this.makeTest262Service());
 
         var argv = ["artifacts/js_min.exe", this.runnerArguments[0]];
         var index = 1;
