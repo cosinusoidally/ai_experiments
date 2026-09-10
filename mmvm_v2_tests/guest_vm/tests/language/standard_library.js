@@ -54,6 +54,22 @@ assertEqual(directiveOctalEscapeRejected, true,
             "strict directive rejects preceding directive octal escape");
 assertEqual(eval("'use\\x20strict'; 010"), 8,
             "escaped strict text is not a strict-mode directive");
+var sameLineASIRejected = false;
+try {
+    eval("{ 1 2 } 3");
+} catch (sameLineASIError) {
+    sameLineASIRejected = sameLineASIError instanceof SyntaxError;
+}
+assertEqual(sameLineASIRejected, true,
+            "ASI does not separate same-line expression statements");
+var beforeElseASIRejected = false;
+try {
+    eval("if (false) 1 else 2");
+} catch (beforeElseASIError) {
+    beforeElseASIRejected = beforeElseASIError instanceof SyntaxError;
+}
+assertEqual(beforeElseASIRejected, true,
+            "ASI does not insert before same-line else");
 var syntaxError = new SyntaxError("bad source");
 assertEqual(syntaxError instanceof SyntaxError, true,
             "native Error subtype has its guest prototype");

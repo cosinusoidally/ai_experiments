@@ -215,6 +215,20 @@ performance are separate mandatory regression gates.
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 
+### 2026-09-11 01:00 BST — automatic semicolon insertion boundaries
+
+- Complete focused native run: `ch07/7.9`, 101 files, 202 variants,
+  202 passed, 0 failed, 0 timed out. The earlier combined lexical run had six
+  failures in this selection.
+- Elapsed: 86.44 seconds. Peak RSS: 178,284 KiB.
+- Expression statements now enforce the ES5.1 semicolon/ASI boundary instead
+  of accepting arbitrary adjacent same-line tokens. Insertion remains valid at
+  a line terminator, closing brace, or end of input; malformed same-line block
+  statements and `if` consequents before `else` are rejected during parsing.
+- Regression gates: Node and `js_min.exe` suites pass with 264 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
+  native interpreter, and three-context checks remain green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

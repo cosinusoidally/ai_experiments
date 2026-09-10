@@ -177,6 +177,8 @@
         }
         var expression = this.parseExpression();
         if (this.isPunctuator(";")) this.advance(true);
+        else if (!this.current.lineBefore && !this.isPunctuator("}") &&
+                 this.current.kind !== "eof") this.error("expected ';'");
         return {type: "ExpressionStatement", expression: expression};
     };
 
