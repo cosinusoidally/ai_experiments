@@ -78,6 +78,12 @@
     var escapedIdentifier = new Tokenizer("v\\u0061lue", "identifier.js");
     token(escapedIdentifier, true, "identifier", "value");
 
+    var unicodeLines = new Tokenizer("left" + String.fromCharCode(8232) +
+        "right" + String.fromCharCode(8233) + "last", "lines.js");
+    token(unicodeLines, true, "identifier", "left");
+    token(unicodeLines, true, "identifier", "right");
+    token(unicodeLines, true, "identifier", "last");
+
     throwsSyntax(function () {
         new Tokenizer("0x", "bad-number.js").next(true);
     }, "invalid hexadecimal literal");

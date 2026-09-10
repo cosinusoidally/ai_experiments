@@ -33,6 +33,7 @@
         load("guest_vm/typed_array.js");
         load("guest_vm/json.js");
         load("guest_vm/date.js");
+        load("guest_vm/error.js");
         load("guest_vm/runtime.js");
         load("guest_vm/interpreter.js");
         load("guest_vm/vm.js");

@@ -12,6 +12,13 @@ assertEqual(dynamicAdd(19, 23), 42,
             "Function constructor compiles a guest function");
 assertEqual(new Function("return 7;")(), 7,
             "Function constructor is constructible");
+var syntaxError = new SyntaxError("bad source");
+assertEqual(syntaxError instanceof SyntaxError, true,
+            "native Error subtype has its guest prototype");
+assertEqual(syntaxError instanceof Error, true,
+            "native Error subtype inherits from Error");
+assertEqual(syntaxError.toString(), "SyntaxError: bad source",
+            "Error prototype formats name and message");
 var leapDate = new Date(2000, 1, 29, 13, 14, 15, 16);
 assertEqual(leapDate.getFullYear(), 2000, "guest Date year");
 assertEqual(leapDate.getMonth(), 1, "guest Date month");

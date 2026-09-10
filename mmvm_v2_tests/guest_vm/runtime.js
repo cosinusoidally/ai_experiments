@@ -13,6 +13,7 @@
     var NativeInterpreter = root.GuestVMNativeInterpreter;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     var DateSupport = root.GuestVMDateSupport;
+    var ErrorSupport = root.GuestVMErrorSupport;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         TypedArraySupport = require("./typed_array.js");
@@ -28,6 +29,7 @@
         NativeInterpreter = require("./aot/native_interpreter.js");
         NativeIntrinsics = require("./native_intrinsics.js");
         DateSupport = require("./date.js");
+        ErrorSupport = require("./error.js");
     }
 
     function own(object, key) {
@@ -1387,6 +1389,7 @@
         this.setGlobal("undefined", undefined);
         this.setGlobal("NaN", NaN);
         this.setGlobal("Infinity", Infinity);
+        ErrorSupport.install(this);
         this.installDateBuiltins();
         this.setGlobal("assertEqual", this.makeNativeFunction("assertEqual",
             function (receiver, args) {
@@ -2328,9 +2331,8 @@
             (typeof error !== "object" && typeof error !== "function")) {
             return error;
         }
-        var result = this.makeObject();
-        this.setProperty(result, "name", error.name || "Error");
-        this.setProperty(result, "message",
+        var name = error.name || "Error";
+        var result = ErrorSupport.makeErrorObject(this, name,
             error.message === undefined ? String(error) : String(error.message));
         if (error.guestFilename !== undefined) {
             this.setProperty(result, "fileName", error.guestFilename);
@@ -2691,6 +2693,24 @@
         if (callable.callMode === "host") {
             throw new Error("external host function must be serviced by the embedder");
         }
+        if (callable.errorConstructorName) {
+            return ErrorSupport.makeErrorObject(this,
+                callable.errorConstructorName,
+                args.length ? args[0] : undefined);
+        }
+        if (callable.errorToString) {
+            if (!receiver || !receiver.guestType) {
+                throw new TypeError(
+                    "Error.prototype.toString receiver is not an object");
+            }
+            var errorName = this.getProperty(receiver, "name");
+            var errorMessage = this.getProperty(receiver, "message");
+            errorName = errorName === undefined ? "Error" : String(errorName);
+            errorMessage = errorMessage === undefined ? "" : String(errorMessage);
+            if (!errorName) return errorMessage;
+            if (!errorMessage) return errorName;
+            return errorName + ": " + errorMessage;
+        }
         return callable.callback(receiver, args);
     };
 
@@ -2701,6 +2721,11 @@
         }
         if (callable.callMode === "host") {
             throw new Error("external host constructor must be serviced by the embedder");
+        }
+        if (callable.errorConstructorName) {
+            return ErrorSupport.makeErrorObject(this,
+                callable.errorConstructorName,
+                args.length ? args[0] : undefined);
         }
         var receiver = this.makeObject();
         var value = callable.constructCallback ?

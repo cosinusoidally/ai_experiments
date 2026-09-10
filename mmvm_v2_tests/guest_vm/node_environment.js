@@ -947,26 +947,6 @@
             return environment.hostNow();
         };
 
-        function publishErrorConstructor(name) {
-            var constructor = environment.makeFunction(name,
-                function (receiver, args) {
-                    return environment.object({name: name,
-                        message: args.length ? String(args[0]) : ""});
-                }, true);
-            constructor.constructCallback = function (args) {
-                return environment.object({name: name,
-                    message: args.length ? String(args[0]) : ""});
-            };
-            publish(name, constructor);
-        }
-        publishErrorConstructor("Error");
-        publishErrorConstructor("EvalError");
-        publishErrorConstructor("RangeError");
-        publishErrorConstructor("ReferenceError");
-        publishErrorConstructor("SyntaxError");
-        publishErrorConstructor("TypeError");
-        publishErrorConstructor("URIError");
-
         publish("setTimeout", this.makeFunction("setTimeout", function (receiver, args) {
             var callback = args[0];
             var callbackRoot = environment.vm.retain(callback);
