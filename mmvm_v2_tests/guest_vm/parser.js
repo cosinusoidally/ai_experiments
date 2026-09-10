@@ -66,6 +66,14 @@
         return this.advance(false);
     };
 
+    Parser.prototype.expectIdentifierName = function () {
+        if (this.current.kind !== "identifier" &&
+            this.current.kind !== "keyword") {
+            this.error("expected identifier name");
+        }
+        return this.advance(false);
+    };
+
     Parser.prototype.parseProgram = function () {
         var body = [];
         while (this.current.kind !== "eof") body.push(this.parseStatement());
@@ -447,7 +455,8 @@
         while (this.isPunctuator(".")) {
             this.advance(false);
             callee = {type: "MemberExpression", object: callee,
-                      property: this.makeLiteral(this.expectIdentifier().value),
+                      property: this.makeLiteral(
+                          this.expectIdentifierName().value),
                       computed: false};
         }
         var args = [];
@@ -468,7 +477,7 @@
                 this.advance(false);
                 expression = {type: "MemberExpression", object: expression,
                               property: this.makeLiteral(
-                                  this.expectIdentifier().value),
+                                  this.expectIdentifierName().value),
                               computed: false};
             } else if (this.isPunctuator("(")) {
                 this.advance(true);
@@ -503,7 +512,7 @@
         while (true) {
             if (this.isPunctuator(".")) {
                 this.advance(false);
-                var property = this.expectIdentifier().value;
+                var property = this.expectIdentifierName().value;
                 expression = {type: "MemberExpression", object: expression,
                               property: this.makeLiteral(property),
                               computed: false};

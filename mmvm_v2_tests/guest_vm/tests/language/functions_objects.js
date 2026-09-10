@@ -175,3 +175,8 @@ function registerPostfixValue() {
 }
 assertEqual(registerPostfixValue(), 34,
             "register postfix update preserves its result value");
+var reservedProperties = {};
+reservedProperties.default = 11;
+reservedProperties.null = 12;
+assertEqual(reservedProperties.default + reservedProperties.null, 23,
+            "reserved words are valid names after property dot");
