@@ -5,6 +5,8 @@ targeted for `js_min.exe`, the explicit non-NaN-boxed value-cell representation,
 and the staged native execution-engine boundary.
 See `guest_vm/HEAP_AND_COMPILER_DESIGN.md` for the concrete authoritative heap
 layouts and the shared front/middle end with JavaScript and i386 backends.
+See `TEST262.md` for the ES5.1 conformance runner, per-test context lifecycle,
+full-suite reporting, and the read-only external-corpus boundary.
 
 ## Objective
 
