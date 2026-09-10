@@ -80,22 +80,26 @@ boundary behaviour.
 ### Function graphs and accessor inlining
 
 The kernel is a statically linked graph of named functions, not one monolithic
-JavaScript function. `KernelCompiler.compileGraph(entry, dependencies)` parses
-and validates every member with the same kernel rules. A call whose target is a
-member of that graph becomes a typed `call_kernel_i32` IR node. Dynamic calls
-remain forbidden. The JavaScript backend emits ordinary local function calls;
-the i386 backend emits relative calls through the named macro-assembler
-`call(label)` operation. This supports transitive and recursive helper calls
-without introducing host callbacks, native pointers in the heap, or raw
-instruction bytes in semantic source.
+JavaScript function. `KernelCompiler.compileGraph(entry, dependencies)` treats
+the dependency map as an available-function namespace, discovers the
+transitive call graph from the parsed entry, and validates and emits only
+reachable members with the same kernel rules. A call whose target is a member
+of that graph becomes a typed `call_kernel_i32` IR node. Dynamic calls remain
+forbidden. The JavaScript backend emits ordinary local function calls; the i386
+backend emits relative calls through the named macro-assembler `call(label)`
+operation. This supports transitive and recursive helper calls without
+introducing host callbacks, native pointers in the heap, or raw instruction
+bytes in semantic source.
 
 Graph construction parses each member's `toString()` source exactly once and
-reuses that immutable syntax tree for its signature, constant validation, and
-IR lowering. This is an important part of the abstraction boundary rather than
-merely a compiler optimization: splitting a large kernel into maintainable
-helpers must not multiply bootstrap parsing cost. Kernel-wide numeric constants
-are declared once by the entry function and supplied as shared bindings to all
-members; helper-local copies of layout or opcode constants are rejected.
+reuses that immutable syntax tree for its signature, dependency discovery,
+constant validation, and IR lowering. Dependency discovery shares the existing
+constant-validation walk rather than adding another full-tree pass. This is an
+important part of the abstraction boundary rather than merely a compiler
+optimization: splitting a large kernel into maintainable helpers must not
+multiply bootstrap parsing cost. Kernel-wide numeric constants are declared
+once by the entry function and supplied as shared bindings to all members;
+helper-local copies of layout or opcode constants are rejected.
 
 Out-of-line calls are for logical operations: allocation, conversion, builtin
 semantics, services, and substantial opcode families. They are not the
@@ -107,14 +111,26 @@ backend therefore inlines it without a native call. Raw `heapBase + record +
 OFFSET` expressions are confined to the compiler's accessor lowering and are
 not duplicated through interpreter semantics.
 
-Current graph members include guest object/array/RegExp allocation, lexical
-binding access, `typeof` classification, `instanceof` prototype traversal,
-property enumeration, string-key comparison, self-hosted program construction,
-array builtins, date operations, and numeric-property lookup. Arithmetic,
-branching, and common interned-key pointer comparisons deliberately remain in
-the dispatch entry because adding a call to those smallest hot operations would
-be a performance regression. Refactoring proceeds by semantic family, with the
-dual-host suite and native benchmarks run at every committed boundary.
+Current graph members include guest object/array/RegExp allocation, bytecode
+call-frame construction and return, lexical binding access, `typeof`
+classification, `instanceof` prototype traversal, property enumeration,
+string-key comparison, self-hosted program construction, the complete
+intrinsic dispatcher, Array/String/RegExp/Buffer/Math/Date builtin families,
+direct FFI marshalling, and numeric-property lookup. The former multi-thousand
+line call and builtin regions are now independently readable and compilable
+units. Arithmetic, branching, general property access, and common interned-key
+pointer comparisons deliberately remain in the dispatch entry because adding
+a call to those smallest hot operations would be a performance regression.
+Refactoring proceeds by semantic family, with the dual-host suite and native
+benchmarks run at every committed boundary.
+
+Field accessors are compiler intrinsics, not runtime helper functions. In
+particular, the frame allocator and return path use names such as
+`frameProgram`, `setFrameProgram`, `engineFreeFrame`, and
+`setEngineCurrentFrame`; scratch storage that must be passed by address uses
+`engineScratchLeftAddress`. Both backends inline these operations. Constants
+such as `VALUE_CELL_BYTES` remain declared exactly once in the entry and are
+injected as immutable bindings into reachable graph members.
 
 `guest_vm/benchmarks/kernel_call_benchmark.js` compares a tight inline integer
 loop with the same loop calling a one-operation kernel helper. On the current

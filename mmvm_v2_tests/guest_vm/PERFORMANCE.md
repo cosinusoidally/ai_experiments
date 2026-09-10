@@ -1,5 +1,44 @@
 # Guest VM performance notes
 
+## 2026-09-10: native bootstrap and interpreter graph refactor
+
+The native interpreter is no longer compiled as one approximately 7,600-line
+entry function. Bytecode call-frame construction and return, intrinsic
+dispatch, FFI marshalling, and the Array, String, RegExp, Buffer, Math, and Date
+families are separate kernel-dialect functions connected by typed graph calls.
+The dispatch entry is now approximately 2,870 lines; its remaining large
+regions are intentionally hot arithmetic, comparison, property, and branch
+paths.
+
+`KernelCompiler.compileGraph` parses each reachable function's `toString()`
+source once and reuses that AST for signature and dependency discovery,
+constant validation, and lowering. Dependency discovery is folded into the
+existing constant walk, and unreachable entries in the available-dependency
+map are not emitted. Shared layout/opcode constants are owned by the entry and
+helper-local duplicates are rejected. Named frame, engine, record, and scratch
+accessors lower to inline address arithmetic, so the refactor does not replace
+raw offsets with native calls.
+
+The cold `js_min.exe guest_runner.js --vm-native --vm-profile hello.js`
+regression measured about 23.10 seconds before the parse-once work, producing
+1,671,561 bytes of native code at roughly 199 MB peak RSS. Successive green
+refactoring checkpoints measured 11.98, 10.42, 8.29, 7.22, 6.92, 6.38, 5.76,
+and 4.67 seconds. The most recent runs fluctuate with machine load around
+4.7--6.4 seconds of wall time while compiler CPU time remains about 4.5--5.0
+seconds; generated code is approximately 187 KB and peak RSS approximately
+77--79 MB. These are cold single runs, not a statistically controlled
+benchmark, but the code-size and memory reductions are stable.
+
+Runtime throughput did not pay for the startup improvement. After extracting
+bytecode call setup and return, the portable call workload completed 2,000
+guest calls in 2 ms in the native engine (26,013 bytecodes, zero semantic
+exits), versus 3 ms at the preceding checkpoint. The same command's reference
+interpreter intentionally remains much slower and took about 14.5 seconds, so
+large call-workload counts should not be used for a quick native-only check.
+The full Node and `js_min.exe` suites are required at each commit; both report
+11 guest programs and 236 guest assertions, including unchanged `net.js` and
+`node_web.js` compilation checks.
+
 ## 2026-08-28: runtime-owned Buffer storage
 
 Buffer backing bytes moved from per-allocation host objects into inline,
