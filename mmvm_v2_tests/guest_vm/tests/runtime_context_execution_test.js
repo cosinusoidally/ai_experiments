@@ -161,6 +161,12 @@
                "no-host-calls mode did not reject an embedder callback");
         assert(forbiddenCallbackCount === 0,
                "no-host-calls mode invoked the forbidden callback");
+        forbiddenContext.run(
+            "var noHostEvalResult = eval('6 * 7');",
+            "no_host_direct_eval.js");
+        assert(forbiddenRuntime.runtime.getGlobal(
+                   forbiddenContext, "noHostEvalResult") === 42,
+               "direct eval crossed the embedder boundary in no-host mode");
         forbiddenRuntime.destroy();
 
         var gcExecution = firstContext.start(
