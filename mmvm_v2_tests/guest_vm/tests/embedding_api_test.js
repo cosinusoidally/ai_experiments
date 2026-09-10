@@ -18,6 +18,8 @@
                "assertEqual(evaluated, 42, 'indirect eval global');" +
                "assertEqual(indirectEval(19), 19, 'eval non-string');",
                "embedding-eval.js");
+        vm.run("assertEqual(eval(\"'eval completion'\"), 'eval completion'," +
+               " 'eval expression completion');", "embedding-eval-value.js");
         var threw = false;
         try { vm.run("missingGlobal;", "embedding-error.js"); }
         catch (error) { threw = error && error.name === "ReferenceError"; }

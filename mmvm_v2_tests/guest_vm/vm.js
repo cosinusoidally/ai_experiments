@@ -166,7 +166,7 @@
                 if (typeof source !== "string") return source;
                 var evalContext = jsRuntime.createContext();
                 evalContext.shareGlobalObject(definingContext);
-                return evalContext.run(source, "<eval>");
+                return evalContext.runEval(source, "<eval>");
             }));
     }
 
@@ -174,6 +174,14 @@
         if (this.destroyed) throw new Error("context has been destroyed");
         var ast = new Parser(source, filename).parseProgram();
         var program = verify(new Compiler().compile(ast));
+        this.runtime.registerProgram(program);
+        return program;
+    };
+
+    JSContext.prototype.compileEval = function (source, filename) {
+        if (this.destroyed) throw new Error("context has been destroyed");
+        var ast = new Parser(source, filename).parseProgram();
+        var program = verify(new Compiler().compile(ast, true));
         this.runtime.registerProgram(program);
         return program;
     };
@@ -224,6 +232,11 @@
 
     JSContext.prototype.run = function (source, filename) {
         return this.runExecutionToCompletion(this.start(source, filename));
+    };
+
+    JSContext.prototype.runEval = function (source, filename) {
+        return this.runExecutionToCompletion(
+            this.startProgram(this.compileEval(source, filename)));
     };
 
     JSContext.prototype.runExecutionToCompletion = function (execution) {

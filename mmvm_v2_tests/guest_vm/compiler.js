@@ -106,7 +106,7 @@
         this.code[position] = value;
     };
 
-    Compiler.prototype.compile = function (program) {
+    Compiler.prototype.compile = function (program, preserveCompletionValue) {
         this.filename = program.filename || this.filename;
         var globalDeclarations = [];
         if (this.scopes.length === 0) {
@@ -127,12 +127,22 @@
             this.storeReference(this.referenceForName(declaration.name), declaredFunction);
         }
         var index = 0;
+        var completionRegister = -1;
         while (index < program.body.length) {
-            this.compileStatement(program.body[index]);
+            var statement = program.body[index];
+            if (preserveCompletionValue &&
+                statement.type === "ExpressionStatement") {
+                if (statement.location) this.currentLocation = statement.location;
+                completionRegister = this.compileExpression(statement.expression);
+            } else {
+                this.compileStatement(statement);
+            }
             index++;
         }
-        var undefinedRegister = this.emitConstant(undefined);
-        this.emit(op.RETURN, undefinedRegister);
+        if (completionRegister < 0) {
+            completionRegister = this.emitConstant(undefined);
+        }
+        this.emit(op.RETURN, completionRegister);
         return {code: this.code, constants: this.constants,
                 constantRegisters: this.constantRegisters,
                 registerHints: this.registerHints,
