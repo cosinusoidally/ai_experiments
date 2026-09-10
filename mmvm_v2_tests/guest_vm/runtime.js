@@ -12,6 +12,7 @@
     var NumericBytecodeBackend = root.GuestVMNumericBytecodeBackend;
     var NativeInterpreter = root.GuestVMNativeInterpreter;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var DateSupport = root.GuestVMDateSupport;
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         TypedArraySupport = require("./typed_array.js");
@@ -26,6 +27,7 @@
         NumericBytecodeBackend = require("./aot/bytecode_numeric_backend.js");
         NativeInterpreter = require("./aot/native_interpreter.js");
         NativeIntrinsics = require("./native_intrinsics.js");
+        DateSupport = require("./date.js");
     }
 
     function own(object, key) {
@@ -191,6 +193,10 @@
         this.jsonSupport = new JSONSupport(this);
         this.nativeInterpreter = options.nativeInterpreter ?
             new NativeInterpreter(this) : null;
+        if (this.nativeInterpreter && this.datePrototype) {
+            this.nativeInterpreter.setDateSupport(
+                this.datePrototype, this.dateValueKey);
+        }
         this.installProgramBuilder();
         if (options.rawFFI) this.installRawFFI();
     }
@@ -1381,6 +1387,7 @@
         this.setGlobal("undefined", undefined);
         this.setGlobal("NaN", NaN);
         this.setGlobal("Infinity", Infinity);
+        this.installDateBuiltins();
         this.setGlobal("assertEqual", this.makeNativeFunction("assertEqual",
             function (receiver, args) {
                 if (args[0] !== args[1]) {
@@ -1998,6 +2005,57 @@
         }, NativeIntrinsics.MATH_MAX);
         mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); });
         this.setGlobal("Math", math);
+    };
+
+    Runtime.prototype.installDateBuiltins = function () {
+        var runtime = this;
+        var dateValueKey = "\x00DateValue";
+        this.dateValueKey = dateValueKey;
+        this.datePrototype = this.makeObject();
+        function dateValue(receiver) {
+            return Number(runtime.getProperty(receiver, dateValueKey));
+        }
+        function method(name, field, intrinsicId) {
+            runtime.setProperty(runtime.datePrototype, name,
+                runtime.makeNativeFunction("Date." + name,
+                    function (receiver) {
+                        if (!field) return dateValue(receiver);
+                        return DateSupport.field(dateValue(receiver), field);
+                    }, "intrinsic", intrinsicId || NativeIntrinsics.NONE));
+        }
+        method("getDate", "Date");
+        method("getMonth", "Month");
+        method("getFullYear", "FullYear");
+        method("getHours", "Hours");
+        method("getMinutes", "Minutes");
+        method("getSeconds", "Seconds");
+        method("getMilliseconds", "Milliseconds");
+        method("getDay", "Day");
+        method("getTime", null, NativeIntrinsics.DATE_GET_TIME);
+        method("valueOf", null, NativeIntrinsics.DATE_GET_TIME);
+        this.setProperty(this.datePrototype, "getTimezoneOffset",
+            this.makeNativeFunction("Date.getTimezoneOffset", function () {
+                return DateSupport.localTimezoneOffset();
+            }));
+        var dateConstructor = this.makeNativeFunction("Date", function () {
+            return String(DateSupport.construct([], runtime.nowMilliseconds ?
+                runtime.nowMilliseconds() : 0));
+        });
+        dateConstructor.constructCallback = function (args) {
+            var date = runtime.makeObject();
+            runtime.heapRecords.setObjectPrototype(
+                date.heapAddress, runtime.datePrototype.heapAddress);
+            runtime.setProperty(date, dateValueKey, DateSupport.construct(
+                args, runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0));
+            return date;
+        };
+        this.setProperty(dateConstructor, "prototype", this.datePrototype);
+        this.setProperty(this.datePrototype, "constructor", dateConstructor);
+        this.setProperty(dateConstructor, "now",
+            this.makeNativeFunction("Date.now", function () {
+                return runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0;
+            }));
+        this.setGlobal("Date", dateConstructor);
     };
 
     Runtime.prototype.installRawFFI = function () {

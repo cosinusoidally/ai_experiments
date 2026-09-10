@@ -146,11 +146,11 @@ var NodeProcess = {
                 encoding !== "utf8" && encoding !== "utf-8") {
                 throw new Error("unsupported Buffer encoding: " + encoding);
             }
-            var result = "";
-            for (var i = start; i < end; i++) {
-                result += String.fromCharCode(this._nodeBytes[i]);
+            if (encoding === "ascii" || encoding === "binary") {
+                return NodeEncoding.byteString(
+                    this._nodeBytes.slice(start, end));
             }
-            return result;
+            return NodeEncoding.utf8String(this._nodeBytes, start, end);
         };
         NodeBuffer.prototype.readUInt16LE = function (offset) {
             return this._nodeBytes[offset] | (this._nodeBytes[offset + 1] << 8);

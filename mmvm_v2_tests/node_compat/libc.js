@@ -162,6 +162,56 @@ var NodeEncoding = {
         }
         return bytes;
     },
+    utf8String: function (bytes, start, end) {
+        start = start || 0;
+        end = end === undefined ? bytes.length : end;
+        var value = "";
+        var index = start;
+        while (index < end) {
+            var first = bytes[index++] & 255;
+            var code;
+            var needed;
+            var minimum;
+            if (first < 128) {
+                value += String.fromCharCode(first);
+                continue;
+            } else if (first >= 194 && first <= 223) {
+                code = first & 31; needed = 1; minimum = 128;
+            } else if (first >= 224 && first <= 239) {
+                code = first & 15; needed = 2; minimum = 2048;
+            } else if (first >= 240 && first <= 244) {
+                code = first & 7; needed = 3; minimum = 65536;
+            } else {
+                value += "\uFFFD";
+                continue;
+            }
+            var continuationStart = index;
+            var valid = index + needed <= end;
+            var continuation = 0;
+            while (valid && continuation < needed) {
+                var next = bytes[index++] & 255;
+                if ((next & 192) !== 128) {
+                    valid = false;
+                    index--;
+                    break;
+                }
+                code = (code << 6) | (next & 63);
+                continuation++;
+            }
+            if (!valid || code < minimum || code > 1114111 ||
+                code >= 55296 && code <= 57343) {
+                value += "\uFFFD";
+                if (index === continuationStart) index++;
+            } else if (code <= 65535) {
+                value += String.fromCharCode(code);
+            } else {
+                code -= 65536;
+                value += String.fromCharCode(55296 + (code >>> 10),
+                                             56320 + (code & 1023));
+            }
+        }
+        return value;
+    },
     byteString: function (bytes) {
         var value = "";
         for (var i = 0; i < bytes.length; i++) {

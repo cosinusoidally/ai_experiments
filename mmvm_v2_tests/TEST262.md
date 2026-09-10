@@ -29,6 +29,12 @@ summary.  `--fail-fast` is an optional diagnostic mode, never the default.
 The runner has no Python, Node.js, npm, or SpiderMonkey dependency.  The
 external corpus is supplied by the user and is read in place.
 
+`test262_manifest.js` is the reproducible list of the 3,292 applicable ES5.1
+test files. It avoids thousands of transitional host-call yields during
+discovery. Every descendant `shell.js` in this particular corpus is empty;
+the nonempty root harness remains explicit. Regeneration verifies those facts
+from the read-only external tree and never writes into that tree.
+
 ## Runtime and context lifetime
 
 One command invocation owns one `JSRuntime`.  Each test variant runs in a
@@ -55,6 +61,15 @@ full collection after every variant.
 The suite's own `shell.js` files provide `$ERROR`, `$FAIL`, `runTestCase`, and
 the other conformance helpers.  They are evaluated in root-to-leaf order in
 the same isolated global as the test.
+
+This Mozilla import expects a driver-provided
+`testPassesUnlessItThrows()` hook; `test262_harness.js` supplies it as guest
+JavaScript. The imported root harness also contains generated values with
+literal quote characters for its `"first"`/`"last"` DST selector, although
+the consumer compares unquoted values. The runner applies that exact
+in-memory normalization while leaving the external corpus unchanged. These
+two compatibility steps are harness integration, not guest-language
+semantics, and are kept explicit and reviewable.
 
 The runner recognizes the old corpus's comment directives without depending
 on regular expressions:

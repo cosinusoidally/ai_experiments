@@ -11,6 +11,7 @@
 (function (runnerArguments) {
     var corpusDirectory = "../../js_tests/tests/test262";
     var fs = require("fs");
+    load("test262_manifest.js");
     var applicableRoots = [
         "ch06", "ch07", "ch09", "ch10", "ch11", "ch12", "ch13"
     ];
@@ -80,29 +81,6 @@
         return slash < 0 ? path : path.substring(0, slash);
     }
 
-    function addTree(relativePath, output) {
-        var fullPath = corpusDirectory + (relativePath ? "/" + relativePath : "");
-        var stats = fs.statSync(fullPath);
-        if (stats.isFile()) {
-            var name = relativePath.substring(relativePath.lastIndexOf("/") + 1);
-            if (name.substring(name.length - 3) === ".js" &&
-                name !== "shell.js" && name !== "browser.js") {
-                output.push(relativePath);
-            }
-            return;
-        }
-
-        var names = fs.readdirSync(fullPath);
-        names.sort();
-        var index = 0;
-        while (index < names.length) {
-            var childName = String(names[index++]);
-            if (!relativePath && !isApplicableRoot(childName)) continue;
-            addTree(relativePath ? relativePath + "/" + childName : childName,
-                    output);
-        }
-    }
-
     var tests = [];
     var selectorIndex = 0;
     while (selectorIndex < selectors.length) {
@@ -110,11 +88,18 @@
         if (selector && !isApplicableRoot(firstPathPart(selector))) {
             failUsage("selector is outside the ES5.1 chapters: " + selector);
         }
-        try { addTree(selector, tests); }
-        catch (selectionError) {
-            failUsage("cannot select " + (selector || "all") + ": " +
-                      selectionError);
+        var matched = 0;
+        var manifestIndex = 0;
+        while (manifestIndex < Test262Manifest.length) {
+            var manifestedPath = Test262Manifest[manifestIndex++];
+            if (!selector || manifestedPath === selector ||
+                manifestedPath.substring(0, selector.length + 1) ===
+                    selector + "/") {
+                tests.push(manifestedPath);
+                matched++;
+            }
         }
+        if (!matched) failUsage("selector matched no tests: " + selector);
     }
     tests.sort();
 
@@ -141,21 +126,9 @@
     }
 
     function harnessFilesFor(relativePath) {
-        var files = [corpusDirectory + "/shell.js"];
-        var slash = relativePath.lastIndexOf("/");
-        var directory = slash < 0 ? "" : relativePath.substring(0, slash);
-        var parts = directory ? directory.split("/") : [];
-        var current = "";
-        var index = 0;
-        while (index < parts.length) {
-            current += "/" + parts[index++];
-            var candidate = corpusDirectory + current + "/shell.js";
-            try {
-                if (fs.statSync(candidate).isFile()) files.push(candidate);
-            } catch (notPresent) {
-                /* Most Test262 directories do not add a local shell.js. */
-            }
-        }
+        var files = ["test262_harness.js", corpusDirectory + "/shell.js"];
+        /* All descendant shell.js files in this imported ES5.1 corpus are
+         * empty. Manifest regeneration verifies that invariant. */
         return files;
     }
 
@@ -202,7 +175,7 @@
             var variantName = strict ? "strict" : "non-strict";
             counts.variants++;
             var result = Test262VM.runVariant(
-                filename, strict, harnessFiles, instructionLimit);
+                filename, source, strict, harnessFiles, instructionLimit);
             var passed = negative ? negativePasses(source, result) :
                                     result.status === "completed";
             if (passed) {

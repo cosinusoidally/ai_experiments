@@ -62,13 +62,33 @@ performance are separate mandatory regression gates.
 
 ## Current failure groups
 
-1. Root harness: incomplete ES5.1 `Date` implementation, beginning with
-   `getTimezoneOffset`.
-2. Runner bootstrap: isolated context execution and filesystem discovery are
+1. Runner bootstrap: isolated context execution and filesystem reads are
    still embedder services and must migrate behind guest/native runtime
    operations.
-3. Unknown test-level groups: a complete run cannot classify these until the
-   root harness evaluates successfully.
+2. Test-level groups already observed: eval completion/lexing, constructor
+   prototypes, Unicode line terminators, and identifier handling.
+3. Full classification remains pending the first uninterrupted suite run.
+
+### 2026-09-10 09:40 BST — runnable harness and chapter sample
+
+- Root harness now completes under MMVM. `Function` and Date calendar
+  construction are guest implementations; MMVM source-file decoding now
+  converts UTF-8 to ES5.1 UTF-16 code units without host decoding.
+- Added a reproducible manifest of all 3,292 applicable files and an initialized
+  harness template. Each variant still receives a fresh global, cloned mutable
+  harness state, and context-bound guest functions while sharing immutable
+  bytecode.
+- Complete `ch07/7.3` run under MMVM native: 59 files, 118 variants, 82 passed,
+  36 failed, 0 timed out; 60.94 seconds. This is a subtree measurement, not a
+  full-suite total.
+- Observed groups in that subtree: eval completion/lexing, constructor
+  prototype setup, Unicode line terminators, and identifier handling.
+- A complete-run attempt reached the same test-level failures but was stopped
+  after 67 files because pre-manifest discovery projected excessive startup
+  time. It is not entered in the full-suite table.
+- Regression gates: Node and `js_min.exe` suites pass with 249 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap/GC/context tests,
+  and three-context scheduling remain passing.
 
 ## Rules for subsequent entries
 

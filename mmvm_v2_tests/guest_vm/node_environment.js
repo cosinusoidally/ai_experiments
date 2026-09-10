@@ -41,6 +41,7 @@
         this.moduleCache = {};
         this.moduleContexts = [];
         this.test262ProgramCache = {};
+        this.test262HarnessTemplate = null;
         this.runnerArguments = runnerArguments;
         this.nodeHost = typeof module !== "undefined" && module.exports &&
                         typeof require === "function";
@@ -365,6 +366,7 @@
         var context = this.vm.jsRuntime.createContext();
         context.shareGlobalObject(globalContext);
         var program;
+        var retainHarnessContext = false;
         try {
             try {
                 program = cacheKey ? this.test262ProgramCache[cacheKey] : null;
@@ -397,6 +399,10 @@
                 } else if (result.status === "hostCall") {
                     execution.serviceHostCall();
                 } else if (result.status === "completed") {
+                    if (cacheKey) {
+                        retainHarnessContext = true;
+                        this.moduleContexts.push(context);
+                    }
                     return this.object({status: "completed", phase: "runtime",
                         name: "", message: "", filename: filename,
                         line: 0, column: 0, instructions: used});
@@ -412,8 +418,147 @@
                 }
             }
         } finally {
-            context.destroy();
+            if (!retainHarnessContext) context.destroy();
         }
+    };
+
+    GuestNodeEnvironment.prototype.cloneTest262HarnessValue = function (
+            value, templateGlobal, targetContext, clones) {
+        var runtime = this.runtime;
+        if (value === templateGlobal) return targetContext.globalObject;
+        if (!value || !value.guestType) return value;
+        var identity = "$" + value.heapAddress;
+        if (clones[identity]) return clones[identity];
+        var clone;
+        if (value.guestType === "bytecodeFunction") {
+            var closure = runtime.functionClosure(value);
+            var clonedClosure = closure ? this.cloneTest262HarnessEnvironment(
+                closure, templateGlobal, targetContext, clones) : null;
+            clone = runtime.makeGuestFunction(
+                value.program, clonedClosure, targetContext);
+            clones[identity] = clone;
+            return clone;
+        }
+        if (value.guestType === "array") {
+            clone = runtime.makeArray(runtime.arrayLength(value));
+            clones[identity] = clone;
+            var arrayIndex = 0;
+            while (arrayIndex < runtime.arrayLength(value)) {
+                if (runtime.arrayHas(value, arrayIndex)) {
+                    runtime.arraySet(clone, arrayIndex,
+                        this.cloneTest262HarnessValue(runtime.arrayGet(
+                            value, arrayIndex), templateGlobal,
+                            targetContext, clones));
+                }
+                arrayIndex++;
+            }
+            return clone;
+        }
+        if (value.guestType === "object") {
+            clone = runtime.makeObject();
+            clones[identity] = clone;
+            var keys = runtime.keys(value);
+            var keyIndex = 0;
+            while (keyIndex < runtime.arrayLength(keys)) {
+                var key = runtime.arrayGet(keys, keyIndex++);
+                runtime.setProperty(clone, key,
+                    this.cloneTest262HarnessValue(runtime.getProperty(
+                        value, key), templateGlobal, targetContext, clones));
+            }
+            return clone;
+        }
+        /* Harness globals currently contain no mutable values of the other
+         * guest kinds. Preserve identity for native built-ins if one is
+         * deliberately exported by a future harness revision. */
+        return value;
+    };
+
+    GuestNodeEnvironment.prototype.cloneTest262HarnessEnvironment = function (
+            environment, templateGlobal, targetContext, clones) {
+        var runtime = this.runtime;
+        var identity = "$environment:" + environment.heapAddress;
+        if (clones[identity]) return clones[identity];
+        var parent = runtime.environmentParent(environment);
+        var clonedParent = parent ? this.cloneTest262HarnessEnvironment(
+            parent, templateGlobal, targetContext, clones) : null;
+        var slotCount = runtime.heapRecords.environmentSlotCount(
+            environment.heapAddress);
+        var clone = {heapAddress: runtime.heapRecords.allocateEnvironment(
+                         clonedParent ? clonedParent.heapAddress : 0, slotCount),
+                     ownerRuntime: runtime};
+        clones[identity] = clone;
+        var metadata = runtime.environmentMetadata["$" +
+                                                   environment.heapAddress];
+        runtime.environmentMetadata["$" + clone.heapAddress] = {
+            handle: clone, bindingSlots: metadata.bindingSlots
+        };
+        var slot = 0;
+        while (slot < slotCount) {
+            runtime.writeHeapValue(runtime.heapRecords.environmentCell(
+                clone.heapAddress, slot), this.cloneTest262HarnessValue(
+                    runtime.readHeapValue(runtime.heapRecords.environmentCell(
+                        environment.heapAddress, slot)), templateGlobal,
+                    targetContext, clones));
+            slot++;
+        }
+        return clone;
+    };
+
+    GuestNodeEnvironment.prototype.prepareTest262Harness = function (
+            harnessFiles, instructionLimit) {
+        if (this.test262HarnessTemplate) return null;
+        var context = this.vm.jsRuntime.createContext();
+        var baseline = {};
+        var baselineKeys = this.runtime.keys(context.globalObject);
+        var baselineIndex = 0;
+        while (baselineIndex < this.runtime.arrayLength(baselineKeys)) {
+            var baselineKey = this.runtime.arrayGet(
+                baselineKeys, baselineIndex++);
+            baseline["$" + baselineKey] = this.runtime.getProperty(
+                context.globalObject, baselineKey);
+        }
+        var harnessIndex = 0;
+        while (harnessIndex < harnessFiles.length) {
+            var harnessFilename = String(harnessFiles[harnessIndex++]);
+            var harnessSource = this.hostFs.readFileSync(
+                harnessFilename).toString("utf8");
+            if (harnessFilename ===
+                    "../../js_tests/tests/test262/shell.js") {
+                harnessSource = harnessSource.
+                    split("'\"first\"'").join("\"first\"").
+                    split("'\"last\"'").join("\"last\"");
+            }
+            var result = this.runTest262Source(
+                context, harnessSource, harnessFilename,
+                instructionLimit, "$" + harnessFilename);
+            if (this.runtime.getProperty(result, "status") !== "completed") {
+                this.runtime.setProperty(result, "phase", "harness");
+                context.destroy();
+                return result;
+            }
+        }
+        this.test262HarnessTemplate = {context: context, baseline: baseline};
+        return null;
+    };
+
+    GuestNodeEnvironment.prototype.instantiateTest262Harness = function () {
+        var template = this.test262HarnessTemplate;
+        var target = this.vm.jsRuntime.createContext();
+        this.runtime.deleteProperty(target.globalObject, "Test262VM");
+        var keys = this.runtime.keys(template.context.globalObject);
+        var clones = {};
+        var index = 0;
+        while (index < this.runtime.arrayLength(keys)) {
+            var key = this.runtime.arrayGet(keys, index++);
+            var value = this.runtime.getProperty(template.context.globalObject, key);
+            if (!("$" + key in template.baseline) ||
+                value !== template.baseline["$" + key]) {
+                this.runtime.setProperty(target.globalObject, key,
+                    this.cloneTest262HarnessValue(value,
+                        template.context.globalObject, target, clones));
+            }
+        }
+        return target;
     };
 
     GuestNodeEnvironment.prototype.makeTest262Service = function () {
@@ -422,34 +567,17 @@
         this.runtime.setProperty(service, "runVariant",
             this.makeFunction("Test262VM.runVariant", function (receiver, args) {
                 var filename = String(args[0]);
-                var strict = !!args[1];
-                var harnessFiles = environment.runtime.arrayToHost(args[2]);
-                var instructionLimit = Number(args[3]);
+                var source = String(args[1]);
+                var strict = !!args[2];
+                var harnessFiles = environment.runtime.arrayToHost(args[3]);
+                var instructionLimit = Number(args[4]);
                 if (!(instructionLimit > 0)) instructionLimit = 20000000;
 
-                var globalContext = environment.vm.jsRuntime.createContext();
-                /* The runner control object is not part of an ES5.1 realm. */
-                environment.runtime.deleteProperty(
-                    globalContext.globalObject, "Test262VM");
+                var harnessFailure = environment.prepareTest262Harness(
+                    harnessFiles, instructionLimit);
+                if (harnessFailure) return harnessFailure;
+                var globalContext = environment.instantiateTest262Harness();
                 try {
-                    var harnessIndex = 0;
-                    while (harnessIndex < harnessFiles.length) {
-                        var harnessFilename = String(harnessFiles[harnessIndex++]);
-                        var harnessSource = environment.hostFs.readFileSync(
-                            harnessFilename).toString("utf8");
-                        var harnessResult = environment.runTest262Source(
-                            globalContext, harnessSource, harnessFilename,
-                            instructionLimit, "$" + harnessFilename);
-                        if (environment.runtime.getProperty(
-                                harnessResult, "status") !== "completed") {
-                            environment.runtime.setProperty(
-                                harnessResult, "phase", "harness");
-                            return harnessResult;
-                        }
-                    }
-
-                    var source = environment.hostFs.readFileSync(filename).
-                        toString("utf8");
                     if (strict) source = "\"use strict\";\n" + source;
                     return environment.runTest262Source(
                         globalContext, source, filename, instructionLimit);
@@ -815,45 +943,9 @@
                 return decodeURIComponent(String(args[0]));
             }, true));
 
-        var dateValueKey = "\x00DateValue";
-        this.runtime.dateValueKey = dateValueKey;
-        var datePrototype = this.object({});
-        function dateValue(receiver) {
-            return Number(environment.runtime.getProperty(
-                receiver, dateValueKey));
-        }
-        function dateMethod(name, intrinsicId) {
-            environment.runtime.setProperty(datePrototype, name,
-                environment.makeFunction("Date." + name, function (receiver) {
-                    return new Date(dateValue(receiver))[name]();
-                }, true, intrinsicId));
-        }
-        dateMethod("getDate"); dateMethod("getMonth");
-        dateMethod("getFullYear"); dateMethod("getHours");
-        dateMethod("getMinutes"); dateMethod("getSeconds");
-        dateMethod("getTime", NativeIntrinsics.DATE_GET_TIME);
-        dateMethod("valueOf", NativeIntrinsics.DATE_GET_TIME);
-        var dateConstructor = this.makeFunction("Date", function () {}, true,
-            NativeIntrinsics.DATE_CONSTRUCTOR);
-        dateConstructor.constructCallback = function () {
-            var date = environment.object({});
-            environment.runtime.heapRecords.setObjectPrototype(
-                date.heapAddress, datePrototype.heapAddress);
-            environment.runtime.setProperty(date, dateValueKey,
-                new Date().getTime());
-            return date;
+        this.runtime.nowMilliseconds = function () {
+            return environment.hostNow();
         };
-        this.runtime.setProperty(dateConstructor, "prototype", datePrototype);
-        this.runtime.setProperty(datePrototype, "constructor", dateConstructor);
-        this.runtime.setProperty(dateConstructor, "now",
-            this.makeFunction("Date.now", function () {
-                return environment.hostNow();
-            }, true));
-        if (this.runtime.nativeInterpreter) {
-            this.runtime.nativeInterpreter.setDateSupport(
-                datePrototype, dateValueKey);
-        }
-        publish("Date", dateConstructor);
 
         function publishErrorConstructor(name) {
             var constructor = environment.makeFunction(name,

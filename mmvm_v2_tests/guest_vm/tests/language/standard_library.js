@@ -12,6 +12,17 @@ assertEqual(dynamicAdd(19, 23), 42,
             "Function constructor compiles a guest function");
 assertEqual(new Function("return 7;")(), 7,
             "Function constructor is constructible");
+var leapDate = new Date(2000, 1, 29, 13, 14, 15, 16);
+assertEqual(leapDate.getFullYear(), 2000, "guest Date year");
+assertEqual(leapDate.getMonth(), 1, "guest Date month");
+assertEqual(leapDate.getDate(), 29, "guest Date date");
+assertEqual(leapDate.getHours(), 13, "guest Date hours");
+assertEqual(leapDate.getMinutes(), 14, "guest Date minutes");
+assertEqual(leapDate.getSeconds(), 15, "guest Date seconds");
+assertEqual(leapDate.getMilliseconds(), 16, "guest Date milliseconds");
+assertEqual(new Date(1970, 0, 1).getDay(), 4, "guest Date weekday");
+assertEqual(new Date(0).getTime(), 0, "guest Date epoch value");
+assertEqual(leapDate.getTimezoneOffset(), 0, "guest Date UTC local policy");
 assertEqual(unescape("A%20B%u0021"), "A B!", "legacy unescape");
 assertEqual(escape("A B!"), "A%20B%21", "legacy escape");
 var jsonValue = JSON.parse('{"name":"guest","values":[1,true,null]}');
