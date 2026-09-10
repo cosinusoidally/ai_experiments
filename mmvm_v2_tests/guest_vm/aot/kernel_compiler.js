@@ -14,6 +14,13 @@
         options = options || {};
         var functions = [];
         var signatures = {};
+        var aggregateTimings = options.timings || null;
+        if (aggregateTimings) {
+            aggregateTimings.source = 0;
+            aggregateTimings.parse = 0;
+            aggregateTimings.collect = 0;
+            aggregateTimings.lower = 0;
+        }
         function addFunction(name, fn) {
             if (typeof fn !== "function") {
                 throw new TypeError("kernel graph member " + name +
@@ -30,9 +37,19 @@
             /* Function.length is absent on the Firefox 1 era shell used by
              * js_min. Parse each graph member exactly once: the same tree is
              * authoritative for arity, constant validation, and lowering. */
+            var sourceStarted = aggregateTimings ? new Date().getTime() : 0;
             var source = fn.toString();
+            if (aggregateTimings) {
+                aggregateTimings.source +=
+                    new Date().getTime() - sourceStarted;
+            }
+            var parseStarted = aggregateTimings ? new Date().getTime() : 0;
             var expression = parseKernelFunctionSource(
                 source, "<kernel-graph>");
+            if (aggregateTimings) {
+                aggregateTimings.parse +=
+                    new Date().getTime() - parseStarted;
+            }
             signatures[name] = {
                 name: name,
                 arity: expression.parameters.length
@@ -44,26 +61,23 @@
             throw new TypeError("kernel graph entry must be a named function");
         }
         addFunction(entry.name, entry);
+        var entryDependencies = [];
         var sharedConstants = collectFunctionConstants(
-            entry, options.constantOverrides || {}, functions[0].expression);
-        var names = [];
-        var name;
-        for (name in dependencies) {
-            if (Object.prototype.hasOwnProperty.call(dependencies, name)) {
-                names.push(name);
-            }
-        }
-        names.sort();
-        var nameIndex = 0;
-        while (nameIndex < names.length) {
-            name = names[nameIndex++];
-            addFunction(name, dependencies[name]);
+            entry, options.constantOverrides || {}, functions[0].expression,
+            dependencies, signatures, entryDependencies);
+        entryDependencies.sort();
+        var entryDependencyIndex = 0;
+        while (entryDependencyIndex < entryDependencies.length) {
+            var entryDependency = entryDependencies[entryDependencyIndex++];
+            addFunction(entryDependency, dependencies[entryDependency]);
         }
         var constantMemberIndex = 1;
         while (constantMemberIndex < functions.length) {
+            var memberDependencies = [];
             var memberConstants = collectFunctionConstants(
                 functions[constantMemberIndex].fn, {},
-                functions[constantMemberIndex].expression);
+                functions[constantMemberIndex].expression,
+                dependencies, signatures, memberDependencies);
             var memberConstantName;
             for (memberConstantName in memberConstants) {
                 if (Object.prototype.hasOwnProperty.call(
@@ -74,17 +88,23 @@
                         functions[constantMemberIndex].name);
                 }
             }
+            memberDependencies.sort();
+            var memberDependencyIndex = 0;
+            while (memberDependencyIndex < memberDependencies.length) {
+                var memberDependency =
+                    memberDependencies[memberDependencyIndex++];
+                addFunction(memberDependency, dependencies[memberDependency]);
+            }
             constantMemberIndex++;
         }
+        var entryMember = functions[0];
+        var helperMembers = functions.slice(1);
+        helperMembers.sort(function (left, right) {
+            return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+        });
+        functions = [entryMember].concat(helperMembers);
         var compiled = [];
         var index = 0;
-        var aggregateTimings = options.timings || null;
-        if (aggregateTimings) {
-            aggregateTimings.source = 0;
-            aggregateTimings.parse = 0;
-            aggregateTimings.collect = 0;
-            aggregateTimings.lower = 0;
-        }
         while (index < functions.length) {
             var memberOptions = {};
             var optionName;
@@ -135,12 +155,25 @@
     }
 
     function collectFunctionConstants(functionObject, overrides,
-                                      parsedExpression) {
+                                      parsedExpression, dependencies,
+                                      signatures, dependencyNames) {
         var expression = parsedExpression ||
             kernelFunctionExpression(functionObject);
         var result = {};
+        var seenDependencies = {};
         function visit(node) {
             if (!node || typeof node !== "object") return;
+            if (dependencyNames && node.type === "CallExpression" &&
+                node.callee && node.callee.type === "Identifier") {
+                var calledName = node.callee.name;
+                if (!signatures[calledName] &&
+                    !seenDependencies[calledName] &&
+                    Object.prototype.hasOwnProperty.call(
+                        dependencies, calledName)) {
+                    seenDependencies[calledName] = true;
+                    dependencyNames.push(calledName);
+                }
+            }
             if (node.type === "VariableStatement") {
                 var declarationIndex = 0;
                 while (declarationIndex < node.declarations.length) {
@@ -202,6 +235,8 @@
         frameProgram: "FRAME_PROGRAM",
         frameEnvironment: "FRAME_ENVIRONMENT",
         frameCaller: "FRAME_CALLER",
+        frameSavedPC: "FRAME_PC",
+        frameReturnSlot: "FRAME_RETURN_SLOT",
         frameRegisterCount: "FRAME_REGISTER_COUNT",
         frameHandler: "FRAME_HANDLER",
         frameContext: "FRAME_CONTEXT",
@@ -221,6 +256,9 @@
         contextActiveFrame: "CONTEXT_ACTIVE_FRAME",
         handlerNext: "HANDLER_NEXT",
         engineCurrentFrame: "ENGINE_CURRENT_FRAME",
+        engineFreeFrame: "ENGINE_FREE_FRAME",
+        engineScratchLeft: "ENGINE_SCRATCH_LEFT",
+        engineScratchRight: "ENGINE_SCRATCH_RIGHT",
         valueCellTag: "VALUE_CELL_TAG",
         valueCellReference: "VALUE_CELL_REFERENCE",
         valueCellInt32: "VALUE_CELL_INT32",
@@ -290,11 +328,17 @@
         setPropertyAttributes: "PROPERTY_ATTRIBUTES",
         setPropertyReserved: "PROPERTY_RESERVED",
         setFrameHandler: "FRAME_HANDLER",
+        setFrameProgram: "FRAME_PROGRAM",
+        setFrameEnvironment: "FRAME_ENVIRONMENT",
+        setFrameCaller: "FRAME_CALLER",
         setHandlerNext: "HANDLER_NEXT",
         setHandlerTarget: "HANDLER_TARGET",
         setHandlerNameConstant: "HANDLER_NAME_CONSTANT",
         setHandlerReserved: "HANDLER_RESERVED",
         setFramePC: "FRAME_PC",
+        setFrameReturnSlot: "FRAME_RETURN_SLOT",
+        setFrameRegisterCount: "FRAME_REGISTER_COUNT",
+        setFrameContext: "FRAME_CONTEXT",
         setVectorCapacity: "VECTOR_CAPACITY",
         setBytecodeLength: "BYTECODE_LENGTH",
         setProgramBytecode: "PROGRAM_BYTECODE",
@@ -315,6 +359,9 @@
         setEngineInstructions: "ENGINE_INSTRUCTIONS",
         setEngineCallRejectReason: "ENGINE_CALL_REJECT_REASON",
         setEngineCurrentFrame: "ENGINE_CURRENT_FRAME",
+        setEngineFreeFrame: "ENGINE_FREE_FRAME",
+        setEngineScratchLeft: "ENGINE_SCRATCH_LEFT",
+        setEngineScratchRight: "ENGINE_SCRATCH_RIGHT",
         setEngineHeapBump: "ENGINE_HEAP_BUMP"
     };
 
@@ -330,6 +377,8 @@
     };
 
     var FIELD_ADDRESS_ACCESSORS = {
+        engineScratchLeftAddress: "ENGINE_SCRATCH_LEFT",
+        engineScratchRightAddress: "ENGINE_SCRATCH_RIGHT",
         propertyValueCellAddress: "PROPERTY_VALUE"
     };
 
