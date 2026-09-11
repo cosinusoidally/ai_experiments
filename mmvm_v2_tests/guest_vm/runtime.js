@@ -3114,10 +3114,6 @@
         while (index < this.contexts.length) {
             enqueue(this.contexts[index++].heapAddress);
         }
-        index = 0;
-        while (index < this.programAddresses.length) {
-            enqueue(this.programAddresses[index++]);
-        }
         var stringKey;
         for (stringKey in this.internedStrings) {
             if (own(this.internedStrings, stringKey)) {
@@ -3317,6 +3313,40 @@
         });
     };
 
+    Runtime.prototype.releaseUnmarkedProgramMetadata = function (generation) {
+        var index = 0;
+        while (index < this.programAddresses.length) {
+            var address = this.programAddresses[index];
+            if (address &&
+                (this.linearHeap.isFreeRecord(address) ||
+                 this.linearHeap.mark(address) !== generation)) {
+                var program = this.programObjects[index];
+                if (program && program.heapAddress === address) {
+                    program.heapAddress = 0;
+                }
+                delete this.programMetadata["$" + address];
+                this.programObjects[index] = null;
+                this.programAddresses[index] = 0;
+            }
+            index++;
+        }
+        var key;
+        for (key in this.programMetadata) {
+            if (own(this.programMetadata, key)) {
+                var metadataAddress = Number(key.substring(1));
+                if (this.linearHeap.isFreeRecord(metadataAddress) ||
+                    this.linearHeap.mark(metadataAddress) !== generation) {
+                    var metadataProgram = this.programMetadata[key];
+                    if (metadataProgram &&
+                        metadataProgram.heapAddress === metadataAddress) {
+                        metadataProgram.heapAddress = 0;
+                    }
+                    delete this.programMetadata[key];
+                }
+            }
+        }
+    };
+
     Runtime.prototype.collect = function () {
         if (this.gcCollecting) return this.heapObjects.length;
         this.gcCollecting = true;
@@ -3441,6 +3471,7 @@
                     delete this.functionMetadata[handleKey];
                 }
             }
+            this.releaseUnmarkedProgramMetadata(generation);
             var sweepResult;
             if (this.heapSweeper &&
                 this.heapSweeper.compiled.backend === "i386") {

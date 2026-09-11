@@ -311,6 +311,23 @@ performance are separate mandatory regression gates.
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 
+### 2026-09-11 01:55 BST — full-run lifetime audit
+
+- A complete-suite attempt at revision `2514f10` was stopped after 297.83
+  seconds when RSS had grown to 342,492 KiB and continued rising. It is not a
+  completed result and therefore does not appear as a whole-suite baseline.
+- Destroyed contexts made their guest program records unreachable, but the
+  runtime's program-address and metadata indexes still retained every host
+  parser/compiler object. The authoritative marker also treated that index as
+  a root on the JavaScript collector path.
+- Program metadata is now a weak address index in lifecycle terms: programs
+  remain alive through context, frame, function, and program-record edges in
+  the guest heap. After marking, metadata for an unmarked program is retired
+  before its records are swept. This lets fresh-context teardown release both
+  guest storage and transitional host representations without invalidating a
+  genuinely reachable function.
+- Regression gates remain green on Node and `js_min.exe`.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure
