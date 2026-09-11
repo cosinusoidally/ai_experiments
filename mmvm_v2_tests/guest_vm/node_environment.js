@@ -42,6 +42,9 @@
         this.moduleContexts = [];
         this.test262ProgramCache = {};
         this.test262HarnessTemplate = null;
+        this.test262Timings = {variants: 0, compile: 0, execute: 0,
+                               context: 0, contextCreate: 0,
+                               harnessExecute: 0, destroy: 0};
         this.runnerArguments = runnerArguments;
         this.nodeHost = typeof module !== "undefined" && module.exports &&
                         typeof require === "function";
@@ -363,16 +366,20 @@
 
     GuestNodeEnvironment.prototype.runTest262Source = function (
             globalContext, source, filename, instructionLimit, cacheKey) {
-        var context = this.vm.jsRuntime.createContext();
-        context.shareGlobalObject(globalContext);
+        var context = globalContext;
         var program;
-        var retainHarnessContext = false;
+        var profile = this.runtime.profileOpcodeCounts ?
+            this.test262Timings : null;
         try {
             try {
+                var compileStarted = profile ? new Date().getTime() : 0;
                 program = cacheKey ? this.test262ProgramCache[cacheKey] : null;
                 if (!program) {
                     program = context.compile(source, filename);
                     if (cacheKey) this.test262ProgramCache[cacheKey] = program;
+                }
+                if (profile) {
+                    profile.compile += new Date().getTime() - compileStarted;
                 }
             } catch (compileError) {
                 return this.test262ErrorResult(
@@ -380,6 +387,7 @@
             }
 
             var execution = context.startProgram(program);
+            var executeStarted = profile ? new Date().getTime() : 0;
             var used = 0;
             var slice = 100000;
             while (true) {
@@ -399,14 +407,16 @@
                 } else if (result.status === "hostCall") {
                     execution.serviceHostCall();
                 } else if (result.status === "completed") {
-                    if (cacheKey) {
-                        retainHarnessContext = true;
-                        this.moduleContexts.push(context);
+                    if (profile) {
+                        profile.execute += new Date().getTime() - executeStarted;
                     }
                     return this.object({status: "completed", phase: "runtime",
                         name: "", message: "", filename: filename,
                         line: 0, column: 0, instructions: used});
                 } else if (result.status === "threw") {
+                    if (profile) {
+                        profile.execute += new Date().getTime() - executeStarted;
+                    }
                     return this.test262ErrorResult(
                         "threw", "runtime", result.exception, used);
                 } else {
@@ -418,7 +428,14 @@
                 }
             }
         } finally {
-            if (!retainHarnessContext) context.destroy();
+            if (context.execution &&
+                context.execution.status !== "completed" &&
+                context.execution.status !== "threw") {
+                context.execution.abort();
+            }
+            context.execution = null;
+            this.runtime.heapRecords.setContextActiveFrame(
+                context.heapAddress, 0);
         }
     };
 
@@ -508,55 +525,54 @@
             harnessFiles, instructionLimit) {
         if (this.test262HarnessTemplate) return null;
         var context = this.vm.jsRuntime.createContext();
-        var baseline = {};
-        var baselineKeys = this.runtime.keys(context.globalObject);
-        var baselineIndex = 0;
-        while (baselineIndex < this.runtime.arrayLength(baselineKeys)) {
-            var baselineKey = this.runtime.arrayGet(
-                baselineKeys, baselineIndex++);
-            baseline["$" + baselineKey] = this.runtime.getProperty(
-                context.globalObject, baselineKey);
-        }
+        var programs = [];
         var harnessIndex = 0;
-        while (harnessIndex < harnessFiles.length) {
-            var harnessFilename = String(harnessFiles[harnessIndex++]);
-            var harnessSource = this.hostFs.readFileSync(
-                harnessFilename).toString("utf8");
-            if (harnessFilename ===
-                    "../../js_tests/tests/test262/shell.js") {
-                harnessSource = harnessSource.
-                    split("'\"first\"'").join("\"first\"").
-                    split("'\"last\"'").join("\"last\"");
+        try {
+            while (harnessIndex < harnessFiles.length) {
+                var harnessFilename = String(harnessFiles[harnessIndex++]);
+                var harnessSource = this.hostFs.readFileSync(
+                    harnessFilename).toString("utf8");
+                if (harnessFilename ===
+                        "../../js_tests/tests/test262/shell.js") {
+                    harnessSource = harnessSource.
+                        split("'\"first\"'").join("\"first\"").
+                        split("'\"last\"'").join("\"last\"");
+                }
+                var program = context.compile(harnessSource, harnessFilename);
+                this.runtime.retainProgram(program);
+                this.test262ProgramCache["$" + harnessFilename] = program;
+                programs.push(program);
             }
-            var result = this.runTest262Source(
-                context, harnessSource, harnessFilename,
-                instructionLimit, "$" + harnessFilename);
-            if (this.runtime.getProperty(result, "status") !== "completed") {
-                this.runtime.setProperty(result, "phase", "harness");
-                context.destroy();
-                return result;
+            harnessIndex = 0;
+            while (harnessIndex < programs.length) {
+                context.evaluateProgram(programs[harnessIndex++]);
             }
+        } catch (compileError) {
+            context.destroy();
+            return this.test262ErrorResult(
+                "threw", "harness", compileError, 0);
         }
-        this.test262HarnessTemplate = {context: context, baseline: baseline};
+        this.runtime.deleteProperty(context.globalObject, "Test262VM");
+        this.test262HarnessTemplate = {
+            context: context,
+            programs: programs,
+            snapshot: context.createSnapshot()
+        };
         return null;
     };
 
     GuestNodeEnvironment.prototype.instantiateTest262Harness = function () {
         var template = this.test262HarnessTemplate;
-        var target = this.vm.jsRuntime.createContext();
-        this.runtime.deleteProperty(target.globalObject, "Test262VM");
-        var keys = this.runtime.keys(template.context.globalObject);
-        var clones = {};
-        var index = 0;
-        while (index < this.runtime.arrayLength(keys)) {
-            var key = this.runtime.arrayGet(keys, index++);
-            var value = this.runtime.getProperty(template.context.globalObject, key);
-            if (!("$" + key in template.baseline) ||
-                value !== template.baseline["$" + key]) {
-                this.runtime.setProperty(target.globalObject, key,
-                    this.cloneTest262HarnessValue(value,
-                        template.context.globalObject, target, clones));
-            }
+        var profile = this.runtime.profileOpcodeCounts ?
+            this.test262Timings : null;
+        var phaseStarted = profile ? new Date().getTime() : 0;
+        var target = template.context.restoreSnapshot(template.snapshot);
+        if (profile) {
+            profile.contextCreate += new Date().getTime() - phaseStarted;
+            phaseStarted = new Date().getTime();
+        }
+        if (profile) {
+            profile.harnessExecute += new Date().getTime() - phaseStarted;
         }
         return target;
     };
@@ -576,7 +592,13 @@
                 var harnessFailure = environment.prepareTest262Harness(
                     harnessFiles, instructionLimit);
                 if (harnessFailure) return harnessFailure;
+                var profile = environment.runtime.profileOpcodeCounts ?
+                    environment.test262Timings : null;
+                var contextStarted = profile ? new Date().getTime() : 0;
                 var globalContext = environment.instantiateTest262Harness();
+                if (profile) {
+                    profile.context += new Date().getTime() - contextStarted;
+                }
                 try {
                     if (strict) source = "\"use strict\";\n" + source;
                     return environment.runTest262Source(
@@ -585,7 +607,24 @@
                     return environment.test262ErrorResult(
                         "threw", "service", serviceError, 0);
                 } finally {
-                    globalContext.destroy();
+                    var destroyStarted = profile ? new Date().getTime() : 0;
+                    globalContext.execution = null;
+                    environment.runtime.heapRecords.setContextActiveFrame(
+                        globalContext.heapAddress, 0);
+                    if (profile) {
+                        profile.destroy += new Date().getTime() - destroyStarted;
+                        profile.variants++;
+                        if (profile.variants % 100 === 0) {
+                            print("Test262 host phases: variants=" +
+                                profile.variants + " context=" +
+                                profile.context + "ms (create=" +
+                                profile.contextCreate + "ms harness=" +
+                                profile.harnessExecute + "ms) compile=" +
+                                profile.compile + "ms execute=" +
+                                profile.execute + "ms destroy=" +
+                                profile.destroy + "ms");
+                        }
+                    }
                 }
             }));
         return service;

@@ -146,6 +146,8 @@
         this.programObjects = [];
         this.programAddresses = [];
         this.programMetadata = {};
+        this.retainedProgramAddresses = {};
+        this.heapStateSnapshots = [];
         this.hostRoots = [];
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
@@ -1098,6 +1100,102 @@
         this.heapRecords.setVectorLength(program.heapParameterSlotsAddress,
             program.parameterSlots ? program.parameterSlots.length : 0);
         return address;
+    };
+
+    Runtime.prototype.retainProgram = function (program) {
+        var address = this.registerProgram(program);
+        this.retainedProgramAddresses["$" + address] = address;
+        return program;
+    };
+
+    Runtime.prototype.releaseProgram = function (program) {
+        if (program && program.heapAddress) {
+            delete this.retainedProgramAddresses["$" + program.heapAddress];
+        }
+    };
+
+    Runtime.prototype.createHeapStateSnapshot = function (rootAddress) {
+        this.ensureLinearHeap();
+        this.linearHeap.requireRecord(rootAddress);
+        var visited = {};
+        var queue = [rootAddress];
+        var addresses = [];
+        var queueIndex = 0;
+        while (queueIndex < queue.length) {
+            var address = queue[queueIndex++];
+            var identity = "$" + address;
+            if (visited[identity]) continue;
+            visited[identity] = true;
+            var type = this.linearHeap.recordType(address);
+            /* Source, bytecode and atoms are immutable. Interpreter frames
+             * and engine/platform state belong to the execution containing
+             * the embedder call, not to the context being snapshotted. */
+            if (type === Heap.Types.STRING || type === Heap.Types.PROGRAM ||
+                type === Heap.Types.BYTECODE || type === Heap.Types.FRAME ||
+                type === Heap.Types.HANDLER ||
+                type === Heap.Types.ENGINE_STATE ||
+                type === Heap.Types.PLATFORM_SERVICES) continue;
+            addresses.push(address);
+            this.heapRecords.visitReferences(address, function (target) {
+                if (!visited["$" + target]) queue.push(target);
+            });
+        }
+        addresses.sort(function (left, right) { return left - right; });
+        var regions = [];
+        var addressIndex = 0;
+        while (addressIndex < addresses.length) {
+            var start = addresses[addressIndex++];
+            var length = this.linearHeap.recordSize(start);
+            while (addressIndex < addresses.length &&
+                   addresses[addressIndex] === start + length) {
+                length += this.linearHeap.recordSize(
+                    addresses[addressIndex++]);
+            }
+            regions.push({address: start, length: length});
+        }
+        var handles = [];
+        var index = 0;
+        while (index < this.heapObjects.length) {
+            var handle = this.heapObjects[index++];
+            if (handle && visited["$" + handle.heapAddress]) {
+                handles.push({handle: handle,
+                    propertyVersion: handle.propertyVersion,
+                    valueVersion: handle.valueVersion,
+                    arrayStructureVersion: handle.arrayStructureVersion});
+            }
+        }
+        var snapshot = {
+            memory: this.linearHeap.memory.createRegionSnapshot(regions),
+            regions: regions, handles: handles, destroyed: false
+        };
+        this.heapStateSnapshots.push(snapshot);
+        return snapshot;
+    };
+
+    Runtime.prototype.restoreHeapStateSnapshot = function (snapshot) {
+        if (!snapshot || snapshot.destroyed) {
+            throw new Error("invalid guest heap snapshot");
+        }
+        if (this.activeExecutions.length) {
+            throw new Error("cannot restore a running guest heap");
+        }
+        this.linearHeap.memory.restoreRegionSnapshot(
+            snapshot.memory, snapshot.regions);
+        var index = 0;
+        while (index < snapshot.handles.length) {
+            var state = snapshot.handles[index++];
+            state.handle.propertyAddresses = {};
+            state.handle.propertyVersion = state.propertyVersion;
+            state.handle.valueVersion = state.valueVersion;
+            state.handle.arrayStructureVersion = state.arrayStructureVersion;
+        }
+    };
+
+    Runtime.prototype.destroyHeapStateSnapshot = function (snapshot) {
+        if (!snapshot || snapshot.destroyed) return;
+        this.linearHeap.memory.destroySnapshot(snapshot.memory);
+        snapshot.memory = null;
+        snapshot.destroyed = true;
     };
 
     Runtime.prototype.programAddress = function (program) {
@@ -3114,6 +3212,12 @@
         while (index < this.contexts.length) {
             enqueue(this.contexts[index++].heapAddress);
         }
+        var retainedProgramKey;
+        for (retainedProgramKey in this.retainedProgramAddresses) {
+            if (own(this.retainedProgramAddresses, retainedProgramKey)) {
+                enqueue(this.retainedProgramAddresses[retainedProgramKey]);
+            }
+        }
         var stringKey;
         for (stringKey in this.internedStrings) {
             if (own(this.internedStrings, stringKey)) {
@@ -3208,6 +3312,14 @@
         if (this.nativeInterpreter) {
             this.linearHeap.setMark(
                 this.nativeInterpreter.stringSupportAddress, generation);
+        }
+        var retainedProgramKey;
+        for (retainedProgramKey in this.retainedProgramAddresses) {
+            if (own(this.retainedProgramAddresses, retainedProgramKey)) {
+                this.linearHeap.setMark(
+                    this.retainedProgramAddresses[retainedProgramKey],
+                    generation);
+            }
         }
         var contextRootIndex = 0;
         while (contextRootIndex < this.contexts.length) {
@@ -3626,6 +3738,12 @@
     };
 
     Runtime.prototype.destroy = function () {
+        var snapshotIndex = 0;
+        while (snapshotIndex < this.heapStateSnapshots.length) {
+            this.destroyHeapStateSnapshot(
+                this.heapStateSnapshots[snapshotIndex++]);
+        }
+        this.heapStateSnapshots = [];
         if (this.nativeInterpreter) this.nativeInterpreter.destroy();
         this.nativeInterpreter = null;
         this.bufferSupport.destroy();

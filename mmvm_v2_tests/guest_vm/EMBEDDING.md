@@ -16,6 +16,23 @@ var runtime = new GuestVM.JSRuntime();
 var context = runtime.createContext();
 ```
 
+An idle context can also capture and restore its guest-visible mutable state:
+
+```js
+var initialized = context.createSnapshot();
+context.run("applicationMutatesItsGlobal();", "request.js");
+context.restoreSnapshot(initialized);
+```
+
+Snapshots are runtime-local and bound to the context that created them. They
+copy mutable records reachable from the context into a separate backing store;
+they do not merely save the global object's address. Restoring therefore also
+undoes mutations to reachable prototypes, functions, arrays, lexical
+environments, and builtin objects. Immutable atoms/programs/bytecode remain
+shared, and active execution frames plus runtime engine/platform state are
+excluded. Both creation and restoration require the context to be idle. The
+runtime owns snapshot storage and releases it when the runtime is destroyed.
+
 `JSRuntime` owns the heap, garbage collector, Buffer backing stores, interned
 strings, and every object created by its contexts. `JSContext` owns a fresh
 global environment and its current resumable execution. A runtime can own many

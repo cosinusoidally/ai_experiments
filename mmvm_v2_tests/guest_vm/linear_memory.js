@@ -145,6 +145,51 @@
         return this.allocation.isNative ? this.allocation.pointer + offset : 0;
     };
 
+    LinearMemory.prototype.createSnapshot = function (length) {
+        this.checkRange(0, length);
+        var snapshot = this.host.allocate(length, false);
+        this.host.copyAllocation(snapshot, this.allocation, length);
+        return snapshot;
+    };
+
+    LinearMemory.prototype.restoreSnapshot = function (snapshot, length) {
+        this.checkRange(0, length);
+        this.host.copyAllocation(this.allocation, snapshot, length);
+    };
+
+    LinearMemory.prototype.destroySnapshot = function (snapshot) {
+        this.host.free(snapshot);
+    };
+
+    LinearMemory.prototype.createRegionSnapshot = function (regions) {
+        var total = 0;
+        var index = 0;
+        while (index < regions.length) total += regions[index++].length;
+        var allocation = this.host.allocate(total, false);
+        var offset = 0;
+        index = 0;
+        while (index < regions.length) {
+            var region = regions[index++];
+            this.checkRange(region.address, region.length);
+            this.host.copyAllocationRange(allocation, offset,
+                this.allocation, region.address, region.length);
+            region.snapshotOffset = offset;
+            offset += region.length;
+        }
+        return allocation;
+    };
+
+    LinearMemory.prototype.restoreRegionSnapshot = function (
+            snapshot, regions) {
+        var index = 0;
+        while (index < regions.length) {
+            var region = regions[index++];
+            this.checkRange(region.address, region.length);
+            this.host.copyAllocationRange(this.allocation, region.address,
+                snapshot, region.snapshotOffset, region.length);
+        }
+    };
+
     LinearMemory.prototype.destroy = function () {
         if (this.destroyed) return;
         this.host.free(this.allocation);

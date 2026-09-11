@@ -41,20 +41,32 @@ from the read-only external tree and never writes into that tree.
 
 ## Runtime and context lifetime
 
-One command invocation owns one `JSRuntime`.  Each test variant runs in a
-fresh `JSContext` within that runtime.  A variant means the non-strict or
+One command invocation owns one `JSRuntime`. Each test variant observes a
+freshly restored `JSContext` environment within that runtime. A variant means the non-strict or
 strict form selected by `@noStrict`, `@onlyStrict`, or the absence of either
-marker.  Contexts share runtime-owned immutable infrastructure and compiled
-native interpreter code, but never globals or mutable harness state.
+marker. Contexts share runtime-owned immutable infrastructure and compiled
+native interpreter code, but never mutable state from an earlier variant.
+
+Constructing the ES5 harness from source for every variant is not part of the
+test and formerly dominated the run. The environment is therefore initialized
+once and captured with the general `JSContext.createSnapshot()` facility.
+Before every variant, `restoreSnapshot()` restores all mutable guest-heap
+records reachable from that context: its global, objects, prototypes,
+properties, arrays, environments, and functions. Immutable strings, programs,
+and bytecode remain runtime-shared. Execution frames and engine/platform state
+belong to the caller which requested the run and are deliberately outside the
+snapshot. Consequently restoration cannot rewind the Test262 scheduler, while
+changes a test made to globals or shared builtin prototypes cannot leak into
+the next variant.
 
 For each variant the runner:
 
-1. creates a fresh context;
-2. evaluates the applicable `shell.js` files from the corpus root down to the
-   test's directory;
+1. restores the initialized context snapshot;
+2. retains the already compiled and initialized root harness;
 3. compiles and runs the test, adding a strict prologue when required;
 4. records completion, exception phase, source position, and instruction use;
-5. destroys the context and removes its roots.
+5. clears execution roots; the next restore discards the variant's observable
+   mutations and automatic collection reclaims unreachable allocations.
 
 Automatic heap-pressure collection reclaims dead context, source, parser,
 AST, bytecode, and execution records in batches.  The runner does not force a
@@ -134,9 +146,9 @@ js_min.exe
   `-- guest_runner.js
         `-- one guest JSRuntime
               `-- test262_runner.js
-                    |-- fresh JSContext: harness + test variant
-                    |-- destroy context
-                    |-- fresh JSContext: harness + test variant
+                    |-- restored JSContext: harness + test variant
+                    |-- clear execution roots
+                    |-- restore JSContext: harness + test variant
                     `-- ...
 ```
 

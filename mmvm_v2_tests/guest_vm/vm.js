@@ -235,6 +235,42 @@
         return this.runExecutionToCompletion(this.startProgram(program));
     };
 
+    JSContext.prototype.evaluateProgram = function (program) {
+        if (this.execution) {
+            throw new Error("context already has an active execution");
+        }
+        try {
+            return this.runExecutionToCompletion(this.startProgram(program));
+        } finally {
+            if (this.execution && this.execution.status !== "completed" &&
+                this.execution.status !== "threw") {
+                this.execution.abort();
+            }
+            this.execution = null;
+            this.runtime.heapRecords.setContextActiveFrame(
+                this.heapAddress, 0);
+        }
+    };
+
+    JSContext.prototype.createSnapshot = function () {
+        if (this.destroyed || this.execution) {
+            throw new Error("context must be idle before it is snapshotted");
+        }
+        return {context: this,
+                heapState: this.runtime.createHeapStateSnapshot(
+                    this.heapAddress)};
+    };
+
+    JSContext.prototype.restoreSnapshot = function (snapshot) {
+        if (this.destroyed || this.execution || !snapshot ||
+            snapshot.context !== this) {
+            throw new Error("invalid context snapshot restore");
+        }
+        this.runtime.restoreHeapStateSnapshot(snapshot.heapState);
+        this.runtime.heapRecords.setContextActiveFrame(this.heapAddress, 0);
+        return this;
+    };
+
     JSContext.prototype.run = function (source, filename) {
         return this.runExecutionToCompletion(this.start(source, filename));
     };

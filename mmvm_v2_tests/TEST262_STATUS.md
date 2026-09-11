@@ -17,6 +17,21 @@ improvement over a larger one.
 
 - Pending: the first uninterrupted full-suite baseline has not completed yet.
 
+### Performance reference
+
+- 2026-09-11, local Node.js 24.14.1 direct `vm`-context runner: all 3,292
+  files and 5,765 selected variants completed in 41.52 seconds (41.78 seconds
+  wall time), with peak RSS 1,198,568 KiB. This is a throughput reference, not
+  a guest-VM conformance result: the helper counted completion versus throws
+  but did not apply the authoritative runner's negative-test classification.
+- 2026-09-11, MMVM native guest with context snapshots, working tree after
+  `2e70454`: `ch07/7.9`, 101 files and 202 variants, 202 passed and 0 failed in
+  11.50 seconds; peak RSS 145,632 KiB. The previous completed measurement for
+  the identical selection was 86.44 seconds.
+- 2026-09-11, same working tree: `ch07/7.6`, 271 files and 503 variants,
+  503 passed and 0 failed in 24.43 seconds; peak RSS 181,064 KiB. The previous
+  completed measurement for the identical selection was 282.16 seconds.
+
 ### Chapter 9 — 128 files, 254 variants
 
 - 2026-09-11 01:15 BST, revision `f801d9a`: 160 passed, 94 failed,
@@ -311,11 +326,12 @@ performance are separate mandatory regression gates.
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 
-### 2026-09-11 01:55 BST — full-run lifetime audit
+### 2026-09-11 01:55 BST — interrupted full-run lifetime audit
 
-- A complete-suite attempt at revision `2514f10` was stopped after 297.83
-  seconds when RSS had grown to 342,492 KiB and continued rising. It is not a
-  completed result and therefore does not appear as a whole-suite baseline.
+- A complete-suite attempt at revision `2514f10` was externally interrupted,
+  probably when the machine was shut down. Its last observation at 297.83
+  seconds showed RSS at 342,492 KiB. It is inconclusive and therefore does not
+  appear as a whole-suite baseline.
 - Destroyed contexts made their guest program records unreachable, but the
   runtime's program-address and metadata indexes still retained every host
   parser/compiler object. The authoritative marker also treated that index as

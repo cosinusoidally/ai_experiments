@@ -10,6 +10,7 @@
         this.isMMVM = this.ffi.isMMVM;
         this.callocPointer = this.isMMVM ? this.ffi.resolve("calloc") : 0;
         this.freePointer = this.isMMVM ? this.ffi.resolve("free") : 0;
+        this.memcpyPointer = this.isMMVM ? this.ffi.resolve("memcpy") : 0;
         this.allocations = 0;
         this.frees = 0;
     }
@@ -159,6 +160,35 @@
         allocation.pointer = 0;
         allocation.pages = null;
         this.frees++;
+    };
+
+    HostMemory.prototype.copyAllocation = function (
+            destination, source, length) {
+        return this.copyAllocationRange(destination, 0, source, 0, length);
+    };
+
+    HostMemory.prototype.copyAllocationRange = function (
+            destination, destinationOffset, source, sourceOffset, length) {
+        length = Number(length);
+        if (!destination || destination.freed || !source || source.freed ||
+            length < 0 || length !== Math.floor(length) ||
+            destinationOffset < 0 || sourceOffset < 0 ||
+            destinationOffset + length > destination.length ||
+            sourceOffset + length > source.length) {
+            throw new RangeError("invalid host-memory allocation copy");
+        }
+        if (destination.isNative && source.isNative) {
+            this.ffi.call(this.memcpyPointer,
+                          [destination.pointer + destinationOffset,
+                           source.pointer + sourceOffset, length]);
+            return;
+        }
+        var byteIndex = 0;
+        while (byteIndex < length) {
+            writePagedByte(destination, destinationOffset + byteIndex,
+                readPagedByte(source, sourceOffset + byteIndex));
+            byteIndex++;
+        }
     };
 
     HostMemory.prototype.hostName = function () {
