@@ -1016,11 +1016,12 @@
     };
 
     Runtime.prototype.registerProgram = function (program) {
-        var index = 0;
-        while (index < this.programObjects.length) {
-            if (this.programObjects[index] === program) return this.programAddresses[index];
-            index++;
+        if (program && program.heapAddress) {
+            this.linearHeap.requireRecord(program.heapAddress,
+                                          Heap.Types.PROGRAM);
+            return program.heapAddress;
         }
+        var index = 0;
         this.ensureLinearHeap();
         program.heapBytecodeAddress =
             this.heapRecords.allocateBytecode(program.code || []);

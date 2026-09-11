@@ -15,7 +15,12 @@ improvement over a larger one.
 
 ### Complete ES5.1 suite — 3,292 files
 
-- Pending: the first uninterrupted full-suite baseline has not completed yet.
+- 2026-09-11, working tree after revision `e3c4f33`, 20,000-instruction
+  diagnostic allowance: all 3,292 files and 5,765 variants reached a result;
+  4,852 passed, 913 failed, and 4 of those failures were timeouts. Elapsed:
+  426.06 seconds. Peak RSS: 359,508 KiB. This is the first complete baseline;
+  the allowance is deliberately recorded because a later unbounded
+  conformance result is not directly comparable to it.
 
 ### Performance reference
 
@@ -24,6 +29,10 @@ improvement over a larger one.
   wall time), with peak RSS 1,198,568 KiB. This is a throughput reference, not
   a guest-VM conformance result: the helper counted completion versus throws
   but did not apply the authoritative runner's negative-test classification.
+- The first complete bounded MMVM run took 426.06 seconds, approximately
+  10.2 times the Node throughput reference. Context restoration is no longer
+  the dominant cost; front-end compilation, semantic services, and
+  accumulated program metadata remain the principal general targets.
 - 2026-09-11, MMVM native guest with context snapshots, working tree after
   `2e70454`: `ch07/7.9`, 101 files and 202 variants, 202 passed and 0 failed in
   11.50 seconds; peak RSS 145,632 KiB. The previous completed measurement for
@@ -343,6 +352,23 @@ performance are separate mandatory regression gates.
   guest storage and transitional host representations without invalidating a
   genuinely reachable function.
 - Regression gates remain green on Node and `js_min.exe`.
+
+### 2026-09-11 — first complete suite and context snapshot checkpoint
+
+- Revision `a789cda` introduced a general guest-heap context snapshot. The
+  initialized harness is captured once, and each variant restores all mutable
+  records reachable from the context while excluding the live scheduler's
+  frames and engine state.
+- The identical `ch07/7.9` selection improved from 86.44 to 11.50 seconds;
+  all 202 variants still pass. The identical `ch07/7.6` selection improved
+  from 282.16 to 24.43 seconds; all 503 variants still pass.
+- Revision `e3c4f33` added `--summary-only`, which suppresses diagnostic text
+  without skipping or reclassifying tests. The first complete bounded run
+  produced the whole-suite count above.
+- Profiling 473 Chapter 10 variants attributes roughly 0.8 seconds to context
+  restoration, 3.5 seconds to compilation, and 3.1 seconds to execution.
+  This rules out further snapshot micro-tuning as the major route to the
+  41.52-second Node reference.
 
 ## Rules for subsequent entries
 
