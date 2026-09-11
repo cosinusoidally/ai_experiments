@@ -18,6 +18,7 @@
     var failFast = false;
     var verbose = false;
     var quiet = false;
+    var summaryOnly = false;
     var listOnly = false;
     var requestedVariant = "";
     var instructionLimit = 20000000;
@@ -26,7 +27,8 @@
     function failUsage(message) {
         if (message) console.error("test262 runner: " + message);
         console.error("usage: test262_runner.js [--fail-fast] [--verbose] " +
-            "[--quiet] [--list] [--strict-only|--non-strict-only] " +
+            "[--quiet] [--summary-only] [--list] " +
+            "[--strict-only|--non-strict-only] " +
             "[--instruction-limit count] [all|path ...]");
         process.exit(2);
     }
@@ -53,6 +55,10 @@
         if (argument === "--fail-fast") failFast = true;
         else if (argument === "--verbose") verbose = true;
         else if (argument === "--quiet") quiet = true;
+        else if (argument === "--summary-only") {
+            quiet = true;
+            summaryOnly = true;
+        }
         else if (argument === "--list") listOnly = true;
         else if (argument === "--strict-only") {
             if (requestedVariant) failUsage("variant options are mutually exclusive");
@@ -199,9 +205,12 @@
             } else {
                 counts.failed++;
                 if (result.status === "timeout") counts.timedOut++;
-                console.error("FAIL " + relativePath + " (" + variantName +
-                    "): " + (negative && result.status === "completed" ?
-                    "expected an exception" : resultDescription(result)));
+                if (!summaryOnly) {
+                    console.error("FAIL " + relativePath + " (" +
+                        variantName + "): " +
+                        (negative && result.status === "completed" ?
+                        "expected an exception" : resultDescription(result)));
+                }
                 if (failFast) stopped = true;
             }
         }

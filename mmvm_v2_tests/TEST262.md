@@ -20,6 +20,7 @@ js_min.exe guest_runner.js --vm-native test262_runner.js
 js_min.exe guest_runner.js --vm-native test262_runner.js ch11/11.4
 js_min.exe guest_runner.js --vm-native test262_runner.js --fail-fast ch11
 js_min.exe guest_runner.js --vm-native test262_runner.js --strict-only ch09
+js_min.exe guest_runner.js --vm-native test262_runner.js --summary-only
 ```
 
 With no selector, or with `all`, the runner discovers every applicable test.
@@ -29,6 +30,13 @@ summary.  `--fail-fast` is an optional diagnostic mode, never the default.
 `--strict-only` and `--non-strict-only` restrict execution to one generated
 variant. They are diagnostic filters; tests whose metadata excludes the
 requested variant are not executed.
+
+`--summary-only` performs the identical selection, execution, classification,
+and exit-status calculation while suppressing per-failure diagnostics and
+progress lines. It is intended for repeatable whole-suite throughput
+measurements when the failure inventory is already known. It never skips a
+test or converts a failure into a pass; omit it when producing the detailed
+failure log used for VM bring-up.
 
 The runner has no Python, Node.js, npm, or SpiderMonkey dependency.  The
 external corpus is supplied by the user and is read in place.
