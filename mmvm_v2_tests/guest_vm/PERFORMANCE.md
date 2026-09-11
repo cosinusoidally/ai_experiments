@@ -578,3 +578,17 @@ all four runs passed 202 of 202 variants. In the latest profiled run, creating
 remaining repeated initialization is therefore a realm/harness problem, not a
 context-allocation problem. The native changes also apply to normal programs;
 they are not keyed to Test262 source or filenames.
+
+Dynamic `Function` construction has two levels of runtime cache. The parsed,
+verified program cache avoids repeating front-end work on every invocation.
+For the common single-body-argument form, a guest-heap index also lets the
+native interpreter instantiate a new bytecode function directly from that
+immutable program. The resulting function gets a new object/prototype pair and
+the current context as its home context. Multi-argument constructors retain the
+semantic path, avoiding a cache-key ambiguity between parameter lists.
+
+This removed repeated host transitions for the two `Function("return this")`
+forms in the Test262 harness. The same 202 fresh-context variants completed in
+23.68 seconds with 202 passes, down from the preceding 25.93 seconds. This is a
+general dynamic-code cache; first-time source still goes through the actual
+guest parser/compiler and no source-specific answer is cached.

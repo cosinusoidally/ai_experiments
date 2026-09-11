@@ -4,12 +4,14 @@
     var SemanticRuntime = root.GuestVMRuntime;
     var Execution = root.GuestVMExecution;
     var verify = root.GuestVMVerify;
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("./parser.js");
         Compiler = require("./compiler.js");
         SemanticRuntime = require("./runtime.js");
         Execution = require("./interpreter.js");
         verify = require("./verifier.js");
+        NativeIntrinsics = require("./native_intrinsics.js");
     }
 
     function own(object, key) {
@@ -69,6 +71,12 @@
     JSRuntime.prototype.installContextFunctions = function () {
         var jsRuntime = this;
         var semanticRuntime = this.runtime;
+        var functionProgramCache = semanticRuntime.makeObject();
+        this.functionProgramCache = functionProgramCache;
+        if (semanticRuntime.nativeInterpreter) {
+            semanticRuntime.nativeInterpreter.setFunctionProgramCache(
+                functionProgramCache);
+        }
         var functionConstructor = semanticRuntime.makeNativeFunction(
             "Function", function (receiver, args, callContext) {
                 if (!callContext) {
@@ -99,10 +107,18 @@
                         compiler.compileFunction(parsed.body[0]));
                     semanticRuntime.retainProgram(program);
                     jsRuntime.functionConstructorPrograms[cacheKey] = program;
+                    if (args.length === 1) {
+                        var cacheProperty = semanticRuntime.heapRecords.
+                            defineOwnProperty(functionProgramCache.heapAddress,
+                                semanticRuntime.internStringAddress(body), 7);
+                        semanticRuntime.valueCells.writeReferenceAt(
+                            semanticRuntime.heapRecords.propertyValueCell(
+                                cacheProperty), program.heapAddress);
+                    }
                 }
                 return semanticRuntime.makeGuestFunction(
                     program, null, callContext);
-            });
+            }, "intrinsic", NativeIntrinsics.FUNCTION_CONSTRUCTOR);
         functionConstructor.constructCallback = function (args, callContext) {
             return functionConstructor.callback(undefined, args, callContext);
         };

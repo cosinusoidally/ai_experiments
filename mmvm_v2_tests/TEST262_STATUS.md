@@ -412,6 +412,14 @@ performance are separate mandatory regression gates.
   the kernel compiler and named heap accessors; non-numeric and deliberately
   bounded edge cases return to the existing semantic implementation rather
   than changing observable results.
+- Follow-up complete focused native run: `ch07/7.9`, 101 files, 202 variants,
+  202 passed, 0 failed, 0 timed out. Elapsed: 23.68 seconds. Peak RSS:
+  158,732 KiB. A guest-heap program index now lets repeated single-argument
+  `Function` construction allocate a distinct function directly in the native
+  interpreter after the first real parse and compilation.
+- Regression gates after the fresh-harness work: Node and `js_min.exe` suites
+  pass with 264 guest assertions; networking, `node_web.js`, demo1, demo2,
+  heap, GC, context, native interpreter, and three-context checks remain green.
 
 ## Rules for subsequent entries
 

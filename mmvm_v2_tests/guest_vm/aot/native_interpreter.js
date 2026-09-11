@@ -338,7 +338,9 @@
         var INTRINSIC_DATE_GET_SECONDS = 59;
         var INTRINSIC_DATE_GET_MILLISECONDS = 60;
         var INTRINSIC_DATE_GET_DAY = 61;
-        var INTRINSIC_LAST_ID = 61;
+        var INTRINSIC_FUNCTION_CONSTRUCTOR = 62;
+        var INTRINSIC_LAST_ID = 62;
+        var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -3795,7 +3797,9 @@
         if (callOperation === 2) {
             if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_ARRAY_CONSTRUCTOR) {
+            if (intrinsicId !== INTRINSIC_FUNCTION_CONSTRUCTOR) {
                 intrinsicCallValid = 0;
+            }
             }
             }
         }
@@ -3847,6 +3851,8 @@
             if (intrinsicId <= INTRINSIC_DATE_GET_DAY) {
                 requiredIntrinsicArguments = 0;
             }
+        } else if (intrinsicId === INTRINSIC_FUNCTION_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
@@ -3938,6 +3944,21 @@
              * callees retain the ordinary semantic call boundary. */
             return unsupportedExitKernel(
                 heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (intrinsicId === INTRINSIC_FUNCTION_CONSTRUCTOR) {
+            intrinsicHandled = functionConstructorKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                currentContext, stringSupport);
+            if (intrinsicHandled === 2) {
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+                intrinsicHandled = 0;
+            }
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
         }
         if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
             intrinsicHandled = arrayConstructorKernel(
@@ -8273,6 +8294,51 @@
         return 1;
     }
 
+    function functionConstructorKernel(
+            heapBase, state, targetCell, registerCells, argumentsVector,
+            argumentCount, context, stringSupport) {
+        if (argumentCount !== 1) return 0;
+        var argumentDescriptor = vectorCellAddress(
+            heapBase, argumentsVector, 0);
+        if (valueCellTag(0, argumentDescriptor) !== VALUE_TAG_INT32) return 0;
+        var argumentRegister = valueCellInt32(0, argumentDescriptor);
+        var sourceCell = heapBase + registerCells +
+            argumentRegister * VALUE_CELL_BYTES;
+        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
+        var source = valueCellReference(0, sourceCell);
+        if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
+        var cacheCell = vectorCellAddress(heapBase, stringSupport,
+            RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE);
+        if (valueCellTag(0, cacheCell) !== VALUE_TAG_REFERENCE) return 0;
+        var cache = valueCellReference(0, cacheCell);
+        if (recordType(heapBase, cache) !== HEAP_TYPE_OBJECT) return 0;
+        var property = objectPropertyHead(heapBase, cache);
+        var program = 0;
+        while (property !== 0) {
+            if (stringKeysEqualKernel(
+                    heapBase, propertyKey(heapBase, property), source) === 1) {
+                var programCell = propertyValueCellAddress(
+                    heapBase, property);
+                if (valueCellTag(0, programCell) === VALUE_TAG_REFERENCE) {
+                    program = valueCellReference(0, programCell);
+                }
+                property = 0;
+            } else property = propertyNext(heapBase, property);
+        }
+        if (program === 0) return 0;
+        if (recordType(heapBase, program) !== HEAP_TYPE_PROGRAM) return 0;
+        var callable = engineHeapBump(heapBase, state);
+        var allocationEnd = callable + FUNCTION_RECORD_BYTES +
+            OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+        if (allocationEnd > engineHeapLimit(heapBase, state)) return 2;
+        var initializedEnd = initializeProgramCallableKernel(
+            heapBase, callable, program, context, stringSupport);
+        if (initializedEnd !== allocationEnd) return 0;
+        setValueCellReference(targetCell, callable);
+        setEngineHeapBump(heapBase, state, allocationEnd);
+        return 1;
+    }
+
     function dateIntrinsicKernel(heapBase, state, targetCell, registerCells,
                                  receiverIndex, intrinsicId, stringSupport,
                                  argumentsVector) {
@@ -8801,6 +8867,7 @@
             dateYearFromDayKernel: dateYearFromDayKernel,
             ffiCallKernel: ffiCallKernel,
             floorDivideDateIntegerKernel: floorDivideDateIntegerKernel,
+            functionConstructorKernel: functionConstructorKernel,
             getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
@@ -8949,7 +9016,7 @@
             runtime.heapRecords.setPlatformFreePointer(
                 this.platformServicesAddress, x86Backend.ffi.resolve("free"));
         }
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(279);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(280);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -9021,7 +9088,9 @@
             this.stringSupportAddress, 277), undefined);
         runtime.writeHeapValue(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 278), undefined);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 279);
+        runtime.writeHeapValue(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 279), undefined);
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 280);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
@@ -9145,6 +9214,12 @@
             this.runtime.heapRecords.vectorCell(
                 this.stringSupportAddress, 278),
             this.runtime.internStringAddress(key));
+    };
+
+    NativeInterpreter.prototype.setFunctionProgramCache = function (cache) {
+        this.runtime.valueCells.writeReferenceAt(
+            this.runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, 279), cache.heapAddress);
     };
 
     /* A published native allocation suffix is private only between
