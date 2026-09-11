@@ -11,6 +11,7 @@
         this.callocPointer = this.isMMVM ? this.ffi.resolve("calloc") : 0;
         this.freePointer = this.isMMVM ? this.ffi.resolve("free") : 0;
         this.memcpyPointer = this.isMMVM ? this.ffi.resolve("memcpy") : 0;
+        this.memsetPointer = this.isMMVM ? this.ffi.resolve("memset") : 0;
         this.allocations = 0;
         this.frees = 0;
     }
@@ -188,6 +189,27 @@
             writePagedByte(destination, destinationOffset + byteIndex,
                 readPagedByte(source, sourceOffset + byteIndex));
             byteIndex++;
+        }
+    };
+
+    HostMemory.prototype.fillAllocationRange = function (
+            allocation, offset, length, value) {
+        length = Number(length);
+        value = Number(value) & 255;
+        if (!allocation || allocation.freed || offset < 0 || length < 0 ||
+            offset !== Math.floor(offset) || length !== Math.floor(length) ||
+            offset + length > allocation.length) {
+            throw new RangeError("invalid host-memory allocation fill");
+        }
+        if (allocation.isNative) {
+            this.ffi.call(this.memsetPointer,
+                          [allocation.pointer + offset, value, length]);
+            return;
+        }
+        var index = 0;
+        while (index < length) {
+            writePagedByte(allocation, offset + index, value);
+            index++;
         }
     };
 

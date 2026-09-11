@@ -62,10 +62,74 @@
                 }
             });
         }
+        this.installContextFunctions();
     }
+
+    JSRuntime.prototype.installContextFunctions = function () {
+        var jsRuntime = this;
+        var semanticRuntime = this.runtime;
+        var functionConstructor = semanticRuntime.makeNativeFunction(
+            "Function", function (receiver, args, callContext) {
+                if (!callContext) {
+                    throw new Error("Function constructor needs a JSContext");
+                }
+                var parameterParts = [];
+                var argumentIndex = 0;
+                while (argumentIndex + 1 < args.length) {
+                    parameterParts.push(String(args[argumentIndex++]));
+                }
+                var body = args.length ? String(args[args.length - 1]) : "";
+                var source = "function anonymous(" +
+                    parameterParts.join(",") + ") {\n" + body + "\n}";
+                var parsed = new Parser(source, "<Function>").parseProgram();
+                if (!parsed.body.length ||
+                    parsed.body[0].type !== "FunctionDeclaration") {
+                    throw new SyntaxError(
+                        "invalid Function constructor source");
+                }
+                var compiler = new Compiler();
+                compiler.filename = "<Function>";
+                var program = verify(
+                    compiler.compileFunction(parsed.body[0]));
+                semanticRuntime.registerProgram(program);
+                return semanticRuntime.makeGuestFunction(
+                    program, null, callContext);
+            });
+        functionConstructor.constructCallback = function (args, callContext) {
+            return functionConstructor.callback(undefined, args, callContext);
+        };
+        if (semanticRuntime.functionPrototype) {
+            semanticRuntime.setProperty(functionConstructor, "prototype",
+                                        semanticRuntime.functionPrototype);
+            semanticRuntime.setProperty(semanticRuntime.functionPrototype,
+                                        "constructor", functionConstructor);
+        }
+        semanticRuntime.setProperty(semanticRuntime.globalObject, "Function",
+                                    functionConstructor);
+
+        var evalFunction = semanticRuntime.makeNativeFunction(
+            "eval", function (receiver, args, callContext) {
+                var source = args.length ? args[0] : undefined;
+                if (typeof source !== "string") return source;
+                if (!callContext) {
+                    throw new Error("indirect eval needs a JSContext");
+                }
+                var evalContext = jsRuntime.createContext();
+                evalContext.shareGlobalObject(callContext);
+                try {
+                    return evalContext.runEval(source, "<eval>");
+                } finally {
+                    evalContext.destroy();
+                }
+            });
+        evalFunction.directEval = true;
+        semanticRuntime.setProperty(semanticRuntime.globalObject, "eval",
+                                    evalFunction);
+    };
 
     JSRuntime.prototype.createContext = function () {
         if (this.destroyed) throw new Error("runtime has been destroyed");
+        this.runtime.prepareContextAllocation();
         var context = new JSContext(this);
         this.contexts.push(context);
         this.runtime.registerContext(context);
@@ -115,60 +179,8 @@
             this.globalObject.heapAddress);
         this.execution = null;
         this.destroyed = false;
-        var key;
-        var keys = this.runtime.keys(this.runtime.globalObject);
-        var index = 0;
-        while (index < this.runtime.arrayLength(keys)) {
-            key = this.runtime.arrayGet(keys, index++);
-            this.runtime.setProperty(this.globalObject, key,
-                this.runtime.getProperty(this.runtime.globalObject, key));
-        }
-        var definingContext = this;
-        var functionConstructor = this.runtime.makeNativeFunction(
-            "Function", function (receiver, args) {
-                var parameterParts = [];
-                var argumentIndex = 0;
-                while (argumentIndex + 1 < args.length) {
-                    parameterParts.push(String(args[argumentIndex++]));
-                }
-                var body = args.length ? String(args[args.length - 1]) : "";
-                var source = "function anonymous(" +
-                    parameterParts.join(",") + ") {\n" + body + "\n}";
-                var parsed = new Parser(source, "<Function>").parseProgram();
-                if (!parsed.body.length ||
-                    parsed.body[0].type !== "FunctionDeclaration") {
-                    throw new SyntaxError("invalid Function constructor source");
-                }
-                var compiler = new Compiler();
-                compiler.filename = "<Function>";
-                var program = verify(compiler.compileFunction(parsed.body[0]));
-                definingContext.runtime.registerProgram(program);
-                return definingContext.runtime.makeGuestFunction(
-                    program, null, definingContext);
-            });
-        functionConstructor.constructCallback = function (args) {
-            return functionConstructor.callback(undefined, args);
-        };
-        if (this.runtime.functionPrototype) {
-            this.runtime.setProperty(functionConstructor, "prototype",
-                                     this.runtime.functionPrototype);
-            this.runtime.setProperty(this.runtime.functionPrototype,
-                                     "constructor", functionConstructor);
-        }
-        this.runtime.setProperty(this.globalObject, "Function",
-                                 functionConstructor);
-        var evalFunction = this.runtime.makeNativeFunction(
-            "eval", function (receiver, args) {
-                var source = args.length ? args[0] : undefined;
-                /* ES5.1 eval returns a non-string argument without parsing it.
-                 * Indirect calls execute in the defining global environment. */
-                if (typeof source !== "string") return source;
-                var evalContext = jsRuntime.createContext();
-                evalContext.shareGlobalObject(definingContext);
-                return evalContext.runEval(source, "<eval>");
-            });
-        evalFunction.directEval = true;
-        this.runtime.setProperty(this.globalObject, "eval", evalFunction);
+        this.runtime.cloneEnumerableOwnProperties(
+            this.runtime.globalObject, this.globalObject);
     }
 
     JSContext.prototype.compile = function (source, filename) {

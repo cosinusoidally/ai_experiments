@@ -124,8 +124,8 @@
 
     LinearMemory.prototype.fill = function (address, length, value) {
         this.checkRange(address, length);
-        var index = 0;
-        while (index < length) this.host.write8(this.allocation, address + index++, value);
+        this.host.fillAllocationRange(
+            this.allocation, address, length, value);
     };
 
     LinearMemory.prototype.copy = function (destination, source, length) {

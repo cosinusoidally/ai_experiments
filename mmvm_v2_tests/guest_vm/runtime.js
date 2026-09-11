@@ -295,6 +295,29 @@
                 prototype ? prototype.heapAddress : 0), "object"));
     };
 
+    Runtime.prototype.cloneEnumerableOwnProperties = function (source, target) {
+        this.assertOwned(source);
+        this.assertOwned(target);
+        var propertyCount;
+        if (source === this.globalObject) {
+            if (this.contextGlobalPropertyCount === undefined ||
+                this.contextGlobalPropertyVersion !==
+                    source.propertyVersion) {
+                this.contextGlobalPropertyCount =
+                    this.heapRecords.countEnumerableOwnProperties(
+                        source.heapAddress);
+                this.contextGlobalPropertyVersion = source.propertyVersion;
+            }
+            propertyCount = this.contextGlobalPropertyCount;
+        }
+        this.heapRecords.cloneEnumerableOwnProperties(
+            source.heapAddress, target.heapAddress, propertyCount);
+        target.propertyAddresses = {};
+        target.propertyVersion++;
+        target.valueVersion++;
+        return target;
+    };
+
     Runtime.prototype.defineInternalValue = function (object, key, value) {
         var keyAddress = this.internStringAddress(key);
         var property = this.heapRecords.defineOwnProperty(
@@ -1013,6 +1036,15 @@
 
     Runtime.prototype.registerContext = function (context) {
         this.contexts.push(context);
+    };
+
+    Runtime.prototype.prepareContextAllocation = function () {
+        /* A native execution may reserve a free heap region between calls.
+         * Context construction is host-side heap work, so publish the unused
+         * tail before allocating its global and property records. */
+        if (this.nativeInterpreter) {
+            this.nativeInterpreter.releaseAllocationRegionForCollection();
+        }
     };
 
     Runtime.prototype.registerProgram = function (program) {
@@ -3030,7 +3062,7 @@
         return false;
     };
 
-    Runtime.prototype.call = function (callable, receiver, args) {
+    Runtime.prototype.call = function (callable, receiver, args, context) {
         this.assertOwned(callable);
         this.assertOwned(receiver);
         if (!callable || callable.guestType !== "function") {
@@ -3065,10 +3097,10 @@
             if (!errorMessage) return errorName;
             return errorName + ": " + errorMessage;
         }
-        return callable.callback(receiver, args);
+        return callable.callback(receiver, args, context || null);
     };
 
-    Runtime.prototype.construct = function (callable, args) {
+    Runtime.prototype.construct = function (callable, args, context) {
         this.assertOwned(callable);
         if (!callable || callable.guestType !== "function") {
             throw new TypeError("value is not a constructor");
@@ -3083,7 +3115,8 @@
         }
         var receiver = this.makeObject();
         var value = callable.constructCallback ?
-            callable.constructCallback(args) : callable.callback(receiver, args);
+            callable.constructCallback(args, context || null) :
+            callable.callback(receiver, args, context || null);
         return value && value.guestType ? value : receiver;
     };
 

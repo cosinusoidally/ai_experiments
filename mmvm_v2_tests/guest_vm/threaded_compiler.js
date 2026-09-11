@@ -348,7 +348,7 @@
                 this.constructionReceivers.length = constructionIndex;
             }
         }
-        return this.runtime.construct(callable, args);
+        return this.runtime.construct(callable, args, context);
     };
 
     ThreadedCompiler.prototype.get = function (object, key) {

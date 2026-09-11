@@ -79,6 +79,23 @@ shares some runtime-owned intrinsic function objects between context binding
 tables; completing independent ES5.1 realm intrinsics remains part of the
 prototype/object-model work.
 
+Fresh-context construction does not enumerate guest keys or invoke the normal
+property API once per builtin. The runtime owns a context-global template, and
+the record layer copies its enumerable own-property records into one freshly
+allocated block. A kernel-dialect copier has JS and i386 backends and preserves
+the linked-property order, keys, attributes, accessors, and complete value
+cells. MMVM clears the block with one libc `memset`; Node uses the same memory
+abstraction. The template's property count is cached against its normal
+property-version counter, so adding a runtime global invalidates the count
+without a separate notification mechanism.
+
+`Function` and indirect `eval` are context-neutral runtime functions. The call
+boundary supplies the current `JSContext`, allowing constructed functions to
+record the correct home context and indirect eval to select the correct global.
+They are initialized once with the runtime rather than rebuilt for every
+context. Direct eval remains an interpreter operation and retains the caller's
+lexical environment and strictness.
+
 Each guest bytecode function records its home context as well as its lexical
 closure. A frame uses that home context for global resolution, including when
 the callable is installed in another context belonging to the same runtime.

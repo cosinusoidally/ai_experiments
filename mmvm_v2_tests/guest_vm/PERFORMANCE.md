@@ -527,3 +527,34 @@ is consequently in generic guest object/property traffic and bytecode dispatch,
 not host numeric conversion. A compact guest-heap AST representation remains a
 promising structural improvement, but is not required for correctness and has
 not been substituted for the real parser in these measurements.
+
+## 2026-09-11: cheap fresh contexts
+
+`context_benchmark.js` separates one-time `JSRuntime` initialization from
+repeated, genuinely fresh `JSContext` creation and destruction. It accepts a
+context count and runs without npm or generated data:
+
+```sh
+js_min.exe guest_vm/context_benchmark.js 1000
+node guest_vm/context_benchmark.js 1000
+```
+
+The former context constructor enumerated runtime globals into a guest Array,
+decoded every key, and installed every property through the general semantic
+API. It also rebuilt `Function` and `eval` for every context. A 100-variant
+Test262 profile measured about 58 ms per context on `js_min.exe`.
+
+The runtime now initializes context-neutral `Function` and `eval` once. A
+kernel-compiled record copier clones the context-global property table, and a
+single native `memset` clears its destination allocation. The property count
+is cached using the source object's existing version. With 1,000 contexts:
+
+- `js_min.exe`: 311 ms total, or 0.311 ms per fresh context; runtime
+  initialization was 5,023 ms in that run;
+- Node.js 24.14.1: 108 ms total, or 0.108 ms per fresh context; runtime
+  initialization was 65 ms.
+
+The MMVM result is approximately 187 times faster than the original measured
+path. Snapshot-based Test262 isolation remains available while its replacement
+is evaluated; these figures measure actual new context/global records, not
+snapshot restoration.

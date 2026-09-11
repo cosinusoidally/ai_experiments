@@ -74,6 +74,19 @@ The runner accepts `NODE_BINARY`, `JS_MIN_BINARY`, and `FIREFOX_LIB_DIR`
 environment overrides. It derives its default paths from the repository layout
 and contains no machine-specific absolute paths.
 
+Measure one-time runtime initialization separately from repeated fresh context
+creation with:
+
+```sh
+node guest_vm/context_benchmark.js 1000
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_vm/context_benchmark.js 1000
+```
+
+The benchmark reports the total and average create/destroy cost and does not
+use context snapshots.
+
 Run one guest program directly with:
 
 ```sh

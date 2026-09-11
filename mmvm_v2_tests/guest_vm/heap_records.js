@@ -323,6 +323,61 @@
         return this.heap.readTrustedFieldU32(property, PROPERTY_NEXT, Heap.Types.PROPERTY);
     };
 
+    Records.prototype.countEnumerableOwnProperties = function (source) {
+        var property = this.objectPropertyHead(source);
+        var count = 0;
+        while (property) {
+            if (this.propertyAttributes(property) & ATTR_ENUMERABLE) count++;
+            property = this.propertyNext(property);
+        }
+        return count;
+    };
+
+    Records.prototype.cloneEnumerableOwnProperties = function (
+            source, target, knownPropertyCount) {
+        if (this.objectPropertyHead(target)) {
+            throw new Error("property clone target must be empty");
+        }
+        var sourceProperty = this.objectPropertyHead(source);
+        var propertyCount = knownPropertyCount === undefined ?
+            this.countEnumerableOwnProperties(source) : knownPropertyCount;
+        if (!propertyCount) return 0;
+        if (this.heap.recordInitializer &&
+            this.heap.recordInitializer.cloneEnumerableProperties) {
+            var recordBytes = Heap.HEADER_SIZE + PROPERTY_BYTES;
+            var requestedBytes = propertyCount * recordBytes;
+            var block = this.heap.allocateRecord(
+                Heap.Types.PROPERTY, requestedBytes - Heap.HEADER_SIZE);
+            var blockBytes = this.heap.recordSize(block);
+            this.heap.allocationCount += propertyCount - 1;
+            return this.heap.recordInitializer.cloneEnumerableProperties(
+                this.objectPropertyHead(source), target, block, blockBytes,
+                propertyCount);
+        }
+        sourceProperty = this.objectPropertyHead(source);
+        var firstClone = 0;
+        var previousClone = 0;
+        while (sourceProperty) {
+            var attributes = this.propertyAttributes(sourceProperty);
+            if (attributes & ATTR_ENUMERABLE) {
+                var clone = this.heap.allocateRecordWords(Heap.Types.PROPERTY,
+                    PROPERTY_BYTES, 0, this.propertyKey(sourceProperty),
+                    attributes, this.propertySetter(sourceProperty));
+                this.cells.copyAt(this.propertyValueCell(clone),
+                                  this.propertyValueCell(sourceProperty));
+                if (!firstClone) firstClone = clone;
+                if (previousClone) {
+                    this.heap.writeTrustedFieldU32(previousClone,
+                        PROPERTY_NEXT, clone, Heap.Types.PROPERTY);
+                }
+                previousClone = clone;
+            }
+            sourceProperty = this.propertyNext(sourceProperty);
+        }
+        this.setObjectPropertyHead(target, firstClone);
+        return firstClone;
+    };
+
     Records.prototype.deleteOwnProperty = function (object, keyAddress) {
         var previous = 0;
         var property = this.objectPropertyHead(object);

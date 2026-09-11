@@ -163,11 +163,7 @@
         /* A collection may lower the bump pointer over a dead tail, so even a
          * bump allocation can cover previously used bytes. Clear every host
          * allocation before publishing its header. */
-        var clearOffset = 0;
-        while (clearOffset < size) {
-            this.memory.writeU32Trusted(address + clearOffset, 0);
-            clearOffset += 4;
-        }
+        this.memory.fill(address, size, 0);
         if (this.recordInitializer && size >= HEADER_SIZE + 16) {
             this.recordInitializer.initialize(address, type, size,
                 word0, word1, word2, word3);

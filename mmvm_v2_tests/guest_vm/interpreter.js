@@ -873,7 +873,7 @@
                         return this.result("hostCall", used);
                     } else {
                         registers[destination] = this.runtime.call(
-                            callableValue, receiver, args);
+                            callableValue, receiver, args, frame.context);
                         if (!this.runtime.nativeInterpreter) {
                             this.runtime.gcSafePoint();
                         }
@@ -937,7 +937,7 @@
                         }
                     } else {
                         registers[constructDestination] = this.runtime.construct(
-                            constructorValue, args);
+                            constructorValue, args, frame.context);
                         if (!this.runtime.nativeInterpreter) {
                             this.runtime.gcSafePoint();
                         }
@@ -1058,7 +1058,8 @@
         if (!this.pendingHostCall) throw new Error("execution has no pending host call");
         var call = this.pendingHostCall;
         try {
-            this.completeHostCall(call.callable.callback(call.receiver, call.args));
+            this.completeHostCall(call.callable.callback(
+                call.receiver, call.args, call.frame.context));
         } catch (error) {
             this.failHostCall(error);
         }

@@ -105,6 +105,18 @@
         return this.heap.memory.readU32Trusted(address + LOW_OFFSET);
     };
 
+    ValueCells.prototype.copyAt = function (destination, source) {
+        this.heap.memory.writeU32Trusted(destination + TAG_OFFSET,
+            this.heap.memory.readU32Trusted(source + TAG_OFFSET));
+        this.heap.memory.writeU32Trusted(destination + LOW_OFFSET,
+            this.heap.memory.readU32Trusted(source + LOW_OFFSET));
+        this.heap.memory.writeU32Trusted(destination + HIGH_OFFSET,
+            this.heap.memory.readU32Trusted(source + HIGH_OFFSET));
+        this.heap.memory.writeU32Trusted(destination + AUX_OFFSET,
+            this.heap.memory.readU32Trusted(source + AUX_OFFSET));
+        return destination;
+    };
+
     ValueCells.prototype.readReferenceAt = function (address, expectedType) {
         if (this.tagAt(address) !== Tags.REFERENCE) {
             throw new TypeError("value cell does not contain a reference");
