@@ -45,6 +45,7 @@
         assembler.resolveLabels();
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
+                      symbols: assembler.labels,
                       ir: ir, backend: "i386", destroy: function () {}};
         if (!this.ffi.isMMVM) return result;
         var allocationLength = Math.max(4096,
@@ -124,6 +125,7 @@
         assembler.resolveLabels();
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
+                      symbols: assembler.labels,
                       ir: graph, backend: "i386",
                       registerAllocation: registerAllocations,
                       destroy: function () {}};
@@ -180,6 +182,7 @@
         if (timings) timings.resolve = new Date().getTime() - resolveStarted;
         var result = {fn: null, pointer: 0, length: assembler.bytes.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
+                      symbols: assembler.labels,
                       ir: ir, backend: "i386",
                       registerAllocation: describeRegisterAllocation(
                           ir, state.registerMap),

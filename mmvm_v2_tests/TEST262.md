@@ -19,12 +19,16 @@ wrapper's command-line shape:
 js_min.exe guest_runner.js --vm-native test262_runner.js
 js_min.exe guest_runner.js --vm-native test262_runner.js ch11/11.4
 js_min.exe guest_runner.js --vm-native test262_runner.js --fail-fast ch11
+js_min.exe guest_runner.js --vm-native test262_runner.js --strict-only ch09
 ```
 
 With no selector, or with `all`, the runner discovers every applicable test.
 Selectors may name a chapter, subtree, or individual test relative to the
 Test262 root.  A normal run continues after failures and prints a complete
 summary.  `--fail-fast` is an optional diagnostic mode, never the default.
+`--strict-only` and `--non-strict-only` restrict execution to one generated
+variant. They are diagnostic filters; tests whose metadata excludes the
+requested variant are not executed.
 
 The runner has no Python, Node.js, npm, or SpiderMonkey dependency.  The
 external corpus is supplied by the user and is read in place.

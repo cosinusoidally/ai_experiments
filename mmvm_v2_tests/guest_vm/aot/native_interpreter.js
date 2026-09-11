@@ -5352,6 +5352,27 @@
                                    intrinsicArgumentCount, stringSupport,
                                    bytecodeWords, pc, intrinsicId) {
         var intrinsicHandled = 0;
+        var isRawMemoryIntrinsic = 0;
+        var isBufferAccessIntrinsic = 0;
+        if (intrinsicId >= INTRINSIC_PEEK8) {
+            if (intrinsicId <= INTRINSIC_POKE32) {
+                isRawMemoryIntrinsic = 1;
+            }
+        }
+        if (intrinsicId === INTRINSIC_BUFFER_READ_U32_LE) {
+            isBufferAccessIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
+            isBufferAccessIntrinsic = 1;
+        } else if (intrinsicId >= INTRINSIC_BUFFER_READ_U16_LE) {
+            if (intrinsicId <= INTRINSIC_BUFFER_WRITE_I16_LE) {
+                isBufferAccessIntrinsic = 1;
+            }
+        }
+        if (intrinsicId !== INTRINSIC_BUFFER_SLICE) {
+            if (isRawMemoryIntrinsic === 0) {
+                if (isBufferAccessIntrinsic === 0) return 0;
+            }
+        }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
         var sliceReceiverIndex = load32(
@@ -5437,7 +5458,7 @@
     }
     }
     if (intrinsicHandled === 0) {
-    if (intrinsicId >= INTRINSIC_BUFFER_READ_U32_LE) {
+    if (isBufferAccessIntrinsic === 1) {
         var bufferReceiverIndex = load32(
             heapBase + bytecodeWords +
             (pc + THIRD_OPERAND) * WORD_BYTES);
@@ -5568,7 +5589,7 @@
         return 1;
     }
     }
-    if (intrinsicHandled === 0) {
+    if (isRawMemoryIntrinsic === 1) {
     var intrinsicPointerRegisterCell = heapBase +
         intrinsicArgumentsVector + VECTOR_CELLS;
     if (load32(intrinsicPointerRegisterCell) !== VALUE_TAG_INT32) {
@@ -5626,8 +5647,9 @@
         store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
         store32(intrinsicTarget + VALUE_CELL_AUX, 0);
     }
+    intrinsicHandled = 1;
     }
-        return 1;
+        return intrinsicHandled;
     }
 
     function bufferCopyKernel(heapBase, intrinsicTarget, copyReceiverCell,

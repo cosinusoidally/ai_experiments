@@ -229,6 +229,24 @@ performance are separate mandatory regression gates.
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 
+### 2026-09-11 01:15 BST — Chapter 9 baseline and intrinsic stability
+
+- Complete focused native run: `ch09`, 128 files, 254 variants, 160 passed,
+  94 failed, 0 timed out. Elapsed: 132.48 seconds. Peak RSS: 172,116 KiB.
+- The first attempt crashed in the strict variant of
+  `ch09/9.8/9.8.1/S9.8.1_A9_T1.js`. Native symbol-offset introspection traced
+  the fault to the buffer intrinsic helper: its broad numeric-ID test treated
+  later, unrelated intrinsic IDs as buffer accesses and dereferenced their
+  operands using a buffer layout. Intrinsic dispatch now rejects IDs before
+  reading operation-specific fields; the isolated strict variant and the
+  complete chapter both finish without a native fault.
+- The remaining failures primarily group into ToPrimitive for guest objects
+  and boxed primitives, missing Number constructor constants, ES5.1 string to
+  number whitespace/conversion rules, and the Boolean object interface.
+- Regression gates: Node and `js_min.exe` suites pass with 264 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
+  native interpreter, and three-context checks remain green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

@@ -19,13 +19,15 @@
     var verbose = false;
     var quiet = false;
     var listOnly = false;
+    var requestedVariant = "";
     var instructionLimit = 20000000;
     var selectors = [];
 
     function failUsage(message) {
         if (message) console.error("test262 runner: " + message);
         console.error("usage: test262_runner.js [--fail-fast] [--verbose] " +
-            "[--quiet] [--list] [--instruction-limit count] [all|path ...]");
+            "[--quiet] [--list] [--strict-only|--non-strict-only] " +
+            "[--instruction-limit count] [all|path ...]");
         process.exit(2);
     }
 
@@ -52,6 +54,13 @@
         else if (argument === "--verbose") verbose = true;
         else if (argument === "--quiet") quiet = true;
         else if (argument === "--list") listOnly = true;
+        else if (argument === "--strict-only") {
+            if (requestedVariant) failUsage("variant options are mutually exclusive");
+            requestedVariant = "strict";
+        } else if (argument === "--non-strict-only") {
+            if (requestedVariant) failUsage("variant options are mutually exclusive");
+            requestedVariant = "non-strict";
+        }
         else if (argument === "--help") failUsage("");
         else if (argument === "--instruction-limit") {
             if (argumentIndex >= runnerArguments.length) {
@@ -168,6 +177,11 @@
         var noStrict = hasDirective(source, "noStrict");
         var negative = hasDirective(source, "negative");
         var variants = onlyStrict ? [true] : noStrict ? [false] : [false, true];
+        if (requestedVariant === "strict") {
+            variants = noStrict ? [] : [true];
+        } else if (requestedVariant === "non-strict") {
+            variants = onlyStrict ? [] : [false];
+        }
         var harnessFiles = harnessFilesFor(relativePath);
         var variantIndex = 0;
         while (variantIndex < variants.length && !stopped) {
