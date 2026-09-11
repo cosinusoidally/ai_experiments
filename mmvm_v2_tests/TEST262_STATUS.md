@@ -370,6 +370,28 @@ performance are separate mandatory regression gates.
   This rules out further snapshot micro-tuning as the major route to the
   41.52-second Node reference.
 
+### 2026-09-11 — genuine fresh-context comparison
+
+- Revision `2ebbc01` reduced actual `JSContext` create/destroy cost from about
+  58 ms to about 0.3 ms per context under `js_min.exe`. It does this with a
+  kernel-compiled global-property copier, bulk memory clearing, cached template
+  metadata, and runtime-owned context-neutral `Function` and indirect `eval`
+  intrinsics. It does not restore a context snapshot.
+- Added a diagnostic `--fresh-contexts` Test262 mode while retaining the
+  snapshot checkpoint as the default comparison path. It creates a new context
+  for every variant and evaluates the already-compiled harness programs there.
+- Complete focused native run: `ch07/7.9`, 101 files, 202 variants, 202 passed,
+  0 failed, 0 timed out. Elapsed: 54.45 seconds. Peak RSS: 161,452 KiB.
+- For 200 reported variants, context creation consumed only 67 ms in total;
+  executing the Test262 harness in those fresh contexts consumed 42,178 ms.
+  Thus fresh context allocation is already cheap. The end-to-end gap from the
+  11.83-second snapshot run is repeated guest harness execution, especially its
+  Date/DST initialization and host-transition overhead, not context creation.
+- This diagnostic mode is not yet the default. A replacement for snapshot
+  isolation must instantiate an independently mutable, initialized realm; it
+  must not hide harness replay time inside the context-construction metric or
+  reuse mutable state from the previous test.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

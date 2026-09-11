@@ -561,15 +561,28 @@
         return null;
     };
 
-    GuestNodeEnvironment.prototype.instantiateTest262Harness = function () {
+    GuestNodeEnvironment.prototype.instantiateTest262Harness = function (
+            freshContext) {
         var template = this.test262HarnessTemplate;
         var profile = this.runtime.profileOpcodeCounts ?
             this.test262Timings : null;
         var phaseStarted = profile ? new Date().getTime() : 0;
-        var target = template.context.restoreSnapshot(template.snapshot);
+        var target;
+        if (freshContext) {
+            target = this.vm.jsRuntime.createContext();
+        } else {
+            target = template.context.restoreSnapshot(template.snapshot);
+        }
         if (profile) {
             profile.contextCreate += new Date().getTime() - phaseStarted;
             phaseStarted = new Date().getTime();
+        }
+        if (freshContext) {
+            this.runtime.deleteProperty(target.globalObject, "Test262VM");
+            var programIndex = 0;
+            while (programIndex < template.programs.length) {
+                target.evaluateProgram(template.programs[programIndex++]);
+            }
         }
         if (profile) {
             profile.harnessExecute += new Date().getTime() - phaseStarted;
@@ -587,6 +600,7 @@
                 var strict = !!args[2];
                 var harnessFiles = environment.runtime.arrayToHost(args[3]);
                 var instructionLimit = Number(args[4]);
+                var freshContext = !!args[5];
                 if (!(instructionLimit > 0)) instructionLimit = 20000000;
 
                 var harnessFailure = environment.prepareTest262Harness(
@@ -595,7 +609,8 @@
                 var profile = environment.runtime.profileOpcodeCounts ?
                     environment.test262Timings : null;
                 var contextStarted = profile ? new Date().getTime() : 0;
-                var globalContext = environment.instantiateTest262Harness();
+                var globalContext = environment.instantiateTest262Harness(
+                    freshContext);
                 if (profile) {
                     profile.context += new Date().getTime() - contextStarted;
                 }
@@ -608,9 +623,12 @@
                         "threw", "service", serviceError, 0);
                 } finally {
                     var destroyStarted = profile ? new Date().getTime() : 0;
-                    globalContext.execution = null;
-                    environment.runtime.heapRecords.setContextActiveFrame(
-                        globalContext.heapAddress, 0);
+                    if (freshContext) globalContext.destroy();
+                    else {
+                        globalContext.execution = null;
+                        environment.runtime.heapRecords.setContextActiveFrame(
+                            globalContext.heapAddress, 0);
+                    }
                     if (profile) {
                         profile.destroy += new Date().getTime() - destroyStarted;
                         profile.variants++;

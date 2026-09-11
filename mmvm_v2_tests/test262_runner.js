@@ -19,6 +19,7 @@
     var verbose = false;
     var quiet = false;
     var summaryOnly = false;
+    var freshContexts = false;
     var listOnly = false;
     var requestedVariant = "";
     var instructionLimit = 20000000;
@@ -27,7 +28,7 @@
     function failUsage(message) {
         if (message) console.error("test262 runner: " + message);
         console.error("usage: test262_runner.js [--fail-fast] [--verbose] " +
-            "[--quiet] [--summary-only] [--list] " +
+            "[--quiet] [--summary-only] [--fresh-contexts] [--list] " +
             "[--strict-only|--non-strict-only] " +
             "[--instruction-limit count] [all|path ...]");
         process.exit(2);
@@ -59,6 +60,7 @@
             quiet = true;
             summaryOnly = true;
         }
+        else if (argument === "--fresh-contexts") freshContexts = true;
         else if (argument === "--list") listOnly = true;
         else if (argument === "--strict-only") {
             if (requestedVariant) failUsage("variant options are mutually exclusive");
@@ -195,7 +197,8 @@
             var variantName = strict ? "strict" : "non-strict";
             counts.variants++;
             var result = Test262VM.runVariant(
-                filename, source, strict, harnessFiles, instructionLimit);
+                filename, source, strict, harnessFiles, instructionLimit,
+                freshContexts);
             var passed = negative ? negativePasses(source, result) :
                                     result.status === "completed";
             if (passed) {

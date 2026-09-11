@@ -21,6 +21,7 @@ js_min.exe guest_runner.js --vm-native test262_runner.js ch11/11.4
 js_min.exe guest_runner.js --vm-native test262_runner.js --fail-fast ch11
 js_min.exe guest_runner.js --vm-native test262_runner.js --strict-only ch09
 js_min.exe guest_runner.js --vm-native test262_runner.js --summary-only
+js_min.exe guest_runner.js --vm-native test262_runner.js --fresh-contexts ch09
 ```
 
 With no selector, or with `all`, the runner discovers every applicable test.
@@ -37,6 +38,12 @@ progress lines. It is intended for repeatable whole-suite throughput
 measurements when the failure inventory is already known. It never skips a
 test or converts a failure into a pass; omit it when producing the detailed
 failure log used for VM bring-up.
+
+`--fresh-contexts` is a diagnostic comparison path. It creates and destroys a
+real `JSContext` for each variant and evaluates the already compiled harness
+programs in it. The default retains the context-snapshot checkpoint while the
+fresh path is brought to equivalent end-to-end speed. Neither mode reparses
+the harness, and both provide a fresh guest-visible global state.
 
 The runner has no Python, Node.js, npm, or SpiderMonkey dependency.  The
 external corpus is supplied by the user and is read in place.
