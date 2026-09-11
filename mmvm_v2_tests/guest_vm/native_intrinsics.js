@@ -24,7 +24,12 @@
                       ARRAY_CONSTRUCTOR: 46, STRING_SUBSTRING: 47,
                       STRING_FROM_CHAR_CODE: 48,
                       PROGRAM_CREATE: 49, PROGRAM_SET_CODE: 50,
-                      PROGRAM_SET_CONSTANT: 51, PROGRAM_SET_VECTOR: 52};
+                      PROGRAM_SET_CONSTANT: 51, PROGRAM_SET_VECTOR: 52,
+                      DATE_GET_TIMEZONE_OFFSET: 53,
+                      DATE_GET_DATE: 54, DATE_GET_MONTH: 55,
+                      DATE_GET_FULL_YEAR: 56, DATE_GET_HOURS: 57,
+                      DATE_GET_MINUTES: 58, DATE_GET_SECONDS: 59,
+                      DATE_GET_MILLISECONDS: 60, DATE_GET_DAY: 61};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

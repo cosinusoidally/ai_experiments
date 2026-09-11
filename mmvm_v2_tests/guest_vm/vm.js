@@ -19,6 +19,7 @@
     function JSRuntime(options) {
         this.runtime = new SemanticRuntime(options || {});
         this.contexts = [];
+        this.functionConstructorPrograms = {};
         this.destroyed = false;
         var semanticRuntime = this.runtime;
         this.runtime.interpretGuest = function (callable, receiver, args,
@@ -81,17 +82,24 @@
                 var body = args.length ? String(args[args.length - 1]) : "";
                 var source = "function anonymous(" +
                     parameterParts.join(",") + ") {\n" + body + "\n}";
-                var parsed = new Parser(source, "<Function>").parseProgram();
-                if (!parsed.body.length ||
-                    parsed.body[0].type !== "FunctionDeclaration") {
-                    throw new SyntaxError(
-                        "invalid Function constructor source");
+                var cacheKey = "$" + source;
+                var program = own(jsRuntime.functionConstructorPrograms,
+                                  cacheKey) ?
+                    jsRuntime.functionConstructorPrograms[cacheKey] : null;
+                if (!program) {
+                    var parsed = new Parser(source, "<Function>").parseProgram();
+                    if (!parsed.body.length ||
+                        parsed.body[0].type !== "FunctionDeclaration") {
+                        throw new SyntaxError(
+                            "invalid Function constructor source");
+                    }
+                    var compiler = new Compiler();
+                    compiler.filename = "<Function>";
+                    program = verify(
+                        compiler.compileFunction(parsed.body[0]));
+                    semanticRuntime.retainProgram(program);
+                    jsRuntime.functionConstructorPrograms[cacheKey] = program;
                 }
-                var compiler = new Compiler();
-                compiler.filename = "<Function>";
-                var program = verify(
-                    compiler.compileFunction(parsed.body[0]));
-                semanticRuntime.registerProgram(program);
                 return semanticRuntime.makeGuestFunction(
                     program, null, callContext);
             });

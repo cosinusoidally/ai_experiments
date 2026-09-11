@@ -558,3 +558,23 @@ The MMVM result is approximately 187 times faster than the original measured
 path. Snapshot-based Test262 isolation remains available while its replacement
 is evaluated; these figures measure actual new context/global records, not
 snapshot restoration.
+
+The `--fresh-contexts ch07/7.9` comparison initially took 54.45 seconds for
+202 passing variants. Correct phase accounting showed 67 ms of context
+creation and 42.18 seconds of harness evaluation. Three general interpreter
+changes reduced the same fresh run without sharing mutable context state:
+
+- the documented UTC `Date.getTimezoneOffset()` operation now returns directly
+  from the guest intrinsic dispatcher;
+- `SET_GLOBAL` can allocate a normal missing property record in the native
+  heap rather than leaving the interpreter;
+- the UTC Date getters and the common numeric Date-construction path operate
+  on guest value cells in the kernel interpreter. Unsupported Date conversions
+  retain the semantic fallback.
+
+The measured progression was 54.45, 46.83, 26.82, and finally 25.93 seconds;
+all four runs passed 202 of 202 variants. In the latest profiled run, creating
+200 contexts cost 99 ms and executing their harnesses cost 14.02 seconds. The
+remaining repeated initialization is therefore a realm/harness problem, not a
+context-allocation problem. The native changes also apply to normal programs;
+they are not keyed to Test262 source or filenames.

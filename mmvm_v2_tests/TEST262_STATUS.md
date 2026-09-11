@@ -392,6 +392,27 @@ performance are separate mandatory regression gates.
   must not hide harness replay time inside the context-construction metric or
   reuse mutable state from the previous test.
 
+### 2026-09-11 — fresh harness native operations
+
+- Complete focused native runs of `ch07/7.9` continued to pass all 202
+  variants with 0 failures and 0 timeouts as general operations moved across
+  the native interpreter boundary. The elapsed progression was 54.45 seconds,
+  46.83 seconds after native UTC timezone offsets, 26.82 seconds after native
+  missing-global property allocation, and 25.93 seconds after native UTC Date
+  getters and common numeric Date construction.
+- The latest run peaked at 159,160 KiB. Its profile measured 99 ms creating
+  200 contexts and 14,024 ms evaluating the harness. Semantic exits fell to
+  933 across the complete command, including runner services; the earlier
+  profile had 33,025 exits.
+- The `Function` constructor now caches immutable verified programs by source
+  at runtime scope. Each invocation still creates a distinct guest function
+  with the requesting context as its home realm, so the optimization does not
+  share mutable function objects between tests.
+- Date values and results remain guest-heap value cells. The native path uses
+  the kernel compiler and named heap accessors; non-numeric and deliberately
+  bounded edge cases return to the existing semantic implementation rather
+  than changing observable results.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

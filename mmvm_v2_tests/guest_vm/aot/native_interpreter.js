@@ -329,6 +329,16 @@
         var INTRINSIC_PROGRAM_SET_CODE = 50;
         var INTRINSIC_PROGRAM_SET_CONSTANT = 51;
         var INTRINSIC_PROGRAM_SET_VECTOR = 52;
+        var INTRINSIC_DATE_GET_TIMEZONE_OFFSET = 53;
+        var INTRINSIC_DATE_GET_DATE = 54;
+        var INTRINSIC_DATE_GET_MONTH = 55;
+        var INTRINSIC_DATE_GET_FULL_YEAR = 56;
+        var INTRINSIC_DATE_GET_HOURS = 57;
+        var INTRINSIC_DATE_GET_MINUTES = 58;
+        var INTRINSIC_DATE_GET_SECONDS = 59;
+        var INTRINSIC_DATE_GET_MILLISECONDS = 60;
+        var INTRINSIC_DATE_GET_DAY = 61;
+        var INTRINSIC_LAST_ID = 61;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
         var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
@@ -451,32 +461,55 @@
                         heapBase, state, frame, pc, opcode, instructions);
                 }
                 var setGlobalKey = load32(setGlobalKeyCell + VALUE_CELL_LOW);
-                var setGlobalProperty = load32(
-                    heapBase + globalObject + OBJECT_PROPERTY_HEAD);
+                var setGlobalFirstProperty = objectPropertyHead(
+                    heapBase, globalObject);
+                var setGlobalProperty = setGlobalFirstProperty;
+                var setGlobalRecord = 0;
                 while (setGlobalProperty > 0) {
                     if (propertyKey(heapBase, setGlobalProperty) ===
                         setGlobalKey) {
-                        var setGlobalValue = heapBase + setGlobalProperty +
-                                             PROPERTY_VALUE;
-                        var setGlobalSource = heapBase + registerCells +
-                            setGlobalSourceIndex * VALUE_CELL_BYTES;
-                        store32(setGlobalValue, load32(setGlobalSource));
-                        store32(setGlobalValue + VALUE_CELL_LOW,
-                                load32(setGlobalSource + VALUE_CELL_LOW));
-                        store32(setGlobalValue + VALUE_CELL_HIGH,
-                                load32(setGlobalSource + VALUE_CELL_HIGH));
-                        store32(setGlobalValue + VALUE_CELL_AUX,
-                                load32(setGlobalSource + VALUE_CELL_AUX));
-                        setGlobalProperty = PROPERTY_FOUND_SENTINEL;
+                        setGlobalRecord = setGlobalProperty;
+                        setGlobalProperty = 0;
                     } else {
-                        setGlobalProperty = load32(
-                            heapBase + setGlobalProperty + PROPERTY_NEXT);
+                        setGlobalProperty = propertyNext(
+                            heapBase, setGlobalProperty);
                     }
                 }
-                if (setGlobalProperty === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, instructions);
+                if (setGlobalRecord === 0) {
+                    setGlobalRecord = engineHeapBump(heapBase, state);
+                    if (setGlobalRecord + PROPERTY_RECORD_BYTES >
+                        engineHeapLimit(heapBase, state)) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    setRecordType(
+                        heapBase, setGlobalRecord, HEAP_TYPE_PROPERTY);
+                    setRecordSize(
+                        heapBase, setGlobalRecord, PROPERTY_RECORD_BYTES);
+                    setRecordMark(heapBase, setGlobalRecord, 0);
+                    setRecordFlags(heapBase, setGlobalRecord, 0);
+                    setPropertyNext(
+                        heapBase, setGlobalRecord, setGlobalFirstProperty);
+                    setPropertyKey(heapBase, setGlobalRecord, setGlobalKey);
+                    setPropertyAttributes(heapBase, setGlobalRecord,
+                                          DEFAULT_PROPERTY_ATTRIBUTES);
+                    setPropertyReserved(heapBase, setGlobalRecord, 0);
+                    setObjectPropertyHead(
+                        heapBase, globalObject, setGlobalRecord);
+                    setEngineHeapBump(heapBase, state,
+                        setGlobalRecord + PROPERTY_RECORD_BYTES);
                 }
+                var setGlobalValue = heapBase + setGlobalRecord +
+                                     PROPERTY_VALUE;
+                var setGlobalSource = heapBase + registerCells +
+                    setGlobalSourceIndex * VALUE_CELL_BYTES;
+                store32(setGlobalValue, load32(setGlobalSource));
+                store32(setGlobalValue + VALUE_CELL_LOW,
+                        load32(setGlobalSource + VALUE_CELL_LOW));
+                store32(setGlobalValue + VALUE_CELL_HIGH,
+                        load32(setGlobalSource + VALUE_CELL_HIGH));
+                store32(setGlobalValue + VALUE_CELL_AUX,
+                        load32(setGlobalSource + VALUE_CELL_AUX));
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MOVE) {
                 var moveTarget = load32(heapBase + bytecodeWords +
@@ -3755,7 +3788,7 @@
             intrinsicId = load32(
                 heapBase + intrinsicFunction + NATIVE_FUNCTION_METADATA);
             if (intrinsicId < INTRINSIC_PEEK8) intrinsicCallValid = 0;
-            else if (intrinsicId > INTRINSIC_PROGRAM_SET_VECTOR) {
+            else if (intrinsicId > INTRINSIC_LAST_ID) {
                 intrinsicCallValid = 0;
             }
         }
@@ -3808,6 +3841,12 @@
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_DATE_GET_TIMEZONE_OFFSET) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId >= INTRINSIC_DATE_GET_DATE) {
+            if (intrinsicId <= INTRINSIC_DATE_GET_DAY) {
+                requiredIntrinsicArguments = 0;
+            }
         } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
@@ -3910,12 +3949,24 @@
                     heapBase, state, frame, pc, opcode, instructions);
             }
         }
+        var isDateIntrinsic = 0;
         if (intrinsicId >= INTRINSIC_NUMBER_CONSTRUCTOR) {
         if (intrinsicId <= INTRINSIC_DATE_GET_TIME) {
+            isDateIntrinsic = 1;
+        }
+        }
+        if (intrinsicId >= INTRINSIC_DATE_GET_DATE) {
+        if (intrinsicId <= INTRINSIC_DATE_GET_DAY) {
+            isDateIntrinsic = 1;
+        }
+        }
+        if (isDateIntrinsic === 1) {
             receiverIndex = -1;
-            if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
+            if (intrinsicId !== INTRINSIC_NUMBER_CONSTRUCTOR) {
+            if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
                 receiverIndex = load32(heapBase + bytecodeWords +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
+            }
             }
             intrinsicHandled = dateIntrinsicKernel(
                 heapBase, state, intrinsicTarget, registerCells,
@@ -3931,12 +3982,18 @@
                     heapBase, state, frame, pc, opcode, instructions);
             }
         }
-        }
         if (intrinsicId === INTRINSIC_GET_DLSYM) {
             store32(intrinsicTarget, VALUE_TAG_INT32);
             store32(intrinsicTarget + VALUE_CELL_LOW,
                 platformDlsymPointer(heapBase,
                     enginePlatformServices(heapBase, state)));
+            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicId === INTRINSIC_DATE_GET_TIMEZONE_OFFSET) {
+            store32(intrinsicTarget, VALUE_TAG_INT32);
+            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
             store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
             store32(intrinsicTarget + VALUE_CELL_AUX, 0);
             intrinsicHandled = 1;
@@ -8107,6 +8164,115 @@
         return 1;
     }
 
+    function floorDivideDateIntegerKernel(value, divisor) {
+        var quotient = divideI32(value, divisor);
+        if (value < 0) {
+            if (value % divisor !== 0) quotient = quotient - 1;
+        }
+        return quotient;
+    }
+
+    function dateLeapYearKernel(year) {
+        if (year % 4 !== 0) return 0;
+        if (year % 100 !== 0) return 1;
+        if (year % 400 === 0) return 1;
+        return 0;
+    }
+
+    function dateDayFromYearKernel(year) {
+        return 365 * (year - 1970) +
+            floorDivideDateIntegerKernel(year - 1969, 4) -
+            floorDivideDateIntegerKernel(year - 1901, 100) +
+            floorDivideDateIntegerKernel(year - 1901, 400);
+    }
+
+    function dateDaysBeforeMonthKernel(year, month) {
+        var result = 0;
+        if (month === 1) result = 31;
+        else if (month === 2) result = 59;
+        else if (month === 3) result = 90;
+        else if (month === 4) result = 120;
+        else if (month === 5) result = 151;
+        else if (month === 6) result = 181;
+        else if (month === 7) result = 212;
+        else if (month === 8) result = 243;
+        else if (month === 9) result = 273;
+        else if (month === 10) result = 304;
+        else if (month === 11) result = 334;
+        if (month > 1) result = result + dateLeapYearKernel(year);
+        return result;
+    }
+
+    function dateYearFromDayKernel(day) {
+        var cycle = floorDivideDateIntegerKernel(day, 146097);
+        var year = 1970 + cycle * 400;
+        while (day < dateDayFromYearKernel(year)) year = year - 1;
+        while (day >= dateDayFromYearKernel(year + 1)) year = year + 1;
+        return year;
+    }
+
+    function dateMonthFromDayKernel(day, year) {
+        var dayWithinYear = day - dateDayFromYearKernel(year);
+        var month = 11;
+        while (month > 0) {
+            if (dayWithinYear >= dateDaysBeforeMonthKernel(year, month)) {
+                return month;
+            }
+            month = month - 1;
+        }
+        return 0;
+    }
+
+    function dateWithinDayUnitKernel(heapBase, state, dateSource,
+                                     dateSourceTag, day, unit, modulus) {
+        var dayScratch = engineScratchLeftAddress(heapBase, state);
+        var unitScratch = engineScratchRightAddress(heapBase, state);
+        store32(dayScratch, day);
+        store32(unitScratch, 86400000);
+        storeF64(dayScratch, multiplyF64(
+            loadI32F64(dayScratch), loadI32F64(unitScratch)));
+        store32(unitScratch, unit);
+        var result = toInt32F64(divideF64(
+            subtractF64(
+                loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
+                loadF64(dayScratch)),
+            loadI32F64(unitScratch)));
+        if (modulus > 0) result = result % modulus;
+        return result;
+    }
+
+    function dateArgumentIntegerKernel(heapBase, registerCells,
+                                       argumentsVector, index,
+                                       defaultValue) {
+        if (index >= vectorLength(heapBase, argumentsVector)) {
+            return defaultValue;
+        }
+        var descriptor = vectorCellAddress(heapBase, argumentsVector, index);
+        if (valueCellTag(0, descriptor) !== VALUE_TAG_INT32) {
+            return MINIMUM_INT32;
+        }
+        var argumentRegister = valueCellInt32(0, descriptor);
+        var argumentCell = heapBase + registerCells +
+            argumentRegister * VALUE_CELL_BYTES;
+        var argumentTag = valueCellTag(0, argumentCell);
+        if (argumentTag !== VALUE_TAG_INT32) {
+            if (argumentTag !== VALUE_TAG_DOUBLE) return MINIMUM_INT32;
+        }
+        return toInt32F64(loadNumberF64(
+            argumentCell + VALUE_CELL_LOW, argumentTag));
+    }
+
+    function dateAddIntegerComponentKernel(heapBase, state, target,
+                                           component, multiplier) {
+        var componentScratch = engineScratchLeftAddress(heapBase, state);
+        var multiplierScratch = engineScratchRightAddress(heapBase, state);
+        store32(componentScratch, component);
+        store32(multiplierScratch, multiplier);
+        storeF64(target, addF64(loadF64(target), multiplyF64(
+            loadI32F64(componentScratch), loadI32F64(multiplierScratch))));
+        return 1;
+    }
+
     function dateIntrinsicKernel(heapBase, state, targetCell, registerCells,
                                  receiverIndex, intrinsicId, stringSupport,
                                  argumentsVector) {
@@ -8246,15 +8412,12 @@
             return 0;
         }
         if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
-            var dateNowPointer = platformGettimeofdayPointer(
-                heapBase, enginePlatformServices(heapBase, state));
-            if (dateNowPointer === 0) return 0;
+            var dateArgumentCount = vectorLength(heapBase, argumentsVector);
+            if (dateArgumentCount > 7) dateArgumentCount = 7;
             var dateObject = engineHeapBump(heapBase, state);
             var dateValueProperty = dateObject + OBJECT_RECORD_BYTES;
             var dateAllocationEnd = dateValueProperty + PROPERTY_RECORD_BYTES;
             if (dateAllocationEnd > engineHeapLimit(heapBase, state)) return 2;
-            var dateTimeval = engineScratchLeftAddress(heapBase, state);
-            if (callNativeI32(dateNowPointer, dateTimeval, 0) !== 0) return 0;
             var datePrototypeCell = heapBase + stringSupport + VECTOR_CELLS +
                 RUNTIME_SUPPORT_DATE_PROTOTYPE * VALUE_CELL_BYTES;
             var dateKeyCell = heapBase + stringSupport + VECTOR_CELLS +
@@ -8279,15 +8442,88 @@
             setPropertyReserved(heapBase, dateValueProperty, 0);
             var dateValueCell = heapBase + dateValueProperty + PROPERTY_VALUE;
             store32(dateValueCell, VALUE_TAG_DOUBLE);
-            /* targetCell is not published until the result is complete, so
-             * its payload is safe conversion scratch.  Do not reuse the
-             * adjacent engine scratch word: it currently holds tv_usec. */
-            store32(targetCell + VALUE_CELL_LOW, 1000);
-            storeF64(dateValueCell + VALUE_CELL_LOW, addF64(
-                multiplyF64(loadI32F64(dateTimeval),
-                    loadI32F64(targetCell + VALUE_CELL_LOW)),
-                divideF64(loadI32F64(dateTimeval + 4),
-                    loadI32F64(targetCell + VALUE_CELL_LOW))));
+            if (dateArgumentCount === 0) {
+                var dateNowPointer = platformGettimeofdayPointer(
+                    heapBase, enginePlatformServices(heapBase, state));
+                if (dateNowPointer === 0) return 0;
+                var dateTimeval = engineScratchLeftAddress(heapBase, state);
+                if (callNativeI32(dateNowPointer, dateTimeval, 0) !== 0) {
+                    return 0;
+                }
+                /* targetCell is unpublished conversion scratch. Do not use
+                 * the adjacent engine word, which contains tv_usec. */
+                store32(targetCell + VALUE_CELL_LOW, 1000);
+                storeF64(dateValueCell + VALUE_CELL_LOW, addF64(
+                    multiplyF64(loadI32F64(dateTimeval),
+                        loadI32F64(targetCell + VALUE_CELL_LOW)),
+                    divideF64(loadI32F64(dateTimeval + 4),
+                        loadI32F64(targetCell + VALUE_CELL_LOW))));
+            } else if (dateArgumentCount === 1) {
+                var dateSingleDescriptor = vectorCellAddress(
+                    heapBase, argumentsVector, 0);
+                if (valueCellTag(0, dateSingleDescriptor) !==
+                    VALUE_TAG_INT32) return 0;
+                var dateSingleRegister = valueCellInt32(
+                    0, dateSingleDescriptor);
+                var dateSingleCell = heapBase + registerCells +
+                    dateSingleRegister * VALUE_CELL_BYTES;
+                var dateSingleTag = valueCellTag(0, dateSingleCell);
+                if (dateSingleTag !== VALUE_TAG_INT32) {
+                    if (dateSingleTag !== VALUE_TAG_DOUBLE) return 0;
+                }
+                storeF64(dateValueCell + VALUE_CELL_LOW,
+                    loadNumberF64(dateSingleCell + VALUE_CELL_LOW,
+                                  dateSingleTag));
+            } else {
+                var dateYear = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 0, 0);
+                var dateMonth = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 1, 0);
+                var dateDate = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 2, 1);
+                var dateHours = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 3, 0);
+                var dateMinutes = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 4, 0);
+                var dateSeconds = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 5, 0);
+                var dateMilliseconds = dateArgumentIntegerKernel(
+                    heapBase, registerCells, argumentsVector, 6, 0);
+                if (dateYear === MINIMUM_INT32) return 0;
+                if (dateMonth === MINIMUM_INT32) return 0;
+                if (dateDate === MINIMUM_INT32) return 0;
+                if (dateHours === MINIMUM_INT32) return 0;
+                if (dateMinutes === MINIMUM_INT32) return 0;
+                if (dateSeconds === MINIMUM_INT32) return 0;
+                if (dateMilliseconds === MINIMUM_INT32) return 0;
+                if (dateYear >= 0) {
+                    if (dateYear <= 99) dateYear = dateYear + 1900;
+                }
+                if (dateMonth < -1200000) return 0;
+                if (dateMonth > 1200000) return 0;
+                dateYear = dateYear +
+                    floorDivideDateIntegerKernel(dateMonth, 12);
+                dateMonth = dateMonth % 12;
+                if (dateMonth < 0) dateMonth = dateMonth + 12;
+                if (dateYear < -275000) return 0;
+                if (dateYear > 275000) return 0;
+                var dateDay = dateDayFromYearKernel(dateYear) +
+                    dateDaysBeforeMonthKernel(dateYear, dateMonth) +
+                    dateDate - 1;
+                store32(targetCell + VALUE_CELL_HIGH, 0);
+                storeF64(dateValueCell + VALUE_CELL_LOW,
+                         loadI32F64(targetCell + VALUE_CELL_HIGH));
+                var dateAddResult = dateAddIntegerComponentKernel(heapBase, state,
+                    dateValueCell + VALUE_CELL_LOW, dateDay, 86400000);
+                dateAddResult = dateAddIntegerComponentKernel(heapBase, state,
+                    dateValueCell + VALUE_CELL_LOW, dateHours, 3600000);
+                dateAddResult = dateAddIntegerComponentKernel(heapBase, state,
+                    dateValueCell + VALUE_CELL_LOW, dateMinutes, 60000);
+                dateAddResult = dateAddIntegerComponentKernel(heapBase, state,
+                    dateValueCell + VALUE_CELL_LOW, dateSeconds, 1000);
+                dateAddResult = dateAddIntegerComponentKernel(heapBase, state,
+                    dateValueCell + VALUE_CELL_LOW, dateMilliseconds, 1);
+            }
             store32(dateValueCell + VALUE_CELL_AUX, 0);
             store32(targetCell, VALUE_TAG_REFERENCE);
             store32(targetCell + VALUE_CELL_LOW, dateObject);
@@ -8306,20 +8542,79 @@
             RUNTIME_SUPPORT_DATE_VALUE_KEY * VALUE_CELL_BYTES;
         var key = valueCellReference(0, keyCell);
         var property = objectPropertyHead(heapBase, receiver);
+        var dateSource = 0;
         while (property !== 0) {
             if (propertyKey(heapBase, property) === key) {
-                var source = heapBase + property + PROPERTY_VALUE;
-                store32(targetCell, load32(source));
-                store32(targetCell + VALUE_CELL_LOW,
-                        load32(source + VALUE_CELL_LOW));
-                store32(targetCell + VALUE_CELL_HIGH,
-                        load32(source + VALUE_CELL_HIGH));
-                store32(targetCell + VALUE_CELL_AUX, 0);
-                return 1;
+                dateSource = heapBase + property + PROPERTY_VALUE;
+                property = 0;
+            } else {
+                property = propertyNext(heapBase, property);
             }
-            property = propertyNext(heapBase, property);
         }
-        return 0;
+        if (dateSource === 0) return 0;
+        if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
+            copyValueCell(targetCell, dateSource);
+            return 1;
+        }
+        var dateSourceTag = valueCellTag(0, dateSource);
+        if (dateSourceTag !== VALUE_TAG_INT32) {
+            if (dateSourceTag !== VALUE_TAG_DOUBLE) return 0;
+        }
+        if (equalF64(
+                loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
+                loadNumberF64(dateSource + VALUE_CELL_LOW,
+                              dateSourceTag)) === 0) {
+            copyValueCell(targetCell, dateSource);
+            return 1;
+        }
+        var dateDayUnitScratch = engineScratchLeftAddress(heapBase, state);
+        store32(dateDayUnitScratch, 86400000);
+        var dateDayNumber = toInt32F64(divideF64(
+            loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
+            loadI32F64(dateDayUnitScratch)));
+        var dateDayNumberScratch = engineScratchRightAddress(heapBase, state);
+        store32(dateDayNumberScratch, dateDayNumber);
+        if (lessF64(
+                divideF64(
+                    loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
+                    loadI32F64(dateDayUnitScratch)),
+                loadI32F64(dateDayNumberScratch)) === 1) {
+            dateDayNumber = dateDayNumber - 1;
+        }
+        var dateResult = 0;
+        if (intrinsicId === INTRINSIC_DATE_GET_DAY) {
+            dateResult = (dateDayNumber + 4) % 7;
+            if (dateResult < 0) dateResult = dateResult + 7;
+        } else if (intrinsicId === INTRINSIC_DATE_GET_HOURS) {
+            dateResult = dateWithinDayUnitKernel(heapBase, state,
+                dateSource, dateSourceTag, dateDayNumber, 3600000, 0);
+        } else if (intrinsicId === INTRINSIC_DATE_GET_MINUTES) {
+            dateResult = dateWithinDayUnitKernel(heapBase, state,
+                dateSource, dateSourceTag, dateDayNumber, 60000, 60);
+        } else if (intrinsicId === INTRINSIC_DATE_GET_SECONDS) {
+            dateResult = dateWithinDayUnitKernel(heapBase, state,
+                dateSource, dateSourceTag, dateDayNumber, 1000, 60);
+        } else if (intrinsicId === INTRINSIC_DATE_GET_MILLISECONDS) {
+            dateResult = dateWithinDayUnitKernel(heapBase, state,
+                dateSource, dateSourceTag, dateDayNumber, 1, 1000);
+        } else {
+            var dateYear = dateYearFromDayKernel(dateDayNumber);
+            if (intrinsicId === INTRINSIC_DATE_GET_FULL_YEAR) {
+                dateResult = dateYear;
+            } else {
+                var dateMonth = dateMonthFromDayKernel(
+                    dateDayNumber, dateYear);
+                if (intrinsicId === INTRINSIC_DATE_GET_MONTH) {
+                    dateResult = dateMonth;
+                } else if (intrinsicId === INTRINSIC_DATE_GET_DATE) {
+                    dateResult = dateDayNumber -
+                        dateDayFromYearKernel(dateYear) -
+                        dateDaysBeforeMonthKernel(dateYear, dateMonth) + 1;
+                } else return 0;
+            }
+        }
+        setValueCellInt32(targetCell, dateResult);
+        return 1;
     }
 
     function isESWhiteSpaceKernel(character) {
@@ -8495,8 +8790,17 @@
             bufferCopyKernel: bufferCopyKernel,
             bufferIntrinsicKernel: bufferIntrinsicKernel,
             bytecodeCallKernel: bytecodeCallKernel,
+            dateAddIntegerComponentKernel: dateAddIntegerComponentKernel,
+            dateArgumentIntegerKernel: dateArgumentIntegerKernel,
+            dateDayFromYearKernel: dateDayFromYearKernel,
+            dateDaysBeforeMonthKernel: dateDaysBeforeMonthKernel,
             dateIntrinsicKernel: dateIntrinsicKernel,
+            dateLeapYearKernel: dateLeapYearKernel,
+            dateMonthFromDayKernel: dateMonthFromDayKernel,
+            dateWithinDayUnitKernel: dateWithinDayUnitKernel,
+            dateYearFromDayKernel: dateYearFromDayKernel,
             ffiCallKernel: ffiCallKernel,
+            floorDivideDateIntegerKernel: floorDivideDateIntegerKernel,
             getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,

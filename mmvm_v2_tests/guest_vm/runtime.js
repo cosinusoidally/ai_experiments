@@ -2302,24 +2302,26 @@
                         return DateSupport.field(dateValue(receiver), field);
                     }, "intrinsic", intrinsicId || NativeIntrinsics.NONE));
         }
-        method("getDate", "Date");
-        method("getMonth", "Month");
-        method("getFullYear", "FullYear");
-        method("getHours", "Hours");
-        method("getMinutes", "Minutes");
-        method("getSeconds", "Seconds");
-        method("getMilliseconds", "Milliseconds");
-        method("getDay", "Day");
+        method("getDate", "Date", NativeIntrinsics.DATE_GET_DATE);
+        method("getMonth", "Month", NativeIntrinsics.DATE_GET_MONTH);
+        method("getFullYear", "FullYear",
+               NativeIntrinsics.DATE_GET_FULL_YEAR);
+        method("getHours", "Hours", NativeIntrinsics.DATE_GET_HOURS);
+        method("getMinutes", "Minutes", NativeIntrinsics.DATE_GET_MINUTES);
+        method("getSeconds", "Seconds", NativeIntrinsics.DATE_GET_SECONDS);
+        method("getMilliseconds", "Milliseconds",
+               NativeIntrinsics.DATE_GET_MILLISECONDS);
+        method("getDay", "Day", NativeIntrinsics.DATE_GET_DAY);
         method("getTime", null, NativeIntrinsics.DATE_GET_TIME);
         method("valueOf", null, NativeIntrinsics.DATE_GET_TIME);
         this.setProperty(this.datePrototype, "getTimezoneOffset",
             this.makeNativeFunction("Date.getTimezoneOffset", function () {
                 return DateSupport.localTimezoneOffset();
-            }));
+            }, "intrinsic", NativeIntrinsics.DATE_GET_TIMEZONE_OFFSET));
         var dateConstructor = this.makeNativeFunction("Date", function () {
             return String(DateSupport.construct([], runtime.nowMilliseconds ?
                 runtime.nowMilliseconds() : 0));
-        });
+        }, "intrinsic", NativeIntrinsics.DATE_CONSTRUCTOR);
         dateConstructor.constructCallback = function (args) {
             var date = runtime.makeObject();
             runtime.heapRecords.setObjectPrototype(
