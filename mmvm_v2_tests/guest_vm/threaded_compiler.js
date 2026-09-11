@@ -775,22 +775,22 @@
         else if (opcode === op.REMAINDER) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")%runtime.toNumber(" + rr(3) + ");");
         else if (opcode === op.STRICT_EQUAL) lines.push(rr(1) + "=" + rr(2) + "===" + rr(3) + ";");
         else if (opcode === op.EQUAL) lines.push(rr(1) + "=runtime.equal(" + rr(2) + "," + rr(3) + ");");
-        else if (opcode === op.LESS) lines.push(rr(1) + "=" + rr(2) + "<" + rr(3) + ";");
-        else if (opcode === op.LESS_EQUAL) lines.push(rr(1) + "=" + rr(2) + "<=" + rr(3) + ";");
-        else if (opcode === op.GREATER) lines.push(rr(1) + "=" + rr(2) + ">" + rr(3) + ";");
-        else if (opcode === op.GREATER_EQUAL) lines.push(rr(1) + "=" + rr(2) + ">=" + rr(3) + ";");
-        else if (opcode === op.BIT_AND) lines.push(rr(1) + "=" + rr(2) + "&" + rr(3) + ";");
-        else if (opcode === op.BIT_OR) lines.push(rr(1) + "=" + rr(2) + "|" + rr(3) + ";");
-        else if (opcode === op.BIT_XOR) lines.push(rr(1) + "=" + rr(2) + "^" + rr(3) + ";");
-        else if (opcode === op.SHIFT_LEFT) lines.push(rr(1) + "=" + rr(2) + "<<" + rr(3) + ";");
-        else if (opcode === op.SHIFT_RIGHT) lines.push(rr(1) + "=" + rr(2) + ">>" + rr(3) + ";");
-        else if (opcode === op.SHIFT_UNSIGNED_RIGHT) lines.push(rr(1) + "=" + rr(2) + ">>>" + rr(3) + ";");
+        else if (opcode === op.LESS) lines.push(rr(1) + "=runtime.relational(" + rr(2) + "," + rr(3) + ",'less');");
+        else if (opcode === op.LESS_EQUAL) lines.push(rr(1) + "=runtime.relational(" + rr(2) + "," + rr(3) + ",'lessEqual');");
+        else if (opcode === op.GREATER) lines.push(rr(1) + "=runtime.relational(" + rr(2) + "," + rr(3) + ",'greater');");
+        else if (opcode === op.GREATER_EQUAL) lines.push(rr(1) + "=runtime.relational(" + rr(2) + "," + rr(3) + ",'greaterEqual');");
+        else if (opcode === op.BIT_AND) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")&runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.BIT_OR) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")|runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.BIT_XOR) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")^runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.SHIFT_LEFT) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")<<runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.SHIFT_RIGHT) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")>>runtime.toNumber(" + rr(3) + ");");
+        else if (opcode === op.SHIFT_UNSIGNED_RIGHT) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ")>>>runtime.toNumber(" + rr(3) + ");");
         else if (opcode === op.IN) lines.push(rr(1) + "=runtime.hasProperty(" + rr(3) + "," + rr(2) + ");");
         else if (opcode === op.INSTANCEOF) lines.push(rr(1) + "=runtime.instanceOf(" + rr(2) + "," + rr(3) + ");");
         else if (opcode === op.NOT) lines.push(rr(1) + "=!" + rr(2) + ";");
         else if (opcode === op.NEGATE) lines.push(rr(1) + "=-runtime.toNumber(" + rr(2) + ");");
         else if (opcode === op.POSITIVE) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ");");
-        else if (opcode === op.BIT_NOT) lines.push(rr(1) + "=~" + rr(2) + ";");
+        else if (opcode === op.BIT_NOT) lines.push(rr(1) + "=~runtime.toNumber(" + rr(2) + ");");
         else if (opcode === op.TYPEOF) lines.push(rr(1) + "=runtime.typeOf(" + rr(2) + ");");
         else if (opcode === op.TYPEOF_GLOBAL) {
             lines.push(rr(1) + "=runtime.typeOfGlobal(context," +

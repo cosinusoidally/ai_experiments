@@ -6,11 +6,40 @@ the full-suite table are recorded only after every selected variant reaches a
 pass, failure, or timeout result; interrupted and focused runs appear in the
 investigation log and are not used to claim progress.
 
-## Full-suite history
+## Result history
 
-| Date and time | Revision | Files | Variants | Passed | Failed | Timed out | Elapsed | Notes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Pending | — | 3,292 | — | — | — | — | — | The first complete baseline is pending removal of root-harness blockers and adequate harness throughput. |
+Results are grouped by identical selection so that movement in the pass and
+failure counts is directly comparable. The intended progression within each
+group is toward zero failures; a smaller selection is never presented as an
+improvement over a larger one.
+
+### Complete ES5.1 suite — 3,292 files
+
+- Pending: the first uninterrupted full-suite baseline has not completed yet.
+
+### Chapter 9 — 128 files, 254 variants
+
+- 2026-09-11 01:15 BST, revision `f801d9a`: 160 passed, 94 failed,
+  0 timed out; 132.48 seconds; peak RSS 172,116 KiB.
+- 2026-09-11 01:25 BST, revision `793da54`: 200 passed, 54 failed,
+  0 timed out; 135.92 seconds; peak RSS 172,112 KiB.
+- 2026-09-11 01:45 BST, working tree after `793da54`: 252 passed,
+  2 failed, 0 timed out; 139.87 seconds; peak RSS 171,392 KiB.
+
+### Chapter 7 focused selections
+
+- `ch07/7.3`, 59 files, 118 variants, revision `e926acc`: 118 passed,
+  0 failed, 0 timed out; 60.94 seconds.
+- `ch07/7.2`, 45 files, 90 variants, revision `e8907b6`: 90 passed,
+  0 failed, 0 timed out.
+- `ch07/7.6`, 271 files, 503 variants, revision `1dd5005`: 503 passed,
+  0 failed, 0 timed out; 282.16 seconds.
+- `ch07/7.8/7.8.3`, 80 files, 150 variants, revision `5838573`:
+  150 passed, 0 failed, 0 timed out; 72.87 seconds.
+- `ch07/7.8/7.8.4`, 78 files, 120 variants, revision `7106d12`:
+  120 passed, 0 failed, 0 timed out; 55.97 seconds.
+- `ch07/7.9`, 101 files, 202 variants, revision `9e4ca43`: 202 passed,
+  0 failed, 0 timed out; 86.44 seconds.
 
 The failure count must decrease from one completed full run to the next.
 A higher count blocks the corresponding change from being accepted, even if
@@ -257,6 +286,28 @@ performance are separate mandatory regression gates.
   signed-zero checks, infinity conversion, bitwise conversion, and number to
   string tests that had all observed missing properties as `undefined`.
 - Regression gates: Node and `js_min.exe` suites pass with 267 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
+  native interpreter, and three-context checks remain green.
+
+### 2026-09-11 01:45 BST — ES5.1 conversion model
+
+- Complete focused native run: `ch09`, 128 files, 254 variants, 252 passed,
+  2 failed, 0 timed out. Elapsed: 139.87 seconds. Peak RSS: 171,392 KiB.
+  This is 52 fewer failures than the directly preceding Chapter 9 result and
+  92 fewer than the initial Chapter 9 baseline.
+- Added guest-owned primitive wrapper objects and the shared `ToObject` and
+  `ToPrimitive` operations. Arithmetic, relational comparison, loose
+  equality, bitwise operations, constructors, and standard prototype methods
+  now consume those conversions consistently. Guest-defined `valueOf` and
+  `toString` functions execute in the guest VM rather than being forwarded to
+  the host language.
+- String-to-number conversion now recognizes the complete ES5.1 whitespace
+  set. The native interpreter trims guest strings itself and sends only the
+  numeric span through its direct `strtod` FFI service.
+- The two remaining failures are both `with (null/undefined) statement`
+  cases. They require the general ES5.1 `with` statement and dynamic object
+  environment records; they are not being special-cased as conversions.
+- Regression gates: Node and `js_min.exe` suites pass with 264 guest
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 

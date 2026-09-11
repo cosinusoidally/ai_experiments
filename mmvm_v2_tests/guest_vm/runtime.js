@@ -102,6 +102,22 @@
         return result;
     }
 
+    function isESWhiteSpace(code) {
+        return code === 9 || code === 10 || code === 11 || code === 12 ||
+               code === 13 || code === 32 || code === 160 || code === 5760 ||
+               code === 6158 || (code >= 8192 && code <= 8202) ||
+               code === 8232 || code === 8233 || code === 8239 ||
+               code === 8287 || code === 12288 || code === 65279;
+    }
+
+    function trimESWhiteSpace(value) {
+        var start = 0;
+        var end = value.length;
+        while (start < end && isESWhiteSpace(value.charCodeAt(start))) start++;
+        while (end > start && isESWhiteSpace(value.charCodeAt(end - 1))) end--;
+        return value.substring(start, end);
+    }
+
     var MAX_ARRAY_CAPACITY = 67108860;
 
     function Runtime(options) {
@@ -275,6 +291,24 @@
         return this.trackObject(this.makeHeapHandle(
             this.heapRecords.allocateObject(
                 prototype ? prototype.heapAddress : 0), "object"));
+    };
+
+    Runtime.prototype.defineInternalValue = function (object, key, value) {
+        var keyAddress = this.internStringAddress(key);
+        var property = this.heapRecords.defineOwnProperty(
+            object.heapAddress, keyAddress, 0);
+        this.heapRecords.setPropertySetter(property, 0);
+        this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
+        object.propertyAddresses["$" + keyAddress] = property;
+        object.propertyVersion++;
+        object.valueVersion++;
+        return value;
+    };
+
+    Runtime.prototype.makePrimitiveWrapper = function (value, prototype) {
+        var wrapper = this.makeObjectWithPrototype(prototype);
+        this.defineInternalValue(wrapper, this.primitiveValueKey, value);
+        return wrapper;
     };
 
     Runtime.prototype.makeArray = function (capacity) {
@@ -951,7 +985,7 @@
             } else {
                 var value = this.readHeapValue(cell);
                 parts[index] = value === undefined || value === null ?
-                               "" : String(value);
+                               "" : this.toString(value);
             }
             index++;
         }
@@ -1381,7 +1415,10 @@
         this.objectPrototype = this.makeObject();
         this.functionPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.stringPrototype = this.makeObject();
+        this.numberPrototype = this.makeObject();
+        this.booleanPrototype = this.makeObject();
         this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.primitiveValueKey = "\x00PrimitiveValue";
         if (this.objectPrototype) {
             this.heapRecords.setObjectPrototype(
                 this.globalObject.heapAddress, this.objectPrototype.heapAddress);
@@ -1439,7 +1476,7 @@
         this.setGlobal("unescape", this.makeNativeFunction("unescape",
             function (receiver, args) {
                 return legacyUnescape(args.length ? args[0] : undefined);
-            }));
+        }));
         this.stringMethods = {};
         this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
             function (receiver, args) {
@@ -1541,6 +1578,14 @@
                 }
             }
         }
+        this.stringMethods.toString = this.makeNativeFunction("String.toString",
+            function (receiver) { return runtime.stringValue(receiver); });
+        this.stringMethods.valueOf = this.makeNativeFunction("String.valueOf",
+            function (receiver) { return runtime.stringValue(receiver); });
+        this.setProperty(this.stringPrototype, "toString",
+                         this.stringMethods.toString);
+        this.setProperty(this.stringPrototype, "valueOf",
+                         this.stringMethods.valueOf);
         this.arrayMethods = {};
         /* Array.prototype is observable through instanceof even on the
          * structured JS backend; it cannot be a host-only virtual method bag. */
@@ -1709,16 +1754,37 @@
                                  receiver.guestType === "bytecodeFunction")) {
                     return "[object Function]";
                 }
+                var boxedReceiver = runtime.primitiveWrapperValue(receiver);
+                if (boxedReceiver.found) {
+                    if (typeof boxedReceiver.value === "string") {
+                        return "[object String]";
+                    }
+                    if (typeof boxedReceiver.value === "number") {
+                        return "[object Number]";
+                    }
+                    if (typeof boxedReceiver.value === "boolean") {
+                        return "[object Boolean]";
+                    }
+                }
                 if (typeof receiver === "string") return "[object String]";
                 if (typeof receiver === "number") return "[object Number]";
                 if (typeof receiver === "boolean") return "[object Boolean]";
                 return "[object Object]";
+            });
+        this.objectMethods.valueOf = this.makeNativeFunction(
+            "Object.valueOf", function (receiver) {
+                if (receiver === null || receiver === undefined) {
+                    throw new TypeError("Object.valueOf receiver is null or undefined");
+                }
+                return receiver;
             });
         if (this.objectPrototype) {
             this.setProperty(this.objectPrototype, "hasOwnProperty",
                              this.objectMethods.hasOwnProperty);
             this.setProperty(this.objectPrototype, "toString",
                              this.objectMethods.toString);
+            this.setProperty(this.objectPrototype, "valueOf",
+                             this.objectMethods.valueOf);
         }
         if (this.arrayPrototype) {
             var arrayMethodName;
@@ -1728,17 +1794,36 @@
                                      this.arrayMethods[arrayMethodName]);
                 }
             }
+            this.arrayMethods.toString = this.makeNativeFunction(
+                "Array.toString", function (receiver) {
+                    var join = runtime.getProperty(receiver, "join");
+                    if (join && (join.guestType === "function" ||
+                                 join.guestType === "bytecodeFunction")) {
+                        return runtime.invokePropertyFunction(
+                            join, receiver, []);
+                    }
+                    return runtime.invokePropertyFunction(
+                        runtime.objectMethods.toString, receiver, []);
+                });
+            this.setProperty(this.arrayPrototype, "toString",
+                             this.arrayMethods.toString);
         }
         var objectConstructor = this.makeNativeFunction("Object",
             function (receiver, args) {
                 var value = args.length ? args[0] : undefined;
                 if (value && value.guestType) return value;
-                return runtime.makeObject();
+                if (value === null || value === undefined) {
+                    return runtime.makeObject();
+                }
+                return runtime.toObject(value);
             });
         objectConstructor.constructCallback = function (args) {
             var value = args.length ? args[0] : undefined;
             if (value && value.guestType) return value;
-            return runtime.makeObject();
+            if (value === null || value === undefined) {
+                return runtime.makeObject();
+            }
+            return runtime.toObject(value);
         };
         if (this.objectPrototype) {
             this.setProperty(objectConstructor, "prototype",
@@ -1870,17 +1955,21 @@
             }
         }
         this.numberMethods = {};
+        this.numberMethods.valueOf = this.makeNativeFunction("Number.valueOf",
+            function (receiver) { return runtime.numberValue(receiver); });
         this.numberMethods.toString = this.makeNativeFunction("Number.toString",
             function (receiver, args) {
-                return Number(receiver).toString(args.length ? Number(args[0]) : 10);
+                return runtime.numberValue(receiver).toString(
+                    args.length ? runtime.toNumber(args[0]) : 10);
             });
         this.numberMethods.toFixed = this.makeNativeFunction("Number.toFixed",
             function (receiver, args) {
-                return Number(receiver).toFixed(args.length ? Number(args[0]) : 0);
+                return runtime.numberValue(receiver).toFixed(
+                    args.length ? runtime.toNumber(args[0]) : 0);
             });
         this.numberMethods.toPrecision = this.makeNativeFunction(
             "Number.toPrecision", function (receiver, args) {
-                var value = Number(receiver);
+                var value = runtime.numberValue(receiver);
                 if (!args.length || args[0] === undefined) {
                     return value.toString();
                 }
@@ -1891,6 +1980,14 @@
                 }
                 return value.toPrecision(precision);
             });
+        this.setProperty(this.numberPrototype, "valueOf",
+                         this.numberMethods.valueOf);
+        this.setProperty(this.numberPrototype, "toString",
+                         this.numberMethods.toString);
+        this.setProperty(this.numberPrototype, "toFixed",
+                         this.numberMethods.toFixed);
+        this.setProperty(this.numberPrototype, "toPrecision",
+                         this.numberMethods.toPrecision);
         this.regexpMethods = {};
         this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
             function (receiver, args) {
@@ -1918,17 +2015,35 @@
             function (receiver, args) {
                 return args.length ? runtime.toString(args[0]) : "";
             }, "intrinsic", NativeIntrinsics.STRING_CONSTRUCTOR);
+        stringConstructor.constructCallback = function (args) {
+            return runtime.makePrimitiveWrapper(
+                args.length ? runtime.toString(args[0]) : "",
+                runtime.stringPrototype);
+        };
         this.setProperty(stringConstructor, "prototype", this.stringPrototype);
         this.setProperty(this.stringPrototype, "constructor", stringConstructor);
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
-                return String.fromCharCode.apply(String, args);
+                var codes = [];
+                var codeIndex = 0;
+                while (codeIndex < args.length) {
+                    codes[codeIndex] = runtime.toNumber(args[codeIndex]);
+                    codeIndex++;
+                }
+                return String.fromCharCode.apply(String, codes);
             }, "intrinsic", NativeIntrinsics.STRING_FROM_CHAR_CODE));
         this.setGlobal("String", stringConstructor);
         var numberConstructor = this.makeNativeFunction("Number",
             function (receiver, args) {
                 return args.length ? runtime.toNumber(args[0]) : 0;
             }, "intrinsic", NativeIntrinsics.NUMBER_CONSTRUCTOR);
+        numberConstructor.constructCallback = function (args) {
+            return runtime.makePrimitiveWrapper(
+                args.length ? runtime.toNumber(args[0]) : 0,
+                runtime.numberPrototype);
+        };
+        this.setProperty(numberConstructor, "prototype", this.numberPrototype);
+        this.setProperty(this.numberPrototype, "constructor", numberConstructor);
         /* ES5.1 15.7.3. These values are guest primitive cells attached to
          * the guest constructor object; they are not borrowed objects from
          * the host's Number constructor. */
@@ -1939,10 +2054,29 @@
         this.setProperty(numberConstructor, "NEGATIVE_INFINITY", -Infinity);
         this.setProperty(numberConstructor, "POSITIVE_INFINITY", Infinity);
         this.setGlobal("Number", numberConstructor);
-        this.setGlobal("Boolean", this.makeNativeFunction("Boolean",
+        this.booleanMethods = {};
+        this.booleanMethods.toString = this.makeNativeFunction("Boolean.toString",
+            function (receiver) {
+                return runtime.booleanValue(receiver) ? "true" : "false";
+            });
+        this.booleanMethods.valueOf = this.makeNativeFunction("Boolean.valueOf",
+            function (receiver) { return runtime.booleanValue(receiver); });
+        this.setProperty(this.booleanPrototype, "toString",
+                         this.booleanMethods.toString);
+        this.setProperty(this.booleanPrototype, "valueOf",
+                         this.booleanMethods.valueOf);
+        var booleanConstructor = this.makeNativeFunction("Boolean",
             function (receiver, args) {
                 return args.length ? runtime.truthy(args[0]) : false;
-            }));
+            });
+        booleanConstructor.constructCallback = function (args) {
+            return runtime.makePrimitiveWrapper(
+                args.length ? runtime.truthy(args[0]) : false,
+                runtime.booleanPrototype);
+        };
+        this.setProperty(booleanConstructor, "prototype", this.booleanPrototype);
+        this.setProperty(this.booleanPrototype, "constructor", booleanConstructor);
+        this.setGlobal("Boolean", booleanConstructor);
         var arrayConstructor = this.makeNativeFunction("Array",
             function (receiver, args) {
                 var array = runtime.makeArray();
@@ -2449,7 +2583,12 @@
             }
             return this.stringMethods[key];
         }
-        if (typeof object === "number") return this.numberMethods[key];
+        if (typeof object === "number") {
+            return this.getProperty(this.numberPrototype, key);
+        }
+        if (typeof object === "boolean") {
+            return this.getProperty(this.booleanPrototype, key);
+        }
         return undefined;
     };
 
@@ -2609,11 +2748,91 @@
         return this.typeOf(this.getProperty(globalObject, name));
     };
 
-    Runtime.prototype.toNumber = function (value) {
-        if (value && value.guestType && this.dateValueKey !== undefined &&
-            this.hasOwnProperty(value, this.dateValueKey)) {
-            return Number(this.getProperty(value, this.dateValueKey));
+    Runtime.prototype.primitiveWrapperValue = function (value) {
+        if (!value || !value.guestType ||
+            !this.hasOwnProperty(value, this.primitiveValueKey)) {
+            return {found: false, value: undefined};
         }
+        return {found: true,
+                value: this.getProperty(value, this.primitiveValueKey)};
+    };
+
+    Runtime.prototype.numberValue = function (value) {
+        if (typeof value === "number") return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found && typeof boxed.value === "number") {
+            return boxed.value;
+        }
+        throw new TypeError("Number method receiver is not a number");
+    };
+
+    Runtime.prototype.stringValue = function (value) {
+        if (typeof value === "string") return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found && typeof boxed.value === "string") {
+            return boxed.value;
+        }
+        throw new TypeError("String method receiver is not a string");
+    };
+
+    Runtime.prototype.booleanValue = function (value) {
+        if (typeof value === "boolean") return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found && typeof boxed.value === "boolean") {
+            return boxed.value;
+        }
+        throw new TypeError("Boolean method receiver is not a boolean");
+    };
+
+    Runtime.prototype.toObject = function (value) {
+        if (value === null || value === undefined) {
+            throw new TypeError("cannot convert null or undefined to object");
+        }
+        if (value && value.guestType) return value;
+        if (typeof value === "string") {
+            return this.makePrimitiveWrapper(value, this.stringPrototype);
+        }
+        if (typeof value === "number") {
+            return this.makePrimitiveWrapper(value, this.numberPrototype);
+        }
+        if (typeof value === "boolean") {
+            return this.makePrimitiveWrapper(value, this.booleanPrototype);
+        }
+        throw new TypeError("cannot convert value to object");
+    };
+
+    Runtime.prototype.toPrimitive = function (value, preferredType) {
+        if (!value || !value.guestType) return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found) return boxed.value;
+        var stringFirst = preferredType === "string";
+        if (!preferredType && this.dateValueKey !== undefined &&
+            this.hasOwnProperty(value, this.dateValueKey)) stringFirst = true;
+        var firstName = stringFirst ? "toString" : "valueOf";
+        var secondName = stringFirst ? "valueOf" : "toString";
+        var method = this.getProperty(value, firstName);
+        if (method && (method.guestType === "function" ||
+                       method.guestType === "bytecodeFunction")) {
+            var firstResult = this.invokePropertyFunction(method, value, []);
+            if (!firstResult || !firstResult.guestType) return firstResult;
+        }
+        method = this.getProperty(value, secondName);
+        if (method && (method.guestType === "function" ||
+                       method.guestType === "bytecodeFunction")) {
+            var secondResult = this.invokePropertyFunction(method, value, []);
+            if (!secondResult || !secondResult.guestType) return secondResult;
+        }
+        throw new TypeError("object cannot be converted to a primitive value");
+    };
+
+    Runtime.prototype.toNumber = function (value) {
+        if (value && value.guestType) value = this.toPrimitive(value, "number");
+        if (value === undefined) return NaN;
+        if (value === null) return 0;
+        if (value === false) return 0;
+        if (value === true) return 1;
+        if (typeof value === "number") return value;
+        if (typeof value === "string") value = trimESWhiteSpace(value);
         return Number(value);
     };
 
@@ -2634,7 +2853,7 @@
             if (!message) return name;
             return name + ": " + message;
         }
-        return "[object Object]";
+        return this.toString(this.toPrimitive(value, "string"));
     };
 
     Runtime.prototype.setProperty = function (object, key, value) {
@@ -2666,10 +2885,29 @@
     };
 
     Runtime.prototype.add = function (left, right) {
+        left = this.toPrimitive(left);
+        right = this.toPrimitive(right);
         if (typeof left === "string" || typeof right === "string") {
             return this.toString(left) + this.toString(right);
         }
-        return Number(left) + Number(right);
+        return this.toNumber(left) + this.toNumber(right);
+    };
+
+    Runtime.prototype.relational = function (left, right, operation) {
+        left = this.toPrimitive(left, "number");
+        right = this.toPrimitive(right, "number");
+        if (typeof left === "string" && typeof right === "string") {
+            if (operation === "less") return left < right;
+            if (operation === "lessEqual") return left <= right;
+            if (operation === "greater") return left > right;
+            return left >= right;
+        }
+        left = this.toNumber(left);
+        right = this.toNumber(right);
+        if (operation === "less") return left < right;
+        if (operation === "lessEqual") return left <= right;
+        if (operation === "greater") return left > right;
+        return left >= right;
     };
 
     Runtime.prototype.equal = function (left, right) {
@@ -2677,13 +2915,19 @@
         if (left === null && right === undefined) return true;
         if (left === undefined && right === null) return true;
         if (typeof left === "number" && typeof right === "string") {
-            return left === Number(right);
+            return left === this.toNumber(right);
         }
         if (typeof left === "string" && typeof right === "number") {
-            return Number(left) === right;
+            return this.toNumber(left) === right;
         }
-        if (typeof left === "boolean") return Number(left) == right;
-        if (typeof right === "boolean") return left == Number(right);
+        if (typeof left === "boolean") return this.equal(this.toNumber(left), right);
+        if (typeof right === "boolean") return this.equal(left, this.toNumber(right));
+        if (left && left.guestType && (!right || !right.guestType)) {
+            return this.equal(this.toPrimitive(left), right);
+        }
+        if (right && right.guestType && (!left || !left.guestType)) {
+            return this.equal(left, this.toPrimitive(right));
+        }
         return false;
     };
 

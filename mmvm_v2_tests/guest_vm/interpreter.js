@@ -697,16 +697,26 @@
                         this.runtime.toNumber(left) % this.runtime.toNumber(right);
                     else if (opcode === op.STRICT_EQUAL) registers[target] = left === right;
                     else if (opcode === op.EQUAL) registers[target] = this.runtime.equal(left, right);
-                    else if (opcode === op.LESS) registers[target] = left < right;
-                    else if (opcode === op.LESS_EQUAL) registers[target] = left <= right;
-                    else if (opcode === op.GREATER) registers[target] = left > right;
-                    else if (opcode === op.GREATER_EQUAL) registers[target] = left >= right;
-                    else if (opcode === op.BIT_AND) registers[target] = left & right;
-                    else if (opcode === op.BIT_OR) registers[target] = left | right;
-                    else if (opcode === op.BIT_XOR) registers[target] = left ^ right;
-                    else if (opcode === op.SHIFT_LEFT) registers[target] = left << right;
-                    else if (opcode === op.SHIFT_RIGHT) registers[target] = left >> right;
-                    else registers[target] = left >>> right;
+                    else if (opcode === op.LESS) registers[target] =
+                        this.runtime.relational(left, right, "less");
+                    else if (opcode === op.LESS_EQUAL) registers[target] =
+                        this.runtime.relational(left, right, "lessEqual");
+                    else if (opcode === op.GREATER) registers[target] =
+                        this.runtime.relational(left, right, "greater");
+                    else if (opcode === op.GREATER_EQUAL) registers[target] =
+                        this.runtime.relational(left, right, "greaterEqual");
+                    else if (opcode === op.BIT_AND) registers[target] =
+                        this.runtime.toNumber(left) & this.runtime.toNumber(right);
+                    else if (opcode === op.BIT_OR) registers[target] =
+                        this.runtime.toNumber(left) | this.runtime.toNumber(right);
+                    else if (opcode === op.BIT_XOR) registers[target] =
+                        this.runtime.toNumber(left) ^ this.runtime.toNumber(right);
+                    else if (opcode === op.SHIFT_LEFT) registers[target] =
+                        this.runtime.toNumber(left) << this.runtime.toNumber(right);
+                    else if (opcode === op.SHIFT_RIGHT) registers[target] =
+                        this.runtime.toNumber(left) >> this.runtime.toNumber(right);
+                    else registers[target] = this.runtime.toNumber(left) >>>
+                        this.runtime.toNumber(right);
                     frame.pc = pc + 4;
                 } else if (opcode === op.NOT) {
                     registers[code[pc + 1]] = !this.runtime.truthy(registers[code[pc + 2]]);
@@ -720,7 +730,8 @@
                         registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.BIT_NOT) {
-                    registers[code[pc + 1]] = ~registers[code[pc + 2]];
+                    registers[code[pc + 1]] = ~this.runtime.toNumber(
+                        registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.TYPEOF) {
                     registers[code[pc + 1]] = this.runtime.typeOf(registers[code[pc + 2]]);

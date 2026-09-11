@@ -8170,6 +8170,35 @@
                     return 0;
                 }
                 var numericLength = stringLength(heapBase, numericString);
+                var numericStart = 0;
+                var numericTrimming = 1;
+                while (numericTrimming === 1) {
+                    if (numericStart >= numericLength) {
+                        numericTrimming = 0;
+                    } else {
+                        var numericLeadingCharacter = stringCharacterCodeUnit(
+                            heapBase, numericString, numericStart);
+                        var numericLeadingWhite = isESWhiteSpaceKernel(
+                            numericLeadingCharacter);
+                        if (numericLeadingWhite === 0) numericTrimming = 0;
+                        else numericStart = numericStart + 1;
+                    }
+                }
+                var numericEnd = numericLength;
+                numericTrimming = 1;
+                while (numericTrimming === 1) {
+                    if (numericEnd <= numericStart) {
+                        numericTrimming = 0;
+                    } else {
+                        var numericTrailingCharacter = stringCharacterCodeUnit(
+                            heapBase, numericString, numericEnd - 1);
+                        var numericTrailingWhite = isESWhiteSpaceKernel(
+                            numericTrailingCharacter);
+                        if (numericTrailingWhite === 0) numericTrimming = 0;
+                        else numericEnd = numericEnd - 1;
+                    }
+                }
+                numericLength = numericEnd - numericStart;
                 if (numericLength === 0) {
                     store32(targetCell, VALUE_TAG_INT32);
                     store32(targetCell + VALUE_CELL_LOW, 0);
@@ -8191,7 +8220,8 @@
                 var numericValid = 1;
                 while (numericIndex < numericLength) {
                     var numericCharacter = stringCharacterCodeUnit(
-                        heapBase, numericString, numericIndex);
+                        heapBase, numericString,
+                        numericStart + numericIndex);
                     if (numericCharacter > 127) numericValid = 0;
                     storeRaw8(numericNative + numericIndex,
                               numericCharacter);
@@ -8289,6 +8319,26 @@
             }
             property = propertyNext(heapBase, property);
         }
+        return 0;
+    }
+
+    function isESWhiteSpaceKernel(character) {
+        if (character >= 9) {
+            if (character <= 13) return 1;
+        }
+        if (character === 32) return 1;
+        if (character === 160) return 1;
+        if (character === 5760) return 1;
+        if (character === 6158) return 1;
+        if (character >= 8192) {
+            if (character <= 8202) return 1;
+        }
+        if (character === 8232) return 1;
+        if (character === 8233) return 1;
+        if (character === 8239) return 1;
+        if (character === 8287) return 1;
+        if (character === 12288) return 1;
+        if (character === 65279) return 1;
         return 0;
     }
 
@@ -8451,6 +8501,7 @@
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             intrinsicCallKernel: intrinsicCallKernel,
+            isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
             localBindingKernel: localBindingKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
