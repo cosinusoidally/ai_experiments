@@ -247,6 +247,19 @@ performance are separate mandatory regression gates.
   assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
   native interpreter, and three-context checks remain green.
 
+### 2026-09-11 01:25 BST — Number constructor constants
+
+- Complete focused native run: `ch09`, 128 files, 254 variants, 200 passed,
+  54 failed, 0 timed out. Elapsed: 135.92 seconds. Peak RSS: 172,112 KiB.
+  This is 40 fewer failures than the directly preceding Chapter 9 baseline.
+- Added the five ES5.1 Number constructor constants as guest-owned primitive
+  properties. This removed secondary failures across Boolean conversion,
+  signed-zero checks, infinity conversion, bitwise conversion, and number to
+  string tests that had all observed missing properties as `undefined`.
+- Regression gates: Node and `js_min.exe` suites pass with 267 guest
+  assertions; networking, `node_web.js`, demo1, demo2, heap, GC, context,
+  native interpreter, and three-context checks remain green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

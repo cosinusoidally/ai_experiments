@@ -1925,9 +1925,20 @@
                 return String.fromCharCode.apply(String, args);
             }, "intrinsic", NativeIntrinsics.STRING_FROM_CHAR_CODE));
         this.setGlobal("String", stringConstructor);
-        this.setGlobal("Number", this.makeNativeFunction("Number",
-            function (receiver, args) { return args.length ? Number(args[0]) : 0; },
-            "intrinsic", NativeIntrinsics.NUMBER_CONSTRUCTOR));
+        var numberConstructor = this.makeNativeFunction("Number",
+            function (receiver, args) {
+                return args.length ? runtime.toNumber(args[0]) : 0;
+            }, "intrinsic", NativeIntrinsics.NUMBER_CONSTRUCTOR);
+        /* ES5.1 15.7.3. These values are guest primitive cells attached to
+         * the guest constructor object; they are not borrowed objects from
+         * the host's Number constructor. */
+        this.setProperty(numberConstructor, "MAX_VALUE",
+                         1.7976931348623157e308);
+        this.setProperty(numberConstructor, "MIN_VALUE", 5e-324);
+        this.setProperty(numberConstructor, "NaN", NaN);
+        this.setProperty(numberConstructor, "NEGATIVE_INFINITY", -Infinity);
+        this.setProperty(numberConstructor, "POSITIVE_INFINITY", Infinity);
+        this.setGlobal("Number", numberConstructor);
         this.setGlobal("Boolean", this.makeNativeFunction("Boolean",
             function (receiver, args) {
                 return args.length ? runtime.truthy(args[0]) : false;

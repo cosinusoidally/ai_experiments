@@ -4,6 +4,11 @@ assertEqual(isNaN("not a number"), true, "isNaN conversion");
 assertEqual(isFinite("12"), true, "isFinite conversion");
 assertEqual(NaN !== NaN, true, "global NaN");
 assertEqual(Infinity > 1e308, true, "global Infinity");
+assertEqual(Number.NaN !== Number.NaN, true, "Number NaN constant");
+assertEqual(Number.POSITIVE_INFINITY, Infinity,
+            "Number positive infinity constant");
+assertEqual(Number.MAX_VALUE, 1.7976931348623157e308,
+            "Number maximum finite constant");
 assertEqual(Boolean(0), false, "Boolean false conversion");
 assertEqual(Boolean("guest"), true, "Boolean true conversion");
 assertEqual(typeof Function, "function", "Function constructor exists");
