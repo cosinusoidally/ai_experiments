@@ -1147,16 +1147,12 @@
                     type: "f64"};
         }
         var unaryOperations = {sqrtF64: "sqrt_f64", absF64: "abs_f64",
+                               truncateF64: "truncate_f64",
                                sinF64: "sin_f64", cosF64: "cos_f64"};
         if (unaryOperations[name] && node.arguments.length === 1) {
             return {op: unaryOperations[name],
                     value: lowerKernelF64Expression(node.arguments[0], symbols),
                     type: "f64"};
-        }
-        var unaryOperations = {sinF64: "sin_f64", cosF64: "cos_f64"};
-        if (unaryOperations[name] && node.arguments.length === 1) {
-            return {op: unaryOperations[name],
-                    value: lowerF64(node.arguments[0], locals), type: "f64"};
         }
         var operations = {addF64: "add_f64", subtractF64: "sub_f64",
                           multiplyF64: "mul_f64", divideF64: "div_f64",

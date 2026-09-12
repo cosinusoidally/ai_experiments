@@ -810,6 +810,23 @@
         return property;
     };
 
+    Runtime.prototype.defineDataProperty = function (
+            object, key, value, attributes) {
+        this.assertOwned(object);
+        this.assertOwned(value);
+        if (!object || !object.heapAddress) {
+            throw new TypeError("data-property target is not an object");
+        }
+        var keyAddress = this.internStringAddress(this.propertyKey(key));
+        var property = this.heapRecords.defineOwnProperty(
+            object.heapAddress, keyAddress, attributes || 0);
+        this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
+        object.propertyAddresses["$" + keyAddress] = property;
+        object.propertyVersion++;
+        object.valueVersion++;
+        return property;
+    };
+
     Runtime.prototype.defineLiteralAccessor = function (
             object, key, callable, setterDefinition) {
         var keyAddress = this.internStringAddress(this.propertyKey(key));
@@ -1551,6 +1568,9 @@
         this.booleanPrototype = this.makeObject();
         this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
         this.primitiveValueKey = "\x00PrimitiveValue";
+        /* ES5.1 15.5.4: String.prototype is the empty String value and exposes
+         * its immutable, non-enumerable length as an own data property. */
+        this.defineDataProperty(this.stringPrototype, "length", 0, 0);
         if (this.objectPrototype) {
             this.heapRecords.setObjectPrototype(
                 this.globalObject.heapAddress, this.objectPrototype.heapAddress);
@@ -2225,6 +2245,8 @@
                 }
                 return array;
             }, "intrinsic", NativeIntrinsics.ARRAY_CONSTRUCTOR);
+        /* ES5.1 15.4.3.2: the Array constructor's formal length is one. */
+        this.defineDataProperty(arrayConstructor, "length", 1, 0);
         if (this.arrayPrototype) {
             this.setProperty(arrayConstructor, "prototype", this.arrayPrototype);
             this.setProperty(this.arrayPrototype, "constructor", arrayConstructor);

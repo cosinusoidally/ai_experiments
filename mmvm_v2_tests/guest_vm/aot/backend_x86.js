@@ -1082,6 +1082,11 @@
             assembler.sqrtF64();
             return;
         }
+        if (node.op === "truncate_f64") {
+            emitControlF64(assembler, node.value, state);
+            truncateF64OnX87Stack(assembler);
+            return;
+        }
         if (node.op === "sin_f64" || node.op === "cos_f64") {
             emitControlF64(assembler, node.value, state);
             if (node.op === "sin_f64") assembler.sinF64();
@@ -1142,6 +1147,20 @@
             assembler.popSt1F64();
         }
         else throw new Error("unsupported i386 control-flow f64 expression " + node.op);
+    }
+
+    function truncateF64OnX87Stack(assembler) {
+        /* Select x87 round-toward-zero only for this operation and restore the
+         * caller's control word immediately afterwards. */
+        assembler.reserveStackBytes(4);
+        assembler.storeX87ControlWordAtStack(0);
+        assembler.loadStackWordToEax(0);
+        assembler.orEaxImmediate(0x0c00);
+        assembler.storeAxAtStack(2);
+        assembler.loadX87ControlWordFromStack(2);
+        assembler.roundF64ToIntegral();
+        assembler.loadX87ControlWordFromStack(0);
+        assembler.releaseStackBytes(4);
     }
 
     function emitExpression(assembler, node) {

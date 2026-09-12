@@ -8545,9 +8545,34 @@
                 if (dateSingleTag !== VALUE_TAG_INT32) {
                     if (dateSingleTag !== VALUE_TAG_DOUBLE) return 0;
                 }
-                storeF64(dateValueCell + VALUE_CELL_LOW,
-                    loadNumberF64(dateSingleCell + VALUE_CELL_LOW,
-                                  dateSingleTag));
+                var clipScaleCell = engineScratchLeftAddress(heapBase, state);
+                var clipFactorCell = engineScratchRightAddress(heapBase, state);
+                store32(clipScaleCell, 86400000);
+                store32(clipFactorCell, 100000000);
+                var invalidClip = 0;
+                if (equalF64(
+                        loadNumberF64(dateSingleCell + VALUE_CELL_LOW,
+                                      dateSingleTag),
+                        loadNumberF64(dateSingleCell + VALUE_CELL_LOW,
+                                      dateSingleTag)) === 0) {
+                    invalidClip = 1;
+                } else if (greaterF64(absF64(loadNumberF64(
+                               dateSingleCell + VALUE_CELL_LOW,
+                               dateSingleTag)),
+                               multiplyF64(loadI32F64(clipScaleCell),
+                                           loadI32F64(clipFactorCell))) === 1) {
+                    invalidClip = 1;
+                }
+                if (invalidClip === 1) {
+                    store32(clipScaleCell, 0);
+                    storeF64(dateValueCell + VALUE_CELL_LOW,
+                        divideF64(loadI32F64(clipScaleCell),
+                                  loadI32F64(clipScaleCell)));
+                } else {
+                    storeF64(dateValueCell + VALUE_CELL_LOW,
+                        truncateF64(loadNumberF64(
+                            dateSingleCell + VALUE_CELL_LOW, dateSingleTag)));
+                }
             } else {
                 var dateYear = dateArgumentIntegerKernel(
                     heapBase, registerCells, argumentsVector, 0, 0);
