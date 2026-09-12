@@ -515,17 +515,26 @@
                     setEngineHeapBump(heapBase, state,
                         setGlobalRecord + PROPERTY_RECORD_BYTES);
                 }
-                var setGlobalValue = heapBase + setGlobalRecord +
-                                     PROPERTY_VALUE;
-                var setGlobalSource = heapBase + registerCells +
-                    setGlobalSourceIndex * VALUE_CELL_BYTES;
-                store32(setGlobalValue, load32(setGlobalSource));
-                store32(setGlobalValue + VALUE_CELL_LOW,
-                        load32(setGlobalSource + VALUE_CELL_LOW));
-                store32(setGlobalValue + VALUE_CELL_HIGH,
-                        load32(setGlobalSource + VALUE_CELL_HIGH));
-                store32(setGlobalValue + VALUE_CELL_AUX,
-                        load32(setGlobalSource + VALUE_CELL_AUX));
+                if ((propertyAttributes(heapBase, setGlobalRecord) &
+                     PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                    if ((programFlags(heapBase, currentProgram) &
+                         PROGRAM_FLAG_STRICT) !== 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                } else {
+                    var setGlobalValue = heapBase + setGlobalRecord +
+                                         PROPERTY_VALUE;
+                    var setGlobalSource = heapBase + registerCells +
+                        setGlobalSourceIndex * VALUE_CELL_BYTES;
+                    store32(setGlobalValue, load32(setGlobalSource));
+                    store32(setGlobalValue + VALUE_CELL_LOW,
+                            load32(setGlobalSource + VALUE_CELL_LOW));
+                    store32(setGlobalValue + VALUE_CELL_HIGH,
+                            load32(setGlobalSource + VALUE_CELL_HIGH));
+                    store32(setGlobalValue + VALUE_CELL_AUX,
+                            load32(setGlobalSource + VALUE_CELL_AUX));
+                }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MOVE) {
                 var moveTarget = load32(heapBase + bytecodeWords +

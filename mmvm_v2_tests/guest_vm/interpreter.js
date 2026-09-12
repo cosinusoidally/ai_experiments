@@ -623,7 +623,8 @@
                     frame.pc = pc + 3;
                 } else if (opcode === op.SET_GLOBAL) {
                     this.runtime.setGlobal(frame.context,
-                        constants[code[pc + 1]], registers[code[pc + 2]]);
+                        constants[code[pc + 1]], registers[code[pc + 2]],
+                        !!frame.program.strict);
                     frame.pc = pc + 3;
                 } else if (opcode === op.GET_LOCAL) {
                     registers[code[pc + 1]] = this.runtime.getEnvironmentSlot(
@@ -656,7 +657,8 @@
                 } else if (opcode === op.SET_PROPERTY) {
                     this.runtime.setProperty(registers[code[pc + 1]],
                                              registers[code[pc + 2]],
-                                             registers[code[pc + 3]]);
+                                             registers[code[pc + 3]],
+                                             !!frame.program.strict);
                     frame.pc = pc + 4;
                 } else if (opcode === op.DEFINE_GETTER ||
                            opcode === op.DEFINE_SETTER) {
@@ -672,7 +674,8 @@
                 } else if (opcode === op.SET_PROPERTY_CONST) {
                     this.runtime.setProperty(registers[code[pc + 1]],
                                              constants[code[pc + 2]],
-                                             registers[code[pc + 3]]);
+                                             registers[code[pc + 3]],
+                                             !!frame.program.strict);
                     frame.pc = pc + 4;
                 } else if (opcode === op.IN) {
                     registers[code[pc + 1]] = this.runtime.hasProperty(

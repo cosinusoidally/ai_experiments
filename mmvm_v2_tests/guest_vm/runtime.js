@@ -1123,24 +1123,30 @@
     };
 
     Runtime.prototype.writePropertyRecord = function (
-            property, receiver, value) {
+            property, receiver, value, strict) {
         var attributes = this.heapRecords.propertyAttributes(property);
         if (attributes & HeapRecords.Attributes.ACCESSOR) {
             var setterAddress = this.heapRecords.propertySetter(property);
-            if (!setterAddress) return value;
+            if (!setterAddress) {
+                if (strict) throw new TypeError("property has no setter");
+                return value;
+            }
             var setter = this.readHeapReference(setterAddress);
             this.invokePropertyFunction(setter, receiver, [value]);
             return value;
         }
-        if (!(attributes & HeapRecords.Attributes.WRITABLE)) return value;
+        if (!(attributes & HeapRecords.Attributes.WRITABLE)) {
+            if (strict) throw new TypeError("property is not writable");
+            return value;
+        }
         this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
         return value;
     };
 
-    Runtime.prototype.setNamedProperty = function (object, key, value) {
+    Runtime.prototype.setNamedProperty = function (object, key, value, strict) {
         var property = this.heapOwnProperty(object, key, false);
         if (property) {
-            this.writePropertyRecord(property, object, value);
+            this.writePropertyRecord(property, object, value, strict);
             object.valueVersion++;
             return value;
         }
@@ -1150,7 +1156,7 @@
                 this.heapRecords.propertyAttributes(inherited);
             if ((inheritedAttributes & HeapRecords.Attributes.ACCESSOR) ||
                 !(inheritedAttributes & HeapRecords.Attributes.WRITABLE)) {
-                this.writePropertyRecord(inherited, object, value);
+                this.writePropertyRecord(inherited, object, value, strict);
                 object.valueVersion++;
                 return value;
             }
@@ -3087,7 +3093,7 @@
         return result;
     };
 
-    Runtime.prototype.setGlobal = function (context, name, value) {
+    Runtime.prototype.setGlobal = function (context, name, value, strict) {
         if (arguments.length === 2) {
             value = name;
             name = context;
@@ -3095,7 +3101,7 @@
         }
         this.assertOwned(value);
         this.setProperty(context ? context.globalObject : this.globalObject,
-                         name, value);
+                         name, value, strict);
         return value;
     };
 
@@ -3473,7 +3479,7 @@
         return this.toString(this.toPrimitive(value, "string"));
     };
 
-    Runtime.prototype.setProperty = function (object, key, value) {
+    Runtime.prototype.setProperty = function (object, key, value, strict) {
         this.assertOwned(object);
         this.assertOwned(value);
         if (object === null || object === undefined) {
@@ -3491,12 +3497,12 @@
             }
             key = this.propertyKey(key);
             if (isArrayIndex(key)) return this.arraySet(object, Number(key), value);
-            return this.setNamedProperty(object, key, value);
+            return this.setNamedProperty(object, key, value, strict);
         }
         key = this.propertyKey(key);
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
-            return this.setNamedProperty(object, key, value);
+            return this.setNamedProperty(object, key, value, strict);
         }
         throw new TypeError("property target is not an object");
     };
