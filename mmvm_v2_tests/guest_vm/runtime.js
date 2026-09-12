@@ -75,6 +75,136 @@
         return result;
     }
 
+    function uriHex(octet) {
+        var digits = "0123456789ABCDEF";
+        return "%" + digits.charAt((octet >> 4) & 15) +
+            digits.charAt(octet & 15);
+    }
+
+    function uriUnescaped(code, component) {
+        if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+            (code >= 48 && code <= 57) || code === 45 || code === 95 ||
+            code === 46 || code === 33 || code === 126 || code === 42 ||
+            code === 39 || code === 40 || code === 41) return true;
+        if (component) return false;
+        return code === 59 || code === 47 || code === 63 || code === 58 ||
+            code === 64 || code === 38 || code === 61 || code === 43 ||
+            code === 36 || code === 44 || code === 35;
+    }
+
+    function encodeURIValue(value, component) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            var code = value.charCodeAt(index++);
+            if (uriUnescaped(code, component)) {
+                result += String.fromCharCode(code);
+                continue;
+            }
+            var codePoint = code;
+            if (code >= 55296 && code <= 56319) {
+                if (index >= value.length) throw new URIError("invalid URI character");
+                var low = value.charCodeAt(index++);
+                if (low < 56320 || low > 57343) {
+                    throw new URIError("invalid URI character");
+                }
+                codePoint = 65536 + (code - 55296) * 1024 + low - 56320;
+            } else if (code >= 56320 && code <= 57343) {
+                throw new URIError("invalid URI character");
+            }
+            if (codePoint < 128) {
+                result += uriHex(codePoint);
+            } else if (codePoint < 2048) {
+                result += uriHex(192 | (codePoint >> 6));
+                result += uriHex(128 | (codePoint & 63));
+            } else if (codePoint < 65536) {
+                result += uriHex(224 | (codePoint >> 12));
+                result += uriHex(128 | ((codePoint >> 6) & 63));
+                result += uriHex(128 | (codePoint & 63));
+            } else {
+                result += uriHex(240 | (codePoint >> 18));
+                result += uriHex(128 | ((codePoint >> 12) & 63));
+                result += uriHex(128 | ((codePoint >> 6) & 63));
+                result += uriHex(128 | (codePoint & 63));
+            }
+        }
+        return result;
+    }
+
+    function uriReserved(code) {
+        return code === 59 || code === 47 || code === 63 || code === 58 ||
+            code === 64 || code === 38 || code === 61 || code === 43 ||
+            code === 36 || code === 44 || code === 35;
+    }
+
+    function uriByte(value, index) {
+        if (index + 2 >= value.length || value.charCodeAt(index) !== 37) {
+            return -1;
+        }
+        var high = hexDigitValue(value.charCodeAt(index + 1));
+        var low = hexDigitValue(value.charCodeAt(index + 2));
+        return high < 0 || low < 0 ? -1 : high * 16 + low;
+    }
+
+    function decodeURIValue(value, component) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            if (value.charCodeAt(index) !== 37) {
+                result += value.charAt(index++);
+                continue;
+            }
+            var sequenceStart = index;
+            var first = uriByte(value, index);
+            if (first < 0) throw new URIError("malformed URI sequence");
+            var count = 0;
+            var codePoint = 0;
+            var minimum = 0;
+            if (first < 128) {
+                count = 1;
+                codePoint = first;
+            } else if (first >= 194 && first <= 223) {
+                count = 2;
+                codePoint = first & 31;
+                minimum = 128;
+            } else if (first >= 224 && first <= 239) {
+                count = 3;
+                codePoint = first & 15;
+                minimum = 2048;
+            } else if (first >= 240 && first <= 244) {
+                count = 4;
+                codePoint = first & 7;
+                minimum = 65536;
+            } else throw new URIError("malformed URI sequence");
+            var byteIndex = 1;
+            while (byteIndex < count) {
+                var next = uriByte(value, index + byteIndex * 3);
+                if (next < 128 || next > 191) {
+                    throw new URIError("malformed URI sequence");
+                }
+                codePoint = codePoint * 64 + (next & 63);
+                byteIndex++;
+            }
+            if (codePoint < minimum || codePoint > 1114111 ||
+                (codePoint >= 55296 && codePoint <= 57343)) {
+                throw new URIError("malformed URI sequence");
+            }
+            index += count * 3;
+            if (!component && codePoint < 128 && uriReserved(codePoint)) {
+                result += value.substring(sequenceStart, index);
+            } else if (codePoint < 65536) {
+                result += String.fromCharCode(codePoint);
+            } else {
+                codePoint -= 65536;
+                result += String.fromCharCode(55296 + (codePoint >> 10));
+                result += String.fromCharCode(56320 + (codePoint & 1023));
+            }
+        }
+        return result;
+    }
+
     function hexadecimal(value, digits) {
         var alphabet = "0123456789ABCDEF";
         var result = "";
@@ -219,7 +349,28 @@
         }
         this.installProgramBuilder();
         if (options.rawFFI) this.installRawFFI();
+        this.finalizeBuiltinGlobals();
     }
+
+    Runtime.prototype.finalizeBuiltinGlobals = function () {
+        /* ES5.1 15.1 gives the initial global bindings DontEnum. This pass is
+         * deliberately performed once, after every optional runtime facility
+         * has installed itself. Guest declarations and embedder-installed
+         * globals created later retain their requested ordinary attributes. */
+        var property = this.heapRecords.objectPropertyHead(
+            this.globalObject.heapAddress);
+        while (property) {
+            var key = this.heapRecords.readString(
+                this.heapRecords.propertyKey(property));
+            var attributes = this.heapRecords.propertyAttributes(property) &
+                ~HeapRecords.Attributes.ENUMERABLE;
+            if (key === "undefined" || key === "NaN" || key === "Infinity") {
+                attributes = 0;
+            }
+            this.heapRecords.setPropertyAttributes(property, attributes);
+            property = this.heapRecords.propertyNext(property);
+        }
+    };
 
     Runtime.prototype.ensureLinearHeap = function () {
         if (!this.linearHeap) {
@@ -312,6 +463,27 @@
         }
         this.heapRecords.cloneEnumerableOwnProperties(
             source.heapAddress, target.heapAddress, propertyCount);
+        target.propertyAddresses = {};
+        target.propertyVersion++;
+        target.valueVersion++;
+        return target;
+    };
+
+    Runtime.prototype.cloneOwnProperties = function (source, target) {
+        this.assertOwned(source);
+        this.assertOwned(target);
+        var propertyCount;
+        if (source === this.globalObject) {
+            if (this.contextGlobalOwnPropertyCount === undefined ||
+                this.contextGlobalOwnPropertyVersion !== source.propertyVersion) {
+                this.contextGlobalOwnPropertyCount =
+                    this.heapRecords.countOwnProperties(source.heapAddress);
+                this.contextGlobalOwnPropertyVersion = source.propertyVersion;
+            }
+            propertyCount = this.contextGlobalOwnPropertyCount;
+        }
+        this.heapRecords.cloneOwnProperties(
+            source.heapAddress, target.heapAddress, propertyCount, false);
         target.propertyAddresses = {};
         target.propertyVersion++;
         target.valueVersion++;
@@ -1643,7 +1815,21 @@
         this.setGlobal("unescape", this.makeNativeFunction("unescape",
             function (receiver, args) {
                 return legacyUnescape(args.length ? args[0] : undefined);
-        }));
+            }));
+        function installURIFunction(name, encode, component) {
+            var callable = runtime.makeNativeFunction(name,
+                function (receiver, args) {
+                    var value = args.length ? args[0] : undefined;
+                    return encode ? encodeURIValue(value, component) :
+                                    decodeURIValue(value, component);
+                });
+            runtime.defineDataProperty(callable, "length", 1, 0);
+            runtime.setGlobal(name, callable);
+        }
+        installURIFunction("encodeURI", true, false);
+        installURIFunction("encodeURIComponent", true, true);
+        installURIFunction("decodeURI", false, false);
+        installURIFunction("decodeURIComponent", false, true);
         this.stringMethods = {};
         this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
             function (receiver, args) {

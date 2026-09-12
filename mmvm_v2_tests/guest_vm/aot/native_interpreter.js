@@ -175,6 +175,7 @@
         var PROPERTY_RESERVED = 28;
         var DEFAULT_PROPERTY_ATTRIBUTES = 7;
         var PROPERTY_ATTRIBUTE_WRITABLE = 1;
+        var PROPERTY_ATTRIBUTE_ENUMERABLE = 2;
         var PROPERTY_ATTRIBUTE_ACCESSOR = 8;
         var PROPERTY_RECORD_BYTES = 48;
         var FRAME_FIXED_BYTES = 48;
@@ -6434,7 +6435,10 @@
         var count = 0;
         var countedProperty = property;
         while (countedProperty !== 0) {
-            count = count + 1;
+            if ((propertyAttributes(heapBase, countedProperty) &
+                 PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
+                count = count + 1;
+            }
             countedProperty = propertyNext(heapBase, countedProperty);
         }
         var vectorBytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
@@ -6452,9 +6456,12 @@
         setVectorCapacity(heapBase, vector, count);
         var index = count - 1;
         while (property !== 0) {
-            setValueCellReference(vectorCellAddress(
-                heapBase, vector, index), propertyKey(heapBase, property));
-            index = index - 1;
+            if ((propertyAttributes(heapBase, property) &
+                 PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
+                setValueCellReference(vectorCellAddress(
+                    heapBase, vector, index), propertyKey(heapBase, property));
+                index = index - 1;
+            }
             property = propertyNext(heapBase, property);
         }
         setRecordType(heapBase, array, HEAP_TYPE_ARRAY);

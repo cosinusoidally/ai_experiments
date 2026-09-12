@@ -333,33 +333,51 @@
         return count;
     };
 
+    Records.prototype.countOwnProperties = function (source) {
+        var property = this.objectPropertyHead(source);
+        var count = 0;
+        while (property) {
+            count++;
+            property = this.propertyNext(property);
+        }
+        return count;
+    };
+
     Records.prototype.cloneEnumerableOwnProperties = function (
             source, target, knownPropertyCount) {
+        return this.cloneOwnProperties(
+            source, target, knownPropertyCount, true);
+    };
+
+    Records.prototype.cloneOwnProperties = function (
+            source, target, knownPropertyCount, enumerableOnly) {
         if (this.objectPropertyHead(target)) {
             throw new Error("property clone target must be empty");
         }
         var sourceProperty = this.objectPropertyHead(source);
         var propertyCount = knownPropertyCount === undefined ?
-            this.countEnumerableOwnProperties(source) : knownPropertyCount;
+            (enumerableOnly ? this.countEnumerableOwnProperties(source) :
+                              this.countOwnProperties(source)) :
+            knownPropertyCount;
         if (!propertyCount) return 0;
         if (this.heap.recordInitializer &&
-            this.heap.recordInitializer.cloneEnumerableProperties) {
+            this.heap.recordInitializer.cloneProperties) {
             var recordBytes = Heap.HEADER_SIZE + PROPERTY_BYTES;
             var requestedBytes = propertyCount * recordBytes;
             var block = this.heap.allocateRecord(
                 Heap.Types.PROPERTY, requestedBytes - Heap.HEADER_SIZE);
             var blockBytes = this.heap.recordSize(block);
             this.heap.allocationCount += propertyCount - 1;
-            return this.heap.recordInitializer.cloneEnumerableProperties(
+            return this.heap.recordInitializer.cloneProperties(
                 this.objectPropertyHead(source), target, block, blockBytes,
-                propertyCount);
+                propertyCount, enumerableOnly);
         }
         sourceProperty = this.objectPropertyHead(source);
         var firstClone = 0;
         var previousClone = 0;
         while (sourceProperty) {
             var attributes = this.propertyAttributes(sourceProperty);
-            if (attributes & ATTR_ENUMERABLE) {
+            if (!enumerableOnly || (attributes & ATTR_ENUMERABLE)) {
                 var clone = this.heap.allocateRecordWords(Heap.Types.PROPERTY,
                     PROPERTY_BYTES, 0, this.propertyKey(sourceProperty),
                     attributes, this.propertySetter(sourceProperty));

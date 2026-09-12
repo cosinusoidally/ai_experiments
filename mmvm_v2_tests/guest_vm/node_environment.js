@@ -991,14 +991,23 @@
             }, true));
         publish("NodeLibc", libcObject);
 
-        publish("encodeURIComponent",
-            this.makeFunction("encodeURIComponent", function (receiver, args) {
-                return encodeURIComponent(String(args[0]));
-            }, true));
-        publish("decodeURIComponent",
-            this.makeFunction("decodeURIComponent", function (receiver, args) {
-                return decodeURIComponent(String(args[0]));
-            }, true));
+        /* The ES runtime owns the URI codecs. Older compatibility snapshots
+         * lacked them, so retain the adapter only as a fallback rather than
+         * replacing the guest implementation with host callbacks. */
+        if (!this.runtime.hasOwnProperty(this.context.globalObject,
+                                         "encodeURIComponent")) {
+            publish("encodeURIComponent",
+                this.makeFunction("encodeURIComponent", function (receiver, args) {
+                    return encodeURIComponent(String(args[0]));
+                }, true));
+        }
+        if (!this.runtime.hasOwnProperty(this.context.globalObject,
+                                         "decodeURIComponent")) {
+            publish("decodeURIComponent",
+                this.makeFunction("decodeURIComponent", function (receiver, args) {
+                    return decodeURIComponent(String(args[0]));
+                }, true));
+        }
 
         this.runtime.nowMilliseconds = function () {
             return environment.hostNow();

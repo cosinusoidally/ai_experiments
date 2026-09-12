@@ -18,6 +18,8 @@
         return Object.prototype.hasOwnProperty.call(object, key);
     }
 
+    var BUILTIN_GLOBAL_ATTRIBUTES = 5;
+
     function JSRuntime(options) {
         this.runtime = new SemanticRuntime(options || {});
         this.contexts = [];
@@ -128,8 +130,9 @@
             semanticRuntime.setProperty(semanticRuntime.functionPrototype,
                                         "constructor", functionConstructor);
         }
-        semanticRuntime.setProperty(semanticRuntime.globalObject, "Function",
-                                    functionConstructor);
+        semanticRuntime.defineDataProperty(
+            semanticRuntime.globalObject, "Function", functionConstructor,
+            BUILTIN_GLOBAL_ATTRIBUTES);
 
         var evalFunction = semanticRuntime.makeNativeFunction(
             "eval", function (receiver, args, callContext) {
@@ -147,8 +150,9 @@
                 }
             });
         evalFunction.directEval = true;
-        semanticRuntime.setProperty(semanticRuntime.globalObject, "eval",
-                                    evalFunction);
+        semanticRuntime.defineDataProperty(
+            semanticRuntime.globalObject, "eval", evalFunction,
+            BUILTIN_GLOBAL_ATTRIBUTES);
     };
 
     JSRuntime.prototype.createContext = function () {
@@ -203,7 +207,7 @@
             this.globalObject.heapAddress);
         this.execution = null;
         this.destroyed = false;
-        this.runtime.cloneEnumerableOwnProperties(
+        this.runtime.cloneOwnProperties(
             this.runtime.globalObject, this.globalObject);
     }
 

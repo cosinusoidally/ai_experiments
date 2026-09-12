@@ -26,7 +26,8 @@
     }
 
     function propertyCloneKernel(base, sourceProperty, targetObject,
-                                 block, blockBytes, propertyCount) {
+                                 block, blockBytes, propertyCount,
+                                 enumerableOnly) {
         var HEAP_TYPE_PROPERTY = 6;
         var RECORD_BYTES = 48;
         var RECORD_TYPE = 0;
@@ -50,7 +51,12 @@
         while (source !== 0) {
             var attributes = load32(
                 base + source + PROPERTY_ATTRIBUTES);
-            if ((attributes & PROPERTY_ENUMERABLE) !== 0) {
+            var cloneProperty = 0;
+            if (enumerableOnly === 0) cloneProperty = 1;
+            else if ((attributes & PROPERTY_ENUMERABLE) !== 0) {
+                cloneProperty = 1;
+            }
+            if (cloneProperty === 1) {
                 var clone = block + index * RECORD_BYTES;
                 var size = RECORD_BYTES;
                 if (index + 1 === propertyCount) {
@@ -116,13 +122,22 @@
 
     RecordInitializer.prototype.cloneEnumerableProperties = function (
             sourceProperty, targetObject, block, blockBytes, propertyCount) {
+        return this.cloneProperties(sourceProperty, targetObject, block,
+                                    blockBytes, propertyCount, 1);
+    };
+
+    RecordInitializer.prototype.cloneProperties = function (
+            sourceProperty, targetObject, block, blockBytes, propertyCount,
+            enumerableOnly) {
         if (this.propertyCloneCompiled.backend === "i386") {
             return this.propertyCloneCompiled.fn(
                 this.heap.memory.nativeAddress(0), sourceProperty,
-                targetObject, block, blockBytes, propertyCount);
+                targetObject, block, blockBytes, propertyCount,
+                enumerableOnly ? 1 : 0);
         }
         return this.propertyCloneCompiled.fn(this.heap.memory, 0,
-            sourceProperty, targetObject, block, blockBytes, propertyCount);
+            sourceProperty, targetObject, block, blockBytes, propertyCount,
+            enumerableOnly ? 1 : 0);
     };
 
     root.GuestVMRecordInitializer = RecordInitializer;
