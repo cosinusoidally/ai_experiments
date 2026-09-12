@@ -3303,6 +3303,9 @@
             var keyAddress = this.internStringAddress(key);
             var removedProperty = this.heapRecords.findOwnProperty(
                 object.heapAddress, keyAddress);
+            if (removedProperty &&
+                !(this.heapRecords.propertyAttributes(removedProperty) &
+                  HeapRecords.Attributes.CONFIGURABLE)) return false;
             delete object.propertyAddresses["$" + keyAddress];
             var deleted = this.heapRecords.deleteOwnProperty(
                 object.heapAddress, keyAddress);

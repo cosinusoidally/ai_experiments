@@ -5,6 +5,7 @@
     var Execution = root.GuestVMExecution;
     var verify = root.GuestVMVerify;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var HeapRecords = root.GuestVMHeapRecords;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("./parser.js");
         Compiler = require("./compiler.js");
@@ -12,6 +13,7 @@
         Execution = require("./interpreter.js");
         verify = require("./verifier.js");
         NativeIntrinsics = require("./native_intrinsics.js");
+        HeapRecords = require("./heap_records.js");
     }
 
     function own(object, key) {
@@ -255,8 +257,10 @@
             var declarationName = program.globalDeclarations[declarationIndex++];
             if (!this.runtime.hasOwnProperty(this.globalObject,
                                              declarationName)) {
-                this.runtime.setProperty(this.globalObject,
-                                         declarationName, undefined);
+                this.runtime.defineDataProperty(this.globalObject,
+                    declarationName, undefined,
+                    HeapRecords.Attributes.WRITABLE |
+                    HeapRecords.Attributes.ENUMERABLE);
             }
         }
         this.execution = new Execution(program, this.runtime, this);

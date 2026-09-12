@@ -3704,12 +3704,27 @@
                         heapBase + calleeParameterSlots + VECTOR_LENGTH);
                     var initializeParameter = 0;
                     while (initializeParameter < calleeParameterCount) {
+                        var parameterSlotCell = heapBase +
+                            calleeParameterSlots + VECTOR_CELLS +
+                            initializeParameter * VALUE_CELL_BYTES;
+                        var parameterSlot = load32(
+                            parameterSlotCell + VALUE_CELL_LOW);
+                        var parameterTarget = 0;
+                        if (calleeBindingRegisters === 0) {
+                            parameterTarget = heapBase +
+                                calleeEnvironment + ENVIRONMENT_CELLS +
+                                parameterSlot * VALUE_CELL_BYTES;
+                        } else {
+                            var parameterRegisterCell = heapBase +
+                                calleeBindingRegisters + VECTOR_CELLS +
+                                parameterSlot * VALUE_CELL_BYTES;
+                            var parameterRegister = load32(
+                                parameterRegisterCell + VALUE_CELL_LOW);
+                            parameterTarget = heapBase + calleeFrame +
+                                FRAME_REGISTERS + parameterRegister *
+                                VALUE_CELL_BYTES;
+                        }
                         if (initializeParameter < bytecodeArgumentCount) {
-                            var parameterSlotCell = heapBase +
-                                calleeParameterSlots + VECTOR_CELLS +
-                                initializeParameter * VALUE_CELL_BYTES;
-                            var parameterSlot = load32(
-                                parameterSlotCell + VALUE_CELL_LOW);
                             var parameterArgumentRegisterCell = heapBase +
                                 bytecodeArgumentVector + VECTOR_CELLS +
                                 (initializeParameter +
@@ -3726,23 +3741,6 @@
                                     parameterArgumentRegister *
                                     VALUE_CELL_BYTES;
                             }
-                            var parameterTarget = 0;
-                            if (calleeBindingRegisters === 0) {
-                                parameterTarget = heapBase +
-                                    calleeEnvironment +
-                                    ENVIRONMENT_CELLS + parameterSlot *
-                                    VALUE_CELL_BYTES;
-                            } else {
-                                var parameterRegisterCell = heapBase +
-                                    calleeBindingRegisters + VECTOR_CELLS +
-                                    parameterSlot * VALUE_CELL_BYTES;
-                                var parameterRegister = load32(
-                                    parameterRegisterCell +
-                                    VALUE_CELL_LOW);
-                                parameterTarget = heapBase + calleeFrame +
-                                    FRAME_REGISTERS + parameterRegister *
-                                    VALUE_CELL_BYTES;
-                            }
                             store32(parameterTarget, load32(parameterSource));
                             store32(parameterTarget + VALUE_CELL_LOW,
                                 load32(parameterSource + VALUE_CELL_LOW));
@@ -3750,6 +3748,8 @@
                                 load32(parameterSource + VALUE_CELL_HIGH));
                             store32(parameterTarget + VALUE_CELL_AUX,
                                 load32(parameterSource + VALUE_CELL_AUX));
+                        } else {
+                            setValueCellUndefined(parameterTarget);
                         }
                         initializeParameter = initializeParameter + 1;
                     }

@@ -798,6 +798,11 @@
         if (expression.type === "UnaryExpression") {
             if (expression.operator === "delete") {
                 if (expression.argument.type !== "MemberExpression") {
+                    if (expression.argument.type === "Identifier" &&
+                        this.referenceForName(expression.argument.name).kind !==
+                            "global") {
+                        return this.emitConstant(false);
+                    }
                     return this.emitConstant(true);
                 }
                 var deleteReference = this.compileReference(expression.argument, null);
