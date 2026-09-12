@@ -21,6 +21,12 @@ improvement over a larger one.
 
 ### Complete ES5.1 suite — 3,292 files
 
+- 2026-09-12, revision `381a345`, 20,000-instruction diagnostic allowance:
+  all 3,292 files and 5,765 variants were executed; 4,856 passed, 909 failed,
+  0 were not run, and 4 of the failures were timeouts. Elapsed: 275.50
+  seconds. Peak RSS: 344,840 KiB. Against the directly comparable first
+  baseline this is 4 more passes, 4 fewer failures, no hidden skips, and
+  150.56 seconds less elapsed time.
 - 2026-09-11, working tree after revision `e3c4f33`, 20,000-instruction
   diagnostic allowance: all 3,292 files and 5,765 variants reached a result;
   4,852 passed, 913 failed, 0 not run, and 4 of those failures were timeouts.
@@ -124,14 +130,16 @@ performance are separate mandatory regression gates.
 1. Runner bootstrap: isolated context execution and filesystem reads are
    still embedder services and must migrate behind guest/native runtime
    operations.
-2. Stability: repeated fresh-context creation/teardown currently reaches a
-   native-host crash after roughly 380 files. A short run over the same file
-   boundary succeeds; accumulated runtime state is under investigation.
-3. Test-level groups remaining from partial output include complete Unicode
-   identifier classification, strict runtime semantics beyond parsing, and
-   long-running Unicode lexical tests that exceed the diagnostic instruction
-   allowance.
-4. Full classification remains pending the first uninterrupted suite run.
+2. Broad test-level groups in the current failure inventory include RegExp,
+   URI encode/decode functions, property/declaration attributes, strict
+   `this` and eval behavior, `arguments` objects, update expressions, object
+   literal accessors, and the remaining statement forms.
+3. Four Unicode lexical variants exhaust the deliberately bounded diagnostic
+   allowance. They remain failures, not skips, until their general execution
+   path completes within the allowance.
+4. The former cumulative Chapter 11 heap corruption is fixed. Complete
+   Chapter 11 and whole-suite runs now finish, so stability and classification
+   are no longer marked as pending.
 
 ### 2026-09-10 09:40 BST — runnable harness and chapter sample
 
@@ -452,6 +460,29 @@ performance are separate mandatory regression gates.
 - Regression gates pass on Node and `js_min.exe` with 264 guest assertions;
   networking, `node_web.js`, demo1, demo2, heap, GC, context, native
   interpreter, and three-context checks remain green.
+
+### 2026-09-12 — first explicit whole-suite outcome improvement
+
+- The first complete run after adding explicit not-run accounting executed all
+  5,765 variants and reported 4,848 passed, 917 failed, 0 not run, and 4 timed
+  out in 287.47 seconds, peak RSS 346,680 KiB. It was rejected as a progress
+  result because it had four more failures than the accepted baseline.
+- The regression was the native one-argument Date constructor copying its
+  input without ES5.1 `TimeClip`. The native kernel now rejects non-finite and
+  out-of-range values and truncates finite values toward zero. The shared
+  kernel compiler gained a portable `truncateF64` operation: the i386 backend
+  temporarily selects x87 round-toward-zero through macro-assembler calls,
+  while the JavaScript backend emits the equivalent floor/ceiling operation.
+  No host Date operation or test-name special case is used.
+- Chapter 9 returned to 252 passed, 2 failed, 0 not run, and 0 timed out across
+  all 254 variants. The two remaining failures are the previously documented
+  unimplemented `with` statement.
+- ES5.1 immutable own `length` properties were added for the Array constructor
+  and String prototype using a general guest-heap data-property definition.
+  Their focused four variants now all pass.
+- The subsequent complete run at revision `381a345` produced the accepted
+  4,856 passed / 909 failed / 0 not run result recorded above. Both Node and
+  `js_min.exe` regression suites remained green before that run.
 
 ## Rules for subsequent entries
 
