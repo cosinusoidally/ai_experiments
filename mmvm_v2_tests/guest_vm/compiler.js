@@ -19,6 +19,7 @@
         this.sourceLocations = [];
         this.currentLocation = null;
         this.filename = "<source>";
+        this.withDepth = 0;
         this.scopes = [];
         if (scopeBindings) {
             this.scopes.push(makeCompileScope(this, scopeBindings,
@@ -216,6 +217,18 @@
                 this.compileStatement(statement.body[index]);
                 index++;
             }
+            return;
+        }
+        if (statement.type === "WithStatement") {
+            var withObject = this.compileExpression(statement.object);
+            this.emit(op.ENTER_WITH, withObject);
+            this.scopes.unshift({bindings: {}, createsEnvironment: true,
+                                 dynamic: true});
+            this.withDepth++;
+            this.compileStatement(statement.body);
+            this.withDepth--;
+            this.scopes.shift();
+            this.emit(op.LEAVE_WITH);
             return;
         }
         if (statement.type === "LabeledStatement") {
@@ -510,6 +523,13 @@
             var returned = statement.argument !== null ?
                 this.compileExpression(statement.argument) :
                 this.emitConstant(undefined);
+            var returnWithScopes = [];
+            var returnWithIndex = 0;
+            while (returnWithIndex < this.withDepth) {
+                this.emit(op.LEAVE_WITH);
+                returnWithScopes.push(this.scopes.shift());
+                returnWithIndex++;
+            }
             if (this.finallyBlocks.length) {
                 var activeFinalizers = this.finallyBlocks.slice(0);
                 var finalizerIndex = activeFinalizers.length - 1;
@@ -526,6 +546,9 @@
                 this.finallyBlocks = activeFinalizers;
             }
             this.emit(op.RETURN, returned);
+            while (returnWithScopes.length) {
+                this.scopes.unshift(returnWithScopes.pop());
+            }
             return;
         }
         throw new Error("unsupported statement: " + statement.type);
@@ -585,6 +608,9 @@
     Compiler.prototype.referenceForName = function (name) {
         var binding = this.resolveBinding(name);
         if (binding) {
+            if (binding.kind === "dynamic") {
+                return {kind: "dynamic", name: this.constant(name)};
+            }
             if (binding.kind === "register") return binding;
             return {kind: "local", depth: binding.depth, slot: binding.slot};
         }
@@ -597,6 +623,7 @@
         var scopeIndex = 0;
         while (scopeIndex < this.scopes.length) {
             var scope = this.scopes[scopeIndex];
+            if (scope.dynamic) return {kind: "dynamic"};
             var binding = scope.bindings[key];
             if (binding !== undefined) {
                 if (binding.kind === "register") return binding;
@@ -618,6 +645,8 @@
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
         } else if (reference.kind === "register") {
             this.emit(op.MOVE, target, reference.register);
+        } else if (reference.kind === "dynamic") {
+            this.emit(op.GET_NAME, target, reference.name);
         } else if (reference.kind === "constantProperty") {
             this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
             var objectHint = this.registerHints[reference.object];
@@ -637,6 +666,8 @@
             this.emit(op.SET_LOCAL, reference.depth, reference.slot, value);
         } else if (reference.kind === "register") {
             if (reference.register !== value) this.emit(op.MOVE, reference.register, value);
+        } else if (reference.kind === "dynamic") {
+            this.emit(op.SET_NAME, reference.name, value);
         } else if (reference.kind === "constantProperty") {
             this.emit(op.SET_PROPERTY_CONST, reference.object, reference.key, value);
         } else {
@@ -667,6 +698,9 @@
                     expression.argument.name);
                 if (typeofReference.kind === "global") {
                     this.emit(op.TYPEOF_GLOBAL, target, typeofReference.name);
+                    return true;
+                } else if (typeofReference.kind === "dynamic") {
+                    this.emit(op.TYPEOF_NAME, target, typeofReference.name);
                     return true;
                 }
             }
@@ -823,6 +857,9 @@
                     expression.argument.name);
                 if (typeofReference.kind === "global") {
                     this.emit(op.TYPEOF_GLOBAL, unary, typeofReference.name);
+                    return unary;
+                } else if (typeofReference.kind === "dynamic") {
+                    this.emit(op.TYPEOF_NAME, unary, typeofReference.name);
                     return unary;
                 }
             }
@@ -1118,6 +1155,7 @@
             node.type === "FunctionExpression" || node.type === "TryStatement") {
             return true;
         }
+        if (node.type === "WithStatement") return true;
         /* A direct eval must be able to address the caller's bindings by
          * lexical slot. Keep those bindings in the guest environment rather
          * than in registers that dynamically compiled code cannot name. */

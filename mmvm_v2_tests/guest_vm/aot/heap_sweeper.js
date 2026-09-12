@@ -51,12 +51,14 @@
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
         var ENVIRONMENT_PROGRAM = 24;
+        var ENVIRONMENT_RESERVED = 28;
         var ENVIRONMENT_CELLS = 32;
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
         var PROPERTY_ATTRIBUTES = 24;
         var PROPERTY_SETTER = 28;
         var PROPERTY_VALUE = 32;
+        var HANDLER_RESERVED = 28;
         var PROPERTY_ATTRIBUTE_ACCESSOR = 8;
         var REGEXP_PATTERN = 16;
         var REGEXP_FLAGS = 20;
@@ -160,6 +162,8 @@
                     if (referenceIndex === 0) target = environmentParent(heapBase, address);
                     else if (referenceIndex === 1) {
                         target = environmentProgram(heapBase, address);
+                    } else if (referenceIndex === 2) {
+                        target = environmentObject(heapBase, address);
                     } else if (itemIndex < itemCount) {
                         cellAddress = address + ENVIRONMENT_CELLS +
                                       itemIndex * VALUE_CELL_BYTES;
@@ -224,6 +228,9 @@
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_HANDLER) {
                     if (referenceIndex === 0) target = handlerNext(heapBase, address);
+                    else if (referenceIndex === 1) {
+                        target = handlerEnvironment(heapBase, address);
+                    }
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ENGINE_STATE) {
                     if (referenceIndex === 0) target = engineCurrentFrame(heapBase, address);

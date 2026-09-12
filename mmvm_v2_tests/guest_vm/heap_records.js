@@ -63,6 +63,7 @@
     var HANDLER_NEXT = 0;
     var HANDLER_TARGET = 4;
     var HANDLER_NAME_CONSTANT = 8;
+    var HANDLER_RESERVED = 12;
     var HANDLER_BYTES = 16;
 
     var BYTECODE_LENGTH = 0;
@@ -517,6 +518,24 @@
             environment, ENVIRONMENT_PROGRAM, Heap.Types.ENVIRONMENT);
     };
 
+    Records.prototype.environmentObject = function (environment) {
+        return this.heap.readTrustedFieldU32(
+            environment, ENVIRONMENT_RESERVED, Heap.Types.ENVIRONMENT);
+    };
+
+    Records.prototype.setEnvironmentObject = function (environment, object) {
+        if (object) this.heap.requireRecord(object);
+        this.heap.writeTrustedFieldU32(
+            environment, ENVIRONMENT_RESERVED, object || 0,
+            Heap.Types.ENVIRONMENT);
+    };
+
+    Records.prototype.allocateObjectEnvironment = function (parent, object) {
+        var environment = this.allocateEnvironment(parent, 0, 0);
+        this.setEnvironmentObject(environment, object);
+        return environment;
+    };
+
     Records.prototype.environmentParent = function (environment) {
         return this.heap.readTrustedFieldU32(environment, ENVIRONMENT_PARENT,
                                       Heap.Types.ENVIRONMENT);
@@ -752,6 +771,14 @@
             frame, FRAME_ENVIRONMENT, Heap.Types.FRAME);
     };
 
+    Records.prototype.setFrameEnvironment = function (frame, environment) {
+        if (environment) {
+            this.heap.requireRecord(environment, Heap.Types.ENVIRONMENT);
+        }
+        this.heap.writeTrustedFieldU32(
+            frame, FRAME_ENVIRONMENT, environment || 0, Heap.Types.FRAME);
+    };
+
     Records.prototype.frameContext = function (frame) {
         return this.heap.readTrustedFieldU32(
             frame, FRAME_CONTEXT, Heap.Types.FRAME);
@@ -793,7 +820,8 @@
 
     Records.prototype.pushFrameHandler = function (frame, target, nameConstant) {
         var handler = this.heap.allocateRecordWords(Heap.Types.HANDLER,
-            HANDLER_BYTES, this.frameHandler(frame), target, nameConstant, 0);
+            HANDLER_BYTES, this.frameHandler(frame), target, nameConstant,
+            this.frameEnvironment(frame));
         this.setFrameHandler(frame, handler);
         return handler;
     };
@@ -812,6 +840,11 @@
 
     Records.prototype.handlerNameConstant = function (handler) {
         return this.heap.readTrustedFieldU32(handler, HANDLER_NAME_CONSTANT);
+    };
+
+    Records.prototype.handlerEnvironment = function (handler) {
+        return this.heap.readTrustedFieldU32(
+            handler, HANDLER_RESERVED, Heap.Types.HANDLER);
     };
 
     Records.prototype.allocateBytecode = function (code) {
@@ -1207,6 +1240,7 @@
         } else if (type === Heap.Types.ENVIRONMENT) {
             reference(records.environmentParent(address));
             reference(records.environmentProgram(address));
+            reference(records.environmentObject(address));
             var environmentIndex = 0;
             while (environmentIndex < records.environmentSlotCount(address)) {
                 cell(records.environmentCell(address, environmentIndex++));
@@ -1260,6 +1294,7 @@
         } else if (type === Heap.Types.HANDLER) {
             reference(this.heap.readTrustedFieldU32(
                 address, HANDLER_NEXT, Heap.Types.HANDLER));
+            reference(records.handlerEnvironment(address));
         } else if (type === Heap.Types.ENGINE_STATE) {
             reference(records.engineCurrentFrame(address));
             reference(records.enginePlatformServices(address));

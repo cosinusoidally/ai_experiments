@@ -148,6 +148,8 @@
         var constants = frame.constants;
         if (opcode === op.SET_GLOBAL) {
             this.reloadNativeOperand(frame, code[pc + 2]);
+        } else if (opcode === op.ENTER_WITH) {
+            this.reloadNativeOperand(frame, code[pc + 1]);
         } else if (opcode === op.MOVE) {
             this.reloadNativeOperand(frame, code[pc + 2]);
         } else if (opcode === op.GET_PROPERTY) {
@@ -219,7 +221,8 @@
             opcode === op.DELETE_PROPERTY || opcode === op.GET_KEYS ||
             opcode === op.GET_LOCAL || opcode === op.GET_PROPERTY_CONST ||
             opcode === op.DELETE_PROPERTY_CONST || opcode === op.IN ||
-            opcode === op.INSTANCEOF || opcode === op.GET_THIS;
+            opcode === op.INSTANCEOF || opcode === op.GET_THIS ||
+            opcode === op.GET_NAME || opcode === op.TYPEOF_NAME;
     };
 
     Execution.prototype.synchronizeFallbackStep = function (frame, pc, opcode) {
@@ -261,8 +264,16 @@
                 var nameConstant =
                     this.runtime.heapRecords.handlerNameConstant(handler);
                 var target = this.runtime.heapRecords.handlerTarget(handler);
+                var handlerEnvironment =
+                    this.runtime.heapRecords.handlerEnvironment(handler);
                 this.runtime.linearHeap.freeRecord(handler,
                                                    "exception handler");
+                frame.environment = handlerEnvironment ?
+                    this.runtime.adoptEnvironment(
+                        handlerEnvironment,
+                        frame.program.bindingSlots || {}).handle : null;
+                this.runtime.heapRecords.setFrameEnvironment(
+                    frame.heapAddress, handlerEnvironment);
                 this.runtime.setBinding(frame.context, frame.environment,
                     frame.constants[nameConstant],
                     this.runtime.importCaughtException(error));
@@ -626,6 +637,34 @@
                         constants[code[pc + 1]], registers[code[pc + 2]],
                         !!frame.program.strict);
                     frame.pc = pc + 3;
+                } else if (opcode === op.ENTER_WITH) {
+                    frame.environment = this.runtime.makeObjectEnvironment(
+                        frame.environment, registers[code[pc + 1]]);
+                    this.runtime.heapRecords.setFrameEnvironment(
+                        frame.heapAddress, frame.environment.heapAddress);
+                    frame.pc = pc + 2;
+                } else if (opcode === op.LEAVE_WITH) {
+                    frame.environment = this.runtime.environmentParent(
+                        frame.environment);
+                    this.runtime.heapRecords.setFrameEnvironment(
+                        frame.heapAddress,
+                        frame.environment ? frame.environment.heapAddress : 0);
+                    frame.pc = pc + 1;
+                } else if (opcode === op.GET_NAME) {
+                    registers[code[pc + 1]] = this.runtime.getBinding(
+                        frame.context, frame.environment,
+                        constants[code[pc + 2]]);
+                    frame.pc = pc + 3;
+                } else if (opcode === op.SET_NAME) {
+                    this.runtime.setBinding(frame.context, frame.environment,
+                        constants[code[pc + 1]], registers[code[pc + 2]],
+                        !!frame.program.strict);
+                    frame.pc = pc + 3;
+                } else if (opcode === op.TYPEOF_NAME) {
+                    registers[code[pc + 1]] = this.runtime.typeOfBinding(
+                        frame.context, frame.environment,
+                        constants[code[pc + 2]]);
+                    frame.pc = pc + 3;
                 } else if (opcode === op.GET_LOCAL) {
                     registers[code[pc + 1]] = this.runtime.getEnvironmentSlot(
                         frame.environment, code[pc + 2], code[pc + 3]);
@@ -822,7 +861,7 @@
                         } else {
                             var evalProgram = frame.context.compileEval(
                                 args[0], "<eval>", !!frame.program.strict,
-                                frame.program);
+                                frame.program, frame.environment);
                             var evalFrame = makeFrame(evalProgram, this.runtime,
                                 frame.context, undefined, [], frame.environment,
                                 null, destination, frame, frame.environment);

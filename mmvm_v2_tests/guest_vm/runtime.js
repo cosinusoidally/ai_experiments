@@ -755,8 +755,16 @@
     Runtime.prototype.getBinding = function (context, environment, name) {
         var current = environment;
         while (current) {
+            var bindingObjectAddress = this.heapRecords.environmentObject(
+                current.heapAddress);
+            if (bindingObjectAddress) {
+                var bindingObject = this.readHeapReference(bindingObjectAddress);
+                if (this.hasProperty(bindingObject, name)) {
+                    return this.getProperty(bindingObject, name);
+                }
+            }
             var metadata = this.environmentMetadata["$" + current.heapAddress];
-            var slot = metadata.bindingSlots["$" + name];
+            var slot = metadata ? metadata.bindingSlots["$" + name] : undefined;
             if (slot !== undefined) return this.readHeapValue(
                 this.heapRecords.environmentCell(current.heapAddress, slot));
             current = this.environmentParent(current);
@@ -764,11 +772,20 @@
         return this.getGlobal(context, name);
     };
 
-    Runtime.prototype.setBinding = function (context, environment, name, value) {
+    Runtime.prototype.setBinding = function (
+            context, environment, name, value, strict) {
         var current = environment;
         while (current) {
+            var bindingObjectAddress = this.heapRecords.environmentObject(
+                current.heapAddress);
+            if (bindingObjectAddress) {
+                var bindingObject = this.readHeapReference(bindingObjectAddress);
+                if (this.hasProperty(bindingObject, name)) {
+                    return this.setProperty(bindingObject, name, value, strict);
+                }
+            }
             var metadata = this.environmentMetadata["$" + current.heapAddress];
-            var slot = metadata.bindingSlots["$" + name];
+            var slot = metadata ? metadata.bindingSlots["$" + name] : undefined;
             if (slot !== undefined) {
                 this.writeHeapValue(this.heapRecords.environmentCell(
                     current.heapAddress, slot), value);
@@ -776,7 +793,31 @@
             }
             current = this.environmentParent(current);
         }
-        return this.setGlobal(context, name, value);
+        return this.setGlobal(context, name, value, strict);
+    };
+
+    Runtime.prototype.makeObjectEnvironment = function (parent, object) {
+        this.assertOwned(object);
+        if (!object || !object.guestType) {
+            object = this.toObject(object);
+        }
+        var environment = {heapAddress:
+            this.heapRecords.allocateObjectEnvironment(
+                parent ? parent.heapAddress : 0, object.heapAddress),
+            ownerRuntime: this};
+        this.environmentMetadata["$" + environment.heapAddress] = {
+            handle: environment, bindingSlots: {}
+        };
+        return environment;
+    };
+
+    Runtime.prototype.typeOfBinding = function (context, environment, name) {
+        try {
+            return this.typeOf(this.getBinding(context, environment, name));
+        } catch (error) {
+            if (error && error.name === "ReferenceError") return "undefined";
+            throw error;
+        }
     };
 
     Runtime.prototype.getEnvironmentSlot = function (environment, depth, slot) {

@@ -167,6 +167,7 @@
         if (this.isKeyword("throw")) return this.parseThrowStatement();
         if (this.isKeyword("try")) return this.parseTryStatement();
         if (this.isKeyword("switch")) return this.parseSwitchStatement();
+        if (this.isKeyword("with")) return this.parseWithStatement();
         if (this.current.kind === "identifier" &&
             this.peek(false).kind === "punctuator" &&
             this.lookahead.value === ":") {
@@ -248,6 +249,16 @@
         var test = this.parseExpression();
         this.expectPunctuator(")", true);
         return {type: "WhileStatement", test: test, body: this.parseStatement()};
+    };
+
+    Parser.prototype.parseWithStatement = function () {
+        if (this.strict) this.error("with is not allowed in strict code");
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var object = this.parseExpression();
+        this.expectPunctuator(")", true);
+        return {type: "WithStatement", object: object,
+                body: this.parseStatement()};
     };
 
     Parser.prototype.parseIfStatement = function () {

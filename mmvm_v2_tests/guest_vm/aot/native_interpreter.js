@@ -280,6 +280,11 @@
         var OP_IN = 49;
         var OP_INSTANCEOF = 50;
         var OP_GET_THIS = 51;
+        var OP_ENTER_WITH = 54;
+        var OP_LEAVE_WITH = 55;
+        var OP_GET_NAME = 56;
+        var OP_SET_NAME = 57;
+        var OP_TYPEOF_NAME = 58;
 
         /* Stable IDs from native_intrinsics.js. */
         var INTRINSIC_PEEK8 = 1;
@@ -399,7 +404,11 @@
                 setOpcodeExecutionCount(heapBase, state, opcode,
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
             }
-            beginOpcodeDispatch(opcode, OP_CONST, OP_GET_THIS);
+            if (opcode >= OP_ENTER_WITH) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            beginOpcodeDispatch(opcode, OP_CONST, OP_TYPEOF_NAME);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -2151,7 +2160,7 @@
                 setHandlerNameConstant(heapBase, pushedHandler, load32(
                     heapBase + bytecodeWords +
                     (pc + SECOND_OPERAND) * WORD_BYTES));
-                setHandlerReserved(heapBase, pushedHandler, 0);
+                setHandlerReserved(heapBase, pushedHandler, environment);
                 setFrameHandler(heapBase, frame, pushedHandler);
                 setEngineHeapBump(heapBase, state,
                                   pushedHandler + HANDLER_RECORD_BYTES);

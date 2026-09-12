@@ -52,7 +52,12 @@
         INSTANCEOF: 50,
         GET_THIS: 51,
         DEFINE_GETTER: 52,
-        DEFINE_SETTER: 53
+        DEFINE_SETTER: 53,
+        ENTER_WITH: 54,
+        LEAVE_WITH: 55,
+        GET_NAME: 56,
+        SET_NAME: 57,
+        TYPEOF_NAME: 58
     };
 
     op.NAMES = [];
