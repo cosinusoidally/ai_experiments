@@ -39,7 +39,9 @@
 
     var ENVIRONMENT_PARENT = 0;
     var ENVIRONMENT_COUNT = 4;
-    var ENVIRONMENT_CELLS = 8;
+    var ENVIRONMENT_PROGRAM = 8;
+    var ENVIRONMENT_RESERVED = 12;
+    var ENVIRONMENT_CELLS = 16;
 
     var FUNCTION_PROTOTYPE = 0;
     var FUNCTION_PROPERTIES = 4;
@@ -492,21 +494,27 @@
         this.setVectorLength(this.arrayElements(array), length);
     };
 
-    Records.prototype.allocateEnvironment = function (parent, slotCount) {
+    Records.prototype.allocateEnvironment = function (parent, slotCount, program) {
         if (parent) this.heap.requireRecord(parent, Heap.Types.ENVIRONMENT);
+        if (program) this.heap.requireRecord(program, Heap.Types.PROGRAM);
         slotCount = Number(slotCount);
         if (slotCount < 0 || slotCount !== Math.floor(slotCount)) {
             throw new RangeError("invalid environment slot count");
         }
         var address = this.heap.allocateRecordWords(Heap.Types.ENVIRONMENT,
             ENVIRONMENT_CELLS + slotCount * CELL_BYTES,
-            parent || 0, slotCount, 0, 0);
+            parent || 0, slotCount, program || 0, 0);
         var index = 0;
         while (index < slotCount) {
             this.cells.writePrimitiveAt(this.environmentCell(address, index), undefined);
             index++;
         }
         return address;
+    };
+
+    Records.prototype.environmentProgram = function (environment) {
+        return this.heap.readTrustedFieldU32(
+            environment, ENVIRONMENT_PROGRAM, Heap.Types.ENVIRONMENT);
     };
 
     Records.prototype.environmentParent = function (environment) {
@@ -1184,6 +1192,10 @@
         } else if (type === Heap.Types.ARRAY) {
             objectEdges();
             reference(records.arrayElements(address));
+            var argumentsEnvironment = records.arrayReserved(address);
+            if (argumentsEnvironment && argumentsEnvironment !== 4294967295) {
+                reference(argumentsEnvironment);
+            }
         } else if (type === Heap.Types.NATIVE_FUNCTION ||
                    type === Heap.Types.BYTECODE_FUNCTION) {
             objectEdges();
@@ -1194,6 +1206,7 @@
             reference(records.functionHomeContext(address));
         } else if (type === Heap.Types.ENVIRONMENT) {
             reference(records.environmentParent(address));
+            reference(records.environmentProgram(address));
             var environmentIndex = 0;
             while (environmentIndex < records.environmentSlotCount(address)) {
                 cell(records.environmentCell(address, environmentIndex++));

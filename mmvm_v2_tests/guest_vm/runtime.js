@@ -537,11 +537,12 @@
     };
 
     Runtime.prototype.makeArgumentsObject = function (
-            values, callable, strict) {
+            values, callable, strict, environment) {
         var result = this.arrayFrom(values);
         this.heapRecords.setObjectPrototype(
             result.heapAddress, this.objectPrototype.heapAddress);
-        this.heapRecords.setArrayReserved(result.heapAddress, 1);
+        this.heapRecords.setArrayReserved(result.heapAddress, strict ?
+            4294967295 : environment ? environment.heapAddress : 0);
         this.defineDataProperty(result, "length", values.length,
             HeapRecords.Attributes.WRITABLE |
             HeapRecords.Attributes.CONFIGURABLE);
@@ -680,7 +681,8 @@
         var bindings = program.bindings || [];
         this.ensureLinearHeap();
         var environment = {heapAddress: this.heapRecords.allocateEnvironment(
-                               closure ? closure.heapAddress : 0, bindings.length),
+                               closure ? closure.heapAddress : 0, bindings.length,
+                               this.programAddress(program)),
                            ownerRuntime: this};
         this.environmentMetadata["$" + environment.heapAddress] = {
             handle: environment, bindingSlots: program.bindingSlots || {}};
@@ -694,7 +696,8 @@
         }
         this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
             program.argumentsSlot),
-            this.makeArgumentsObject(args, callable, !!program.strict));
+            this.makeArgumentsObject(
+                args, callable, !!program.strict, environment));
         this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
             program.thisSlot), receiver);
         if (program.functionNameSlot >= 0) this.writeHeapValue(
@@ -1187,7 +1190,29 @@
 
     Runtime.prototype.isArgumentsObject = function (object) {
         return !!object && object.guestType === "array" &&
-            this.heapRecords.arrayReserved(object.heapAddress) === 1;
+            this.heapRecords.arrayReserved(object.heapAddress) !== 0;
+    };
+
+    Runtime.prototype.argumentsMappedCell = function (array, index) {
+        var environment = this.heapRecords.arrayReserved(array.heapAddress);
+        if (!environment || environment === 4294967295 ||
+            !this.arrayHas(array, index)) return 0;
+        var program = this.heapRecords.environmentProgram(environment);
+        if (!program) return 0;
+        var parameterSlots = this.heapRecords.programParameterSlots(program);
+        var parameterCount = this.heapRecords.vectorLength(parameterSlots);
+        if (index < 0 || index >= parameterCount) return 0;
+        var slot = this.readHeapValue(
+            this.heapRecords.vectorCell(parameterSlots, index));
+        var later = index + 1;
+        while (later < parameterCount) {
+            if (this.readHeapValue(
+                    this.heapRecords.vectorCell(parameterSlots, later)) === slot) {
+                return 0;
+            }
+            later++;
+        }
+        return this.heapRecords.environmentCell(environment, slot);
     };
 
     Runtime.prototype.arrayHas = function (array, index) {
@@ -1202,6 +1227,8 @@
         if (index >= this.heapRecords.vectorLength(vector)) return undefined;
         var cell = this.heapRecords.vectorCellWithinLength(vector, index);
         if (this.valueCells.tagAt(cell) === 0) return undefined;
+        var mappedCell = this.argumentsMappedCell(array, index);
+        if (mappedCell) return this.readHeapValue(mappedCell);
         return this.readHeapValue(cell);
     };
 
@@ -1240,9 +1267,11 @@
         if (index < 0 || index >= 4294967295 || index !== Math.floor(index)) {
             throw new RangeError("invalid array index");
         }
+        var mappedCell = this.argumentsMappedCell(array, index);
         this.ensureArrayCapacity(array, index + 1);
         this.writeHeapValue(this.heapRecords.arrayElementCell(array.heapAddress, index),
                             value);
+        if (mappedCell) this.writeHeapValue(mappedCell, value);
         if (index >= this.arrayLength(array)) {
             this.heapRecords.setArrayLength(array.heapAddress, index + 1);
             array.arrayStructureVersion++;
@@ -3181,7 +3210,8 @@
         if (object.guestType === "array" && isArrayIndex(key)) {
             return this.arrayHas(object, Number(key));
         }
-        if (object.guestType === "array" && key === "length") return true;
+        if (object.guestType === "array" && key === "length" &&
+            !this.isArgumentsObject(object)) return true;
         if (object.guestType === "buffer" && isArrayIndex(key)) {
             return Number(key) < this.bufferSupport.viewLength(object);
         }

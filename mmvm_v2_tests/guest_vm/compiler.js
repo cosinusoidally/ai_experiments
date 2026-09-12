@@ -158,7 +158,12 @@
     Compiler.prototype.compileFunction = function (expression) {
         var locals = collectLocals(expression.body, expression.name);
         var bindings = makeFunctionBindings(expression.parameters, locals);
-        var useRegisters = canUseRegisterBindings(expression.body);
+        var usesArguments = referencesArguments(expression.body);
+        /* Sloppy arguments objects alias named parameter bindings.  Keep
+         * those bindings in a guest environment so the mapping remains valid
+         * if the arguments object escapes its activation. */
+        var useRegisters = canUseRegisterBindings(expression.body) &&
+            (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters);
         var bodyProgram = {body: expression.body.body,
                            filename: expression.location ?
@@ -178,7 +183,7 @@
         program.thisSlot = program.bindingSlots.$this;
         program.functionNameSlot = expression.name ?
             program.bindingSlots["$" + expression.name] : -1;
-        program.usesArguments = referencesArguments(expression.body);
+        program.usesArguments = usesArguments;
         program.name = expression.name || "";
         program.source = expression.source || null;
         program.astBody = expression.body;

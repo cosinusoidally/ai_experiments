@@ -185,8 +185,10 @@
         var FRAME_FLAG_NATIVE_CONSTRUCT = 2;
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
-        var ENVIRONMENT_CELLS = 24;
-        var ENVIRONMENT_FIXED_BYTES = 24;
+        var ENVIRONMENT_PROGRAM = 24;
+        var ENVIRONMENT_RESERVED = 28;
+        var ENVIRONMENT_CELLS = 32;
+        var ENVIRONMENT_FIXED_BYTES = 32;
         var ENGINE_EXIT_REASON = 0;
         var ENGINE_PC = 4;
         var ENGINE_RESULT = 8;
@@ -872,6 +874,13 @@
                         store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
                         store32(arrayGetTarget + VALUE_CELL_AUX, 0);
                     } else {
+                        var mappedArgumentSource =
+                            argumentsMappedCellKernel(
+                                heapBase, arrayGetObject, arrayGetIndex);
+                        if (mappedArgumentSource !== 0) {
+                            arrayGetSource = mappedArgumentSource;
+                            arrayGetTag = load32(arrayGetSource);
+                        }
                         store32(arrayGetTarget, arrayGetTag);
                         store32(arrayGetTarget + VALUE_CELL_LOW,
                                 load32(arrayGetSource + VALUE_CELL_LOW));
@@ -1003,6 +1012,9 @@
                 var arraySetSource = heapBase + registerCells +
                     arraySetSourceIndex * VALUE_CELL_BYTES;
                 if (arraySetSupported === 1) {
+                    var mappedArgumentDestination =
+                        argumentsMappedCellKernel(
+                            heapBase, arraySetObject, arraySetIndex);
                     var arraySetDestination = heapBase + arraySetVector +
                         VECTOR_CELLS + arraySetIndex * VALUE_CELL_BYTES;
                     store32(arraySetDestination, load32(arraySetSource));
@@ -1012,6 +1024,10 @@
                             load32(arraySetSource + VALUE_CELL_HIGH));
                     store32(arraySetDestination + VALUE_CELL_AUX,
                             load32(arraySetSource + VALUE_CELL_AUX));
+                    if (mappedArgumentDestination !== 0) {
+                        copyValueCell(mappedArgumentDestination,
+                                      arraySetSource);
+                    }
                     var arraySetLength = vectorLength(heapBase, arraySetVector);
                     if (arraySetIndex >= arraySetLength) {
                         setVectorLength(heapBase, arraySetVector,
@@ -3492,6 +3508,10 @@
                                             bytecodeCallable));
                         setEnvironmentCount(heapBase,
                             calleeEnvironment, calleeBindingCount);
+                        setEnvironmentProgram(heapBase,
+                            calleeEnvironment, calleeProgram);
+                        setEnvironmentReserved(heapBase,
+                            calleeEnvironment, 0);
                         var clearEnvironmentSlot = 0;
                         while (clearEnvironmentSlot <
                                calleeBindingCount) {
@@ -3529,7 +3549,8 @@
                         setArrayElements(heapBase, calleeArgumentsArray,
                                          calleeArgumentsVector);
                         setArrayReserved(heapBase,
-                                         calleeArgumentsArray, 1);
+                                         calleeArgumentsArray,
+                                         calleeEnvironment);
                         setRecordType(heapBase, calleeArgumentsVector,
                                       HEAP_TYPE_VALUE_VECTOR);
                         setRecordSize(heapBase, calleeArgumentsVector,
@@ -4864,6 +4885,11 @@
             var ownObject = valueCellReference(0, ownReceiverCell);
             var ownObjectType = recordType(heapBase, ownObject);
             var ownProperty = 0;
+            /* Indexed Array properties live in the value vector rather than
+             * the named-property chain.  Leave Array receivers to the shared
+             * semantic implementation until the native intrinsic performs
+             * canonical string-index decoding itself. */
+            if (ownObjectType === HEAP_TYPE_ARRAY) ownValid = 0;
             if (ownObjectType >= HEAP_TYPE_OBJECT) {
                 if (ownObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
                     ownProperty = objectPropertyHead(
@@ -6532,6 +6558,9 @@
         if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
         var object = valueCellReference(0, sourceCell);
         var type = recordType(heapBase, object);
+        /* Array enumeration must include populated vector elements.  The
+         * ordinary-object kernel below only walks named property records. */
+        if (type === HEAP_TYPE_ARRAY) return 0;
         if (type < HEAP_TYPE_OBJECT) return 0;
         if (type > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
         var property = objectPropertyHead(heapBase, object);
@@ -6597,6 +6626,35 @@
         if (write === 0) copyValueCell(destinationCell, bindingCell);
         else copyValueCell(bindingCell, sourceCell);
         return 1;
+    }
+
+    function argumentsMappedCellKernel(heapBase, array, index) {
+        var environment = arrayReserved(heapBase, array);
+        if (environment === 0) return 0;
+        if (environment === -1) return 0;
+        var elements = arrayElements(heapBase, array);
+        if (index < 0) return 0;
+        if (index >= vectorLength(heapBase, elements)) return 0;
+        if (valueCellTag(0, vectorCellAddress(
+                heapBase, elements, index)) === 0) return 0;
+        var program = environmentProgram(heapBase, environment);
+        if (program === 0) return 0;
+        var parameterSlots = programParameterSlots(heapBase, program);
+        var parameterCount = vectorLength(heapBase, parameterSlots);
+        if (index >= parameterCount) return 0;
+        var slotCell = vectorCellAddress(
+            heapBase, parameterSlots, index);
+        if (valueCellTag(0, slotCell) !== VALUE_TAG_INT32) return 0;
+        var slot = valueCellInt32(0, slotCell);
+        var later = index + 1;
+        while (later < parameterCount) {
+            var laterSlotCell = vectorCellAddress(
+                heapBase, parameterSlots, later);
+            if (valueCellTag(0, laterSlotCell) !== VALUE_TAG_INT32) return 0;
+            if (valueCellInt32(0, laterSlotCell) === slot) return 0;
+            later = later + 1;
+        }
+        return environmentCellAddress(heapBase, environment, slot);
     }
 
     function regexpTestKernel(heapBase, intrinsicTarget, registerCells,
@@ -9201,6 +9259,7 @@
             intrinsicCallKernel: intrinsicCallKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
+            argumentsMappedCellKernel: argumentsMappedCellKernel,
             localBindingKernel: localBindingKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,

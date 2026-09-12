@@ -501,7 +501,9 @@
         var slotCount = runtime.heapRecords.environmentSlotCount(
             environment.heapAddress);
         var clone = {heapAddress: runtime.heapRecords.allocateEnvironment(
-                         clonedParent ? clonedParent.heapAddress : 0, slotCount),
+                         clonedParent ? clonedParent.heapAddress : 0, slotCount,
+                         runtime.heapRecords.environmentProgram(
+                             environment.heapAddress)),
                      ownerRuntime: runtime};
         clones[identity] = clone;
         var metadata = runtime.environmentMetadata["$" +

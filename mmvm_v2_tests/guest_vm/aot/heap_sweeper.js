@@ -44,12 +44,14 @@
         var OBJECT_PROTOTYPE = 16;
         var OBJECT_PROPERTY_HEAD = 20;
         var ARRAY_ELEMENTS = 24;
+        var ARRAY_RESERVED = 28;
         var FUNCTION_CLOSURE = 24;
         var FUNCTION_METADATA = 28;
         var FUNCTION_HOME_CONTEXT = 32;
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
-        var ENVIRONMENT_CELLS = 24;
+        var ENVIRONMENT_PROGRAM = 24;
+        var ENVIRONMENT_CELLS = 32;
         var PROPERTY_NEXT = 16;
         var PROPERTY_KEY = 20;
         var PROPERTY_ATTRIBUTES = 24;
@@ -136,6 +138,10 @@
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
                     else if (referenceIndex === 2) target = arrayElements(heapBase, address);
+                    else if (referenceIndex === 3) {
+                        target = arrayReserved(heapBase, address);
+                        if (target === -1) target = 0;
+                    }
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_NATIVE_FUNCTION) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
@@ -152,7 +158,9 @@
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ENVIRONMENT) {
                     if (referenceIndex === 0) target = environmentParent(heapBase, address);
-                    else if (itemIndex < itemCount) {
+                    else if (referenceIndex === 1) {
+                        target = environmentProgram(heapBase, address);
+                    } else if (itemIndex < itemCount) {
                         cellAddress = address + ENVIRONMENT_CELLS +
                                       itemIndex * VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
