@@ -34,6 +34,7 @@
     var ARRAY_PROTOTYPE = 0;
     var ARRAY_PROPERTIES = 4;
     var ARRAY_ELEMENTS = 8;
+    var ARRAY_RESERVED = 12;
     var ARRAY_BYTES = 16;
 
     var ENVIRONMENT_PARENT = 0;
@@ -462,6 +463,16 @@
 
     Records.prototype.arrayElements = function (array) {
         return this.heap.readTrustedFieldU32(array, ARRAY_ELEMENTS, Heap.Types.ARRAY);
+    };
+
+    Records.prototype.arrayReserved = function (array) {
+        return this.heap.readTrustedFieldU32(array, ARRAY_RESERVED,
+                                             Heap.Types.ARRAY);
+    };
+
+    Records.prototype.setArrayReserved = function (array, value) {
+        this.heap.writeTrustedFieldU32(array, ARRAY_RESERVED, value >>> 0,
+                                       Heap.Types.ARRAY);
     };
 
     Records.prototype.arrayLength = function (array) {

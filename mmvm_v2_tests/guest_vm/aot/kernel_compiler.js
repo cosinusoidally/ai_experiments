@@ -213,6 +213,7 @@
         objectPrototype: "OBJECT_PROTOTYPE",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
         arrayElements: "ARRAY_ELEMENTS",
+        arrayReserved: "ARRAY_RESERVED",
         functionClosure: "FUNCTION_CLOSURE",
         functionMetadata: "FUNCTION_METADATA",
         nativeFunctionMetadata: "NATIVE_FUNCTION_METADATA",

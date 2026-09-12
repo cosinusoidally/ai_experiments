@@ -536,6 +536,32 @@
         return wrapper;
     };
 
+    Runtime.prototype.makeArgumentsObject = function (
+            values, callable, strict) {
+        var result = this.arrayFrom(values);
+        this.heapRecords.setObjectPrototype(
+            result.heapAddress, this.objectPrototype.heapAddress);
+        this.heapRecords.setArrayReserved(result.heapAddress, 1);
+        this.defineDataProperty(result, "length", values.length,
+            HeapRecords.Attributes.WRITABLE |
+            HeapRecords.Attributes.CONFIGURABLE);
+        if (strict) {
+            this.defineAccessorProperty(result,
+                this.internStringAddress("callee"),
+                this.strictArgumentsThrower,
+                this.strictArgumentsThrower, 0);
+            this.defineAccessorProperty(result,
+                this.internStringAddress("caller"),
+                this.strictArgumentsThrower,
+                this.strictArgumentsThrower, 0);
+        } else {
+            this.defineDataProperty(result, "callee", callable,
+                HeapRecords.Attributes.WRITABLE |
+                HeapRecords.Attributes.CONFIGURABLE);
+        }
+        return result;
+    };
+
     Runtime.prototype.makeArray = function (capacity) {
         capacity = capacity === undefined ? 4 : Number(capacity);
         if (capacity < 0 || capacity > MAX_ARRAY_CAPACITY ||
@@ -667,7 +693,8 @@
             index++;
         }
         this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
-            program.argumentsSlot), this.arrayFrom(args));
+            program.argumentsSlot),
+            this.makeArgumentsObject(args, callable, !!program.strict));
         this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
             program.thisSlot), receiver);
         if (program.functionNameSlot >= 0) this.writeHeapValue(
@@ -714,7 +741,8 @@
                 index < args.length ? args[index] : undefined;
             index++;
         }
-        registers[bindingRegisters[program.argumentsSlot]] = this.arrayFrom(args);
+        registers[bindingRegisters[program.argumentsSlot]] =
+            this.makeArgumentsObject(args, callable, !!program.strict);
         registers[bindingRegisters[program.thisSlot]] = receiver;
         if (program.functionNameSlot >= 0) {
             registers[bindingRegisters[program.functionNameSlot]] = callable;
@@ -1155,6 +1183,11 @@
 
     Runtime.prototype.arrayLength = function (array) {
         return this.heapRecords.arrayLength(array.heapAddress);
+    };
+
+    Runtime.prototype.isArgumentsObject = function (object) {
+        return !!object && object.guestType === "array" &&
+            this.heapRecords.arrayReserved(object.heapAddress) === 1;
     };
 
     Runtime.prototype.arrayHas = function (array, index) {
@@ -1786,6 +1819,14 @@
         this.numberPrototype = this.makeObject();
         this.booleanPrototype = this.makeObject();
         this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.strictArgumentsThrower = this.makeNativeFunction(
+            "ThrowTypeError", function () {
+                throw new TypeError("restricted arguments property");
+            });
+        if (this.functionPrototype) {
+            this.defineInternalValue(this.functionPrototype,
+                "\x00StrictArgumentsThrower", this.strictArgumentsThrower);
+        }
         this.primitiveValueKey = "\x00PrimitiveValue";
         /* ES5.1 15.5.4: String.prototype is the empty String value and exposes
          * its immutable, non-enumerable length as an own data property. */
@@ -2297,6 +2338,73 @@
             this.makeNativeFunction("Object.create", function (receiver, args) {
                 return runtime.makeObjectWithPrototype(args[0]);
             }));
+        this.setProperty(objectConstructor, "getPrototypeOf",
+            this.makeNativeFunction("Object.getPrototypeOf",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "Object.getPrototypeOf target is not an object");
+                    }
+                    var prototype = runtime.heapRecords.objectPrototype(
+                        object.heapAddress);
+                    return prototype ? runtime.readHeapReference(prototype) : null;
+                }));
+        this.setProperty(objectConstructor, "getOwnPropertyDescriptor",
+            this.makeNativeFunction("Object.getOwnPropertyDescriptor",
+                function (receiver, args) {
+                    var object = args[0];
+                    var key = runtime.propertyKey(args[1]);
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "property descriptor target is not an object");
+                    }
+                    var descriptor = runtime.makeObject();
+                    if (object.guestType === "array" && key === "length" &&
+                        !runtime.isArgumentsObject(object)) {
+                        runtime.setProperty(descriptor, "value",
+                            runtime.arrayLength(object));
+                        runtime.setProperty(descriptor, "writable", true);
+                        runtime.setProperty(descriptor, "enumerable", false);
+                        runtime.setProperty(descriptor, "configurable", false);
+                        return descriptor;
+                    }
+                    if ((object.guestType === "array" ||
+                         object.guestType === "buffer" ||
+                         object.guestType === "typedArray") &&
+                        isArrayIndex(key) &&
+                        runtime.hasOwnProperty(object, key)) {
+                        runtime.setProperty(descriptor, "value",
+                            runtime.getProperty(object, key));
+                        runtime.setProperty(descriptor, "writable", true);
+                        runtime.setProperty(descriptor, "enumerable", true);
+                        runtime.setProperty(descriptor, "configurable", true);
+                        return descriptor;
+                    }
+                    var property = runtime.heapOwnProperty(object, key, false);
+                    if (!property) return undefined;
+                    var attributes = runtime.heapRecords.propertyAttributes(
+                        property);
+                    if (attributes & HeapRecords.Attributes.ACCESSOR) {
+                        runtime.setProperty(descriptor, "get",
+                            runtime.readHeapValue(
+                                runtime.heapRecords.propertyValueCell(property)));
+                        var setter = runtime.heapRecords.propertySetter(property);
+                        runtime.setProperty(descriptor, "set", setter ?
+                            runtime.readHeapReference(setter) : undefined);
+                    } else {
+                        runtime.setProperty(descriptor, "value",
+                            runtime.readHeapValue(
+                                runtime.heapRecords.propertyValueCell(property)));
+                        runtime.setProperty(descriptor, "writable",
+                            !!(attributes & HeapRecords.Attributes.WRITABLE));
+                    }
+                    runtime.setProperty(descriptor, "enumerable",
+                        !!(attributes & HeapRecords.Attributes.ENUMERABLE));
+                    runtime.setProperty(descriptor, "configurable",
+                        !!(attributes & HeapRecords.Attributes.CONFIGURABLE));
+                    return descriptor;
+                }));
         this.setProperty(objectConstructor, "keys",
             this.makeNativeFunction("Object.keys", function (receiver, args) {
                 if (!args[0] || !args[0].guestType) {
@@ -3006,11 +3114,23 @@
         if (object.guestType === "array") {
             if (isDirectArrayIndex(key)) return this.arrayGet(object, key);
             key = this.propertyKey(key);
-            if (key === "length") return this.arrayLength(object);
+            if (key === "length" && !this.isArgumentsObject(object)) {
+                return this.arrayLength(object);
+            }
             if (isArrayIndex(key)) return this.arrayGet(object, Number(key));
             var arrayProperty = this.heapOwnProperty(object, key, false);
             if (arrayProperty) {
                 return this.readPropertyRecord(arrayProperty, accessReceiver);
+            }
+            var arrayPrototypeAddress =
+                this.heapRecords.objectPrototype(object.heapAddress);
+            if (arrayPrototypeAddress) {
+                var inheritedArrayValue = this.getProperty(
+                    this.readHeapReference(arrayPrototypeAddress), key,
+                    accessReceiver);
+                if (inheritedArrayValue !== undefined) {
+                    return inheritedArrayValue;
+                }
             }
             return this.arrayMethods[key];
         }
@@ -3061,6 +3181,7 @@
         if (object.guestType === "array" && isArrayIndex(key)) {
             return this.arrayHas(object, Number(key));
         }
+        if (object.guestType === "array" && key === "length") return true;
         if (object.guestType === "buffer" && isArrayIndex(key)) {
             return Number(key) < this.bufferSupport.viewLength(object);
         }
