@@ -205,6 +205,34 @@
         return result;
     }
 
+    function expandStringReplacement(template, matched, prefix, suffix) {
+        template = String(template);
+        var result = "";
+        var index = 0;
+        while (index < template.length) {
+            var character = template.charAt(index++);
+            if (character !== "$" || index >= template.length) {
+                result += character;
+                continue;
+            }
+            var token = template.charAt(index);
+            if (token === "$") {
+                result += "$";
+                index++;
+            } else if (token === "&") {
+                result += matched;
+                index++;
+            } else if (token === "`") {
+                result += prefix;
+                index++;
+            } else if (token === "'") {
+                result += suffix;
+                index++;
+            } else result += "$";
+        }
+        return result;
+    }
+
     function hexadecimal(value, digits) {
         var alphabet = "0123456789ABCDEF";
         var result = "";
@@ -648,17 +676,19 @@
         return environment;
     };
 
-    Runtime.prototype.normalizeCallReceiver = function (context, receiver) {
-        /* Strict-mode functions are not compiled yet, so every guest function
-         * currently has ES5.1 non-strict Call semantics. Null and undefined
-         * become the global object belonging to the callee's context. */
+    Runtime.prototype.normalizeCallReceiver = function (
+            context, receiver, strict) {
+        if (strict) return receiver;
+        /* ES5.1 10.4.3: non-strict calls substitute the callee realm's global
+         * object for null/undefined and box primitive receivers. */
         if (receiver === null || receiver === undefined) {
             if (!context || !context.globalObject) {
                 throw new Error("call receiver normalization needs a JSContext");
             }
             return context.globalObject;
         }
-        return receiver;
+        return receiver && receiver.guestType ? receiver :
+            this.toObject(receiver);
     };
 
     Runtime.prototype.initializeFrameRegisters = function (program, registers,
@@ -1283,7 +1313,8 @@
             functionNameSlot: program.functionNameSlot === undefined ?
                               -1 : program.functionNameSlot,
             metadata: metadataId,
-            flags: program.usesArguments ? 1 : 0,
+            flags: (program.usesArguments ? 1 : 0) |
+                   (program.strict ? 2 : 0),
             bindingCount: program.bindings ? program.bindings.length : 0
         });
         if (program.bindings && this.heapRecords.programBindingCount(address) !==
@@ -1519,6 +1550,7 @@
             thisSlot: records.programThisSlot(address),
             functionNameSlot: records.programFunctionNameSlot(address),
             usesArguments: !!(records.programFlags(address) & 1),
+            strict: !!(records.programFlags(address) & 2),
             globalDeclarations: [],
             filename: "<guest-heap-program>",
             name: ""
@@ -1833,35 +1865,35 @@
         this.stringMethods = {};
         this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
             function (receiver, args) {
-                return String(receiver).charAt(Number(args[0]) || 0);
+                return runtime.toString(receiver).charAt(Number(args[0]) || 0);
             }, "intrinsic", NativeIntrinsics.STRING_CHAR_AT);
         this.stringMethods.charCodeAt = this.makeNativeFunction("String.charCodeAt",
             function (receiver, args) {
-                return String(receiver).charCodeAt(Number(args[0]) || 0);
+                return runtime.toString(receiver).charCodeAt(Number(args[0]) || 0);
             }, "intrinsic", NativeIntrinsics.STRING_CHAR_CODE_AT);
         this.stringMethods.indexOf = this.makeNativeFunction("String.indexOf",
             function (receiver, args) {
-                return String(receiver).indexOf(String(args[0]),
+                return runtime.toString(receiver).indexOf(String(args[0]),
                     args.length > 1 ? Number(args[1]) : 0);
             }, "intrinsic", NativeIntrinsics.STRING_INDEX_OF);
         this.stringMethods.lastIndexOf = this.makeNativeFunction("String.lastIndexOf",
             function (receiver, args) {
-                var text = String(receiver);
+                var text = runtime.toString(receiver);
                 return text.lastIndexOf(String(args[0]),
                     args.length > 1 ? Number(args[1]) : text.length);
             });
         this.stringMethods.substring = this.makeNativeFunction("String.substring",
             function (receiver, args) {
-                return args.length > 1 ? String(receiver).substring(Number(args[0]), Number(args[1])) :
-                                         String(receiver).substring(Number(args[0]));
+                return args.length > 1 ? runtime.toString(receiver).substring(Number(args[0]), Number(args[1])) :
+                                         runtime.toString(receiver).substring(Number(args[0]));
             }, "intrinsic", NativeIntrinsics.STRING_SUBSTRING);
         this.stringMethods.substr = this.makeNativeFunction("String.substr",
             function (receiver, args) {
-                return args.length > 1 ? String(receiver).substr(Number(args[0]),
-                    Number(args[1])) : String(receiver).substr(Number(args[0]));
+                return args.length > 1 ? runtime.toString(receiver).substr(Number(args[0]),
+                    Number(args[1])) : runtime.toString(receiver).substr(Number(args[0]));
             }, "intrinsic", NativeIntrinsics.STRING_SUBSTR);
         this.stringMethods.toLowerCase = this.makeNativeFunction("String.toLowerCase",
-            function (receiver) { return String(receiver).toLowerCase(); });
+            function (receiver) { return runtime.toString(receiver).toLowerCase(); });
         this.stringMethods.split = this.makeNativeFunction("String.split",
             function (receiver, args) {
                 var separator = args.length ? args[0] : undefined;
@@ -1871,8 +1903,8 @@
                     separator = String(separator);
                 }
                 var parts = args.length > 1 ?
-                    String(receiver).split(separator, Number(args[1])) :
-                    String(receiver).split(separator);
+                    runtime.toString(receiver).split(separator, Number(args[1])) :
+                    runtime.toString(receiver).split(separator);
                 return runtime.arrayFrom(parts);
             });
         this.stringMethods.match = this.makeNativeFunction("String.match",
@@ -1884,7 +1916,7 @@
                     regexp = new RegExp(regexp === undefined ? "" :
                                         String(regexp));
                 }
-                var match = String(receiver).match(regexp);
+                var match = runtime.toString(receiver).match(regexp);
                 if (!match) return null;
                 var result = runtime.arrayFrom(match);
                 if (match.index !== undefined) {
@@ -1896,12 +1928,35 @@
         this.stringMethods.replace = this.makeNativeFunction("String.replace",
             function (receiver, args) {
                 var search = args[0];
-                var replacementInput = String(receiver);
+                var replacementInput = runtime.toString(receiver);
+                var regexpSearch = false;
                 if (search && search.guestType === "regexp") {
                     search = runtime.hostRegExp(search);
+                    regexpSearch = true;
                 }
                 var replacement = args[1];
                 var replaced;
+                if (!regexpSearch) {
+                    var searchText = String(search);
+                    var matchIndex = replacementInput.indexOf(searchText);
+                    if (matchIndex < 0) return replacementInput;
+                    var prefix = replacementInput.substring(0, matchIndex);
+                    var suffix = replacementInput.substring(
+                        matchIndex + searchText.length);
+                    var replacementText;
+                    if (replacement &&
+                        (replacement.guestType === "function" ||
+                         replacement.guestType === "bytecodeFunction")) {
+                        replacementText = runtime.toString(
+                            runtime.invokePropertyFunction(replacement,
+                                undefined,
+                                [searchText, matchIndex, replacementInput]));
+                    } else {
+                        replacementText = expandStringReplacement(
+                            replacement, searchText, prefix, suffix);
+                    }
+                    return prefix + replacementText + suffix;
+                }
                 if (replacement && (replacement.guestType === "function" ||
                                     replacement.guestType === "bytecodeFunction")) {
                     replaced = replacementInput.replace(search, function () {
@@ -1919,9 +1974,9 @@
                 return replaced;
             }, "intrinsic", NativeIntrinsics.STRING_REPLACE);
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
-            function (receiver) { return String(receiver).toUpperCase(); });
+            function (receiver) { return runtime.toString(receiver).toUpperCase(); });
         this.stringMethods.trim = this.makeNativeFunction("String.trim",
-            function (receiver) { return String(receiver).replace(/^\s+|\s+$/g, ""); });
+            function (receiver) { return runtime.toString(receiver).replace(/^\s+|\s+$/g, ""); });
         if (this.stringPrototype) {
             var stringMethodName;
             for (stringMethodName in this.stringMethods) {
@@ -2984,15 +3039,18 @@
             if (key === "length") return object.length;
             if (isArrayIndex(key)) return object.charAt(Number(key));
             if (this.stringPrototype) {
-                return this.getProperty(this.stringPrototype, key);
+                return this.getProperty(
+                    this.stringPrototype, key, accessReceiver);
             }
             return this.stringMethods[key];
         }
         if (typeof object === "number") {
-            return this.getProperty(this.numberPrototype, key);
+            return this.getProperty(
+                this.numberPrototype, key, accessReceiver);
         }
         if (typeof object === "boolean") {
-            return this.getProperty(this.booleanPrototype, key);
+            return this.getProperty(
+                this.booleanPrototype, key, accessReceiver);
         }
         return undefined;
     };

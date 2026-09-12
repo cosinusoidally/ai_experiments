@@ -5,7 +5,8 @@
     function makeFrame(program, runtime, context, receiver, args, closure, callable,
                        returnRegister, caller, environmentOverride) {
         args = args || [];
-        receiver = runtime.normalizeCallReceiver(context, receiver);
+        receiver = runtime.normalizeCallReceiver(
+            context, receiver, !!program.strict);
         var registers = [];
         runtime.initializeFrameRegisters(program, registers, receiver, args, callable);
         var environment = environmentOverride !== undefined ?
@@ -805,10 +806,12 @@
                     var directEval = code[pc + 3] === -2 &&
                         callableValue && callableValue.directEval;
                     frame.pc = pc + 5;
-                    receiver = this.runtime.normalizeCallReceiver(
-                        callableValue && callableValue.homeContext ?
-                            callableValue.homeContext : frame.context,
-                        receiver);
+                    if (callableValue && callableValue.guestType ===
+                        "bytecodeFunction") {
+                        receiver = this.runtime.normalizeCallReceiver(
+                            callableValue.homeContext || frame.context,
+                            receiver, !!callableValue.program.strict);
+                    }
                     if (directEval) {
                         if (!args.length || typeof args[0] !== "string") {
                             registers[destination] = args.length ?

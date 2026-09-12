@@ -116,6 +116,7 @@
         var PROGRAM_BINDING_COUNT = 60;
         var PROGRAM_METADATA = 52;
         var PROGRAM_FLAG_USES_ARGUMENTS = 1;
+        var PROGRAM_FLAG_STRICT = 2;
         var PROGRAM_RECORD_BYTES = 64;
         var BYTECODE_LENGTH = 16;
         var BYTECODE_WORDS = 24;
@@ -3240,6 +3241,52 @@
                 }
                 var calleeProgram = functionMetadata(
                     heapBase, bytecodeCallable);
+                /* Primitive boxing is currently performed by the shared
+                 * semantic allocator. Keep object and strict receivers on the
+                 * native fast path, but leave a non-strict primitive call for
+                 * that general path instead of exposing an unboxed `this`. */
+                var receiverToNormalize = bytecodeThisSource;
+                if (callOperation !== 2) {
+                    if (bytecodeApplyForwarding === 0) {
+                        var normalizationReceiverIndex = load32(
+                            heapBase + bytecodeWords +
+                            (pc + THIRD_OPERAND) * WORD_BYTES);
+                        if (normalizationReceiverIndex >= 0) {
+                            receiverToNormalize = heapBase + registerCells +
+                                normalizationReceiverIndex * VALUE_CELL_BYTES;
+                        }
+                    }
+                    if ((programFlags(heapBase, calleeProgram) &
+                         PROGRAM_FLAG_STRICT) === 0) {
+                        if (receiverToNormalize !== 0) {
+                            var receiverToNormalizeTag = valueCellTag(
+                                0, receiverToNormalize);
+                            var receiverNeedsBoxing = 0;
+                            if (receiverToNormalizeTag === VALUE_TAG_INT32) {
+                                receiverNeedsBoxing = 1;
+                            } else if (receiverToNormalizeTag ===
+                                       VALUE_TAG_DOUBLE) {
+                                receiverNeedsBoxing = 1;
+                            } else if (receiverToNormalizeTag ===
+                                       VALUE_TAG_TRUE) {
+                                receiverNeedsBoxing = 1;
+                            } else if (receiverToNormalizeTag ===
+                                       VALUE_TAG_FALSE) {
+                                receiverNeedsBoxing = 1;
+                            } else if (receiverToNormalizeTag ===
+                                       VALUE_TAG_REFERENCE) {
+                                if (recordType(heapBase, valueCellReference(
+                                    0, receiverToNormalize)) ===
+                                    HEAP_TYPE_STRING) {
+                                    receiverNeedsBoxing = 1;
+                                }
+                            }
+                            if (receiverNeedsBoxing === 1) {
+                                bytecodeCallValid = 0;
+                            }
+                        }
+                    }
+                }
                 var calleeBindingRegisters = programBindingRegisters(
                     heapBase, calleeProgram);
                 var argumentCheckIndex = 0;
@@ -3696,6 +3743,11 @@
                     }
                     var receiverIndex = -1;
                     var thisSource = bytecodeThisSource;
+                    var strictThisBinding = 0;
+                    if ((programFlags(heapBase, calleeProgram) &
+                         PROGRAM_FLAG_STRICT) !== 0) {
+                        strictThisBinding = 1;
+                    }
                     if (callOperation === 2) {
                         thisSource = heapBase + registerCells +
                             callTargetIndex * VALUE_CELL_BYTES;
@@ -3711,7 +3763,9 @@
                     if (thisSource !== 0) {
                         var thisSourceTag = load32(thisSource);
                         var copyThisSource = 0;
-                        if (thisSourceTag !== VALUE_TAG_UNDEFINED) {
+                        if (strictThisBinding === 1) {
+                            copyThisSource = 1;
+                        } else if (thisSourceTag !== VALUE_TAG_UNDEFINED) {
                             if (thisSourceTag !== VALUE_TAG_NULL) {
                                 copyThisSource = 1;
                             }
@@ -3727,9 +3781,14 @@
                         } else thisSource = 0;
                     }
                     if (thisSource === 0) {
-                        store32(thisTarget, VALUE_TAG_REFERENCE);
-                        store32(thisTarget + VALUE_CELL_LOW,
-                            contextGlobal(heapBase, calleeContext));
+                        if (strictThisBinding === 1) {
+                            store32(thisTarget, VALUE_TAG_UNDEFINED);
+                            store32(thisTarget + VALUE_CELL_LOW, 0);
+                        } else {
+                            store32(thisTarget, VALUE_TAG_REFERENCE);
+                            store32(thisTarget + VALUE_CELL_LOW,
+                                contextGlobal(heapBase, calleeContext));
+                        }
                         store32(thisTarget + VALUE_CELL_HIGH, 0);
                         store32(thisTarget + VALUE_CELL_AUX, 0);
                     }
