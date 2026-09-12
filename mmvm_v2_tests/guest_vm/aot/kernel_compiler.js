@@ -491,12 +491,18 @@
                 registerPreferences: registerPreferences};
     }
 
+    function symbolAt(symbols, name) {
+        var key = "$" + name;
+        return Object.prototype.hasOwnProperty.call(symbols, key) ?
+               symbols[key] : undefined;
+    }
+
     function resolveRegisterPreferences(names, symbols) {
         var preferences = [];
         var index = 0;
         while (index < names.length) {
             var name = names[index++];
-            var symbol = symbols["$" + name];
+            var symbol = symbolAt(symbols, name);
             if (!symbol || symbol.kind === "constant") {
                 throw new SyntaxError("unknown kernel register preference " + name);
             }
@@ -512,7 +518,7 @@
             while (declarationIndex < node.declarations.length) {
                 var declaration = node.declarations[declarationIndex++];
                 var name = declaration.name;
-                if (symbols["$" + name] === undefined) {
+                if (symbolAt(symbols, name) === undefined) {
                     if (isKernelConstantDeclaration(declaration)) {
                         symbols["$" + name] = {
                             kind: "constant",
@@ -598,7 +604,8 @@
             while (index < statement.declarations.length) {
                 var declaration = statement.declarations[index++];
                 if (declaration.initial) {
-                    var declarationSymbol = symbols["$" + declaration.name];
+                    var declarationSymbol = symbolAt(symbols,
+                                                     declaration.name);
                     if (!declarationSymbol) {
                         throw new SyntaxError("unknown kernel declaration " +
                                               declaration.name);
@@ -653,7 +660,7 @@
             if (expression.type === "AssignmentExpression" &&
                 expression.operator === "=" &&
                 expression.left.type === "Identifier") {
-                var target = symbols["$" + expression.left.name];
+                var target = symbolAt(symbols, expression.left.name);
                 if (!target) throw new SyntaxError("unknown kernel assignment " +
                                                    expression.left.name);
                 if (target.kind === "constant") {
@@ -743,7 +750,7 @@
     }
 
     function requireLocal(symbols, name) {
-        var symbol = symbols["$" + name];
+        var symbol = symbolAt(symbols, name);
         if (!symbol || symbol.kind !== "local") {
             throw new SyntaxError("kernel local is not declared: " + name);
         }
@@ -751,7 +758,7 @@
     }
 
     function valueCellFieldAddress(expression, fieldName, symbols) {
-        var field = symbols["$" + fieldName];
+        var field = symbolAt(symbols, fieldName);
         if (!field || field.kind !== "constant") {
             throw new SyntaxError("value-cell operation requires " + fieldName);
         }
@@ -783,7 +790,7 @@
             "VALUE_TAG_FALSE" : name === "setValueCellTrue" ?
             "VALUE_TAG_TRUE" : name === "setValueCellInt32" ?
             "VALUE_TAG_INT32" : "VALUE_TAG_REFERENCE";
-        var tag = symbols["$" + tagName];
+        var tag = symbolAt(symbols, tagName);
         if (!tag || tag.kind !== "constant") {
             throw new SyntaxError("value-cell operation requires " + tagName);
         }
@@ -821,7 +828,7 @@
             return {op: "const_i32", value: node.value | 0, type: "i32"};
         }
         if (node.type === "Identifier") {
-            var symbol = symbols["$" + node.name];
+            var symbol = symbolAt(symbols, node.name);
             if (!symbol) throw new SyntaxError("unknown kernel identifier " + node.name);
             if (symbol.kind === "constant") {
                 return {op: "const_i32", value: symbol.value, type: "i32"};
@@ -995,7 +1002,7 @@
 
     function namedFieldAddress(name, argumentsList, symbols, accessors) {
         var fieldName = accessors[name];
-        var field = symbols["$" + fieldName];
+        var field = symbolAt(symbols, fieldName);
         if (!field || field.kind !== "constant") {
             throw new SyntaxError("kernel field accessor " + name +
                                   " requires " + fieldName);
@@ -1011,7 +1018,7 @@
 
     function fieldAddress(name, argumentsList, symbols) {
         var fieldName = FIELD_ADDRESS_ACCESSORS[name];
-        var field = symbols["$" + fieldName];
+        var field = symbolAt(symbols, fieldName);
         if (!field || field.kind !== "constant") {
             throw new SyntaxError("kernel address accessor " + name +
                                   " requires " + fieldName);
@@ -1027,9 +1034,9 @@
 
     function indexedAddress(name, argumentsList, symbols) {
         var descriptor = INDEXED_ADDRESS_ACCESSORS[name];
-        var field = descriptor.field ? symbols["$" + descriptor.field] : null;
+        var field = descriptor.field ? symbolAt(symbols, descriptor.field) : null;
         var stride = descriptor.stride ?
-            symbols["$" + descriptor.stride] : null;
+            symbolAt(symbols, descriptor.stride) : null;
         if (descriptor.field && (!field || field.kind !== "constant") ||
             descriptor.stride && (!stride || stride.kind !== "constant")) {
             throw new SyntaxError("kernel indexed accessor " + name +

@@ -420,7 +420,7 @@
         }
         values.sort(function (left, right) {
             if (left.count !== right.count) return right.count - left.count;
-            return left.key < right.key ? -1 : 1;
+            return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
         });
         var names = ["ebx", "esi", "edi"];
         var result = {};
@@ -436,6 +436,15 @@
                 result[values[valueIndex].key] = names[index++];
             }
             valueIndex++;
+        }
+        var occupied = {};
+        for (key in result) {
+            if (!Object.prototype.hasOwnProperty.call(result, key)) continue;
+            if (occupied[result[key]] !== undefined) {
+                throw new Error("kernel register " + result[key] +
+                    " assigned to both " + occupied[result[key]] + " and " + key);
+            }
+            occupied[result[key]] = key;
         }
         return result;
     }

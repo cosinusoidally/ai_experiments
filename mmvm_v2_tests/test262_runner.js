@@ -173,8 +173,8 @@
         return true;
     }
 
-    var counts = {tests: tests.length, variants: 0, passed: 0, failed: 0,
-                  timedOut: 0};
+    var counts = {tests: tests.length, variants: 0, executed: 0,
+                  passed: 0, failed: 0, notRun: 0, timedOut: 0};
     var stopped = false;
     testIndex = 0;
     while (testIndex < tests.length && !stopped) {
@@ -185,17 +185,20 @@
         var noStrict = hasDirective(source, "noStrict");
         var negative = hasDirective(source, "negative");
         var variants = onlyStrict ? [true] : noStrict ? [false] : [false, true];
+        var applicableVariantCount = variants.length;
         if (requestedVariant === "strict") {
             variants = noStrict ? [] : [true];
         } else if (requestedVariant === "non-strict") {
             variants = onlyStrict ? [] : [false];
         }
+        counts.variants += applicableVariantCount;
+        counts.notRun += applicableVariantCount - variants.length;
         var harnessFiles = harnessFilesFor(relativePath);
         var variantIndex = 0;
         while (variantIndex < variants.length && !stopped) {
             var strict = variants[variantIndex++];
             var variantName = strict ? "strict" : "non-strict";
-            counts.variants++;
+            counts.executed++;
             var result = Test262VM.runVariant(
                 filename, source, strict, harnessFiles, instructionLimit,
                 freshContexts);
@@ -217,6 +220,7 @@
                 if (failFast) stopped = true;
             }
         }
+        if (stopped) counts.notRun += variants.length - variantIndex;
         if (!quiet && !verbose && testIndex % 100 === 0) {
             console.log("Test262: " + testIndex + "/" + tests.length +
                 " files, " + counts.passed + " passed, " + counts.failed +
@@ -224,11 +228,25 @@
         }
     }
 
+    /* A fail-fast diagnostic still reports the complete selected outcome
+     * denominator. Tests after the stopping point are explicitly "not run";
+     * they are never silently omitted or described as passing. */
+    while (stopped && testIndex < tests.length) {
+        var unrunSource = fs.readFileSync(
+            corpusDirectory + "/" + tests[testIndex++], "utf8");
+        var unrunVariants = hasDirective(unrunSource, "onlyStrict") ||
+                            hasDirective(unrunSource, "noStrict") ? 1 : 2;
+        counts.variants += unrunVariants;
+        counts.notRun += unrunVariants;
+    }
+
     console.log("Test262 ES5.1 summary");
     console.log("  test files: " + counts.tests);
     console.log("  variants:   " + counts.variants);
+    console.log("  executed:   " + counts.executed);
     console.log("  passed:     " + counts.passed);
     console.log("  failed:     " + counts.failed);
+    console.log("  not run:    " + counts.notRun);
     console.log("  timed out:  " + counts.timedOut);
     if (stopped) console.log("  stopped:    first failure (--fail-fast)");
     if (counts.failed) process.exit(1);

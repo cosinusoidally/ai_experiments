@@ -1199,7 +1199,8 @@
         }
         var snapshot = {
             memory: this.linearHeap.memory.createRegionSnapshot(regions),
-            regions: regions, handles: handles, destroyed: false
+            regions: regions, addresses: addresses,
+            handles: handles, destroyed: false
         };
         this.heapStateSnapshots.push(snapshot);
         return snapshot;
@@ -3263,6 +3264,16 @@
         if (this.nativeInterpreter) {
             enqueue(this.nativeInterpreter.stateAddress);
         }
+        var snapshotIndex = 0;
+        while (snapshotIndex < this.heapStateSnapshots.length) {
+            var snapshot = this.heapStateSnapshots[snapshotIndex++];
+            if (!snapshot || snapshot.destroyed) continue;
+            var snapshotAddressIndex = 0;
+            while (snapshotAddressIndex < snapshot.addresses.length) {
+                enqueue(snapshot.addresses[snapshotAddressIndex++],
+                    "heap snapshot");
+            }
+        }
         enqueue(this.functionConstructionProgram || 0);
         enqueue(this.functionConstructionCallable ?
                 this.functionConstructionCallable.heapAddress : 0);
@@ -3348,6 +3359,16 @@
         if (this.nativeInterpreter) {
             this.linearHeap.setMark(
                 this.nativeInterpreter.stringSupportAddress, generation);
+        }
+        var snapshotIndex = 0;
+        while (snapshotIndex < this.heapStateSnapshots.length) {
+            var snapshot = this.heapStateSnapshots[snapshotIndex++];
+            if (!snapshot || snapshot.destroyed) continue;
+            var snapshotAddressIndex = 0;
+            while (snapshotAddressIndex < snapshot.addresses.length) {
+                this.linearHeap.setMark(
+                    snapshot.addresses[snapshotAddressIndex++], generation);
+            }
         }
         var retainedProgramKey;
         for (retainedProgramKey in this.retainedProgramAddresses) {

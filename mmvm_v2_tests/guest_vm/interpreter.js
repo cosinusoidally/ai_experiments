@@ -1057,12 +1057,19 @@
     Execution.prototype.serviceHostCall = function () {
         if (!this.pendingHostCall) throw new Error("execution has no pending host call");
         var call = this.pendingHostCall;
+        var result;
         try {
-            this.completeHostCall(call.callable.callback(
-                call.receiver, call.args, call.frame.context));
+            result = call.callable.callback(
+                call.receiver, call.args, call.frame.context);
         } catch (error) {
             this.failHostCall(error);
+            return;
         }
+        /* completeHostCall also publishes the result and may run a collection.
+         * An internal VM failure there must propagate as-is: pendingHostCall has
+         * already been consumed, so treating it as a callback exception both
+         * hides the useful error and attempts to complete the same call twice. */
+        this.completeHostCall(result);
     };
 
     Execution.prototype.abort = function () {

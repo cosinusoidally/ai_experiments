@@ -7746,8 +7746,12 @@
 
     function initializeProgramCallableKernel(heapBase, callable, program,
                                              context, stringSupport) {
-        var prototype = callable + FUNCTION_RECORD_BYTES;
-        var prototypeProperty = prototype + OBJECT_RECORD_BYTES;
+        /* Firefox 1's Function#toString decompiler rewrites a local named
+         * exactly `prototype` when another identifier begins with that word.
+         * Kernel source is obtained through Function#toString, so keep this
+         * unambiguous name in the portable dialect. */
+        var callablePrototype = callable + FUNCTION_RECORD_BYTES;
+        var prototypeProperty = callablePrototype + OBJECT_RECORD_BYTES;
         var constructorProperty = prototypeProperty + PROPERTY_RECORD_BYTES;
         var functionPrototypeCell = vectorCellAddress(
             heapBase, stringSupport, RUNTIME_SUPPORT_FUNCTION_PROTOTYPE);
@@ -7767,15 +7771,15 @@
         setFunctionClosure(heapBase, callable, 0);
         setFunctionMetadata(heapBase, callable, program);
         setFunctionHomeContext(heapBase, callable, context);
-        setRecordType(heapBase, prototype, HEAP_TYPE_OBJECT);
-        setRecordSize(heapBase, prototype, OBJECT_RECORD_BYTES);
-        setRecordMark(heapBase, prototype, 0);
-        setRecordFlags(heapBase, prototype, 0);
-        setObjectPrototype(heapBase, prototype,
+        setRecordType(heapBase, callablePrototype, HEAP_TYPE_OBJECT);
+        setRecordSize(heapBase, callablePrototype, OBJECT_RECORD_BYTES);
+        setRecordMark(heapBase, callablePrototype, 0);
+        setRecordFlags(heapBase, callablePrototype, 0);
+        setObjectPrototype(heapBase, callablePrototype,
                            valueCellReference(0, objectPrototypeCell));
-        setObjectPropertyHead(heapBase, prototype, constructorProperty);
-        setObjectExtensible(heapBase, prototype, 1);
-        setObjectReserved(heapBase, prototype, 0);
+        setObjectPropertyHead(heapBase, callablePrototype, constructorProperty);
+        setObjectExtensible(heapBase, callablePrototype, 1);
+        setObjectReserved(heapBase, callablePrototype, 0);
         setRecordType(heapBase, prototypeProperty, HEAP_TYPE_PROPERTY);
         setRecordSize(heapBase, prototypeProperty, PROPERTY_RECORD_BYTES);
         setRecordMark(heapBase, prototypeProperty, 0);
@@ -7787,7 +7791,8 @@
                               DEFAULT_PROPERTY_ATTRIBUTES);
         setPropertyReserved(heapBase, prototypeProperty, 0);
         setValueCellReference(
-            propertyValueCellAddress(heapBase, prototypeProperty), prototype);
+            propertyValueCellAddress(heapBase, prototypeProperty),
+            callablePrototype);
         setRecordType(heapBase, constructorProperty, HEAP_TYPE_PROPERTY);
         setRecordSize(heapBase, constructorProperty, PROPERTY_RECORD_BYTES);
         setRecordMark(heapBase, constructorProperty, 0);
@@ -8245,20 +8250,23 @@
     }
 
     function dateWithinDayUnitKernel(heapBase, state, dateSource,
-                                     dateSourceTag, day, unit, modulus) {
-        var dayScratch = engineScratchLeftAddress(heapBase, state);
-        var unitScratch = engineScratchRightAddress(heapBase, state);
-        store32(dayScratch, day);
-        store32(unitScratch, 86400000);
-        storeF64(dayScratch, multiplyF64(
-            loadI32F64(dayScratch), loadI32F64(unitScratch)));
-        store32(unitScratch, unit);
+                                     resultScratch, wholeDays, millisPerUnit) {
+        var elapsedCell = engineScratchLeftAddress(heapBase, state);
+        var divisorCell = engineScratchRightAddress(heapBase, state);
+        store32(elapsedCell, wholeDays);
+        store32(divisorCell, 86400000);
+        /* The engine's two integer scratch slots are only four bytes apart.
+         * Keep the eight-byte intermediate in the result value cell payload,
+         * which remains dead until dateIntrinsicKernel publishes its result. */
+        storeF64(resultScratch, multiplyF64(
+            loadI32F64(elapsedCell), loadI32F64(divisorCell)));
+        store32(divisorCell, millisPerUnit);
         var result = toInt32F64(divideF64(
             subtractF64(
-                loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
-                loadF64(dayScratch)),
-            loadI32F64(unitScratch)));
-        if (modulus > 0) result = result % modulus;
+                loadNumberF64(dateSource + VALUE_CELL_LOW,
+                              valueCellTag(0, dateSource)),
+                loadF64(resultScratch)),
+            loadI32F64(divisorCell)));
         return result;
     }
 
@@ -8608,78 +8616,89 @@
             RUNTIME_SUPPORT_DATE_VALUE_KEY * VALUE_CELL_BYTES;
         var key = valueCellReference(0, keyCell);
         var property = objectPropertyHead(heapBase, receiver);
-        var dateSource = 0;
+        var storedDateCell = 0;
         while (property !== 0) {
             if (propertyKey(heapBase, property) === key) {
-                dateSource = heapBase + property + PROPERTY_VALUE;
+                storedDateCell = heapBase + property + PROPERTY_VALUE;
                 property = 0;
             } else {
                 property = propertyNext(heapBase, property);
             }
         }
-        if (dateSource === 0) return 0;
+        if (storedDateCell === 0) return 0;
         if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
-            copyValueCell(targetCell, dateSource);
+            copyValueCell(targetCell, storedDateCell);
             return 1;
         }
-        var dateSourceTag = valueCellTag(0, dateSource);
-        if (dateSourceTag !== VALUE_TAG_INT32) {
-            if (dateSourceTag !== VALUE_TAG_DOUBLE) return 0;
+        var numericTag = valueCellTag(0, storedDateCell);
+        if (numericTag !== VALUE_TAG_INT32) {
+            if (numericTag !== VALUE_TAG_DOUBLE) return 0;
         }
         if (equalF64(
-                loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
-                loadNumberF64(dateSource + VALUE_CELL_LOW,
-                              dateSourceTag)) === 0) {
-            copyValueCell(targetCell, dateSource);
+                loadNumberF64(storedDateCell + VALUE_CELL_LOW, numericTag),
+                loadNumberF64(storedDateCell + VALUE_CELL_LOW,
+                              numericTag)) === 0) {
+            copyValueCell(targetCell, storedDateCell);
             return 1;
         }
-        var dateDayUnitScratch = engineScratchLeftAddress(heapBase, state);
-        store32(dateDayUnitScratch, 86400000);
-        var dateDayNumber = toInt32F64(divideF64(
-            loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
-            loadI32F64(dateDayUnitScratch)));
-        var dateDayNumberScratch = engineScratchRightAddress(heapBase, state);
-        store32(dateDayNumberScratch, dateDayNumber);
+        var unitCell = engineScratchLeftAddress(heapBase, state);
+        store32(unitCell, 86400000);
+        var wholeDays = toInt32F64(divideF64(
+            loadNumberF64(storedDateCell + VALUE_CELL_LOW, numericTag),
+            loadI32F64(unitCell)));
+        /* Keep local names distinct under Firefox 1's source decompiler.  A
+         * local whose name is a prefix of another local can otherwise be
+         * rewritten while Function#toString produces the kernel source. */
+        var dayFloorCell = engineScratchRightAddress(heapBase, state);
+        store32(dayFloorCell, wholeDays);
         if (lessF64(
                 divideF64(
-                    loadNumberF64(dateSource + VALUE_CELL_LOW, dateSourceTag),
-                    loadI32F64(dateDayUnitScratch)),
-                loadI32F64(dateDayNumberScratch)) === 1) {
-            dateDayNumber = dateDayNumber - 1;
+                    loadNumberF64(storedDateCell + VALUE_CELL_LOW, numericTag),
+                    loadI32F64(unitCell)),
+                loadI32F64(dayFloorCell)) === 1) {
+            wholeDays = wholeDays - 1;
         }
-        var dateResult = 0;
+        var calendarResult = 0;
         if (intrinsicId === INTRINSIC_DATE_GET_DAY) {
-            dateResult = (dateDayNumber + 4) % 7;
-            if (dateResult < 0) dateResult = dateResult + 7;
+            calendarResult = (wholeDays + 4) % 7;
+            if (calendarResult < 0) calendarResult = calendarResult + 7;
         } else if (intrinsicId === INTRINSIC_DATE_GET_HOURS) {
-            dateResult = dateWithinDayUnitKernel(heapBase, state,
-                dateSource, dateSourceTag, dateDayNumber, 3600000, 0);
+            calendarResult = dateWithinDayUnitKernel(heapBase, state,
+                storedDateCell, targetCell + VALUE_CELL_LOW,
+                wholeDays, 3600000);
+            calendarResult = calendarResult % 24;
         } else if (intrinsicId === INTRINSIC_DATE_GET_MINUTES) {
-            dateResult = dateWithinDayUnitKernel(heapBase, state,
-                dateSource, dateSourceTag, dateDayNumber, 60000, 60);
+            calendarResult = dateWithinDayUnitKernel(heapBase, state,
+                storedDateCell, targetCell + VALUE_CELL_LOW,
+                wholeDays, 60000);
+            calendarResult = calendarResult % 60;
         } else if (intrinsicId === INTRINSIC_DATE_GET_SECONDS) {
-            dateResult = dateWithinDayUnitKernel(heapBase, state,
-                dateSource, dateSourceTag, dateDayNumber, 1000, 60);
+            calendarResult = dateWithinDayUnitKernel(heapBase, state,
+                storedDateCell, targetCell + VALUE_CELL_LOW,
+                wholeDays, 1000);
+            calendarResult = calendarResult % 60;
         } else if (intrinsicId === INTRINSIC_DATE_GET_MILLISECONDS) {
-            dateResult = dateWithinDayUnitKernel(heapBase, state,
-                dateSource, dateSourceTag, dateDayNumber, 1, 1000);
+            calendarResult = dateWithinDayUnitKernel(heapBase, state,
+                storedDateCell, targetCell + VALUE_CELL_LOW,
+                wholeDays, 1);
+            calendarResult = calendarResult % 1000;
         } else {
-            var dateYear = dateYearFromDayKernel(dateDayNumber);
+            var dateYear = dateYearFromDayKernel(wholeDays);
             if (intrinsicId === INTRINSIC_DATE_GET_FULL_YEAR) {
-                dateResult = dateYear;
+                calendarResult = dateYear;
             } else {
                 var dateMonth = dateMonthFromDayKernel(
-                    dateDayNumber, dateYear);
+                    wholeDays, dateYear);
                 if (intrinsicId === INTRINSIC_DATE_GET_MONTH) {
-                    dateResult = dateMonth;
+                    calendarResult = dateMonth;
                 } else if (intrinsicId === INTRINSIC_DATE_GET_DATE) {
-                    dateResult = dateDayNumber -
+                    calendarResult = wholeDays -
                         dateDayFromYearKernel(dateYear) -
                         dateDaysBeforeMonthKernel(dateYear, dateMonth) + 1;
                 } else return 0;
             }
         }
-        setValueCellInt32(targetCell, dateResult);
+        setValueCellInt32(targetCell, calendarResult);
         return 1;
     }
 
@@ -9360,6 +9379,9 @@
         } else if (nativeHeapBump > heap.bump) {
             heap.bump = nativeHeapBump;
             this.runtime.noteNativeHeapBump(nativeHeapBump);
+        }
+        if (this.runtime.verifyNativeHeap) {
+            heap.visitRecords(function () {});
         }
         var instructionCount = records.engineInstructionCount(this.stateAddress);
         this.runCount++;

@@ -324,17 +324,19 @@
                 dispatchHeap.destroy();
                 dispatchX86.destroy();
             }
-            function graphEntry(base, address, value) {
+            function graphEntry(base, address, value, fourth, fifth) {
                 var VECTOR_CELLS = 24;
                 var VALUE_CELL_BYTES = 16;
-                return graphMiddle(base, address, value) + 1;
+                var carried = fourth + value;
+                return graphMiddle(base, address, value, carried, fifth) + 1;
             }
-            function graphMiddle(base, address, value) {
-                return graphLeaf(base, address, value * 3);
+            function graphMiddle(base, address, value, fourth, fifth) {
+                return graphLeaf(base, address, value * 3, fourth, fifth);
             }
-            function graphLeaf(base, address, value) {
-                store32(vectorCellAddress(base, address, 1), value);
-                return value;
+            function graphLeaf(base, address, value, fourth, fifth) {
+                var result = value + fourth + fifth;
+                store32(vectorCellAddress(base, address, 1), result);
+                return result;
             }
             var graphIR = compiler.compileGraph(graphEntry, {
                 graphMiddle: graphMiddle,
@@ -344,14 +346,15 @@
             var graphX86 = new X86Backend().compile(graphIR);
             var graphHeap = new Heap({heapBytes: 4096});
             try {
-                if (graphJS.fn(graphHeap.memory, 0, 64, 7) !== 22 ||
-                    graphHeap.memory.readU32(104) !== 21) {
+                if (graphJS.fn(graphHeap.memory, 0, 64, 7, 11, 13) !== 53 ||
+                    graphHeap.memory.readU32(104) !== 52) {
                     throw new Error("JavaScript kernel function graph mismatch");
                 }
                 graphHeap.memory.writeU32(104, 0);
                 if (graphX86.fn &&
-                    (graphX86.fn(graphHeap.memory.nativeAddress(0), 64, 9) !== 28 ||
-                     graphHeap.memory.readU32(104) !== 27)) {
+                    (graphX86.fn(graphHeap.memory.nativeAddress(0), 64, 9,
+                                 11, 13) !== 61 ||
+                     graphHeap.memory.readU32(104) !== 60)) {
                     throw new Error("i386 kernel function graph mismatch");
                 }
                 if (graphX86.assembly.indexOf(

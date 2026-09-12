@@ -6,6 +6,12 @@ the full-suite table are recorded only after every selected variant reaches a
 pass, failure, or timeout result; interrupted and focused runs appear in the
 investigation log and are not used to claim progress.
 
+Each current run reports `passed`, `failed`, and `not run` as mutually
+exclusive outcomes, with their sum equal to the applicable variant total.
+Timeouts are included in `failed` and also shown as a diagnostic subset. A
+normal unfiltered complete run is valid only when `not run` is zero. There are
+no conformance skips: unsupported ES5.1 behavior fails until implemented.
+
 ## Result history
 
 Results are grouped by identical selection so that movement in the pass and
@@ -17,9 +23,9 @@ improvement over a larger one.
 
 - 2026-09-11, working tree after revision `e3c4f33`, 20,000-instruction
   diagnostic allowance: all 3,292 files and 5,765 variants reached a result;
-  4,852 passed, 913 failed, and 4 of those failures were timeouts. Elapsed:
-  426.06 seconds. Peak RSS: 359,508 KiB. This is the first complete baseline;
-  the allowance is deliberately recorded because a later unbounded
+  4,852 passed, 913 failed, 0 not run, and 4 of those failures were timeouts.
+  Elapsed: 426.06 seconds. Peak RSS: 359,508 KiB. This is the first complete
+  baseline; the allowance is deliberately recorded because a later unbounded
   conformance result is not directly comparable to it.
 
 ### Performance reference
@@ -420,6 +426,32 @@ performance are separate mandatory regression gates.
 - Regression gates after the fresh-harness work: Node and `js_min.exe` suites
   pass with 264 guest assertions; networking, `node_web.js`, demo1, demo2,
   heap, GC, context, native interpreter, and three-context checks remain green.
+
+### 2026-09-12 — complete Chapter 11 stability run and explicit outcomes
+
+- Complete focused native run: `ch11`, 1,320 files and 2,476 variants;
+  2,209 passed, 267 failed, 0 not run, and 0 timed out. Elapsed: 188.88
+  seconds. Peak RSS: 282,556 KiB. This is a complete chapter measurement, not
+  a replacement for the whole-suite baseline.
+- A repeated single-argument `Function` construction had exposed a malformed
+  guest prototype record. Firefox 1's source decompiler rewrote a kernel local
+  named `prototype` when `prototypeProperty` was also present, so the compiler
+  did not receive the source spelling visible in the repository. Distinct
+  kernel-local names now survive `Function#toString`, and the native heap
+  verifier completes the whole chapter without corruption.
+- The runner now reports the complete applicable denominator as mutually
+  exclusive passed, failed, and not-run counts. A normal unfiltered run has
+  zero not-run variants. Diagnostic strict filters and `--fail-fast` account
+  for every deliberately unexecuted variant instead of silently shrinking the
+  denominator; timeouts remain failures.
+- A native Date regression found by the broader gate was an eight-byte
+  temporary written across two adjacent four-byte engine scratch fields. The
+  temporary now uses dead space in the result value cell. The complete
+  `ch07/7.9` selection again passes all 202 variants with 0 failed and 0 not
+  run in 12.00 seconds, peak RSS 148,768 KiB.
+- Regression gates pass on Node and `js_min.exe` with 264 guest assertions;
+  networking, `node_web.js`, demo1, demo2, heap, GC, context, native
+  interpreter, and three-context checks remain green.
 
 ## Rules for subsequent entries
 

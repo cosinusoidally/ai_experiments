@@ -125,11 +125,23 @@ At that point the result is a timeout, the context is destroyed, and—unless
 `--fail-fast` was selected—the next variant runs.  Thus an infinite loop cannot
 prevent a full-suite result.
 
-The final report includes selected tests and variants, passes, failures,
-timeouts, and explicit exclusions.  Failure output includes the relative
-test name, variant, phase, error class, filename, line, and column.  Any failed
-or timed-out applicable variant makes the command exit nonzero after the
-summary.
+The final report uses three mutually exclusive outcome counts:
+
+- `passed`: an executed applicable variant satisfied its expectation;
+- `failed`: an executed applicable variant did not, including every timeout;
+- `not run`: an applicable variant was left unexecuted by an explicit
+  diagnostic filter or by `--fail-fast`.
+
+Consequently `passed + failed + not run = variants`, while `timed out` is a
+diagnostic subset of `failed`, not a fourth outcome. A normal unfiltered
+whole-suite run must report `executed = variants` and `not run = 0`.
+Unsupported ES5.1 behavior is a failure; it is never called a skip or moved to
+`not run`. Files outside the stated ES5.1 corpus, such as `intl402`, are outside
+the denominator rather than hidden skips.
+
+Failure output includes the relative test name, variant, phase, error class,
+filename, line, and column. Any failed or timed-out applicable variant makes
+the command exit nonzero after the summary.
 
 ## Self-hosting boundary
 
