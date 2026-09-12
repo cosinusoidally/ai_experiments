@@ -30,7 +30,8 @@
                       DATE_GET_FULL_YEAR: 56, DATE_GET_HOURS: 57,
                       DATE_GET_MINUTES: 58, DATE_GET_SECONDS: 59,
                       DATE_GET_MILLISECONDS: 60, DATE_GET_DAY: 61,
-                      FUNCTION_CONSTRUCTOR: 62};
+                      FUNCTION_CONSTRUCTOR: 62,
+                      REGEXP_CONSTRUCTOR: 63};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

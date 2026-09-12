@@ -339,7 +339,8 @@
         var INTRINSIC_DATE_GET_MILLISECONDS = 60;
         var INTRINSIC_DATE_GET_DAY = 61;
         var INTRINSIC_FUNCTION_CONSTRUCTOR = 62;
-        var INTRINSIC_LAST_ID = 62;
+        var INTRINSIC_REGEXP_CONSTRUCTOR = 63;
+        var INTRINSIC_LAST_ID = 63;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -362,6 +363,12 @@
         var RUNTIME_SUPPORT_FUNCTION_PROTOTYPE = 276;
         var RUNTIME_SUPPORT_DATE_PROTOTYPE = 277;
         var RUNTIME_SUPPORT_DATE_VALUE_KEY = 278;
+        var RUNTIME_SUPPORT_REGEXP_SOURCE_KEY = 280;
+        var RUNTIME_SUPPORT_REGEXP_GLOBAL_KEY = 281;
+        var RUNTIME_SUPPORT_REGEXP_IGNORE_CASE_KEY = 282;
+        var RUNTIME_SUPPORT_REGEXP_MULTILINE_KEY = 283;
+        var RUNTIME_SUPPORT_REGEXP_LAST_INDEX_KEY = 284;
+        var RUNTIME_SUPPORT_EMPTY_REGEXP_SOURCE = 285;
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
@@ -3798,7 +3805,9 @@
             if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_ARRAY_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_FUNCTION_CONSTRUCTOR) {
+            if (intrinsicId !== INTRINSIC_REGEXP_CONSTRUCTOR) {
                 intrinsicCallValid = 0;
+            }
             }
             }
             }
@@ -3852,6 +3861,8 @@
                 requiredIntrinsicArguments = 0;
             }
         } else if (intrinsicId === INTRINSIC_FUNCTION_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_REGEXP_CONSTRUCTOR) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
             requiredIntrinsicArguments = 0;
@@ -3950,6 +3961,21 @@
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 currentContext, stringSupport);
+            if (intrinsicHandled === 2) {
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+                intrinsicHandled = 0;
+            }
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        if (intrinsicId === INTRINSIC_REGEXP_CONSTRUCTOR) {
+            intrinsicHandled = regexpConstructorKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                stringSupport, callOperation);
             if (intrinsicHandled === 2) {
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_HEAP_SPACE);
@@ -6225,29 +6251,175 @@
         return 1;
     }
 
+    function initializeRegexpPropertyKernel(
+            heapBase, property, nextProperty, keyCell, attributes,
+            valueKind, valueReference) {
+        setRecordType(heapBase, property, HEAP_TYPE_PROPERTY);
+        setRecordSize(heapBase, property, PROPERTY_RECORD_BYTES);
+        setRecordMark(heapBase, property, 0);
+        setRecordFlags(heapBase, property, 0);
+        setPropertyNext(heapBase, property, nextProperty);
+        setPropertyKey(heapBase, property, valueCellReference(0, keyCell));
+        setPropertyAttributes(heapBase, property, attributes);
+        setPropertyReserved(heapBase, property, 0);
+        var valueCell = propertyValueCellAddress(heapBase, property);
+        if (valueKind === 0) setValueCellReference(valueCell, valueReference);
+        else if (valueKind === 1) setValueCellTrue(valueCell);
+        else if (valueKind === 2) setValueCellFalse(valueCell);
+        else setValueCellInt32(valueCell, 0);
+        return 1;
+    }
+
     function allocateRegexpKernel(heapBase, state, targetCell, patternCell,
                                   flagsCell, stringSupport) {
         if (valueCellTag(0, patternCell) !== VALUE_TAG_REFERENCE) return 0;
         if (valueCellTag(0, flagsCell) !== VALUE_TAG_REFERENCE) return 0;
         var regexp = engineHeapBump(heapBase, state);
-        if (regexp + REGEXP_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
+        var sourceProperty = regexp + REGEXP_RECORD_BYTES;
+        var globalProperty = sourceProperty + PROPERTY_RECORD_BYTES;
+        var ignoreCaseProperty = globalProperty + PROPERTY_RECORD_BYTES;
+        var multilineProperty = ignoreCaseProperty + PROPERTY_RECORD_BYTES;
+        var lastIndexProperty = multilineProperty + PROPERTY_RECORD_BYTES;
+        var allocationEnd = lastIndexProperty + PROPERTY_RECORD_BYTES;
+        if (allocationEnd > engineHeapLimit(heapBase, state)) {
             return 0;
         }
         var prototypeCell = vectorCellAddress(
             heapBase, stringSupport, RUNTIME_SUPPORT_REGEXP_PROTOTYPE);
+        var pattern = valueCellReference(0, patternCell);
+        var flags = valueCellReference(0, flagsCell);
+        var source = pattern;
+        if (stringLength(heapBase, source) === 0) {
+            source = valueCellReference(0, vectorCellAddress(
+                heapBase, stringSupport, RUNTIME_SUPPORT_EMPTY_REGEXP_SOURCE));
+        }
+        var hasGlobal = 0;
+        var hasIgnoreCase = 0;
+        var hasMultiline = 0;
+        var flagIndex = 0;
+        while (flagIndex < stringLength(heapBase, flags)) {
+            var flag = stringCharacterCodeUnit(heapBase, flags, flagIndex) & 65535;
+            if (flag === 103) hasGlobal = 1;
+            else if (flag === 105) hasIgnoreCase = 1;
+            else if (flag === 109) hasMultiline = 1;
+            flagIndex = flagIndex + 1;
+        }
+        var globalValueKind = 2;
+        var ignoreCaseValueKind = 2;
+        var multilineValueKind = 2;
+        if (hasGlobal === 1) globalValueKind = 1;
+        if (hasIgnoreCase === 1) ignoreCaseValueKind = 1;
+        if (hasMultiline === 1) multilineValueKind = 1;
         setRecordType(heapBase, regexp, HEAP_TYPE_REGEXP);
         setRecordSize(heapBase, regexp, REGEXP_RECORD_BYTES);
         setRecordMark(heapBase, regexp, 0);
         setRecordFlags(heapBase, regexp, 0);
-        setRegexpPattern(heapBase, regexp,
-                         valueCellReference(0, patternCell));
-        setRegexpFlags(heapBase, regexp,
-                       valueCellReference(0, flagsCell));
+        setRegexpPattern(heapBase, regexp, pattern);
+        setRegexpFlags(heapBase, regexp, flags);
         setRegexpPrototype(heapBase, regexp,
                            valueCellReference(0, prototypeCell));
-        setRegexpPropertyHead(heapBase, regexp, 0);
+        setRegexpPropertyHead(heapBase, regexp, sourceProperty);
+        var initializedProperty = initializeRegexpPropertyKernel(
+            heapBase, sourceProperty, globalProperty,
+            vectorCellAddress(heapBase, stringSupport,
+                RUNTIME_SUPPORT_REGEXP_SOURCE_KEY), 0, 0, source);
+        initializedProperty = initializeRegexpPropertyKernel(
+            heapBase, globalProperty, ignoreCaseProperty,
+            vectorCellAddress(heapBase, stringSupport,
+                RUNTIME_SUPPORT_REGEXP_GLOBAL_KEY), 0,
+            globalValueKind, 0);
+        initializedProperty = initializeRegexpPropertyKernel(
+            heapBase, ignoreCaseProperty, multilineProperty,
+            vectorCellAddress(heapBase, stringSupport,
+                RUNTIME_SUPPORT_REGEXP_IGNORE_CASE_KEY), 0,
+            ignoreCaseValueKind, 0);
+        initializedProperty = initializeRegexpPropertyKernel(
+            heapBase, multilineProperty, lastIndexProperty,
+            vectorCellAddress(heapBase, stringSupport,
+                RUNTIME_SUPPORT_REGEXP_MULTILINE_KEY), 0,
+            multilineValueKind, 0);
+        initializedProperty = initializeRegexpPropertyKernel(
+            heapBase, lastIndexProperty, 0,
+            vectorCellAddress(heapBase, stringSupport,
+                RUNTIME_SUPPORT_REGEXP_LAST_INDEX_KEY),
+            PROPERTY_ATTRIBUTE_WRITABLE, 3, 0);
         setValueCellReference(targetCell, regexp);
-        setEngineHeapBump(heapBase, state, regexp + REGEXP_RECORD_BYTES);
+        setEngineHeapBump(heapBase, state, allocationEnd);
+        return 1;
+    }
+
+    function regexpConstructorKernel(
+            heapBase, state, targetCell, registerCells, argumentsVector,
+            argumentCount, stringSupport, callOperation) {
+        var emptyStringCell = vectorCellAddress(
+            heapBase, stringSupport, STRING_SUPPORT_EMPTY);
+        var patternCell = emptyStringCell;
+        var flagsCell = emptyStringCell;
+        if (argumentCount > 0) {
+            var patternDescriptor = vectorCellAddress(
+                heapBase, argumentsVector, 0);
+            if (valueCellTag(0, patternDescriptor) !== VALUE_TAG_INT32) return 0;
+            var patternRegister = valueCellInt32(0, patternDescriptor);
+            var suppliedPatternCell = heapBase + registerCells +
+                patternRegister * VALUE_CELL_BYTES;
+            if (valueCellTag(0, suppliedPatternCell) === VALUE_TAG_REFERENCE) {
+                var suppliedPattern = valueCellReference(0, suppliedPatternCell);
+                var suppliedPatternType = recordType(heapBase, suppliedPattern);
+                if (suppliedPatternType === HEAP_TYPE_STRING) {
+                    patternCell = suppliedPatternCell;
+                } else if (suppliedPatternType === HEAP_TYPE_REGEXP) {
+                    if (argumentCount > 1) return 0;
+                    if (callOperation === 1) {
+                        setValueCellReference(targetCell, suppliedPattern);
+                        return 1;
+                    }
+                    /* Construction needs two temporary tagged cells for the
+                     * copied pattern and flags. The semantic path handles
+                     * this uncommon case until kernel scratch cells are
+                     * reserved for it. */
+                    return 0;
+                } else return 0;
+            } else if (valueCellTag(0, suppliedPatternCell) !==
+                       VALUE_TAG_UNDEFINED) return 0;
+        }
+        if (argumentCount > 1) {
+            var flagsDescriptor = vectorCellAddress(
+                heapBase, argumentsVector, 1);
+            if (valueCellTag(0, flagsDescriptor) !== VALUE_TAG_INT32) return 0;
+            var flagsRegister = valueCellInt32(0, flagsDescriptor);
+            var suppliedFlagsCell = heapBase + registerCells +
+                flagsRegister * VALUE_CELL_BYTES;
+            if (valueCellTag(0, suppliedFlagsCell) === VALUE_TAG_REFERENCE) {
+                var suppliedFlags = valueCellReference(0, suppliedFlagsCell);
+                if (recordType(heapBase, suppliedFlags) !== HEAP_TYPE_STRING) {
+                    return 0;
+                }
+                flagsCell = suppliedFlagsCell;
+            } else if (valueCellTag(0, suppliedFlagsCell) !==
+                       VALUE_TAG_UNDEFINED) return 0;
+        }
+        var flagsAddress = valueCellReference(0, flagsCell);
+        var seenGlobal = 0;
+        var seenIgnoreCase = 0;
+        var seenMultiline = 0;
+        var flagIndex = 0;
+        while (flagIndex < stringLength(heapBase, flagsAddress)) {
+            var flag = stringCharacterCodeUnit(
+                heapBase, flagsAddress, flagIndex) & 65535;
+            if (flag === 103) {
+                if (seenGlobal === 1) return 0;
+                seenGlobal = 1;
+            } else if (flag === 105) {
+                if (seenIgnoreCase === 1) return 0;
+                seenIgnoreCase = 1;
+            } else if (flag === 109) {
+                if (seenMultiline === 1) return 0;
+                seenMultiline = 1;
+            } else return 0;
+            flagIndex = flagIndex + 1;
+        }
+        if (allocateRegexpKernel(heapBase, state, targetCell, patternCell,
+                                 flagsCell, stringSupport) === 0) return 2;
         return 1;
     }
 
@@ -8914,6 +9086,7 @@
             functionConstructorKernel: functionConstructorKernel,
             getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
+            initializeRegexpPropertyKernel: initializeRegexpPropertyKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             intrinsicCallKernel: intrinsicCallKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
@@ -8931,6 +9104,7 @@
             programSetConstantKernel: programSetConstantKernel,
             programSetVectorKernel: programSetVectorKernel,
             regexpTestKernel: regexpTestKernel,
+            regexpConstructorKernel: regexpConstructorKernel,
             returnFromBytecodeKernel: returnFromBytecodeKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
@@ -9060,7 +9234,7 @@
             runtime.heapRecords.setPlatformFreePointer(
                 this.platformServicesAddress, x86Backend.ffi.resolve("free"));
         }
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(280);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(286);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -9134,7 +9308,20 @@
             this.stringSupportAddress, 278), undefined);
         runtime.writeHeapValue(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 279), undefined);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 280);
+        var regexpPropertyNames = ["source", "global", "ignoreCase",
+                                   "multiline", "lastIndex"];
+        var regexpPropertyIndex = 0;
+        while (regexpPropertyIndex < regexpPropertyNames.length) {
+            runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, 280 + regexpPropertyIndex),
+                runtime.internStringAddress(
+                    regexpPropertyNames[regexpPropertyIndex]));
+            regexpPropertyIndex++;
+        }
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 285),
+            runtime.internStringAddress("(?:)"));
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 286);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;

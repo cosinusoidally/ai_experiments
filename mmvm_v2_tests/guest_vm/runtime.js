@@ -376,10 +376,25 @@
 
     Runtime.prototype.makeRegExp = function (pattern, flags) {
         this.ensureLinearHeap();
-        return this.trackObject(this.makeHeapHandle(
+        var regexp = this.trackObject(this.makeHeapHandle(
             this.heapRecords.allocateRegExp(pattern, flags,
                 this.regexpPrototype ? this.regexpPrototype.heapAddress : 0),
             "regexp"));
+        /* ES5.1 15.10.7: these are own properties of every RegExp instance.
+         * Keeping them in ordinary guest property records makes descriptor,
+         * enumeration, assignment and instanceof behaviour use the same path
+         * as every other guest object. */
+        this.defineDataProperty(regexp, "source",
+            pattern.length ? pattern : "(?:)", 0);
+        this.defineDataProperty(regexp, "global",
+            flags.indexOf("g") >= 0, 0);
+        this.defineDataProperty(regexp, "ignoreCase",
+            flags.indexOf("i") >= 0, 0);
+        this.defineDataProperty(regexp, "multiline",
+            flags.indexOf("m") >= 0, 0);
+        this.defineDataProperty(regexp, "lastIndex", 0,
+            HeapRecords.Attributes.WRITABLE);
+        return regexp;
     };
 
     Runtime.prototype.hostRegExp = function (regexp) {
@@ -2163,6 +2178,54 @@
                 }
             }
         }
+        function regexpArguments(args, constructing) {
+            var patternValue = args.length ? args[0] : undefined;
+            var flagsValue = args.length > 1 ? args[1] : undefined;
+            if (patternValue && patternValue.guestType === "regexp") {
+                if (flagsValue !== undefined) {
+                    throw new TypeError("flags supplied with a RegExp pattern");
+                }
+                if (!constructing) return {same: patternValue};
+                return {
+                    pattern: runtime.heapRecords.regexpPattern(
+                        patternValue.heapAddress),
+                    flags: runtime.heapRecords.regexpFlags(
+                        patternValue.heapAddress)
+                };
+            }
+            var pattern = patternValue === undefined ? "" :
+                runtime.toString(patternValue);
+            var flags = flagsValue === undefined ? "" :
+                runtime.toString(flagsValue);
+            var seenGlobal = false;
+            var seenIgnoreCase = false;
+            var seenMultiline = false;
+            var flagIndex = 0;
+            while (flagIndex < flags.length) {
+                var flag = flags.charAt(flagIndex++);
+                if (flag === "g" && !seenGlobal) seenGlobal = true;
+                else if (flag === "i" && !seenIgnoreCase) seenIgnoreCase = true;
+                else if (flag === "m" && !seenMultiline) seenMultiline = true;
+                else throw new SyntaxError("invalid regular expression flags");
+            }
+            return {pattern: pattern, flags: flags};
+        }
+        var regexpConstructor = this.makeNativeFunction("RegExp",
+            function (receiver, args) {
+                var parsed = regexpArguments(args, false);
+                return parsed.same || runtime.makeRegExp(
+                    parsed.pattern, parsed.flags);
+            }, "intrinsic", NativeIntrinsics.REGEXP_CONSTRUCTOR);
+        regexpConstructor.constructCallback = function (args) {
+            var parsed = regexpArguments(args, true);
+            return runtime.makeRegExp(parsed.pattern, parsed.flags);
+        };
+        this.defineDataProperty(regexpConstructor, "length", 2, 0);
+        if (this.regexpPrototype) {
+            this.setProperty(regexpConstructor, "prototype", this.regexpPrototype);
+            this.setProperty(this.regexpPrototype, "constructor", regexpConstructor);
+        }
+        this.setGlobal("RegExp", regexpConstructor);
         var stringConstructor = this.makeNativeFunction("String",
             function (receiver, args) {
                 return args.length ? runtime.toString(args[0]) : "";
