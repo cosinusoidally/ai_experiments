@@ -869,9 +869,35 @@
                             registers[destination] = args.length ?
                                 args[0] : undefined;
                         } else {
-                            var evalProgram = frame.context.compileEval(
-                                args[0], "<eval>", !!frame.program.strict,
-                                frame.program, frame.environment);
+                            var evalProgram;
+                            if (this.runtime.evalCompilerRoot) {
+                                var evalCompiler = this.runtime.retained(
+                                    this.runtime.evalCompilerRoot);
+                                var compiledEval = this.runtime.interpretGuest(
+                                    evalCompiler, undefined,
+                                    [args[0], "<eval>",
+                                     !!frame.program.strict], frame.context);
+                                if (!compiledEval || compiledEval.guestType !==
+                                        "bytecodeFunction") {
+                                    throw new TypeError(
+                                        "self-hosted eval compiler returned " +
+                                        "a non-callable program");
+                                }
+                                evalProgram = compiledEval.program;
+                                var guestDeclarations =
+                                    this.runtime.getProperty(compiledEval,
+                                        "__guestVMEvalDeclarations");
+                                if (guestDeclarations &&
+                                    guestDeclarations.guestType === "array") {
+                                    evalProgram.evalDeclarations =
+                                        this.runtime.arrayToHost(
+                                            guestDeclarations);
+                                }
+                            } else {
+                                evalProgram = frame.context.compileEval(
+                                    args[0], "<eval>", !!frame.program.strict,
+                                    frame.program, frame.environment);
+                            }
                             if (evalProgram.evalDeclarations) {
                                 this.runtime.declareEvalBindings(
                                     frame.context, frame.environment,

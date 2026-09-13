@@ -317,18 +317,13 @@
         this.retainedProgramAddresses = {};
         this.heapStateSnapshots = [];
         this.hostRoots = [];
+        this.evalCompilerRoot = 0;
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
             normalizeGCThreshold(options.gcThreshold);
         this.gcAllocationDebt = 0;
         this.gcPending = false;
         this.gcCollecting = false;
-        /* An embedder whose own collector is not generational (notably the
-         * Firefox 1 shell used by js_min) may supply a safe explicit host-GC
-         * hook. It is never guest-visible and is only called after guest
-         * frames and roots have been published at an ordinary safe point. */
-        this.hostCollect = typeof options.hostCollect === "function" ?
-            options.hostCollect : null;
         this.gcHeapPressureBump = 0;
         this.compiledDepth = 0;
         this.collectionCount = 0;
@@ -1958,7 +1953,6 @@
     Runtime.prototype.gcSafePoint = function () {
         if (this.gcPending && !this.gcCollecting && this.compiledDepth === 0) {
             this.collect();
-            if (this.hostCollect) this.hostCollect();
         }
     };
 
@@ -3154,6 +3148,21 @@
             runtime.assertOwned(callable);
             return callable.program;
         }
+        this.setGlobal("__guestVMInstallEvalCompiler",
+            this.makeNativeFunction("__guestVMInstallEvalCompiler",
+                function (receiver, args) {
+                    var compiler = args[0];
+                    if (!compiler || compiler.guestType !==
+                            "bytecodeFunction") {
+                        throw new TypeError(
+                            "eval compiler must be guest bytecode");
+                    }
+                    if (runtime.evalCompilerRoot) {
+                        runtime.release(runtime.evalCompilerRoot);
+                    }
+                    runtime.evalCompilerRoot = runtime.retain(compiler);
+                    return undefined;
+                }));
         this.setGlobal("__guestVMProgramCreate", this.makeNativeFunction(
             "__guestVMProgramCreate", function (receiver, args) {
                 var codeLength = integer(args[0], "code length");
@@ -3177,6 +3186,8 @@
                     thisSlot: integer(args[6], "this slot"),
                     functionNameSlot: integer(args[7], "function-name slot"),
                     usesArguments: !!args[8],
+                    strict: !!args[10],
+                    evalCode: !!args[11],
                     bindings: bindingCount ? new Array(bindingCount) : null,
                     globalDeclarations: []
                 };
@@ -4529,6 +4540,38 @@
              * free space or the remaining tail cannot satisfy a record. */
             var postCollectionHeadroom = Math.max(1024 * 1024,
                 Math.floor(sweepResult.bytes / 2));
+            /* Derive occupancy from the authoritative record walk. The free
+             * block index is an allocator acceleration structure and native
+             * sweep/index rebuilding may legitimately replace or coalesce
+             * entries while a collection is finalized. */
+            var occupancy = this.linearHeap.recordStatistics();
+            var reusableBytes = occupancy.bytes[Heap.Types.FREE] || 0;
+            var liveBytes = this.linearHeap.bump - reusableBytes;
+            var nativeFragmentationRequiresGrowth =
+                this.nativeInterpreter &&
+                this.nativeInterpreter.needsLogicalHeapGrowth();
+            var exhaustedContiguousTail = this.linearHeap.bump >=
+                Math.floor(this.linearHeap.allocationLimit * 15 / 16);
+            if ((liveBytes >= Math.floor(
+                    this.linearHeap.allocationLimit * 2 / 3) ||
+                 nativeFragmentationRequiresGrowth ||
+                 exhaustedContiguousTail) &&
+                this.linearHeap.allocationLimit <
+                    this.linearHeap.maximumAllocationLimit) {
+                /* A large, persistent working set (for example demo8's
+                 * renderer) should not repeatedly collect the same live
+                 * graph at the current pressure line. Likewise, abundant
+                 * free bytes split into blocks smaller than the native
+                 * allocation region cannot service native execution cheaply;
+                 * once the contiguous tail is exhausted, cycling thousands
+                 * of small regions causes collection thrash even if one block
+                 * happens to exceed the minimum at the sampling instant. Grow
+                 * only after collection proves one of those conditions;
+                 * high-churn compiler/test workloads continue reusing the
+                 * original logical heap while suitable blocks remain. */
+                this.linearHeap.growToFit(
+                    this.linearHeap.allocationLimit + 1);
+            }
             this.resetHeapPressureBump(
                 this.linearHeap.bump + postCollectionHeadroom);
             if (this.profileOpcodeCounts) {
@@ -4542,7 +4585,8 @@
                     this.linearHeap.freeBlocks.length + " markMs=" +
                     (markingFinished - collectionStarted) + " sweepMs=" +
                     (sweepingFinished - markingFinished) + " nextPressure=" +
-                    this.gcHeapPressureBump + " limit=" +
+                    this.gcHeapPressureBump + " liveBytes=" + liveBytes +
+                    " limit=" +
                     this.linearHeap.allocationLimit;
                 if (typeof print === "function") print(collectionLine);
                 else if (typeof console !== "undefined" && console.log) {

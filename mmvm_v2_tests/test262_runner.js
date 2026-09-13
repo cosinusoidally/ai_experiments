@@ -20,6 +20,7 @@
     var quiet = false;
     var summaryOnly = false;
     var freshContexts = false;
+    var selfHostedEval = false;
     var listOnly = false;
     var requestedVariant = "";
     var instructionLimit = 20000000;
@@ -28,7 +29,8 @@
     function failUsage(message) {
         if (message) console.error("test262 runner: " + message);
         console.error("usage: test262_runner.js [--fail-fast] [--verbose] " +
-            "[--quiet] [--summary-only] [--fresh-contexts] [--list] " +
+            "[--quiet] [--summary-only] [--fresh-contexts] " +
+            "[--self-hosted-eval] [--list] " +
             "[--strict-only|--non-strict-only] " +
             "[--instruction-limit count] [all|path ...]");
         process.exit(2);
@@ -61,6 +63,7 @@
             summaryOnly = true;
         }
         else if (argument === "--fresh-contexts") freshContexts = true;
+        else if (argument === "--self-hosted-eval") selfHostedEval = true;
         else if (argument === "--list") listOnly = true;
         else if (argument === "--strict-only") {
             if (requestedVariant) failUsage("variant options are mutually exclusive");
@@ -84,6 +87,9 @@
         } else selectors.push(normalizeRelativePath(argument));
     }
     if (!selectors.length) selectors.push("");
+    if (selfHostedEval) {
+        require("./guest_vm/self_hosted_frontend.js").installEvalCompiler();
+    }
 
     function isApplicableRoot(name) {
         var index = 0;

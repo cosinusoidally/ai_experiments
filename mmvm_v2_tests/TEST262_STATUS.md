@@ -585,10 +585,9 @@ performance are separate mandatory regression gates.
   and growable-heap behavior are unchanged.
 - High-churn address dictionaries are replaced by survivor-only maps during
   collection, released program-metadata slots are reused, and the transitional
-  compiled-regexp accelerator is bounded to 256 entries. On `js_min.exe`, the
-  embedder's own collector is invoked automatically after a guest collection
-  safe point; this is host implementation housekeeping and is not a
-  guest-visible host call.
+  compiled-regexp accelerator is bounded to 256 entries. Host-VM collection
+  is not coupled to guest collection: doing so caused long pauses in
+  interactive workloads with a large persistent guest graph.
 - Native `ch07/7.4` remains 14 passed / 0 failed / 0 not run in 39.11 seconds,
   with a 268,220 KiB peak. Its guest heap reported a 64 MiB logical limit, no
   growth, and four collections. The exact generated regexp test
@@ -604,6 +603,38 @@ performance are separate mandatory regression gates.
 - Complete Node and `js_min.exe` regression gates pass after these changes
   with all 264 guest assertions, networking, `node_web.js`, demo1, demo2,
   heap/GC/context/native-interpreter checks, and the three-context demo green.
+
+### 2026-09-13 — self-hosted eval checkpoint and GC performance correction
+
+- The guest-owned frontend can now compile direct eval through the shared
+  tokenizer, parser, compiler, verifier, and authoritative program-builder
+  ABI. Sloppy eval uses dynamic caller-environment lookup; strict eval creates
+  its own lexical environment and dynamically resolves outer bindings.
+  Program strict/eval flags and sloppy eval declarations survive adoption.
+- This path is selected explicitly with `--self-hosted-eval` while it is being
+  optimized. Native `ch10/10.1` passes 43/43 in that mode in 14.10 seconds,
+  peak RSS 135,220 KiB. The generated 65,536-regexp test remained incomplete
+  at the 180-second cap, but peak RSS fell to 255,192 KiB from the prior
+  host-frontend sample above 335 MiB. It is not yet the default because that
+  would regress Test262 throughput.
+- Profiling identified general string intrinsic gaps rather than a regexp-test
+  special case. Native `String.charAt` now returns arbitrary UTF-16 code units,
+  allocating a one-code-unit guest string above the prebuilt Latin-1 table,
+  and single-argument `String.fromCharCode` reuses native ES number conversion
+  for string arguments. The latter removes a host transition from generated
+  lexical workloads.
+- The initial collect-before-grow policy caused demo8 to exhaust its
+  contiguous 64 MiB tail and cycle thousands of fragmented regions. It
+  repeatedly collected a graph with only about 3.7 MiB live, dropping from
+  roughly 4 FPS to 0.4--0.7 FPS. Logical growth is now permitted only after a
+  collection proves high live occupancy, an unusable native region, or an
+  exhausted contiguous tail. No demo code or workload-specific VM path was
+  added.
+- After the correction, a native guest demo8 run at 320x240 and a 20 FPS cap
+  reported consecutive five-second samples of 15.2, 15.4, 16.6, 17.8, and
+  15.4 FPS with no cliff. A second run reported 14.8, 12.3, and 18.2 FPS.
+  Complete Node and `js_min.exe` regression gates pass with all 264 guest
+  assertions and the existing integration checks.
 
 ## Rules for subsequent entries
 

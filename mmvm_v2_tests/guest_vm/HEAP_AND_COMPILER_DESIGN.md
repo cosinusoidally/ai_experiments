@@ -75,8 +75,13 @@ The default heap reserves a stable maximum address range but initially exposes
 only a smaller logical allocation limit. Native allocation stops at the
 collection-pressure boundary and publishes its frame so automatic collection
 can run first. The logical limit grows only when collection and reusable free
-regions cannot satisfy an allocation; reserved address space is not permission
-to double the live heap before attempting reclamation.
+regions cannot satisfy an allocation, or after collection establishes that at
+least two thirds of the current logical heap is genuinely live. It also grows
+after collection when the contiguous tail is exhausted: cycling thousands of
+small reusable blocks can otherwise make a native allocation-region workload
+collect repeatedly despite a low total live-byte count. These adaptive cases
+give a persistent renderer working set useful headroom without making reserved
+address space permission to grow before attempting reclamation.
 
 ## Shared compiler pipeline
 

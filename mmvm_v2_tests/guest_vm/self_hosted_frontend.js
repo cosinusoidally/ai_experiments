@@ -38,7 +38,9 @@ function adoptProgramDescriptor(program) {
         program.thisSlot === undefined ? -1 : program.thisSlot,
         program.functionNameSlot === undefined ? -1 : program.functionNameSlot,
         !!program.usesArguments,
-        bindings.length);
+        bindings.length,
+        !!program.strict,
+        !!program.evalCode);
     var index = 0;
     while (index < program.code.length) {
         __guestVMProgramSetCode(callable, index, program.code[index]);
@@ -79,4 +81,26 @@ exports.adoptProgram = adoptProgramDescriptor;
 
 exports.compileExecutable = function (source, filename) {
     return adoptProgramDescriptor(exports.compile(source, filename));
+};
+
+exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
+    var ast = new SelfHostedParser(source, filename,
+        {strict: !!inheritedStrict, compactLiterals: true}).parseProgram();
+    var dynamicOuter = [
+        {bindings: {}, createsEnvironment: false, dynamic: true}
+    ];
+    var program = ast.strict ?
+        SelfHostedCompiler.compileStrictEval(ast, dynamicOuter) :
+        SelfHostedCompiler.compileSloppyDirectEval(ast, null);
+    selfHostedVerify(program);
+    var callable = adoptProgramDescriptor(program);
+    callable.__guestVMEvalDeclarations = program.evalDeclarations || [];
+    return callable;
+};
+
+exports.installEvalCompiler = function () {
+    if (typeof __guestVMInstallEvalCompiler !== "function") {
+        throw new Error("self-hosted eval installation is unavailable");
+    }
+    __guestVMInstallEvalCompiler(exports.compileEvalExecutable);
 };

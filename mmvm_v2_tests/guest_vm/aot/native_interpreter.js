@@ -4164,7 +4164,7 @@
         } else if (intrinsicId === INTRINSIC_POKE32) {
             requiredIntrinsicArguments = 2;
         } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
-            requiredIntrinsicArguments = 10;
+            requiredIntrinsicArguments = 12;
         } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
             requiredIntrinsicArguments = 3;
         } else if (intrinsicId ===
@@ -7482,6 +7482,30 @@
     if (intrinsicId === INTRINSIC_STRING_FROM_CHAR_CODE) {
         var fromCharCodeValid = 1;
         var fromCharCodeResult = 0;
+        var fromCharCodeConvertedArgument = 0;
+        if (intrinsicArgumentCount === 1) {
+            var fromCharCodeSingleDescriptor = heapBase +
+                intrinsicArgumentsVector + VECTOR_CELLS;
+            if (valueCellTag(0, fromCharCodeSingleDescriptor) ===
+                    VALUE_TAG_INT32) {
+                var fromCharCodeSingleRegister = valueCellInt32(
+                    0, fromCharCodeSingleDescriptor);
+                var fromCharCodeSingleCell = heapBase + registerCells +
+                    fromCharCodeSingleRegister * VALUE_CELL_BYTES;
+                if (valueCellTag(0, fromCharCodeSingleCell) ===
+                        VALUE_TAG_REFERENCE) {
+                    if (recordType(heapBase,
+                            valueCellReference(0,
+                                fromCharCodeSingleCell)) ===
+                            HEAP_TYPE_STRING) {
+                        fromCharCodeConvertedArgument = dateIntrinsicKernel(
+                            heapBase, state, intrinsicTarget, registerCells,
+                            -1, INTRINSIC_NUMBER_CONSTRUCTOR, stringSupport,
+                            intrinsicArgumentsVector);
+                    }
+                }
+            }
+        }
         if (intrinsicArgumentCount === 0) {
             var fromCharCodeEmptyCell = heapBase + stringSupport +
                 VECTOR_CELLS + STRING_SUPPORT_EMPTY *
@@ -7527,6 +7551,9 @@
                     var fromCharCodeValueCell = heapBase +
                         registerCells + fromCharCodeRegister *
                         VALUE_CELL_BYTES;
+                    if (fromCharCodeConvertedArgument === 1) {
+                        fromCharCodeValueCell = intrinsicTarget;
+                    }
                     var fromCharCodeTag = valueCellTag(
                         0, fromCharCodeValueCell);
                     if (fromCharCodeTag !== VALUE_TAG_INT32) {
@@ -7793,6 +7820,7 @@
             }
         }
         var charAtSupportIndex = STRING_SUPPORT_EMPTY;
+        var charAtResultAddress = 0;
         var charAtInRange = 0;
         var charAtCode = 0;
         if (charAtValid === 1) {
@@ -7803,8 +7831,37 @@
                     charAtCode = stringCharacterCodeUnit(
                         heapBase, charAtString, charAtIndex) & 65535;
                     if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
-                        if (charAtCode > 255) charAtValid = 0;
-                        else charAtSupportIndex =
+                        if (charAtCode > 255) {
+                            var charAtStringBytes =
+                                (STRING_CHARS + 2 + 7) & -8;
+                            charAtResultAddress = engineHeapBump(
+                                heapBase, state);
+                            if (charAtResultAddress + charAtStringBytes >
+                                    engineHeapLimit(heapBase, state)) {
+                                charAtValid = 0;
+                                setEngineCallRejectReason(heapBase, state,
+                                    CALL_REJECT_HEAP_SPACE);
+                            } else {
+                                setRecordType(heapBase, charAtResultAddress,
+                                    HEAP_TYPE_STRING);
+                                setRecordSize(heapBase, charAtResultAddress,
+                                    charAtStringBytes);
+                                setRecordMark(heapBase, charAtResultAddress, 0);
+                                setRecordFlags(heapBase, charAtResultAddress, 0);
+                                setStringLength(heapBase,
+                                    charAtResultAddress, 1);
+                                setStringCharacterByte(heapBase,
+                                    charAtResultAddress, 0,
+                                    charAtCode & 255);
+                                setStringCharacterByte(heapBase,
+                                    charAtResultAddress, 1,
+                                    (charAtCode >>> 8) & 255);
+                                setStringHash(heapBase, charAtResultAddress,
+                                    (-2128831035 ^ charAtCode) * 16777619);
+                                setEngineHeapBump(heapBase, state,
+                                    charAtResultAddress + charAtStringBytes);
+                            }
+                        } else charAtSupportIndex =
                             STRING_SUPPORT_ASCII_BASE + charAtCode;
                     }
                 }
@@ -7826,11 +7883,16 @@
                         2146959360);
             }
         } else {
-            var charAtResultCell = heapBase + stringSupport +
-                VECTOR_CELLS + charAtSupportIndex * VALUE_CELL_BYTES;
             store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-            store32(intrinsicTarget + VALUE_CELL_LOW,
-                load32(charAtResultCell + VALUE_CELL_LOW));
+            if (charAtResultAddress !== 0) {
+                store32(intrinsicTarget + VALUE_CELL_LOW,
+                    charAtResultAddress);
+            } else {
+                var charAtResultCell = heapBase + stringSupport +
+                    VECTOR_CELLS + charAtSupportIndex * VALUE_CELL_BYTES;
+                store32(intrinsicTarget + VALUE_CELL_LOW,
+                    load32(charAtResultCell + VALUE_CELL_LOW));
+            }
             store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
         }
         store32(intrinsicTarget + VALUE_CELL_AUX, 0);
@@ -8326,6 +8388,10 @@
             heapBase, argumentsVector, registerCells, 8);
         var bindingCount = programIntArgumentKernel(
             heapBase, argumentsVector, registerCells, 9);
+        var strictProgram = programBooleanArgumentKernel(
+            heapBase, argumentsVector, registerCells, 10);
+        var evalProgram = programBooleanArgumentKernel(
+            heapBase, argumentsVector, registerCells, 11);
         if (codeLength < 0) return 0;
         if (constantLength < 0) return 0;
         if (bindingLength < 0) return 0;
@@ -8336,6 +8402,8 @@
         if (thisSlot === INVALID_PROGRAM_INTEGER) return 0;
         if (functionNameSlot === INVALID_PROGRAM_INTEGER) return 0;
         if (usesArguments < 0) return 0;
+        if (strictProgram < 0) return 0;
+        if (evalProgram < 0) return 0;
         var bytecodeBytes = (BYTECODE_FIXED_BYTES + codeLength * 4 + 7) & -8;
         var constantBytes = 24 + constantLength * VALUE_CELL_BYTES;
         var bindingBytes = 24 + bindingLength * VALUE_CELL_BYTES;
@@ -8385,7 +8453,8 @@
         setProgramThisSlot(heapBase, program, thisSlot);
         setProgramFunctionNameSlot(heapBase, program, functionNameSlot);
         setProgramMetadata(heapBase, program, 0);
-        setProgramFlags(heapBase, program, usesArguments);
+        setProgramFlags(heapBase, program, usesArguments |
+            strictProgram * 2 | evalProgram * 4);
         setProgramBindingCount(heapBase, program, bindingCount);
         initializedBytes = initializeProgramCallableKernel(
             heapBase, callable, program, context, stringSupport);
@@ -9824,6 +9893,14 @@
             return false;
         }
         this.releaseAllocationRegionForCollection();
+        return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
+                   heap.allocationLimit &&
+               heap.largestFreeBlockSize() <
+                   MIN_NATIVE_ALLOCATION_REGION_BYTES;
+    };
+
+    NativeInterpreter.prototype.needsLogicalHeapGrowth = function () {
+        var heap = this.runtime.linearHeap;
         return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
                    heap.allocationLimit &&
                heap.largestFreeBlockSize() <
