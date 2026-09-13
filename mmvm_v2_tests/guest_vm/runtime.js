@@ -33,7 +33,15 @@
     }
 
     function own(object, key) {
-        return Object.prototype.hasOwnProperty.call(object, key);
+        return object.hasOwnProperty(key);
+    }
+
+    function guestMethod(table, key) {
+        /* Firefox 1 exposes a legacy host Object.prototype.eval. Method tables
+         * are ordinary ES3 objects, so raw lookup must not expose inherited
+         * host functions to guest code. Every real entry is a guest callable. */
+        var value = table[key];
+        return value && value.guestType ? value : undefined;
     }
 
     function hexDigitValue(code) {
@@ -694,6 +702,7 @@
                 index < args.length ? args[index] : undefined);
             index++;
         }
+        if (program.evalCode) return environment;
         this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
             program.argumentsSlot),
             this.makeArgumentsObject(
@@ -744,6 +753,7 @@
                 index < args.length ? args[index] : undefined;
             index++;
         }
+        if (program.evalCode) return;
         registers[bindingRegisters[program.argumentsSlot]] =
             this.makeArgumentsObject(args, callable, !!program.strict);
         registers[bindingRegisters[program.thisSlot]] = receiver;
@@ -809,6 +819,65 @@
             handle: environment, bindingSlots: {}
         };
         return environment;
+    };
+
+    Runtime.prototype.declareEvalBindings = function (context, environment,
+                                                       names) {
+        var target = environment;
+        /* Object environments belong to `with`; variable declarations pass
+         * through them to the caller's variable environment. */
+        while (target && !this.heapRecords.environmentProgram(
+                target.heapAddress)) {
+            target = this.environmentParent(target);
+        }
+        var index = 0;
+        if (!target) {
+            while (index < names.length) {
+                var globalName = names[index++];
+                if (!this.hasProperty(context.globalObject, globalName)) {
+                    this.defineDataProperty(context.globalObject, globalName,
+                        undefined, HeapRecords.Attributes.WRITABLE |
+                        HeapRecords.Attributes.ENUMERABLE |
+                        HeapRecords.Attributes.CONFIGURABLE);
+                }
+            }
+            return;
+        }
+        var bindingObjectAddress = this.heapRecords.environmentObject(
+            target.heapAddress);
+        var bindingObject = bindingObjectAddress ?
+            this.readHeapReference(bindingObjectAddress) : this.makeObject();
+        if (!bindingObjectAddress) {
+            this.heapRecords.setEnvironmentObject(target.heapAddress,
+                                                   bindingObject.heapAddress);
+        }
+        var metadata = this.environmentMetadata["$" + target.heapAddress];
+        while (index < names.length) {
+            var name = names[index++];
+            var existingSlot = metadata ?
+                metadata.bindingSlots["$" + name] : undefined;
+            if (existingSlot === undefined &&
+                !this.hasOwnProperty(bindingObject, name)) {
+                this.defineDataProperty(bindingObject, name, undefined,
+                    HeapRecords.Attributes.WRITABLE |
+                    HeapRecords.Attributes.ENUMERABLE |
+                    HeapRecords.Attributes.CONFIGURABLE);
+            }
+        }
+    };
+
+    Runtime.prototype.evalThisBinding = function (context, environment) {
+        var current = environment;
+        while (current) {
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            var slot = metadata ? metadata.bindingSlots.$this : undefined;
+            if (slot !== undefined) {
+                return this.readHeapValue(this.heapRecords.environmentCell(
+                    current.heapAddress, slot));
+            }
+            current = this.environmentParent(current);
+        }
+        return context.globalObject;
     };
 
     Runtime.prototype.typeOfBinding = function (context, environment, name) {
@@ -958,7 +1027,8 @@
             throw new TypeError("host object cannot be stored in guest heap" +
                 (value.name ? ": " + value.name : ""));
         } else if (typeof value === "function") {
-            throw new TypeError("host function cannot be stored in guest heap");
+            throw new TypeError("host function cannot be stored in guest heap" +
+                (value.name ? ": " + value.name : ""));
         } else this.valueCells.writePrimitiveAt(cell, value);
     };
 
@@ -1423,7 +1493,8 @@
                               -1 : program.functionNameSlot,
             metadata: metadataId,
             flags: (program.usesArguments ? 1 : 0) |
-                   (program.strict ? 2 : 0),
+                   (program.strict ? 2 : 0) |
+                   (program.evalCode ? 4 : 0),
             bindingCount: program.bindings ? program.bindings.length : 0
         });
         if (program.bindings && this.heapRecords.programBindingCount(address) !==
@@ -1660,6 +1731,7 @@
             functionNameSlot: records.programFunctionNameSlot(address),
             usesArguments: !!(records.programFlags(address) & 1),
             strict: !!(records.programFlags(address) & 2),
+            evalCode: !!(records.programFlags(address) & 4),
             globalDeclarations: [],
             filename: "<guest-heap-program>",
             name: ""
@@ -3141,8 +3213,11 @@
             context = null;
         }
         this.assertOwned(value);
-        this.setProperty(context ? context.globalObject : this.globalObject,
-                         name, value, strict);
+        var globalObject = context ? context.globalObject : this.globalObject;
+        if (strict && !this.hasProperty(globalObject, name)) {
+            throw new ReferenceError(name + " is not defined");
+        }
+        this.setProperty(globalObject, name, value, strict);
         return value;
     };
 
@@ -3208,7 +3283,7 @@
                     return inheritedArrayValue;
                 }
             }
-            return this.arrayMethods[key];
+            return own(this.arrayMethods, key) ? this.arrayMethods[key] : undefined;
         }
         key = this.propertyKey(key);
         this.internStringAddress(key);
@@ -3218,7 +3293,8 @@
             if (property) {
                 return this.readPropertyRecord(property, accessReceiver);
             }
-            if (object.guestType === "regexp") return this.regexpMethods[key];
+            if (object.guestType === "regexp" &&
+                own(this.regexpMethods, key)) return this.regexpMethods[key];
             var prototypeAddress = this.heapRecords.objectPrototype(object.heapAddress);
             if (prototypeAddress) {
                 var inherited = this.getProperty(
@@ -3228,8 +3304,8 @@
             }
             if ((object.guestType === "function" ||
                  object.guestType === "bytecodeFunction") &&
-                this.functionMethods[key]) return this.functionMethods[key];
-            return this.objectMethods[key];
+                own(this.functionMethods, key)) return this.functionMethods[key];
+            return guestMethod(this.objectMethods, key);
         }
         if (typeof object === "string") {
             if (key === "length") return object.length;
@@ -3238,7 +3314,8 @@
                 return this.getProperty(
                     this.stringPrototype, key, accessReceiver);
             }
-            return this.stringMethods[key];
+            return own(this.stringMethods, key) ?
+                this.stringMethods[key] : undefined;
         }
         if (typeof object === "number") {
             return this.getProperty(
@@ -3280,7 +3357,7 @@
         if (this.hasOwnProperty(object, key)) return true;
         if (object.guestType === "array") {
             if (key === "length") return true;
-            if (!this.arrayPrototype && this.arrayMethods[key]) return true;
+            if (!this.arrayPrototype && own(this.arrayMethods, key)) return true;
         } else if (object.guestType === "buffer") {
             if (key === "length") return true;
         } else if (object.guestType === "typedArray") {
@@ -3289,10 +3366,10 @@
         } else if (object.guestType === "arrayBuffer") {
             if (key === "byteLength") return true;
         } else if (object.guestType === "regexp") {
-            if (!this.regexpPrototype && this.regexpMethods[key]) return true;
+            if (!this.regexpPrototype && own(this.regexpMethods, key)) return true;
         } else if (object.guestType === "function" ||
                    object.guestType === "bytecodeFunction") {
-            if (!this.functionPrototype && this.functionMethods[key]) return true;
+            if (!this.functionPrototype && own(this.functionMethods, key)) return true;
         }
         if (object.heapAddress) {
             var prototypeAddress = this.heapRecords.objectPrototype(
@@ -3302,7 +3379,7 @@
                     this.readHeapReference(prototypeAddress), key);
             }
         }
-        return !!this.objectMethods[key];
+        return guestMethod(this.objectMethods, key) !== undefined;
     };
 
     Runtime.prototype.instanceOf = function (value, constructor) {
@@ -4090,9 +4167,8 @@
             while (builtinTableIndex < builtinTables.length) {
                 var builtinTable = builtinTables[builtinTableIndex++];
                 for (key in builtinTable) {
-                    if (own(builtinTable, key)) {
-                        this.markValue(builtinTable[key], generation);
-                    }
+                    var builtinMethod = guestMethod(builtinTable, key);
+                    if (builtinMethod) this.markValue(builtinMethod, generation);
                 }
             }
             var hostRootIndex = 0;

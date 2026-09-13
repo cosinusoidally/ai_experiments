@@ -146,7 +146,7 @@
     Execution.prototype.reloadNativeOperands = function (frame, pc, opcode) {
         var code = frame.code;
         var constants = frame.constants;
-        if (opcode === op.SET_GLOBAL) {
+        if (opcode === op.SET_GLOBAL || opcode === op.SET_NAME) {
             this.reloadNativeOperand(frame, code[pc + 2]);
         } else if (opcode === op.ENTER_WITH) {
             this.reloadNativeOperand(frame, code[pc + 1]);
@@ -862,9 +862,18 @@
                             var evalProgram = frame.context.compileEval(
                                 args[0], "<eval>", !!frame.program.strict,
                                 frame.program, frame.environment);
+                            if (evalProgram.evalDeclarations) {
+                                this.runtime.declareEvalBindings(
+                                    frame.context, frame.environment,
+                                    evalProgram.evalDeclarations);
+                            }
+                            var evalReceiver = this.runtime.evalThisBinding(
+                                frame.context, frame.environment);
                             var evalFrame = makeFrame(evalProgram, this.runtime,
-                                frame.context, undefined, [], frame.environment,
-                                null, destination, frame, frame.environment);
+                                frame.context, evalReceiver, [], frame.environment,
+                                null, destination, frame,
+                                evalProgram.evalCode ? undefined :
+                                    frame.environment);
                             this.frames.push(evalFrame);
                         }
                     } else if (callableValue && callableValue.guestType === "bytecodeFunction") {

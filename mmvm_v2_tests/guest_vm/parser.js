@@ -496,6 +496,10 @@
              this.current.value === "|=" || this.current.value === "&=" ||
              this.current.value === "^=" || this.current.value === "<<=" ||
              this.current.value === ">>=" || this.current.value === ">>>=")) {
+            if (this.strict && left.type === "Identifier" &&
+                (left.name === "eval" || left.name === "arguments")) {
+                this.error("invalid assignment target in strict code");
+            }
             var operator = this.advance(true).value;
             return {type: "AssignmentExpression", operator: operator,
                     left: left, right: this.parseAssignment()};

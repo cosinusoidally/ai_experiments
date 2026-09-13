@@ -226,16 +226,17 @@
                                                 callerEnvironment) {
         if (this.destroyed) throw new Error("context has been destroyed");
         var ast = new Parser(source, filename, {strict: !!strict}).parseProgram();
-        var callerScope = Compiler.environmentScopeForProgram(callerProgram);
-        var outerScopes = callerScope ? [callerScope] : null;
+        var outerScopes = Compiler.environmentScopesForProgram(callerProgram);
         if (callerEnvironment && this.runtime.heapRecords.environmentObject(
                 callerEnvironment.heapAddress)) {
             outerScopes = outerScopes || [];
             outerScopes.unshift({bindings: {}, createsEnvironment: true,
                                  dynamic: true});
         }
-        var program = verify(
-            new Compiler(null, outerScopes).compile(ast, true));
+        var program = verify(ast.strict ?
+            Compiler.compileStrictEval(ast, outerScopes) :
+            callerProgram ? Compiler.compileSloppyDirectEval(ast, outerScopes) :
+            new Compiler().compile(ast, true));
         this.runtime.registerProgram(program);
         return program;
     };

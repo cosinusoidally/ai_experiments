@@ -501,6 +501,11 @@
                     }
                 }
                 if (setGlobalRecord === 0) {
+                    if ((programFlags(heapBase, currentProgram) &
+                         PROGRAM_FLAG_STRICT) !== 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
                     setGlobalRecord = engineHeapBump(heapBase, state);
                     if (setGlobalRecord + PROPERTY_RECORD_BYTES >
                         engineHeapLimit(heapBase, state)) {

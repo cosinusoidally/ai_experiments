@@ -166,6 +166,15 @@
         var useRegisters = canUseRegisterBindings(expression.body) &&
             (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters);
+        if (containsDirectEval(expression.body)) {
+            /* Sloppy eval may introduce a new var binding in this activation
+             * which shadows an outer binding. Keep known locals in their
+             * fixed slots, but resolve every non-local name through the live
+             * environment chain. */
+            nested.scopes.splice(1, 0, {
+                bindings: {}, createsEnvironment: false, dynamic: true
+            });
+        }
         var bodyProgram = {body: expression.body.body,
                            filename: expression.location ?
                                expression.location.filename : this.filename,
@@ -190,6 +199,11 @@
         program.astBody = expression.body;
         program.returnKind = inferReturnKind(expression.body);
         program.nonlocalBindings = describeNonlocalBindings(expression.body, nested);
+        /* Direct eval is compiled after this function has started executing.
+         * Preserve the compiler-visible outer environment layouts so eval can
+         * resolve through the complete lexical chain, not merely its caller's
+         * innermost activation. */
+        program.outerEnvironmentScopes = nested.scopes.slice(1);
         return program;
     };
 
@@ -784,12 +798,18 @@
             return this.loadReference(identifierReference);
         }
         if (expression.type === "ThisExpression") {
-            if (this.scopes.length === 0) {
+            if (this.evalThis) {
+                var evalThis = this.allocate();
+                this.emit(op.GET_THIS, evalThis);
+                return evalThis;
+            }
+            var thisReference = this.referenceForName("this");
+            if (thisReference.kind === "global") {
                 var globalThis = this.allocate();
                 this.emit(op.GET_THIS, globalThis);
                 return globalThis;
             }
-            return this.loadReference(this.referenceForName("this"));
+            return this.loadReference(thisReference);
         }
         if (expression.type === "BinaryExpression") {
             if (expression.operator === "&&" || expression.operator === "||") {
@@ -1149,6 +1169,27 @@
         return !containsNestedFunctionOrTry(body);
     }
 
+    function containsDirectEval(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "CallExpression" && node.callee &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "eval") return true;
+        if (node.type === "FunctionDeclaration" ||
+            node.type === "FunctionExpression") return false;
+        if (typeof node.length === "number" && node.type === undefined) {
+            var arrayIndex = 0;
+            while (arrayIndex < node.length) {
+                if (containsDirectEval(node[arrayIndex++])) return true;
+            }
+            return false;
+        }
+        var key;
+        for (key in node) {
+            if (key !== "type" && containsDirectEval(node[key])) return true;
+        }
+        return false;
+    }
+
     function containsNestedFunctionOrTry(node) {
         if (!node || typeof node !== "object") return false;
         if (node.type === "FunctionDeclaration" ||
@@ -1330,6 +1371,8 @@
                 while (index < statement.declarations.length) {
                     add(statement.declarations[index++].name);
                 }
+            } else if (statement.type === "FunctionDeclaration") {
+                add(statement.name);
             } else if (statement.type === "BlockStatement") {
                 index = 0;
                 while (index < statement.body.length) {
@@ -1369,7 +1412,7 @@
         }
     }
 
-    Compiler.environmentScopeForProgram = function (program) {
+    Compiler.environmentScopesForProgram = function (program) {
         if (!program || !program.bindingSlots) return null;
         var bindings = {};
         var key;
@@ -1379,7 +1422,49 @@
                                  slot: program.bindingSlots[key]};
             }
         }
-        return {bindings: bindings, createsEnvironment: true};
+        var scopes = [{bindings: bindings, createsEnvironment: true}];
+        var outer = program.outerEnvironmentScopes || [];
+        var outerIndex = 0;
+        while (outerIndex < outer.length) scopes.push(outer[outerIndex++]);
+        return scopes;
+    };
+
+    Compiler.compileSloppyDirectEval = function (ast, outerScopes) {
+        var declarations = [];
+        collectVariableDeclarations(ast.body, declarations);
+        /* A direct sloppy eval can introduce bindings into the caller's
+         * variable environment. Name bytecodes perform the required dynamic
+         * lookup after those bindings have been instantiated. */
+        var scopes = [{bindings: {}, createsEnvironment: false, dynamic: true}];
+        var outerIndex = 0;
+        while (outerScopes && outerIndex < outerScopes.length) {
+            scopes.push(outerScopes[outerIndex++]);
+        }
+        var compiler = new Compiler(null, scopes);
+        compiler.evalThis = true;
+        var program = compiler.compile(ast, true);
+        program.evalDeclarations = declarations;
+        return program;
+    };
+
+    Compiler.compileStrictEval = function (ast, outerScopes) {
+        var block = {type: "BlockStatement", body: ast.body};
+        var locals = collectLocals(block, null);
+        var bindings = locals.slice(0);
+        var compiler = new Compiler(bindings, outerScopes, false);
+        var program = compiler.compile(ast, true);
+        program.parameters = [];
+        program.locals = locals;
+        program.bindings = bindings;
+        program.bindingSlots = makeBindingMap(bindings);
+        program.bindingRegisters = null;
+        program.parameterSlots = [];
+        program.argumentsSlot = -1;
+        program.thisSlot = -1;
+        program.functionNameSlot = -1;
+        program.usesArguments = false;
+        program.evalCode = true;
+        return program;
     };
 
     root.GuestVMCompiler = Compiler;

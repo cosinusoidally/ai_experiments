@@ -749,7 +749,8 @@
         else if (opcode === op.GET_GLOBAL) {
             lines.push(rr(1) + "=runtime.getGlobal(context," + constant(2) + ");");
         } else if (opcode === op.SET_GLOBAL) {
-            lines.push("runtime.setGlobal(context," + constant(1) + "," + rr(2) + ");");
+            lines.push("runtime.setGlobal(context," + constant(1) + "," + rr(2) +
+                       ",!!p.strict);");
         } else if (opcode === op.GET_LOCAL) {
             lines.push(rr(1) + "=runtime.getEnvironmentSlot(env," + c[pc + 2] + "," +
                        c[pc + 3] + ");");
