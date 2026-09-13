@@ -540,6 +540,35 @@ performance are separate mandatory regression gates.
   including networking, `node_web.js`, demo1, demo2, heap/GC/context checks,
   native interpreter checks, and the three-context demo.
 
+### 2026-09-13 — interrupted whole-suite run and eval stress diagnosis
+
+- A complete authored-source run was stopped externally after approximately
+  85 minutes and the machine was subsequently rebooted. It produced no final
+  summary, so it does not change the accepted whole-suite pass/fail/not-run
+  baseline. Resident memory had grown gradually beyond 400 MiB. The generated
+  log remained empty because `--quiet` reports only failures and the final
+  summary; no outcome is inferred from that empty partial log.
+- Bounded chapter runs localized the extreme delay to historical generated
+  lexer tests. Chapter 7.2 passed 45/45 in 10.68 seconds (142,432 KiB peak),
+  chapter 7.3 passed 59/59 in 10.86 seconds (142,228 KiB peak), and chapter
+  7.6 passed 271/271 in 45.90 seconds (193,544 KiB peak). Chapter 7.8.3 passed
+  80/80 in 11.21 seconds and 7.8.4 passed 78/78 in 11.39 seconds.
+- `ch07/7.4/S7.4_A5.js` and `S7.4_A6.js` each perform 65,536 direct evals.
+  The former initially took 77.45 seconds under native `js_min.exe`, versus
+  7.63 seconds for the same guest VM hosted by Node. Successfully parsed empty
+  eval programs now share one immutable retained program, avoiding tens of
+  thousands of redundant program graphs. A kernel-compiled eval intrinsic
+  recognizes sources consisting entirely of ES5 whitespace and comments and
+  returns `undefined` without a native-to-host transition; all other string
+  sources retain the real parser/compiler path. A5 now passes in 36.94 seconds;
+  A6 passes in 10.48 seconds.
+- Chapter 7.8.5 contains several further 65,536-iteration tests whose eval
+  sources are non-empty regexp programs. They must be handled by wiring the
+  existing guest-owned tokenizer/parser/compiler and program-adoption ABI into
+  eval. No benchmark-specific regexp evaluator or cached parse is acceptable.
+- Node and `js_min.exe` regression gates remain green with all 264 guest
+  assertions and the existing networking/demo/integration checks.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

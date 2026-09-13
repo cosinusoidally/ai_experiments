@@ -350,7 +350,8 @@
         var INTRINSIC_DATE_GET_DAY = 61;
         var INTRINSIC_FUNCTION_CONSTRUCTOR = 62;
         var INTRINSIC_REGEXP_CONSTRUCTOR = 63;
-        var INTRINSIC_LAST_ID = 63;
+        var INTRINSIC_EVAL = 64;
+        var INTRINSIC_LAST_ID = 64;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -3941,6 +3942,107 @@
         return bytecodeCallHandled;
     }
 
+    function emptyEvalSourceKernel(heapBase, source) {
+        var length = stringLength(heapBase, source);
+        var index = 0;
+        while (index < length) {
+            var code = stringCharacterCodeUnit(heapBase, source, index) & 65535;
+            var trivia = 0;
+            if (code === 9) trivia = 1;
+            else if (code === 11) trivia = 1;
+            else if (code === 12) trivia = 1;
+            else if (code === 32) trivia = 1;
+            else if (code === 160) trivia = 1;
+            else if (code === 5760) trivia = 1;
+            else if (code === 6158) trivia = 1;
+            else if (code === 8239) trivia = 1;
+            else if (code === 8287) trivia = 1;
+            else if (code === 12288) trivia = 1;
+            else if (code === 65279) trivia = 1;
+            else if (code === 10) trivia = 1;
+            else if (code === 13) trivia = 1;
+            else if (code === 8232) trivia = 1;
+            else if (code === 8233) trivia = 1;
+            else if (code >= 8192) {
+                if (code <= 8202) trivia = 1;
+            }
+            if (trivia === 1) {
+                index = index + 1;
+            } else if (code === 47) {
+                if (index + 1 >= length) return 0;
+                var commentKind = stringCharacterCodeUnit(
+                    heapBase, source, index + 1) & 65535;
+                if (commentKind === 47) {
+                    index = index + 2;
+                    var scanningLine = 1;
+                    while (scanningLine === 1) {
+                        if (index >= length) scanningLine = 0;
+                        else {
+                            code = stringCharacterCodeUnit(
+                                heapBase, source, index) & 65535;
+                            var lineEnd = 0;
+                            if (code === 10) lineEnd = 1;
+                            else if (code === 13) lineEnd = 1;
+                            else if (code === 8232) lineEnd = 1;
+                            else if (code === 8233) lineEnd = 1;
+                            if (lineEnd === 1) scanningLine = 0;
+                            else index = index + 1;
+                        }
+                    }
+                } else if (commentKind === 42) {
+                    index = index + 2;
+                    var closed = 0;
+                    while (closed === 0) {
+                        if (index + 1 >= length) return 0;
+                        else {
+                            var closeFirst = stringCharacterCodeUnit(
+                                heapBase, source, index) & 65535;
+                            if (closeFirst === 42) {
+                                var closeSecond = stringCharacterCodeUnit(
+                                    heapBase, source, index + 1) & 65535;
+                                if (closeSecond === 47) {
+                                    index = index + 2;
+                                    closed = 1;
+                                } else index = index + 1;
+                            } else {
+                                index = index + 1;
+                            }
+                        }
+                    }
+                } else return 0;
+            } else return 0;
+        }
+        return 1;
+    }
+
+    function evalIntrinsicKernel(
+            heapBase, target, registerCells, argumentsVector,
+            argumentCount) {
+        if (argumentCount === 0) {
+            setValueCellUndefined(target);
+            return 1;
+        }
+        var argumentRegisterCell = vectorCellAddress(
+            heapBase, argumentsVector, 0);
+        if (valueCellTag(0, argumentRegisterCell) !== VALUE_TAG_INT32) return 0;
+        var sourceCell = heapBase + registerCells +
+            valueCellInt32(0, argumentRegisterCell) * VALUE_CELL_BYTES;
+        var sourceTag = valueCellTag(0, sourceCell);
+        if (sourceTag !== VALUE_TAG_REFERENCE) {
+            copyValueCell(target, sourceCell);
+            return 1;
+        }
+        var source = valueCellReference(0, sourceCell);
+        if (recordType(heapBase, source) !== HEAP_TYPE_STRING) {
+            copyValueCell(target, sourceCell);
+            return 1;
+        }
+        var sourceIsEmpty = emptyEvalSourceKernel(heapBase, source);
+        if (sourceIsEmpty === 0) return 0;
+        setValueCellUndefined(target);
+        return 1;
+    }
+
     function intrinsicCallKernel(
             heapBase, state, frame, callFunctionCell, callArgumentsCell,
             callOperation, callTargetIndex, currentContext, stringSupport,
@@ -4087,7 +4189,15 @@
         var intrinsicTarget = heapBase + registerCells +
             callTargetIndex * VALUE_CELL_BYTES;
         var intrinsicHandled = 0;
-        if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
+        if (intrinsicId === INTRINSIC_EVAL) {
+            intrinsicHandled = evalIntrinsicKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
             intrinsicHandled = programCreateKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, currentContext,
@@ -9296,6 +9406,8 @@
             dateWithinDayUnitKernel: dateWithinDayUnitKernel,
             dateYearFromDayKernel: dateYearFromDayKernel,
             ffiCallKernel: ffiCallKernel,
+            emptyEvalSourceKernel: emptyEvalSourceKernel,
+            evalIntrinsicKernel: evalIntrinsicKernel,
             floorDivideDateIntegerKernel: floorDivideDateIntegerKernel,
             functionConstructorKernel: functionConstructorKernel,
             getKeysKernel: getKeysKernel,

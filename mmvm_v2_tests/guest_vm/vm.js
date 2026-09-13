@@ -26,6 +26,7 @@
         this.runtime = new SemanticRuntime(options || {});
         this.contexts = [];
         this.functionConstructorPrograms = {};
+        this.emptyEvalPrograms = {};
         this.destroyed = false;
         var semanticRuntime = this.runtime;
         this.runtime.interpretGuest = function (callable, receiver, args,
@@ -151,7 +152,7 @@
                 } finally {
                     evalContext.destroy();
                 }
-            });
+            }, "intrinsic", NativeIntrinsics.EVAL);
         evalFunction.directEval = true;
         semanticRuntime.defineDataProperty(
             semanticRuntime.globalObject, "eval", evalFunction,
@@ -227,6 +228,23 @@
                                                 callerEnvironment) {
         if (this.destroyed) throw new Error("context has been destroyed");
         var ast = new Parser(source, filename, {strict: !!strict}).parseProgram();
+        /* Comment-only and otherwise empty eval sources are common in lexer
+         * conformance workloads. Parsing must still happen for lexical errors,
+         * but the resulting no-op program is immutable and independent of the
+         * caller's lexical environment. Reuse its guest program graph instead
+         * of retaining thousands of identical empty programs until GC. */
+        if (!ast.body.length) {
+            var emptyKind = ast.strict ? "$strict" : "$sloppy";
+            var emptyProgram = this.jsRuntime.emptyEvalPrograms[emptyKind];
+            if (!emptyProgram) {
+                emptyProgram = verify(ast.strict ?
+                    Compiler.compileStrictEval(ast, null) :
+                    Compiler.compileSloppyDirectEval(ast, null));
+                this.runtime.retainProgram(emptyProgram);
+                this.jsRuntime.emptyEvalPrograms[emptyKind] = emptyProgram;
+            }
+            return emptyProgram;
+        }
         var outerScopes = Compiler.environmentScopesForProgram(callerProgram);
         if (callerEnvironment && this.runtime.heapRecords.environmentObject(
                 callerEnvironment.heapAddress)) {
