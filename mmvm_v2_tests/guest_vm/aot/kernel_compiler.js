@@ -212,6 +212,7 @@
         recordFlags: "RECORD_FLAGS",
         objectPrototype: "OBJECT_PROTOTYPE",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
+        objectExtensible: "OBJECT_EXTENSIBLE",
         arrayElements: "ARRAY_ELEMENTS",
         arrayReserved: "ARRAY_RESERVED",
         functionClosure: "FUNCTION_CLOSURE",

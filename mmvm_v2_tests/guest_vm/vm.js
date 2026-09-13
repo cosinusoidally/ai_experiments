@@ -126,6 +126,7 @@
         functionConstructor.constructCallback = function (args, callContext) {
             return functionConstructor.callback(undefined, args, callContext);
         };
+        semanticRuntime.defineDataProperty(functionConstructor, "length", 1, 0);
         if (semanticRuntime.functionPrototype) {
             semanticRuntime.setProperty(functionConstructor, "prototype",
                                         semanticRuntime.functionPrototype);

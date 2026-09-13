@@ -810,6 +810,8 @@
         } else if (opcode === op.DELETE_NAME) {
             lines.push(rr(1) + "=runtime.deleteBinding(context,env," +
                        constant(2) + ",!!p.strict);");
+        } else if (opcode === op.INVALID_ASSIGNMENT) {
+            lines.push("throw new ReferenceError('invalid assignment target');");
         } else if (opcode === op.GET_KEYS) lines.push(rr(1) + "=runtime.keys(" + rr(2) + ");");
         else if (opcode === op.JUMP) {
             if (c[pc + 1] <= pc) lines.push("if(runtime.gcPending)runtime.gcSafePoint();");
@@ -2187,7 +2189,7 @@
         if (opcode === op.JUMP || opcode === op.RETURN ||
             opcode === op.MAKE_OBJECT ||
             opcode === op.THROW || opcode === op.GET_THIS) return 2;
-        if (opcode === op.POP_CATCH) return 1;
+        if (opcode === op.POP_CATCH || opcode === op.INVALID_ASSIGNMENT) return 1;
         if (opcode === op.JUMP_IF_FALSE) return 3;
         if (opcode === op.CALL) return 5;
         throw new Error("invalid threaded opcode " + opcode);

@@ -113,6 +113,138 @@
         throw new Error("unknown guest Date field " + name);
     }
 
+    function setField(value, name, args) {
+        if (name === "Time") return timeClip(args.length ? args[0] : NaN);
+        value = Number(value);
+        if (value !== value) {
+            if (name !== "FullYear") return NaN;
+            value = 0;
+        }
+        var year = yearFromTime(value);
+        var month = monthFromTime(value);
+        var date = dateFromTime(value);
+        var hours = field(value, "Hours");
+        var minutes = field(value, "Minutes");
+        var seconds = field(value, "Seconds");
+        var milliseconds = field(value, "Milliseconds");
+        if (name === "Milliseconds") milliseconds = args[0];
+        else if (name === "Seconds") {
+            seconds = args[0];
+            if (args.length > 1) milliseconds = args[1];
+        } else if (name === "Minutes") {
+            minutes = args[0];
+            if (args.length > 1) seconds = args[1];
+            if (args.length > 2) milliseconds = args[2];
+        } else if (name === "Hours") {
+            hours = args[0];
+            if (args.length > 1) minutes = args[1];
+            if (args.length > 2) seconds = args[2];
+            if (args.length > 3) milliseconds = args[3];
+        } else if (name === "Date") date = args[0];
+        else if (name === "Month") {
+            month = args[0];
+            if (args.length > 1) date = args[1];
+        } else if (name === "FullYear") {
+            year = args[0];
+            if (args.length > 1) month = args[1];
+            if (args.length > 2) date = args[2];
+        }
+        return timeClip(makeTime(year, month, date, hours, minutes, seconds,
+                                 milliseconds));
+    }
+
+    function pad(value, width) {
+        var result = String(Math.abs(value));
+        while (result.length < width) result = "0" + result;
+        return result;
+    }
+
+    function toString(value) {
+        value = Number(value);
+        if (value !== value) return "Invalid Date";
+        var year = yearFromTime(value);
+        return pad(year, 4) + "-" + pad(monthFromTime(value) + 1, 2) +
+            "-" + pad(dateFromTime(value), 2) + "T" +
+            pad(field(value, "Hours"), 2) + ":" +
+            pad(field(value, "Minutes"), 2) + ":" +
+            pad(field(value, "Seconds"), 2) + "." +
+            pad(field(value, "Milliseconds"), 3) + "Z";
+    }
+
+    function decimalDigit(code) {
+        return code >= 48 && code <= 57 ? code - 48 : -1;
+    }
+
+    function decimalAt(source, start, count) {
+        var value = 0;
+        var index = 0;
+        while (index < count) {
+            var digit = decimalDigit(source.charCodeAt(start + index));
+            if (digit < 0) return -1;
+            value = value * 10 + digit;
+            index++;
+        }
+        return value;
+    }
+
+    /* ES5.1 only requires implementations to accept their own Date string
+     * formats plus the standardized date-time form. The guest's canonical
+     * local zone is UTC, so absent offsets are deterministic as well. */
+    function parse(source) {
+        source = String(source);
+        var length = source.length;
+        if (length < 4) return NaN;
+        var year = decimalAt(source, 0, 4);
+        if (year < 0) return NaN;
+        if (length === 4) return timeClip(makeTime(year, 0, 1, 0, 0, 0, 0));
+        if (source.charAt(4) !== "-" || length < 7) return NaN;
+        var month = decimalAt(source, 5, 2);
+        if (month < 1 || month > 12) return NaN;
+        if (length === 7) {
+            return timeClip(makeTime(year, month - 1, 1, 0, 0, 0, 0));
+        }
+        if (source.charAt(7) !== "-" || length < 10) return NaN;
+        var date = decimalAt(source, 8, 2);
+        if (date < 1 || date > 31) return NaN;
+        if (length === 10) {
+            return timeClip(makeTime(year, month - 1, date, 0, 0, 0, 0));
+        }
+        if (source.charAt(10) !== "T" || length < 16 ||
+            source.charAt(13) !== ":") return NaN;
+        var hours = decimalAt(source, 11, 2);
+        var minutes = decimalAt(source, 14, 2);
+        if (hours > 24 || minutes > 59) return NaN;
+        var position = 16;
+        var seconds = 0;
+        var milliseconds = 0;
+        if (source.charAt(position) === ":") {
+            seconds = decimalAt(source, position + 1, 2);
+            if (seconds > 59) return NaN;
+            position += 3;
+            if (source.charAt(position) === ".") {
+                if (position + 4 > length) return NaN;
+                milliseconds = decimalAt(source, position + 1, 3);
+                position += 4;
+            }
+        }
+        var offsetMinutes = 0;
+        if (source.charAt(position) === "Z") position++;
+        else if (source.charAt(position) === "+" ||
+                 source.charAt(position) === "-") {
+            var sign = source.charAt(position++) === "+" ? 1 : -1;
+            var offsetHours = decimalAt(source, position, 2);
+            if (source.charAt(position + 2) !== ":") return NaN;
+            var offsetPartMinutes = decimalAt(source, position + 3, 2);
+            if (offsetHours > 23 || offsetPartMinutes > 59) return NaN;
+            offsetMinutes = sign * (offsetHours * 60 + offsetPartMinutes);
+            position += 5;
+        }
+        if (position !== length || (hours === 24 &&
+            (minutes || seconds || milliseconds))) return NaN;
+        return timeClip(makeTime(year, month - 1, date, hours, minutes,
+            seconds, milliseconds) - offsetMinutes * MS_MINUTE);
+    }
+
     var DateSupport = {
         construct: construct,
         field: field,
@@ -120,6 +252,9 @@
         timeClip: timeClip,
         dayFromYear: dayFromYear,
         leapYear: leapYear,
+        parse: parse,
+        setField: setField,
+        toString: toString,
         localTimezoneOffset: function () { return 0; }
     };
     root.GuestVMDateSupport = DateSupport;

@@ -58,7 +58,8 @@
         GET_NAME: 56,
         SET_NAME: 57,
         TYPEOF_NAME: 58,
-        DELETE_NAME: 59
+        DELETE_NAME: 59,
+        INVALID_ASSIGNMENT: 60
     };
 
     op.NAMES = [];

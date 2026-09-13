@@ -1299,6 +1299,10 @@
                 return value;
             }
         }
+        if (!this.heapRecords.objectIsExtensible(object.heapAddress)) {
+            if (strict) throw new TypeError("object is not extensible");
+            return value;
+        }
         property = this.heapOwnProperty(object, key, true);
         this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
         object.valueVersion++;
@@ -1989,7 +1993,14 @@
          * execution backends. It is guest-heap state even when Node supplies
          * the low-level JavaScript backend. */
         this.objectPrototype = this.makeObject();
-        this.functionPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        /* ES5.1 15.3.4 requires Function.prototype itself to be callable. It
+         * is bootstrapped before the normal function prototype exists, then
+         * linked to Object.prototype like every other function object. */
+        this.functionPrototype = null;
+        this.functionPrototype = this.makeNativeFunction(
+            "Function.prototype", function () { return undefined; });
+        this.heapRecords.setObjectPrototype(
+            this.functionPrototype.heapAddress, this.objectPrototype.heapAddress);
         this.stringPrototype = this.makeObject();
         this.numberPrototype = this.makeObject();
         this.booleanPrototype = this.makeObject();
@@ -2580,6 +2591,38 @@
                         !!(attributes & HeapRecords.Attributes.CONFIGURABLE));
                     return descriptor;
                 }));
+        this.setProperty(objectConstructor, "preventExtensions",
+            this.makeNativeFunction("Object.preventExtensions",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "Object.preventExtensions target is not an object");
+                    }
+                    runtime.heapRecords.preventObjectExtensions(
+                        object.heapAddress);
+                    return object;
+                }));
+        this.setProperty(objectConstructor, "isExtensible",
+            this.makeNativeFunction("Object.isExtensible",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "Object.isExtensible target is not an object");
+                    }
+                    return runtime.heapRecords.objectIsExtensible(
+                        object.heapAddress);
+                }));
+        this.setProperty(objectConstructor, "getOwnPropertyNames",
+            this.makeNativeFunction("Object.getOwnPropertyNames",
+                function (receiver, args) {
+                    if (!args[0] || !args[0].guestType) {
+                        throw new TypeError(
+                            "Object.getOwnPropertyNames target is not an object");
+                    }
+                    return runtime.ownPropertyNames(args[0]);
+                }));
         this.setProperty(objectConstructor, "keys",
             this.makeNativeFunction("Object.keys", function (receiver, args) {
                 if (!args[0] || !args[0].guestType) {
@@ -2755,9 +2798,11 @@
                 return args.length ? runtime.toString(args[0]) : "";
             }, "intrinsic", NativeIntrinsics.STRING_CONSTRUCTOR);
         stringConstructor.constructCallback = function (args) {
-            return runtime.makePrimitiveWrapper(
-                args.length ? runtime.toString(args[0]) : "",
-                runtime.stringPrototype);
+            var stringValue = args.length ? runtime.toString(args[0]) : "";
+            var wrapper = runtime.makePrimitiveWrapper(
+                stringValue, runtime.stringPrototype);
+            runtime.defineDataProperty(wrapper, "length", stringValue.length, 0);
+            return wrapper;
         };
         this.setProperty(stringConstructor, "prototype", this.stringPrototype);
         this.setProperty(this.stringPrototype, "constructor", stringConstructor);
@@ -2786,12 +2831,14 @@
         /* ES5.1 15.7.3. These values are guest primitive cells attached to
          * the guest constructor object; they are not borrowed objects from
          * the host's Number constructor. */
-        this.setProperty(numberConstructor, "MAX_VALUE",
-                         1.7976931348623157e308);
-        this.setProperty(numberConstructor, "MIN_VALUE", 5e-324);
-        this.setProperty(numberConstructor, "NaN", NaN);
-        this.setProperty(numberConstructor, "NEGATIVE_INFINITY", -Infinity);
-        this.setProperty(numberConstructor, "POSITIVE_INFINITY", Infinity);
+        this.defineDataProperty(numberConstructor, "MAX_VALUE",
+                                1.7976931348623157e308, 0);
+        this.defineDataProperty(numberConstructor, "MIN_VALUE", 5e-324, 0);
+        this.defineDataProperty(numberConstructor, "NaN", NaN, 0);
+        this.defineDataProperty(numberConstructor, "NEGATIVE_INFINITY",
+                                -Infinity, 0);
+        this.defineDataProperty(numberConstructor, "POSITIVE_INFINITY",
+                                Infinity, 0);
         this.setGlobal("Number", numberConstructor);
         this.booleanMethods = {};
         this.booleanMethods.toString = this.makeNativeFunction("Boolean.toString",
@@ -2834,6 +2881,12 @@
             }, "intrinsic", NativeIntrinsics.ARRAY_CONSTRUCTOR);
         /* ES5.1 15.4.3.2: the Array constructor's formal length is one. */
         this.defineDataProperty(arrayConstructor, "length", 1, 0);
+        this.defineDataProperty(arrayConstructor, "isArray",
+            this.makeNativeFunction("Array.isArray", function (receiver, args) {
+                return !!args[0] && args[0].guestType === "array" &&
+                    !runtime.isArgumentsObject(args[0]);
+            }), HeapRecords.Attributes.WRITABLE |
+                HeapRecords.Attributes.CONFIGURABLE);
         if (this.arrayPrototype) {
             this.setProperty(arrayConstructor, "prototype", this.arrayPrototype);
             this.setProperty(this.arrayPrototype, "constructor", arrayConstructor);
@@ -2845,14 +2898,14 @@
                 runtime.makeNativeFunction("Math." + name, callback,
                     "intrinsic", intrinsicId || NativeIntrinsics.NONE));
         }
-        this.setProperty(math, "E", Math.E);
-        this.setProperty(math, "LN2", Math.LN2);
-        this.setProperty(math, "LN10", Math.LN10);
-        this.setProperty(math, "LOG2E", Math.LOG2E);
-        this.setProperty(math, "LOG10E", Math.LOG10E);
-        this.setProperty(math, "PI", Math.PI);
-        this.setProperty(math, "SQRT1_2", Math.SQRT1_2);
-        this.setProperty(math, "SQRT2", Math.SQRT2);
+        this.defineDataProperty(math, "E", Math.E, 0);
+        this.defineDataProperty(math, "LN2", Math.LN2, 0);
+        this.defineDataProperty(math, "LN10", Math.LN10, 0);
+        this.defineDataProperty(math, "LOG2E", Math.LOG2E, 0);
+        this.defineDataProperty(math, "LOG10E", Math.LOG10E, 0);
+        this.defineDataProperty(math, "PI", Math.PI, 0);
+        this.defineDataProperty(math, "SQRT1_2", Math.SQRT1_2, 0);
+        this.defineDataProperty(math, "SQRT2", Math.SQRT2, 0);
         mathMethod("abs", function (receiver, args) {
             return Math.abs(Number(args[0]));
         }, NativeIntrinsics.MATH_ABS);
@@ -2924,6 +2977,59 @@
         method("getDay", "Day", NativeIntrinsics.DATE_GET_DAY);
         method("getTime", null, NativeIntrinsics.DATE_GET_TIME);
         method("valueOf", null, NativeIntrinsics.DATE_GET_TIME);
+        method("getUTCDate", "Date");
+        method("getUTCMonth", "Month");
+        method("getUTCFullYear", "FullYear");
+        method("getUTCHours", "Hours");
+        method("getUTCMinutes", "Minutes");
+        method("getUTCSeconds", "Seconds");
+        method("getUTCMilliseconds", "Milliseconds");
+        method("getUTCDay", "Day");
+        function dateStringMethod(name) {
+            runtime.setProperty(runtime.datePrototype, name,
+                runtime.makeNativeFunction("Date." + name,
+                    function (receiver) {
+                        return DateSupport.toString(dateValue(receiver));
+                    }));
+        }
+        dateStringMethod("toString");
+        dateStringMethod("toDateString");
+        dateStringMethod("toTimeString");
+        dateStringMethod("toLocaleString");
+        dateStringMethod("toLocaleDateString");
+        dateStringMethod("toLocaleTimeString");
+        dateStringMethod("toUTCString");
+        dateStringMethod("toISOString");
+        runtime.setProperty(runtime.datePrototype, "toJSON",
+            runtime.makeNativeFunction("Date.toJSON", function (receiver) {
+                var value = dateValue(receiver);
+                return value === value ? DateSupport.toString(value) : null;
+            }));
+        function dateSetter(name, field, utc) {
+            runtime.setProperty(runtime.datePrototype, name,
+                runtime.makeNativeFunction("Date." + name,
+                    function (receiver, args) {
+                        var value = DateSupport.setField(
+                            dateValue(receiver), field, args, utc);
+                        runtime.setProperty(receiver, dateValueKey, value);
+                        return value;
+                    }));
+        }
+        dateSetter("setTime", "Time", true);
+        dateSetter("setMilliseconds", "Milliseconds", false);
+        dateSetter("setUTCMilliseconds", "Milliseconds", true);
+        dateSetter("setSeconds", "Seconds", false);
+        dateSetter("setUTCSeconds", "Seconds", true);
+        dateSetter("setMinutes", "Minutes", false);
+        dateSetter("setUTCMinutes", "Minutes", true);
+        dateSetter("setHours", "Hours", false);
+        dateSetter("setUTCHours", "Hours", true);
+        dateSetter("setDate", "Date", false);
+        dateSetter("setUTCDate", "Date", true);
+        dateSetter("setMonth", "Month", false);
+        dateSetter("setUTCMonth", "Month", true);
+        dateSetter("setFullYear", "FullYear", false);
+        dateSetter("setUTCFullYear", "FullYear", true);
         this.setProperty(this.datePrototype, "getTimezoneOffset",
             this.makeNativeFunction("Date.getTimezoneOffset", function () {
                 return DateSupport.localTimezoneOffset();
@@ -2945,6 +3051,24 @@
         this.setProperty(dateConstructor, "now",
             this.makeNativeFunction("Date.now", function () {
                 return runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0;
+            }));
+        this.setProperty(dateConstructor, "parse",
+            this.makeNativeFunction("Date.parse", function (receiver, args) {
+                return DateSupport.parse(runtime.toString(args[0]));
+            }));
+        this.setProperty(dateConstructor, "UTC",
+            this.makeNativeFunction("Date.UTC", function (receiver, args) {
+                if (!args.length) return NaN;
+                var year = runtime.toNumber(args[0]);
+                if (year === year && year >= 0 && year <= 99) year += 1900;
+                return DateSupport.timeClip(DateSupport.makeTime(
+                    year,
+                    args.length > 1 ? runtime.toNumber(args[1]) : 0,
+                    args.length > 2 ? runtime.toNumber(args[2]) : 1,
+                    args.length > 3 ? runtime.toNumber(args[3]) : 0,
+                    args.length > 4 ? runtime.toNumber(args[4]) : 0,
+                    args.length > 5 ? runtime.toNumber(args[5]) : 0,
+                    args.length > 6 ? runtime.toNumber(args[6]) : 0));
             }));
         this.setGlobal("Date", dateConstructor);
     };
@@ -3320,6 +3444,10 @@
             if (property) {
                 return this.readPropertyRecord(property, accessReceiver);
             }
+            if ((object.guestType === "function" ||
+                 object.guestType === "bytecodeFunction") && key === "length") {
+                return this.callableLength(object);
+            }
             if (object.guestType === "regexp" &&
                 own(this.regexpMethods, key)) return this.regexpMethods[key];
             var prototypeAddress = this.heapRecords.objectPrototype(object.heapAddress);
@@ -3363,6 +3491,10 @@
         }
         if (object.guestType === "array" && key === "length" &&
             !this.isArgumentsObject(object)) return true;
+        if ((object.guestType === "function" ||
+             object.guestType === "bytecodeFunction") && key === "length") {
+            return true;
+        }
         if (object.guestType === "buffer" && isArrayIndex(key)) {
             return Number(key) < this.bufferSupport.viewLength(object);
         }
@@ -3444,6 +3576,11 @@
         this.assertOwned(object);
         key = this.propertyKey(key);
         if (!object || !object.guestType) return true;
+        if (object.guestType === "array" && key === "length" &&
+            !this.isArgumentsObject(object)) {
+            if (strict) throw new TypeError("property is not configurable");
+            return false;
+        }
         if (object.guestType === "array" && isArrayIndex(key)) {
             var arrayCell = this.heapRecords.arrayElementCell(
                 object.heapAddress, Number(key));
@@ -3502,6 +3639,42 @@
             }
         }
         return this.arrayFrom(values);
+    };
+
+    Runtime.prototype.ownPropertyNames = function (object) {
+        this.assertOwned(object);
+        var values = [];
+        var index;
+        if (object.guestType === "array") {
+            for (index = 0; index < this.arrayLength(object); index++) {
+                if (this.arrayHas(object, index)) values.push(String(index));
+            }
+            if (!this.isArgumentsObject(object)) values.push("length");
+        }
+        var property = object.heapAddress ?
+            this.heapRecords.objectPropertyHead(object.heapAddress) : 0;
+        var reversed = [];
+        while (property) {
+            reversed.push(this.heapRecords.readString(
+                this.heapRecords.propertyKey(property)));
+            property = this.heapRecords.propertyNext(property);
+        }
+        index = reversed.length - 1;
+        while (index >= 0) values.push(reversed[index--]);
+        if ((object.guestType === "function" ||
+             object.guestType === "bytecodeFunction") &&
+            !this.heapOwnProperty(object, "length", false)) values.push("length");
+        return this.arrayFrom(values);
+    };
+
+    Runtime.prototype.callableLength = function (callable) {
+        if (callable.guestType === "bytecodeFunction") {
+            var program = this.heapRecords.functionMetadata(
+                callable.heapAddress);
+            return this.heapRecords.vectorLength(
+                this.heapRecords.programParameterSlots(program));
+        }
+        return 0;
     };
 
     Runtime.prototype.typeOf = function (value) {

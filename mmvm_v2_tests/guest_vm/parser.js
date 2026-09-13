@@ -199,6 +199,9 @@
         var declarations = [];
         while (true) {
             var name = this.expectIdentifier().value;
+            if (this.strict && (name === "eval" || name === "arguments")) {
+                this.error("invalid variable binding in strict code");
+            }
             var initial = null;
             if (this.isPunctuator("=")) {
                 this.advance(true);
@@ -410,7 +413,7 @@
         }
         this.expectPunctuator(")", true);
         var outerStrict = this.strict;
-        var body = this.parseFunctionBody();
+        var body = this.parseFunctionBody(declaration);
         var functionStrict = this.strict;
         this.strict = outerStrict;
         if (functionStrict) {
@@ -438,7 +441,7 @@
                            line: startLine, column: startColumn + 1}};
     };
 
-    Parser.prototype.parseFunctionBody = function () {
+    Parser.prototype.parseFunctionBody = function (allowRegexpAfterClose) {
         this.expectPunctuator("{", true);
         var body = [];
         var directivePrologue = true;
@@ -473,7 +476,7 @@
                 }
             }
         }
-        var close = this.expectPunctuator("}", true);
+        var close = this.expectPunctuator("}", !!allowRegexpAfterClose);
         return {type: "BlockStatement", body: body, sourceEnd: close.end};
     };
 
@@ -595,13 +598,21 @@
 
     Parser.prototype.parseNewExpression = function () {
         this.advance(true);
-        var callee = this.parsePrimary();
+        var callee = this.isKeyword("new") ?
+            this.parseNewExpression() : this.parsePrimary();
         while (this.isPunctuator(".")) {
             this.advance(false);
             callee = {type: "MemberExpression", object: callee,
                       property: this.makeLiteral(
                           this.expectIdentifierName().value),
                       computed: false};
+        }
+        while (this.isPunctuator("[")) {
+            this.advance(true);
+            var calleeKey = this.parseExpression();
+            this.expectPunctuator("]", false);
+            callee = {type: "MemberExpression", object: callee,
+                      property: calleeKey, computed: true};
         }
         var args = [];
         if (this.isPunctuator("(")) {
@@ -623,6 +634,12 @@
                               property: this.makeLiteral(
                                   this.expectIdentifierName().value),
                               computed: false};
+            } else if (this.isPunctuator("[")) {
+                this.advance(true);
+                var expressionKey = this.parseExpression();
+                this.expectPunctuator("]", false);
+                expression = {type: "MemberExpression", object: expression,
+                              property: expressionKey, computed: true};
             } else if (this.isPunctuator("(")) {
                 this.advance(true);
                 var callArgs = [];
@@ -805,7 +822,7 @@
                     }
                     this.expectPunctuator(")", true);
                     var outerStrict = this.strict;
-                    var accessorBody = this.parseFunctionBody();
+                    var accessorBody = this.parseFunctionBody(false);
                     var accessorStrict = this.strict;
                     this.strict = outerStrict;
                     if (accessorStrict && accessorParameters.length &&

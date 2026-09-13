@@ -514,6 +514,32 @@ performance are separate mandatory regression gates.
   Chapter 11 run executed all 1,320 files: 1,280 passed, 40 failed, 0 were not
   run, and 0 timed out. Chapter 11.1 is 66 passed / 0 failed.
 
+### 2026-09-13 — Chapter 11 shared semantic gaps reduced to one corpus erratum
+
+- Complete native authored-source run: `ch11`, 1,320 files; 1,319 passed,
+  1 failed, 0 not run, and 0 timed out. Elapsed: 88.23 seconds. Peak RSS:
+  236,096 KiB.
+- General ES5.1 behavior added in this step includes callable
+  `Function.prototype`, function `length`, recursive `new` expressions,
+  computed member access after construction, non-extensible ordinary objects,
+  `Object.preventExtensions`, `Object.isExtensible`,
+  `Object.getOwnPropertyNames`, `Array.isArray`, standard immutable Number and
+  Math constants, sparse-array and array-length deletion behavior, invalid
+  assignment references, and deterministic Date parsing/UTC operations.
+- The regexp/division lexical-goal decision after a function expression is
+  now made from the expression context, so a function expression can be the
+  left operand of division without mis-tokenizing `/` as a regexp literal.
+- The sole remaining Chapter 11 failure is
+  `ch11/11.13/11.13.1/11.13.1-4-28gs.js`. Its source executes
+  `throw NotEarlyError` before `Math.PI = 20`, while its metadata demands an
+  early error. ES5.1 permits the member assignment syntactically and requires
+  a runtime `TypeError` only if execution reaches the assignment, so making
+  this file pass would require a deliberate language-semantic regression.
+  It remains counted as a failure; it is neither skipped nor silently accepted.
+- Node and `js_min.exe` regression gates pass with all 264 guest assertions,
+  including networking, `node_web.js`, demo1, demo2, heap/GC/context checks,
+  native interpreter checks, and the three-context demo.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

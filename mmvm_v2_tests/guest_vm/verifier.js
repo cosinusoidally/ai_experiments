@@ -45,7 +45,8 @@
                      opcode === op.THROW || opcode === op.GET_THIS ||
                      opcode === op.ENTER_WITH) width = 2;
             else if (opcode === op.PUSH_CATCH) width = 3;
-            else if (opcode === op.POP_CATCH || opcode === op.LEAVE_WITH) width = 1;
+            else if (opcode === op.POP_CATCH || opcode === op.LEAVE_WITH ||
+                     opcode === op.INVALID_ASSIGNMENT) width = 1;
             else if (opcode === op.JUMP_IF_FALSE) width = 3;
             else if (opcode === op.CALL) width = 5;
             else if (opcode === op.CONSTRUCT) width = 4;

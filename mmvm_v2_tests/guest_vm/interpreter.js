@@ -671,6 +671,8 @@
                         frame.context, frame.environment,
                         constants[code[pc + 2]], !!frame.program.strict);
                     frame.pc = pc + 3;
+                } else if (opcode === op.INVALID_ASSIGNMENT) {
+                    throw new ReferenceError("invalid assignment target");
                 } else if (opcode === op.GET_LOCAL) {
                     registers[code[pc + 1]] = this.runtime.getEnvironmentSlot(
                         frame.environment, code[pc + 2], code[pc + 3]);

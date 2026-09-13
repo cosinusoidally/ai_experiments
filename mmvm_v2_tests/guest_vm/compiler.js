@@ -909,6 +909,17 @@
             return this.loadReference(this.compileReference(expression, future));
         }
         if (expression.type === "AssignmentExpression") {
+            if (expression.left.type !== "Identifier" &&
+                expression.left.type !== "MemberExpression") {
+                this.compileExpression(expression.left);
+                if (expression.operator !== "=") {
+                    this.emit(op.INVALID_ASSIGNMENT);
+                    return this.emitConstant(undefined);
+                }
+                var invalidAssigned = this.compileExpression(expression.right);
+                this.emit(op.INVALID_ASSIGNMENT);
+                return invalidAssigned;
+            }
             var reference = this.compileReference(expression.left, expression.right);
             var assigned;
             if (expression.operator === "=") {

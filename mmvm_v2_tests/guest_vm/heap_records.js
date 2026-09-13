@@ -231,6 +231,28 @@
                                               prototype || 0, 0, 1, 0);
     };
 
+    Records.prototype.objectIsExtensible = function (address) {
+        var type = this.heap.recordType(address);
+        if (type === Heap.Types.OBJECT) {
+            return !!this.heap.readTrustedFieldU32(
+                address, OBJECT_EXTENSIBLE, Heap.Types.OBJECT);
+        }
+        /* The older layouts have no spare per-object word. Until those
+         * layouts are unified, their ordinary ES object state remains
+         * extensible. */
+        return true;
+    };
+
+    Records.prototype.preventObjectExtensions = function (address) {
+        var type = this.heap.recordType(address);
+        if (type !== Heap.Types.OBJECT) {
+            throw new TypeError(
+                "non-ordinary object extensibility is not implemented");
+        }
+        this.heap.writeTrustedFieldU32(
+            address, OBJECT_EXTENSIBLE, 0, Heap.Types.OBJECT);
+    };
+
     Records.prototype.objectPrototype = function (address) {
         var type = this.heap.recordType(address);
         if (type === Heap.Types.REGEXP) {

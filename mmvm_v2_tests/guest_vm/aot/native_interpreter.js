@@ -677,12 +677,22 @@
                     if (namedGetObject !== 0) {
                         if (recordType(heapBase, namedGetObject) ===
                             HEAP_TYPE_STRING) {
-                            var dynamicStringPrototypeCell = heapBase +
-                                stringSupport + VECTOR_CELLS +
-                                RUNTIME_SUPPORT_STRING_PROTOTYPE *
-                                VALUE_CELL_BYTES;
-                            namedGetObject = load32(
-                                dynamicStringPrototypeCell + VALUE_CELL_LOW);
+                            if (namedGetKey === arrayLengthKey) {
+                                store32(arrayGetTarget, VALUE_TAG_INT32);
+                                store32(arrayGetTarget + VALUE_CELL_LOW,
+                                    stringLength(heapBase, namedGetObject));
+                                store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
+                                store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
+                                namedGetObject = 0;
+                            } else {
+                                var dynamicStringPrototypeCell = heapBase +
+                                    stringSupport + VECTOR_CELLS +
+                                    RUNTIME_SUPPORT_STRING_PROTOTYPE *
+                                    VALUE_CELL_BYTES;
+                                namedGetObject = load32(
+                                    dynamicStringPrototypeCell + VALUE_CELL_LOW);
+                            }
                         }
                     }
                     while (namedGetObject !== 0) {
@@ -2944,6 +2954,16 @@
                     if (setPropertyHeadOffset === 0) {
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    /* Let the semantic path apply strict/sloppy assignment
+                     * behavior when an ordinary object rejects extension. */
+                    if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
+                        if (objectExtensible(
+                            heapBase, setPropertyObject) === 0) {
+                            return unsupportedExitKernel(
+                                heapBase, state, frame, pc, opcode,
+                                instructions);
+                        }
                     }
                     setPropertyRecord = engineHeapBump(heapBase, state);
                     if (setPropertyRecord + PROPERTY_RECORD_BYTES >
