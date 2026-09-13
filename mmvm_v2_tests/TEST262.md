@@ -28,9 +28,9 @@ With no selector, or with `all`, the runner discovers every applicable test.
 Selectors may name a chapter, subtree, or individual test relative to the
 Test262 root.  A normal run continues after failures and prints a complete
 summary.  `--fail-fast` is an optional diagnostic mode, never the default.
-`--strict-only` and `--non-strict-only` restrict execution to one generated
-variant. They are diagnostic filters; tests whose metadata excludes the
-requested variant are not executed.
+`--strict-only` and `--non-strict-only` select tests explicitly authored for
+the requested mode. They are diagnostic filters; tests in the other mode are
+reported as not run.
 
 `--summary-only` performs the identical selection, execution, classification,
 and exit-status calculation while suppressing per-failure diagnostics and
@@ -56,10 +56,10 @@ from the read-only external tree and never writes into that tree.
 
 ## Runtime and context lifetime
 
-One command invocation owns one `JSRuntime`. Each test variant observes a
-freshly restored `JSContext` environment within that runtime. A variant means the non-strict or
-strict form selected by `@noStrict`, `@onlyStrict`, or the absence of either
-marker. Contexts share runtime-owned immutable infrastructure and compiled
+One command invocation owns one `JSRuntime`. Each test observes a freshly
+restored `JSContext` environment within that runtime. Source is evaluated as
+authored (and is therefore sloppy by default); `@onlyStrict` explicitly asks
+the runner to prepend a strict directive. Contexts share runtime-owned immutable infrastructure and compiled
 native interpreter code, but never mutable state from an earlier variant.
 
 Constructing the ES5 harness from source for every variant is not part of the
@@ -105,11 +105,20 @@ semantics, and are kept explicit and reviewable.
 The runner recognizes the old corpus's comment directives without depending
 on regular expressions:
 
-- `@onlyStrict` selects only the strict variant;
-- `@noStrict` selects only the non-strict variant;
-- neither selects both variants;
+- `@onlyStrict` asks the harness to prepend `"use strict"`;
+- `@noStrict` documents that the authored source uses the default sloppy mode;
+- with neither marker, the source is run exactly as authored—no synthetic
+  strict copy is invented;
 - `@negative` inverts the expected outcome and may constrain the acceptable
   failure.
+
+This distinction is important for this Mozilla-era suite. Its unannotated
+files are complete test programs, many imported from Sputnik before modern
+Test262 dual-variant metadata existed. Automatically prepending strict mode to
+all of them creates tests whose behavior contradicts ES5.1; it is not added
+coverage. Strict-mode conformance comes from the suite's explicit strict tests
+and strict directives in authored source. Separate focused dual-mode tests may
+be used during VM development, but are not counted as corpus results.
 
 Negative tests retain the distinction between lexical/parse or other early
 errors and runtime exceptions.  In particular, the corpus's `NotEarlyError`

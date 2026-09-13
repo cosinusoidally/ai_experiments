@@ -775,9 +775,12 @@
             this.emit(op.MAKE_ARRAY, arrayRegister, expression.elements.length);
             var elementIndex = 0;
             while (elementIndex < expression.elements.length) {
-                var elementKey = this.emitConstant(elementIndex);
-                var elementValue = this.compileExpression(expression.elements[elementIndex]);
-                this.emit(op.SET_PROPERTY, arrayRegister, elementKey, elementValue);
+                if (expression.elements[elementIndex] !== null) {
+                    var elementKey = this.emitConstant(elementIndex);
+                    var elementValue = this.compileExpression(
+                        expression.elements[elementIndex]);
+                    this.emit(op.SET_PROPERTY, arrayRegister, elementKey, elementValue);
+                }
                 elementIndex++;
             }
             return arrayRegister;
@@ -852,11 +855,19 @@
         if (expression.type === "UnaryExpression") {
             if (expression.operator === "delete") {
                 if (expression.argument.type !== "MemberExpression") {
-                    if (expression.argument.type === "Identifier" &&
-                        this.referenceForName(expression.argument.name).kind !==
-                            "global") {
-                        return this.emitConstant(false);
+                    if (expression.argument.type === "Identifier") {
+                        var deleteNameReference = this.referenceForName(
+                            expression.argument.name);
+                        if (deleteNameReference.kind === "local" ||
+                            deleteNameReference.kind === "register") {
+                            return this.emitConstant(false);
+                        }
+                        var deleteNameResult = this.allocate();
+                        this.emit(op.DELETE_NAME, deleteNameResult,
+                                  deleteNameReference.name);
+                        return deleteNameResult;
                     }
+                    this.compileExpression(expression.argument);
                     return this.emitConstant(true);
                 }
                 var deleteReference = this.compileReference(expression.argument, null);
@@ -926,13 +937,15 @@
         if (expression.type === "UpdateExpression") {
             reference = this.compileReference(expression.argument, null);
             current = this.loadReference(reference);
+            var numericCurrent = this.allocate();
+            this.emit(op.POSITIVE, numericCurrent, current);
             var one = this.emitConstant(1);
             var updated = reference.kind === "register" ?
                 reference.register : this.allocate();
             this.emit(expression.operator === "++" ? op.ADD : op.SUBTRACT,
-                      updated, current, one);
+                      updated, numericCurrent, one);
             this.storeReference(reference, updated);
-            var updateResult = expression.prefix ? updated : current;
+            var updateResult = expression.prefix ? updated : numericCurrent;
             if (this.expressionWritesRegister(future, updateResult)) {
                 var stableUpdate = this.allocate();
                 this.emit(op.MOVE, stableUpdate, updateResult);

@@ -57,7 +57,8 @@
         LEAVE_WITH: 55,
         GET_NAME: 56,
         SET_NAME: 57,
-        TYPEOF_NAME: 58
+        TYPEOF_NAME: 58,
+        DELETE_NAME: 59
     };
 
     op.NAMES = [];

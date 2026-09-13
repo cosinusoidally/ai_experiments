@@ -565,8 +565,14 @@
         if (this.current.kind === "punctuator" &&
             (this.current.value === "++" || this.current.value === "--")) {
             var updateOperator = this.advance(true).value;
+            var updateArgument = this.parseUnary();
+            if (this.strict && updateArgument.type === "Identifier" &&
+                (updateArgument.name === "eval" ||
+                 updateArgument.name === "arguments")) {
+                this.error("invalid update target in strict code");
+            }
             return {type: "UpdateExpression", operator: updateOperator,
-                    argument: this.parseUnary(), prefix: true};
+                    argument: updateArgument, prefix: true};
         }
         if (this.isKeyword("new")) return this.parseNewExpression();
         if ((this.current.kind === "punctuator" &&
@@ -576,8 +582,13 @@
              (this.current.value === "typeof" || this.current.value === "void" ||
               this.current.value === "delete"))) {
             var operator = this.advance(true).value;
+            var unaryArgument = this.parseUnary();
+            if (this.strict && operator === "delete" &&
+                unaryArgument.type === "Identifier") {
+                this.error("cannot delete an identifier in strict code");
+            }
             return {type: "UnaryExpression", operator: operator,
-                    argument: this.parseUnary()};
+                    argument: unaryArgument};
         }
         return this.parsePostfix();
     };
@@ -634,6 +645,10 @@
         var expression = this.parseLeftHandSide();
         if (!this.current.lineBefore && this.current.kind === "punctuator" &&
             (this.current.value === "++" || this.current.value === "--")) {
+            if (this.strict && expression.type === "Identifier" &&
+                (expression.name === "eval" || expression.name === "arguments")) {
+                this.error("invalid update target in strict code");
+            }
             return {type: "UpdateExpression", operator: this.advance(false).value,
                     argument: expression, prefix: false};
         }
@@ -675,6 +690,25 @@
         return expression;
     };
 
+    Parser.prototype.noteObjectProperty = function (
+            definitions, key, kind, strict) {
+        var mapKey = "$" + key;
+        var previous = definitions[mapKey];
+        if (previous) {
+            if (previous === "accessorPair") {
+                this.error("invalid duplicate object literal property");
+            }
+            var previousData = previous === "init";
+            var currentData = kind === "init";
+            if ((strict && previousData && currentData) ||
+                previousData !== currentData ||
+                (!currentData && previous === kind)) {
+                this.error("invalid duplicate object literal property");
+            }
+            definitions[mapKey] = "accessorPair";
+        } else definitions[mapKey] = kind;
+    };
+
     Parser.prototype.parsePrimary = function () {
         var token = this.current;
         if (this.isKeyword("function")) return this.parseFunction(false);
@@ -711,6 +745,11 @@
             this.advance(true);
             var elements = [];
             while (!this.isPunctuator("]")) {
+                if (this.isPunctuator(",")) {
+                    elements.push(null);
+                    this.advance(true);
+                    continue;
+                }
                 elements.push(this.parseAssignment());
                 if (!this.isPunctuator(",")) break;
                 this.advance(true);
@@ -721,6 +760,7 @@
         if (this.isPunctuator("{")) {
             this.advance(true);
             var properties = [];
+            var propertyDefinitions = {};
             while (!this.isPunctuator("}")) {
                 var keyToken = this.current;
                 var keyValue = keyToken.value;
@@ -736,6 +776,7 @@
                 if ((keyValue === "get" || keyValue === "set") &&
                     !this.isPunctuator(":")) {
                     var accessorKind = keyValue;
+                    var objectStrict = this.strict;
                     var accessorKey = this.current;
                     var accessorKeyValue = accessorKey.value;
                     if (accessorKey.kind !== "identifier" &&
@@ -763,13 +804,25 @@
                         this.error("setter must have one parameter");
                     }
                     this.expectPunctuator(")", true);
-                    var accessorBody = this.parseBlock();
+                    var outerStrict = this.strict;
+                    var accessorBody = this.parseFunctionBody();
+                    var accessorStrict = this.strict;
+                    this.strict = outerStrict;
+                    if (accessorStrict && accessorParameters.length &&
+                        (accessorParameters[0] === "eval" ||
+                         accessorParameters[0] === "arguments" ||
+                         strictFutureReserved["$" + accessorParameters[0]] === 1)) {
+                        this.error("invalid setter parameter in strict code");
+                    }
+                    this.noteObjectProperty(propertyDefinitions,
+                        String(accessorKeyValue), accessorKind, objectStrict);
                     properties.push({key: String(accessorKeyValue),
                         kind: accessorKind,
                         value: {type: "FunctionExpression",
                             name: String(accessorKeyValue),
                             parameters: accessorParameters,
                             body: accessorBody,
+                            strict: accessorStrict,
                             source: this.tokenizer.source.substring(
                                 keyStart, accessorBody.sourceEnd),
                             location: {filename: this.tokenizer.filename,
@@ -777,6 +830,8 @@
                                 column: keyColumn + 1}}});
                 } else {
                     this.expectPunctuator(":", true);
+                    this.noteObjectProperty(propertyDefinitions,
+                        String(keyValue), "init", this.strict);
                     properties.push({key: String(keyValue), kind: "init",
                                      value: this.parseAssignment()});
                 }

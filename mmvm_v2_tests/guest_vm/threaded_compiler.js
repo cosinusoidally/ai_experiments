@@ -59,6 +59,7 @@
         }
         if (!program.astBody ||
             !this.supports(program)) return null;
+        if (containsArrayHole(program.astBody)) return null;
         /* Firefox 1 aliases generated caller activations across a guest
          * construction trampoline even when locals are spilled. Keep the
          * containing function semantic; independently called leaf functions
@@ -801,9 +802,14 @@
                        constant(2) + ");");
         }
         else if (opcode === op.DELETE_PROPERTY) {
-            lines.push(rr(1) + "=runtime.deleteProperty(" + rr(2) + "," + rr(3) + ");");
+            lines.push(rr(1) + "=runtime.deleteProperty(" + rr(2) + "," + rr(3) +
+                       ",!!p.strict);");
         } else if (opcode === op.DELETE_PROPERTY_CONST) {
-            lines.push(rr(1) + "=runtime.deleteProperty(" + rr(2) + "," + constant(3) + ");");
+            lines.push(rr(1) + "=runtime.deleteProperty(" + rr(2) + "," + constant(3) +
+                       ",!!p.strict);");
+        } else if (opcode === op.DELETE_NAME) {
+            lines.push(rr(1) + "=runtime.deleteBinding(context,env," +
+                       constant(2) + ",!!p.strict);");
         } else if (opcode === op.GET_KEYS) lines.push(rr(1) + "=runtime.keys(" + rr(2) + ");");
         else if (opcode === op.JUMP) {
             if (c[pc + 1] <= pc) lines.push("if(runtime.gcPending)runtime.gcSafePoint();");
@@ -834,7 +840,7 @@
                        argumentSource(program.constants[c[pc + 3]]) + ",context);");
         } else if (opcode === op.MAKE_OBJECT) lines.push(rr(1) + "=runtime.makeObject();");
         else if (opcode === op.MAKE_ARRAY) {
-            lines.push(rr(1) + "=runtime.makeArray(" + c[pc + 2] + ");");
+            lines.push(rr(1) + "=runtime.makeArrayLiteral(" + c[pc + 2] + ");");
         }
         else if (opcode === op.MAKE_REGEXP) {
             lines.push(rr(1) + "=runtime.makeRegExp(" + constant(2) + "," + constant(3) + ");");
@@ -1985,6 +1991,25 @@
         return found;
     }
 
+    function containsArrayHole(node) {
+        var found = false;
+        function visit(value) {
+            if (!value || typeof value !== "object" || found) return;
+            if (value.type === "ArrayExpression") {
+                var index = 0;
+                while (index < value.elements.length) {
+                    if (value.elements[index++] === null) {
+                        found = true;
+                        return;
+                    }
+                }
+            }
+            visitChildren(value, visit, false);
+        }
+        visit(node);
+        return found;
+    }
+
     function isPure(node) {
         if (!node) return true;
         if (node.type === "Literal" || node.type === "Identifier" ||
@@ -2149,7 +2174,7 @@
             opcode === op.BIT_NOT ||
             opcode === op.TYPEOF || opcode === op.TYPEOF_GLOBAL ||
             opcode === op.GET_KEYS ||
-            opcode === op.PUSH_CATCH) return 3;
+            opcode === op.PUSH_CATCH || opcode === op.DELETE_NAME) return 3;
         if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
             opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
             opcode === op.GET_PROPERTY_CONST || opcode === op.SET_PROPERTY_CONST ||

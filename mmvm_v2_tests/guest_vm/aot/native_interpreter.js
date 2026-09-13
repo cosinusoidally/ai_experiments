@@ -6389,7 +6389,10 @@
         setRecordSize(heapBase, vector, vectorBytes);
         setRecordMark(heapBase, vector, 0);
         setRecordFlags(heapBase, vector, 0);
-        setVectorLength(heapBase, vector, 0);
+        /* MAKE_ARRAY is the array-literal opcode: its operand is both the
+         * initial backing capacity and the observable literal length. Holes
+         * remain absent because their value cells stay undefined. */
+        setVectorLength(heapBase, vector, capacity);
         setVectorCapacity(heapBase, vector, capacity);
         setRecordType(heapBase, array, HEAP_TYPE_ARRAY);
         setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);

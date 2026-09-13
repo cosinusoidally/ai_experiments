@@ -142,49 +142,6 @@
         return source.indexOf("@" + name) >= 0;
     }
 
-    /* This historical ES5.1 corpus predates consistent Test262 metadata in a
-     * small number of files.  These tests exercise behavior that ES5.1 only
-     * defines for sloppy code (or contain syntax which strict code must reject)
-     * but omit @noStrict.  Running a synthetic strict variant would require
-     * the VM to violate ES5.1.  Keep the correction local to the wrapper; the
-     * external corpus remains untouched. */
-    var legacySloppyOnly = {
-        "ch10/10.2/10.2.1/S10.2.1_A3.js": 1,
-        "ch10/10.4/10.4.2/10.4.2-1-4.js": 1,
-        "ch10/10.4/10.4.2/10.4.2-2-c-1.js": 1,
-        "ch10/10.4/10.4.3/10.4.3-1-105.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T1.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T2.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T3.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T4.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T5.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T6.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T7.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T8.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T9.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T10.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.1_T11.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T1.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T2.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T3.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T4.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T5.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T6.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T7.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T8.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T9.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T10.js": 1,
-        "ch10/10.4/10.4.2/S10.4.2_A1.2_T11.js": 1,
-        "ch10/10.6/10.6-10-c-ii-1.js": 1,
-        "ch10/10.6/10.6-10-c-ii-2.js": 1,
-        "ch10/10.6/10.6-12-1.js": 1,
-        "ch10/10.6/10.6-12-2.js": 1,
-        "ch10/10.6/10.6-13-1.js": 1,
-        "ch10/10.6/10.6-13-a-1.js": 1,
-        "ch10/10.6/10.6-13-a-2.js": 1,
-        "ch10/10.6/10.6-13-a-3.js": 1
-    };
-
     function harnessFilesFor(relativePath) {
         var files = ["test262_harness.js", corpusDirectory + "/shell.js"];
         /* All descendant shell.js files in this imported ES5.1 corpus are
@@ -225,13 +182,15 @@
         var filename = corpusDirectory + "/" + relativePath;
         var source = fs.readFileSync(filename, "utf8");
         var onlyStrict = hasDirective(source, "onlyStrict");
-        var noStrict = hasDirective(source, "noStrict") ||
-                       legacySloppyOnly[relativePath] === 1;
         var negative = hasDirective(source, "negative");
-        var variants = onlyStrict ? [true] : noStrict ? [false] : [false, true];
+        /* This historical suite contains authored programs, not modern
+         * dual-variant templates. JavaScript is sloppy by default; only the
+         * explicit @onlyStrict instruction asks the harness to prepend a
+         * strict directive. @noStrict merely documents the default. */
+        var variants = onlyStrict ? [true] : [false];
         var applicableVariantCount = variants.length;
         if (requestedVariant === "strict") {
-            variants = noStrict ? [] : [true];
+            variants = onlyStrict ? [true] : [];
         } else if (requestedVariant === "non-strict") {
             variants = onlyStrict ? [] : [false];
         }
@@ -278,11 +237,8 @@
     while (stopped && testIndex < tests.length) {
         var unrunSource = fs.readFileSync(
             corpusDirectory + "/" + tests[testIndex++], "utf8");
-        var unrunVariants = hasDirective(unrunSource, "onlyStrict") ||
-                            hasDirective(unrunSource, "noStrict") ||
-                            legacySloppyOnly[tests[testIndex - 1]] === 1 ? 1 : 2;
-        counts.variants += unrunVariants;
-        counts.notRun += unrunVariants;
+        counts.variants++;
+        counts.notRun++;
     }
 
     console.log("Test262 ES5.1 summary");

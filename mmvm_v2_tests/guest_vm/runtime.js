@@ -585,6 +585,12 @@
             "array"));
     };
 
+    Runtime.prototype.makeArrayLiteral = function (length) {
+        var array = this.makeArray(length);
+        this.heapRecords.setArrayLength(array.heapAddress, length);
+        return array;
+    };
+
     Runtime.prototype.makeObjectLiteral3 = function (
             k0, v0, k1, v1, k2, v2) {
         var object = this.makeObject();
@@ -878,6 +884,27 @@
             current = this.environmentParent(current);
         }
         return context.globalObject;
+    };
+
+    Runtime.prototype.deleteBinding = function (context, environment, name,
+                                                  strict) {
+        var current = environment;
+        while (current) {
+            var bindingObjectAddress = this.heapRecords.environmentObject(
+                current.heapAddress);
+            if (bindingObjectAddress) {
+                var bindingObject = this.readHeapReference(bindingObjectAddress);
+                if (this.hasProperty(bindingObject, name)) {
+                    return this.deleteProperty(bindingObject, name, strict);
+                }
+            }
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            if (metadata && metadata.bindingSlots["$" + name] !== undefined) {
+                return false;
+            }
+            current = this.environmentParent(current);
+        }
+        return this.deleteProperty(context.globalObject, name, strict);
     };
 
     Runtime.prototype.typeOfBinding = function (context, environment, name) {
@@ -3413,7 +3440,7 @@
         return false;
     };
 
-    Runtime.prototype.deleteProperty = function (object, key) {
+    Runtime.prototype.deleteProperty = function (object, key, strict) {
         this.assertOwned(object);
         key = this.propertyKey(key);
         if (!object || !object.guestType) return true;
@@ -3429,7 +3456,10 @@
                 object.heapAddress, keyAddress);
             if (removedProperty &&
                 !(this.heapRecords.propertyAttributes(removedProperty) &
-                  HeapRecords.Attributes.CONFIGURABLE)) return false;
+                  HeapRecords.Attributes.CONFIGURABLE)) {
+                if (strict) throw new TypeError("property is not configurable");
+                return false;
+            }
             delete object.propertyAddresses["$" + keyAddress];
             var deleted = this.heapRecords.deleteOwnProperty(
                 object.heapAddress, keyAddress);

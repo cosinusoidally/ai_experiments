@@ -222,7 +222,8 @@
             opcode === op.GET_LOCAL || opcode === op.GET_PROPERTY_CONST ||
             opcode === op.DELETE_PROPERTY_CONST || opcode === op.IN ||
             opcode === op.INSTANCEOF || opcode === op.GET_THIS ||
-            opcode === op.GET_NAME || opcode === op.TYPEOF_NAME;
+            opcode === op.GET_NAME || opcode === op.TYPEOF_NAME ||
+            opcode === op.DELETE_NAME;
     };
 
     Execution.prototype.synchronizeFallbackStep = function (frame, pc, opcode) {
@@ -665,6 +666,11 @@
                         frame.context, frame.environment,
                         constants[code[pc + 2]]);
                     frame.pc = pc + 3;
+                } else if (opcode === op.DELETE_NAME) {
+                    registers[code[pc + 1]] = this.runtime.deleteBinding(
+                        frame.context, frame.environment,
+                        constants[code[pc + 2]], !!frame.program.strict);
+                    frame.pc = pc + 3;
                 } else if (opcode === op.GET_LOCAL) {
                     registers[code[pc + 1]] = this.runtime.getEnvironmentSlot(
                         frame.environment, code[pc + 2], code[pc + 3]);
@@ -785,11 +791,13 @@
                     frame.pc = pc + 3;
                 } else if (opcode === op.DELETE_PROPERTY) {
                     registers[code[pc + 1]] = this.runtime.deleteProperty(
-                        registers[code[pc + 2]], registers[code[pc + 3]]);
+                        registers[code[pc + 2]], registers[code[pc + 3]],
+                        !!frame.program.strict);
                     frame.pc = pc + 4;
                 } else if (opcode === op.DELETE_PROPERTY_CONST) {
                     registers[code[pc + 1]] = this.runtime.deleteProperty(
-                        registers[code[pc + 2]], constants[code[pc + 3]]);
+                        registers[code[pc + 2]], constants[code[pc + 3]],
+                        !!frame.program.strict);
                     frame.pc = pc + 4;
                 } else if (opcode === op.GET_KEYS) {
                     registers[code[pc + 1]] = this.runtime.keys(registers[code[pc + 2]]);
@@ -1010,7 +1018,7 @@
                     }
                     frame.pc = pc + 2;
                 } else if (opcode === op.MAKE_ARRAY) {
-                    registers[code[pc + 1]] = this.runtime.makeArray(
+                    registers[code[pc + 1]] = this.runtime.makeArrayLiteral(
                         code[pc + 2]);
                     if (!this.runtime.nativeInterpreter) {
                         this.runtime.gcSafePoint();

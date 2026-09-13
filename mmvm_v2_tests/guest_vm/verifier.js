@@ -27,7 +27,8 @@
                 opcode === op.BIT_NOT || opcode === op.TYPEOF ||
                 opcode === op.TYPEOF_GLOBAL ||
                 opcode === op.GET_KEYS || opcode === op.GET_NAME ||
-                opcode === op.SET_NAME || opcode === op.TYPEOF_NAME) width = 3;
+                opcode === op.SET_NAME || opcode === op.TYPEOF_NAME ||
+                opcode === op.DELETE_NAME) width = 3;
             else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                      opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
                      opcode === op.GET_PROPERTY_CONST ||
@@ -65,7 +66,8 @@
                     throw new Error("invalid global name at bytecode " + pc);
                 }
                 requireRegister(program, code[pc + 2], pc);
-            } else if (opcode === op.GET_NAME || opcode === op.TYPEOF_NAME) {
+            } else if (opcode === op.GET_NAME || opcode === op.TYPEOF_NAME ||
+                       opcode === op.DELETE_NAME) {
                 requireRegister(program, code[pc + 1], pc);
                 if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
                     throw new Error("invalid name constant at bytecode " + pc);

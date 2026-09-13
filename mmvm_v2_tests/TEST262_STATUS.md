@@ -12,6 +12,13 @@ Timeouts are included in `failed` and also shown as a diagnostic subset. A
 normal unfiltered complete run is valid only when `not run` is zero. There are
 no conformance skips: unsupported ES5.1 behavior fails until implemented.
 
+As of 2026-09-13 the runner follows this historical corpus's authored-program
+model: every file runs once as written, except that `@onlyStrict` directs the
+harness to prepend a strict prologue. Earlier 5,765-variant measurements below
+were useful VM diagnostics, but synthesized strict copies of every unannotated
+file and are therefore not Test262 conformance totals. They remain in the
+chronological ledger rather than being rewritten or silently discarded.
+
 ## Result history
 
 Results are grouped by identical selection so that movement in the pass and
@@ -20,6 +27,9 @@ group is toward zero failures; a smaller selection is never presented as an
 improvement over a larger one.
 
 ### Complete ES5.1 suite — 3,292 files
+
+- No complete authored-program result has yet been recorded. The next complete
+  run will have 3,292 executed tests, zero not run, and no synthetic variants.
 
 - 2026-09-12, revision `381a345`, 20,000-instruction diagnostic allowance:
   all 3,292 files and 5,765 variants were executed; 4,856 passed, 909 failed,
@@ -45,6 +55,8 @@ improvement over a larger one.
   10.2 times the Node throughput reference. Context restoration is no longer
   the dominant cost; front-end compilation, semantic services, and
   accumulated program metadata remain the principal general targets.
+  This comparison used the superseded 5,765 synthetic-variant selection and
+  remains only a historical throughput reference.
 - 2026-09-11, MMVM native guest with context snapshots, working tree after
   `2e70454`: `ch07/7.9`, 101 files and 202 variants, 202 passed and 0 failed in
   11.50 seconds; peak RSS 145,632 KiB. The previous completed measurement for
@@ -483,6 +495,24 @@ performance are separate mandatory regression gates.
 - The subsequent complete run at revision `381a345` produced the accepted
   4,856 passed / 909 failed / 0 not run result recorded above. Both Node and
   `js_min.exe` regression suites remained green before that run.
+
+### 2026-09-13 — authored-mode accounting and chapter 11 operators
+
+- The runner was corrected to execute this Mozilla-era corpus as authored:
+  JavaScript is sloppy by default, `@onlyStrict` requests a prepended strict
+  directive, and unannotated programs are no longer duplicated with an
+  invented directive. `@noStrict` documents the default. This is not a skip;
+  each of the 3,292 corpus files has exactly one applicable execution in a
+  normal run. `TEST262.md` documents the selection contract.
+- Before the operator work, a complete authored-mode Chapter 11 run executed
+  all 1,320 files: 1,245 passed, 75 failed, 0 were not run, and 0 timed out.
+  (The immediately preceding 1,397-variant diagnostic reported 1,245 passed
+  and 152 failed; its 77 additional failures were synthesized strict copies.)
+- After implementing sparse array literal length/hole semantics, strict object
+  literal validation, strict setter/update targets, numeric update coercion,
+  and strict/sloppy binding/property deletion, a complete authored-mode
+  Chapter 11 run executed all 1,320 files: 1,280 passed, 40 failed, 0 were not
+  run, and 0 timed out. Chapter 11.1 is 66 passed / 0 failed.
 
 ## Rules for subsequent entries
 
