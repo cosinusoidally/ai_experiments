@@ -303,6 +303,7 @@
          * Guest-visible state never lives here: lastIndex is reset before
          * each use, matching the current guest record semantics. */
         this.hostRegExpCache = {};
+        this.hostRegExpCacheEntries = 0;
         this.assertions = 0;
         this.heapObjects = [];
         this.heapHandles = {};
@@ -311,6 +312,7 @@
         this.environmentMetadata = {};
         this.programObjects = [];
         this.programAddresses = [];
+        this.freeProgramMetadataIndices = [];
         this.programMetadata = {};
         this.retainedProgramAddresses = {};
         this.heapStateSnapshots = [];
@@ -321,6 +323,12 @@
         this.gcAllocationDebt = 0;
         this.gcPending = false;
         this.gcCollecting = false;
+        /* An embedder whose own collector is not generational (notably the
+         * Firefox 1 shell used by js_min) may supply a safe explicit host-GC
+         * hook. It is never guest-visible and is only called after guest
+         * frames and roots have been published at an ordinary safe point. */
+        this.hostCollect = typeof options.hostCollect === "function" ?
+            options.hostCollect : null;
         this.gcHeapPressureBump = 0;
         this.compiledDepth = 0;
         this.collectionCount = 0;
@@ -645,8 +653,18 @@
         var key = "$" + pattern.length + ":" + pattern + ":" + flags;
         var compiled = this.hostRegExpCache[key];
         if (!compiled) {
+            /* This is only an execution accelerator, not semantic state. Do
+             * not let workloads containing unbounded distinct patterns turn
+             * it into a second, immortal regexp heap. Replacing the table is
+             * also friendlier to old SpiderMonkey's property allocator than
+             * repeatedly deleting thousands of dictionary entries. */
+            if (this.hostRegExpCacheEntries >= 256) {
+                this.hostRegExpCache = {};
+                this.hostRegExpCacheEntries = 0;
+            }
             compiled = new RegExp(pattern, flags);
             this.hostRegExpCache[key] = compiled;
+            this.hostRegExpCacheEntries++;
         }
         compiled.lastIndex = 0;
         return compiled;
@@ -1510,7 +1528,9 @@
             this.heapRecords.allocateValueVector(program.bindingRegisters.length) : 0;
         program.heapParameterSlotsAddress = this.heapRecords.allocateValueVector(
             program.parameterSlots ? program.parameterSlots.length : 0);
-        var metadataId = this.programObjects.length + 1;
+        var metadataIndex = this.freeProgramMetadataIndices.length ?
+            this.freeProgramMetadataIndices.pop() : this.programObjects.length;
+        var metadataId = metadataIndex + 1;
         var address = this.heapRecords.allocateProgram(
             program.heapBytecodeAddress, program.heapConstantsAddress, {
             constantRegisters: program.heapConstantRegistersAddress,
@@ -1532,8 +1552,8 @@
                 program.bindings.length) {
             throw new Error("guest program binding layout was not preserved");
         }
-        this.programObjects.push(program);
-        this.programAddresses.push(address);
+        this.programObjects[metadataIndex] = program;
+        this.programAddresses[metadataIndex] = address;
         program.heapAddress = address;
         this.programMetadata["$" + address] = program;
         index = 0;
@@ -1878,16 +1898,7 @@
          * headroom; the interpreter services it only after publishing the
          * native frame at the next ordinary yield. */
         if (bump >= this.gcHeapPressureBump) {
-            if (this.linearHeap.allocationLimit <
-                this.linearHeap.maximumAllocationLimit) {
-                /* The backing reservation and all guest references are stable
-                 * offsets, so logical growth is cheap and cannot invalidate a
-                 * pointer. Prefer the fresh contiguous tail to repeatedly
-                 * carving tiny regions out of a fragmented young heap. */
-                this.linearHeap.growToFit(
-                    this.linearHeap.allocationLimit + 1);
-                this.resetHeapPressureBump(0);
-            } else this.gcPending = true;
+            this.gcPending = true;
         }
     };
 
@@ -1947,6 +1958,7 @@
     Runtime.prototype.gcSafePoint = function () {
         if (this.gcPending && !this.gcCollecting && this.compiledDepth === 0) {
             this.collect();
+            if (this.hostCollect) this.hostCollect();
         }
     };
 
@@ -4065,12 +4077,6 @@
                 enqueue(this.retainedProgramAddresses[retainedProgramKey]);
             }
         }
-        var stringKey;
-        for (stringKey in this.internedStrings) {
-            if (own(this.internedStrings, stringKey)) {
-                enqueue(this.internedStrings[stringKey]);
-            }
-        }
         if (this.nativeInterpreter) {
             enqueue(this.nativeInterpreter.stateAddress);
         }
@@ -4230,13 +4236,41 @@
             this.linearHeap.setMark(
                 this.functionConstructionProgram, generation);
         }
-        var internedStringKey;
-        for (internedStringKey in this.internedStrings) {
-            if (own(this.internedStrings, internedStringKey)) {
-                this.linearHeap.setMark(
-                    this.internedStrings[internedStringKey], generation);
-            }
+    };
+
+    Runtime.prototype.rebuildWeakStringTables = function (generation) {
+        /* Interning establishes canonical identity while an atom is live; it
+         * must not make every atom an immortal runtime root.  This matters in
+         * particular for long-lived runtimes which compile many independent
+         * programs (the Test262 lexical tests create tens of thousands of
+         * distinct eval sources).  References from properties, programs,
+         * values and snapshots have already marked the strings they need.
+         * Retain table entries only for those live records, and allow all
+         * other strings and their host-side spelling keys to disappear. */
+        var oldAddresses = this.stringAddresses;
+        var oldInterned = this.internedStrings;
+        var oldTransient = this.transientStringAddresses;
+        var oldDecoded = this.decodedStrings;
+        var liveAddresses = {};
+        var liveInterned = {};
+        var liveTransient = {};
+        var liveDecoded = {};
+        var key;
+        for (key in oldAddresses) {
+            if (!own(oldAddresses, key)) continue;
+            var address = oldAddresses[key];
+            if (this.linearHeap.isFreeRecord(address) ||
+                this.linearHeap.mark(address) !== generation) continue;
+            liveAddresses[key] = address;
+            if (oldInterned[key] === address) liveInterned[key] = address;
+            if (oldTransient[key] === address) liveTransient[key] = address;
+            var decoded = oldDecoded["$" + address];
+            if (decoded !== undefined) liveDecoded["$" + address] = decoded;
         }
+        this.stringAddresses = liveAddresses;
+        this.internedStrings = liveInterned;
+        this.transientStringAddresses = liveTransient;
+        this.decodedStrings = liveDecoded;
     };
 
     Runtime.prototype.verifyNativeFrameMarks = function (generation) {
@@ -4293,6 +4327,7 @@
     };
 
     Runtime.prototype.releaseUnmarkedProgramMetadata = function (generation) {
+        var liveMetadata = {};
         var index = 0;
         while (index < this.programAddresses.length) {
             var address = this.programAddresses[index];
@@ -4303,9 +4338,12 @@
                 if (program && program.heapAddress === address) {
                     program.heapAddress = 0;
                 }
-                delete this.programMetadata["$" + address];
                 this.programObjects[index] = null;
                 this.programAddresses[index] = 0;
+                this.freeProgramMetadataIndices.push(index);
+            } else if (address && this.programMetadata["$" + address]) {
+                liveMetadata["$" + address] =
+                    this.programMetadata["$" + address];
             }
             index++;
         }
@@ -4320,10 +4358,13 @@
                         metadataProgram.heapAddress === metadataAddress) {
                         metadataProgram.heapAddress = 0;
                     }
-                    delete this.programMetadata[key];
-                }
+                } else liveMetadata[key] = this.programMetadata[key];
             }
         }
+        /* Replace, rather than mutate, this high-churn address dictionary.
+         * Firefox 1 retains considerable dictionary bookkeeping after delete;
+         * a fresh survivor map lets its host collector reclaim that storage. */
+        this.programMetadata = liveMetadata;
     };
 
     Runtime.prototype.collect = function () {
@@ -4424,6 +4465,7 @@
                 index++;
             }
             this.heapObjects = survivors;
+            var liveEnvironmentMetadata = {};
             var environmentKey;
             for (environmentKey in this.environmentMetadata) {
                 if (own(this.environmentMetadata, environmentKey)) {
@@ -4432,24 +4474,39 @@
                             environmentMetadata.handle.heapAddress) ||
                         this.linearHeap.mark(
                             environmentMetadata.handle.heapAddress) !== generation) {
-                        delete this.environmentMetadata[environmentKey];
                     } else {
                         environmentMetadata.gcMark = generation;
+                        liveEnvironmentMetadata[environmentKey] =
+                            environmentMetadata;
                     }
                 }
             }
+            this.environmentMetadata = liveEnvironmentMetadata;
+            var liveHeapHandles = {};
+            var liveFunctionMetadata = {};
             var handleKey;
             for (handleKey in this.heapHandles) {
-                if (own(this.heapHandles, handleKey) &&
-                    (this.linearHeap.isFreeRecord(
-                        this.heapHandles[handleKey].heapAddress) ||
-                     this.linearHeap.mark(
-                        this.heapHandles[handleKey].heapAddress) !== generation)) {
-                    delete this.heapHandles[handleKey];
-                    delete this.functionMetadata[handleKey];
+                if (own(this.heapHandles, handleKey)) {
+                    var heapHandle = this.heapHandles[handleKey];
+                    if (!this.linearHeap.isFreeRecord(heapHandle.heapAddress) &&
+                        this.linearHeap.mark(heapHandle.heapAddress) ===
+                            generation) {
+                        liveHeapHandles[handleKey] = heapHandle;
+                        if (this.functionMetadata[handleKey]) {
+                            liveFunctionMetadata[handleKey] =
+                                this.functionMetadata[handleKey];
+                        }
+                    }
                 }
             }
+            this.heapHandles = liveHeapHandles;
+            this.functionMetadata = liveFunctionMetadata;
             this.releaseUnmarkedProgramMetadata(generation);
+            /* Filter weak atom/cache entries while dead records still retain
+             * their headers. Sweeping may coalesce adjacent dead records, at
+             * which point an old string address is no longer necessarily a
+             * record boundary. */
+            this.rebuildWeakStringTables(generation);
             var sweepResult;
             if (this.heapSweeper &&
                 this.heapSweeper.compiled.backend === "i386") {
@@ -4464,16 +4521,6 @@
                 new Date().getTime() : 0;
             this.gcAllocationDebt = 0;
             this.gcPending = false;
-            this.transientStringAddresses = {};
-            this.stringAddresses = {};
-            this.decodedStrings = {};
-            var retainedStringKey;
-            for (retainedStringKey in this.internedStrings) {
-                if (own(this.internedStrings, retainedStringKey)) {
-                    this.stringAddresses[retainedStringKey] =
-                        this.internedStrings[retainedStringKey];
-                }
-            }
             this.collectionCount++;
             /* A large live graph can leave the bump above the ordinary 75%
              * pressure mark.  Do not collect that same live graph again at
@@ -4624,6 +4671,12 @@
         this.stringAddresses = {};
         this.transientStringAddresses = {};
         this.decodedStrings = {};
+        this.hostRegExpCache = {};
+        this.hostRegExpCacheEntries = 0;
+        this.programObjects = [];
+        this.programAddresses = [];
+        this.freeProgramMetadataIndices = [];
+        this.programMetadata = {};
         this.globalObject = null;
         var compilationIndex = 0;
         while (compilationIndex < this.nativeCompilations.length) {

@@ -569,6 +569,42 @@ performance are separate mandatory regression gates.
 - Node and `js_min.exe` regression gates remain green with all 264 guest
   assertions and the existing networking/demo/integration checks.
 
+### 2026-09-13 — long-run memory diagnosis and bounded regexp completion
+
+- The reported 85-minute run exceeding 400 MiB was treated as a lifecycle
+  regression. No second opaque whole-suite run was started. Reproducible,
+  bounded selections show that the runtime atom table made every identifier,
+  literal, and property spelling a permanent GC root, while the growable heap
+  doubled its logical limit at collection pressure before attempting to
+  reclaim dead records.
+- Interning is now weak: live heap references preserve canonical atom
+  addresses, while mark/sweep rebuilds the host lookup tables from marked
+  entries and releases dead spellings. Native allocation requests collection
+  at its pressure boundary and grows the logical heap only if reclamation
+  cannot satisfy a later allocation. The stable maximum address reservation
+  and growable-heap behavior are unchanged.
+- High-churn address dictionaries are replaced by survivor-only maps during
+  collection, released program-metadata slots are reused, and the transitional
+  compiled-regexp accelerator is bounded to 256 entries. On `js_min.exe`, the
+  embedder's own collector is invoked automatically after a guest collection
+  safe point; this is host implementation housekeeping and is not a
+  guest-visible host call.
+- Native `ch07/7.4` remains 14 passed / 0 failed / 0 not run in 39.11 seconds,
+  with a 268,220 KiB peak. Its guest heap reported a 64 MiB logical limit, no
+  growth, and four collections. The exact generated regexp test
+  `ch07/7.8/7.8.5/S7.8.5_A1.1_T2.js` now has a completed bounded result:
+  1 passed / 0 failed / 0 not run in approximately 165 seconds. Its sampled
+  RSS still rose from 137,996 KiB at 15 seconds to 335,788 KiB at 165 seconds.
+  Therefore weak atoms and bounded metadata remove genuine leaks but do not
+  resolve the dominant cost: non-empty direct eval still constructs its
+  tokenizer, AST, compiler, and program adapter in the host VM. Wiring the
+  existing guest-owned frontend into general eval remains the next large
+  memory and performance step; no regexp-specific evaluator or parse cache is
+  used.
+- Complete Node and `js_min.exe` regression gates pass after these changes
+  with all 264 guest assertions, networking, `node_web.js`, demo1, demo2,
+  heap/GC/context/native-interpreter checks, and the three-context demo green.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

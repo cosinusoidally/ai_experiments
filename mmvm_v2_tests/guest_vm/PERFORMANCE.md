@@ -370,7 +370,11 @@ intern table merely because a semantic register is spilled. A per-generation
 reverse cache preserves address reuse during normal execution, while ordinary
 heap reachability controls lifetime at collection. This particularly targets
 the temporary macro-assembly and specialization strings created while changing
-demo8 modes; atoms and property keys remain strongly interned.
+demo8 modes. The atom table preserves canonical identity only while an atom is
+reachable: properties, programs, snapshots, and values mark their string
+records normally, and collection rebuilds the table from its marked entries.
+This weak-interning rule prevents a runtime which compiles many unrelated
+sources from retaining every identifier and literal spelling forever.
 
 Trusted value-cell and fixed-field reads now reach js_min's aligned
 `peek32`/`poke32` primitives without repeating host-memory validation after the

@@ -9873,13 +9873,6 @@
         var allocationBump = heap.bump;
         var allocationLimit = heap.allocationLimit;
         if (!this.allocationRegion &&
-            heap.bump >= this.runtime.gcHeapPressureBump &&
-            heap.allocationLimit < heap.maximumAllocationLimit) {
-            heap.growToFit(heap.allocationLimit + 1);
-            this.runtime.resetHeapPressureBump(0);
-            allocationLimit = heap.allocationLimit;
-        }
-        if (!this.allocationRegion &&
             heap.bump >= this.runtime.gcHeapPressureBump) {
             var claimedRegion = heap.claimLargestFreeBlock(
                 MIN_NATIVE_ALLOCATION_REGION_BYTES);
@@ -9888,6 +9881,18 @@
                     cursor: claimedRegion.address,
                     end: claimedRegion.address + claimedRegion.size
                 };
+            }
+        }
+        if (!this.allocationRegion &&
+            allocationLimit > this.runtime.gcHeapPressureBump) {
+            /* Stop the native bump allocator at the collection-pressure
+             * boundary. It will publish its frame and return an allocation
+             * exit, allowing the ordinary collector to reclaim dead records
+             * before the logical heap is grown. A genuinely live heap can
+             * still grow through the normal post-collection allocation path. */
+            allocationLimit = this.runtime.gcHeapPressureBump;
+            if (allocationLimit < allocationBump) {
+                allocationLimit = allocationBump;
             }
         }
         if (this.allocationRegion) {

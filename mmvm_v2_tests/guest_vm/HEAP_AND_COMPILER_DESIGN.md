@@ -64,6 +64,20 @@ write updates the heap first and then updates or invalidates the cache. Cache
 misses decode from the heap. GC scans heap records and never cache contents.
 The x86 backend uses the same guards and side-exits on misses.
 
+String interning is a weak canonicalization table, not a root set. A live
+property key, program atom, value, or snapshot marks its string record through
+the ordinary heap graph. After marking, the runtime rebuilds its address and
+decoded-string caches from live entries before dead records are swept. This
+both preserves address comparisons for live property atoms and permits a
+long-lived runtime to discard strings belonging only to destroyed contexts.
+
+The default heap reserves a stable maximum address range but initially exposes
+only a smaller logical allocation limit. Native allocation stops at the
+collection-pressure boundary and publishes its frame so automatic collection
+can run first. The logical limit grows only when collection and reusable free
+regions cannot satisfy an allocation; reserved address space is not permission
+to double the live heap before attempting reclamation.
+
 ## Shared compiler pipeline
 
 There is one semantic compiler pipeline and two execution backends:

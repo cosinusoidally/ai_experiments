@@ -104,6 +104,8 @@ var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource = guestRunnerIsNode ?
     require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
+                                        hostCollect:
+                                            typeof gc === "function" ? gc : null,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
                                             guestRunnerTraceExceptions,
