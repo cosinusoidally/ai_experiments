@@ -366,7 +366,8 @@
         var INTRINSIC_REGEXP_CONSTRUCTOR = 63;
         var INTRINSIC_EVAL = 64;
         var INTRINSIC_PARSE_INT = 65;
-        var INTRINSIC_LAST_ID = 65;
+        var INTRINSIC_MATH_ATAN = 66;
+        var INTRINSIC_LAST_ID = 66;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -4532,6 +4533,9 @@
         if (intrinsicId === INTRINSIC_MATH_ATAN2) {
             isMathIntrinsic = 1;
         }
+        if (intrinsicId === INTRINSIC_MATH_ATAN) {
+            isMathIntrinsic = 1;
+        }
         if (isMathIntrinsic === 1) {
             intrinsicHandled = mathIntrinsicKernel(
                 heapBase, state, intrinsicTarget, registerCells,
@@ -6474,7 +6478,14 @@
         if (mathArgumentsValid === 0) {
             return 0;
         }
-        if (intrinsicId === INTRINSIC_MATH_ATAN2) {
+        if (intrinsicId === INTRINSIC_MATH_ATAN) {
+            var atanTag = load32(unaryMathCell);
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW,
+                atan2F64(loadNumberF64(
+                    unaryMathCell + VALUE_CELL_LOW, atanTag),
+                    loadI32F64(1)));
+        } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
             if (intrinsicArgumentCount !== 2) {
                 mathArgumentsValid = 0;
             }

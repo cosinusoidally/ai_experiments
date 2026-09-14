@@ -8,6 +8,17 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.46
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Added a native guest `Math.atan` intrinsic. It uses the existing kernel/x87
+  binary64 `atan2` operation with a denominator of one, so ordinary numeric
+  calls no longer require the host Math implementation. `Math.atan2` retains
+  its existing two-argument path.
+
 ## 0.45
 
 Approximate completion: 2026-09-14 evening BST

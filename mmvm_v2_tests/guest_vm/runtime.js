@@ -2917,7 +2917,9 @@
         }, NativeIntrinsics.MATH_ABS);
         mathMethod("acos", function (receiver, args) { return Math.acos(Number(args[0])); });
         mathMethod("asin", function (receiver, args) { return Math.asin(Number(args[0])); });
-        mathMethod("atan", function (receiver, args) { return Math.atan(Number(args[0])); });
+        mathMethod("atan", function (receiver, args) {
+            return Math.atan(Number(args[0]));
+        }, NativeIntrinsics.MATH_ATAN);
         mathMethod("atan2", function (receiver, args) {
             return Math.atan2(Number(args[0]), Number(args[1]));
         }, NativeIntrinsics.MATH_ATAN2);

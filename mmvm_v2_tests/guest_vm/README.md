@@ -79,6 +79,11 @@ installs those precollected locals instead of traversing every function again.
 The standalone `KernelCompiler.compile` path continues to discover locals
 itself, so its API does not require callers to manufacture graph metadata.
 
+The native numeric intrinsic set includes both `Math.atan2(y, x)` and
+`Math.atan(x)`. The latter lowers to the same binary64 x87 operation with a
+denominator of one; numeric inputs and results remain guest value cells and do
+not enter the host Math implementation.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a
