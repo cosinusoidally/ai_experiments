@@ -75,6 +75,27 @@
         if (this.macros) this.macros.push("mov_eax_dword_ptr_eax()");
         this.emitBytes2(0x8b, 0x00);
     };
+    Assembler.prototype.movEaxDwordPtrRegisterPlusEax = function (
+            register, displacement) {
+        var baseBits = register === "ebx" ? 3 :
+                       register === "esi" ? 6 :
+                       register === "edi" ? 7 : -1;
+        if (baseBits < 0) {
+            throw new Error("unsupported indexed-load base register " +
+                            register);
+        }
+        displacement = displacement | 0;
+        if (this.macros) {
+            this.macros.push("mov_eax_ptr_" + register +
+                "_plus_eax(" + displacement + ")");
+        }
+        if (displacement === 0) {
+            this.emitBytes3(0x8b, 0x04, baseBits);
+        } else {
+            this.emitBytes3(0x8b, 0x84, baseBits);
+            this.word32(displacement);
+        }
+    };
     Assembler.prototype.testEaxEax = function () {
         if (this.macros) this.macros.push("test_eax()");
         this.emitBytes2(0x85, 0xc0);

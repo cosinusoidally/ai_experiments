@@ -134,8 +134,13 @@ safepoints, side exits, and an explicitly enumerated libc/platform ABI.
 The JavaScript backend lowers heap operations to the accessor contract. On
 Node it may specialize emulated memory to its byte array after guarding the
 allocation kind. The i386 backend lowers the same operations to aligned loads
-and stores relative to the runtime heap base. Both execute identical IR tests
-and must produce identical output heap snapshots.
+and stores relative to the runtime heap base. Its address matcher flattens
+integer additions around a register-resident base and folds constant field
+offsets into i386's indexed addressing mode. Thus source-level named field
+accessors remain the only layout authority while a common
+`heapBase + record + FIELD` read becomes one machine load rather than a series
+of explicit additions followed by a load. Both backends execute identical IR
+tests and must produce identical output heap snapshots.
 
 ## Native entry and side exits
 

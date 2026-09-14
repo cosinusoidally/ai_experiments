@@ -8,6 +8,24 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.37
+
+Approximate completion: 2026-09-14 afternoon BST
+
+### Guest VM
+
+- Added a general i386 indexed-address lowering for guest-heap reads. Named
+  accessor expressions such as `heapBase + record + FIELD` now fold into one
+  machine load without exposing layout offsets at call sites.
+- The native interpreter's first 26 million demo8 bytecodes improved from
+  approximately 1.75 seconds to 1.65 seconds. A 320x240 attract-mode sample
+  with the 20 FPS limit ranged from 16.5 to 20.0 FPS and averaged about 18.2
+  FPS, compared with about 18.8 FPS for direct `js_min.exe` in the same scene.
+- Rejected two measured alternatives: indirect jump-table dispatch was about
+  15 percent slower than balanced branch dispatch on this i386 host, and
+  indexed stores/numeric x87 loads also regressed throughput. They are not
+  retained in the implementation.
+
 ## 0.36
 
 Approximate completion: 2026-09-14 afternoon BST

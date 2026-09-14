@@ -862,6 +862,56 @@
                 type: "i32"};
     }
 
+    function indexedLoadAddress(node, state) {
+        var terms = [];
+        function collect(expression) {
+            if (expression.op === "add_i32") {
+                collect(expression.left);
+                collect(expression.right);
+            } else terms.push(expression);
+        }
+        collect(node);
+        var baseIndex = -1;
+        var baseRegister = null;
+        var index = 0;
+        while (index < terms.length) {
+            var term = terms[index];
+            var register = null;
+            if (term.op === "arg_i32") {
+                register = state.registerMap["argument:" + term.index];
+            } else if (term.op === "local_i32") {
+                register = state.registerMap["local:" + term.index];
+            }
+            if (register === "ebx" || register === "esi" ||
+                register === "edi") {
+                baseIndex = index;
+                baseRegister = register;
+                break;
+            }
+            index++;
+        }
+        if (baseIndex < 0) return null;
+        var displacement = 0;
+        var dynamic = null;
+        index = 0;
+        while (index < terms.length) {
+            if (index !== baseIndex) {
+                term = terms[index];
+                if (term.op === "const_i32") {
+                    displacement = (displacement + term.value) | 0;
+                } else if (dynamic === null) dynamic = term;
+                else dynamic = {op: "add_i32", left: dynamic, right: term,
+                                type: "i32"};
+            }
+            index++;
+        }
+        /* A base plus immediate already has a compact ordinary lowering. The
+         * indexed form pays off when EAX carries a genuine guest offset. */
+        if (dynamic === null) return null;
+        return {register: baseRegister, index: dynamic,
+                displacement: displacement};
+    }
+
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
         else if (node.op === "call_kernel_i32") {
@@ -984,8 +1034,15 @@
             }
         }
         else if (node.op === "load_u32") {
-            emitControlExpression(assembler, node.address, state);
-            assembler.movEaxDwordPtrEax();
+            var indexedAddress = indexedLoadAddress(node.address, state);
+            if (indexedAddress) {
+                emitControlExpression(assembler, indexedAddress.index, state);
+                assembler.movEaxDwordPtrRegisterPlusEax(
+                    indexedAddress.register, indexedAddress.displacement);
+            } else {
+                emitControlExpression(assembler, node.address, state);
+                assembler.movEaxDwordPtrEax();
+            }
         } else if (node.op === "load_raw_u8" || node.op === "load_raw_u32") {
             emitControlExpression(assembler, node.address, state);
             if (node.op === "load_raw_u8") assembler.movzxEaxBytePtrEax();

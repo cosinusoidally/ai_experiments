@@ -317,7 +317,14 @@
                     throw new Error("i386 control-flow kernel mismatch");
                 }
                 if (dispatchX86.assembly.indexOf("kernel_loop_") < 0 ||
-                    dispatchX86.assembly.indexOf("mov_eax_dword_ptr_eax()") < 0) {
+                    (dispatchX86.assembly.indexOf(
+                        "mov_eax_dword_ptr_eax()") < 0 &&
+                     dispatchX86.assembly.indexOf(
+                        "mov_eax_ptr_ebx_plus_eax(") < 0 &&
+                     dispatchX86.assembly.indexOf(
+                        "mov_eax_ptr_esi_plus_eax(") < 0 &&
+                     dispatchX86.assembly.indexOf(
+                        "mov_eax_ptr_edi_plus_eax(") < 0)) {
                     throw new Error("control-flow backend bypassed macro assembly");
                 }
             } finally {
