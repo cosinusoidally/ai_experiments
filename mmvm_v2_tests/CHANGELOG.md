@@ -8,6 +8,22 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.42
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Fixed the native `Array.join` allocator contract. Join now bounds its result
+  against the representable guest string-record size and leaves physical
+  placement to the general native allocator, which can move from an exhausted
+  reclaimed arena to another region or to tail space.
+- Previously, join compared the result with only the current arena's suffix
+  and entered host semantics before the allocator had a chance to switch.
+  Demo8's recurring free-driving `Array.join` fallbacks dropped from 163 to
+  zero; three consecutive post-transition samples held 20.0 FPS at
+  320x240/20 FPS. No demo source was changed.
+
 ## 0.41
 
 Approximate completion: 2026-09-14 evening BST

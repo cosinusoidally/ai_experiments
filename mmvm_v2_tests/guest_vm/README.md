@@ -55,6 +55,12 @@ ES5 signed-zero rule without an embedder call: minimum selects `-0` when either
 equal-zero operand is negative, while maximum selects `+0` when either is
 positive. NaN continues to propagate through the selected guest value cell.
 
+Native operations measure compound record sizes independently of the current
+allocation arena. In particular, `Array.join` first validates that the result
+fits a guest string record and then calls the shared native allocator; an
+exhausted arena can therefore be replaced by another reclaimed region or by
+tail space without entering the host implementation.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a

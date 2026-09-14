@@ -5525,15 +5525,13 @@
             if (joinValid === 1) {
                 joinSeparatorLength = stringLength(
                     heapBase, joinSeparator);
-                var joinAvailableBytes = engineHeapLimit(
-                    heapBase, state) - engineHeapBump(heapBase, state);
-                if (joinAvailableBytes < STRING_CHARS + 7) {
-                    joinValid = 0;
-                    joinAllocationFailed = 1;
-                } else {
-                    joinMaximumCharacters = divideI32(
-                        joinAvailableBytes - STRING_CHARS - 7, 2);
-                }
+                /* Measure against the representable record size, not merely
+                 * the active arena's remaining suffix. The allocator below
+                 * can switch to another reclaimed region or the native tail;
+                 * rejecting here forced every subsequent join through host
+                 * semantics as soon as one arena became nearly full. */
+                joinMaximumCharacters = divideI32(
+                    MAX_SIGNED_INT32 - STRING_CHARS - 7, 2);
             }
             var joinMeasureIndex = 0;
             while (joinMeasureIndex < joinLength) {
