@@ -8,6 +8,29 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.38
+
+Approximate completion: 2026-09-14 afternoon BST
+
+### Guest VM
+
+- Removed redundant host-memory reads from post-mark weak-handle, program,
+  environment, and string-cache filtering. A named collector-mark accessor
+  now answers liveness directly; free records have mark zero and therefore
+  cannot be mistaken for members of the current generation.
+- Made the native free-block indexing pass report total reusable bytes during
+  its existing record walk. Collection no longer performs a second complete
+  host-side walk merely to calculate live occupancy.
+- Restricted the expensive native-frame and heap-graph validation walks to the
+  explicit `--vm-verify-heap` diagnostic mode. Normal execution still uses the
+  same native tracing and sweep algorithms; only the redundant validation pass
+  is omitted.
+- On the development machine, demo8's first 50 MiB collection at 320x240 fell
+  from approximately 239 ms to 71 ms (native mark 11 ms, native sweep 7 ms).
+  After the free-driving mode-switch interval, five-second samples recovered
+  to 18.9, 19.9, 20.0, 20.1, and 20.0 FPS; later collection-affected samples
+  were 19.6, 19.8, and 18.6 FPS. No demo source was changed.
+
 ## 0.37
 
 Approximate completion: 2026-09-14 afternoon BST

@@ -4270,8 +4270,7 @@
         for (key in oldAddresses) {
             if (!own(oldAddresses, key)) continue;
             var address = oldAddresses[key];
-            if (this.linearHeap.isFreeRecord(address) ||
-                this.linearHeap.mark(address) !== generation) continue;
+            if (this.linearHeap.collectorMark(address) !== generation) continue;
             liveAddresses[key] = address;
             if (oldInterned[key] === address) liveInterned[key] = address;
             if (oldTransient[key] === address) liveTransient[key] = address;
@@ -4343,8 +4342,7 @@
         while (index < this.programAddresses.length) {
             var address = this.programAddresses[index];
             if (address &&
-                (this.linearHeap.isFreeRecord(address) ||
-                 this.linearHeap.mark(address) !== generation)) {
+                this.linearHeap.collectorMark(address) !== generation) {
                 var program = this.programObjects[index];
                 if (program && program.heapAddress === address) {
                     program.heapAddress = 0;
@@ -4362,8 +4360,8 @@
         for (key in this.programMetadata) {
             if (own(this.programMetadata, key)) {
                 var metadataAddress = Number(key.substring(1));
-                if (this.linearHeap.isFreeRecord(metadataAddress) ||
-                    this.linearHeap.mark(metadataAddress) !== generation) {
+                if (this.linearHeap.collectorMark(metadataAddress) !==
+                    generation) {
                     var metadataProgram = this.programMetadata[key];
                     if (metadataProgram &&
                         metadataProgram.heapAddress === metadataAddress) {
@@ -4399,8 +4397,8 @@
                 if (this.heapSweeper.mark(generation) !== 0) {
                     throw new Error("native guest marker exhausted its work stack");
                 }
-                this.verifyNativeFrameMarks(generation);
                 if (this.verifyNativeHeap) {
+                    this.verifyNativeFrameMarks(generation);
                     this.verifyNativeHeapGraph(generation);
                 }
             } else {
@@ -4468,23 +4466,24 @@
             while (index < this.heapObjects.length) {
                 var heapObject = this.heapObjects[index];
                 if (heapObject.heapAddress &&
-                    !this.linearHeap.isFreeRecord(heapObject.heapAddress) &&
-                    this.linearHeap.mark(heapObject.heapAddress) === generation) {
+                    this.linearHeap.collectorMark(heapObject.heapAddress) ===
+                        generation) {
                     heapObject.gcMark = generation;
                     survivors.push(heapObject);
                 }
                 index++;
             }
             this.heapObjects = survivors;
+            var handlesStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             var liveEnvironmentMetadata = {};
             var environmentKey;
             for (environmentKey in this.environmentMetadata) {
                 if (own(this.environmentMetadata, environmentKey)) {
                     var environmentMetadata = this.environmentMetadata[environmentKey];
-                    if (this.linearHeap.isFreeRecord(
-                            environmentMetadata.handle.heapAddress) ||
-                        this.linearHeap.mark(
-                            environmentMetadata.handle.heapAddress) !== generation) {
+                    if (this.linearHeap.collectorMark(
+                            environmentMetadata.handle.heapAddress) !==
+                        generation) {
                     } else {
                         environmentMetadata.gcMark = generation;
                         liveEnvironmentMetadata[environmentKey] =
@@ -4499,8 +4498,7 @@
             for (handleKey in this.heapHandles) {
                 if (own(this.heapHandles, handleKey)) {
                     var heapHandle = this.heapHandles[handleKey];
-                    if (!this.linearHeap.isFreeRecord(heapHandle.heapAddress) &&
-                        this.linearHeap.mark(heapHandle.heapAddress) ===
+                    if (this.linearHeap.collectorMark(heapHandle.heapAddress) ===
                             generation) {
                         liveHeapHandles[handleKey] = heapHandle;
                         if (this.functionMetadata[handleKey]) {
@@ -4512,21 +4510,30 @@
             }
             this.heapHandles = liveHeapHandles;
             this.functionMetadata = liveFunctionMetadata;
+            var metadataStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             this.releaseUnmarkedProgramMetadata(generation);
             /* Filter weak atom/cache entries while dead records still retain
              * their headers. Sweeping may coalesce adjacent dead records, at
              * which point an old string address is no longer necessarily a
              * record boundary. */
             this.rebuildWeakStringTables(generation);
+            var nativeSweepStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             var sweepResult;
             if (this.heapSweeper &&
                 this.heapSweeper.compiled.backend === "i386") {
                 sweepResult = {records: null,
                     bytes: this.heapSweeper.sweep(generation)};
-                this.verifyNativeFrameMarks(generation);
+                var nativeIndexStarted = this.profileOpcodeCounts ?
+                    new Date().getTime() : 0;
+                if (this.verifyNativeHeap) {
+                    this.verifyNativeFrameMarks(generation);
+                }
                 this.rebuildFreeBlockIndex();
             } else {
                 sweepResult = this.linearHeap.sweepUnmarked(generation);
+                var nativeIndexStarted = 0;
             }
             var sweepingFinished = this.profileOpcodeCounts ?
                 new Date().getTime() : 0;
@@ -4540,12 +4547,19 @@
              * free space or the remaining tail cannot satisfy a record. */
             var postCollectionHeadroom = Math.max(1024 * 1024,
                 Math.floor(sweepResult.bytes / 2));
-            /* Derive occupancy from the authoritative record walk. The free
-             * block index is an allocator acceleration structure and native
-             * sweep/index rebuilding may legitimately replace or coalesce
-             * entries while a collection is finalized. */
-            var occupancy = this.linearHeap.recordStatistics();
-            var reusableBytes = occupancy.bytes[Heap.Types.FREE] || 0;
+            /* The native free-block indexer reports total free bytes while it
+             * is already walking the authoritative record stream.  Rewalking
+             * a large native heap through host peek calls here turns an
+             * otherwise short collection into a visible frame-time pause.
+             * Portable hosts retain the ordinary record-statistics path. */
+            var reusableBytes;
+            if (this.heapSweeper &&
+                this.heapSweeper.indexer.backend === "i386") {
+                reusableBytes = this.heapSweeper.reusableBytes >>> 0;
+            } else {
+                var occupancy = this.linearHeap.recordStatistics();
+                reusableBytes = occupancy.bytes[Heap.Types.FREE] || 0;
+            }
             var liveBytes = this.linearHeap.bump - reusableBytes;
             var nativeFragmentationRequiresGrowth =
                 this.nativeInterpreter &&
@@ -4600,6 +4614,17 @@
                     this.gcHeapPressureBump + " liveBytes=" + liveBytes +
                     " limit=" +
                     this.linearHeap.allocationLimit;
+                if (nativeSweepStarted) {
+                    collectionLine += " phasesMs=wrappers:" +
+                        (handlesStarted - markingFinished) +
+                        ",handles:" + (metadataStarted - handlesStarted) +
+                        ",metadata:" +
+                        (nativeSweepStarted - metadataStarted) +
+                        ",sweep:" +
+                        (nativeIndexStarted - nativeSweepStarted) +
+                        ",index:" +
+                        (sweepingFinished - nativeIndexStarted);
+                }
                 if (typeof print === "function") print(collectionLine);
                 else if (typeof console !== "undefined" && console.log) {
                     console.log(collectionLine);

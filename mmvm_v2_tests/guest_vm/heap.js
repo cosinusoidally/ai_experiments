@@ -543,6 +543,20 @@
         return this.memory.readU32(address + HEADER_MARK);
     };
 
+    /* Collector-side weak tables are filtered before sweeping, while every
+     * cached address is still a record boundary. Unlike mark(), this accessor
+     * deliberately permits an already-free record: free headers have a zero
+     * mark and therefore fail every live-generation test. This avoids a
+     * separate type read for every weak entry without exposing layout offsets
+     * to Runtime. */
+    Heap.prototype.collectorMark = function (address) {
+        address = Number(address);
+        if (!address || address < 64 || address + HEADER_SIZE > this.bump) {
+            return 0;
+        }
+        return this.memory.readU32Trusted(address + HEADER_MARK);
+    };
+
     Heap.prototype.setMark = function (address, generation) {
         this.requireRecord(address);
         this.memory.writeU32(address + HEADER_MARK, generation);

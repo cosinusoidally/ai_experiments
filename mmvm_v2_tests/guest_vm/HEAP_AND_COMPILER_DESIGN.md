@@ -70,6 +70,10 @@ the ordinary heap graph. After marking, the runtime rebuilds its address and
 decoded-string caches from live entries before dead records are swept. This
 both preserves address comparisons for live property atoms and permits a
 long-lived runtime to discard strings belonging only to destroyed contexts.
+Weak host tables test the named collector-mark field directly while all of
+their addresses are still record boundaries. A mark equal to the current
+generation is sufficient proof of liveness; free records always have mark
+zero. This avoids a redundant record-type read for every weak entry.
 
 The default heap reserves a stable maximum address range but initially exposes
 only a smaller logical allocation limit. Native allocation stops at the
@@ -94,6 +98,12 @@ collection. A semantic fallback may execute while the lists remain native-owned
 because the host allocator can see only its disjoint tail and retained small
 blocks. This avoids rebuilding allocator indexes for formatting or I/O calls
 while preserving one authoritative heap and non-overlapping allocation ranges.
+The native post-sweep indexer reports both the free-record addresses and their
+total reusable byte count in collector workspace. Occupancy accounting reuses
+that result rather than crossing into native memory for a second full record
+walk. Native frame/graph verification remains available through
+`--vm-verify-heap`, but its redundant validation walks are not part of normal
+execution.
 
 ## Shared compiler pipeline
 

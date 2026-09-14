@@ -312,32 +312,40 @@
         var WORD_BYTES = 4;
         var OUTPUT_COUNT_WORD = 0;
         var OUTPUT_BUMP_WORD = 1;
-        var OUTPUT_FIRST_ADDRESS_WORD = 2;
+        var OUTPUT_FREE_BYTES_WORD = 2;
+        var OUTPUT_FIRST_ADDRESS_WORD = 3;
         var address = HEAP_FIRST_RECORD;
         var count = 0;
+        var freeBytes = 0;
         var rebuiltBump = heapBump;
         while (address < heapBump) {
             var size = recordSize(heapBase, address);
             var ordinaryFree = 0;
-            if (recordType(heapBase, address) === HEAP_TYPE_FREE) {
+            var type = recordType(heapBase, address);
+            if (type === HEAP_TYPE_FREE) {
                 if (recordFlags(heapBase, address) === 0) ordinaryFree = 1;
             }
             if (ordinaryFree === 1) {
                 if (address + size === heapBump) {
                     rebuiltBump = address;
                 } else {
+                    freeBytes = freeBytes + size;
                     var outputAddress = outputBase +
                         (OUTPUT_FIRST_ADDRESS_WORD + count) * WORD_BYTES;
                     if (outputAddress + WORD_BYTES > outputLimit) return -1;
                     store32(heapBase + outputAddress, address);
                     count = count + 1;
                 }
+            } else if (type === HEAP_TYPE_FREE) {
+                freeBytes = freeBytes + size;
             }
             address = address + size;
         }
         store32(heapBase + outputBase + OUTPUT_COUNT_WORD * WORD_BYTES, count);
         store32(heapBase + outputBase + OUTPUT_BUMP_WORD * WORD_BYTES,
                 rebuiltBump);
+        store32(heapBase + outputBase + OUTPUT_FREE_BYTES_WORD * WORD_BYTES,
+                freeBytes);
         return count;
     }
 
@@ -401,11 +409,13 @@
         if (count < 0) return heap.rebuildFreeBlocks();
         var rebuiltBump = heap.memory.readU32Trusted(
             heap.collectorStackBase + 4);
+        this.reusableBytes = heap.memory.readU32Trusted(
+            heap.collectorStackBase + 8);
         var blocks = [];
         var index = 0;
         while (index < count) {
             blocks[index] = heap.memory.readU32Trusted(
-                heap.collectorStackBase + 8 + index * 4);
+                heap.collectorStackBase + 12 + index * 4);
             index++;
         }
         heap.bump = rebuiltBump;
