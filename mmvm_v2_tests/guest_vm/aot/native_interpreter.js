@@ -6397,17 +6397,6 @@
                 }
             }
             if (selectExtreme === 1) {
-                if (mathValueTag === VALUE_TAG_DOUBLE) {
-                    if (load32(mathValueCell + VALUE_CELL_LOW) === 0) {
-                        if ((load32(mathValueCell + VALUE_CELL_HIGH) &
-                            IEEE754_ABSOLUTE_MASK) === 0) {
-                            if (load32(mathValueCell +
-                                VALUE_CELL_HIGH) < 0) {
-                                mathArgumentsValid = 0;
-                            }
-                        }
-                    }
-                }
                 if (mathArgumentIndex === 0) {
                     minimumCell = mathValueCell;
                 } else {
@@ -6418,6 +6407,51 @@
                             mathValueCell + VALUE_CELL_LOW,
                             mathValueTag)) === 0) {
                         minimumCell = mathValueCell;
+                    } else if (equalF64(loadNumberF64(
+                            mathValueCell + VALUE_CELL_LOW,
+                            mathValueTag), loadNumberF64(
+                            minimumCell + VALUE_CELL_LOW,
+                            minimumTag)) === 1) {
+                        /* x87 comparisons intentionally regard both signed
+                         * zeros as equal. ES5 Math.min/Math.max distinguishes
+                         * them: min prefers -0 and max prefers +0. Select the
+                         * required existing value cell without manufacturing
+                         * or canonicalizing either representation. */
+                        var currentNegativeZero = 0;
+                        var minimumNegativeZero = 0;
+                        if (mathValueTag === VALUE_TAG_DOUBLE) {
+                            if (load32(mathValueCell + VALUE_CELL_LOW) === 0) {
+                                if ((load32(mathValueCell + VALUE_CELL_HIGH) &
+                                    IEEE754_ABSOLUTE_MASK) === 0) {
+                                    if (load32(mathValueCell +
+                                        VALUE_CELL_HIGH) < 0) {
+                                        currentNegativeZero = 1;
+                                    }
+                                }
+                            }
+                        }
+                        if (minimumTag === VALUE_TAG_DOUBLE) {
+                            if (load32(minimumCell + VALUE_CELL_LOW) === 0) {
+                                if ((load32(minimumCell + VALUE_CELL_HIGH) &
+                                    IEEE754_ABSOLUTE_MASK) === 0) {
+                                    if (load32(minimumCell +
+                                        VALUE_CELL_HIGH) < 0) {
+                                        minimumNegativeZero = 1;
+                                    }
+                                }
+                            }
+                        }
+                        if (intrinsicId === INTRINSIC_MATH_MIN) {
+                            if (currentNegativeZero === 1) {
+                                if (minimumNegativeZero === 0) {
+                                    minimumCell = mathValueCell;
+                                }
+                            }
+                        } else if (currentNegativeZero === 0) {
+                            if (minimumNegativeZero === 1) {
+                                minimumCell = mathValueCell;
+                            }
+                        }
                     } else if (intrinsicId === INTRINSIC_MATH_MIN) {
                         if (lessF64(loadNumberF64(
                                 mathValueCell + VALUE_CELL_LOW,

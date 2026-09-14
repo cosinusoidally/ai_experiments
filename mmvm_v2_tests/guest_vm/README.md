@@ -50,6 +50,11 @@ zero, and signed-int32 results. Wider results and coercions that are not yet
 self-hosted yield to the semantic implementation so the optimization never
 changes observable numeric results.
 
+Native `Math.min` and `Math.max` operate on guest number cells and preserve the
+ES5 signed-zero rule without an embedder call: minimum selects `-0` when either
+equal-zero operand is negative, while maximum selects `+0` when either is
+positive. NaN continues to propagate through the selected guest value cell.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a

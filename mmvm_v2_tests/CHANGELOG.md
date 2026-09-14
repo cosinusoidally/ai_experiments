@@ -8,6 +8,21 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.41
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Removed the native `Math.min`/`Math.max` fallback for signed zero. The
+  compiled guest implementation now applies the ES5 tie rule directly:
+  `Math.min` prefers negative zero and `Math.max` prefers positive zero, while
+  returning the selected authoritative guest value cell.
+- This removed hundreds of recurring host transitions from demo8 free-driving
+  frames. At 320x240 with the 20 FPS limit, the measured post-transition
+  samples were 19.9, 19.9, and 19.6 FPS after the initial heap growth and
+  collection interval. No demo source was changed.
+
 ## 0.40
 
 Approximate completion: 2026-09-14 evening BST
