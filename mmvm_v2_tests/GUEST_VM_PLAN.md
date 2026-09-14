@@ -7,6 +7,9 @@ See `guest_vm/HEAP_AND_COMPILER_DESIGN.md` for the concrete authoritative heap
 layouts and the shared front/middle end with JavaScript and i386 backends.
 See `TEST262.md` for the ES5.1 conformance runner, per-test context lifecycle,
 full-suite reporting, and the read-only external-corpus boundary.
+See `guest_vm/STANDALONE_SNAPSHOT_PLAN.md` for the relocatable native boot
+image, minimal C launcher ABI, deterministic serialization rules, and
+self-hosting fixed-point target.
 
 ## Objective
 
