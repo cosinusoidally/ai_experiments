@@ -8,6 +8,21 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.45
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Combined kernel local-variable discovery with the mandatory graph walk that
+  already finds constants and helper dependencies. Graph members carry their
+  ordered local-name list into lowering, while standalone compiler users keep
+  the original independent local collector.
+- This removes one complete traversal of the native interpreter AST. Two cold
+  builds measured about 4.40 and 4.46 seconds, down from 4.66--4.68 seconds at
+  the preceding checkpoint and roughly 4.95 seconds before the parser work.
+  The lowering-side local collection phase fell from 248--255 ms to 11 ms.
+
 ## 0.44
 
 Approximate completion: 2026-09-14 evening BST

@@ -55,16 +55,18 @@
                 arity: expression.parameters.length
             };
             functions.push({name: name, fn: fn, source: source,
-                            expression: expression});
+                            expression: expression, localNames: null});
         }
         if (!entry || typeof entry !== "function" || !entry.name) {
             throw new TypeError("kernel graph entry must be a named function");
         }
         addFunction(entry.name, entry);
         var entryDependencies = [];
+        functions[0].localNames = [];
         var sharedConstants = collectFunctionConstants(
             entry, options.constantOverrides || {}, functions[0].expression,
-            dependencies, signatures, entryDependencies);
+            dependencies, signatures, entryDependencies,
+            functions[0].localNames);
         entryDependencies.sort();
         var entryDependencyIndex = 0;
         while (entryDependencyIndex < entryDependencies.length) {
@@ -74,11 +76,13 @@
         var constantMemberIndex = 1;
         while (constantMemberIndex < functions.length) {
             var memberDependencies = [];
+            functions[constantMemberIndex].localNames = [];
             var memberConstants = collectFunctionConstants(
                 functions[constantMemberIndex].fn,
                 options.constantOverrides || {},
                 functions[constantMemberIndex].expression,
-                dependencies, signatures, memberDependencies);
+                dependencies, signatures, memberDependencies,
+                functions[constantMemberIndex].localNames);
             var memberConstantName;
             for (memberConstantName in memberConstants) {
                 if (Object.prototype.hasOwnProperty.call(
@@ -130,6 +134,7 @@
             memberOptions.constantBindings = sharedConstants;
             memberOptions.source = member.source;
             memberOptions.functionExpression = member.expression;
+            memberOptions.precollectedLocalNames = member.localNames;
             if (member.name !== entry.name) {
                 var perFunctionPreferences =
                     options.registerPreferencesByFunction || {};
@@ -171,11 +176,17 @@
 
     function collectFunctionConstants(functionObject, overrides,
                                       parsedExpression, dependencies,
-                                      signatures, dependencyNames) {
+                                      signatures, dependencyNames,
+                                      localNames) {
         var expression = parsedExpression ||
             kernelFunctionExpression(functionObject);
         var result = {};
         var seenDependencies = {};
+        var seenLocals = {};
+        var parameterIndex = 0;
+        while (parameterIndex < expression.parameters.length) {
+            seenLocals["$" + expression.parameters[parameterIndex++]] = true;
+        }
         function visit(node) {
             if (!node || typeof node !== "object") return;
             if (dependencyNames && node.type === "CallExpression" &&
@@ -199,6 +210,10 @@
                                 overrides, declaration.name) ?
                             overrides[declaration.name] | 0 :
                             kernelConstantValue(declaration.initial);
+                    } else if (localNames &&
+                               !seenLocals["$" + declaration.name]) {
+                        seenLocals["$" + declaration.name] = true;
+                        localNames.push(declaration.name);
                     }
                 }
             }
@@ -541,8 +556,23 @@
         }
         var localNames = [];
         var collectStarted = timings ? new Date().getTime() : 0;
-        collectLocals(fn.body, symbols, localNames,
-                      options.constantOverrides || {});
+        if (options.precollectedLocalNames) {
+            var precollectedIndex = 0;
+            while (precollectedIndex <
+                    options.precollectedLocalNames.length) {
+                var precollectedName =
+                    options.precollectedLocalNames[precollectedIndex++];
+                if (symbolAt(symbols, precollectedName) === undefined) {
+                    symbols["$" + precollectedName] = {
+                        kind: "local", index: localNames.length
+                    };
+                    localNames.push(precollectedName);
+                }
+            }
+        } else {
+            collectLocals(fn.body, symbols, localNames,
+                          options.constantOverrides || {});
+        }
         symbols.$kernelFunctions = options.kernelFunctions || null;
         symbols.$kernelFunctionName = fn.name || "kernel";
         if (timings) timings.collect = new Date().getTime() - collectStarted;
