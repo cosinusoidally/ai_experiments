@@ -8,6 +8,22 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.48
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Identified the exact 0.46 crash: the kernel expression `loadI32F64(1)` tried
+  to load and convert an int32 at native address `0x1`; it did not convert the
+  immediate value one. This caused demo8's field-of-view `Math.atan` call to
+  segfault during default-size initialization.
+- Reintroduced native guest `Math.atan` using the established safe pattern:
+  write the denominator one through the named engine-scratch accessor, then
+  pass that scratch-cell address to `loadI32F64`. The exact reported demo8
+  command now initializes and continues rendering, with observed 18.6 and
+  19.8 FPS samples at its default 256x192 resolution.
+
 ## 0.47
 
 Approximate completion: 2026-09-14 evening BST
