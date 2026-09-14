@@ -61,6 +61,12 @@ fits a guest string record and then calls the shared native allocator; an
 exhausted arena can therefore be replaced by another reclaimed region or by
 tail space without entering the host implementation.
 
+The shared parser captures source locations and function source text by
+default. Kernel AOT disables those two metadata products: kernel validation and
+lowering use the parsed structure but never source locations or copied function
+text. Guest program parsing retains both, including the filename/line/column
+information used for observable errors and diagnostics.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a

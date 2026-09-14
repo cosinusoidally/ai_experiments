@@ -8,6 +8,21 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.43
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Made parser statement locations and copied function-source text explicitly
+  optional, while preserving both by default for guest programs and their
+  source-located errors. Kernel compilation disables this metadata because its
+  validation and lowering stages do not consume it.
+- This reduces both parser allocation and the object graph traversed during
+  kernel constant/dependency collection. Two measured cold native-interpreter
+  builds fell from about 4.95 seconds to 4.70 seconds; collection of kernel
+  constants and dependencies fell from roughly 355 ms to 280--285 ms.
+
 ## 0.42
 
 Approximate completion: 2026-09-14 evening BST

@@ -20,6 +20,9 @@
         this.strict = !!options && options.strict === true;
         this.finallySerial = 0;
         this.compactLiterals = !!options && options.compactLiterals === true;
+        this.captureLocations = !options || options.captureLocations !== false;
+        this.captureFunctionSource = !options ||
+            options.captureFunctionSource !== false;
         this.current = this.tokenizer.next(true);
         this.lookahead = null;
         this.spareToken = {};
@@ -132,17 +135,21 @@
                 }
             }
         }
-        return {type: "Program", body: body, filename: this.tokenizer.filename,
-                strict: this.strict,
-                location: body.length ? body[0].location :
-                    {filename: this.tokenizer.filename, line: 1, column: 1}};
+        var program = {type: "Program", body: body,
+                       filename: this.tokenizer.filename,
+                       strict: this.strict};
+        if (this.captureLocations) {
+            program.location = body.length ? body[0].location :
+                {filename: this.tokenizer.filename, line: 1, column: 1};
+        }
+        return program;
     };
 
     Parser.prototype.parseStatement = function () {
         var startLine = this.current.line;
         var startColumn = this.current.column;
         var statement = this.parseStatementWithoutLocation();
-        if (!statement.location) {
+        if (this.captureLocations && !statement.location) {
             statement.location = {filename: this.tokenizer.filename,
                                   line: startLine, column: startColumn + 1};
         }
@@ -433,12 +440,20 @@
                 this.error("invalid function name in strict code");
             }
         }
-        return {type: declaration ? "FunctionDeclaration" : "FunctionExpression",
-                name: name, parameters: parameters, body: body,
-                strict: functionStrict,
-                source: this.tokenizer.source.substring(startOffset, body.sourceEnd),
-                location: {filename: this.tokenizer.filename,
-                           line: startLine, column: startColumn + 1}};
+        var result = {
+            type: declaration ? "FunctionDeclaration" : "FunctionExpression",
+            name: name, parameters: parameters, body: body,
+            strict: functionStrict
+        };
+        if (this.captureFunctionSource) {
+            result.source = this.tokenizer.source.substring(
+                startOffset, body.sourceEnd);
+        }
+        if (this.captureLocations) {
+            result.location = {filename: this.tokenizer.filename,
+                               line: startLine, column: startColumn + 1};
+        }
+        return result;
     };
 
     Parser.prototype.parseFunctionBody = function (allowRegexpAfterClose) {

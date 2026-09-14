@@ -156,7 +156,9 @@
 
     function parseKernelFunctionSource(source, filename) {
         var parsed = new Parser("var __kernel = " + source + ";",
-                                filename, {captureRaw: false});
+                                filename, {captureRaw: false,
+                                    captureLocations: false,
+                                    captureFunctionSource: false});
         var program = parsed.parseProgram();
         return program.body[0].declarations[0].initial;
     }
