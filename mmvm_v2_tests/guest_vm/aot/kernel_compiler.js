@@ -158,7 +158,8 @@
         var parsed = new Parser("var __kernel = " + source + ";",
                                 filename, {captureRaw: false,
                                     captureLocations: false,
-                                    captureFunctionSource: false});
+                                    captureFunctionSource: false,
+                                    compactLiterals: true});
         var program = parsed.parseProgram();
         return program.body[0].declarations[0].initial;
     }
@@ -493,7 +494,8 @@
                 instructions.push({op: "store_f64",
                     address: lower(statement.expression.arguments[0], locals),
                     value: lowerF64(statement.expression.arguments[1], locals)});
-            } else if (statement.type === "ReturnStatement" && statement.argument &&
+            } else if (statement.type === "ReturnStatement" &&
+                       statement.argument !== null &&
                        statementIndex === fn.body.body.length) {
                 resultExpression = lower(statement.argument, locals);
             } else throw new SyntaxError("unsupported kernel statement " + statement.type);
@@ -622,6 +624,10 @@
     }
 
     function kernelConstantValue(expression) {
+        if (typeof expression === "number" &&
+            expression === (expression | 0)) {
+            return expression | 0;
+        }
         if (expression && expression.type === "Literal" &&
             typeof expression.value === "number" &&
             expression.value === (expression.value | 0)) {
@@ -629,10 +635,15 @@
         }
         if (expression && expression.type === "UnaryExpression" &&
             expression.operator === "-" && expression.argument &&
-            expression.argument.type === "Literal" &&
-            typeof expression.argument.value === "number" &&
-            -expression.argument.value === (-expression.argument.value | 0)) {
-            return -expression.argument.value | 0;
+            ((typeof expression.argument === "number" &&
+              -expression.argument === (-expression.argument | 0)) ||
+             (expression.argument.type === "Literal" &&
+              typeof expression.argument.value === "number" &&
+              -expression.argument.value ===
+                  (-expression.argument.value | 0)))) {
+            var argumentValue = typeof expression.argument === "number" ?
+                expression.argument : expression.argument.value;
+            return -argumentValue | 0;
         }
         return null;
     }
@@ -667,7 +678,7 @@
             var index = 0;
             while (index < statement.declarations.length) {
                 var declaration = statement.declarations[index++];
-                if (declaration.initial) {
+                if (declaration.initial !== null) {
                     var declarationSymbol = symbolAt(symbols,
                                                      declaration.name);
                     if (!declarationSymbol) {
@@ -817,7 +828,8 @@
             return {op: "while", test: lowerKernelExpression(statement.test, symbols),
                     body: lowerStatement(statement.body, symbols)};
         }
-        if (statement.type === "ReturnStatement" && statement.argument) {
+        if (statement.type === "ReturnStatement" &&
+            statement.argument !== null) {
             return {op: "return",
                     value: lowerKernelExpression(statement.argument, symbols)};
         }
@@ -904,6 +916,9 @@
     }
 
     function lowerKernelExpression(node, symbols) {
+        if (typeof node === "number" && node === (node | 0)) {
+            return {op: "const_i32", value: node | 0, type: "i32"};
+        }
         if (node.type === "Literal" && typeof node.value === "number" &&
             node.value === (node.value | 0)) {
             return {op: "const_i32", value: node.value | 0, type: "i32"};
@@ -1263,6 +1278,9 @@
     }
 
     function lower(node, locals) {
+        if (typeof node === "number" && node === (node | 0)) {
+            return {op: "const_i32", value: node | 0, type: "i32"};
+        }
         if (node.type === "Literal" && typeof node.value === "number" &&
             node.value === (node.value | 0)) {
             return {op: "const_i32", value: node.value | 0, type: "i32"};

@@ -8,6 +8,21 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.44
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Enabled the parser's compact literal representation for kernel AOT and made
+  both kernel lowering paths consume primitive integer literals directly.
+  Constant discovery preserves signed-int32 validation, including unary
+  negative constants, and now distinguishes an initializer or return value of
+  zero from the parser's absent-expression `null` sentinel.
+- Two measured cold native-interpreter builds took about 4.66 and 4.68 seconds,
+  down from roughly 4.70 seconds after the preceding metadata reduction.
+  Kernel constant/dependency collection fell from 280--285 ms to 248--255 ms.
+
 ## 0.43
 
 Approximate completion: 2026-09-14 evening BST

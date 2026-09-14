@@ -67,6 +67,12 @@ lowering use the parsed structure but never source locations or copied function
 text. Guest program parsing retains both, including the filename/line/column
 information used for observable errors and diagnostics.
 
+Kernel parsing also uses the parser's compact-literal representation. Integer
+literals therefore reach constant validation and the IR lowerer as primitive
+numbers instead of one-property AST leaves. The kernel compiler treats `null`
+as an absent initializer/expression and zero as a real value; normal guest ASTs
+continue to use explicit `Literal` nodes by default.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a
