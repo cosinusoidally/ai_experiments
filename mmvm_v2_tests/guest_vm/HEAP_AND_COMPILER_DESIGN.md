@@ -83,6 +83,18 @@ collect repeatedly despite a low total live-byte count. These adaptive cases
 give a persistent renderer working set useful headroom without making reserved
 address space permission to grow before attempting reclamation.
 
+Reclaimed records of at least 272 bytes are handed to the compiled interpreter
+as a size-ordered guest-heap list. The interpreter changes regions in native
+code; exhausting a region does not yield to the host. A suffix that cannot
+satisfy the current allocation moves to a separate retired list so later
+compound allocations do not repeatedly scan known-small fragments. Both lists
+remain ordinary `FREE` records linked through their otherwise-unused mark
+field. They are returned directly to the host allocator index before a
+collection. A semantic fallback may execute while the lists remain native-owned
+because the host allocator can see only its disjoint tail and retained small
+blocks. This avoids rebuilding allocator indexes for formatting or I/O calls
+while preserving one authoritative heap and non-overlapping allocation ranges.
+
 ## Shared compiler pipeline
 
 There is one semantic compiler pipeline and two execution backends:

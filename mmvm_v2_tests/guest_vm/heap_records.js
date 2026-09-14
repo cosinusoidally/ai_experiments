@@ -101,8 +101,19 @@
     var ENGINE_SCRATCH_RIGHT = 40;
     var ENGINE_PLATFORM_SERVICES = 44;
     var ENGINE_OPCODE_COUNTS = 48;
-    var ENGINE_OPCODE_COUNT = 48;
-    var ENGINE_STATE_BYTES = ENGINE_OPCODE_COUNTS + ENGINE_OPCODE_COUNT * 4;
+    /* bytecode.js currently defines opcodes 1..60. Keep slot zero as well so
+     * profile counters cannot overlap allocator state when newer ES5 opcodes
+     * execute. */
+    var ENGINE_OPCODE_COUNT = 61;
+    var ENGINE_NATIVE_REGION_END =
+        ENGINE_OPCODE_COUNTS + ENGINE_OPCODE_COUNT * 4;
+    var ENGINE_NATIVE_FREE_REGION = ENGINE_NATIVE_REGION_END + 4;
+    var ENGINE_NATIVE_TAIL_BUMP = ENGINE_NATIVE_FREE_REGION + 4;
+    var ENGINE_NATIVE_TAIL_LIMIT = ENGINE_NATIVE_TAIL_BUMP + 4;
+    var ENGINE_NATIVE_REGION_ACTIVE = ENGINE_NATIVE_TAIL_LIMIT + 4;
+    var ENGINE_ALLOCATION_FAILED = ENGINE_NATIVE_REGION_ACTIVE + 4;
+    var ENGINE_NATIVE_RETIRED_REGION = ENGINE_ALLOCATION_FAILED + 4;
+    var ENGINE_STATE_BYTES = ENGINE_NATIVE_RETIRED_REGION + 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -1190,6 +1201,66 @@
     Records.prototype.engineHeapLimit = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_HEAP_LIMIT, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineNativeAllocator = function (
+            state, regionEnd, freeRegion, tailBump, tailLimit, regionActive,
+            retiredRegion) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_REGION_END,
+            regionEnd, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_FREE_REGION,
+            freeRegion, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_TAIL_BUMP,
+            tailBump, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_TAIL_LIMIT,
+            tailLimit, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_REGION_ACTIVE,
+            regionActive, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_RETIRED_REGION,
+            retiredRegion || 0, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineNativeFreeRegion = function (state, region) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_FREE_REGION,
+            region, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineNativeRetiredRegion = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_NATIVE_RETIRED_REGION, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineNativeTailBounds = function (
+            state, bump, limit) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_TAIL_BUMP,
+            bump, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_TAIL_LIMIT,
+            limit, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineNativeFreeRegion = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_NATIVE_FREE_REGION,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineNativeRegionEnd = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_NATIVE_REGION_END,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineNativeRegionActive = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_NATIVE_REGION_ACTIVE, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineNativeTailBump = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_NATIVE_TAIL_BUMP,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineAllocationFailed = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_ALLOCATION_FAILED,
+            Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.engineCurrentFrame = function (state) {

@@ -4575,6 +4575,15 @@
             this.resetHeapPressureBump(
                 this.linearHeap.bump + postCollectionHeadroom);
             if (this.profileOpcodeCounts) {
+                var freeDistribution =
+                    this.linearHeap.freeBlockDistribution();
+                if (typeof print === "function") {
+                    print("guest heap free distribution: " +
+                          freeDistribution);
+                } else if (typeof console !== "undefined" && console.log) {
+                    console.log("guest heap free distribution: " +
+                                freeDistribution);
+                }
                 var collectionLine = "guest heap collection " +
                     this.collectionCount + ": bump=" +
                     heapBumpBeforeCollection + "->" + this.linearHeap.bump +
@@ -4582,7 +4591,10 @@
                     (sweepResult.records === null ? "" :
                      " reclaimedRecords=" + sweepResult.records) +
                     " freeBlocks=" +
-                    this.linearHeap.freeBlocks.length + " markMs=" +
+                    this.linearHeap.freeBlocks.length + " largestFree=" +
+                    this.linearHeap.largestFreeBlockSize() +
+                    " freeDistribution(min:count/bytes)=" +
+                    freeDistribution + " markMs=" +
                     (markingFinished - collectionStarted) + " sweepMs=" +
                     (sweepingFinished - markingFinished) + " nextPressure=" +
                     this.gcHeapPressureBump + " liveBytes=" + liveBytes +

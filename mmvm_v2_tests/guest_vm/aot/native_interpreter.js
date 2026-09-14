@@ -14,10 +14,16 @@
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
-    var MIN_NATIVE_ALLOCATION_REGION_BYTES = 4096 + FREE_RECORD_HEADER_BYTES;
+    /* Native execution consumes private contiguous suffixes of ordinary free
+     * records. Region changes now happen inside the compiled allocator, so
+     * they no longer re-enter the interpreter and do not need coarse 64 KiB
+     * arenas. Keep only very small holes for exact host-side allocations;
+     * measurements after demo8 collection show that the 256-byte cutoff makes
+     * essentially all reclaimed bytes available to native execution while
+     * avoiding a long chain of 32--64-byte records. */
+    var MIN_NATIVE_ALLOCATION_REGION_BYTES = 256 +
+                                             FREE_RECORD_HEADER_BYTES;
     var NATIVE_ALLOCATION_REGION_FLAG = 2;
-    var NATIVE_PROPERTY_RECORD_BYTES = 48;
-    var CallReject = {HEAP_SPACE: 4};
     var NUMBER_CONSTRUCTOR_INTRINSIC_ID = 41;
     var DATE_CONSTRUCTOR_INTRINSIC_ID = 42;
     var DATE_GET_TIME_INTRINSIC_ID = 43;
@@ -395,6 +401,7 @@
         var environment = frameEnvironment(heapBase, frame);
         var pc = frameSavedPC(heapBase, frame);
         var instructions = 0;
+        setEngineAllocationFailed(heapBase, state, 0);
         setEngineCurrentFrame(heapBase, state, frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
@@ -504,6 +511,11 @@
                 if (setGlobalRecord === 0) {
                     if ((programFlags(heapBase, currentProgram) &
                          PROGRAM_FLAG_STRICT) !== 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    if (reserveNativeAllocationKernel(
+                            heapBase, state, PROPERTY_RECORD_BYTES) === 0) {
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, instructions);
                     }
@@ -1001,6 +1013,10 @@
                         }
                         var grownVectorBytes = VECTOR_CELLS +
                             grownArrayCapacity * VALUE_CELL_BYTES;
+                        if (reserveNativeAllocationKernel(
+                                heapBase, state, grownVectorBytes) === 0) {
+                            arraySetSupported = 0;
+                        }
                         var grownVector = engineHeapBump(heapBase, state);
                         if (grownVector + grownVectorBytes >
                             engineHeapLimit(heapBase, state)) {
@@ -1198,6 +1214,13 @@
                         }
                     }
                     if (dynamicPropertyRecord === 0) {
+                        if (reserveNativeAllocationKernel(
+                                heapBase, state,
+                                PROPERTY_RECORD_BYTES) === 0) {
+                            return unsupportedExitKernel(
+                                heapBase, state, frame, pc, opcode,
+                                instructions);
+                        }
                         dynamicPropertyRecord = engineHeapBump(heapBase, state);
                         if (dynamicPropertyRecord + PROPERTY_RECORD_BYTES >
                             engineHeapLimit(heapBase, state)) {
@@ -1475,6 +1498,13 @@
                         }
                         var concatenationBytes =
                             (STRING_CHARS + concatenationLength * 2 + 7) & -8;
+                        if (concatenationBytes >= STRING_CHARS) {
+                            if (reserveNativeAllocationKernel(
+                                    heapBase, state,
+                                    concatenationBytes) === 0) {
+                                concatenationValid = 0;
+                            }
+                        }
                         var concatenationAddress = engineHeapBump(
                             heapBase, state);
                         if (concatenationBytes < STRING_CHARS) {
@@ -2158,6 +2188,11 @@
                 } else pc = pc + FIVE_WORD_INSTRUCTION;
                 }
             } else if (opcode === OP_PUSH_CATCH) {
+                if (reserveNativeAllocationKernel(
+                        heapBase, state, HANDLER_RECORD_BYTES) === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
                 var pushedHandler = engineHeapBump(heapBase, state);
                 if (pushedHandler + HANDLER_RECORD_BYTES >
                     engineHeapLimit(heapBase, state)) {
@@ -2225,6 +2260,13 @@
                 }
                 var makeFunctionProgram = valueCellReference(
                     0, makeFunctionProgramCell);
+                var makeFunctionBytes = FUNCTION_RECORD_BYTES +
+                    OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+                if (reserveNativeAllocationKernel(
+                        heapBase, state, makeFunctionBytes) === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
                 var makeFunctionAddress = engineHeapBump(heapBase, state);
                 var makeFunctionPrototype = makeFunctionAddress +
                     FUNCTION_RECORD_BYTES;
@@ -2966,6 +3008,11 @@
                                 instructions);
                         }
                     }
+                    if (reserveNativeAllocationKernel(
+                            heapBase, state, PROPERTY_RECORD_BYTES) === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
                     setPropertyRecord = engineHeapBump(heapBase, state);
                     if (setPropertyRecord + PROPERTY_RECORD_BYTES >
                         engineHeapLimit(heapBase, state)) {
@@ -3507,6 +3554,35 @@
                         PROPERTY_RECORD_BYTES;
                     bytecodeAllocationEnd = bytecodeAllocationEnd +
                         PROPERTY_RECORD_BYTES;
+                }
+                var bytecodeAllocationStart =
+                    engineHeapBump(heapBase, state);
+                var bytecodeAllocationBytes =
+                    bytecodeAllocationEnd - bytecodeAllocationStart;
+                if (reserveNativeAllocationKernel(
+                        heapBase, state, bytecodeAllocationBytes) === 1) {
+                    var bytecodeAllocationMove =
+                        engineHeapBump(heapBase, state) -
+                        bytecodeAllocationStart;
+                    bytecodeAllocationEnd = bytecodeAllocationEnd +
+                                            bytecodeAllocationMove;
+                    if (callOperation === 2) {
+                        constructedObject = constructedObject +
+                                            bytecodeAllocationMove;
+                    }
+                    if (calleeFrameReused === 0) {
+                        calleeFrame = calleeFrame + bytecodeAllocationMove;
+                    }
+                    if (calleeBindingRegisters === 0) {
+                        calleeEnvironment = calleeEnvironment +
+                                            bytecodeAllocationMove;
+                    }
+                    if (calleeNeedsArguments === 1) {
+                        calleeArgumentsArray = calleeArgumentsArray +
+                            bytecodeAllocationMove;
+                        calleeArgumentsVector = calleeArgumentsVector +
+                            bytecodeAllocationMove;
+                    }
                 }
                 if (bytecodeAllocationEnd > engineHeapLimit(heapBase, state)) {
                     bytecodeCallValid = 0;
@@ -4545,6 +4621,9 @@
                         var ffiStringBytes =
                             (BUFFER_BACKING_DATA + ffiStringLength +
                              1 + 7) & -8;
+                        if (reserveNativeAllocationKernel(
+                                heapBase, state,
+                                ffiStringBytes) === 0) ffiValid = 0;
                         var ffiStringBacking = engineHeapBump(
                             heapBase, state);
                         if (ffiStringBacking + ffiStringBytes >
@@ -4686,6 +4765,14 @@
             }
             var arrayConstructVectorBytes = VECTOR_CELLS +
                 arrayConstructCapacity * VALUE_CELL_BYTES;
+            var arrayConstructBytes = arrayConstructVectorBytes +
+                ARRAY_RECORD_BYTES;
+            if (reserveNativeAllocationKernel(
+                    heapBase, state, arrayConstructBytes) === 0) {
+                arrayConstructValid = 0;
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+            }
             var arrayConstructVector = engineHeapBump(heapBase, state);
             var arrayConstructObject = arrayConstructVector +
                 arrayConstructVectorBytes;
@@ -4924,6 +5011,12 @@
                     }
                     var stringConvertBytes = (STRING_CHARS +
                         stringConvertLength * 2 + 7) & -8;
+                    if (reserveNativeAllocationKernel(
+                            heapBase, state,
+                            stringConvertBytes) === 0) {
+                        stringConvertValid = 0;
+                        stringConvertAllocationFailed = 1;
+                    }
                     var stringConvertResult = engineHeapBump(
                         heapBase, state);
                     if (stringConvertResult + stringConvertBytes >
@@ -5421,6 +5514,11 @@
             if (joinValid === 1) {
                 joinBytes = (STRING_CHARS +
                              joinCharacterLength * 2 + 7) & -8;
+                if (reserveNativeAllocationKernel(
+                        heapBase, state, joinBytes) === 0) {
+                    joinValid = 0;
+                    joinAllocationFailed = 1;
+                }
                 joinResult = engineHeapBump(heapBase, state);
                 if (joinResult + joinBytes >
                     engineHeapLimit(heapBase, state)) {
@@ -5540,6 +5638,9 @@
                     }
                     var grownPushVectorBytes = VECTOR_CELLS +
                         grownPushCapacity * VALUE_CELL_BYTES;
+                    if (reserveNativeAllocationKernel(
+                            heapBase, state,
+                            grownPushVectorBytes) === 0) pushValid = 0;
                     var grownPushVector = engineHeapBump(heapBase, state);
                     if (grownPushVector + grownPushVectorBytes >
                         engineHeapLimit(heapBase, state)) {
@@ -5679,6 +5780,14 @@
         }
         var bufferBackingBytes =
             (BUFFER_BACKING_DATA + bufferAllocSize + 7) & -8;
+        var bufferAllocationBytes = bufferBackingBytes +
+            BUFFER_VIEW_RECORD_BYTES;
+        if (bufferAllocValid === 1) {
+            if (reserveNativeAllocationKernel(
+                    heapBase, state, bufferAllocationBytes) === 0) {
+                bufferAllocValid = 0;
+            }
+        }
         var allocatedBacking = engineHeapBump(heapBase, state);
         var allocatedView = allocatedBacking + bufferBackingBytes;
         if (allocatedView + BUFFER_VIEW_RECORD_BYTES >
@@ -5816,6 +5925,11 @@
             sliceArgumentIndex = sliceArgumentIndex + 1;
         }
         if (sliceEnd < sliceStart) sliceEnd = sliceStart;
+        if (sliceValid === 1) {
+            if (reserveNativeAllocationKernel(
+                    heapBase, state,
+                    BUFFER_VIEW_RECORD_BYTES) === 0) sliceValid = 0;
+        }
         var sliceView = engineHeapBump(heapBase, state);
         if (sliceView + BUFFER_VIEW_RECORD_BYTES >
             engineHeapLimit(heapBase, state)) sliceValid = 0;
@@ -6487,6 +6601,8 @@
 
     function allocateObjectKernel(heapBase, state, targetCell,
                                   stringSupport) {
+        if (reserveNativeAllocationKernel(
+                heapBase, state, OBJECT_RECORD_BYTES) === 0) return 0;
         var object = engineHeapBump(heapBase, state);
         if (object + OBJECT_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
             return 0;
@@ -6510,6 +6626,10 @@
     function allocateArrayKernel(heapBase, state, targetCell, capacity,
                                  arrayPrototype) {
         var vectorBytes = VECTOR_CELLS + capacity * VALUE_CELL_BYTES;
+        var allocationBytes = vectorBytes + ARRAY_RECORD_BYTES;
+        if (allocationBytes < vectorBytes) return 0;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, allocationBytes) === 0) return 0;
         var vector = engineHeapBump(heapBase, state);
         var array = vector + vectorBytes;
         if (array + ARRAY_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
@@ -6560,6 +6680,10 @@
                                   flagsCell, stringSupport) {
         if (valueCellTag(0, patternCell) !== VALUE_TAG_REFERENCE) return 0;
         if (valueCellTag(0, flagsCell) !== VALUE_TAG_REFERENCE) return 0;
+        var regexpAllocationBytes =
+            REGEXP_RECORD_BYTES + PROPERTY_RECORD_BYTES * 5;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, regexpAllocationBytes) === 0) return 0;
         var regexp = engineHeapBump(heapBase, state);
         var sourceProperty = regexp + REGEXP_RECORD_BYTES;
         var globalProperty = sourceProperty + PROPERTY_RECORD_BYTES;
@@ -6731,6 +6855,10 @@
         }
         var vectorBytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
         if (vectorBytes < VECTOR_FIXED_BYTES) return 0;
+        var getKeysAllocationBytes = vectorBytes + ARRAY_RECORD_BYTES;
+        if (getKeysAllocationBytes < vectorBytes) return 0;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, getKeysAllocationBytes) === 0) return 0;
         var vector = engineHeapBump(heapBase, state);
         var array = vector + vectorBytes;
         if (array + ARRAY_RECORD_BYTES > engineHeapLimit(heapBase, state)) {
@@ -7515,6 +7643,13 @@
         } else {
             var fromCharCodeBytes = (STRING_CHARS +
                 intrinsicArgumentCount * 2 + 7) & -8;
+            if (reserveNativeAllocationKernel(
+                    heapBase, state,
+                    fromCharCodeBytes) === 0) {
+                fromCharCodeValid = 0;
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+            }
             fromCharCodeResult = engineHeapBump(heapBase, state);
             if (fromCharCodeResult + fromCharCodeBytes >
                 engineHeapLimit(heapBase, state)) {
@@ -7722,6 +7857,8 @@
         if (substrResultAddress === 0) {
             var substrBytes =
                 (STRING_CHARS + substrLength * 2 + 7) & -8;
+            if (reserveNativeAllocationKernel(
+                    heapBase, state, substrBytes) === 0) return 0;
             substrResultAddress = engineHeapBump(heapBase, state);
             if (substrResultAddress + substrBytes >
                 engineHeapLimit(heapBase, state)) {
@@ -7834,6 +7971,13 @@
                         if (charAtCode > 255) {
                             var charAtStringBytes =
                                 (STRING_CHARS + 2 + 7) & -8;
+                            if (reserveNativeAllocationKernel(
+                                    heapBase, state,
+                                    charAtStringBytes) === 0) {
+                                charAtValid = 0;
+                                setEngineCallRejectReason(heapBase, state,
+                                    CALL_REJECT_HEAP_SPACE);
+                            }
                             charAtResultAddress = engineHeapBump(
                                 heapBase, state);
                             if (charAtResultAddress + charAtStringBytes >
@@ -8041,6 +8185,11 @@
                     replaceMatchCount * (replaceValueLength - 1);
                 var replaceResultBytes = (STRING_CHARS +
                     replaceResultLength * 2 + 7) & -8;
+                if (replaceResultLength >= 0) {
+                    if (reserveNativeAllocationKernel(
+                            heapBase, state,
+                            replaceResultBytes) === 0) replaceValid = 0;
+                }
                 var replaceResult = engineHeapBump(
                     heapBase, state);
                 if (replaceResultLength < 0) replaceValid = 0;
@@ -8152,6 +8301,113 @@
         setEngineInstructions(heapBase, state, instructions);
         setFramePC(heapBase, frame, pc);
         return EXIT_UNSUPPORTED;
+    }
+
+    /* Keep reclaimed-region selection inside the compiled engine.  A guest
+     * program can execute millions of bytecodes between observable yields;
+     * returning to the host every time one fragmented arena is consumed both
+     * violates the self-hosting boundary and forces unnecessary collections.
+     * Free records use their otherwise-unused mark word as a transient next
+     * link while ownership belongs to this dispatcher. */
+    function nativeExecutionKernel(heapBase, frame, globalObject,
+                                   arrayLengthKey, arrayPrototype,
+                                   stringSupport, budget, state) {
+        var FREE_RECORD_HEADER_BYTES = 16;
+        var ENGINE_NATIVE_REGION_END = 292;
+        var ENGINE_NATIVE_FREE_REGION = 296;
+        var ENGINE_NATIVE_TAIL_BUMP = 300;
+        var ENGINE_NATIVE_TAIL_LIMIT = 304;
+        var ENGINE_NATIVE_REGION_ACTIVE = 308;
+        var ENGINE_ALLOCATION_FAILED = 312;
+        var ENGINE_NATIVE_RETIRED_REGION = 316;
+        if (engineNativeRegionActive(heapBase, state) === 0) {
+            var freeRegion = engineNativeFreeRegion(heapBase, state);
+            if (freeRegion !== 0) {
+                var nextFreeRegion = recordMark(heapBase, freeRegion);
+                var freeRegionEnd = freeRegion +
+                    recordSize(heapBase, freeRegion);
+                setEngineNativeFreeRegion(heapBase, state, nextFreeRegion);
+                setEngineNativeRegionEnd(heapBase, state, freeRegionEnd);
+                setEngineNativeRegionActive(heapBase, state, 1);
+                setEngineHeapBump(heapBase, state, freeRegion);
+                setEngineHeapLimit(heapBase, state,
+                    freeRegionEnd - FREE_RECORD_HEADER_BYTES);
+            }
+        }
+        var reason = interpreterKernel(
+            heapBase, frame, globalObject, arrayLengthKey,
+            arrayPrototype, stringSupport, budget, state);
+        if (engineNativeRegionActive(heapBase, state) === 0) {
+            setEngineNativeTailBump(
+                heapBase, state, engineHeapBump(heapBase, state));
+        } else {
+            var remainingRegion = engineHeapBump(heapBase, state);
+            var remainingRegionSize =
+                engineNativeRegionEnd(heapBase, state) - remainingRegion;
+            setRecordType(heapBase, remainingRegion, HEAP_TYPE_FREE);
+            setRecordSize(heapBase, remainingRegion, remainingRegionSize);
+            setRecordMark(heapBase, remainingRegion, 0);
+            setRecordFlags(heapBase, remainingRegion, 2);
+        }
+        return reason;
+    }
+
+    function reserveNativeAllocationKernel(heapBase, state, bytes) {
+        var current = engineHeapBump(heapBase, state);
+        if (current + bytes <= engineHeapLimit(heapBase, state)) return 1;
+        if (engineNativeRegionActive(heapBase, state) !== 0) {
+            var remaining = current;
+            var remainingSize =
+                engineNativeRegionEnd(heapBase, state) - remaining;
+            setRecordType(heapBase, remaining, HEAP_TYPE_FREE);
+            setRecordSize(heapBase, remaining, remainingSize);
+            setRecordMark(heapBase, remaining, 0);
+            setRecordFlags(heapBase, remaining, 0);
+            if (remainingSize >= FREE_RECORD_HEADER_BYTES + 8) {
+                setRecordMark(heapBase, remaining,
+                    engineNativeRetiredRegion(heapBase, state));
+                setEngineNativeRetiredRegion(heapBase, state, remaining);
+            }
+            setEngineNativeRegionActive(heapBase, state, 0);
+        } else {
+            setEngineNativeTailBump(heapBase, state, current);
+        }
+        var freeRegion = engineNativeFreeRegion(heapBase, state);
+        if (freeRegion !== 0) {
+            var nextFreeRegion = recordMark(heapBase, freeRegion);
+            var freeRegionEnd = freeRegion + recordSize(heapBase, freeRegion);
+            if (freeRegion + bytes <=
+                    freeRegionEnd - FREE_RECORD_HEADER_BYTES) {
+                setEngineNativeFreeRegion(heapBase, state, nextFreeRegion);
+                setEngineNativeRegionEnd(heapBase, state, freeRegionEnd);
+                setEngineNativeRegionActive(heapBase, state, 1);
+                setEngineHeapBump(heapBase, state, freeRegion);
+                setEngineHeapLimit(heapBase, state,
+                    freeRegionEnd - FREE_RECORD_HEADER_BYTES);
+                return 1;
+            }
+            /* Regions are handed over largest-first. If the head cannot
+             * satisfy this request, no later region can either. Retire the
+             * ordered chain in one operation rather than repeatedly scanning
+             * it for every subsequent allocation. */
+            var retiredTail = freeRegion;
+            while (recordMark(heapBase, retiredTail) !== 0) {
+                retiredTail = recordMark(heapBase, retiredTail);
+            }
+            setRecordMark(heapBase, retiredTail,
+                engineNativeRetiredRegion(heapBase, state));
+            setEngineNativeRetiredRegion(heapBase, state, freeRegion);
+            setEngineNativeFreeRegion(heapBase, state, 0);
+        }
+        var tailBump = engineNativeTailBump(heapBase, state);
+        setEngineHeapBump(heapBase, state, tailBump);
+        setEngineHeapLimit(heapBase, state,
+            engineNativeTailLimit(heapBase, state));
+        if (tailBump + bytes <= engineNativeTailLimit(heapBase, state)) {
+            return 1;
+        }
+        setEngineAllocationFailed(heapBase, state, 1);
+        return 0;
     }
 
     function typeofValueKernel(heapBase, targetCell, sourceCell,
@@ -8408,6 +8664,13 @@
         var constantBytes = 24 + constantLength * VALUE_CELL_BYTES;
         var bindingBytes = 24 + bindingLength * VALUE_CELL_BYTES;
         var parameterBytes = 24 + parameterLength * VALUE_CELL_BYTES;
+        var programAllocationBytes = bytecodeBytes + constantBytes * 2 +
+            bindingBytes + parameterBytes + PROGRAM_RECORD_BYTES +
+            FUNCTION_RECORD_BYTES + OBJECT_RECORD_BYTES +
+            PROPERTY_RECORD_BYTES * 2;
+        if (programAllocationBytes < bytecodeBytes) return 0;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, programAllocationBytes) === 0) return 2;
         var bytecode = engineHeapBump(heapBase, state);
         var constants = bytecode + bytecodeBytes;
         var constantRegisters = constants + constantBytes;
@@ -8589,6 +8852,9 @@
         if (end < start) end = start;
         var count = end - start;
         var vectorBytes = VECTOR_CELLS + count * VALUE_CELL_BYTES;
+        var resultBytes = vectorBytes + ARRAY_RECORD_BYTES;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, resultBytes) === 0) return 2;
         var resultVector = engineHeapBump(heapBase, state);
         var resultArray = resultVector + vectorBytes;
         if (resultArray + ARRAY_RECORD_BYTES >
@@ -8671,6 +8937,9 @@
             argumentIndex = argumentIndex + 1;
         }
         var vectorBytes = VECTOR_CELLS + resultLength * VALUE_CELL_BYTES;
+        var resultBytes = vectorBytes + ARRAY_RECORD_BYTES;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, resultBytes) === 0) return 2;
         var resultVector = engineHeapBump(heapBase, state);
         var resultArray = resultVector + vectorBytes;
         if (resultArray + ARRAY_RECORD_BYTES >
@@ -8900,6 +9169,10 @@
         }
         if (program === 0) return 0;
         if (recordType(heapBase, program) !== HEAP_TYPE_PROGRAM) return 0;
+        var functionAllocationBytes = FUNCTION_RECORD_BYTES +
+            OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, functionAllocationBytes) === 0) return 2;
         var callable = engineHeapBump(heapBase, state);
         var allocationEnd = callable + FUNCTION_RECORD_BYTES +
             OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
@@ -9053,6 +9326,10 @@
         if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
             var dateArgumentCount = vectorLength(heapBase, argumentsVector);
             if (dateArgumentCount > 7) dateArgumentCount = 7;
+            var dateAllocationBytes = OBJECT_RECORD_BYTES +
+                PROPERTY_RECORD_BYTES;
+            if (reserveNativeAllocationKernel(
+                    heapBase, state, dateAllocationBytes) === 0) return 2;
             var dateObject = engineHeapBump(heapBase, state);
             var dateValueProperty = dateObject + OBJECT_RECORD_BYTES;
             var dateAllocationEnd = dateValueProperty + PROPERTY_RECORD_BYTES;
@@ -9391,6 +9668,10 @@
                 digitCount = digitCount + 1;
             }
             var stringBytes = (STRING_CHARS + digitCount * 2 + 7) & -8;
+            var indexedAllocationBytes = stringBytes +
+                PROPERTY_RECORD_BYTES;
+            if (reserveNativeAllocationKernel(
+                    heapBase, state, indexedAllocationBytes) === 0) return 2;
             var stringAddress = engineHeapBump(heapBase, state);
             var propertyAddress = stringAddress + stringBytes;
             if (propertyAddress + PROPERTY_RECORD_BYTES >
@@ -9483,6 +9764,7 @@
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
+            interpreterKernel: interpreterKernel,
             intrinsicCallKernel: intrinsicCallKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
@@ -9502,6 +9784,7 @@
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
             returnFromBytecodeKernel: returnFromBytecodeKernel,
+            reserveNativeAllocationKernel: reserveNativeAllocationKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
@@ -9515,7 +9798,7 @@
             (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
         var kernelSource = null;
         if (snapshotNeedsSource) {
-            kernelSource = interpreterKernel.toString();
+            kernelSource = nativeExecutionKernel.toString();
             var kernelDependencyNames = [];
             var kernelDependencyName;
             for (kernelDependencyName in kernelDependencies) {
@@ -9538,7 +9821,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 3,
+                compilerVersion: 4,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,
@@ -9565,14 +9848,17 @@
             }
         } else {
             var compilerOptions = {
-                registerPreferences: ["heapBase", "pc", "bytecodeWords"],
+                registerPreferences: ["heapBase", "state", "budget"],
+                registerPreferencesByFunction: {
+                    interpreterKernel: ["heapBase", "pc", "bytecodeWords"]
+                },
                 timings: loweringTimings,
                 constantOverrides: {
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
                 }
             };
             this.ir = new KernelCompiler().compileGraph(
-                interpreterKernel, kernelDependencies, compilerOptions);
+                nativeExecutionKernel, kernelDependencies, compilerOptions);
         }
         var loweringFinished = constructionStarted ?
             new Date().getTime() : 0;
@@ -9730,6 +10016,7 @@
         this.synchronizationCount = 0;
         this.synchronizationElapsedMs = 0;
         this.allocationExitCount = 0;
+        this.allocationOpcodeCounts = [];
         this.allocationRefillAttemptCount = 0;
         this.allocationRefillCount = 0;
         this.allocationRefillElapsedMs = 0;
@@ -9744,6 +10031,8 @@
         this.callRejectCounts = [];
         this.propertyFallbackCounts = {};
         this.allocationRegion = null;
+        this.forceTailAllocation = false;
+        this.nativeFreeRegionsOwned = false;
         if (runtime.profileOpcodeCounts) {
             var codeLine = "native guest code: pointer=" +
                 this.nativeResult.pointer + " bytes=" + this.nativeResult.length;
@@ -9862,8 +10151,47 @@
      * layout. */
     NativeInterpreter.prototype.releaseAllocationRegionForCollection =
             function () {
-        if (!this.allocationRegion) return;
+        var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;
+        if (this.nativeFreeRegionsOwned) {
+            var tailBump = records.engineNativeTailBump(this.stateAddress);
+            if (tailBump > heap.bump) heap.bump = tailBump;
+            var returnedRegions = [];
+            var freeRegion = records.engineNativeFreeRegion(
+                this.stateAddress);
+            while (freeRegion) {
+                var nextFreeRegion = heap.freeRecordNext(freeRegion);
+                heap.setFreeRecordNext(freeRegion, 0);
+                returnedRegions.push(freeRegion);
+                freeRegion = nextFreeRegion;
+            }
+            var retiredRegion = records.engineNativeRetiredRegion(
+                this.stateAddress);
+            while (retiredRegion) {
+                var nextRetiredRegion = heap.freeRecordNext(retiredRegion);
+                heap.setFreeRecordNext(retiredRegion, 0);
+                returnedRegions.push(retiredRegion);
+                retiredRegion = nextRetiredRegion;
+            }
+            if (records.engineNativeRegionActive(this.stateAddress)) {
+                var regionBump = records.engineHeapBump(this.stateAddress);
+                var regionEnd = records.engineNativeRegionEnd(
+                    this.stateAddress);
+                heap.publishFreeRegion(
+                    regionBump, regionEnd - regionBump, 0);
+                returnedRegions.push(regionBump);
+            }
+            records.setEngineNativeAllocator(
+                this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0,
+                0);
+            this.nativeFreeRegionsOwned = false;
+            var returnedIndex = 0;
+            while (returnedIndex < returnedRegions.length) {
+                heap.freeBlocks.push(returnedRegions[returnedIndex++]);
+            }
+            heap.freeBlocksAreMaxHeap = false;
+        }
+        if (!this.allocationRegion) return;
         var remaining = this.allocationRegion.end -
                         this.allocationRegion.cursor;
         if (remaining >= FREE_RECORD_HEADER_BYTES) {
@@ -9873,15 +10201,64 @@
         this.runtime.rebuildFreeBlockIndex();
     };
 
+    NativeInterpreter.prototype.installNativeFreeRegions = function () {
+        if (this.nativeFreeRegionsOwned) return;
+        var heap = this.runtime.linearHeap;
+        var nativeHead = 0;
+        var retained = [];
+        var nativeRegions = [];
+        var index = 0;
+        while (index < heap.freeBlocks.length) {
+            var address = heap.freeBlocks[index++];
+            var size = heap.freeRecordSize(address);
+            if (size >= MIN_NATIVE_ALLOCATION_REGION_BYTES) {
+                nativeRegions.push({address: address, size: size});
+            } else retained.push(address);
+        }
+        if (!nativeRegions.length) return;
+        /* Keep large compound allocations on the constant-time head path.
+         * An unsorted fragmented list can make each such allocation walk and
+         * restore thousands of smaller regions. Sorting happens once when
+         * ownership crosses into native execution; consumption thereafter is
+         * entirely inside the compiled allocator. */
+        nativeRegions.sort(function (left, right) {
+            return left.size - right.size;
+        });
+        index = 0;
+        while (index < nativeRegions.length) {
+            address = nativeRegions[index++].address;
+            heap.setFreeRecordNext(address, nativeHead);
+            nativeHead = address;
+        }
+        heap.freeBlocks = retained;
+        heap.freeBlocksAreMaxHeap = false;
+        this.runtime.heapRecords.setEngineNativeFreeRegion(
+            this.stateAddress, nativeHead);
+        this.nativeFreeRegionsOwned = true;
+    };
+
     NativeInterpreter.prototype.prepareSemanticFallback = function () {
+        var heap = this.runtime.linearHeap;
+        if (this.nativeFreeRegionsOwned) {
+            /* Native-owned regions have been removed from the host allocator
+             * index, while their active suffix is a published FREE record.
+             * Host semantics can therefore allocate safely from retained
+             * small blocks or the disjoint tail without forcing an ownership
+             * round trip. This is important for periodic formatting and I/O:
+             * sorting thousands of reclaimed regions at each such call makes
+             * an otherwise short host service visibly stall animation. */
+            if (heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES <=
+                    heap.allocationLimit ||
+                heap.largestFreeBlockSize() >=
+                    MIN_NATIVE_ALLOCATION_REGION_BYTES) return false;
+            this.releaseAllocationRegionForCollection();
+        }
         if (!this.allocationRegion) {
-            return this.runtime.linearHeap.bump +
-                       MIN_NATIVE_ALLOCATION_REGION_BYTES >
-                       this.runtime.linearHeap.allocationLimit &&
-                   this.runtime.linearHeap.largestFreeBlockSize() <
+            return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
+                       heap.allocationLimit &&
+                   heap.largestFreeBlockSize() <
                        MIN_NATIVE_ALLOCATION_REGION_BYTES;
         }
-        var heap = this.runtime.linearHeap;
         /* Most semantic operations allocate nothing and should not disturb
          * the native bump region. If the ordinary allocator has neither tail
          * room nor a useful free block, however, return the reserved suffix
@@ -9908,7 +10285,16 @@
     };
 
     NativeInterpreter.prototype.tryRefillAllocationRegion = function () {
-        if (this.allocationRegion) return false;
+        if (this.allocationRegion) {
+            /* The current largest reclaimed arena was too small for this
+             * compound allocation.  Return its untouched suffix and retry
+             * once from contiguous tail space.  Reclaiming the same largest
+             * block would repeat the failure; collecting here is also wrong
+             * when the logical heap still has ample unused tail capacity. */
+            this.releaseAllocationRegionForCollection();
+            this.forceTailAllocation = true;
+            return true;
+        }
         var refillStarted = this.runtime.profileOpcodeCounts ?
             new Date().getTime() : 0;
         var claimedRegion = this.runtime.linearHeap.claimLargestFreeBlock(
@@ -9949,8 +10335,16 @@
         var heap = this.runtime.linearHeap;
         var allocationBump = heap.bump;
         var allocationLimit = heap.allocationLimit;
-        if (!this.allocationRegion &&
-            heap.bump >= this.runtime.gcHeapPressureBump) {
+        this.installNativeFreeRegions();
+        /* Prefer reclaimed guest-heap storage at every native entry.  Waiting
+         * until the bump cursor reached the next pressure boundary made a
+         * high-churn renderer manufacture tens of megabytes of fresh garbage
+         * after each collection while equivalent free records already
+         * existed.  The maximum-block index makes this selection independent
+         * of free-list order and preserves large compound-allocation arenas. */
+        var forceTailAllocation = this.forceTailAllocation;
+        this.forceTailAllocation = false;
+        if (!this.allocationRegion && !forceTailAllocation) {
             var claimedRegion = heap.claimLargestFreeBlock(
                 MIN_NATIVE_ALLOCATION_REGION_BYTES);
             if (claimedRegion) {
@@ -9978,8 +10372,12 @@
             allocationLimit = this.allocationRegion.end -
                               FREE_RECORD_HEADER_BYTES;
         }
-        records.setEngineHeapBounds(this.stateAddress,
-                                    allocationBump, allocationLimit);
+        records.setEngineNativeTailBounds(
+            this.stateAddress, allocationBump, allocationLimit);
+        if (!records.engineNativeRegionActive(this.stateAddress)) {
+            records.setEngineHeapBounds(this.stateAddress,
+                                        allocationBump, allocationLimit);
+        }
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var nativeStarted = this.runtime.profileOpcodeCounts ?
             new Date().getTime() : 0;
@@ -9993,19 +10391,28 @@
             this.nativeElapsedMs += new Date().getTime() - nativeStarted;
         }
         var nativeHeapBump = records.engineHeapBump(this.stateAddress);
+        var nativeTailBump = records.engineNativeTailBump(this.stateAddress);
+        var exhaustedAllocationRegion = false;
         if (this.allocationRegion) {
             this.allocationRegion.cursor = nativeHeapBump;
             var regionRemaining = this.allocationRegion.end - nativeHeapBump;
             heap.publishFreeRegion(nativeHeapBump, regionRemaining,
                                    NATIVE_ALLOCATION_REGION_FLAG);
             if (regionRemaining < MIN_NATIVE_ALLOCATION_REGION_BYTES) {
-                heap.publishFreeRegion(nativeHeapBump, regionRemaining, 0);
-                this.allocationRegion = null;
-                this.runtime.rebuildFreeBlockIndex();
+                /* Keep the region identity until an unsupported exit has
+                 * been classified below.  If the current operation failed
+                 * for space, tryRefillAllocationRegion must know that this
+                 * was a reclaimed arena so it can retry from unused tail
+                 * space instead of claiming another undersized hole. */
+                exhaustedAllocationRegion = true;
             }
         } else if (nativeHeapBump > heap.bump) {
             heap.bump = nativeHeapBump;
             this.runtime.noteNativeHeapBump(nativeHeapBump);
+        }
+        if (nativeTailBump > heap.bump) {
+            heap.bump = nativeTailBump;
+            this.runtime.noteNativeHeapBump(nativeTailBump);
         }
         if (this.runtime.verifyNativeHeap) {
             heap.visitRecords(function () {});
@@ -10022,21 +10429,28 @@
         }
         if (reason === Exit.UNSUPPORTED) {
             var allocationOpcode = records.engineResultCell(this.stateAddress);
-            var allocationRemaining = records.engineHeapLimit(this.stateAddress) -
-                                      records.engineHeapBump(this.stateAddress);
-            var allocationExit = allocationRemaining <
-                    NATIVE_PROPERTY_RECORD_BYTES ||
-                allocationOpcode === Bytecode.MAKE_OBJECT ||
-                allocationOpcode === Bytecode.MAKE_FUNCTION ||
-                allocationOpcode === Bytecode.MAKE_ARRAY ||
-                allocationOpcode === Bytecode.MAKE_REGEXP ||
-                allocationOpcode === Bytecode.GET_KEYS ||
-                ((allocationOpcode === Bytecode.CALL ||
-                  allocationOpcode === Bytecode.CONSTRUCT) &&
-                 records.engineCallRejectReason(this.stateAddress) ===
-                 CallReject.HEAP_SPACE);
+            var allocationExit =
+                records.engineAllocationFailed(this.stateAddress) !== 0;
             if (allocationExit) reason = Exit.ALLOCATION;
-            if (allocationExit) this.allocationExitCount++;
+            if (allocationExit) {
+                this.allocationExitCount++;
+                this.allocationOpcodeCounts[allocationOpcode] =
+                    (this.allocationOpcodeCounts[allocationOpcode] || 0) + 1;
+                if (this.runtime.profileOpcodeCounts &&
+                    this.allocationExitCount <= 100) {
+                    var allocationExitLine =
+                        "native guest allocation exit " +
+                        this.allocationExitCount + ": " +
+                        (Bytecode.NAMES[allocationOpcode] || allocationOpcode);
+                    if (typeof print === "function") print(allocationExitLine);
+                    else if (typeof console !== "undefined" && console.log) {
+                        console.log(allocationExitLine);
+                    }
+                }
+            }
+        }
+        if (exhaustedAllocationRegion && reason !== Exit.ALLOCATION) {
+            this.releaseAllocationRegionForCollection();
         }
         if (reason === Exit.UNSUPPORTED) {
             this.unsupportedExitCount++;
@@ -10089,6 +10503,24 @@
             if (typeof print === "function") print(executionLine);
             else if (typeof console !== "undefined" && console.log) {
                 console.log(executionLine);
+            }
+        }
+        var allocationParts = [];
+        var allocationOpcode = 0;
+        while (allocationOpcode < this.allocationOpcodeCounts.length) {
+            if (this.allocationOpcodeCounts[allocationOpcode]) {
+                allocationParts.push((Bytecode.NAMES[allocationOpcode] ||
+                    allocationOpcode) + "=" +
+                    this.allocationOpcodeCounts[allocationOpcode]);
+            }
+            allocationOpcode++;
+        }
+        if (allocationParts.length) {
+            var allocationLine = "native guest allocation exits: " +
+                                 allocationParts.join(" ");
+            if (typeof print === "function") print(allocationLine);
+            else if (typeof console !== "undefined" && console.log) {
+                console.log(allocationLine);
             }
         }
         var parts = [];

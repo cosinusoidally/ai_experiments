@@ -214,6 +214,16 @@ contexts, programs, bytecode, strings, Buffer metadata, roots, allocator state,
 free lists, and GC marks are heap records. Native code addresses records as
 `heap_base + offset`.
 
+The engine state also owns a native allocation cursor, the unused tail bounds,
+and linked heads for available and retired free regions. Allocation helpers
+reserve complete compound record groups before publishing any member. Region
+selection and switching are compiled kernel operations; ordinary bytecode does
+not call the host merely to obtain another reclaimed block. Available regions
+are largest-first. Once a suffix is too small for an allocation it is retired
+for that native slice instead of being reconsidered on every later allocation.
+The collector handoff walks both named lists and restores their records to the
+host index without scanning the entire heap.
+
 Host handles, parsed ASTs, compiler analysis, generated-code addresses, and
 libc symbol addresses are bootstrap metadata only. The native engine cannot
 dereference or call a host handle.

@@ -403,6 +403,33 @@
         return largest;
     };
 
+    Heap.prototype.freeBlockDistribution = function () {
+        var thresholds = [256, 4096, 16384, 65536];
+        var counts = [0, 0, 0, 0];
+        var bytes = [0, 0, 0, 0];
+        var index = 0;
+        while (index < this.freeBlocks.length) {
+            var size = this.memory.readU32Trusted(
+                this.freeBlocks[index++] + HEADER_SIZE_FIELD);
+            var thresholdIndex = 0;
+            while (thresholdIndex < thresholds.length) {
+                if (size >= thresholds[thresholdIndex]) {
+                    counts[thresholdIndex]++;
+                    bytes[thresholdIndex] += size;
+                }
+                thresholdIndex++;
+            }
+        }
+        var parts = [];
+        index = 0;
+        while (index < thresholds.length) {
+            parts.push(thresholds[index] + ":" + counts[index] + "/" +
+                       bytes[index]);
+            index++;
+        }
+        return parts.join(",");
+    };
+
     Heap.prototype.publishFreeRegion = function (address, size, flags) {
         if (address < 64 || address !== Math.floor(address) ||
             size < HEADER_SIZE || size % 8 || address + size > this.bump) {
@@ -412,6 +439,25 @@
         this.memory.writeU32Trusted(address + HEADER_SIZE_FIELD, size);
         this.memory.writeU32Trusted(address + HEADER_MARK, 0);
         this.memory.writeU32Trusted(address + HEADER_FLAGS, flags || 0);
+    };
+
+    Heap.prototype.setFreeRecordNext = function (address, next) {
+        this.requireRecord(address, Types.FREE);
+        if (this.memory.readU32Trusted(address + HEADER_FLAGS) !== 0) {
+            throw new Error("native free-region link requires an ordinary " +
+                            "free record at " + address);
+        }
+        this.memory.writeU32Trusted(address + HEADER_MARK, next || 0);
+    };
+
+    Heap.prototype.freeRecordSize = function (address) {
+        this.requireRecord(address, Types.FREE);
+        return this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+    };
+
+    Heap.prototype.freeRecordNext = function (address) {
+        this.requireRecord(address, Types.FREE);
+        return this.memory.readU32Trusted(address + HEADER_MARK);
     };
 
     Heap.prototype.sweepUnmarked = function (generation) {

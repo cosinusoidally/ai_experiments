@@ -82,10 +82,17 @@
             for (memberConstantName in memberConstants) {
                 if (Object.prototype.hasOwnProperty.call(
                         memberConstants, memberConstantName)) {
-                    throw new SyntaxError("kernel graph constant " +
-                        memberConstantName + " must be declared once by " +
-                        entry.name + ", not by " +
-                        functions[constantMemberIndex].name);
+                    if (Object.prototype.hasOwnProperty.call(
+                            sharedConstants, memberConstantName) &&
+                        sharedConstants[memberConstantName] !==
+                            memberConstants[memberConstantName]) {
+                        throw new SyntaxError("kernel graph constant " +
+                            memberConstantName + " has conflicting values in " +
+                            entry.name + " and " +
+                            functions[constantMemberIndex].name);
+                    }
+                    sharedConstants[memberConstantName] =
+                        memberConstants[memberConstantName];
                 }
             }
             memberDependencies.sort();
@@ -110,6 +117,7 @@
             var optionName;
             for (optionName in options) {
                 if (optionName !== "source" && optionName !== "timings" &&
+                    optionName !== "registerPreferencesByFunction" &&
                     Object.prototype.hasOwnProperty.call(options, optionName)) {
                     memberOptions[optionName] = options[optionName];
                 }
@@ -122,7 +130,10 @@
             memberOptions.source = member.source;
             memberOptions.functionExpression = member.expression;
             if (member.name !== entry.name) {
-                memberOptions.registerPreferences = [];
+                var perFunctionPreferences =
+                    options.registerPreferencesByFunction || {};
+                memberOptions.registerPreferences =
+                    perFunctionPreferences[member.name] || [];
             }
             try {
                 compiled.push(this.compile(member.fn, memberOptions));
@@ -282,6 +293,16 @@
         propertyValueReference: "PROPERTY_VALUE_REFERENCE",
         engineHeapBump: "ENGINE_HEAP_BUMP",
         engineHeapLimit: "ENGINE_HEAP_LIMIT",
+        engineInstructions: "ENGINE_INSTRUCTIONS",
+        engineResult: "ENGINE_RESULT",
+        engineCallRejectReason: "ENGINE_CALL_REJECT_REASON",
+        engineNativeRegionEnd: "ENGINE_NATIVE_REGION_END",
+        engineNativeFreeRegion: "ENGINE_NATIVE_FREE_REGION",
+        engineNativeTailBump: "ENGINE_NATIVE_TAIL_BUMP",
+        engineNativeTailLimit: "ENGINE_NATIVE_TAIL_LIMIT",
+        engineNativeRegionActive: "ENGINE_NATIVE_REGION_ACTIVE",
+        engineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
+        engineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION",
         enginePlatformServices: "ENGINE_PLATFORM_SERVICES",
         platformDlsymPointer: "PLATFORM_DLSYM_POINTER",
         platformArraySlicePointer: "PLATFORM_ARRAY_SLICE_POINTER",
@@ -369,7 +390,14 @@
         setEngineFreeFrame: "ENGINE_FREE_FRAME",
         setEngineScratchLeft: "ENGINE_SCRATCH_LEFT",
         setEngineScratchRight: "ENGINE_SCRATCH_RIGHT",
-        setEngineHeapBump: "ENGINE_HEAP_BUMP"
+        setEngineHeapBump: "ENGINE_HEAP_BUMP",
+        setEngineHeapLimit: "ENGINE_HEAP_LIMIT",
+        setEngineNativeRegionEnd: "ENGINE_NATIVE_REGION_END",
+        setEngineNativeFreeRegion: "ENGINE_NATIVE_FREE_REGION",
+        setEngineNativeTailBump: "ENGINE_NATIVE_TAIL_BUMP",
+        setEngineNativeRegionActive: "ENGINE_NATIVE_REGION_ACTIVE",
+        setEngineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
+        setEngineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION"
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {

@@ -8,6 +8,27 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.36
+
+Approximate completion: 2026-09-14 afternoon BST
+
+### Guest VM
+
+- Moved reclaimed-region selection and switching into the compiled guest
+  interpreter. All native allocation sites now reserve their complete record
+  group through the same kernel allocator instead of yielding for each arena.
+- Preserved undersized fragments on a named retired-region list and ordered
+  available regions largest-first, removing lost free space and quadratic
+  rescanning under renderer allocation churn.
+- Kept native and semantic-fallback allocation ranges disjoint while allowing
+  non-collecting fallbacks to run without rebuilding the entire host free-block
+  index. At 320x240 with the 20 FPS limit, the post-fix attract-mode sample
+  ranged from 14.8 to 19.8 FPS and no longer collapsed to 1--7 FPS after the
+  first collection.
+- Corrected the native engine-state opcode counter extent so opcodes 48--60
+  cannot overwrite allocator state, and added named accessors for every new
+  allocator field.
+
 ## 0.35
 
 Approximate completion: 2026-08-23 late evening BST
