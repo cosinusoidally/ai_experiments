@@ -8,6 +8,26 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.40
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Moved the ordinary ES5 `parseInt` string/radix path into the compiled guest
+  interpreter. It handles ES whitespace, signs, radix inference, hexadecimal
+  prefixes, ASCII digits through base 36, NaN, negative zero, and the complete
+  signed-int32 result range without returning to the host. Inputs requiring
+  wider binary64 accumulation or object/string coercion retain the exact
+  semantic fallback rather than using an approximation.
+- Added the named kernel operation `setValueCellDoubleBits` for readable NaN
+  and signed-zero construction. The compiler lowers it to authoritative guest
+  heap stores; callers do not repeat value-cell offset arithmetic.
+- Confirmed that `parseInt` disappeared from demo8's profiled fallback-call
+  list. At 320x240 with the 20 FPS limit, free-driving samples after the mode
+  transition were 17.8, 18.6, and 20.0 FPS while the heap grew and collected;
+  the final interval met the 20 FPS limit. No demo source was changed.
+
 ## 0.39
 
 Approximate completion: 2026-09-14 evening BST

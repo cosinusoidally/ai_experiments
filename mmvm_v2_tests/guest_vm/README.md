@@ -43,6 +43,13 @@ transitional `load()`, and compatibility services still cross the embedding
 boundary. It becomes the default only after those services have moved into
 MMVM platform code.
 
+The native interpreter also completes the common ES5 `parseInt` path entirely
+against guest string and value-cell records. Its native case includes ES
+whitespace, sign and prefix processing, radices 2 through 36, NaN, negative
+zero, and signed-int32 results. Wider results and coercions that are not yet
+self-hosted yield to the semantic implementation so the optimization never
+changes observable numeric results.
+
 Each context provides the ES5.1 global `eval` function. Indirect eval executes
 against that context's global object, and non-string arguments are returned
 unchanged. At the current migration checkpoint eval deliberately yields as a

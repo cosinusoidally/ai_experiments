@@ -2060,7 +2060,7 @@
         this.setGlobal("parseInt", this.makeNativeFunction("parseInt",
             function (receiver, args) {
                 return parseInt(String(args[0]), args.length > 1 ? Number(args[1]) : undefined);
-            }));
+            }, "intrinsic", NativeIntrinsics.PARSE_INT));
         this.setGlobal("parseFloat", this.makeNativeFunction("parseFloat",
             function (receiver, args) {
                 return parseFloat(String(args[0]));

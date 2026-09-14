@@ -365,7 +365,8 @@
         var INTRINSIC_FUNCTION_CONSTRUCTOR = 62;
         var INTRINSIC_REGEXP_CONSTRUCTOR = 63;
         var INTRINSIC_EVAL = 64;
-        var INTRINSIC_LAST_ID = 64;
+        var INTRINSIC_PARSE_INT = 65;
+        var INTRINSIC_LAST_ID = 65;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -4494,6 +4495,17 @@
                 return EXIT_UNSUPPORTED;
             }
             if (ffiCallResult === 1) intrinsicHandled = 1;
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_PARSE_INT) {
+            intrinsicHandled = parseIntIntrinsicKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
         }
         }
         if (intrinsicHandled === 0) {
@@ -9653,6 +9665,156 @@
         return 0;
     }
 
+    /* Complete parseInt without leaving the guest for the ordinary string and
+     * signed-int32 case.  Accumulating the magnitude as a negative integer
+     * makes -2147483648 representable and lets every overflow be detected
+     * before i386 arithmetic wraps.  Larger exact results retain the semantic
+     * fallback until the native number parser has binary64 accumulation. */
+    function parseIntIntrinsicKernel(heapBase, targetCell, registerCells,
+                                     argumentsVector, argumentCount) {
+        var IEEE754_QUIET_NAN_HIGH = 2146959360;
+        var sourceDescriptor = vectorCellAddress(
+            heapBase, argumentsVector, 0);
+        if (valueCellTag(0, sourceDescriptor) !== VALUE_TAG_INT32) return 0;
+        var sourceCell = heapBase + registerCells +
+            valueCellInt32(0, sourceDescriptor) * VALUE_CELL_BYTES;
+        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
+        var source = valueCellReference(0, sourceCell);
+        if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
+
+        var radix = 0;
+        if (argumentCount > 1) {
+            var radixDescriptor = vectorCellAddress(
+                heapBase, argumentsVector, 1);
+            if (valueCellTag(0, radixDescriptor) !== VALUE_TAG_INT32) return 0;
+            var radixCell = heapBase + registerCells +
+                valueCellInt32(0, radixDescriptor) * VALUE_CELL_BYTES;
+            var radixTag = valueCellTag(0, radixCell);
+            if (radixTag === VALUE_TAG_INT32) {
+                radix = valueCellInt32(0, radixCell);
+            } else if (radixTag === VALUE_TAG_UNDEFINED) {
+                radix = 0;
+            } else if (radixTag === VALUE_TAG_NULL) {
+                radix = 0;
+            } else if (radixTag === VALUE_TAG_FALSE) {
+                radix = 0;
+            } else if (radixTag === VALUE_TAG_TRUE) {
+                radix = 1;
+            } else if (radixTag === VALUE_TAG_DOUBLE) {
+                radix = toInt32F64(loadF64(radixCell + VALUE_CELL_LOW));
+                if (equalF64(loadF64(radixCell + VALUE_CELL_LOW),
+                             loadI32F64(radix)) === 0) return 0;
+            } else return 0;
+        }
+
+        var length = stringLength(heapBase, source);
+        var index = 0;
+        var scanningWhitespace = 1;
+        while (scanningWhitespace === 1) {
+            if (index >= length) scanningWhitespace = 0;
+            else {
+                var leading = stringCharacterCodeUnit(
+                    heapBase, source, index) & 65535;
+                if (isESWhiteSpaceKernel(leading) === 0) {
+                    scanningWhitespace = 0;
+                } else index = index + 1;
+            }
+        }
+        var negative = 0;
+        if (index < length) {
+            var sign = stringCharacterCodeUnit(
+                heapBase, source, index) & 65535;
+            if (sign === 43) index = index + 1;
+            else if (sign === 45) {
+                negative = 1;
+                index = index + 1;
+            }
+        }
+
+        var allowPrefix = 0;
+        if (radix === 0) {
+            radix = 10;
+            allowPrefix = 1;
+        } else if (radix === 16) allowPrefix = 1;
+        else if (radix < 2) {
+            setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
+            return 1;
+        } else if (radix > 36) {
+            setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
+            return 1;
+        }
+        if (allowPrefix === 1) {
+            if (index + 1 < length) {
+                if ((stringCharacterCodeUnit(heapBase, source, index) &
+                     65535) === 48) {
+                    var prefix = stringCharacterCodeUnit(
+                        heapBase, source, index + 1) & 65535;
+                    if (prefix === 120) {
+                        radix = 16;
+                        index = index + 2;
+                    } else if (prefix === 88) {
+                        radix = 16;
+                        index = index + 2;
+                    }
+                }
+            }
+        }
+
+        var limit = -2147483647;
+        if (negative === 1) limit = MINIMUM_INT32;
+        var multiplyLimit = divideI32(limit, radix);
+        var result = 0;
+        var digits = 0;
+        var scanningDigits = 1;
+        while (scanningDigits === 1) {
+            if (index >= length) scanningDigits = 0;
+            else {
+                var character = stringCharacterCodeUnit(
+                    heapBase, source, index) & 65535;
+                var digit = -1;
+                if (character >= ASCII_DIGIT_ZERO) {
+                    if (character <= ASCII_DIGIT_NINE) {
+                        digit = character - ASCII_DIGIT_ZERO;
+                    }
+                }
+                if (digit < 0) {
+                    if (character >= ASCII_UPPER_A) {
+                        if (character <= ASCII_UPPER_Z) {
+                            digit = character - ASCII_UPPER_A + 10;
+                        }
+                    }
+                }
+                if (digit < 0) {
+                    if (character >= ASCII_LOWER_A) {
+                        if (character <= ASCII_LOWER_Z) {
+                            digit = character - ASCII_LOWER_A + 10;
+                        }
+                    }
+                }
+                if (digit < 0) scanningDigits = 0;
+                else if (digit >= radix) scanningDigits = 0;
+                else {
+                    if (result < multiplyLimit) return 0;
+                    result = result * radix;
+                    if (result < limit + digit) return 0;
+                    result = result - digit;
+                    digits = digits + 1;
+                    index = index + 1;
+                }
+            }
+        }
+        if (digits === 0) {
+            setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
+            return 1;
+        }
+        if (negative === 1) {
+            if (result === 0) {
+                setValueCellDoubleBits(targetCell, 0, IEEE754_SIGN_BIT);
+            } else setValueCellInt32(targetCell, result);
+        } else setValueCellInt32(targetCell, 0 - result);
+        return 1;
+    }
+
     /* Property keys are strings even when bracket syntax supplies an integer.
      * Match the canonical decimal spelling in place so indexed access on an
      * ordinary object does not allocate a temporary string or leave the guest
@@ -9837,6 +9999,7 @@
             mathIntrinsicKernel: mathIntrinsicKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
             objectHasOwnPropertyKernel: objectHasOwnPropertyKernel,
+            parseIntIntrinsicKernel: parseIntIntrinsicKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,
             programCallableKernel: programCallableKernel,

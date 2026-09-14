@@ -697,9 +697,10 @@
                  expression.callee.name === "setValueCellFalse" ||
                  expression.callee.name === "setValueCellTrue" ||
                  expression.callee.name === "setValueCellInt32" ||
-                 expression.callee.name === "setValueCellReference") &&
-                (expression.arguments.length === 1 ||
-                 expression.arguments.length === 2)) {
+                 expression.callee.name === "setValueCellReference" ||
+                 expression.callee.name === "setValueCellDoubleBits") &&
+                (expression.arguments.length >= 1 &&
+                 expression.arguments.length <= 3)) {
                 return setValueCellBlock(expression.callee.name,
                                          expression.arguments, symbols);
             }
@@ -862,7 +863,8 @@
             "VALUE_TAG_UNDEFINED" : name === "setValueCellFalse" ?
             "VALUE_TAG_FALSE" : name === "setValueCellTrue" ?
             "VALUE_TAG_TRUE" : name === "setValueCellInt32" ?
-            "VALUE_TAG_INT32" : "VALUE_TAG_REFERENCE";
+            "VALUE_TAG_INT32" : name === "setValueCellDoubleBits" ?
+            "VALUE_TAG_DOUBLE" : "VALUE_TAG_REFERENCE";
         var tag = symbolAt(symbols, tagName);
         if (!tag || tag.kind !== "constant") {
             throw new SyntaxError("value-cell operation requires " + tagName);
@@ -870,19 +872,23 @@
         var tagOnly = name === "setValueCellUndefined" ||
                       name === "setValueCellFalse" ||
                       name === "setValueCellTrue";
-        if (tagOnly && argumentsList.length !== 1 ||
-            !tagOnly && argumentsList.length !== 2) {
+        var doubleBits = name === "setValueCellDoubleBits";
+        if ((tagOnly && argumentsList.length !== 1) ||
+            (!tagOnly && !doubleBits && argumentsList.length !== 2) ||
+            (doubleBits && argumentsList.length !== 3)) {
             throw new SyntaxError("invalid value-cell operation arity");
         }
         var payload = tagOnly ?
             {op: "const_i32", value: 0, type: "i32"} :
             lowerKernelExpression(argumentsList[1], symbols);
+        var payloadHigh = doubleBits ?
+            lowerKernelExpression(argumentsList[2], symbols) :
+            {op: "const_i32", value: 0, type: "i32"};
         var target = argumentsList[0];
         var fields = ["VALUE_CELL_TAG", "VALUE_CELL_LOW",
                       "VALUE_CELL_HIGH", "VALUE_CELL_AUX"];
         var values = [{op: "const_i32", value: tag.value, type: "i32"},
-                      payload,
-                      {op: "const_i32", value: 0, type: "i32"},
+                      payload, payloadHigh,
                       {op: "const_i32", value: 0, type: "i32"}];
         var body = [];
         var index = 0;
