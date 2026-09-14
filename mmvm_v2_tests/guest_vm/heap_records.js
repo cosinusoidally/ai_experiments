@@ -113,7 +113,11 @@
     var ENGINE_NATIVE_REGION_ACTIVE = ENGINE_NATIVE_TAIL_LIMIT + 4;
     var ENGINE_ALLOCATION_FAILED = ENGINE_NATIVE_REGION_ACTIVE + 4;
     var ENGINE_NATIVE_RETIRED_REGION = ENGINE_ALLOCATION_FAILED + 4;
-    var ENGINE_STATE_BYTES = ENGINE_NATIVE_RETIRED_REGION + 4;
+    var ENGINE_PROPERTY_CACHE = ENGINE_NATIVE_RETIRED_REGION + 4;
+    var PROPERTY_CACHE_ENTRY_BYTES = 24;
+    var PROPERTY_CACHE_ENTRY_COUNT = 256;
+    var ENGINE_STATE_BYTES = ENGINE_PROPERTY_CACHE +
+        PROPERTY_CACHE_ENTRY_BYTES * PROPERTY_CACHE_ENTRY_COUNT;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -294,6 +298,10 @@
         this.heap.writeTrustedFieldU32(address, propertyHeadOffset(type), property || 0, type);
     };
 
+    Records.prototype.bumpObjectStructureVersion = function (address) {
+        this.heap.setFlags(address, (this.heap.flags(address) + 1) >>> 0);
+    };
+
     Records.prototype.findOwnProperty = function (object, keyString) {
         var keyAddress = typeof keyString === "number" ? keyString : 0;
         var property = this.objectPropertyHead(object);
@@ -443,6 +451,7 @@
                     this.heap.writeTrustedFieldU32(previous, PROPERTY_NEXT, next,
                                             Heap.Types.PROPERTY);
                 } else this.setObjectPropertyHead(object, next);
+                this.bumpObjectStructureVersion(object);
                 return true;
             }
             previous = property;
@@ -1164,6 +1173,12 @@
         return this.heap.trustedPayloadAddress(
             state, ENGINE_EXIT_REASON, ENGINE_STATE_BYTES,
             Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.clearEnginePropertyCache = function (state) {
+        var payload = this.engineStatePayloadAddress(state);
+        this.heap.memory.fill(payload + ENGINE_PROPERTY_CACHE,
+            PROPERTY_CACHE_ENTRY_BYTES * PROPERTY_CACHE_ENTRY_COUNT, 0);
     };
 
     Records.prototype.engineExitReason = function (state) {

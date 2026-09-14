@@ -4383,6 +4383,10 @@
             if (this.nativeInterpreter) {
                 this.nativeInterpreter.releaseAllocationRegionForCollection();
                 this.nativeInterpreter.releaseCachedFramesForCollection();
+                /* Inline property entries are weak derived state. Clear them
+                 * before reclaimed object/property addresses can be reused. */
+                this.heapRecords.clearEnginePropertyCache(
+                    this.nativeInterpreter.stateAddress);
             }
             var heapBumpBeforeCollection = this.linearHeap.bump;
             var collectionStarted = this.profileOpcodeCounts ?

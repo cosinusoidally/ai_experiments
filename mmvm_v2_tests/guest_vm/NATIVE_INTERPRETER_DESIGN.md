@@ -228,6 +228,13 @@ Host handles, parsed ASTs, compiler analysis, generated-code addresses, and
 libc symbol addresses are bootstrap metadata only. The native engine cannot
 dereference or call a host handle.
 
+The engine-state record also owns a small direct-mapped constant-property
+cache. It accelerates repeated own-property reads without changing object
+layout or making cache contents authoritative. Receiver/key identity,
+structural version, GC mark, and property-head guards must all match; the
+property value itself is always loaded afresh. The collector does not trace
+cache entries and clears them before reclaimed addresses become reusable.
+
 Native bytecode-to-bytecode calls support both register-bound functions and
 functions that require lexical environments. A `PROGRAM` record carries its
 binding count as part of the authoritative heap layout. For an

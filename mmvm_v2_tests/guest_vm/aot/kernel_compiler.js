@@ -75,7 +75,8 @@
         while (constantMemberIndex < functions.length) {
             var memberDependencies = [];
             var memberConstants = collectFunctionConstants(
-                functions[constantMemberIndex].fn, {},
+                functions[constantMemberIndex].fn,
+                options.constantOverrides || {},
                 functions[constantMemberIndex].expression,
                 dependencies, signatures, memberDependencies);
             var memberConstantName;
@@ -411,6 +412,32 @@
         bytecodeWordAddress: {field: "BYTECODE_WORDS", strideValue: 4}
     };
 
+    var READ_INDEXED_FIELD_ACCESSORS = {
+        propertyCacheObject: {field: "ENGINE_PROPERTY_CACHE_OBJECT",
+                              stride: "PROPERTY_CACHE_ENTRY_BYTES"},
+        propertyCacheKey: {field: "ENGINE_PROPERTY_CACHE_KEY",
+                           stride: "PROPERTY_CACHE_ENTRY_BYTES"},
+        propertyCacheVersion: {field: "ENGINE_PROPERTY_CACHE_VERSION",
+                               stride: "PROPERTY_CACHE_ENTRY_BYTES"},
+        propertyCacheGeneration: {field: "ENGINE_PROPERTY_CACHE_GENERATION",
+                                  stride: "PROPERTY_CACHE_ENTRY_BYTES"},
+        propertyCacheHead: {field: "ENGINE_PROPERTY_CACHE_HEAD",
+                            stride: "PROPERTY_CACHE_ENTRY_BYTES"},
+        propertyCacheProperty: {field: "ENGINE_PROPERTY_CACHE_PROPERTY",
+                                stride: "PROPERTY_CACHE_ENTRY_BYTES"}
+    };
+
+    var WRITE_INDEXED_FIELD_ACCESSORS = {
+        setPropertyCacheObject: READ_INDEXED_FIELD_ACCESSORS.propertyCacheObject,
+        setPropertyCacheKey: READ_INDEXED_FIELD_ACCESSORS.propertyCacheKey,
+        setPropertyCacheVersion: READ_INDEXED_FIELD_ACCESSORS.propertyCacheVersion,
+        setPropertyCacheGeneration:
+            READ_INDEXED_FIELD_ACCESSORS.propertyCacheGeneration,
+        setPropertyCacheHead: READ_INDEXED_FIELD_ACCESSORS.propertyCacheHead,
+        setPropertyCacheProperty:
+            READ_INDEXED_FIELD_ACCESSORS.propertyCacheProperty
+    };
+
     var FIELD_ADDRESS_ACCESSORS = {
         engineScratchLeftAddress: "ENGINE_SCRATCH_LEFT",
         engineScratchRightAddress: "ENGINE_SCRATCH_RIGHT",
@@ -718,6 +745,17 @@
             }
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
+                WRITE_INDEXED_FIELD_ACCESSORS[expression.callee.name] &&
+                expression.arguments.length === 4) {
+                return {op: "store_u32",
+                    address: indexedAddressDescriptor(
+                        WRITE_INDEXED_FIELD_ACCESSORS[expression.callee.name],
+                        expression.arguments, symbols),
+                    value: lowerKernelExpression(
+                        expression.arguments[3], symbols)};
+            }
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
                 WRITE_FIELD_ACCESSORS[expression.callee.name] &&
                 expression.arguments.length === 3) {
                 return {op: "store_u32",
@@ -882,6 +920,16 @@
             FIELD_ADDRESS_ACCESSORS[node.callee.name] &&
             node.arguments.length === 2) {
             return fieldAddress(node.callee.name, node.arguments, symbols);
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            READ_INDEXED_FIELD_ACCESSORS[node.callee.name] &&
+            node.arguments.length === 3) {
+            return {op: "load_u32",
+                    address: indexedAddressDescriptor(
+                        READ_INDEXED_FIELD_ACCESSORS[node.callee.name],
+                        node.arguments, symbols),
+                    type: "i32"};
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
@@ -1068,14 +1116,18 @@
     }
 
     function indexedAddress(name, argumentsList, symbols) {
-        var descriptor = INDEXED_ADDRESS_ACCESSORS[name];
+        return indexedAddressDescriptor(
+            INDEXED_ADDRESS_ACCESSORS[name], argumentsList, symbols);
+    }
+
+    function indexedAddressDescriptor(descriptor, argumentsList, symbols) {
         var field = descriptor.field ? symbolAt(symbols, descriptor.field) : null;
         var stride = descriptor.stride ?
             symbolAt(symbols, descriptor.stride) : null;
         if (descriptor.field && (!field || field.kind !== "constant") ||
             descriptor.stride && (!stride || stride.kind !== "constant")) {
-            throw new SyntaxError("kernel indexed accessor " + name +
-                                  " requires layout constants");
+            throw new SyntaxError(
+                "kernel indexed field accessor requires layout constants");
         }
         return {op: "add_i32",
             left: {op: "add_i32",

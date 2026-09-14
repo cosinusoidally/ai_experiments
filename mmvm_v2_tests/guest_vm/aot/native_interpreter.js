@@ -208,6 +208,14 @@
         var ENGINE_SCRATCH_RIGHT = 40;
         var ENGINE_PLATFORM_SERVICES = 44;
         var ENGINE_OPCODE_COUNTS = 48;
+        var ENGINE_PROPERTY_CACHE_OBJECT = 320;
+        var ENGINE_PROPERTY_CACHE_KEY = 324;
+        var ENGINE_PROPERTY_CACHE_VERSION = 328;
+        var ENGINE_PROPERTY_CACHE_GENERATION = 332;
+        var ENGINE_PROPERTY_CACHE_HEAD = 336;
+        var ENGINE_PROPERTY_CACHE_PROPERTY = 340;
+        var PROPERTY_CACHE_ENTRY_BYTES = 24;
+        var PROPERTY_CACHE_ENTRY_MASK = 255;
         var PLATFORM_DLSYM_POINTER = 16;
         var PLATFORM_ARRAY_SLICE_POINTER = 36;
         var PLATFORM_ARRAY_CONCAT_POINTER = 40;
@@ -2709,6 +2717,42 @@
                 var propertyRecord = 0;
                 var virtualPropertyObjectType = recordType(
                     heapBase, propertyObject);
+                var propertyReceiver = propertyObject;
+                var propertyFoundOnReceiver = 0;
+                var propertyCacheIndex =
+                    ((propertyReceiver >>> 3) ^
+                     (propertyConstantKey >>> 3)) &
+                    PROPERTY_CACHE_ENTRY_MASK;
+                if (virtualPropertyObjectType === HEAP_TYPE_OBJECT) {
+                    if (propertyCacheObject(
+                            heapBase, state, propertyCacheIndex) ===
+                        propertyReceiver) {
+                        if (propertyCacheKey(
+                                heapBase, state, propertyCacheIndex) ===
+                            propertyConstantKey) {
+                            if (propertyCacheVersion(
+                                    heapBase, state, propertyCacheIndex) ===
+                                recordFlags(heapBase, propertyReceiver)) {
+                                if (propertyCacheGeneration(
+                                        heapBase, state,
+                                        propertyCacheIndex) ===
+                                    recordMark(heapBase,
+                                               propertyReceiver)) {
+                                    if (propertyCacheHead(
+                                            heapBase, state,
+                                            propertyCacheIndex) ===
+                                        objectPropertyHead(
+                                            heapBase, propertyReceiver)) {
+                                        propertyRecord = propertyCacheProperty(
+                                            heapBase, state,
+                                            propertyCacheIndex);
+                                        propertyObject = 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if (virtualPropertyObjectType === HEAP_TYPE_ARRAY) {
                     if (propertyConstantKey === arrayLengthKey) {
                         if (arrayReserved(heapBase, propertyObject) === 0) {
@@ -2794,6 +2838,9 @@
                         }
                         if (propertyKeysMatch === 1) {
                             propertyRecord = propertyHead;
+                            if (propertyObject === propertyReceiver) {
+                                propertyFoundOnReceiver = 1;
+                            }
                             propertyHead = 0;
                         } else {
                             propertyHead = load32(
@@ -2840,6 +2887,23 @@
                         heapBase, state, frame, pc, opcode, instructions);
                 }
                 if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
+                    if (propertyFoundOnReceiver === 1) {
+                        setPropertyCacheKey(heapBase, state,
+                            propertyCacheIndex, propertyConstantKey);
+                        setPropertyCacheVersion(heapBase, state,
+                            propertyCacheIndex,
+                            recordFlags(heapBase, propertyReceiver));
+                        setPropertyCacheGeneration(heapBase, state,
+                            propertyCacheIndex,
+                            recordMark(heapBase, propertyReceiver));
+                        setPropertyCacheHead(heapBase, state,
+                            propertyCacheIndex,
+                            objectPropertyHead(heapBase, propertyReceiver));
+                        setPropertyCacheProperty(heapBase, state,
+                            propertyCacheIndex, propertyRecord);
+                        setPropertyCacheObject(heapBase, state,
+                            propertyCacheIndex, propertyReceiver);
+                    }
                     var propertySource = heapBase + propertyRecord + PROPERTY_VALUE;
                     var propertyTarget = heapBase + registerCells +
                         propertyTargetIndex * VALUE_CELL_BYTES;

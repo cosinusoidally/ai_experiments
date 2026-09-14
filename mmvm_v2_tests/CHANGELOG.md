@@ -8,6 +8,29 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.39
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Added a 256-entry direct-mapped cache for native constant-name reads of own
+  properties on ordinary guest objects. Entries live in the engine-state heap
+  record and are guarded by receiver/key identity, the receiver's structural
+  version, GC generation mark, and current property-head address. Values still
+  come from the authoritative property value cell on every hit.
+- Made property deletion advance the authoritative object structural version,
+  and clear the weak cache at collection before dead addresses can be reused.
+  The cache therefore cannot keep an object or property alive and cannot
+  confuse a recycled address with its previous record.
+- Fixed graph-wide kernel constant overrides. `--vm-profile` once again counts
+  native dispatch opcodes after the interpreter was split into compiled helper
+  functions, rather than reporting only semantic exits.
+- A comparable profiled demo8 run improved from roughly 14.7 million to about
+  15.3 million bytecodes per native-execution second. Sustained free-driving
+  samples at 320x240/20 FPS held between 19.6 and 20.0 FPS after the mode-switch
+  interval. No demo source was changed.
+
 ## 0.38
 
 Approximate completion: 2026-09-14 afternoon BST

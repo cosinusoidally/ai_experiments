@@ -62,7 +62,14 @@ The JavaScript backend may maintain guarded property or element caches. A cache
 entry contains a heap address, version/shape guard, and decoded value. Every
 write updates the heap first and then updates or invalidates the cache. Cache
 misses decode from the heap. GC scans heap records and never cache contents.
-The x86 backend uses the same guards and side-exits on misses.
+The native interpreter currently keeps a 256-entry direct-mapped cache for
+constant-name reads of own properties on ordinary objects. Each entry checks
+receiver and key identity, the receiver's structural version, its GC-generation
+mark, and its current property-head address. A hit supplies only the property
+record address; the value is reread from its authoritative value cell. Adding
+a property changes the head guard, deletion advances the structure version,
+and collection clears all entries before address reuse. Cache words are weak
+derived state and are deliberately not collector edges.
 
 String interning is a weak canonicalization table, not a root set. A live
 property key, program atom, value, or snapshot marks its string record through
