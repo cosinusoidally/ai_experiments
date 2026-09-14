@@ -8,6 +8,23 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.47
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Removed the 0.46 native `Math.atan` intrinsic after the exact default demo8
+  invocation exposed an i386 crash during field-of-view initialization. The
+  established semantic `Math.atan` implementation is restored while the
+  separately tested native `Math.atan2` path remains unchanged.
+- Reproduced the original status-139 failure with
+  `js_min.exe guest_runner.js --vm-native demo8_runner.js demo8.js`, then
+  confirmed that the corrected build initializes and continues rendering at
+  its default 256x192 resolution. Observed five-second samples were 18.7,
+  19.6, and 18.5 FPS. The parser, allocator, `parseInt`, and signed-zero
+  improvements remain enabled; no demo source was changed.
+
 ## 0.46
 
 Approximate completion: 2026-09-14 evening BST
