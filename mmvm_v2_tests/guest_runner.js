@@ -1,4 +1,5 @@
 var guestRunnerIsNode = typeof process !== "undefined" && process.argv &&
+                        process.versions && process.versions.node &&
                         typeof require === "function";
 var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
@@ -19,8 +20,10 @@ if (guestRunnerIsNode) {
     GuestRunnerNodeEnvironment = require("./guest_vm/node_environment.js");
     guestRunnerArguments = process.argv.slice(2);
 } else {
-    load("guest_vm/guest_vm.js");
-    load("guest_vm/node_environment.js");
+    if (typeof GuestVM === "undefined") load("guest_vm/guest_vm.js");
+    if (typeof GuestNodeEnvironment === "undefined") {
+        load("guest_vm/node_environment.js");
+    }
     GuestRunnerVM = GuestVM;
     GuestRunnerNodeEnvironment = GuestNodeEnvironment;
     for (var guestArgumentIndex = 0;
@@ -30,10 +33,14 @@ if (guestRunnerIsNode) {
 }
 
 var guestRunnerProgramArguments = [];
+var guestRunnerFoundProgram = false;
 for (var guestRunnerOptionIndex = 0;
      guestRunnerOptionIndex < guestRunnerArguments.length;
      guestRunnerOptionIndex++) {
-    if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
+    if (guestRunnerFoundProgram) {
+        guestRunnerProgramArguments.push(
+            guestRunnerArguments[guestRunnerOptionIndex]);
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
         guestRunnerProfile = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-trace-exceptions") {
@@ -82,6 +89,7 @@ for (var guestRunnerOptionIndex = 0;
         guestRunnerProfile = true;
     } else {
         guestRunnerProgramArguments.push(guestRunnerArguments[guestRunnerOptionIndex]);
+        guestRunnerFoundProgram = true;
     }
 }
 guestRunnerArguments = guestRunnerProgramArguments;
@@ -101,8 +109,12 @@ if (!guestRunnerArguments.length) {
 }
 
 var guestProgramPath = guestRunnerArguments[0];
-var guestProgramSource = guestRunnerIsNode ?
-    require("fs").readFileSync(guestProgramPath, "utf8") : read(guestProgramPath);
+var guestProgramSource;
+if (guestRunnerIsNode) {
+    guestProgramSource = require("fs").readFileSync(guestProgramPath, "utf8");
+} else if (typeof NodeFs !== "undefined") {
+    guestProgramSource = NodeFs.readFileSync(guestProgramPath).toString("utf8");
+} else guestProgramSource = read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
@@ -164,6 +176,9 @@ function guestRunnerCleanup() {
 }
 
 try {
+    if (guestRunnerSnapshot && guestProgramPath === "guest_runner.js") {
+        guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
+    }
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
     var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);

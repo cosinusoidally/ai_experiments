@@ -433,7 +433,8 @@
     Heap.prototype.publishFreeRegion = function (address, size, flags) {
         if (address < 64 || address !== Math.floor(address) ||
             size < HEADER_SIZE || size % 8 || address + size > this.bump) {
-            throw new Error("invalid published guest free region");
+            throw new Error("invalid published guest free region: address=" +
+                address + " size=" + size + " heapBump=" + this.bump);
         }
         this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
         this.memory.writeU32Trusted(address + HEADER_SIZE_FIELD, size);

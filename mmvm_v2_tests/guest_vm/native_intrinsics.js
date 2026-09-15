@@ -34,7 +34,9 @@
                       REGEXP_CONSTRUCTOR: 63,
                       EVAL: 64,
                       PARSE_INT: 65,
-                      MATH_ATAN: 66};
+                      MATH_ATAN: 66,
+                      BUFFER_TO_STRING: 67,
+                      FUNCTION_TO_STRING: 68};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

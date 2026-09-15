@@ -584,7 +584,7 @@
                         continue;
                     }
                     if (this.runtime.nativeInterpreter.
-                            prepareSemanticFallback()) {
+                            prepareSemanticFallback(nativeResult.opcode)) {
                         this.runtime.gcPending = true;
                         this.runtime.gcSafePoint();
                         nativeFrame.nativeHeapCurrent = true;

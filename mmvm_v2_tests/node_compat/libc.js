@@ -7,37 +7,25 @@ function nodeResolveSymbol(name) {
     return pointer;
 }
 
-var NodeLibcSymbols = {
-    socket: nodeResolveSymbol("socket"),
-    connect: nodeResolveSymbol("connect"),
-    setsockopt: nodeResolveSymbol("setsockopt"),
-    getsockopt: nodeResolveSymbol("getsockopt"),
-    bind: nodeResolveSymbol("bind"),
-    listen: nodeResolveSymbol("listen"),
-    accept: nodeResolveSymbol("accept"),
-    fcntl: nodeResolveSymbol("fcntl"),
-    poll: nodeResolveSymbol("poll"),
-    read: nodeResolveSymbol("read"),
-    write: nodeResolveSymbol("write"),
-    close: nodeResolveSymbol("close"),
-    calloc: nodeResolveSymbol("calloc"),
-    free: nodeResolveSymbol("free"),
-    memmove: nodeResolveSymbol("memmove"),
-    inet_aton: nodeResolveSymbol("inet_aton"),
-    getsockname: nodeResolveSymbol("getsockname"),
-    signal: nodeResolveSymbol("signal"),
-    gettimeofday: nodeResolveSymbol("gettimeofday"),
-    getenv: nodeResolveSymbol("getenv"),
-    errno_location: nodeResolveSymbol("__errno_location"),
-    fopen: nodeResolveSymbol("fopen"),
-    fseek: nodeResolveSymbol("fseek"),
-    ftell: nodeResolveSymbol("ftell"),
-    fread: nodeResolveSymbol("fread"),
-    fclose: nodeResolveSymbol("fclose"),
-    opendir: nodeResolveSymbol("opendir"),
-    readdir: nodeResolveSymbol("readdir"),
-    closedir: nodeResolveSymbol("closedir")
+var NodeLibcSymbolNames = {
+    socket: "socket", connect: "connect", setsockopt: "setsockopt",
+    getsockopt: "getsockopt", bind: "bind", listen: "listen",
+    accept: "accept", fcntl: "fcntl", poll: "poll", read: "read",
+    write: "write", close: "close", calloc: "calloc", free: "free",
+    memmove: "memmove", inet_aton: "inet_aton", getsockname: "getsockname",
+    signal: "signal", gettimeofday: "gettimeofday", getenv: "getenv",
+    errno_location: "__errno_location", fopen: "fopen", fseek: "fseek",
+    ftell: "ftell", fread: "fread", fclose: "fclose", opendir: "opendir",
+    readdir: "readdir", closedir: "closedir"
 };
+var NodeLibcSymbols = {};
+for (var NodeLibcSymbolKey in NodeLibcSymbolNames) {
+    if (Object.prototype.hasOwnProperty.call(
+            NodeLibcSymbolNames, NodeLibcSymbolKey)) {
+        NodeLibcSymbols[NodeLibcSymbolKey] = nodeResolveSymbol(
+            NodeLibcSymbolNames[NodeLibcSymbolKey]);
+    }
+}
 
 var NodeLibc = {
     socket: function (domain, type, protocol) {

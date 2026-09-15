@@ -59,12 +59,14 @@
             this.HostBuffer = require("buffer").Buffer;
             this.hostProcess = process;
         } else {
-            load("node_compat/libc.js");
-            load("node_compat/events.js");
-            load("node_compat/process.js");
-            load("node_compat/net.js");
-            load("node_compat/fs.js");
-            load("node_compat/http.js");
+            if (typeof NodeLibc === "undefined") {
+                load("node_compat/libc.js");
+                load("node_compat/events.js");
+                load("node_compat/process.js");
+                load("node_compat/net.js");
+                load("node_compat/fs.js");
+                load("node_compat/http.js");
+            }
             NodeProcess.install(runnerArguments);
             var guestEnvironment = this;
             NodeProcess.exceptionFormatter = function (error) {
@@ -84,6 +86,22 @@
         }
         this.installGlobals();
     }
+
+    GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
+        if (this.nodeHost) {
+            throw new Error("standalone runtime snapshots require js_min.exe");
+        }
+        this.context.run([
+            "load(\"guest_vm/guest_vm.js\");",
+            "load(\"guest_vm/node_environment.js\");",
+            "load(\"node_compat/libc.js\");",
+            "load(\"node_compat/events.js\");",
+            "load(\"node_compat/process.js\");",
+            "load(\"node_compat/net.js\");",
+            "load(\"node_compat/fs.js\");",
+            "load(\"node_compat/http.js\");"
+        ].join("\n"), "<standalone-runtime-bootstrap>");
+    };
 
     GuestNodeEnvironment.prototype.environmentValue = function (name) {
         if (this.nodeHost) return this.hostProcess.env[name];

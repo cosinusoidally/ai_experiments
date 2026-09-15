@@ -121,9 +121,10 @@
         var PROGRAM_FLAGS = 56;
         var PROGRAM_BINDING_COUNT = 60;
         var PROGRAM_METADATA = 52;
+        var PROGRAM_SOURCE = 64;
         var PROGRAM_FLAG_USES_ARGUMENTS = 1;
         var PROGRAM_FLAG_STRICT = 2;
-        var PROGRAM_RECORD_BYTES = 64;
+        var PROGRAM_RECORD_BYTES = 72;
         var BYTECODE_LENGTH = 16;
         var BYTECODE_WORDS = 24;
         var BYTECODE_FIXED_BYTES = 24;
@@ -367,7 +368,9 @@
         var INTRINSIC_EVAL = 64;
         var INTRINSIC_PARSE_INT = 65;
         var INTRINSIC_MATH_ATAN = 66;
-        var INTRINSIC_LAST_ID = 66;
+        var INTRINSIC_BUFFER_TO_STRING = 67;
+        var INTRINSIC_FUNCTION_TO_STRING = 68;
+        var INTRINSIC_LAST_ID = 68;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -4280,6 +4283,8 @@
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_FUNCTION_TO_STRING) {
+            requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
@@ -4466,6 +4471,24 @@
             intrinsicHandled = 1;
         }
         if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_FUNCTION_TO_STRING) {
+            var functionStringReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var functionStringReceiverCell = 0;
+            if (functionStringReceiverIndex >= 0) {
+                functionStringReceiverCell = frameRegisterCellAddress(
+                    heapBase, frame, functionStringReceiverIndex);
+            }
+            intrinsicHandled = functionToStringKernel(
+                heapBase, intrinsicTarget, functionStringReceiverCell);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
             var stringConstructorResult = stringConstructorKernel(
                 heapBase, state, intrinsicTarget, registerCells,
@@ -4647,6 +4670,21 @@
             }
         }
         return intrinsicHandled;
+    }
+
+    function functionToStringKernel(heapBase, targetCell, receiverCell) {
+        if (receiverCell === 0) return 0;
+        if (valueCellTag(0, receiverCell) !== VALUE_TAG_REFERENCE) return 0;
+        var callable = valueCellReference(0, receiverCell);
+        if (recordType(heapBase, callable) !==
+                HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        var program = functionMetadata(heapBase, callable);
+        if (recordType(heapBase, program) !== HEAP_TYPE_PROGRAM) return 0;
+        var source = programSource(heapBase, program);
+        if (source === 0) return 0;
+        if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
+        setValueCellReference(targetCell, source);
+        return 1;
     }
 
     function ffiCallKernel(
@@ -5942,7 +5980,13 @@
                 isBufferAccessIntrinsic = 1;
             }
         }
-        if (intrinsicId !== INTRINSIC_BUFFER_SLICE) {
+        var isBufferObjectIntrinsic = 0;
+        if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
+            isBufferObjectIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_BUFFER_TO_STRING) {
+            isBufferObjectIntrinsic = 1;
+        }
+        if (isBufferObjectIntrinsic === 0) {
             if (isRawMemoryIntrinsic === 0) {
                 if (isBufferAccessIntrinsic === 0) return 0;
             }
@@ -6031,6 +6075,215 @@
             sliceView + BUFFER_VIEW_RECORD_BYTES);
         store32(intrinsicTarget, VALUE_TAG_REFERENCE);
         store32(intrinsicTarget + VALUE_CELL_LOW, sliceView);
+        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
+        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        return 1;
+    }
+    }
+    if (intrinsicHandled === 0) {
+    if (intrinsicId === INTRINSIC_BUFFER_TO_STRING) {
+        var toStringReceiverIndex = load32(
+            heapBase + bytecodeWords +
+            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var toStringValid = 1;
+        if (toStringReceiverIndex < 0) toStringValid = 0;
+        var toStringReceiverCell = heapBase + registerCells +
+            toStringReceiverIndex * VALUE_CELL_BYTES;
+        if (load32(toStringReceiverCell) !== VALUE_TAG_REFERENCE) {
+            toStringValid = 0;
+        }
+        var toStringView = load32(toStringReceiverCell + VALUE_CELL_LOW);
+        if (toStringValid === 1) {
+            if (recordType(heapBase, toStringView) !==
+                    HEAP_TYPE_BUFFER_VIEW) toStringValid = 0;
+        }
+        if (intrinsicArgumentCount > 1) toStringValid = 0;
+        var toStringAscii = 0;
+        if (intrinsicArgumentCount === 1) {
+            var toStringEncodingDescriptor = heapBase +
+                intrinsicArgumentsVector + VECTOR_CELLS;
+            if (load32(toStringEncodingDescriptor) !== VALUE_TAG_INT32) {
+                toStringValid = 0;
+            }
+            var toStringEncodingRegister = load32(
+                toStringEncodingDescriptor + VALUE_CELL_LOW);
+            var toStringEncodingCell = heapBase + registerCells +
+                toStringEncodingRegister * VALUE_CELL_BYTES;
+            if (load32(toStringEncodingCell) !== VALUE_TAG_REFERENCE) {
+                toStringValid = 0;
+            }
+            var toStringEncoding = load32(
+                toStringEncodingCell + VALUE_CELL_LOW);
+            if (toStringValid === 1) {
+                if (recordType(heapBase, toStringEncoding) !==
+                        HEAP_TYPE_STRING) toStringValid = 0;
+            }
+            if (toStringValid === 1) {
+                var encodingLength = stringLength(heapBase,
+                                                  toStringEncoding);
+                if (encodingLength === 5) {
+                    var encodingMatches = 1;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 0) !== 97) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 1) !== 115) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 2) !== 99) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 3) !== 105) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 4) !== 105) encodingMatches = 0;
+                    if (encodingMatches === 1) {
+                        toStringAscii = 1;
+                    } else {
+                        encodingMatches = 1;
+                        if (stringCharacterCodeUnit(heapBase,
+                                toStringEncoding, 0) !== 117) encodingMatches = 0;
+                        if (stringCharacterCodeUnit(heapBase,
+                                toStringEncoding, 1) !== 116) encodingMatches = 0;
+                        if (stringCharacterCodeUnit(heapBase,
+                                toStringEncoding, 2) !== 102) encodingMatches = 0;
+                        if (stringCharacterCodeUnit(heapBase,
+                                toStringEncoding, 3) !== 45) encodingMatches = 0;
+                        if (stringCharacterCodeUnit(heapBase,
+                                toStringEncoding, 4) !== 56) encodingMatches = 0;
+                        if (encodingMatches === 0) toStringValid = 0;
+                    }
+                } else if (encodingLength === 6) {
+                    encodingMatches = 1;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 0) !== 98) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 1) !== 105) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 2) !== 110) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 3) !== 97) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 4) !== 114) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 5) !== 121) encodingMatches = 0;
+                    if (encodingMatches === 1) toStringAscii = 1;
+                    else toStringValid = 0;
+                } else if (encodingLength === 4) {
+                    encodingMatches = 1;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 0) !== 117) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 1) !== 116) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 2) !== 102) encodingMatches = 0;
+                    if (stringCharacterCodeUnit(heapBase,
+                            toStringEncoding, 3) !== 56) encodingMatches = 0;
+                    if (encodingMatches === 0) toStringValid = 0;
+                } else toStringValid = 0;
+            }
+        }
+        if (toStringValid === 0) return 0;
+        var toStringBacking = bufferViewBacking(heapBase, toStringView);
+        var toStringPointer = bufferBackingPointer(heapBase,
+                                                   toStringBacking);
+        var toStringByteLength = bufferViewLength(heapBase, toStringView);
+        var toStringByteOffset = bufferViewOffset(heapBase, toStringView);
+        if (toStringPointer === 0) return 0;
+        toStringPointer = toStringPointer + toStringByteOffset;
+        var toStringUnitCount = 0;
+        var toStringScan = 0;
+        while (toStringScan < toStringByteLength) {
+            var toStringLead = loadRaw8(toStringPointer + toStringScan);
+            var toStringSingleByte = 0;
+            if (toStringAscii === 1) toStringSingleByte = 1;
+            else if (toStringLead < 128) toStringSingleByte = 1;
+            if (toStringSingleByte === 1) {
+                toStringScan = toStringScan + 1;
+                toStringUnitCount = toStringUnitCount + 1;
+            } else if ((toStringLead & 224) === 192) {
+                if (toStringScan + 1 >= toStringByteLength) return 0;
+                else {
+                    toStringScan = toStringScan + 2;
+                    toStringUnitCount = toStringUnitCount + 1;
+                }
+            } else if ((toStringLead & 240) === 224) {
+                if (toStringScan + 2 >= toStringByteLength) return 0;
+                else {
+                    toStringScan = toStringScan + 3;
+                    toStringUnitCount = toStringUnitCount + 1;
+                }
+            } else if ((toStringLead & 248) === 240) {
+                if (toStringScan + 3 >= toStringByteLength) return 0;
+                else {
+                    toStringScan = toStringScan + 4;
+                    toStringUnitCount = toStringUnitCount + 2;
+                }
+            } else return 0;
+        }
+        var toStringRecordBytes =
+            (STRING_CHARS + toStringUnitCount * 2 + 7) & -8;
+        if (reserveNativeAllocationKernel(heapBase, state,
+                toStringRecordBytes) === 0) return 0;
+        var toStringResult = engineHeapBump(heapBase, state);
+        if (toStringResult + toStringRecordBytes >
+                engineHeapLimit(heapBase, state)) return 0;
+        setRecordType(heapBase, toStringResult, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, toStringResult, toStringRecordBytes);
+        setRecordMark(heapBase, toStringResult, 0);
+        setRecordFlags(heapBase, toStringResult, 0);
+        setStringLength(heapBase, toStringResult, toStringUnitCount);
+        var toStringHash = -2128831035;
+        var toStringInput = 0;
+        var toStringOutput = 0;
+        while (toStringInput < toStringByteLength) {
+            var toStringFirst = loadRaw8(toStringPointer + toStringInput);
+            var toStringCode = toStringFirst;
+            var toStringDecodeSequence = 0;
+            if (toStringAscii === 0) {
+                if (toStringFirst >= 128) toStringDecodeSequence = 1;
+            }
+            if (toStringDecodeSequence === 1) {
+                if ((toStringFirst & 224) === 192) {
+                    toStringCode = ((toStringFirst & 31) << 6) |
+                        (loadRaw8(toStringPointer + toStringInput + 1) & 63);
+                    toStringInput = toStringInput + 1;
+                } else if ((toStringFirst & 240) === 224) {
+                    toStringCode = ((toStringFirst & 15) << 12) |
+                        ((loadRaw8(toStringPointer + toStringInput + 1) & 63) << 6) |
+                        (loadRaw8(toStringPointer + toStringInput + 2) & 63);
+                    toStringInput = toStringInput + 2;
+                } else {
+                    toStringCode = ((toStringFirst & 7) << 18) |
+                        ((loadRaw8(toStringPointer + toStringInput + 1) & 63) << 12) |
+                        ((loadRaw8(toStringPointer + toStringInput + 2) & 63) << 6) |
+                        (loadRaw8(toStringPointer + toStringInput + 3) & 63);
+                    toStringInput = toStringInput + 3;
+                }
+            }
+            if (toStringCode >= 65536) {
+                toStringCode = toStringCode - 65536;
+                var toStringHighSurrogate = 55296 +
+                                             (toStringCode >>> 10);
+                setStringCharacterByte(heapBase, toStringResult,
+                    toStringOutput * 2, toStringHighSurrogate & 255);
+                setStringCharacterByte(heapBase, toStringResult,
+                    toStringOutput * 2 + 1,
+                    (toStringHighSurrogate >>> 8) & 255);
+                toStringHash = (toStringHash ^ toStringHighSurrogate) *
+                               16777619;
+                toStringOutput = toStringOutput + 1;
+                toStringCode = 56320 + (toStringCode & 1023);
+            }
+            setStringCharacterByte(heapBase, toStringResult,
+                toStringOutput * 2, toStringCode & 255);
+            setStringCharacterByte(heapBase, toStringResult,
+                toStringOutput * 2 + 1, (toStringCode >>> 8) & 255);
+            toStringHash = (toStringHash ^ toStringCode) * 16777619;
+            toStringOutput = toStringOutput + 1;
+            toStringInput = toStringInput + 1;
+        }
+        setStringHash(heapBase, toStringResult, toStringHash);
+        setEngineHeapBump(heapBase, state,
+                          toStringResult + toStringRecordBytes);
+        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
+        store32(intrinsicTarget + VALUE_CELL_LOW, toStringResult);
         store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
         store32(intrinsicTarget + VALUE_CELL_AUX, 0);
         return 1;
@@ -8842,6 +9095,7 @@
         setProgramFlags(heapBase, program, usesArguments |
             strictProgram * 2 | evalProgram * 4);
         setProgramBindingCount(heapBase, program, bindingCount);
+        setProgramSource(heapBase, program, 0);
         initializedBytes = initializeProgramCallableKernel(
             heapBase, callable, program, context, stringSupport);
         setEngineHeapBump(heapBase, state, end);
@@ -10033,6 +10287,7 @@
             evalIntrinsicKernel: evalIntrinsicKernel,
             floorDivideDateIntegerKernel: floorDivideDateIntegerKernel,
             functionConstructorKernel: functionConstructorKernel,
+            functionToStringKernel: functionToStringKernel,
             getKeysKernel: getKeysKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
@@ -10453,9 +10708,11 @@
                 var regionBump = records.engineHeapBump(this.stateAddress);
                 var regionEnd = records.engineNativeRegionEnd(
                     this.stateAddress);
-                heap.publishFreeRegion(
-                    regionBump, regionEnd - regionBump, 0);
-                returnedRegions.push(regionBump);
+                var regionBytes = regionEnd - regionBump;
+                if (regionBytes >= FREE_RECORD_HEADER_BYTES) {
+                    heap.publishFreeRegion(regionBump, regionBytes, 0);
+                    returnedRegions.push(regionBump);
+                }
             }
             records.setEngineNativeAllocator(
                 this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0,
@@ -10513,8 +10770,17 @@
         this.nativeFreeRegionsOwned = true;
     };
 
-    NativeInterpreter.prototype.prepareSemanticFallback = function () {
+    NativeInterpreter.prototype.prepareSemanticFallback = function (opcode) {
         var heap = this.runtime.linearHeap;
+        /* Host CALL and CONSTRUCT callbacks may synchronously enter another
+         * JSContext on this runtime (the Function constructor's guest parser
+         * is one example).  Return native allocator ownership before such a
+         * callback: the nested execution uses the same engine-state record
+         * and must not inherit an outer run's active arena. */
+        if (opcode === Bytecode.CALL || opcode === Bytecode.CONSTRUCT) {
+            this.releaseAllocationRegionForCollection();
+            return false;
+        }
         if (this.nativeFreeRegionsOwned) {
             /* Native-owned regions have been removed from the host allocator
              * index, while their active suffix is a published FREE record.

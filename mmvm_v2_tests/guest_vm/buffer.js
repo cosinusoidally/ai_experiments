@@ -175,7 +175,7 @@
                     result += String.fromCharCode(support.read(receiver, index++));
                 }
                 return result;
-            });
+            }, NativeIntrinsics.BUFFER_TO_STRING);
         var property;
         for (property in properties) {
             if (Object.prototype.hasOwnProperty.call(properties, property)) {

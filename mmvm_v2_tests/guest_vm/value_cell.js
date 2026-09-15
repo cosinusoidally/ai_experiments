@@ -44,6 +44,10 @@
         this.heap.memory.writeU32Trusted(address + TAG_OFFSET, tag);
     };
 
+    ValueCells.prototype.int32PayloadAddressAt = function (address) {
+        return address + LOW_OFFSET;
+    };
+
     ValueCells.prototype.clearPayload = function (cell) {
         this.heap.writeFieldU32(cell, LOW_OFFSET, 0, Heap.Types.ROOT_SLOT);
         this.heap.writeFieldU32(cell, HIGH_OFFSET, 0, Heap.Types.ROOT_SLOT);

@@ -1527,6 +1527,8 @@
         var metadataIndex = this.freeProgramMetadataIndices.length ?
             this.freeProgramMetadataIndices.pop() : this.programObjects.length;
         var metadataId = metadataIndex + 1;
+        var sourceAddress = program.source ?
+            this.internStringAddress(program.source) : 0;
         var address = this.heapRecords.allocateProgram(
             program.heapBytecodeAddress, program.heapConstantsAddress, {
             constantRegisters: program.heapConstantRegistersAddress,
@@ -1542,7 +1544,8 @@
             flags: (program.usesArguments ? 1 : 0) |
                    (program.strict ? 2 : 0) |
                    (program.evalCode ? 4 : 0),
-            bindingCount: program.bindings ? program.bindings.length : 0
+            bindingCount: program.bindings ? program.bindings.length : 0,
+            source: sourceAddress
         });
         if (program.bindings && this.heapRecords.programBindingCount(address) !==
                 program.bindings.length) {
@@ -1781,7 +1784,9 @@
             evalCode: !!(records.programFlags(address) & 4),
             globalDeclarations: [],
             filename: "<guest-heap-program>",
-            name: ""
+            name: "",
+            source: records.programSource(address) ?
+                this.readHeapString(records.programSource(address)) : null
         };
         this.programMetadata[key] = program;
         return program;
@@ -2685,7 +2690,7 @@
                     return receiver.source;
                 }
                 return "function " + (receiver.name || "") + "() { [native code] }";
-            });
+            }, "intrinsic", NativeIntrinsics.FUNCTION_TO_STRING);
         if (this.functionPrototype) {
             var functionMethodName;
             for (functionMethodName in this.functionMethods) {
@@ -3402,6 +3407,50 @@
         var object = context ? context.globalObject : this.globalObject;
         var property = this.heapOwnProperty(object, this.propertyKey(name), false);
         return property ? this.heapRecords.propertyValueCell(property) : 0;
+    };
+
+    Runtime.prototype.standaloneNativeBindings = function (context) {
+        var bindings = [];
+        var dlsymCell = this.globalCellAddress(context, "NodeDlsymPointer");
+        if (dlsymCell) {
+            bindings.push({cell: dlsymCell,
+                payload: this.valueCells.int32PayloadAddressAt(dlsymCell),
+                suppliedDlsym: true, symbol: "dlsym"});
+        }
+        var names;
+        var pointers;
+        try {
+            names = this.getGlobal(context, "NodeLibcSymbolNames");
+            pointers = this.getGlobal(context, "NodeLibcSymbols");
+        } catch (missingBindings) {
+            return bindings;
+        }
+        if (!names || !names.heapAddress || !pointers ||
+            !pointers.heapAddress) return bindings;
+        var property = this.heapRecords.objectPropertyHead(names.heapAddress);
+        while (property) {
+            var keyAddress = this.heapRecords.propertyKey(property);
+            var pointerProperty = this.heapRecords.findOwnProperty(
+                pointers.heapAddress, keyAddress);
+            if (pointerProperty) {
+                var pointerCell = this.heapRecords.propertyValueCell(
+                    pointerProperty);
+                bindings.push({cell: pointerCell,
+                    payload: this.valueCells.int32PayloadAddressAt(pointerCell),
+                    suppliedDlsym: false,
+                    symbol: String(this.readHeapValue(
+                        this.heapRecords.propertyValueCell(property)))});
+            }
+            property = this.heapRecords.propertyNext(property);
+        }
+        bindings.sort(function (left, right) {
+            if (left.suppliedDlsym !== right.suppliedDlsym) {
+                return left.suppliedDlsym ? -1 : 1;
+            }
+            return left.symbol < right.symbol ? -1 :
+                   left.symbol > right.symbol ? 1 : left.cell - right.cell;
+        });
+        return bindings;
     };
 
     Runtime.prototype.assertOwned = function (value) {

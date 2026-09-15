@@ -81,7 +81,8 @@
     var PROGRAM_METADATA = 36;
     var PROGRAM_FLAGS = 40;
     var PROGRAM_BINDING_COUNT = 44;
-    var PROGRAM_BYTES = 48;
+    var PROGRAM_SOURCE = 48;
+    var PROGRAM_BYTES = 56;
 
     var CONTEXT_GLOBAL = 0;
     var CONTEXT_ACTIVE_FRAME = 4;
@@ -951,6 +952,8 @@
             layout.flags || 0, Heap.Types.PROGRAM);
         this.heap.writeTrustedFieldU32(address, PROGRAM_BINDING_COUNT,
             layout.bindingCount || 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_SOURCE,
+            layout.source || 0, Heap.Types.PROGRAM);
         return address;
     };
 
@@ -975,6 +978,11 @@
     Records.prototype.programBindingCount = function (program) {
         return this.heap.readTrustedFieldU32(
             program, PROGRAM_BINDING_COUNT, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programSource = function (program) {
+        return this.heap.readTrustedFieldU32(
+            program, PROGRAM_SOURCE, Heap.Types.PROGRAM);
     };
 
     Records.prototype.programFlags = function (program) {
@@ -1432,6 +1440,7 @@
             reference(records.programConstantRegisters(address));
             reference(records.programBindingRegisters(address));
             reference(records.programParameterSlots(address));
+            reference(records.programSource(address));
         } else if (type === Heap.Types.CONTEXT) {
             reference(records.contextGlobal(address));
             reference(records.contextActiveFrame(address));

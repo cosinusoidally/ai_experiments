@@ -399,6 +399,14 @@
             assembler.jumpEqual("standalone_runtime_error");
             assembler.movLocalEax(SYMBOL_POINTER_LOCAL);
         }
+        function storeBindingPayload(payloadAddress, suppliedDlsym) {
+            assembler.movEaxLocal(HEAP_BASE_LOCAL);
+            assembler.addEaxImmediate(payloadAddress);
+            assembler.movEcxEax();
+            if (suppliedDlsym) assembler.movEaxEbpArgument(2);
+            else assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+            assembler.movDwordPtrEcxEax();
+        }
 
         assembler.pushEbp();
         assembler.movEbpEsp();
@@ -457,6 +465,16 @@
         assembler.movEcxEax();
         assembler.movEaxEbpArgument(2);
         assembler.movDwordPtrEcxEax();
+
+        var nativeBindingIndex = 0;
+        while (nativeBindingIndex < layout.nativeBindings.length) {
+            var nativeBinding = layout.nativeBindings[nativeBindingIndex++];
+            if (!nativeBinding.suppliedDlsym) {
+                resolveSymbol(nativeBinding.nameOffset);
+            }
+            storeBindingPayload(nativeBinding.payload,
+                                nativeBinding.suppliedDlsym);
+        }
 
         assembler.movEaxEbpArgument(0);
         assembler.compareEaxImmediate(1);
@@ -540,6 +558,7 @@
             codeOffset: 0,
             heapCapacity: 0,
             heapImageLength: 0,
+            nativeBindings: runtime.standaloneNativeBindings(frame.context),
             statePayloadAddress: nativeInterpreter.statePayload,
             stringSupportAddress: nativeInterpreter.stringSupportAddress,
             arrayPrototypeAddress: runtime.arrayPrototype ?
@@ -550,6 +569,12 @@
         };
         var mmapNameBytes = standaloneStringBytes("mmap");
         var memcpyNameBytes = standaloneStringBytes("memcpy");
+        var bindingNameBytes = [];
+        var bindingIndex = 0;
+        while (bindingIndex < layout.nativeBindings.length) {
+            bindingNameBytes.push(standaloneStringBytes(
+                layout.nativeBindings[bindingIndex++].symbol));
+        }
         var bootstrap = buildStandaloneBootstrap(layout);
         layout.mmapNameOffset = layout.entryOffset + bootstrap.bytes.length;
         layout.memcpyNameOffset = layout.mmapNameOffset + mmapNameBytes.length;
@@ -557,8 +582,15 @@
                                   memcpyNameBytes.length;
         layout.expectedNameOffset = layout.strcmpNameOffset +
                                     strcmpNameBytes.length;
-        layout.codeOffset = alignStandalone(layout.expectedNameOffset +
-                                            expectedNameBytes.length, 16);
+        var nextDataOffset = layout.expectedNameOffset +
+                             expectedNameBytes.length;
+        bindingIndex = 0;
+        while (bindingIndex < layout.nativeBindings.length) {
+            layout.nativeBindings[bindingIndex].nameOffset = nextDataOffset;
+            nextDataOffset += bindingNameBytes[bindingIndex].length;
+            bindingIndex++;
+        }
+        layout.codeOffset = alignStandalone(nextDataOffset, 16);
         var heapImageLength = heap.bump;
         var heapCapacity = heap.memory.byteLength;
         layout.heapOffset = alignStandalone(layout.codeOffset + result.length,
@@ -578,10 +610,24 @@
         var savedPlatformPointers =
             records.suspendPlatformPointersForSnapshot(
                 nativeInterpreter.platformServicesAddress);
+        var savedNativeBindingValues = [];
+        bindingIndex = 0;
+        while (bindingIndex < layout.nativeBindings.length) {
+            var bindingCell = layout.nativeBindings[bindingIndex++].cell;
+            savedNativeBindingValues.push(runtime.readHeapValue(bindingCell));
+            runtime.writeHeapValue(bindingCell, 0);
+        }
         var heapImage = null;
         try {
             heapImage = heap.memory.createSnapshot(heapImageLength);
         } finally {
+            bindingIndex = 0;
+            while (bindingIndex < layout.nativeBindings.length) {
+                runtime.writeHeapValue(
+                    layout.nativeBindings[bindingIndex].cell,
+                    savedNativeBindingValues[bindingIndex]);
+                bindingIndex++;
+            }
             records.restorePlatformPointersAfterSnapshot(
                 nativeInterpreter.platformServicesAddress,
                 savedPlatformPointers);
@@ -632,6 +678,13 @@
                               strcmpNameBytes);
             copyBytesToNative(staging + layout.expectedNameOffset,
                               expectedNameBytes);
+            bindingIndex = 0;
+            while (bindingIndex < layout.nativeBindings.length) {
+                copyBytesToNative(staging +
+                    layout.nativeBindings[bindingIndex].nameOffset,
+                    bindingNameBytes[bindingIndex]);
+                bindingIndex++;
+            }
             this.ffi.call(this.ffi.resolve("memcpy"),
                 [staging + layout.codeOffset, result.pointer, result.length]);
             complete = writeExact(this.ffi, writePointer, descriptor,

@@ -279,6 +279,7 @@
         programConstantRegisters: "PROGRAM_CONSTANT_REGISTERS",
         programBindingRegisters: "PROGRAM_BINDING_REGISTERS",
         programBindingCount: "PROGRAM_BINDING_COUNT",
+        programSource: "PROGRAM_SOURCE",
         programParameterSlots: "PROGRAM_PARAMETER_SLOTS",
         programRegisterCount: "PROGRAM_REGISTER_COUNT",
         programArgumentsSlot: "PROGRAM_ARGUMENTS_SLOT",
@@ -400,6 +401,7 @@
         setProgramMetadata: "PROGRAM_METADATA",
         setProgramFlags: "PROGRAM_FLAGS",
         setProgramBindingCount: "PROGRAM_BINDING_COUNT",
+        setProgramSource: "PROGRAM_SOURCE",
         setEngineExitReason: "ENGINE_EXIT_REASON",
         setEnginePC: "ENGINE_PC",
         setEngineResult: "ENGINE_RESULT",
@@ -649,8 +651,23 @@
     }
 
     function isKernelConstantDeclaration(declaration) {
-        return /^[A-Z][A-Z0-9_]*$/.test(declaration.name) &&
+        return isKernelConstantName(declaration.name) &&
                kernelConstantValue(declaration.initial) !== null;
+    }
+
+    function isKernelConstantName(name) {
+        if (!name.length) return false;
+        var first = name.charCodeAt(0);
+        if (first < 65 || first > 90) return false;
+        var index = 1;
+        while (index < name.length) {
+            var code = name.charCodeAt(index++);
+            if (code >= 65 && code <= 90) continue;
+            if (code >= 48 && code <= 57) continue;
+            if (code === 95) continue;
+            return false;
+        }
+        return true;
     }
 
     function kernelConstantValue(expression) {
