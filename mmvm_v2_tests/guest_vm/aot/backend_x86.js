@@ -377,17 +377,32 @@
 
     function buildStandaloneBootstrap(layout) {
         var assembler = new Assembler(true);
+        var IMAGE_BASE_LOCAL = 0;
+        var SYMBOL_POINTER_LOCAL = 1;
+        var HEAP_BASE_LOCAL = 2;
         function imageAddress(offset) {
-            assembler.movEaxLocal(0);
-            assembler.addEaxImmediate(offset - layout.heapOffset);
+            assembler.movEaxLocal(IMAGE_BASE_LOCAL);
+            assembler.addEaxImmediate(offset);
         }
         function discardCallWords(count) {
             while (count-- > 0) assembler.popEcx();
         }
+        function resolveSymbol(nameOffset) {
+            imageAddress(nameOffset);
+            assembler.pushEax();
+            assembler.movEaxImmediate(0);
+            assembler.pushEax();
+            assembler.movEaxEbpArgument(2);
+            assembler.callEax();
+            discardCallWords(2);
+            assembler.testEaxEax();
+            assembler.jumpEqual("standalone_runtime_error");
+            assembler.movLocalEax(SYMBOL_POINTER_LOCAL);
+        }
 
         assembler.pushEbp();
         assembler.movEbpEsp();
-        assembler.subEspImmediate(8);
+        assembler.subEspImmediate(12);
         assembler.pushEbx();
         assembler.pushEsi();
         assembler.pushEdi();
@@ -396,12 +411,48 @@
         assembler.label("standalone_image_anchor");
         assembler.popInstructionPointerEcx();
         assembler.movEaxEcx();
-        assembler.addEaxImmediate(layout.heapOffset -
-            (layout.entryOffset + assembler.labels.standalone_image_anchor));
-        assembler.movLocalEax(0);
+        assembler.subtractEaxImmediate(
+            layout.entryOffset + assembler.labels.standalone_image_anchor);
+        assembler.movLocalEax(IMAGE_BASE_LOCAL);
+
+        /* The file contains only initialized heap bytes. Reserve the runtime
+         * heap as anonymous memory so file size is independent of capacity. */
+        resolveSymbol(layout.mmapNameOffset);
+        assembler.movEaxImmediate(0);
+        assembler.pushEax();
+        assembler.movEaxImmediate(-1);
+        assembler.pushEax();
+        assembler.movEaxImmediate(0x22);
+        assembler.pushEax();
+        assembler.movEaxImmediate(3);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.heapCapacity);
+        assembler.pushEax();
+        assembler.movEaxImmediate(0);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(6);
+        assembler.testEaxEax();
+        assembler.jumpEqual("standalone_runtime_error");
+        assembler.compareEaxImmediate(-1);
+        assembler.jumpEqual("standalone_runtime_error");
+        assembler.movLocalEax(HEAP_BASE_LOCAL);
+
+        resolveSymbol(layout.memcpyNameOffset);
+        assembler.movEaxImmediate(layout.heapImageLength);
+        assembler.pushEax();
+        imageAddress(layout.heapOffset);
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(3);
 
         /* Rebind the one capability supplied by the loader.  This is a named
          * guest-heap field chosen by HeapRecords, not an open-coded layout. */
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
         assembler.addEaxImmediate(layout.dlsymCellAddress);
         assembler.movEcxEax();
         assembler.movEaxEbpArgument(2);
@@ -413,23 +464,14 @@
 
         /* Resolve strcmp through the supplied dlsym and use it to prove that
          * argv names the program captured in this image. */
-        imageAddress(layout.strcmpNameOffset);
-        assembler.pushEax();
-        assembler.movEaxImmediate(0);
-        assembler.pushEax();
-        assembler.movEaxEbpArgument(2);
-        assembler.callEax();
-        discardCallWords(2);
-        assembler.testEaxEax();
-        assembler.jumpEqual("standalone_runtime_error");
-        assembler.movLocalEax(1);
+        resolveSymbol(layout.strcmpNameOffset);
 
         imageAddress(layout.expectedNameOffset);
         assembler.pushEax();
         assembler.movEaxEbpArgument(1);
         assembler.movEaxDwordPtrEax();
         assembler.pushEax();
-        assembler.movEaxLocal(1);
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
         assembler.callEax();
         discardCallWords(2);
         assembler.testEaxEax();
@@ -449,7 +491,7 @@
         assembler.pushEax();
         assembler.movEaxImmediate(layout.frameAddress);
         assembler.pushEax();
-        assembler.movEaxLocal(0);
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
         assembler.pushEax();
         imageAddress(layout.codeOffset);
         assembler.callEax();
@@ -491,9 +533,13 @@
             heapOffset: 0,
             dlsymCellAddress: records.platformDlsymPointerCellAddress(
                 nativeInterpreter.platformServicesAddress),
+            mmapNameOffset: 0,
+            memcpyNameOffset: 0,
             strcmpNameOffset: 0,
             expectedNameOffset: 0,
             codeOffset: 0,
+            heapCapacity: 0,
+            heapImageLength: 0,
             statePayloadAddress: nativeInterpreter.statePayload,
             stringSupportAddress: nativeInterpreter.stringSupportAddress,
             arrayPrototypeAddress: runtime.arrayPrototype ?
@@ -502,19 +548,25 @@
             contextAddress: frame.context.heapAddress,
             frameAddress: frame.heapAddress
         };
+        var mmapNameBytes = standaloneStringBytes("mmap");
+        var memcpyNameBytes = standaloneStringBytes("memcpy");
         var bootstrap = buildStandaloneBootstrap(layout);
-        layout.strcmpNameOffset = layout.entryOffset + bootstrap.bytes.length;
+        layout.mmapNameOffset = layout.entryOffset + bootstrap.bytes.length;
+        layout.memcpyNameOffset = layout.mmapNameOffset + mmapNameBytes.length;
+        layout.strcmpNameOffset = layout.memcpyNameOffset +
+                                  memcpyNameBytes.length;
         layout.expectedNameOffset = layout.strcmpNameOffset +
                                     strcmpNameBytes.length;
         layout.codeOffset = alignStandalone(layout.expectedNameOffset +
                                             expectedNameBytes.length, 16);
-        layout.heapOffset = alignStandalone(layout.codeOffset + result.length,
-                                            4096);
-        bootstrap = buildStandaloneBootstrap(layout);
-
         var heapImageLength = heap.bump;
         var heapCapacity = heap.memory.byteLength;
-        var fileLength = layout.heapOffset + heapCapacity;
+        layout.heapOffset = alignStandalone(layout.codeOffset + result.length,
+                                            4096);
+        layout.heapImageLength = heapImageLength;
+        layout.heapCapacity = heapCapacity;
+        bootstrap = buildStandaloneBootstrap(layout);
+        var fileLength = layout.heapOffset + heapImageLength;
         if (fileLength > 1073741824) {
             throw new RangeError("standalone snapshot exceeds 1 GiB");
         }
@@ -541,7 +593,6 @@
         var renamePointer = this.ffi.resolve("rename");
         var unlinkPointer = this.ffi.resolve("unlink");
         var getpidPointer = this.ffi.resolve("getpid");
-        var ftruncatePointer = this.ffi.resolve("ftruncate");
         var callocPointer = this.ffi.resolve("calloc");
         var freePointer = this.ffi.resolve("free");
         var temporaryPath = path + ".tmp." +
@@ -573,6 +624,10 @@
             poke32(staging + 84, metadata.profileMode | 0);
             poke32(staging + 88, metadata.sourceHash | 0);
             copyBytesToNative(staging + layout.entryOffset, bootstrap.bytes);
+            copyBytesToNative(staging + layout.mmapNameOffset,
+                              mmapNameBytes);
+            copyBytesToNative(staging + layout.memcpyNameOffset,
+                              memcpyNameBytes);
             copyBytesToNative(staging + layout.strcmpNameOffset,
                               strcmpNameBytes);
             copyBytesToNative(staging + layout.expectedNameOffset,
@@ -582,9 +637,7 @@
             complete = writeExact(this.ffi, writePointer, descriptor,
                                   staging, stagingLength) &&
                        writeExact(this.ffi, writePointer, descriptor,
-                                  heapImage.pointer, heapImageLength) &&
-                       this.ffi.call(ftruncatePointer,
-                                     [descriptor, fileLength]) === 0;
+                                  heapImage.pointer, heapImageLength);
         }
         if (staging) this.ffi.call(freePointer, [staging]);
         heap.memory.destroySnapshot(heapImage);

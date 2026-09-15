@@ -240,10 +240,12 @@ argument is the path captured at snapshot time. Images and executables stay in
 the ignored `artifacts/` directory.
 
 This is the first standalone milestone, not yet a general source loader. The
-current image reserves the guest heap's full growth capacity as a sparse file
-extent and maps it privately. Only the initialized prefix consumes ordinary
-disk blocks. General guest-side loading, native GC/lifecycle handling, and
-snapshot generation from inside the standalone VM remain later stages in
+current image stores only the initialized guest-heap prefix, so its ordinary
+file length is currently about 273 KiB. At startup, the image resolves `mmap`
+and `memcpy` through the supplied `dlsym`, reserves anonymous memory for the
+heap's growth capacity, and copies the compact template into it. General
+guest-side loading, native GC/lifecycle handling, and snapshot generation from
+inside the standalone VM remain later stages in
 `guest_vm/STANDALONE_SNAPSHOT_PLAN.md`.
 
 The high-level regression test builds its runner in a temporary ignored

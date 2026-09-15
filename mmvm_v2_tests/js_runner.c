@@ -69,8 +69,8 @@ int main(int argc, char **argv)
         file_length != (uint32_t)status.st_size ||
         entry_offset < SNAPSHOT_HEADER_BYTES || entry_offset >= code_offset ||
         code_offset >= heap_offset || code_length > heap_offset - code_offset ||
-        heap_image_length > heap_capacity ||
-        heap_offset > file_length || heap_capacity != file_length - heap_offset) {
+        heap_image_length > heap_capacity || heap_offset > file_length ||
+        heap_image_length != file_length - heap_offset) {
         fprintf(stderr, "js_runner: incompatible snapshot %s\n", argv[1]);
         munmap(image, (size_t)status.st_size);
         return 65;

@@ -180,8 +180,11 @@ The implemented bootstrap resolves `strcmp` through the supplied `dlsym` to
 check that filename, rebinds the heap's named dlsym capability cell, and calls
 the real native bytecode interpreter with the serialized guest offsets. All
 process-local platform pointers are cleared while copying the heap and restored
-in the still-running js_min instance afterwards. The image's heap extent is
-sparse on disk and `MAP_PRIVATE`, so execution does not mutate the file.
+in the still-running js_min instance afterwards. The file includes only the
+initialized heap prefix. The bootstrap resolves `mmap` and `memcpy` through the
+supplied `dlsym`, creates a zero-filled anonymous heap reservation, and copies
+the compact template into it before entering the interpreter. Heap capacity
+therefore does not inflate the snapshot file or constrain its load address.
 
 ### 3. Native runtime lifecycle
 

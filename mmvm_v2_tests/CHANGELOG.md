@@ -8,6 +8,20 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.50
+
+Approximate completion: 2026-09-15 morning BST
+
+### Guest VM
+
+- Replaced the sparse full-capacity heap extent in standalone snapshots with a
+  genuinely compact initialized heap template. The current hello image is
+  about 273 KiB as both an ordinary file and apparent file size.
+- Made the native bootstrap resolve `mmap` and `memcpy` through its sole
+  loader-supplied `dlsym` capability, reserve zero-filled anonymous heap memory
+  at startup, and copy the compact template before entering the interpreter.
+  The C runner still supplies no VM support.
+
 ## 0.49
 
 Approximate completion: 2026-09-15 morning BST

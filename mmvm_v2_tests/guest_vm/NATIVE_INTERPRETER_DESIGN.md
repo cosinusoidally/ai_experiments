@@ -177,10 +177,12 @@ pointer, or lazy intrinsic-helper address. All internal branches are relative;
 the heap base and runtime-owned platform-service table remain entry arguments.
 Consequently snapshot use never fixes generated code at its original address.
 Ordinary `--with-snapshot` execution still uses the independently allocated,
-growable runtime heap. Standalone stage-2 execution privately maps a sparse heap
-template and its reserved growth extent as part of the relocatable image; later
-stages will move allocation, collection and further growth under the native
-runtime lifecycle.
+growable runtime heap. A standalone stage-2 file stores only its initialized
+heap template. Its native bootstrap resolves `mmap` and `memcpy` through the
+loader-supplied `dlsym`, reserves anonymous runtime memory independently of the
+file, and copies that compact template before interpreter entry. Later stages
+will move allocation, collection and further growth under the native runtime
+lifecycle.
 
 Snapshots are architecture-, compiler-, profile-mode-, and source-specific
 temporary build products. The checked-in runner documentation places them in
