@@ -113,6 +113,8 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,
                                         snapshot: guestRunnerSnapshot,
+                                        deferSnapshotWrite:
+                                            !!guestRunnerSnapshot,
                                         withSnapshot: guestRunnerWithSnapshot,
                                         skipSnapshotHash:
                                             guestRunnerSkipSnapshotHash,
@@ -165,6 +167,18 @@ try {
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
     var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
+    if (guestRunnerSnapshot) {
+        if (!guestProgramVM.runtime.nativeInterpreter.writeStandaloneSnapshot(
+                guestRunnerSnapshot, guestExecution, guestProgramPath)) {
+            throw new Error("could not write standalone snapshot: " +
+                            guestRunnerSnapshot);
+        }
+        if (typeof print === "function") {
+            print("wrote standalone snapshot: " + guestRunnerSnapshot);
+        } else if (typeof console !== "undefined" && console.log) {
+            console.log("wrote standalone snapshot: " + guestRunnerSnapshot);
+        }
+    }
     var guestRunnerProfileStarted = new Date().getTime();
     var guestRunnerStoppedForProfile = false;
     var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?

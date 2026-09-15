@@ -8,6 +8,23 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.49
+
+Approximate completion: 2026-09-15 morning BST
+
+### Guest VM
+
+- Added the first complete standalone snapshot image: a macro-assembled native
+  bootstrap, relocatable interpreter, precompiled guest program and initial
+  frame/context, and a canonical sparse guest-heap template.
+- Added the minimal ANSI C `js_runner.c` loader. It maps the image, supplies
+  only `argc`, `argv`, and the address of `dlsym`, and transfers control; the
+  snapshotted guest bytecode performs the `Hello, world!` libc FFI call.
+- Made standalone image output deterministic by excluding process-local
+  platform pointers. Two clean generations are byte-identical. Version-2
+  images remain usable as native-interpreter inputs through `--with-snapshot`,
+  and older version-1 code images remain readable.
+
 ## 0.48
 
 Approximate completion: 2026-09-14 evening BST

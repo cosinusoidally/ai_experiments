@@ -10102,6 +10102,7 @@
                 skipSourceHash: !snapshotNeedsSource
             };
         }
+        this.snapshotMetadata = snapshotMetadata;
         var x86Backend = new X86Backend({captureAssembly: false});
         var loadedSnapshot = false;
         if (runtime.nativeSnapshotRead) {
@@ -10150,7 +10151,8 @@
         if (!loadedSnapshot) {
             x86Backend.timings = backendTimings;
             this.nativeResult = x86Backend.compile(this.ir);
-            if (runtime.nativeSnapshotWrite) {
+            if (runtime.nativeSnapshotWrite &&
+                !runtime.deferNativeSnapshotWrite) {
                 if (!x86Backend.writeExecutableSnapshot(
                         runtime.nativeSnapshotWrite, this.nativeResult,
                         snapshotMetadata)) {
@@ -10757,6 +10759,14 @@
                     records.engineResultCell(this.stateAddress) : 0,
                 instructions: instructionCount,
                 backend: this.nativeResult.fn ? "i386" : "js"};
+    };
+
+    NativeInterpreter.prototype.writeStandaloneSnapshot = function (
+            path, execution, expectedProgramPath) {
+        var backend = new X86Backend({captureAssembly: false});
+        return backend.writeStandaloneSnapshot(path, this.nativeResult,
+            this.runtime, execution, expectedProgramPath,
+            this.snapshotMetadata);
     };
 
     NativeInterpreter.prototype.reportProfile = function () {

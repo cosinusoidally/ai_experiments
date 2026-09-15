@@ -1068,6 +1068,12 @@
             Heap.Types.PLATFORM_SERVICES);
     };
 
+    Records.prototype.platformDlsymPointerCellAddress = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(services,
+                                               PLATFORM_DLSYM_POINTER);
+    };
+
     Records.prototype.setPlatformArraySlicePointer = function (
             services, pointer) {
         this.heap.writeTrustedFieldU32(
@@ -1167,6 +1173,36 @@
         return this.heap.readTrustedFieldU32(
             services, PLATFORM_FREE_POINTER,
             Heap.Types.PLATFORM_SERVICES);
+    };
+
+    /* Native service addresses are process-local capabilities and must never
+     * become persistent image data. Snapshot code brackets its memory copy
+     * with these two named operations so platform layout remains private to
+     * HeapRecords and the live runtime is restored exactly. */
+    Records.prototype.suspendPlatformPointersForSnapshot = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        var saved = [];
+        var offset = 0;
+        while (offset < PLATFORM_SERVICES_BYTES) {
+            saved.push(this.heap.readTrustedFieldU32(
+                services, offset, Heap.Types.PLATFORM_SERVICES));
+            this.heap.writeTrustedFieldU32(
+                services, offset, 0, Heap.Types.PLATFORM_SERVICES);
+            offset += 4;
+        }
+        return saved;
+    };
+
+    Records.prototype.restorePlatformPointersAfterSnapshot = function (
+            services, saved) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        var offset = 0;
+        var index = 0;
+        while (offset < PLATFORM_SERVICES_BYTES) {
+            this.heap.writeTrustedFieldU32(
+                services, offset, saved[index++], Heap.Types.PLATFORM_SERVICES);
+            offset += 4;
+        }
     };
 
     Records.prototype.engineStatePayloadAddress = function (state) {

@@ -239,6 +239,9 @@
     var SNAPSHOT_MAGIC = 0x31535647;
     var SNAPSHOT_FORMAT_VERSION = 1;
     var SNAPSHOT_HEADER_BYTES = 32;
+    var STANDALONE_SNAPSHOT_MAGIC = 0x32535647;
+    var STANDALONE_SNAPSHOT_VERSION = 2;
+    var STANDALONE_HEADER_BYTES = 128;
 
     X86Backend.prototype.loadExecutableSnapshot = function (path, expected) {
         if (!this.ffi.isMMVM) {
@@ -253,26 +256,34 @@
         if (descriptor < 0) {
             throw new Error("could not open native snapshot: " + path);
         }
-        var header = this.ffi.call(callocPointer, [SNAPSHOT_HEADER_BYTES, 1]);
+        /* Version 2 extends the header for a complete standalone image. Read
+         * the larger size up front, then seek explicitly to the code segment;
+         * this remains compatible with version-1 code-only snapshots. */
+        var headerBytes = STANDALONE_HEADER_BYTES;
+        var header = this.ffi.call(callocPointer, [headerBytes, 1]);
         if (!header) {
             this.ffi.call(closePointer, [descriptor]);
             throw new Error("could not allocate native snapshot header");
         }
         if (!readExact(this.ffi, readPointer, descriptor, header,
-                       SNAPSHOT_HEADER_BYTES)) {
+                       headerBytes)) {
             this.ffi.call(freePointer, [header]);
             this.ffi.call(closePointer, [descriptor]);
             throw new Error("native snapshot header is truncated: " + path);
         }
         var magic = peek32(header) >>> 0;
         var formatVersion = peek32(header + 4) >>> 0;
-        var compilerVersion = peek32(header + 8) >>> 0;
-        var profileMode = peek32(header + 12) >>> 0;
-        var sourceHash = peek32(header + 16) >>> 0;
-        var length = peek32(header + 20) >>> 0;
+        var standalone = formatVersion === 2;
+        var compilerVersion = peek32(header + (standalone ? 80 : 8)) >>> 0;
+        var profileMode = peek32(header + (standalone ? 84 : 12)) >>> 0;
+        var sourceHash = peek32(header + (standalone ? 88 : 16)) >>> 0;
+        var codeOffset = standalone ? peek32(header + 20) >>> 0 :
+                                      SNAPSHOT_HEADER_BYTES;
+        var length = peek32(header + (standalone ? 24 : 20)) >>> 0;
         this.ffi.call(freePointer, [header]);
-        if (magic !== SNAPSHOT_MAGIC ||
-            formatVersion !== SNAPSHOT_FORMAT_VERSION ||
+        if ((!standalone && magic !== SNAPSHOT_MAGIC) ||
+            (standalone && magic !== STANDALONE_SNAPSHOT_MAGIC) ||
+            (formatVersion !== SNAPSHOT_FORMAT_VERSION && !standalone) ||
             compilerVersion !== (expected.compilerVersion >>> 0) ||
             profileMode !== (expected.profileMode >>> 0) ||
             (!expected.skipSourceHash &&
@@ -281,6 +292,12 @@
             this.ffi.call(closePointer, [descriptor]);
             throw new Error("native snapshot is incompatible with this VM: " +
                             path);
+        }
+        var lseekPointer = this.ffi.resolve("lseek");
+        if (this.ffi.call(lseekPointer, [descriptor, codeOffset, 0]) !==
+                codeOffset) {
+            this.ffi.call(closePointer, [descriptor]);
+            throw new Error("native snapshot code offset is invalid: " + path);
         }
         var pointer = this.ffi.call(this.mmap,
             [0, length, 7, 0x22, -1, 0]);
@@ -337,6 +354,240 @@
                        writeExact(this.ffi, writePointer, descriptor,
                                   result.pointer, result.length);
         this.ffi.call(freePointer, [header]);
+        this.ffi.call(closePointer, [descriptor]);
+        if (!complete ||
+            this.ffi.call(renamePointer, [temporaryPath, path]) !== 0) {
+            this.ffi.call(unlinkPointer, [temporaryPath]);
+            return false;
+        }
+        return true;
+    };
+
+    function alignStandalone(value, alignment) {
+        return Math.ceil(value / alignment) * alignment;
+    }
+
+    function standaloneStringBytes(value) {
+        var bytes = [];
+        var index = 0;
+        while (index < value.length) bytes.push(value.charCodeAt(index++) & 255);
+        bytes.push(0);
+        return bytes;
+    }
+
+    function buildStandaloneBootstrap(layout) {
+        var assembler = new Assembler(true);
+        function imageAddress(offset) {
+            assembler.movEaxLocal(0);
+            assembler.addEaxImmediate(offset - layout.heapOffset);
+        }
+        function discardCallWords(count) {
+            while (count-- > 0) assembler.popEcx();
+        }
+
+        assembler.pushEbp();
+        assembler.movEbpEsp();
+        assembler.subEspImmediate(8);
+        assembler.pushEbx();
+        assembler.pushEsi();
+        assembler.pushEdi();
+
+        assembler.callLabel("standalone_image_anchor");
+        assembler.label("standalone_image_anchor");
+        assembler.popInstructionPointerEcx();
+        assembler.movEaxEcx();
+        assembler.addEaxImmediate(layout.heapOffset -
+            (layout.entryOffset + assembler.labels.standalone_image_anchor));
+        assembler.movLocalEax(0);
+
+        /* Rebind the one capability supplied by the loader.  This is a named
+         * guest-heap field chosen by HeapRecords, not an open-coded layout. */
+        assembler.addEaxImmediate(layout.dlsymCellAddress);
+        assembler.movEcxEax();
+        assembler.movEaxEbpArgument(2);
+        assembler.movDwordPtrEcxEax();
+
+        assembler.movEaxEbpArgument(0);
+        assembler.compareEaxImmediate(1);
+        assembler.jumpLess("standalone_usage_error");
+
+        /* Resolve strcmp through the supplied dlsym and use it to prove that
+         * argv names the program captured in this image. */
+        imageAddress(layout.strcmpNameOffset);
+        assembler.pushEax();
+        assembler.movEaxImmediate(0);
+        assembler.pushEax();
+        assembler.movEaxEbpArgument(2);
+        assembler.callEax();
+        discardCallWords(2);
+        assembler.testEaxEax();
+        assembler.jumpEqual("standalone_runtime_error");
+        assembler.movLocalEax(1);
+
+        imageAddress(layout.expectedNameOffset);
+        assembler.pushEax();
+        assembler.movEaxEbpArgument(1);
+        assembler.movEaxDwordPtrEax();
+        assembler.pushEax();
+        assembler.movEaxLocal(1);
+        assembler.callEax();
+        discardCallWords(2);
+        assembler.testEaxEax();
+        assembler.jumpNotZero("standalone_usage_error");
+
+        assembler.movEaxImmediate(layout.statePayloadAddress);
+        assembler.pushEax();
+        assembler.movEaxImmediate(2147483647);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.stringSupportAddress);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.arrayPrototypeAddress);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.arrayLengthKeyAddress);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.contextAddress);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.frameAddress);
+        assembler.pushEax();
+        assembler.movEaxLocal(0);
+        assembler.pushEax();
+        imageAddress(layout.codeOffset);
+        assembler.callEax();
+        discardCallWords(8);
+        assembler.compareEaxImmediate(2);
+        assembler.jumpNotEqual("standalone_runtime_error");
+        assembler.movEaxImmediate(0);
+        assembler.jump("standalone_return");
+
+        assembler.label("standalone_usage_error");
+        assembler.movEaxImmediate(64);
+        assembler.jump("standalone_return");
+        assembler.label("standalone_runtime_error");
+        assembler.movEaxImmediate(70);
+        assembler.label("standalone_return");
+        assembler.popEdi();
+        assembler.popEsi();
+        assembler.popEbx();
+        assembler.leave();
+        assembler.ret();
+        assembler.resolveLabels();
+        return assembler;
+    }
+
+    X86Backend.prototype.writeStandaloneSnapshot = function (
+            path, result, runtime, execution, expectedProgramPath, metadata) {
+        if (!this.ffi.isMMVM || !result || !result.pointer || !metadata ||
+            !execution || !execution.frames || execution.frames.length !== 1) {
+            return false;
+        }
+        var heap = runtime.linearHeap;
+        var records = runtime.heapRecords;
+        var nativeInterpreter = runtime.nativeInterpreter;
+        var frame = execution.frames[0];
+        var expectedNameBytes = standaloneStringBytes(expectedProgramPath);
+        var strcmpNameBytes = standaloneStringBytes("strcmp");
+        var layout = {
+            entryOffset: STANDALONE_HEADER_BYTES,
+            heapOffset: 0,
+            dlsymCellAddress: records.platformDlsymPointerCellAddress(
+                nativeInterpreter.platformServicesAddress),
+            strcmpNameOffset: 0,
+            expectedNameOffset: 0,
+            codeOffset: 0,
+            statePayloadAddress: nativeInterpreter.statePayload,
+            stringSupportAddress: nativeInterpreter.stringSupportAddress,
+            arrayPrototypeAddress: runtime.arrayPrototype ?
+                runtime.arrayPrototype.heapAddress : 0,
+            arrayLengthKeyAddress: runtime.internStringAddress("length"),
+            contextAddress: frame.context.heapAddress,
+            frameAddress: frame.heapAddress
+        };
+        var bootstrap = buildStandaloneBootstrap(layout);
+        layout.strcmpNameOffset = layout.entryOffset + bootstrap.bytes.length;
+        layout.expectedNameOffset = layout.strcmpNameOffset +
+                                    strcmpNameBytes.length;
+        layout.codeOffset = alignStandalone(layout.expectedNameOffset +
+                                            expectedNameBytes.length, 16);
+        layout.heapOffset = alignStandalone(layout.codeOffset + result.length,
+                                            4096);
+        bootstrap = buildStandaloneBootstrap(layout);
+
+        var heapImageLength = heap.bump;
+        var heapCapacity = heap.memory.byteLength;
+        var fileLength = layout.heapOffset + heapCapacity;
+        if (fileLength > 1073741824) {
+            throw new RangeError("standalone snapshot exceeds 1 GiB");
+        }
+
+        records.setEngineHeapBounds(nativeInterpreter.stateAddress, heapImageLength,
+                                    heap.allocationLimit);
+        records.setEngineNativeTailBounds(nativeInterpreter.stateAddress, heapImageLength,
+                                          heap.allocationLimit);
+        var savedPlatformPointers =
+            records.suspendPlatformPointersForSnapshot(
+                nativeInterpreter.platformServicesAddress);
+        var heapImage = null;
+        try {
+            heapImage = heap.memory.createSnapshot(heapImageLength);
+        } finally {
+            records.restorePlatformPointersAfterSnapshot(
+                nativeInterpreter.platformServicesAddress,
+                savedPlatformPointers);
+        }
+
+        var openPointer = this.ffi.resolve("open");
+        var closePointer = this.ffi.resolve("close");
+        var writePointer = this.ffi.resolve("write");
+        var renamePointer = this.ffi.resolve("rename");
+        var unlinkPointer = this.ffi.resolve("unlink");
+        var getpidPointer = this.ffi.resolve("getpid");
+        var ftruncatePointer = this.ffi.resolve("ftruncate");
+        var callocPointer = this.ffi.resolve("calloc");
+        var freePointer = this.ffi.resolve("free");
+        var temporaryPath = path + ".tmp." +
+                            this.ffi.call(getpidPointer, []);
+        var descriptor = this.ffi.call(openPointer,
+            [temporaryPath, 577, 384]);
+        if (descriptor < 0) {
+            heap.memory.destroySnapshot(heapImage);
+            return false;
+        }
+        var stagingLength = layout.heapOffset;
+        var staging = this.ffi.call(callocPointer, [stagingLength, 1]);
+        var complete = !!staging;
+        if (complete) {
+            poke32(staging, STANDALONE_SNAPSHOT_MAGIC);
+            poke32(staging + 4, STANDALONE_SNAPSHOT_VERSION);
+            poke32(staging + 8, fileLength);
+            poke32(staging + 12, layout.entryOffset);
+            poke32(staging + 16, bootstrap.bytes.length);
+            poke32(staging + 20, layout.codeOffset);
+            poke32(staging + 24, result.length);
+            poke32(staging + 28, layout.heapOffset);
+            poke32(staging + 32, heapImageLength);
+            poke32(staging + 36, heapCapacity);
+            poke32(staging + 40, layout.frameAddress);
+            poke32(staging + 44, layout.contextAddress);
+            poke32(staging + 48, layout.dlsymCellAddress);
+            poke32(staging + 80, metadata.compilerVersion | 0);
+            poke32(staging + 84, metadata.profileMode | 0);
+            poke32(staging + 88, metadata.sourceHash | 0);
+            copyBytesToNative(staging + layout.entryOffset, bootstrap.bytes);
+            copyBytesToNative(staging + layout.strcmpNameOffset,
+                              strcmpNameBytes);
+            copyBytesToNative(staging + layout.expectedNameOffset,
+                              expectedNameBytes);
+            this.ffi.call(this.ffi.resolve("memcpy"),
+                [staging + layout.codeOffset, result.pointer, result.length]);
+            complete = writeExact(this.ffi, writePointer, descriptor,
+                                  staging, stagingLength) &&
+                       writeExact(this.ffi, writePointer, descriptor,
+                                  heapImage.pointer, heapImageLength) &&
+                       this.ffi.call(ftruncatePointer,
+                                     [descriptor, fileLength]) === 0;
+        }
+        if (staging) this.ffi.call(freePointer, [staging]);
+        heap.memory.destroySnapshot(heapImage);
         this.ffi.call(closePointer, [descriptor]);
         if (!complete ||
             this.ffi.call(renamePointer, [temporaryPath, path]) !== 0) {

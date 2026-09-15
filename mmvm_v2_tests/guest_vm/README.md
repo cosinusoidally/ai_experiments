@@ -288,8 +288,11 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
 ```
 
 Both options imply `--vm-native`. `--snapshot FILE` compiles normally, writes
-`FILE`, and continues running the requested guest program. `--with-snapshot
-FILE` requires a compatible snapshot and fails rather than silently compiling
+a version-2 standalone image containing the native interpreter plus the
+prepared program/frame/context/heap, and continues running the requested guest
+program. `--with-snapshot FILE` reads the interpreter segment from either an
+older version-1 code-only image or a version-2 standalone image. It fails rather
+than silently compiling
 when the file is absent, truncated, built for profiling mode, or stale. Remove
 snapshots with `./mk_clean`; they are temporary build artifacts and must not be
 committed.
@@ -302,6 +305,13 @@ code length, and actual file length. It cannot detect that a snapshot was made
 from older kernel source, however, so use it only with a snapshot whose origin
 is trusted and whose build is known to match the current checkout. The option
 is rejected unless `--with-snapshot FILE` is also present.
+
+For the first standalone milestone, build `js_runner.c` and run a snapshotted
+`hello.js` directly as documented in the top-level `README.md`. The current
+standalone entry handles a completed native execution and deliberately reports
+other VM exits as errors; general source loading and the full native runtime
+lifecycle remain work in progress. The design and staged acceptance gates are
+in `STANDALONE_SNAPSHOT_PLAN.md`.
 
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:

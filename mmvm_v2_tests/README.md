@@ -203,6 +203,57 @@ Expected output:
 Hello, world!
 ```
 
+### Standalone snapshot hello
+
+The native guest can serialize the interpreter, the compiled `hello.js`
+program, its initial execution frame, and the guest heap into an ignored
+standalone image. Build the deliberately small ANSI C image loader and create
+the snapshot from this directory:
+
+```sh
+gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
+
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
+  --snapshot artifacts/snap hello.js
+```
+
+The snapshot-generation command also runs `hello.js` normally through
+`js_min.exe`. The resulting image can then run without SpiderMonkey or
+`LD_LIBRARY_PATH`:
+
+```sh
+./artifacts/js_runner.exe ./artifacts/snap hello.js
+```
+
+Expected standalone output:
+
+```text
+Hello, world!
+```
+
+`js_runner.c` only validates and privately maps the image, finds `dlsym`, and
+transfers `argc`/`argv` to its native entry point. The output comes from the
+snapshotted `hello.js` bytecode executing in the native guest interpreter; it
+is not a C or bootstrap diagnostic. The image checks that its first program
+argument is the path captured at snapshot time. Images and executables stay in
+the ignored `artifacts/` directory.
+
+This is the first standalone milestone, not yet a general source loader. The
+current image reserves the guest heap's full growth capacity as a sparse file
+extent and maps it privately. Only the initialized prefix consumes ordinary
+disk blocks. General guest-side loading, native GC/lifecycle handling, and
+snapshot generation from inside the standalone VM remain later stages in
+`guest_vm/STANDALONE_SNAPSHOT_PLAN.md`.
+
+The high-level regression test builds its runner in a temporary ignored
+directory, generates the image twice, requires byte identity, executes hello,
+and verifies filename rejection:
+
+```sh
+guest_vm/tests/run_standalone_snapshot_test.sh
+```
+
 ### libc-only static web server
 
 `net.js` uses only libc through the MMVM FFI for its network and filesystem

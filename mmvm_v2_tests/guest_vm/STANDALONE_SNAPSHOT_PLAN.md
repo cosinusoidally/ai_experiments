@@ -51,9 +51,17 @@ must not be produced by merely copying the input image.
 
 ## Current checkpoint
 
-The existing format is a 32-byte header followed by relocatable native
-interpreter text. It does not contain a runtime, heap, context, program, frame,
-or bootstrap entry. Its internal entry ABI takes VM implementation arguments:
+As of 2026-09-14, implementation stage 2 is working. The version-2 image
+contains a position-independent macro-assembled bootstrap, expected program
+name, relocatable native interpreter text, prepared guest frame/context, and a
+canonical guest heap template. The exact requested command prints
+`Hello, world!` and exits zero. Independently generated images are byte-for-byte
+identical, and the version-2 container remains readable through the existing
+`--with-snapshot` js_min path.
+
+The older version-1 format is a 32-byte header followed by relocatable native
+interpreter text. It remains readable for compatibility. Its internal entry
+ABI takes VM implementation arguments:
 
 ```text
 heap base, frame, context, array-length key, array prototype,
@@ -66,10 +74,11 @@ Repeated generation of this code-only image is already deterministic. Two
 The hash is evidence for deterministic code emission, not a permanent golden
 file and not a substitute for the full fixed-point test.
 
-After host bootstrap, `hello.js` already completes under
-`--vm-native --vm-no-host-calls`. The principal missing work is standalone
-bootstrap/image state and native ownership of every lifecycle operation, not
-the final libc `puts` call.
+The stage-2 bootstrap currently accepts the single completed native return
+needed by `hello.js`; it does not yet implement allocation-exit recovery, GC,
+heap growth beyond the reserved mapping, exceptions, budget resumption, or
+general source loading. Those lifecycle items, followed by self-hosted image
+generation, are the principal remaining work.
 
 ## External launcher ABI
 
@@ -141,7 +150,7 @@ symbols into cleared platform slots, and enters the native VM loop.
 
 ## Implementation stages
 
-### 1. Minimal C loader and native entry
+### 1. Minimal C loader and native entry — complete
 
 Add `js_runner.c` and a standalone header parser. The loader validates all
 offset/length arithmetic, maps executable memory, and passes only `argc`,
@@ -149,7 +158,7 @@ offset/length arithmetic, maps executable memory, and passes only `argc`,
 resolves `puts`, prints a fixed diagnostic, and returns. This validates the
 external ABI and position independence but is not accepted as the hello goal.
 
-### 2. Precompiled hello boot image
+### 2. Precompiled hello boot image — complete
 
 Extend snapshot generation with a canonical heap template containing the
 runtime support required by precompiled `hello.js`. Add a native boot loop
@@ -166,6 +175,13 @@ This is the requested first end-to-end milestone:
 
 The filename must be checked against or used to select the snapshotted program;
 the runner must not ignore it and print a built-in string.
+
+The implemented bootstrap resolves `strcmp` through the supplied `dlsym` to
+check that filename, rebinds the heap's named dlsym capability cell, and calls
+the real native bytecode interpreter with the serialized guest offsets. All
+process-local platform pointers are cleared while copying the heap and restored
+in the still-running js_min instance afterwards. The image's heap extent is
+sparse on disk and `MAP_PRIVATE`, so execution does not mutate the file.
 
 ### 3. Native runtime lifecycle
 
@@ -229,4 +245,3 @@ in any previously passing gate is fixed before the next checkpoint is committed.
 - `hello.js` is executed as guest bytecode; the output is not hard-coded in
   the C runner or native bootstrap.
 - Existing Node and js_min guest execution, tests, and demos do not regress.
-

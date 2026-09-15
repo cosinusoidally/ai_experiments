@@ -158,6 +158,11 @@
         this.emitByte(displacement);
     };
 
+    Assembler.prototype.callEax = function () {
+        if (this.macros) this.macros.push("call_eax()");
+        this.emitBytes2(0xff, 0xd0);
+    };
+
     Assembler.prototype.callLabel = function (name) {
         if (this.macros) this.macros.push("call(" + name + ")");
         this.emitByte(0xe8);
@@ -166,6 +171,14 @@
 
     Assembler.prototype.popEcx = function () {
         if (this.macros) this.macros.push("pop_ecx()"); this.emitByte(0x59); this.stackWords--;
+    };
+
+    /* Used after a position-discovery call.  The return address was pushed by
+     * the processor rather than by pushEax(), so it is deliberately absent
+     * from the assembler's expression-stack accounting. */
+    Assembler.prototype.popInstructionPointerEcx = function () {
+        if (this.macros) this.macros.push("pop_instruction_pointer_ecx()");
+        this.emitByte(0x59);
     };
 
     Assembler.prototype.addEaxEcx = function () {
@@ -203,6 +216,10 @@
     Assembler.prototype.movEaxEcx = function () {
         if (this.macros) this.macros.push("mov_eax_ecx()");
         this.emitBytes2(0x89, 0xc8);
+    };
+    Assembler.prototype.movEcxEax = function () {
+        if (this.macros) this.macros.push("mov_ecx_eax()");
+        this.emitBytes2(0x89, 0xc1);
     };
     Assembler.prototype.imulEaxEcx = function () {
         if (this.macros) this.macros.push("imul_eax_ecx()");

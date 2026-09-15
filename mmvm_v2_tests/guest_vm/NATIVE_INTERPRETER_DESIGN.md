@@ -157,8 +157,11 @@ to validate every other header and file-layout field, but deliberately cannot
 reject executable code generated from stale kernel source. The unchecked mode
 is never implicit and is invalid without `withSnapshot`.
 
-A snapshot contains a 32-byte header followed by the macro assembler's i386
-output. The header records:
+The loader accepts two image generations. Version 1 contains a 32-byte header
+followed by the macro assembler's i386 output. Version 2 is the standalone
+container described in `STANDALONE_SNAPSHOT_PLAN.md`: it adds a native entry,
+prepared guest program/frame/context, and canonical guest heap while retaining
+an explicitly located interpreter-code segment. Both headers record:
 
 - the snapshot magic and file-format version;
 - a manually maintained native compiler/ABI version;
@@ -166,15 +169,18 @@ output. The header records:
 - a hash of `interpreterKernel` source;
 - the exact code length.
 
-Loading validates every field and rejects an incompatible or truncated file.
+Loading validates the relevant fields and rejects an incompatible or truncated file.
 It allocates a new anonymous mapping, reads the code into that mapping, and
 changes it from read/write/execute to read/execute before entry. The snapshot
 does not store a preferred code address, heap address, runtime record, libc
 pointer, or lazy intrinsic-helper address. All internal branches are relative;
 the heap base and runtime-owned platform-service table remain entry arguments.
-Consequently snapshot use neither fixes the generated code at its original
-address nor places any additional constraint on the independently allocated,
-growable guest heap.
+Consequently snapshot use never fixes generated code at its original address.
+Ordinary `--with-snapshot` execution still uses the independently allocated,
+growable runtime heap. Standalone stage-2 execution privately maps a sparse heap
+template and its reserved growth extent as part of the relocatable image; later
+stages will move allocation, collection and further growth under the native
+runtime lifecycle.
 
 Snapshots are architecture-, compiler-, profile-mode-, and source-specific
 temporary build products. The checked-in runner documentation places them in

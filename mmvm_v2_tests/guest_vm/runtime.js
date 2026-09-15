@@ -354,6 +354,7 @@
         this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.nativeSnapshotWrite = options.snapshot || null;
         this.nativeSnapshotRead = options.withSnapshot || null;
+        this.deferNativeSnapshotWrite = !!options.deferSnapshotWrite;
         this.skipNativeSnapshotHash = !!options.skipSnapshotHash;
         if (this.nativeSnapshotWrite && this.nativeSnapshotRead) {
             throw new Error("snapshot and withSnapshot are mutually exclusive");
