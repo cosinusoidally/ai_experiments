@@ -207,12 +207,22 @@ Move image canonicalization and serialization into the snapshot-hosted VM.
 Resolve `open`, `write`, `close`, `rename`, and related operations through
 `dlsym`. Never serialize rebound process addresses.
 
+Status: the fixed-point runner path now performs canonical serialization in
+the native bootstrap before the mutable heap template is copied and rebound.
+It uses macro-assembled `open`/`write`/`close` calls and handles short writes.
+Atomic temporary-file replacement remains future hardening; a failed write is
+reported as a runtime failure and never accepted as a valid image.
+
 ### 6. Fixed-point reproduction
 
 Generate `snap` under js_min, boot it with `js_runner.exe`, independently
 generate `snap2`, and require byte identity. Run the comparison with ASLR and
 with deliberately different available mapping addresses to catch hidden
 absolute pointers.
+
+Status: the documented `guest_runner.js --vm-native --snapshot ... hello.js`
+command now writes `snap2`, runs the prepared hello payload, and produces a
+byte-identical fixed point. The regression suite compares the complete files.
 
 ## Regression gates
 

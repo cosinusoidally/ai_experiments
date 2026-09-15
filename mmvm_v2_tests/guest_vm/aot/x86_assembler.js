@@ -213,6 +213,10 @@
         if (this.macros) this.macros.push("sub_ecx_eax()");
         this.emitBytes2(0x29, 0xc1);
     };
+    Assembler.prototype.subEaxEcx = function () {
+        if (this.macros) this.macros.push("sub_eax_ecx()");
+        this.emitBytes2(0x29, 0xc8);
+    };
     Assembler.prototype.movEaxEcx = function () {
         if (this.macros) this.macros.push("mov_eax_ecx()");
         this.emitBytes2(0x89, 0xc8);

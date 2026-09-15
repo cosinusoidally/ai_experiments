@@ -10350,7 +10350,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 4,
+                compilerVersion: 5,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,
@@ -10377,6 +10377,9 @@
                 loweringTimings.lower = 0;
             }
         } else {
+            if (runtime.nativeSnapshotWrite) {
+                reportSnapshot("lowering native interpreter kernel");
+            }
             var compilerOptions = {
                 registerPreferences: ["heapBase", "state", "budget"],
                 registerPreferencesByFunction: {
@@ -10389,6 +10392,9 @@
             };
             this.ir = new KernelCompiler().compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
+            if (runtime.nativeSnapshotWrite) {
+                reportSnapshot("lowered native interpreter kernel");
+            }
         }
         var loweringFinished = constructionStarted ?
             new Date().getTime() : 0;
@@ -10404,8 +10410,14 @@
             new Date().getTime() : 0;
         var backendTimings = runtime.profileOpcodeCounts ? {} : null;
         if (!loadedSnapshot) {
+            if (runtime.nativeSnapshotWrite) {
+                reportSnapshot("assembling native interpreter kernel");
+            }
             x86Backend.timings = backendTimings;
             this.nativeResult = x86Backend.compile(this.ir);
+            if (runtime.nativeSnapshotWrite) {
+                reportSnapshot("assembled native interpreter kernel");
+            }
             if (runtime.nativeSnapshotWrite &&
                 !runtime.deferNativeSnapshotWrite) {
                 if (!x86Backend.writeExecutableSnapshot(

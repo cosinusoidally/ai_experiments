@@ -42,4 +42,20 @@ if [ "$wrong_program_status" -ne 64 ]; then
     exit 1
 fi
 
-echo "standalone snapshot hello and deterministic regeneration passed"
+LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$js_min_binary" guest_runner.js --vm-native \
+    --snapshot "$temporary_directory/runner-snap" guest_runner.js \
+    --vm-native --snapshot "$temporary_directory/runner-snap2" \
+    hello.js >/dev/null
+fixed_point_output=$("$temporary_directory/js_runner.exe" \
+    "$temporary_directory/runner-snap" guest_runner.js --vm-native \
+    --snapshot "$temporary_directory/runner-snap2" hello.js)
+if [ "$fixed_point_output" != "Hello, world!" ]; then
+    echo "fixed-point runner emitted unexpected stdout:" >&2
+    echo "$fixed_point_output" >&2
+    exit 1
+fi
+cmp "$temporary_directory/runner-snap" \
+    "$temporary_directory/runner-snap2"
+
+echo "standalone snapshot hello and byte-identical fixed point passed"

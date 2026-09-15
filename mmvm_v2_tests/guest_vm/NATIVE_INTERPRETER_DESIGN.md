@@ -180,9 +180,13 @@ Ordinary `--with-snapshot` execution still uses the independently allocated,
 growable runtime heap. A standalone stage-2 file stores only its initialized
 heap template. Its native bootstrap resolves `mmap` and `memcpy` through the
 loader-supplied `dlsym`, reserves anonymous runtime memory independently of the
-file, and copies that compact template before interpreter entry. Later stages
-will move allocation, collection and further growth under the native runtime
-lifecycle.
+file, and copies that compact template before interpreter entry. A runner
+image presented with `--snapshot FILE` also resolves `open`, `write`, and
+`close` and serializes its untouched mapped image before interpreter entry.
+Because executable code is PIC, the heap template contains no process-local
+pointers, and heap capacity is not a file extent, this operation is a
+byte-identical fixed point at any mapping address. Later stages will move
+allocation, collection and further growth under the native runtime lifecycle.
 
 Snapshots are architecture-, compiler-, profile-mode-, and source-specific
 temporary build products. The checked-in runner documentation places them in

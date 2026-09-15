@@ -176,12 +176,53 @@ function guestRunnerCleanup() {
 }
 
 try {
+    var guestSnapshotPayloadPath = null;
     if (guestRunnerSnapshot && guestProgramPath === "guest_runner.js") {
         guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
+        /* A runner snapshot may carry the final program as its prepared
+         * execution while retaining guest_runner.js as the external command
+         * name. The standalone bootstrap handles regeneration itself, then
+         * enters this payload without requiring a second compiler instance. */
+        var guestPayloadOptionIndex = 1;
+        while (guestPayloadOptionIndex < guestRunnerArguments.length) {
+            var guestPayloadOption =
+                guestRunnerArguments[guestPayloadOptionIndex++];
+            if (guestPayloadOption === "--snapshot" ||
+                guestPayloadOption === "--with-snapshot" ||
+                guestPayloadOption === "--vm-profile-duration") {
+                guestPayloadOptionIndex++;
+            } else if (guestPayloadOption === "--vm-native" ||
+                       guestPayloadOption === "--vm-profile" ||
+                       guestPayloadOption === "--vm-trace-exceptions" ||
+                       guestPayloadOption === "--vm-verify-heap" ||
+                       guestPayloadOption === "--vm-threaded" ||
+                       guestPayloadOption === "--vm-no-host-calls" ||
+                       guestPayloadOption === "--skip-snapshot-hash") {
+                /* Flag-only nested runner option. */
+            } else {
+                guestSnapshotPayloadPath = guestPayloadOption;
+                break;
+            }
+        }
     }
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
-    var guestExecution = guestProgramVM.start(guestProgramSource, guestProgramPath);
+    var guestExecution;
+    if (guestSnapshotPayloadPath) {
+        var guestSnapshotPayloadSource;
+        if (guestRunnerIsNode) {
+            guestSnapshotPayloadSource = require("fs").readFileSync(
+                guestSnapshotPayloadPath, "utf8");
+        } else if (typeof NodeFs !== "undefined") {
+            guestSnapshotPayloadSource = NodeFs.readFileSync(
+                guestSnapshotPayloadPath).toString("utf8");
+        } else guestSnapshotPayloadSource = read(guestSnapshotPayloadPath);
+        guestExecution = guestProgramVM.start(
+            guestSnapshotPayloadSource, guestSnapshotPayloadPath);
+    } else {
+        guestExecution = guestProgramVM.start(
+            guestProgramSource, guestProgramPath);
+    }
     if (guestRunnerSnapshot) {
         if (!guestProgramVM.runtime.nativeInterpreter.writeStandaloneSnapshot(
                 guestRunnerSnapshot, guestExecution, guestProgramPath)) {

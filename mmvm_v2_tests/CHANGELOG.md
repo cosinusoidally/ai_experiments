@@ -8,6 +8,24 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.51
+
+Approximate completion: 2026-09-15 afternoon BST
+
+### Guest VM
+
+- Added standalone runner-image fixed-point reproduction. A relocatable image
+  can now process `guest_runner.js --vm-native --snapshot FILE hello.js`, write
+  itself through libc obtained from the loader's sole `dlsym` capability, and
+  then execute the prepared guest hello program.
+- Added a high-level regression requiring the regenerated non-sparse image to
+  be byte-identical to its source, while keeping `js_runner.c` limited to image
+  validation/mapping and the `argc`/`argv`/`dlsym` ABI transfer.
+- Stored bytecode-function source in guest-heap program records and added
+  native Buffer and Function string conversion paths needed by continued
+  self-hosting work. Native allocator ownership is now released safely before
+  re-entrant host call boundaries.
+
 ## 0.50
 
 Approximate completion: 2026-09-15 morning BST

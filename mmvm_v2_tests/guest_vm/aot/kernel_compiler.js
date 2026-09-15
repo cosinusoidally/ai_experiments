@@ -26,17 +26,6 @@
                 throw new TypeError("kernel graph member " + name +
                                     " is not a function");
             }
-            var actualName = fn.name || name;
-            if (actualName !== name) {
-                throw new SyntaxError("kernel graph key " + name +
-                                      " does not match function " + actualName);
-            }
-            if (signatures[name]) {
-                throw new SyntaxError("duplicate kernel function " + name);
-            }
-            /* Function.length is absent on the Firefox 1 era shell used by
-             * js_min. Parse each graph member exactly once: the same tree is
-             * authoritative for arity, constant validation, and lowering. */
             var sourceStarted = aggregateTimings ? new Date().getTime() : 0;
             var source = fn.toString();
             if (aggregateTimings) {
@@ -50,6 +39,21 @@
                 aggregateTimings.parse +=
                     new Date().getTime() - parseStarted;
             }
+            var actualName = fn.name || name || expression.name;
+            if (!actualName) {
+                throw new SyntaxError("kernel graph member must be named");
+            }
+            if (!name) name = actualName;
+            if (actualName !== name) {
+                throw new SyntaxError("kernel graph key " + name +
+                                      " does not match function " + actualName);
+            }
+            if (signatures[name]) {
+                throw new SyntaxError("duplicate kernel function " + name);
+            }
+            /* Function.length is absent on the Firefox 1 era shell used by
+             * js_min. Parse each graph member exactly once: the same tree is
+             * authoritative for arity, constant validation, and lowering. */
             signatures[name] = {
                 name: name,
                 arity: expression.parameters.length
@@ -57,10 +61,11 @@
             functions.push({name: name, fn: fn, source: source,
                             expression: expression, localNames: null});
         }
-        if (!entry || typeof entry !== "function" || !entry.name) {
+        if (!entry || typeof entry !== "function") {
             throw new TypeError("kernel graph entry must be a named function");
         }
-        addFunction(entry.name, entry);
+        addFunction(null, entry);
+        var entryName = functions[0].name;
         var entryDependencies = [];
         functions[0].localNames = [];
         var sharedConstants = collectFunctionConstants(
@@ -93,7 +98,7 @@
                             memberConstants[memberConstantName]) {
                         throw new SyntaxError("kernel graph constant " +
                             memberConstantName + " has conflicting values in " +
-                            entry.name + " and " +
+                            entryName + " and " +
                             functions[constantMemberIndex].name);
                     }
                     sharedConstants[memberConstantName] =
@@ -135,7 +140,7 @@
             memberOptions.source = member.source;
             memberOptions.functionExpression = member.expression;
             memberOptions.precollectedLocalNames = member.localNames;
-            if (member.name !== entry.name) {
+            if (member.name !== entryName) {
                 var perFunctionPreferences =
                     options.registerPreferencesByFunction || {};
                 memberOptions.registerPreferences =
@@ -155,7 +160,7 @@
                 aggregateTimings.lower += memberTimings.lower || 0;
             }
         }
-        return {kernelGraph: true, entry: entry.name, functions: compiled,
+        return {kernelGraph: true, entry: entryName, functions: compiled,
                 signatures: signatures};
     };
 
@@ -591,8 +596,10 @@
 
     function symbolAt(symbols, name) {
         var key = "$" + name;
-        return Object.prototype.hasOwnProperty.call(symbols, key) ?
-               symbols[key] : undefined;
+        /* Symbol keys are always prefixed with '$', so none can alias an
+         * Object.prototype member. Direct lookup is both sufficient and
+         * available while the guest compiler is running without host calls. */
+        return symbols[key];
     }
 
     function resolveRegisterPreferences(names, symbols) {
@@ -730,7 +737,10 @@
                                                      declaration.name);
                     if (!declarationSymbol) {
                         throw new SyntaxError("unknown kernel declaration " +
-                                              declaration.name);
+                            declaration.name + " (constantName=" +
+                            isKernelConstantName(declaration.name) +
+                            ", constantValue=" +
+                            kernelConstantValue(declaration.initial) + ")");
                     }
                     if (declarationSymbol.kind !== "constant") {
                         declarations.push({op: "set_local",

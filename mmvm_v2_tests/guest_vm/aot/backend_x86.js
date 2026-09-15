@@ -380,6 +380,10 @@
         var IMAGE_BASE_LOCAL = 0;
         var SYMBOL_POINTER_LOCAL = 1;
         var HEAP_BASE_LOCAL = 2;
+        var SNAPSHOT_FD_LOCAL = 3;
+        var SNAPSHOT_WRITE_POINTER_LOCAL = 4;
+        var SNAPSHOT_CURRENT_LOCAL = 5;
+        var SNAPSHOT_REMAINING_LOCAL = 6;
         function imageAddress(offset) {
             assembler.movEaxLocal(IMAGE_BASE_LOCAL);
             assembler.addEaxImmediate(offset);
@@ -407,10 +411,26 @@
             else assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
             assembler.movDwordPtrEcxEax();
         }
+        function argvString(index) {
+            assembler.movEaxEbpArgument(1);
+            assembler.addEaxImmediate(index * 4);
+            assembler.movEaxDwordPtrEax();
+        }
+        function compareArgvString(index, stringOffset, mismatchLabel) {
+            imageAddress(stringOffset);
+            assembler.pushEax();
+            argvString(index);
+            assembler.pushEax();
+            assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+            assembler.callEax();
+            discardCallWords(2);
+            assembler.testEaxEax();
+            assembler.jumpNotZero(mismatchLabel);
+        }
 
         assembler.pushEbp();
         assembler.movEbpEsp();
-        assembler.subEspImmediate(12);
+        assembler.subEspImmediate(28);
         assembler.pushEbx();
         assembler.pushEsi();
         assembler.pushEdi();
@@ -495,6 +515,68 @@
         assembler.testEaxEax();
         assembler.jumpNotZero("standalone_usage_error");
 
+        /* A standalone snapshot is already a canonical, relocatable image.
+         * When the embedded runner requests another snapshot, serialize the
+         * untouched file mapping before executing its prepared payload. This
+         * uses only libc reached through the supplied dlsym capability and
+         * therefore preserves the fixed point byte-for-byte. */
+        assembler.movEaxEbpArgument(0);
+        assembler.compareEaxImmediate(4);
+        assembler.jumpLess("standalone_snapshot_complete");
+        compareArgvString(2, layout.snapshotOptionOffset,
+                          "standalone_snapshot_complete");
+        resolveSymbol(layout.openNameOffset);
+        assembler.movEaxImmediate(384);
+        assembler.pushEax();
+        assembler.movEaxImmediate(577);
+        assembler.pushEax();
+        argvString(3);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(3);
+        assembler.compareEaxImmediate(0);
+        assembler.jumpLess("standalone_runtime_error");
+        assembler.movLocalEax(SNAPSHOT_FD_LOCAL);
+        resolveSymbol(layout.writeNameOffset);
+        assembler.movLocalEax(SNAPSHOT_WRITE_POINTER_LOCAL);
+        assembler.movEaxLocal(IMAGE_BASE_LOCAL);
+        assembler.movLocalEax(SNAPSHOT_CURRENT_LOCAL);
+        assembler.movEaxImmediate(layout.fileLength);
+        assembler.movLocalEax(SNAPSHOT_REMAINING_LOCAL);
+        assembler.label("standalone_snapshot_write");
+        assembler.movEaxLocal(SNAPSHOT_REMAINING_LOCAL);
+        assembler.testEaxEax();
+        assembler.jumpEqual("standalone_snapshot_close");
+        assembler.pushEax();
+        assembler.movEaxLocal(SNAPSHOT_CURRENT_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxLocal(SNAPSHOT_FD_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxLocal(SNAPSHOT_WRITE_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(3);
+        assembler.compareEaxImmediate(0);
+        assembler.jumpLessOrEqual("standalone_runtime_error");
+        assembler.movEcxEax();
+        assembler.movEaxLocal(SNAPSHOT_CURRENT_LOCAL);
+        assembler.addEaxEcx();
+        assembler.movLocalEax(SNAPSHOT_CURRENT_LOCAL);
+        assembler.movEaxLocal(SNAPSHOT_REMAINING_LOCAL);
+        assembler.subEaxEcx();
+        assembler.movLocalEax(SNAPSHOT_REMAINING_LOCAL);
+        assembler.jump("standalone_snapshot_write");
+        assembler.label("standalone_snapshot_close");
+        resolveSymbol(layout.closeNameOffset);
+        assembler.movEaxLocal(SNAPSHOT_FD_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(1);
+        assembler.compareEaxImmediate(0);
+        assembler.jumpNotEqual("standalone_runtime_error");
+        assembler.label("standalone_snapshot_complete");
+
         assembler.movEaxImmediate(layout.statePayloadAddress);
         assembler.pushEax();
         assembler.movEaxImmediate(2147483647);
@@ -555,6 +637,10 @@
             memcpyNameOffset: 0,
             strcmpNameOffset: 0,
             expectedNameOffset: 0,
+            snapshotOptionOffset: 0,
+            openNameOffset: 0,
+            writeNameOffset: 0,
+            closeNameOffset: 0,
             codeOffset: 0,
             heapCapacity: 0,
             heapImageLength: 0,
@@ -569,6 +655,10 @@
         };
         var mmapNameBytes = standaloneStringBytes("mmap");
         var memcpyNameBytes = standaloneStringBytes("memcpy");
+        var snapshotOptionBytes = standaloneStringBytes("--snapshot");
+        var openNameBytes = standaloneStringBytes("open");
+        var writeNameBytes = standaloneStringBytes("write");
+        var closeNameBytes = standaloneStringBytes("close");
         var bindingNameBytes = [];
         var bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
@@ -584,6 +674,14 @@
                                     strcmpNameBytes.length;
         var nextDataOffset = layout.expectedNameOffset +
                              expectedNameBytes.length;
+        layout.snapshotOptionOffset = nextDataOffset;
+        nextDataOffset += snapshotOptionBytes.length;
+        layout.openNameOffset = nextDataOffset;
+        nextDataOffset += openNameBytes.length;
+        layout.writeNameOffset = nextDataOffset;
+        nextDataOffset += writeNameBytes.length;
+        layout.closeNameOffset = nextDataOffset;
+        nextDataOffset += closeNameBytes.length;
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
             layout.nativeBindings[bindingIndex].nameOffset = nextDataOffset;
@@ -597,8 +695,9 @@
                                             4096);
         layout.heapImageLength = heapImageLength;
         layout.heapCapacity = heapCapacity;
-        bootstrap = buildStandaloneBootstrap(layout);
         var fileLength = layout.heapOffset + heapImageLength;
+        layout.fileLength = fileLength;
+        bootstrap = buildStandaloneBootstrap(layout);
         if (fileLength > 1073741824) {
             throw new RangeError("standalone snapshot exceeds 1 GiB");
         }
@@ -678,6 +777,14 @@
                               strcmpNameBytes);
             copyBytesToNative(staging + layout.expectedNameOffset,
                               expectedNameBytes);
+            copyBytesToNative(staging + layout.snapshotOptionOffset,
+                              snapshotOptionBytes);
+            copyBytesToNative(staging + layout.openNameOffset,
+                              openNameBytes);
+            copyBytesToNative(staging + layout.writeNameOffset,
+                              writeNameBytes);
+            copyBytesToNative(staging + layout.closeNameOffset,
+                              closeNameBytes);
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
                 copyBytesToNative(staging +

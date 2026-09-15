@@ -239,18 +239,39 @@ is not a C or bootstrap diagnostic. The image checks that its first program
 argument is the path captured at snapshot time. Images and executables stay in
 the ignored `artifacts/` directory.
 
-This is the first standalone milestone, not yet a general source loader. The
-current image stores only the initialized guest-heap prefix, so its ordinary
-file length is currently about 273 KiB. At startup, the image resolves `mmap`
+This is the first standalone milestone, not yet a general source loader. A
+hello-only image stores just the initialized guest-heap prefix, so its ordinary
+file length is only a few hundred KiB. At startup, the image resolves `mmap`
 and `memcpy` through the supplied `dlsym`, reserves anonymous memory for the
 heap's growth capacity, and copies the compact template into it. General
-guest-side loading, native GC/lifecycle handling, and snapshot generation from
-inside the standalone VM remain later stages in
+guest-side loading and native GC/lifecycle handling remain later stages in
 `guest_vm/STANDALONE_SNAPSHOT_PLAN.md`.
+
+A runner image can also reproduce itself without SpiderMonkey. Generate it
+with the eventual standalone command line following the captured
+`guest_runner.js` program:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
+  --snapshot artifacts/snap guest_runner.js --vm-native \
+  --snapshot artifacts/snap2 hello.js
+
+./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
+  --snapshot artifacts/snap2 hello.js
+cmp artifacts/snap artifacts/snap2
+```
+
+The native bootstrap recognizes the runner's `--snapshot FILE` request,
+resolves `open`, `write`, and `close` from its sole `dlsym` capability, and
+serializes the untouched mapped image with a short-write loop before entering
+the prepared `hello.js` frame. Consequently `snap2` is a genuine non-sparse,
+byte-identical copy of the relocatable image; neither the C loader nor the
+bootstrap contains the hello output.
 
 The high-level regression test builds its runner in a temporary ignored
 directory, generates the image twice, requires byte identity, executes hello,
-and verifies filename rejection:
+verifies filename rejection, and exercises the runner-image fixed point:
 
 ```sh
 guest_vm/tests/run_standalone_snapshot_test.sh
