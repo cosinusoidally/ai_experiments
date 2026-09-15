@@ -21,7 +21,7 @@ exports.compile = function (source, filename) {
     return exports.compileAst(exports.parse(source, filename));
 };
 
-function adoptProgramDescriptor(program) {
+function adoptProgramDescriptor(program, contextAnchor) {
     if (typeof __guestVMProgramCreate !== "function") {
         throw new Error("self-hosted program adoption is unavailable");
     }
@@ -40,7 +40,8 @@ function adoptProgramDescriptor(program) {
         !!program.usesArguments,
         bindings.length,
         !!program.strict,
-        !!program.evalCode);
+        !!program.evalCode,
+        contextAnchor);
     var index = 0;
     while (index < program.code.length) {
         __guestVMProgramSetCode(callable, index, program.code[index]);
@@ -51,7 +52,7 @@ function adoptProgramDescriptor(program) {
         var constant = program.constants[index];
         if (constant && typeof constant === "object" &&
             constant.code && constant.constants) {
-            constant = adoptProgramDescriptor(constant);
+            constant = adoptProgramDescriptor(constant, contextAnchor);
         }
         __guestVMProgramSetConstant(callable, index, constant);
         index++;
@@ -79,8 +80,9 @@ function adoptProgramDescriptor(program) {
 
 exports.adoptProgram = adoptProgramDescriptor;
 
-exports.compileExecutable = function (source, filename) {
-    return adoptProgramDescriptor(exports.compile(source, filename));
+exports.compileExecutable = function (source, filename, contextAnchor) {
+    return adoptProgramDescriptor(
+        exports.compile(source, filename), contextAnchor);
 };
 
 exports.compileEvalExecutable = function (source, filename, inheritedStrict) {

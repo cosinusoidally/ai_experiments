@@ -1,3 +1,6 @@
+if (typeof __guestVMStandaloneRunGuestRunner === "function") {
+    __guestVMStandaloneRunGuestRunner(arguments);
+} else {
 var guestRunnerIsNode = typeof process !== "undefined" && process.argv &&
                         process.versions && process.versions.node &&
                         typeof require === "function";
@@ -176,56 +179,21 @@ function guestRunnerCleanup() {
 }
 
 try {
-    var guestSnapshotPayloadPath = null;
     if (guestRunnerSnapshot && guestProgramPath === "guest_runner.js") {
         guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
-        /* A runner snapshot may carry the final program as its prepared
-         * execution while retaining guest_runner.js as the external command
-         * name. The standalone bootstrap handles regeneration itself, then
-         * enters this payload without requiring a second compiler instance. */
-        var guestPayloadOptionIndex = 1;
-        while (guestPayloadOptionIndex < guestRunnerArguments.length) {
-            var guestPayloadOption =
-                guestRunnerArguments[guestPayloadOptionIndex++];
-            if (guestPayloadOption === "--snapshot" ||
-                guestPayloadOption === "--with-snapshot" ||
-                guestPayloadOption === "--vm-profile-duration") {
-                guestPayloadOptionIndex++;
-            } else if (guestPayloadOption === "--vm-native" ||
-                       guestPayloadOption === "--vm-profile" ||
-                       guestPayloadOption === "--vm-trace-exceptions" ||
-                       guestPayloadOption === "--vm-verify-heap" ||
-                       guestPayloadOption === "--vm-threaded" ||
-                       guestPayloadOption === "--vm-no-host-calls" ||
-                       guestPayloadOption === "--skip-snapshot-hash") {
-                /* Flag-only nested runner option. */
-            } else {
-                guestSnapshotPayloadPath = guestPayloadOption;
-                break;
-            }
-        }
     }
     guestProgramVM.installGlobal("arguments",
         guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
-    var guestExecution;
-    if (guestSnapshotPayloadPath) {
-        var guestSnapshotPayloadSource;
-        if (guestRunnerIsNode) {
-            guestSnapshotPayloadSource = require("fs").readFileSync(
-                guestSnapshotPayloadPath, "utf8");
-        } else if (typeof NodeFs !== "undefined") {
-            guestSnapshotPayloadSource = NodeFs.readFileSync(
-                guestSnapshotPayloadPath).toString("utf8");
-        } else guestSnapshotPayloadSource = read(guestSnapshotPayloadPath);
-        guestExecution = guestProgramVM.start(
-            guestSnapshotPayloadSource, guestSnapshotPayloadPath);
-    } else {
-        guestExecution = guestProgramVM.start(
-            guestProgramSource, guestProgramPath);
-    }
+    var guestExecution = guestProgramVM.start(
+        guestRunnerSnapshot && guestProgramPath === "guest_runner.js" ?
+            read("guest_vm/standalone_source_runner.js") : guestProgramSource,
+        guestRunnerSnapshot && guestProgramPath === "guest_runner.js" ?
+            "guest_vm/standalone_source_runner.js" : guestProgramPath);
     if (guestRunnerSnapshot) {
         if (!guestProgramVM.runtime.nativeInterpreter.writeStandaloneSnapshot(
-                guestRunnerSnapshot, guestExecution, guestProgramPath)) {
+                guestRunnerSnapshot, guestExecution,
+                guestProgramPath === "guest_runner.js" ? null :
+                    guestProgramPath)) {
             throw new Error("could not write standalone snapshot: " +
                             guestRunnerSnapshot);
         }
@@ -237,9 +205,11 @@ try {
     }
     var guestRunnerProfileStarted = new Date().getTime();
     var guestRunnerStoppedForProfile = false;
+    var guestRunnerSnapshotOnly = guestRunnerSnapshot &&
+        guestProgramPath === "guest_runner.js";
     var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
         1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
-    while (true) {
+    while (!guestRunnerSnapshotOnly) {
         var guestExecutionResult = guestExecution.resume(
             guestRunnerResumeBudget);
         if (guestExecutionResult.status === "budget") {
@@ -262,7 +232,9 @@ try {
             break;
         }
     }
-    if (guestRunnerStoppedForProfile) {
+    if (guestRunnerSnapshotOnly) {
+        /* The generic entry obtains its real argc/argv from js_runner. */
+    } else if (guestRunnerStoppedForProfile) {
         if (typeof print === "function") {
             print("guest runner: stopped at an instruction-budget boundary " +
                   "after " + guestRunnerProfileDuration + " ms");
@@ -293,3 +265,4 @@ if (guestRunnerFailure) {
 }
 
 if (!guestRunnerIsNode) quit(guestNodeEnvironment.exitCode);
+}

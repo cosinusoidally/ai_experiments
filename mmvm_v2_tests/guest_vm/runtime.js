@@ -3213,7 +3213,11 @@
                 index = 0;
                 while (index < parameterLength) program.parameterSlots[index++] = -1;
                 runtime.registerProgram(program);
-                return runtime.makeGuestFunction(program, null, null);
+                var contextAnchor = args.length > 12 ? args[12] : null;
+                var homeContext = contextAnchor &&
+                    contextAnchor.guestType === "bytecodeFunction" ?
+                    contextAnchor.homeContext : null;
+                return runtime.makeGuestFunction(program, null, homeContext);
             }, "intrinsic", NativeIntrinsics.PROGRAM_CREATE));
         this.setGlobal("__guestVMProgramSetCode", this.makeNativeFunction(
             "__guestVMProgramSetCode", function (receiver, args) {
@@ -3451,6 +3455,21 @@
                    left.symbol > right.symbol ? 1 : left.cell - right.cell;
         });
         return bindings;
+    };
+
+    Runtime.prototype.standaloneArgumentCells = function (context) {
+        var runtime = this;
+        function payload(name) {
+            var cell = runtime.globalCellAddress(context, name);
+            if (!cell) throw new Error("missing standalone field " + name);
+            return runtime.valueCells.int32PayloadAddressAt(cell);
+        }
+        return {
+            argc: payload("__guestVMStandaloneArgc"),
+            argv: payload("__guestVMStandaloneArgv"),
+            imageBase: payload("__guestVMStandaloneImageBase"),
+            imageLength: payload("__guestVMStandaloneImageLength")
+        };
     };
 
     Runtime.prototype.assertOwned = function (value) {

@@ -18,12 +18,7 @@ gcc -ansi -m32 js_runner.c \
 
 LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$js_min_binary" guest_runner.js --vm-native \
-    --snapshot "$temporary_directory/snap-a" hello.js >/dev/null
-LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    "$js_min_binary" guest_runner.js --vm-native \
-    --snapshot "$temporary_directory/snap-b" hello.js >/dev/null
-
-cmp "$temporary_directory/snap-a" "$temporary_directory/snap-b"
+    --snapshot "$temporary_directory/snap-a" guest_runner.js >/dev/null
 standalone_output=$("$temporary_directory/js_runner.exe" \
     "$temporary_directory/snap-a" hello.js)
 if [ "$standalone_output" != "Hello, world!" ]; then
@@ -32,30 +27,14 @@ if [ "$standalone_output" != "Hello, world!" ]; then
     exit 1
 fi
 
-set +e
-"$temporary_directory/js_runner.exe" "$temporary_directory/snap-a" \
-    wrong-program.js >/dev/null 2>&1
-wrong_program_status=$?
-set -e
-if [ "$wrong_program_status" -ne 64 ]; then
-    echo "standalone snapshot accepted the wrong program name" >&2
-    exit 1
-fi
-
-LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    "$js_min_binary" guest_runner.js --vm-native \
-    --snapshot "$temporary_directory/runner-snap" guest_runner.js \
-    --vm-native --snapshot "$temporary_directory/runner-snap2" \
-    hello.js >/dev/null
 fixed_point_output=$("$temporary_directory/js_runner.exe" \
-    "$temporary_directory/runner-snap" guest_runner.js --vm-native \
-    --snapshot "$temporary_directory/runner-snap2" hello.js)
+    "$temporary_directory/snap-a" guest_runner.js --vm-native \
+    --snapshot "$temporary_directory/snap2" hello.js)
 if [ "$fixed_point_output" != "Hello, world!" ]; then
     echo "fixed-point runner emitted unexpected stdout:" >&2
     echo "$fixed_point_output" >&2
     exit 1
 fi
-cmp "$temporary_directory/runner-snap" \
-    "$temporary_directory/runner-snap2"
+cmp "$temporary_directory/snap-a" "$temporary_directory/snap2"
 
-echo "standalone snapshot hello and byte-identical fixed point passed"
+echo "generic standalone snapshot and byte-identical fixed point passed"

@@ -401,6 +401,9 @@
         var RUNTIME_SUPPORT_EMPTY_REGEXP_SOURCE = 285;
         var RUNTIME_SUPPORT_ARGUMENTS_CALLEE_KEY = 286;
         var RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY = 287;
+        var RUNTIME_SUPPORT_NULL_STRING = 288;
+        var RUNTIME_SUPPORT_TRUE_STRING = 289;
+        var RUNTIME_SUPPORT_FALSE_STRING = 290;
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
@@ -467,8 +470,9 @@
                 var globalProperty = load32(
                     heapBase + globalObject + OBJECT_PROPERTY_HEAD);
                 while (globalProperty > 0) {
-                    if (propertyKey(heapBase, globalProperty) ===
-                        globalKey) {
+                    if (stringKeysEqualKernel(heapBase,
+                        propertyKey(heapBase, globalProperty),
+                        globalKey) === 1) {
                         if ((propertyAttributes(heapBase, globalProperty) &
                              PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
                             globalProperty = 0;
@@ -512,8 +516,9 @@
                 var setGlobalProperty = setGlobalFirstProperty;
                 var setGlobalRecord = 0;
                 while (setGlobalProperty > 0) {
-                    if (propertyKey(heapBase, setGlobalProperty) ===
-                        setGlobalKey) {
+                    if (stringKeysEqualKernel(heapBase,
+                        propertyKey(heapBase, setGlobalProperty),
+                        setGlobalKey) === 1) {
                         setGlobalRecord = setGlobalProperty;
                         setGlobalProperty = 0;
                     } else {
@@ -673,7 +678,8 @@
                 if (arrayGetSupported === 3) {
                     var namedGetObject = arrayGetObject;
                     var namedGetProperty = 0;
-                    if (namedGetKey === arrayLengthKey) {
+                    if (stringKeysEqualKernel(
+                            heapBase, namedGetKey, arrayLengthKey) === 1) {
                         var namedGetObjectType = recordType(
                             heapBase, namedGetObject);
                         if (namedGetObjectType === HEAP_TYPE_ARRAY) {
@@ -703,7 +709,8 @@
                     if (namedGetObject !== 0) {
                         if (recordType(heapBase, namedGetObject) ===
                             HEAP_TYPE_STRING) {
-                            if (namedGetKey === arrayLengthKey) {
+                            if (stringKeysEqualKernel(heapBase,
+                                    namedGetKey, arrayLengthKey) === 1) {
                                 store32(arrayGetTarget, VALUE_TAG_INT32);
                                 store32(arrayGetTarget + VALUE_CELL_LOW,
                                     stringLength(heapBase, namedGetObject));
@@ -2601,8 +2608,9 @@
                     heapBase, globalObject);
                 var typeofGlobalFoundProperty = 0;
                 while (typeofGlobalProperty !== 0) {
-                    if (propertyKey(heapBase, typeofGlobalProperty) ===
-                        typeofGlobalKey) {
+                    if (stringKeysEqualKernel(heapBase,
+                        propertyKey(heapBase, typeofGlobalProperty),
+                        typeofGlobalKey) === 1) {
                         typeofGlobalFoundProperty = typeofGlobalProperty;
                         typeofGlobalProperty = 0;
                     } else typeofGlobalProperty = propertyNext(
@@ -2759,7 +2767,8 @@
                     }
                 }
                 if (virtualPropertyObjectType === HEAP_TYPE_ARRAY) {
-                    if (propertyConstantKey === arrayLengthKey) {
+                    if (stringKeysEqualKernel(heapBase,
+                            propertyConstantKey, arrayLengthKey) === 1) {
                         if (arrayReserved(heapBase, propertyObject) === 0) {
                             var propertyArrayVector = arrayElements(
                                 heapBase, propertyObject);
@@ -2776,7 +2785,8 @@
                     }
                 } else if (virtualPropertyObjectType ===
                            HEAP_TYPE_BUFFER_VIEW) {
-                    if (propertyConstantKey === arrayLengthKey) {
+                    if (stringKeysEqualKernel(heapBase,
+                            propertyConstantKey, arrayLengthKey) === 1) {
                         var bufferLengthTarget = heapBase + registerCells +
                             propertyTargetIndex * VALUE_CELL_BYTES;
                         store32(bufferLengthTarget, VALUE_TAG_INT32);
@@ -2788,7 +2798,8 @@
                         propertyObject = 0;
                     }
                 } else if (virtualPropertyObjectType === HEAP_TYPE_STRING) {
-                    if (propertyConstantKey === arrayLengthKey) {
+                    if (stringKeysEqualKernel(heapBase,
+                            propertyConstantKey, arrayLengthKey) === 1) {
                         var stringLengthTarget = heapBase + registerCells +
                             propertyTargetIndex * VALUE_CELL_BYTES;
                         store32(stringLengthTarget, VALUE_TAG_INT32);
@@ -4347,7 +4358,8 @@
         } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
             intrinsicHandled = programCreateKernel(
                 heapBase, state, intrinsicTarget, registerCells,
-                intrinsicArgumentsVector, currentContext,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                currentContext,
                 stringSupport);
         } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
             intrinsicHandled = programSetCodeKernel(
@@ -5027,6 +5039,18 @@
                     RUNTIME_SUPPORT_TYPE_UNDEFINED * VALUE_CELL_BYTES;
                 stringConvertExisting = valueCellReference(
                     0, stringConvertUndefinedCell);
+            } else if (stringConvertTag === VALUE_TAG_NULL) {
+                stringConvertExisting = valueCellReference(0,
+                    vectorCellAddress(heapBase, stringSupport,
+                        RUNTIME_SUPPORT_NULL_STRING));
+            } else if (stringConvertTag === VALUE_TAG_TRUE) {
+                stringConvertExisting = valueCellReference(0,
+                    vectorCellAddress(heapBase, stringSupport,
+                        RUNTIME_SUPPORT_TRUE_STRING));
+            } else if (stringConvertTag === VALUE_TAG_FALSE) {
+                stringConvertExisting = valueCellReference(0,
+                    vectorCellAddress(heapBase, stringSupport,
+                        RUNTIME_SUPPORT_FALSE_STRING));
             } else if (stringConvertTag === VALUE_TAG_REFERENCE) {
                 stringConvertExisting = valueCellReference(
                     0, stringConvertSourceCell);
@@ -5944,6 +5968,7 @@
         setBufferViewOffset(heapBase, allocatedView, 0);
         setBufferViewLength(heapBase, allocatedView,
                             bufferAllocSize);
+        setBufferViewKind(heapBase, allocatedView, BUFFER_KIND_NATIVE);
         var bufferPrototypeCell = heapBase + stringSupport +
             VECTOR_CELLS + RUNTIME_SUPPORT_BUFFER_PROTOTYPE *
             VALUE_CELL_BYTES;
@@ -6068,6 +6093,8 @@
             bufferViewOffset(heapBase, sliceReceiver) + sliceStart);
         setBufferViewLength(heapBase, sliceView,
             sliceEnd - sliceStart);
+        setBufferViewKind(heapBase, sliceView,
+            bufferViewKind(heapBase, sliceReceiver));
         setBufferViewPrototype(heapBase, sliceView,
             bufferViewPrototype(heapBase, sliceReceiver));
         setBufferViewPropertyHead(heapBase, sliceView, 0);
@@ -8653,9 +8680,6 @@
 
     function stringKeysEqualKernel(heapBase, left, right) {
         if (left === right) return 1;
-        if (stringHash(heapBase, left) !== stringHash(heapBase, right)) {
-            return 0;
-        }
         var length = stringLength(heapBase, left);
         if (length !== stringLength(heapBase, right)) return 0;
         var index = 0;
@@ -8999,7 +9023,8 @@
     }
 
     function programCreateKernel(heapBase, state, targetCell, registerCells,
-                                 argumentsVector, context, stringSupport) {
+                                 argumentsVector, argumentCount, context,
+                                 stringSupport) {
         var codeLength = programIntArgumentKernel(
             heapBase, argumentsVector, registerCells, 0);
         var constantLength = programIntArgumentKernel(
@@ -9024,6 +9049,21 @@
             heapBase, argumentsVector, registerCells, 10);
         var evalProgram = programBooleanArgumentKernel(
             heapBase, argumentsVector, registerCells, 11);
+        if (argumentCount > 12) {
+            var contextAnchorCell = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 12);
+            if (contextAnchorCell === 0) return 0;
+            if (valueCellTag(0, contextAnchorCell) !== VALUE_TAG_REFERENCE) {
+                return 0;
+            }
+            var contextAnchor = valueCellReference(0, contextAnchorCell);
+            if (recordType(heapBase, contextAnchor) !==
+                    HEAP_TYPE_BYTECODE_FUNCTION) {
+                return 0;
+            }
+            context = functionHomeContext(heapBase, contextAnchor);
+            if (context === 0) return 0;
+        }
         if (codeLength < 0) return 0;
         if (constantLength < 0) return 0;
         if (bindingLength < 0) return 0;
@@ -10350,7 +10390,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 5,
+                compilerVersion: 6,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,
@@ -10459,7 +10499,7 @@
             runtime.heapRecords.setPlatformFreePointer(
                 this.platformServicesAddress, x86Backend.ffi.resolve("free"));
         }
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(288);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(291);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -10552,7 +10592,16 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 287),
             runtime.internStringAddress("length"));
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 288);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 288),
+            runtime.internStringAddress("null"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 289),
+            runtime.internStringAddress("true"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 290),
+            runtime.internStringAddress("false"));
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 291);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
@@ -10735,6 +10784,12 @@
                 heap.freeBlocks.push(returnedRegions[returnedIndex++]);
             }
             heap.freeBlocksAreMaxHeap = false;
+            /* Reconstruct the reusable index from record boundaries at the
+             * ownership transition.  Native execution may split one arena
+             * into allocated prefixes and several retired suffixes; the
+             * record graph is authoritative and avoids carrying a stale or
+             * overlapping range into host allocation. */
+            this.runtime.rebuildFreeBlockIndex();
         }
         if (!this.allocationRegion) return;
         var remaining = this.allocationRegion.end -
@@ -10889,7 +10944,13 @@
         var heap = this.runtime.linearHeap;
         var allocationBump = heap.bump;
         var allocationLimit = heap.allocationLimit;
-        this.installNativeFreeRegions();
+        /* Keep one reclaimed arena attached to the native interpreter at a
+         * time.  The multi-region hand-off remains available for further
+         * development, but switching between independently reclaimed arenas
+         * during one dispatch can expose stale ranges after host/native
+         * ownership transitions.  The persistent single arena is both
+         * general and stable, and falls back to untouched tail space when a
+         * compound allocation does not fit. */
         /* Prefer reclaimed guest-heap storage at every native entry.  Waiting
          * until the bump cursor reached the next pressure boundary made a
          * high-churn renderer manufacture tens of megabytes of fresh garbage

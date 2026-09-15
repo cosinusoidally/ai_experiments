@@ -91,6 +91,12 @@
         if (this.nodeHost) {
             throw new Error("standalone runtime snapshots require js_min.exe");
         }
+        this.context.installGlobal("__guestVMStandaloneArgc", 0);
+        this.context.installGlobal("__guestVMStandaloneArgv", 0);
+        this.context.installGlobal("__guestVMStandaloneImageBase", 0);
+        this.context.installGlobal("__guestVMStandaloneImageLength", 0);
+        this.context.installGlobal(
+            "__guestVMStandaloneRunGuestRunner", undefined);
         this.context.run([
             "load(\"guest_vm/guest_vm.js\");",
             "load(\"guest_vm/node_environment.js\");",
@@ -99,7 +105,10 @@
             "load(\"node_compat/process.js\");",
             "load(\"node_compat/net.js\");",
             "load(\"node_compat/fs.js\");",
-            "load(\"node_compat/http.js\");"
+            "load(\"node_compat/http.js\");",
+            "var GuestStandaloneFrontend = require(" +
+                "\"./guest_vm/self_hosted_frontend.js\");",
+            "GuestStandaloneFrontend.installEvalCompiler();"
         ].join("\n"), "<standalone-runtime-bootstrap>");
     };
 
@@ -256,7 +265,8 @@
         }
     };
 
-    GuestNodeEnvironment.prototype.enqueueGuest = function (callable, receiver, args) {
+    GuestNodeEnvironment.prototype.enqueueGuest = function (callable, receiver, args,
+                                                              source) {
         var environment = this;
         var roots = [this.vm.retain(callable)];
         if (receiver && receiver.guestType) roots.push(this.vm.retain(receiver));
@@ -270,6 +280,12 @@
         }
         this.enqueueHost(function () {
             try {
+                if (!callable || callable.guestType !== "bytecodeFunction") {
+                    throw new TypeError("invalid queued guest callback from " +
+                        (source || "host service") + ": type " +
+                        (callable && callable.guestType || typeof callable) +
+                        ", address " + (callable && callable.heapAddress || 0));
+                }
                 environment.invoke(callable, receiver, args);
             } finally {
                 var rootIndex = 0;
@@ -681,7 +697,8 @@
                     var callbackArgs = [];
                     if (name === "data") callbackArgs.push(environment.guestBuffer(value));
                     else if (value !== undefined) callbackArgs.push(environment.error(value));
-                    environment.enqueueGuest(callback, socket, callbackArgs);
+                    environment.enqueueGuest(callback, socket, callbackArgs,
+                                             "Socket." + name);
                 });
                 return socket;
             }));
@@ -704,7 +721,8 @@
                     } else hostValue = environment.hostBody(value);
                 } else hostValue = environment.hostBody(value);
                 return hostSocket.write(hostValue, function () {
-                    if (callback) environment.enqueueGuest(callback, socket, []);
+                    if (callback) environment.enqueueGuest(
+                        callback, socket, [], "Socket.write");
                     if (callbackRoot) environment.vm.release(callbackRoot);
                     if (valueRoot) environment.vm.release(valueRoot);
                 });

@@ -418,6 +418,10 @@ var NodeRuntime = {
             if (count > 0) output.offset += count;
             else {
                 var number = NodeLibc.errno();
+                /* A nonblocking stream can make no progress without making
+                 * the queued bytes invalid.  Keep them for the next POLLOUT
+                 * notification; errno is unspecified when write returns 0. */
+                if (count === 0) return;
                 if (count < 0 && number === NodeNetConstants.EINTR) continue;
                 if (count < 0 && (number === NodeNetConstants.EAGAIN ||
                                   number === NodeNetConstants.EWOULDBLOCK)) return;
@@ -503,6 +507,7 @@ var NodeRuntime = {
                 client.outputOffset += count;
             } else {
                 var errorNumber = NodeLibc.errno();
+                if (count === 0) return;
                 if (count < 0 && errorNumber === NodeNetConstants.EINTR) continue;
                 if (count < 0 && (errorNumber === NodeNetConstants.EAGAIN ||
                                   errorNumber === NodeNetConstants.EWOULDBLOCK)) return;

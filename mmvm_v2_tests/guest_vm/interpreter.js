@@ -64,7 +64,9 @@
 
     Execution.fromFunction = function (callable, runtime, context, receiver, args) {
         if (!callable || callable.guestType !== "bytecodeFunction") {
-            throw new TypeError("entry value is not a guest bytecode function");
+            throw new TypeError("entry value is not a guest bytecode function" +
+                " (type " + (callable && callable.guestType || typeof callable) +
+                ", address " + (callable && callable.heapAddress || 0) + ")");
         }
         runtime.assertOwned(callable);
         var execution = new Execution(callable.program, runtime, context);

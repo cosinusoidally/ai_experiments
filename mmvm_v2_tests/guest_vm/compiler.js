@@ -1441,10 +1441,8 @@
         var bindings = {};
         var key;
         for (key in program.bindingSlots) {
-            if (Object.prototype.hasOwnProperty.call(program.bindingSlots, key)) {
-                bindings[key] = {kind: "environment",
-                                 slot: program.bindingSlots[key]};
-            }
+            bindings[key] = {kind: "environment",
+                             slot: program.bindingSlots[key]};
         }
         var scopes = [{bindings: bindings, createsEnvironment: true}];
         var outer = program.outerEnvironmentScopes || [];

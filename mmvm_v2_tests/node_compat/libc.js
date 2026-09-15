@@ -16,7 +16,7 @@ var NodeLibcSymbolNames = {
     signal: "signal", gettimeofday: "gettimeofday", getenv: "getenv",
     errno_location: "__errno_location", fopen: "fopen", fseek: "fseek",
     ftell: "ftell", fread: "fread", fclose: "fclose", opendir: "opendir",
-    readdir: "readdir", closedir: "closedir"
+    readdir: "readdir", closedir: "closedir", open: "open"
 };
 var NodeLibcSymbols = {};
 for (var NodeLibcSymbolKey in NodeLibcSymbolNames) {
@@ -28,6 +28,9 @@ for (var NodeLibcSymbolKey in NodeLibcSymbolNames) {
 }
 
 var NodeLibc = {
+    open: function (path, flags, mode) {
+        return ffi_call(NodeLibcSymbols.open, path, flags, mode);
+    },
     socket: function (domain, type, protocol) {
         return ffi_call(NodeLibcSymbols.socket, domain, type, protocol);
     },
