@@ -81,18 +81,21 @@ var NodeFs = {
             throw tellError;
         }
         var pointer = NodeMemory.allocate(length);
-        var bytes = [];
+        var result = Buffer.alloc(length);
+        var offset = 0;
         var remaining = length;
         while (remaining > 0) {
             var wanted = remaining > 65536 ? 65536 : remaining;
             var count = NodeLibc.fread(pointer, 1, wanted, file);
             if (count <= 0) break;
-            for (var i = 0; i < count; i++) bytes.push(peek8(pointer + i));
+            for (var i = 0; i < count; i++) {
+                result.writeUInt8(peek8(pointer + i), offset++);
+            }
             remaining -= count;
         }
         NodeMemory.free(pointer);
         NodeLibc.fclose(file);
-        return new Buffer(bytes);
+        return offset === length ? result : result.slice(0, offset);
     },
 
     stat: function (path, callback) {

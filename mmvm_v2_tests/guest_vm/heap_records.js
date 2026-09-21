@@ -1121,6 +1121,13 @@
             Heap.Types.PLATFORM_SERVICES);
     };
 
+    Records.prototype.platformGettimeofdayPointerCellAddress = function (
+            services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(
+            services, PLATFORM_GETTIMEOFDAY_POINTER);
+    };
+
     Records.prototype.setPlatformDateIntrinsicPointer = function (
             services, pointer) {
         this.heap.writeTrustedFieldU32(
@@ -1159,6 +1166,12 @@
             Heap.Types.PLATFORM_SERVICES);
     };
 
+    Records.prototype.platformStrtodPointerCellAddress = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(services,
+                                               PLATFORM_STRTOD_POINTER);
+    };
+
     Records.prototype.setPlatformMallocPointer = function (services, pointer) {
         this.heap.writeTrustedFieldU32(
             services, PLATFORM_MALLOC_POINTER, pointer,
@@ -1171,6 +1184,12 @@
             Heap.Types.PLATFORM_SERVICES);
     };
 
+    Records.prototype.platformMallocPointerCellAddress = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(services,
+                                               PLATFORM_MALLOC_POINTER);
+    };
+
     Records.prototype.setPlatformFreePointer = function (services, pointer) {
         this.heap.writeTrustedFieldU32(
             services, PLATFORM_FREE_POINTER, pointer,
@@ -1181,6 +1200,12 @@
         return this.heap.readTrustedFieldU32(
             services, PLATFORM_FREE_POINTER,
             Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformFreePointerCellAddress = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(services,
+                                               PLATFORM_FREE_POINTER);
     };
 
     /* Native service addresses are process-local capabilities and must never

@@ -36,7 +36,11 @@
                       PARSE_INT: 65,
                       MATH_ATAN: 66,
                       BUFFER_TO_STRING: 67,
-                      FUNCTION_TO_STRING: 68};
+                      FUNCTION_TO_STRING: 68,
+                      STRING_LAST_INDEX_OF: 69,
+                      STRING_SPLIT: 70,
+                      BUFFER_READ_U8: 71,
+                      BUFFER_WRITE_U8: 72};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

@@ -662,9 +662,15 @@
         var savedNativeBindingValues = [];
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
-            var bindingCell = layout.nativeBindings[bindingIndex++].cell;
-            savedNativeBindingValues.push(runtime.readHeapValue(bindingCell));
-            runtime.writeHeapValue(bindingCell, 0);
+            var savedBinding = layout.nativeBindings[bindingIndex++];
+            if (savedBinding.raw) {
+                savedNativeBindingValues.push(null);
+            } else {
+                var bindingCell = savedBinding.cell;
+                savedNativeBindingValues.push(
+                    runtime.readHeapValue(bindingCell));
+                runtime.writeHeapValue(bindingCell, 0);
+            }
         }
         var heapImage = null;
         try {
@@ -672,9 +678,11 @@
         } finally {
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
-                runtime.writeHeapValue(
-                    layout.nativeBindings[bindingIndex].cell,
-                    savedNativeBindingValues[bindingIndex]);
+                if (!layout.nativeBindings[bindingIndex].raw) {
+                    runtime.writeHeapValue(
+                        layout.nativeBindings[bindingIndex].cell,
+                        savedNativeBindingValues[bindingIndex]);
+                }
                 bindingIndex++;
             }
             records.restorePlatformPointersAfterSnapshot(

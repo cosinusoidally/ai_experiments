@@ -155,6 +155,12 @@ var NodeProcess = {
         NodeBuffer.prototype.readUInt16LE = function (offset) {
             return this._nodeBytes[offset] | (this._nodeBytes[offset + 1] << 8);
         };
+        NodeBuffer.prototype.readUInt8 = function (offset) {
+            if (offset < 0 || offset >= this.length) {
+                throw new RangeError("Buffer index out of range");
+            }
+            return this._nodeBytes[offset];
+        };
         NodeBuffer.prototype.readUInt16BE = function (offset) {
             return (this._nodeBytes[offset] << 8) | this._nodeBytes[offset + 1];
         };
@@ -173,6 +179,13 @@ var NodeProcess = {
             this._nodeBytes[offset + 1] = (value >>> 8) & 255;
             return offset + 2;
         };
+        NodeBuffer.prototype.writeUInt8 = function (value, offset) {
+            if (offset < 0 || offset >= this.length) {
+                throw new RangeError("Buffer index out of range");
+            }
+            this._nodeBytes[offset] = Number(value) & 255;
+            return offset + 1;
+        };
         NodeBuffer.prototype.writeUInt32LE = function (value, offset) {
             this._nodeBytes[offset] = value & 255;
             this._nodeBytes[offset + 1] = (value >>> 8) & 255;
@@ -183,7 +196,14 @@ var NodeProcess = {
         NodeBuffer.prototype.writeInt16LE = function (value, offset) {
             return this.writeUInt16LE(value & 65535, offset);
         };
-        Buffer = NodeBuffer;
+        /* The guest runtime installs its heap-backed Buffer before this
+         * compatibility layer. Preserve that implementation: replacing it
+         * with the array fallback makes bulk I/O quadratic and discards the
+         * VM's native buffer intrinsics. Bare ES3 shells and old Node hosts
+         * without Buffer.alloc still receive the portable fallback. */
+        if (typeof Buffer === "undefined" || !Buffer.alloc) {
+            Buffer = NodeBuffer;
+        }
     },
 
     formatArguments: function (values) {

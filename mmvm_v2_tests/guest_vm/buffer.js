@@ -99,14 +99,14 @@
             function (receiver, args) {
                 support.requireBuffer(receiver);
                 return support.read(receiver, integer(args[0]));
-            });
+            }, NativeIntrinsics.BUFFER_READ_U8);
         properties.$writeUInt8 = this.makeNative("Buffer.prototype.writeUInt8",
             function (receiver, args) {
                 support.requireBuffer(receiver);
                 var offset = integer(args[1]);
                 support.write(receiver, offset, args[0]);
                 return offset + 1;
-            });
+            }, NativeIntrinsics.BUFFER_WRITE_U8);
         properties.$readUInt32LE = this.makeNative("Buffer.prototype.readUInt32LE",
             function (receiver, args) {
                 support.requireBuffer(receiver);
@@ -216,7 +216,7 @@
                         pointer + support.viewOffset(buffer));
                 }
                 return buffer;
-            }));
+            }, NativeIntrinsics.BUFFER_ALLOC));
         this.runtime.setProperty(constructor, "prototype", this.prototype);
         this.constructor = constructor;
         this.runtime.setGlobal("Buffer", constructor);

@@ -2120,7 +2120,7 @@
                 var text = runtime.toString(receiver);
                 return text.lastIndexOf(String(args[0]),
                     args.length > 1 ? Number(args[1]) : text.length);
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_LAST_INDEX_OF);
         this.stringMethods.substring = this.makeNativeFunction("String.substring",
             function (receiver, args) {
                 return args.length > 1 ? runtime.toString(receiver).substring(Number(args[0]), Number(args[1])) :
@@ -2145,7 +2145,7 @@
                     runtime.toString(receiver).split(separator, Number(args[1])) :
                     runtime.toString(receiver).split(separator);
                 return runtime.arrayFrom(parts);
-            });
+            }, "intrinsic", NativeIntrinsics.STRING_SPLIT);
         this.stringMethods.match = this.makeNativeFunction("String.match",
             function (receiver, args) {
                 var regexp = args.length ? args[0] : undefined;
@@ -3415,12 +3415,26 @@
 
     Runtime.prototype.standaloneNativeBindings = function (context) {
         var bindings = [];
+        var records = this.heapRecords;
+        var services = this.nativeInterpreter.platformServicesAddress;
+        function platformBinding(cell, symbol) {
+            bindings.push({cell: 0, payload: cell, raw: true,
+                           suppliedDlsym: false, symbol: symbol});
+        }
         var dlsymCell = this.globalCellAddress(context, "NodeDlsymPointer");
         if (dlsymCell) {
             bindings.push({cell: dlsymCell,
                 payload: this.valueCells.int32PayloadAddressAt(dlsymCell),
                 suppliedDlsym: true, symbol: "dlsym"});
         }
+        platformBinding(records.platformGettimeofdayPointerCellAddress(
+            services), "gettimeofday");
+        platformBinding(records.platformStrtodPointerCellAddress(services),
+                        "strtod");
+        platformBinding(records.platformMallocPointerCellAddress(services),
+                        "malloc");
+        platformBinding(records.platformFreePointerCellAddress(services),
+                        "free");
         var names;
         var pointers;
         try {
