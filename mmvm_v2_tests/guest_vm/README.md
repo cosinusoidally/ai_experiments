@@ -306,12 +306,14 @@ from older kernel source, however, so use it only with a snapshot whose origin
 is trusted and whose build is known to match the current checkout. The option
 is rejected unless `--with-snapshot FILE` is also present.
 
-For the first standalone milestone, build `js_runner.c` and run a snapshotted
-`hello.js` directly as documented in the top-level `README.md`. The current
-standalone entry handles a completed native execution and deliberately reports
-other VM exits as errors; general source loading and the full native runtime
-lifecycle remain work in progress. The design and staged acceptance gates are
-in `STANDALONE_SNAPSHOT_PLAN.md`.
+Build `js_runner.c` and create the generic runner image as documented in the
+top-level `README.md`. The image reads arbitrary source through guest-owned
+libc bindings and runs the self-hosted tokenizer, parser, compiler, and native
+interpreter. It can reproduce a byte-identical copy of itself and currently
+runs `hello.js` and the unchanged X11 `demo1.js`. Unsupported native semantic
+exits still report an error status, and later demos plus full lifecycle and
+performance work remain in progress. The design and staged acceptance gates
+are in `STANDALONE_SNAPSHOT_PLAN.md`.
 
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:

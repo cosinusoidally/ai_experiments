@@ -189,7 +189,7 @@
         var support = this;
         var constructor = this.makeNative("Buffer", function (receiver, args) {
             return support.fromValue(args[0], args[1]);
-        });
+        }, NativeIntrinsics.BUFFER_CONSTRUCTOR);
         this.runtime.setProperty(constructor, "alloc", this.makeNative("Buffer.alloc",
             function (receiver, args) {
                 var buffer = support.allocate(args[0]);
@@ -204,7 +204,9 @@
                 return !!args[0] && args[0].guestType === "buffer";
             }));
         this.runtime.setProperty(constructor, "from", this.makeNative("Buffer.from",
-            function (receiver, args) { return support.fromValue(args[0], args[1]); }));
+            function (receiver, args) {
+                return support.fromValue(args[0], args[1]);
+            }, NativeIntrinsics.BUFFER_CONSTRUCTOR));
         this.runtime.setProperty(constructor, "allocNative", this.makeNative("Buffer.allocNative",
             function (receiver, args) {
                 var buffer = support.allocate(args[0]);

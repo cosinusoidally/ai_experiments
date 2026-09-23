@@ -249,6 +249,7 @@
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
         objectExtensible: "OBJECT_EXTENSIBLE",
         arrayElements: "ARRAY_ELEMENTS",
+        arrayPropertyHead: "ARRAY_PROPERTY_HEAD",
         arrayReserved: "ARRAY_RESERVED",
         functionClosure: "FUNCTION_CLOSURE",
         functionMetadata: "FUNCTION_METADATA",

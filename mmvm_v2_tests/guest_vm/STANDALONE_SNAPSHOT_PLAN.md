@@ -224,6 +224,13 @@ Status: the documented `guest_runner.js --vm-native --snapshot ... hello.js`
 command now writes `snap2`, runs the prepared hello payload, and produces a
 byte-identical fixed point. The regression suite compares the complete files.
 
+The generic image now also loads arbitrary source filenames instead of
+capturing `hello.js`. As of the 2026-09-23 checkpoint it runs unchanged
+`demo1.js` through X11 for sustained execution, including guest-owned RegExp,
+Number formatting, Buffer conversion, and primitive property lookup. The demo
+is still much slower than its 20 FPS target, so broader standalone demo
+correctness and performance remain active work.
+
 ## Regression gates
 
 Every stable checkpoint must keep these paths working:

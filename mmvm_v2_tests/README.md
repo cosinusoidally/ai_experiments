@@ -205,22 +205,22 @@ Hello, world!
 
 ### Standalone snapshot hello
 
-The native guest can serialize the interpreter, the compiled `hello.js`
-program, its initial execution frame, and the guest heap into an ignored
-standalone image. Build the deliberately small ANSI C image loader and create
-the snapshot from this directory:
+The native guest can serialize a generic guest-side source runner, the native
+interpreter, and the guest heap into an ignored standalone image. Build the
+deliberately small ANSI C image loader and create the snapshot from this
+directory:
 
 ```sh
 gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
 
 LD_LIBRARY_PATH="$MOZJS_LIB" \
   "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
-  --snapshot artifacts/snap hello.js
+  --snapshot artifacts/snap guest_runner.js
 ```
 
-The snapshot-generation command also runs `hello.js` normally through
-`js_min.exe`. The resulting image can then run without SpiderMonkey or
-`LD_LIBRARY_PATH`:
+The resulting image can load arbitrary guest source through its libc-backed
+filesystem layer, tokenize, parse, compile, and execute it without
+SpiderMonkey or `LD_LIBRARY_PATH`:
 
 ```sh
 ./artifacts/js_runner.exe ./artifacts/snap hello.js
@@ -234,18 +234,19 @@ Hello, world!
 
 `js_runner.c` only validates and privately maps the image, finds `dlsym`, and
 transfers `argc`/`argv` to its native entry point. The output comes from the
-snapshotted `hello.js` bytecode executing in the native guest interpreter; it
-is not a C or bootstrap diagnostic. The image checks that its first program
-argument is the path captured at snapshot time. Images and executables stay in
-the ignored `artifacts/` directory.
+guest-compiled `hello.js` bytecode executing in the native guest interpreter;
+it is not a C or bootstrap diagnostic. Images and executables stay in the
+ignored `artifacts/` directory. The file is non-sparse: it contains only
+initialized image and heap bytes, not the heap's reserved growth capacity. At
+startup, the image resolves `mmap` and `memcpy` through the supplied `dlsym`,
+reserves anonymous memory for that capacity, and copies the compact template
+into it.
 
-This is the first standalone milestone, not yet a general source loader. A
-hello-only image stores just the initialized guest-heap prefix, so its ordinary
-file length is only a few hundred KiB. At startup, the image resolves `mmap`
-and `memcpy` through the supplied `dlsym`, reserves anonymous memory for the
-heap's growth capacity, and copies the compact template into it. General
-guest-side loading and native GC/lifecycle handling remain later stages in
-`guest_vm/STANDALONE_SNAPSHOT_PLAN.md`.
+The same image also runs the unchanged X11 `demo1.js`; the guest runtime owns
+its RegExp execution, Number formatting, Buffer construction, parsing, and
+property semantics. This is a correctness milestone rather than the final
+performance point: the standalone demo currently runs well below its requested
+20 FPS, and unsupported native semantic exits still terminate with status 70.
 
 A runner image can also reproduce itself without SpiderMonkey. Generate it
 with the eventual standalone command line following the captured
@@ -254,18 +255,17 @@ with the eventual standalone command line following the captured
 ```sh
 LD_LIBRARY_PATH="$MOZJS_LIB" \
   "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
-  --snapshot artifacts/snap guest_runner.js --vm-native \
-  --snapshot artifacts/snap2 hello.js
+  --snapshot artifacts/snap guest_runner.js
 
 ./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
   --snapshot artifacts/snap2 hello.js
 cmp artifacts/snap artifacts/snap2
 ```
 
-The native bootstrap recognizes the runner's `--snapshot FILE` request,
+The snapshot-hosted runner recognizes its `--snapshot FILE` request,
 resolves `open`, `write`, and `close` from its sole `dlsym` capability, and
 serializes the untouched mapped image with a short-write loop before entering
-the prepared `hello.js` frame. Consequently `snap2` is a genuine non-sparse,
+the requested `hello.js` program. Consequently `snap2` is a genuine non-sparse,
 byte-identical copy of the relocatable image; neither the C loader nor the
 bootstrap contains the hello output.
 
