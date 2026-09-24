@@ -4,6 +4,22 @@
  * the guest runtime. */
 var GuestStandaloneGlobal = this;
 var GuestStandaloneModuleCache = {};
+var GuestStandaloneExitPointer = 0;
+
+function guestStandaloneQuit(status) {
+    /* Exit is a direct guest FFI operation.  The C image loader supplies only
+     * dlsym; no VM-specific callback or host JavaScript participates. */
+    if (!GuestStandaloneExitPointer) {
+        GuestStandaloneExitPointer = ffi_call(
+            NodeDlsymPointer, 0, "exit");
+        if (!GuestStandaloneExitPointer) {
+            throw new Error("standalone libc exit is unavailable");
+        }
+    }
+    ffi_call(GuestStandaloneExitPointer,
+             status === undefined ? 0 : Number(status) | 0);
+    throw new Error("standalone libc exit returned");
+}
 
 function guestStandaloneCString(pointer) {
     var result = "";
@@ -152,7 +168,7 @@ function guestStandaloneExecute(path, programArguments) {
             loadedSource, String(filename), guestStandaloneExecute)();
     };
     GuestStandaloneGlobal.print = console.log;
-    GuestStandaloneGlobal.quit = process.exit;
+    GuestStandaloneGlobal.quit = guestStandaloneQuit;
     var source = NodeFs.readFileSync(path).toString("utf8");
     GuestStandaloneFrontend.compileExecutable(
         source, path, guestStandaloneExecute)();

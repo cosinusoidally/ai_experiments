@@ -316,9 +316,11 @@ guest-owned capacity-growth kernel, and `Math.pow` handles zero bases without a
 host semantic exit. The standalone collector can now reclaim and reuse guest
 records without a host transition, and self-hosted adopted programs retain the
 source needed by `Function#toString`. Unsupported native semantic exits still
-report an error status. Demo8's self-hosted startup and clean menu-Q shutdown,
-plus broader lifecycle and performance work, remain in progress. The design
-and staged acceptance gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
+report an error status. Standalone `quit(status)` resolves libc `exit` through
+the guest's direct FFI, so demo shutdown preserves its requested process status
+without a host-language callback. Demo8's self-hosted startup and broader
+lifecycle and performance work remain in progress. The design and staged
+acceptance gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
 
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:

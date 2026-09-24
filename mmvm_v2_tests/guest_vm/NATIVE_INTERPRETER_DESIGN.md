@@ -244,7 +244,10 @@ frame and permanent runtime records, sweeps/coalesces dead records, rebuilds
 the free-region chain, and retries the same bytecode in native code. Cached
 frames and the weak property cache are invalidated before sweeping. Every
 reference that survives this safepoint must be reachable through named record
-fields or value cells; no host object participates in liveness.
+fields or value cells; no host object participates in liveness. Program records
+are not immortal structural roots: active programs are traced from frames,
+callables, and constant references, while the host-coordinated path explicitly
+seeds programs retained by its runtime metadata.
 
 Host handles, parsed ASTs, compiler analysis, generated-code addresses, and
 libc symbol addresses are bootstrap metadata only. The native engine cannot

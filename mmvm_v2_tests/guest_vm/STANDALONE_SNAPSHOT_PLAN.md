@@ -247,9 +247,9 @@ infinities, and negative zero. At 256x192, an observed standalone run completed
 loading, entered attract mode at roughly 18 FPS, and sustained 20 FPS after an
 Escape/F transition into free-driving mode. Self-hosted parse/compile startup
 still takes roughly two minutes and is now the principal standalone demo8
-performance problem. Menu Q currently closes the X11 connection but returns
-status 70 rather than a clean zero status, so shutdown lifecycle work also
-remains.
+performance problem. Menu Q now exits through a guest-resolved libc `exit`
+call: the loader still supplies only `dlsym`, the requested status is
+preserved, and shutdown requires no host-language exception or callback.
 
 ## Regression gates
 
