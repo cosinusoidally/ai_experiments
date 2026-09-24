@@ -310,12 +310,15 @@ Build `js_runner.c` and create the generic runner image as documented in the
 top-level `README.md`. The image reads arbitrary source through guest-owned
 libc bindings and runs the self-hosted tokenizer, parser, compiler, and native
 interpreter. It can reproduce a byte-identical copy of itself and currently
-runs `hello.js` and the unchanged X11 demos 1 through 7. Native Array
+runs `hello.js` and the unchanged X11 demos 1 through 8. Native Array
 construction accepts exact integral-double lengths, `push`/`unshift` share the
 guest-owned capacity-growth kernel, and `Math.pow` handles zero bases without a
-host semantic exit. Unsupported native semantic exits still report an error
-status; demo8, full lifecycle work, and performance remain in progress. The
-design and staged acceptance gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
+host semantic exit. The standalone collector can now reclaim and reuse guest
+records without a host transition, and self-hosted adopted programs retain the
+source needed by `Function#toString`. Unsupported native semantic exits still
+report an error status. Demo8's self-hosted startup and clean menu-Q shutdown,
+plus broader lifecycle and performance work, remain in progress. The design
+and staged acceptance gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
 
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:

@@ -298,6 +298,7 @@
         handlerNext: "HANDLER_NEXT",
         handlerEnvironment: "HANDLER_RESERVED",
         engineCurrentFrame: "ENGINE_CURRENT_FRAME",
+        engineRecordCurrentFrame: "ENGINE_RECORD_CURRENT_FRAME",
         engineFreeFrame: "ENGINE_FREE_FRAME",
         engineScratchLeft: "ENGINE_SCRATCH_LEFT",
         engineScratchRight: "ENGINE_SCRATCH_RIGHT",
@@ -329,7 +330,12 @@
         engineNativeRegionActive: "ENGINE_NATIVE_REGION_ACTIVE",
         engineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
         engineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION",
+        engineGCGeneration: "ENGINE_GC_GENERATION",
+        engineGCStackBase: "ENGINE_GC_STACK_BASE",
+        engineGCStackLimit: "ENGINE_GC_STACK_LIMIT",
+        engineGCCollections: "ENGINE_GC_COLLECTIONS",
         enginePlatformServices: "ENGINE_PLATFORM_SERVICES",
+        engineRecordPlatformServices: "ENGINE_RECORD_PLATFORM_SERVICES",
         platformDlsymPointer: "PLATFORM_DLSYM_POINTER",
         platformArraySlicePointer: "PLATFORM_ARRAY_SLICE_POINTER",
         platformArrayConcatPointer: "PLATFORM_ARRAY_CONCAT_POINTER",
@@ -338,7 +344,8 @@
         platformNumericPropertyPointer: "PLATFORM_NUMERIC_PROPERTY_POINTER",
         platformStrtodPointer: "PLATFORM_STRTOD_POINTER",
         platformMallocPointer: "PLATFORM_MALLOC_POINTER",
-        platformFreePointer: "PLATFORM_FREE_POINTER"
+        platformFreePointer: "PLATFORM_FREE_POINTER",
+        platformSnprintfPointer: "PLATFORM_SNPRINTF_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {
@@ -424,7 +431,9 @@
         setEngineNativeTailBump: "ENGINE_NATIVE_TAIL_BUMP",
         setEngineNativeRegionActive: "ENGINE_NATIVE_REGION_ACTIVE",
         setEngineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
-        setEngineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION"
+        setEngineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION",
+        setEngineGCGeneration: "ENGINE_GC_GENERATION",
+        setEngineGCCollections: "ENGINE_GC_COLLECTIONS"
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {

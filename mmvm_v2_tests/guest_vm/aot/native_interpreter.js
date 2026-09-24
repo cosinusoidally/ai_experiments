@@ -5,12 +5,17 @@
     var JSBackend = root.GuestVMKernelJSBackend;
     var X86Backend = root.GuestVMKernelX86Backend;
     var Bytecode = root.GuestVMBytecode;
+    var HeapSweeper = root.GuestVMHeapSweeper;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
         Bytecode = require("../bytecode.js");
+        HeapSweeper = require("./heap_sweeper.js");
     }
+
+    var heapMarkKernel = HeapSweeper.markKernel;
+    var heapSweepKernel = HeapSweeper.sweepKernel;
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
@@ -226,6 +231,7 @@
         var PLATFORM_STRTOD_POINTER = 56;
         var PLATFORM_MALLOC_POINTER = 60;
         var PLATFORM_FREE_POINTER = 64;
+        var PLATFORM_SNPRINTF_POINTER = 68;
         var PROFILE_OPCODES = 0;
         var CALL_REJECT_NONE = 0;
         var CALL_REJECT_ARGUMENT_LIST = 1;
@@ -1157,6 +1163,20 @@
                     var mappedArgumentDestination =
                         argumentsMappedCellKernel(
                             heapBase, arraySetObject, arraySetIndex);
+                    var arraySetLength = vectorLength(
+                        heapBase, arraySetVector);
+                    /* Recycled vectors retain their old bytes.  Extending a
+                     * sparse array must materialize the intervening holes as
+                     * undefined; otherwise a later indexed read can observe
+                     * arbitrary cells left by the reclaimed record that
+                     * previously occupied this storage. */
+                    var arraySetHole = arraySetLength;
+                    while (arraySetHole < arraySetIndex) {
+                        setValueCellUndefined(heapBase + arraySetVector +
+                            VECTOR_CELLS +
+                            arraySetHole * VALUE_CELL_BYTES);
+                        arraySetHole = arraySetHole + 1;
+                    }
                     var arraySetDestination = heapBase + arraySetVector +
                         VECTOR_CELLS + arraySetIndex * VALUE_CELL_BYTES;
                     store32(arraySetDestination, load32(arraySetSource));
@@ -1170,7 +1190,6 @@
                         copyValueCell(mappedArgumentDestination,
                                       arraySetSource);
                     }
-                    var arraySetLength = vectorLength(heapBase, arraySetVector);
                     if (arraySetIndex >= arraySetLength) {
                         setVectorLength(heapBase, arraySetVector,
                                         arraySetIndex + 1);
@@ -1462,6 +1481,8 @@
                     var concatenationRightIsString = 0;
                     var concatenationLeftIsInteger = 0;
                     var concatenationRightIsInteger = 0;
+                    var concatenationLeftIsDouble = 0;
+                    var concatenationRightIsDouble = 0;
                     var concatenationLeftInteger = 0;
                     var concatenationRightInteger = 0;
                     if (opcode === OP_ADD) {
@@ -1497,7 +1518,7 @@
                                 loadI32F64(engineScratchLeftAddress(
                                     heapBase, state))) === 1) {
                                 concatenationLeftIsInteger = 1;
-                            }
+                            } else concatenationLeftIsDouble = 1;
                         }
                         if (arithmeticRightTag === VALUE_TAG_INT32) {
                             concatenationRightIsInteger = 1;
@@ -1515,27 +1536,68 @@
                                 loadI32F64(engineScratchRightAddress(
                                     heapBase, state))) === 1) {
                                 concatenationRightIsInteger = 1;
-                            }
+                            } else concatenationRightIsDouble = 1;
                         }
                         if (concatenationLeftIsString === 1) {
                             if (concatenationRightIsString === 1) {
                                 stringConcatenation = 1;
                             } else if (concatenationRightIsInteger === 1) {
                                 stringConcatenation = 1;
+                            } else if (concatenationRightIsDouble === 1) {
+                                stringConcatenation = 1;
                             }
                         } else if (concatenationRightIsString === 1) {
                             if (concatenationLeftIsInteger === 1) {
+                                stringConcatenation = 1;
+                            } else if (concatenationLeftIsDouble === 1) {
                                 stringConcatenation = 1;
                             }
                         }
                     }
                     if (stringConcatenation === 1) {
+                        var concatenationNative = 0;
+                        var concatenationLeftNative = 0;
+                        var concatenationRightNative = 0;
+                        var concatenationNeedsNative =
+                            concatenationLeftIsDouble;
+                        if (concatenationRightIsDouble === 1) {
+                            concatenationNeedsNative = 1;
+                        }
+                        if (concatenationNeedsNative === 1) {
+                            var concatenationServices =
+                                enginePlatformServices(heapBase, state);
+                            var concatenationMalloc = platformMallocPointer(
+                                heapBase, concatenationServices);
+                            if (concatenationMalloc !== 0) {
+                                concatenationNative = callNativeI32(
+                                    concatenationMalloc, 128);
+                            }
+                            if (concatenationNative === 0) {
+                                return unsupportedExitKernel(
+                                    heapBase, state, frame, pc, opcode,
+                                    instructions);
+                            }
+                            var concatenationFormat = concatenationNative + 112;
+                            storeRaw8(concatenationFormat, 37);
+                            storeRaw8(concatenationFormat + 1, 46);
+                            storeRaw8(concatenationFormat + 2, 49);
+                            storeRaw8(concatenationFormat + 3, 53);
+                            storeRaw8(concatenationFormat + 4, 103);
+                            storeRaw8(concatenationFormat + 5, 0);
+                            concatenationLeftNative = concatenationNative;
+                            concatenationRightNative = concatenationNative + 56;
+                        }
                         var concatenationLeftLength = 0;
                         var concatenationLeftNumber = 0;
                         var concatenationLeftNegative = 0;
                         if (concatenationLeftIsString === 1) {
                             concatenationLeftLength = stringLength(
                                 heapBase, concatenationLeft);
+                        } else if (concatenationLeftIsDouble === 1) {
+                            concatenationLeftLength = formatDoubleStringKernel(
+                                heapBase, state, arithmeticLeft,
+                                concatenationLeftNative,
+                                concatenationNative + 112);
                         } else {
                             concatenationLeftNumber =
                                 concatenationLeftInteger;
@@ -1562,6 +1624,11 @@
                         if (concatenationRightIsString === 1) {
                             concatenationRightLength = stringLength(
                                 heapBase, concatenationRight);
+                        } else if (concatenationRightIsDouble === 1) {
+                            concatenationRightLength = formatDoubleStringKernel(
+                                heapBase, state, arithmeticRight,
+                                concatenationRightNative,
+                                concatenationNative + 112);
                         } else {
                             concatenationRightNumber =
                                 concatenationRightInteger;
@@ -1585,6 +1652,8 @@
                         var concatenationLength = concatenationLeftLength +
                                                   concatenationRightLength;
                         var concatenationValid = 1;
+                        if (concatenationLeftLength < 0) concatenationValid = 0;
+                        if (concatenationRightLength < 0) concatenationValid = 0;
                         if (concatenationLength < concatenationLeftLength) {
                             concatenationValid = 0;
                         }
@@ -1607,6 +1676,12 @@
                             concatenationValid = 0;
                         }
                         if (concatenationValid === 0) {
+                            if (concatenationNative !== 0) {
+                                var concatenationInvalidFree = callNativeI32(
+                                    platformFreePointer(
+                                        heapBase, concatenationServices),
+                                    concatenationNative);
+                            }
                             return unsupportedExitKernel(
                                 heapBase, state, frame, pc, opcode,
                                 instructions);
@@ -1628,6 +1703,10 @@
                                     concatenationCode = stringCharacterCodeUnit(
                                         heapBase, concatenationLeft,
                                         concatenationIndex) & 65535;
+                                } else if (concatenationLeftIsDouble === 1) {
+                                    concatenationCode = loadRaw8(
+                                        concatenationLeftNative +
+                                        concatenationIndex);
                                 } else if (concatenationIndex <
                                            concatenationLeftNegative) {
                                     concatenationCode = 45;
@@ -1654,6 +1733,10 @@
                                     concatenationCode = stringCharacterCodeUnit(
                                         heapBase, concatenationRight,
                                         concatenationRightIndex) & 65535;
+                                } else if (concatenationRightIsDouble === 1) {
+                                    concatenationCode = loadRaw8(
+                                        concatenationRightNative +
+                                        concatenationRightIndex);
                                 } else if (concatenationRightIndex <
                                            concatenationRightNegative) {
                                     concatenationCode = 45;
@@ -1686,6 +1769,12 @@
                         }
                         setStringHash(heapBase, concatenationAddress,
                                       concatenationHash);
+                        if (concatenationNative !== 0) {
+                            var concatenationFreeResult = callNativeI32(
+                                platformFreePointer(
+                                    heapBase, concatenationServices),
+                                concatenationNative);
+                        }
                         store32(arithmeticTarget, VALUE_TAG_REFERENCE);
                         store32(arithmeticTarget + VALUE_CELL_LOW,
                                 concatenationAddress);
@@ -4092,6 +4181,7 @@
                     }
                     var thisSlot = programThisSlot(
                         heapBase, calleeProgram);
+                    if (thisSlot >= 0) {
                     var thisTarget = 0;
                     if (calleeBindingRegisters === 0) {
                         if (calleeNeedsArguments === 1) {
@@ -4193,6 +4283,7 @@
                         }
                         store32(thisTarget + VALUE_CELL_HIGH, 0);
                         store32(thisTarget + VALUE_CELL_AUX, 0);
+                    }
                     }
                     var functionNameSlot = programFunctionNameSlot(
                         heapBase, calleeProgram);
@@ -9647,6 +9738,106 @@
         return EXIT_UNSUPPORTED;
     }
 
+    function rebuildNativeAllocatorKernel(heapBase, state, heapBump) {
+        var HEAP_FIRST_RECORD = 64;
+        var HEAP_TYPE_FREE = 0;
+        var FREE_RECORD_HEADER_BYTES = 16;
+        var MIN_NATIVE_REGION_BYTES = 272;
+        var address = HEAP_FIRST_RECORD;
+        var freeHead = 0;
+        var tailBump = heapBump;
+        while (address < heapBump) {
+            var size = recordSize(heapBase, address);
+            if (recordType(heapBase, address) === HEAP_TYPE_FREE) {
+                if (recordFlags(heapBase, address) === 0) {
+                    if (address + size === heapBump) {
+                        tailBump = address;
+                    } else if (size >= MIN_NATIVE_REGION_BYTES) {
+                        setRecordMark(heapBase, address, freeHead);
+                        freeHead = address;
+                    }
+                }
+            }
+            address = address + size;
+        }
+        setEngineNativeRegionEnd(heapBase, state, 0);
+        setEngineNativeFreeRegion(heapBase, state, freeHead);
+        setEngineNativeTailBump(heapBase, state, tailBump);
+        setEngineNativeRegionActive(heapBase, state, 0);
+        setEngineNativeRetiredRegion(heapBase, state, 0);
+        setEngineHeapBump(heapBase, state, tailBump);
+        setEngineHeapLimit(heapBase, state,
+                           engineNativeTailLimit(heapBase, state));
+        return freeHead;
+    }
+
+    function formatDoubleStringKernel(
+            heapBase, state, sourceCell, destination, format) {
+        var IEEE754_ABSOLUTE_MASK = 2147483647;
+        var IEEE754_EXPONENT_MASK = 2146435072;
+        var VALUE_CELL_LOW = 4;
+        var VALUE_CELL_HIGH = 8;
+        var low = load32(sourceCell + VALUE_CELL_LOW);
+        var high = load32(sourceCell + VALUE_CELL_HIGH);
+        var absoluteHigh = high & IEEE754_ABSOLUTE_MASK;
+        if (absoluteHigh === 0) {
+            if (low === 0) {
+                storeRaw8(destination, 48);
+                storeRaw8(destination + 1, 0);
+                return 1;
+            }
+        }
+        if ((absoluteHigh & IEEE754_EXPONENT_MASK) ===
+                IEEE754_EXPONENT_MASK) {
+            var mantissaHigh = absoluteHigh & 1048575;
+            var isNaN = 0;
+            if (mantissaHigh !== 0) isNaN = 1;
+            if (low !== 0) isNaN = 1;
+            if (isNaN === 1) {
+                storeRaw8(destination, 78);
+                storeRaw8(destination + 1, 97);
+                storeRaw8(destination + 2, 78);
+                storeRaw8(destination + 3, 0);
+                return 3;
+            }
+            var infinityIndex = 0;
+            if (high < 0) {
+                storeRaw8(destination, 45);
+                infinityIndex = 1;
+            }
+            storeRaw8(destination + infinityIndex, 73);
+            storeRaw8(destination + infinityIndex + 1, 110);
+            storeRaw8(destination + infinityIndex + 2, 102);
+            storeRaw8(destination + infinityIndex + 3, 105);
+            storeRaw8(destination + infinityIndex + 4, 110);
+            storeRaw8(destination + infinityIndex + 5, 105);
+            storeRaw8(destination + infinityIndex + 6, 116);
+            storeRaw8(destination + infinityIndex + 7, 121);
+            storeRaw8(destination + infinityIndex + 8, 0);
+            return infinityIndex + 8;
+        }
+        var services = enginePlatformServices(heapBase, state);
+        var snprintfPointer = platformSnprintfPointer(heapBase, services);
+        if (snprintfPointer === 0) return -1;
+        return callNativeI32(
+            snprintfPointer, destination, 48, format, low, high);
+    }
+
+    /* Property-cache entries are weak derived state.  A collection can reuse
+     * both the cached receiver and property-record addresses, so retaining an
+     * entry across a sweep can turn an otherwise valid lookup into an access
+     * through an unrelated record.  Clearing the receiver field invalidates
+     * the complete entry without coupling this code to its byte layout. */
+    function clearNativePropertyCacheKernel(heapBase, state) {
+        var PROPERTY_CACHE_ENTRY_COUNT = 256;
+        var cacheIndex = 0;
+        while (cacheIndex < PROPERTY_CACHE_ENTRY_COUNT) {
+            setPropertyCacheObject(heapBase, state, cacheIndex, 0);
+            cacheIndex = cacheIndex + 1;
+        }
+        return 0;
+    }
+
     /* Keep reclaimed-region selection inside the compiled engine.  A guest
      * program can execute millions of bytecodes between observable yields;
      * returning to the host every time one fragmented arena is consumed both
@@ -9664,6 +9855,11 @@
         var ENGINE_NATIVE_REGION_ACTIVE = 308;
         var ENGINE_ALLOCATION_FAILED = 312;
         var ENGINE_NATIVE_RETIRED_REGION = 316;
+        var ENGINE_GC_GENERATION = 6464;
+        var ENGINE_GC_STACK_BASE = 6468;
+        var ENGINE_GC_STACK_LIMIT = 6472;
+        var ENGINE_GC_COLLECTIONS = 6476;
+        var EXIT_UNSUPPORTED = 3;
         if (engineNativeRegionActive(heapBase, state) === 0) {
             var freeRegion = engineNativeFreeRegion(heapBase, state);
             if (freeRegion !== 0) {
@@ -9681,6 +9877,54 @@
         var reason = interpreterKernel(
             heapBase, frame, globalObject, arrayLengthKey,
             arrayPrototype, stringSupport, budget, state);
+        var collectionEnabled = engineGCStackBase(heapBase, state) !== 0;
+        var collectionCanResume = collectionEnabled;
+        while (collectionCanResume === 1) {
+            if (reason !== EXIT_UNSUPPORTED) {
+                collectionCanResume = 0;
+            } else if (engineAllocationFailed(heapBase, state) === 0) {
+                collectionCanResume = 0;
+            } else {
+            var collectionBump = engineNativeTailBump(heapBase, state);
+            setEngineNativeRegionEnd(heapBase, state, 0);
+            setEngineNativeFreeRegion(heapBase, state, 0);
+            setEngineNativeRegionActive(heapBase, state, 0);
+            setEngineNativeRetiredRegion(heapBase, state, 0);
+            setEngineFreeFrame(heapBase, state, 0);
+            var clearedPropertyCache = clearNativePropertyCacheKernel(
+                heapBase, state);
+            var collectionGeneration =
+                engineGCGeneration(heapBase, state) + 1;
+            if (collectionGeneration === 0) collectionGeneration = 1;
+            setEngineGCGeneration(
+                heapBase, state, collectionGeneration);
+            setRecordMark(heapBase, frame, collectionGeneration);
+            setRecordMark(heapBase, globalObject, collectionGeneration);
+            setRecordMark(heapBase, arrayLengthKey, collectionGeneration);
+            setRecordMark(heapBase, arrayPrototype, collectionGeneration);
+            setRecordMark(heapBase, stringSupport, collectionGeneration);
+            var markResult = heapMarkKernel(
+                heapBase, collectionBump,
+                engineGCStackBase(heapBase, state),
+                engineGCStackLimit(heapBase, state),
+                collectionGeneration);
+            if (markResult !== 0) {
+                collectionCanResume = 0;
+            } else {
+                var collectionReclaimed = heapSweepKernel(
+                    heapBase, collectionBump, collectionGeneration);
+                var collectionFreeHead = rebuildNativeAllocatorKernel(
+                    heapBase, state, collectionBump);
+                setEngineGCCollections(heapBase, state,
+                    engineGCCollections(heapBase, state) + 1);
+                setEngineAllocationFailed(heapBase, state, 0);
+                frame = engineCurrentFrame(heapBase, state);
+                reason = interpreterKernel(
+                    heapBase, frame, globalObject, arrayLengthKey,
+                    arrayPrototype, stringSupport, budget, state);
+            }
+            }
+        }
         if (engineNativeRegionActive(heapBase, state) === 0) {
             setEngineNativeTailBump(
                 heapBase, state, engineHeapBump(heapBase, state));
@@ -9722,12 +9966,19 @@
             setEngineNativeTailBump(heapBase, state, current);
         }
         var freeRegion = engineNativeFreeRegion(heapBase, state);
-        if (freeRegion !== 0) {
+        var previousFreeRegion = 0;
+        while (freeRegion !== 0) {
             var nextFreeRegion = recordMark(heapBase, freeRegion);
             var freeRegionEnd = freeRegion + recordSize(heapBase, freeRegion);
             if (freeRegion + bytes <=
                     freeRegionEnd - FREE_RECORD_HEADER_BYTES) {
-                setEngineNativeFreeRegion(heapBase, state, nextFreeRegion);
+                if (previousFreeRegion === 0) {
+                    setEngineNativeFreeRegion(
+                        heapBase, state, nextFreeRegion);
+                } else {
+                    setRecordMark(heapBase, previousFreeRegion,
+                                  nextFreeRegion);
+                }
                 setEngineNativeRegionEnd(heapBase, state, freeRegionEnd);
                 setEngineNativeRegionActive(heapBase, state, 1);
                 setEngineHeapBump(heapBase, state, freeRegion);
@@ -9735,18 +9986,8 @@
                     freeRegionEnd - FREE_RECORD_HEADER_BYTES);
                 return 1;
             }
-            /* Regions are handed over largest-first. If the head cannot
-             * satisfy this request, no later region can either. Retire the
-             * ordered chain in one operation rather than repeatedly scanning
-             * it for every subsequent allocation. */
-            var retiredTail = freeRegion;
-            while (recordMark(heapBase, retiredTail) !== 0) {
-                retiredTail = recordMark(heapBase, retiredTail);
-            }
-            setRecordMark(heapBase, retiredTail,
-                engineNativeRetiredRegion(heapBase, state));
-            setEngineNativeRetiredRegion(heapBase, state, freeRegion);
-            setEngineNativeFreeRegion(heapBase, state, 0);
+            previousFreeRegion = freeRegion;
+            freeRegion = nextFreeRegion;
         }
         var tailBump = engineNativeTailBump(heapBase, state);
         setEngineHeapBump(heapBase, state, tailBump);
@@ -10118,6 +10359,7 @@
             heapBase, argumentsVector, registerCells, 10);
         var evalProgram = programBooleanArgumentKernel(
             heapBase, argumentsVector, registerCells, 11);
+        var sourceProgram = 0;
         if (argumentCount > 12) {
             var contextAnchorCell = programArgumentCellKernel(
                 heapBase, argumentsVector, registerCells, 12);
@@ -10132,6 +10374,18 @@
             }
             context = functionHomeContext(heapBase, contextAnchor);
             if (context === 0) return 0;
+        }
+        if (argumentCount > 13) {
+            var sourceCell = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 13);
+            if (sourceCell === 0) return 0;
+            var sourceTag = valueCellTag(0, sourceCell);
+            if (sourceTag === VALUE_TAG_REFERENCE) {
+                sourceProgram = valueCellReference(0, sourceCell);
+                if (recordType(heapBase, sourceProgram) !== HEAP_TYPE_STRING) {
+                    return 0;
+                }
+            } else if (sourceTag !== VALUE_TAG_NULL) return 0;
         }
         if (codeLength < 0) return 0;
         if (constantLength < 0) return 0;
@@ -10204,7 +10458,7 @@
         setProgramFlags(heapBase, program, usesArguments |
             strictProgram * 2 | evalProgram * 4);
         setProgramBindingCount(heapBase, program, bindingCount);
-        setProgramSource(heapBase, program, 0);
+        setProgramSource(heapBase, program, sourceProgram);
         initializedBytes = initializeProgramCallableKernel(
             heapBase, callable, program, context, stringSupport);
         setEngineHeapBump(heapBase, state, end);
@@ -10322,6 +10576,9 @@
             var argumentValue = 0;
             if (argumentTag === VALUE_TAG_INT32) {
                 argumentValue = load32(argumentCell + VALUE_CELL_LOW);
+            } else if (argumentTag === VALUE_TAG_DOUBLE) {
+                argumentValue = toInt32F64(loadNumberF64(
+                    argumentCell + VALUE_CELL_LOW, argumentTag));
             } else if (argumentTag === VALUE_TAG_UNDEFINED) {
                 if (argumentIndex === 1) argumentValue = sourceLength;
             } else return 15;
@@ -11404,7 +11661,11 @@
             floorDivideDateIntegerKernel: floorDivideDateIntegerKernel,
             functionConstructorKernel: functionConstructorKernel,
             functionToStringKernel: functionToStringKernel,
+            formatDoubleStringKernel: formatDoubleStringKernel,
             getKeysKernel: getKeysKernel,
+            clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
+            heapMarkKernel: heapMarkKernel,
+            heapSweepKernel: heapSweepKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
@@ -11429,6 +11690,7 @@
             programSetVectorKernel: programSetVectorKernel,
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
+            rebuildNativeAllocatorKernel: rebuildNativeAllocatorKernel,
             returnFromBytecodeKernel: returnFromBytecodeKernel,
             reserveNativeAllocationKernel: reserveNativeAllocationKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
@@ -11575,6 +11837,9 @@
                 this.platformServicesAddress, x86Backend.ffi.resolve("malloc"));
             runtime.heapRecords.setPlatformFreePointer(
                 this.platformServicesAddress, x86Backend.ffi.resolve("free"));
+            runtime.heapRecords.setPlatformSnprintfPointer(
+                this.platformServicesAddress,
+                x86Backend.ffi.resolve("snprintf"));
         }
         this.stringSupportAddress = runtime.heapRecords.allocateValueVector(294);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(

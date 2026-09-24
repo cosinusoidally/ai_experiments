@@ -117,8 +117,12 @@
     var ENGINE_PROPERTY_CACHE = ENGINE_NATIVE_RETIRED_REGION + 4;
     var PROPERTY_CACHE_ENTRY_BYTES = 24;
     var PROPERTY_CACHE_ENTRY_COUNT = 256;
-    var ENGINE_STATE_BYTES = ENGINE_PROPERTY_CACHE +
+    var ENGINE_GC_GENERATION = ENGINE_PROPERTY_CACHE +
         PROPERTY_CACHE_ENTRY_BYTES * PROPERTY_CACHE_ENTRY_COUNT;
+    var ENGINE_GC_STACK_BASE = ENGINE_GC_GENERATION + 4;
+    var ENGINE_GC_STACK_LIMIT = ENGINE_GC_STACK_BASE + 4;
+    var ENGINE_GC_COLLECTIONS = ENGINE_GC_STACK_LIMIT + 4;
+    var ENGINE_STATE_BYTES = ENGINE_GC_COLLECTIONS + 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -151,7 +155,8 @@
     var PLATFORM_STRTOD_POINTER = 40;
     var PLATFORM_MALLOC_POINTER = 44;
     var PLATFORM_FREE_POINTER = 48;
-    var PLATFORM_SERVICES_BYTES = 52;
+    var PLATFORM_SNPRINTF_POINTER = 52;
+    var PLATFORM_SERVICES_BYTES = 56;
 
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
@@ -1047,6 +1052,38 @@
             Heap.Types.ENGINE_STATE, ENGINE_STATE_BYTES, 0, 0, 0, 0);
     };
 
+    Records.prototype.engineGCGeneration = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_GENERATION, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCStackBase = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_STACK_BASE, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCStackLimit = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_STACK_LIMIT, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCCollections = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_COLLECTIONS, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCState = function (
+            state, generation, stackBase, stackLimit, collections) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_GENERATION,
+            generation || 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_STACK_BASE,
+            stackBase || 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_STACK_LIMIT,
+            stackLimit || 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_COLLECTIONS,
+            collections || 0, Heap.Types.ENGINE_STATE);
+    };
+
     Records.prototype.allocatePlatformServices = function () {
         return this.heap.allocateRecordWords(
             Heap.Types.PLATFORM_SERVICES, PLATFORM_SERVICES_BYTES,
@@ -1206,6 +1243,24 @@
         this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
         return this.heap.trustedPayloadAddress(services,
                                                PLATFORM_FREE_POINTER);
+    };
+
+    Records.prototype.setPlatformSnprintfPointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(
+            services, PLATFORM_SNPRINTF_POINTER, pointer,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformSnprintfPointer = function (services) {
+        return this.heap.readTrustedFieldU32(
+            services, PLATFORM_SNPRINTF_POINTER,
+            Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformSnprintfPointerCellAddress = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(services,
+                                               PLATFORM_SNPRINTF_POINTER);
     };
 
     /* Native service addresses are process-local capabilities and must never

@@ -234,7 +234,22 @@ kernel supports both `push` and `unshift`. The unchanged `demo2.js` consequently
 runs through the generic image as well. Native zero-base `Math.pow` handling
 then brought demos 3 through 7 across the same boundary without demo changes.
 At 256x192, demo2 currently renders about 1.9--2.1 FPS and demos 6/7 about
-1.2--1.7 FPS, so demo8 correctness and general performance remain active work.
+1.2--1.7 FPS.
+
+The 2026-09-24 standalone-lifecycle checkpoint also runs unchanged demo8. The
+standalone engine now performs mark/sweep collection itself, rebuilds its
+native free-region index, invalidates weak property-cache entries, and resumes
+the interrupted bytecode without returning to a host VM. Recycled array
+vectors initialize newly exposed sparse holes to `undefined`; self-hosted
+program adoption retains function source text for `Function#toString`; and
+native string concatenation covers finite fractional doubles, `NaN`,
+infinities, and negative zero. At 256x192, an observed standalone run completed
+loading, entered attract mode at roughly 18 FPS, and sustained 20 FPS after an
+Escape/F transition into free-driving mode. Self-hosted parse/compile startup
+still takes roughly two minutes and is now the principal standalone demo8
+performance problem. Menu Q currently closes the X11 connection but returns
+status 70 rather than a clean zero status, so shutdown lifecycle work also
+remains.
 
 ## Regression gates
 

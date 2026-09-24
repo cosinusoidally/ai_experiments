@@ -231,10 +231,20 @@ and linked heads for available and retired free regions. Allocation helpers
 reserve complete compound record groups before publishing any member. Region
 selection and switching are compiled kernel operations; ordinary bytecode does
 not call the host merely to obtain another reclaimed block. Available regions
-are largest-first. Once a suffix is too small for an allocation it is retired
+are linked in heap storage and searched for the first region which can satisfy
+the current request. Once a suffix is too small for an allocation it is retired
 for that native slice instead of being reconsidered on every later allocation.
-The collector handoff walks both named lists and restores their records to the
-host index without scanning the entire heap.
+The host-coordinated collector handoff walks both named lists and restores
+their records to the host index without scanning the entire heap.
+
+A standalone snapshot has no host collector or allocator index. Its engine
+state therefore publishes a collector generation and a separate mark-work
+area above the logical heap limit. Allocation exhaustion marks from the active
+frame and permanent runtime records, sweeps/coalesces dead records, rebuilds
+the free-region chain, and retries the same bytecode in native code. Cached
+frames and the weak property cache are invalidated before sweeping. Every
+reference that survives this safepoint must be reachable through named record
+fields or value cells; no host object participates in liveness.
 
 Host handles, parsed ASTs, compiler analysis, generated-code addresses, and
 libc symbol addresses are bootstrap metadata only. The native engine cannot

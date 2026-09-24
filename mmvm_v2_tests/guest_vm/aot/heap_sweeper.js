@@ -17,7 +17,8 @@
     var sharedIndexJS = null;
     var sharedIndexX86 = null;
 
-    function markKernel(heapBase, heapBump, stackBase, heapLimit, generation) {
+    function heapMarkKernel(
+            heapBase, heapBump, stackBase, heapLimit, generation) {
         var HEAP_FIRST_RECORD = 64;
         var HEAP_TYPE_FREE = 0;
         var HEAP_TYPE_OBJECT = 1;
@@ -83,11 +84,12 @@
         var PROGRAM_CONSTANT_REGISTERS = 24;
         var PROGRAM_BINDING_REGISTERS = 28;
         var PROGRAM_PARAMETER_SLOTS = 32;
+        var PROGRAM_SOURCE = 64;
         var CONTEXT_GLOBAL = 16;
         var CONTEXT_ACTIVE_FRAME = 20;
         var HANDLER_NEXT = 16;
-        var ENGINE_CURRENT_FRAME = 40;
-        var ENGINE_PLATFORM_SERVICES = 60;
+        var ENGINE_RECORD_CURRENT_FRAME = 40;
+        var ENGINE_RECORD_PLATFORM_SERVICES = 60;
         var VALUE_CELL_TAG = 0;
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;
@@ -221,6 +223,7 @@
                     else if (referenceIndex === 2) target = programConstantRegisters(heapBase, address);
                     else if (referenceIndex === 3) target = programBindingRegisters(heapBase, address);
                     else if (referenceIndex === 4) target = programParameterSlots(heapBase, address);
+                    else if (referenceIndex === 5) target = programSource(heapBase, address);
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_CONTEXT) {
                     if (referenceIndex === 0) target = contextGlobal(heapBase, address);
@@ -233,9 +236,12 @@
                     }
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ENGINE_STATE) {
-                    if (referenceIndex === 0) target = engineCurrentFrame(heapBase, address);
+                    if (referenceIndex === 0) {
+                        target = engineRecordCurrentFrame(heapBase, address);
+                    }
                     else if (referenceIndex === 1) {
-                        target = enginePlatformServices(heapBase, address);
+                        target = engineRecordPlatformServices(
+                            heapBase, address);
                     }
                     else referenceIndex = -2;
                 } else referenceIndex = -2;
@@ -261,7 +267,7 @@
         return 0;
     }
 
-    function sweepKernel(heapBase, heapBump, generation) {
+    function heapSweepKernel(heapBase, heapBump, generation) {
         var HEAP_FIRST_RECORD = 64;
         var HEAP_TYPE_FREE = 0;
         var RECORD_TYPE = 0;
@@ -351,12 +357,12 @@
 
     function HeapSweeper(heap) {
         if (!sharedJS) {
-            var ir = new KernelCompiler().compile(sweepKernel, {
+            var ir = new KernelCompiler().compile(heapSweepKernel, {
                 registerPreferences: ["heapBase", "heapBump", "address"]
             });
             sharedJS = new JSBackend().compile(ir);
             sharedX86 = new X86Backend().compile(ir);
-            var markIR = new KernelCompiler().compile(markKernel, {
+            var markIR = new KernelCompiler().compile(heapMarkKernel, {
                 registerPreferences: ["heapBase", "address", "stackCount"]
             });
             sharedMarkJS = new JSBackend().compile(markIR);
@@ -422,6 +428,13 @@
         heap.freeBlocks = blocks;
         return count;
     };
+
+    /* The standalone interpreter compiles these same kernels into its native
+     * dependency graph. Export the kernel-dialect sources as properties of
+     * the implementation object so host-coordinated and self-coordinated
+     * collection cannot drift into separate marking or sweeping semantics. */
+    HeapSweeper.markKernel = heapMarkKernel;
+    HeapSweeper.sweepKernel = heapSweepKernel;
 
     root.GuestVMHeapSweeper = HeapSweeper;
     if (typeof module !== "undefined" && module.exports) {

@@ -656,6 +656,15 @@
         records.setEngineNativeTailBounds(nativeInterpreter.stateAddress,
                                           heapImageLength,
                                           heap.maximumAllocationLimit);
+        var savedGCState = [
+            records.engineGCGeneration(nativeInterpreter.stateAddress),
+            records.engineGCStackBase(nativeInterpreter.stateAddress),
+            records.engineGCStackLimit(nativeInterpreter.stateAddress),
+            records.engineGCCollections(nativeInterpreter.stateAddress)
+        ];
+        records.setEngineGCState(nativeInterpreter.stateAddress,
+            runtime.gcGeneration, heap.collectorStackBase,
+            heap.byteLength, 0);
         var savedPlatformPointers =
             records.suspendPlatformPointersForSnapshot(
                 nativeInterpreter.platformServicesAddress);
@@ -688,6 +697,9 @@
             records.restorePlatformPointersAfterSnapshot(
                 nativeInterpreter.platformServicesAddress,
                 savedPlatformPointers);
+            records.setEngineGCState(nativeInterpreter.stateAddress,
+                savedGCState[0], savedGCState[1], savedGCState[2],
+                savedGCState[3]);
         }
 
         var openPointer = this.ffi.resolve("open");

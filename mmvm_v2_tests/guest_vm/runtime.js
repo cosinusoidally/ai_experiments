@@ -3196,6 +3196,8 @@
                     usesArguments: !!args[8],
                     strict: !!args[10],
                     evalCode: !!args[11],
+                    source: args.length > 13 && args[13] !== null ?
+                        String(args[13]) : null,
                     bindings: bindingCount ? new Array(bindingCount) : null,
                     globalDeclarations: []
                 };
@@ -3435,6 +3437,8 @@
                         "malloc");
         platformBinding(records.platformFreePointerCellAddress(services),
                         "free");
+        platformBinding(records.platformSnprintfPointerCellAddress(services),
+                        "snprintf");
         var names;
         var pointers;
         try {

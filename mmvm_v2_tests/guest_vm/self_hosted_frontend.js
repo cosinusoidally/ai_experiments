@@ -41,7 +41,8 @@ function adoptProgramDescriptor(program, contextAnchor) {
         bindings.length,
         !!program.strict,
         !!program.evalCode,
-        contextAnchor);
+        contextAnchor,
+        program.source || null);
     var index = 0;
     while (index < program.code.length) {
         __guestVMProgramSetCode(callable, index, program.code[index]);
