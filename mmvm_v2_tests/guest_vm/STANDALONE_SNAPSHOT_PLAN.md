@@ -231,9 +231,10 @@ Number formatting, Buffer conversion, and primitive property lookup. On
 2026-09-24 the next general runtime gaps were closed: Array construction now
 accepts valid integral-double lengths and a shared native capacity-growth
 kernel supports both `push` and `unshift`. The unchanged `demo2.js` consequently
-runs through the generic image as well. At 256x192 it currently renders only
-about 1.9--2.1 FPS, so broader standalone demo correctness and performance
-remain active work.
+runs through the generic image as well. Native zero-base `Math.pow` handling
+then brought demos 3 through 7 across the same boundary without demo changes.
+At 256x192, demo2 currently renders about 1.9--2.1 FPS and demos 6/7 about
+1.2--1.7 FPS, so demo8 correctness and general performance remain active work.
 
 ## Regression gates
 

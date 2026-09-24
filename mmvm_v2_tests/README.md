@@ -242,14 +242,15 @@ startup, the image resolves `mmap` and `memcpy` through the supplied `dlsym`,
 reserves anonymous memory for that capacity, and copies the compact template
 into it.
 
-The same image also runs the unchanged X11 `demo1.js` and `demo2.js`; the guest
-runtime owns their RegExp execution, Number formatting, Buffer construction,
-parsing, property semantics, Array construction, capacity growth, and
-`Array.prototype.unshift`. This is a correctness milestone rather than the
-final performance point. At the 2026-09-24 checkpoint, standalone demo2 at its
-default 256x192 viewport rendered about 1.9--2.1 FPS, versus about 5--6 FPS
-through the ordinary js_min-hosted guest path. Unsupported native semantic
-exits still terminate with status 70.
+The same image also runs the unchanged X11 demos 1 through 7; the guest runtime
+owns their RegExp execution, Number formatting, Buffer construction, parsing,
+property semantics, Array construction/capacity growth, `unshift`, and the
+zero-base cases of `Math.pow`. This is a correctness milestone rather than the
+final performance point. At the 2026-09-24 checkpoint, measured default
+256x192 rates ranged from about 2.9 FPS for demo3 to about 1.2--1.7 FPS for the
+rally demos. Demo2 rendered about 1.9--2.1 FPS, versus about 5--6 FPS through
+the ordinary js_min-hosted guest path. Unsupported native semantic exits still
+terminate with status 70.
 
 A runner image can also reproduce itself without SpiderMonkey. Generate it
 with the eventual standalone command line following the captured
