@@ -41,7 +41,8 @@
                       STRING_SPLIT: 70,
                       BUFFER_READ_U8: 71,
                       BUFFER_WRITE_U8: 72,
-                      BUFFER_CONSTRUCTOR: 73};
+                      BUFFER_CONSTRUCTOR: 73,
+                      ARRAY_UNSHIFT: 74};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

@@ -227,9 +227,13 @@ byte-identical fixed point. The regression suite compares the complete files.
 The generic image now also loads arbitrary source filenames instead of
 capturing `hello.js`. As of the 2026-09-23 checkpoint it runs unchanged
 `demo1.js` through X11 for sustained execution, including guest-owned RegExp,
-Number formatting, Buffer conversion, and primitive property lookup. The demo
-is still much slower than its 20 FPS target, so broader standalone demo
-correctness and performance remain active work.
+Number formatting, Buffer conversion, and primitive property lookup. On
+2026-09-24 the next general runtime gaps were closed: Array construction now
+accepts valid integral-double lengths and a shared native capacity-growth
+kernel supports both `push` and `unshift`. The unchanged `demo2.js` consequently
+runs through the generic image as well. At 256x192 it currently renders only
+about 1.9--2.1 FPS, so broader standalone demo correctness and performance
+remain active work.
 
 ## Regression gates
 

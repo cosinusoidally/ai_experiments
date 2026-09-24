@@ -384,7 +384,8 @@
         var INTRINSIC_BUFFER_READ_U8 = 71;
         var INTRINSIC_BUFFER_WRITE_U8 = 72;
         var INTRINSIC_BUFFER_CONSTRUCTOR = 73;
-        var INTRINSIC_LAST_ID = 73;
+        var INTRINSIC_ARRAY_UNSHIFT = 74;
+        var INTRINSIC_LAST_ID = 74;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -4402,6 +4403,8 @@
             requiredIntrinsicArguments = 2;
         } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
+            requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
@@ -5045,9 +5048,41 @@
                         arrayConstructCopiesArguments = 0;
                     } else if (valueCellTag(0, arrayLengthCell) ===
                                VALUE_TAG_DOUBLE) {
-                        /* The semantic path validates integral finite
-                         * doubles and throws RangeError where needed. */
-                        arrayConstructValid = 0;
+                        var arrayLengthScratch =
+                            engineScratchLeftAddress(heapBase, state);
+                        var arrayLengthLimitScratch =
+                            engineScratchRightAddress(heapBase, state);
+                        store32(arrayLengthScratch, 0);
+                        store32(arrayLengthLimitScratch, 2147483647);
+                        if (equalF64(loadF64(
+                                arrayLengthCell + VALUE_CELL_LOW),
+                                loadF64(arrayLengthCell +
+                                        VALUE_CELL_LOW)) === 0) {
+                            arrayConstructValid = 0;
+                        } else if (lessF64(loadF64(
+                                       arrayLengthCell + VALUE_CELL_LOW),
+                                   loadI32F64(arrayLengthScratch)) === 1) {
+                            arrayConstructValid = 0;
+                        } else if (greaterF64(loadF64(
+                                       arrayLengthCell + VALUE_CELL_LOW),
+                                   loadI32F64(
+                                       arrayLengthLimitScratch)) === 1) {
+                            arrayConstructValid = 0;
+                        } else {
+                            arrayConstructLength =
+                                toNativeI32F64(loadF64(
+                                    arrayLengthCell + VALUE_CELL_LOW));
+                            store32(arrayLengthScratch,
+                                    arrayConstructLength);
+                            if (equalF64(loadF64(
+                                    arrayLengthCell + VALUE_CELL_LOW),
+                                    loadI32F64(
+                                        arrayLengthScratch)) === 0) {
+                                arrayConstructValid = 0;
+                            } else {
+                                arrayConstructCopiesArguments = 0;
+                            }
+                        }
                     }
                 }
             }
@@ -5515,6 +5550,62 @@
         return intrinsicHandled;
     }
 
+    function ensureArrayCapacityKernel(
+            heapBase, state, array, requiredCapacity) {
+        var vector = arrayElements(heapBase, array);
+        var capacity = vectorCapacity(heapBase, vector);
+        if (requiredCapacity <= capacity) return 1;
+        if (requiredCapacity > MAX_VECTOR_LENGTH) return 0;
+        var grownCapacity = capacity;
+        if (grownCapacity < INITIAL_ARRAY_CAPACITY) {
+            grownCapacity = INITIAL_ARRAY_CAPACITY;
+        }
+        while (grownCapacity < requiredCapacity) {
+            if (grownCapacity > divideI32(MAX_VECTOR_LENGTH, 2)) {
+                grownCapacity = requiredCapacity;
+            } else grownCapacity = grownCapacity * 2;
+        }
+        var grownBytes = VECTOR_CELLS +
+            grownCapacity * VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, grownBytes) === 0) return 0;
+        var grownVector = engineHeapBump(heapBase, state);
+        if (grownVector + grownBytes >
+            engineHeapLimit(heapBase, state)) return 0;
+        setRecordType(heapBase, grownVector, HEAP_TYPE_VALUE_VECTOR);
+        setRecordSize(heapBase, grownVector, grownBytes);
+        setRecordMark(heapBase, grownVector, 0);
+        setRecordFlags(heapBase, grownVector, 0);
+        var length = vectorLength(heapBase, vector);
+        setVectorLength(heapBase, grownVector, length);
+        setVectorCapacity(heapBase, grownVector, grownCapacity);
+        var index = 0;
+        while (index < grownCapacity) {
+            var target = heapBase + grownVector + VECTOR_CELLS +
+                index * VALUE_CELL_BYTES;
+            if (index < length) {
+                var source = heapBase + vector + VECTOR_CELLS +
+                    index * VALUE_CELL_BYTES;
+                store32(target, load32(source));
+                store32(target + VALUE_CELL_LOW,
+                        load32(source + VALUE_CELL_LOW));
+                store32(target + VALUE_CELL_HIGH,
+                        load32(source + VALUE_CELL_HIGH));
+                store32(target + VALUE_CELL_AUX,
+                        load32(source + VALUE_CELL_AUX));
+            } else {
+                store32(target, 0);
+                store32(target + VALUE_CELL_LOW, 0);
+                store32(target + VALUE_CELL_HIGH, 0);
+                store32(target + VALUE_CELL_AUX, 0);
+            }
+            index = index + 1;
+        }
+        setArrayElements(heapBase, array, grownVector);
+        setEngineHeapBump(heapBase, state, grownVector + grownBytes);
+        return 1;
+    }
+
     function arrayIntrinsicKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
@@ -5928,71 +6019,12 @@
             if (pushValid === 1) {
                 pushVector = arrayElements(heapBase, pushArray);
                 pushLength = vectorLength(heapBase, pushVector);
-                var pushCapacity = vectorCapacity(heapBase, pushVector);
-                if (pushLength + intrinsicArgumentCount > pushCapacity) {
-                    var grownPushCapacity = pushCapacity;
-                    if (grownPushCapacity < INITIAL_ARRAY_CAPACITY) {
-                        grownPushCapacity = INITIAL_ARRAY_CAPACITY;
-                    }
-                    while (grownPushCapacity <
-                           pushLength + intrinsicArgumentCount) {
-                        grownPushCapacity = grownPushCapacity * 2;
-                    }
-                    var grownPushVectorBytes = VECTOR_CELLS +
-                        grownPushCapacity * VALUE_CELL_BYTES;
-                    if (reserveNativeAllocationKernel(
-                            heapBase, state,
-                            grownPushVectorBytes) === 0) pushValid = 0;
-                    var grownPushVector = engineHeapBump(heapBase, state);
-                    if (grownPushVector + grownPushVectorBytes >
-                        engineHeapLimit(heapBase, state)) {
-                        pushValid = 0;
-                    } else {
-                        setRecordType(heapBase, grownPushVector,
-                                      HEAP_TYPE_VALUE_VECTOR);
-                        setRecordSize(heapBase, grownPushVector,
-                                      grownPushVectorBytes);
-                        setRecordMark(heapBase, grownPushVector, 0);
-                        setRecordFlags(heapBase, grownPushVector, 0);
-                        setVectorLength(heapBase, grownPushVector,
-                                        pushLength);
-                        setVectorCapacity(heapBase, grownPushVector,
-                                          grownPushCapacity);
-                        var grownPushIndex = 0;
-                        while (grownPushIndex < grownPushCapacity) {
-                            var grownPushTarget = heapBase +
-                                grownPushVector + VECTOR_CELLS +
-                                grownPushIndex * VALUE_CELL_BYTES;
-                            if (grownPushIndex < pushLength) {
-                                var grownPushSource = heapBase +
-                                    pushVector + VECTOR_CELLS +
-                                    grownPushIndex * VALUE_CELL_BYTES;
-                                store32(grownPushTarget,
-                                        load32(grownPushSource));
-                                store32(grownPushTarget + VALUE_CELL_LOW,
-                                    load32(grownPushSource +
-                                           VALUE_CELL_LOW));
-                                store32(grownPushTarget + VALUE_CELL_HIGH,
-                                    load32(grownPushSource +
-                                           VALUE_CELL_HIGH));
-                                store32(grownPushTarget + VALUE_CELL_AUX,
-                                    load32(grownPushSource +
-                                           VALUE_CELL_AUX));
-                            } else {
-                                store32(grownPushTarget, 0);
-                                store32(grownPushTarget + VALUE_CELL_LOW, 0);
-                                store32(grownPushTarget + VALUE_CELL_HIGH, 0);
-                                store32(grownPushTarget + VALUE_CELL_AUX, 0);
-                            }
-                            grownPushIndex = grownPushIndex + 1;
-                        }
-                        setArrayElements(heapBase, pushArray,
-                                         grownPushVector);
-                        setEngineHeapBump(heapBase, state,
-                            grownPushVector + grownPushVectorBytes);
-                        pushVector = grownPushVector;
-                    }
-                }
+                if (pushLength > MAX_VECTOR_LENGTH -
+                    intrinsicArgumentCount) pushValid = 0;
+                else if (ensureArrayCapacityKernel(heapBase, state,
+                    pushArray, pushLength + intrinsicArgumentCount) === 0) {
+                    pushValid = 0;
+                } else pushVector = arrayElements(heapBase, pushArray);
             }
             var pushIndex = 0;
             while (pushIndex < intrinsicArgumentCount) {
@@ -6038,6 +6070,94 @@
             store32(intrinsicTarget + VALUE_CELL_LOW, pushLength);
             store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
             store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
+            var unshiftReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var unshiftValid = 1;
+            if (unshiftReceiverIndex < 0) unshiftValid = 0;
+            var unshiftReceiverCell = heapBase + registerCells +
+                unshiftReceiverIndex * VALUE_CELL_BYTES;
+            if (valueCellTag(0, unshiftReceiverCell) !==
+                VALUE_TAG_REFERENCE) unshiftValid = 0;
+            var unshiftArray = valueCellReference(
+                0, unshiftReceiverCell);
+            if (unshiftValid === 1) {
+                if (recordType(heapBase, unshiftArray) !==
+                    HEAP_TYPE_ARRAY) unshiftValid = 0;
+            }
+            var unshiftArgumentIndex = 0;
+            while (unshiftArgumentIndex < intrinsicArgumentCount) {
+                var unshiftArgumentDescriptor = heapBase +
+                    intrinsicArgumentsVector + VECTOR_CELLS +
+                    unshiftArgumentIndex * VALUE_CELL_BYTES;
+                if (valueCellTag(0, unshiftArgumentDescriptor) !==
+                    VALUE_TAG_INT32) unshiftValid = 0;
+                unshiftArgumentIndex = unshiftArgumentIndex + 1;
+            }
+            var unshiftVector = 0;
+            var unshiftLength = 0;
+            if (unshiftValid === 1) {
+                unshiftVector = arrayElements(heapBase, unshiftArray);
+                unshiftLength = vectorLength(heapBase, unshiftVector);
+                if (unshiftLength > MAX_VECTOR_LENGTH -
+                    intrinsicArgumentCount) unshiftValid = 0;
+                else if (ensureArrayCapacityKernel(heapBase, state,
+                    unshiftArray,
+                    unshiftLength + intrinsicArgumentCount) === 0) {
+                    unshiftValid = 0;
+                } else unshiftVector = arrayElements(
+                    heapBase, unshiftArray);
+            }
+            if (unshiftValid === 0) {
+                setEngineExitReason(heapBase, state, EXIT_UNSUPPORTED);
+                setEnginePC(heapBase, state, pc);
+                setEngineResult(heapBase, state, opcode);
+                setEngineInstructions(heapBase, state, instructions);
+                setFramePC(heapBase, frame, pc);
+                return EXIT_UNSUPPORTED;
+            }
+            var unshiftMoveIndex = unshiftLength;
+            while (unshiftMoveIndex > 0) {
+                unshiftMoveIndex = unshiftMoveIndex - 1;
+                var unshiftMoveSource = heapBase + unshiftVector +
+                    VECTOR_CELLS + unshiftMoveIndex * VALUE_CELL_BYTES;
+                var unshiftMoveTarget = unshiftMoveSource +
+                    intrinsicArgumentCount * VALUE_CELL_BYTES;
+                store32(unshiftMoveTarget, load32(unshiftMoveSource));
+                store32(unshiftMoveTarget + VALUE_CELL_LOW,
+                    load32(unshiftMoveSource + VALUE_CELL_LOW));
+                store32(unshiftMoveTarget + VALUE_CELL_HIGH,
+                    load32(unshiftMoveSource + VALUE_CELL_HIGH));
+                store32(unshiftMoveTarget + VALUE_CELL_AUX,
+                    load32(unshiftMoveSource + VALUE_CELL_AUX));
+            }
+            unshiftArgumentIndex = 0;
+            while (unshiftArgumentIndex < intrinsicArgumentCount) {
+                unshiftArgumentDescriptor = heapBase +
+                    intrinsicArgumentsVector + VECTOR_CELLS +
+                    unshiftArgumentIndex * VALUE_CELL_BYTES;
+                var unshiftSourceRegister = valueCellInt32(
+                    0, unshiftArgumentDescriptor);
+                var unshiftSource = heapBase + registerCells +
+                    unshiftSourceRegister * VALUE_CELL_BYTES;
+                var unshiftTarget = heapBase + unshiftVector +
+                    VECTOR_CELLS +
+                    unshiftArgumentIndex * VALUE_CELL_BYTES;
+                store32(unshiftTarget, load32(unshiftSource));
+                store32(unshiftTarget + VALUE_CELL_LOW,
+                    load32(unshiftSource + VALUE_CELL_LOW));
+                store32(unshiftTarget + VALUE_CELL_HIGH,
+                    load32(unshiftSource + VALUE_CELL_HIGH));
+                store32(unshiftTarget + VALUE_CELL_AUX,
+                    load32(unshiftSource + VALUE_CELL_AUX));
+                unshiftArgumentIndex = unshiftArgumentIndex + 1;
+            }
+            unshiftLength = unshiftLength + intrinsicArgumentCount;
+            setVectorLength(heapBase, unshiftVector, unshiftLength);
+            setValueCellInt32(intrinsicTarget, unshiftLength);
             intrinsicHandled = 1;
         }
         return intrinsicHandled;
@@ -11212,6 +11332,7 @@
             dateYearFromDayKernel: dateYearFromDayKernel,
             ffiCallKernel: ffiCallKernel,
             emptyEvalSourceKernel: emptyEvalSourceKernel,
+            ensureArrayCapacityKernel: ensureArrayCapacityKernel,
             evalIntrinsicKernel: evalIntrinsicKernel,
             floorDivideDateIntegerKernel: floorDivideDateIntegerKernel,
             functionConstructorKernel: functionConstructorKernel,

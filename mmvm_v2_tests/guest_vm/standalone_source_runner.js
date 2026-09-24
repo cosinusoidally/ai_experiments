@@ -191,5 +191,12 @@ try {
         GuestStandaloneArgv[0], GuestStandaloneArgv.slice(1));
     NodeRuntime.run();
 } catch (GuestStandaloneError) {
-    if (GuestStandaloneError !== NodeProcess.exitMarker) throw GuestStandaloneError;
+    if (GuestStandaloneError !== NodeProcess.exitMarker) {
+        if (GuestStandaloneError && GuestStandaloneError.stack) {
+            console.log(String(GuestStandaloneError.stack));
+        } else {
+            console.log(String(GuestStandaloneError));
+        }
+        throw GuestStandaloneError;
+    }
 }

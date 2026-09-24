@@ -2277,7 +2277,7 @@
                 while (index >= 0) values.unshift(args[index--]);
                 runtime.replaceArray(receiver, values);
                 return runtime.arrayLength(receiver);
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_UNSHIFT);
         this.arrayMethods.shift = this.makeNativeFunction("Array.shift",
             function (receiver) {
                 var values = runtime.arrayToHost(receiver);
