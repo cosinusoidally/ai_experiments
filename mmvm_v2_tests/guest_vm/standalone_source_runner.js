@@ -5,13 +5,44 @@
 var GuestStandaloneGlobal = this;
 var GuestStandaloneModuleCache = {};
 var GuestStandaloneExitPointer = 0;
+var GuestStandaloneProfile = false;
+/* Guest programs execute in this context and may legitimately declare the
+ * same compatibility-layer globals.  Keep the embedder's service objects in
+ * private bindings so loading the next file cannot silently switch to a
+ * guest-provided implementation. */
+var GuestStandaloneFs = NodeFs;
+var GuestStandaloneDlsymPointer = NodeDlsymPointer;
+var GuestStandaloneBuffer = Buffer;
+
+function guestStandaloneReadSource(path) {
+    /* NodeFs.readFileSync resolves Buffer through its global environment.
+     * Application runners are allowed to install their own Buffer, but the
+     * embedder must keep using the intrinsic-backed implementation captured
+     * with its filesystem service. */
+    var applicationBuffer = GuestStandaloneGlobal.Buffer;
+    GuestStandaloneGlobal.Buffer = GuestStandaloneBuffer;
+    var result = GuestStandaloneFs.readFileSync(path).toString("utf8");
+    GuestStandaloneGlobal.Buffer = applicationBuffer;
+    return result;
+}
+
+function guestStandaloneProfileStart() {
+    return GuestStandaloneProfile ? NodeRuntime.now() : 0;
+}
+
+function guestStandaloneProfileEnd(label, started) {
+    if (GuestStandaloneProfile) {
+        console.log("standalone profile: " + label + "=" +
+            ((NodeRuntime.now() - started) | 0) + "ms");
+    }
+}
 
 function guestStandaloneQuit(status) {
     /* Exit is a direct guest FFI operation.  The C image loader supplies only
      * dlsym; no VM-specific callback or host JavaScript participates. */
     if (!GuestStandaloneExitPointer) {
         GuestStandaloneExitPointer = ffi_call(
-            NodeDlsymPointer, 0, "exit");
+            GuestStandaloneDlsymPointer, 0, "exit");
         if (!GuestStandaloneExitPointer) {
             throw new Error("standalone libc exit is unavailable");
         }
@@ -89,7 +120,7 @@ var GuestStandalonePath = {
 };
 
 function guestStandaloneBuiltin(request) {
-    if (request === "fs") return NodeFs;
+    if (request === "fs") return GuestStandaloneFs;
     if (request === "net") return NodeNet;
     if (request === "http") return NodeHttp;
     if (request === "path") return GuestStandalonePath;
@@ -117,17 +148,23 @@ function guestStandaloneRequire(request, parentFilename) {
     var require = function (child) {
         return guestStandaloneRequire(String(child), filename);
     };
-    var source = NodeFs.readFileSync(filename).toString("utf8");
+    var phaseStarted = guestStandaloneProfileStart();
+    var source = guestStandaloneReadSource(filename);
+    guestStandaloneProfileEnd("read " + filename, phaseStarted);
     var factoryName = "__guestVMStandaloneModuleFactory";
     var previousFactory = GuestStandaloneGlobal[factoryName];
     var factorySource = factoryName + " = function(module, exports, require, " +
         "__filename, __dirname) {\n" + source + "\n};";
+    phaseStarted = guestStandaloneProfileStart();
     var factoryProgram = GuestStandaloneFrontend.compileExecutable(
         factorySource, filename, guestStandaloneExecute);
+    guestStandaloneProfileEnd("compile " + filename, phaseStarted);
+    phaseStarted = guestStandaloneProfileStart();
     factoryProgram();
     var factory = GuestStandaloneGlobal[factoryName];
     GuestStandaloneGlobal[factoryName] = previousFactory;
     factory(module, exports, require, __filename, __dirname);
+    guestStandaloneProfileEnd("execute " + filename, phaseStarted);
     return module.exports;
 }
 
@@ -163,15 +200,30 @@ function guestStandaloneExecute(path, programArguments) {
         return guestStandaloneRequire(String(request), path);
     };
     GuestStandaloneGlobal.load = function (filename) {
-        var loadedSource = NodeFs.readFileSync(String(filename)).toString("utf8");
-        GuestStandaloneFrontend.compileExecutable(
-            loadedSource, String(filename), guestStandaloneExecute)();
+        filename = String(filename);
+        var loadedPhaseStarted = guestStandaloneProfileStart();
+        var loadedSource = guestStandaloneReadSource(filename);
+        guestStandaloneProfileEnd("read " + filename, loadedPhaseStarted);
+        loadedPhaseStarted = guestStandaloneProfileStart();
+        var loadedExecutable = GuestStandaloneFrontend.compileExecutable(
+            loadedSource, filename, guestStandaloneExecute);
+        guestStandaloneProfileEnd("compile " + filename, loadedPhaseStarted);
+        loadedPhaseStarted = guestStandaloneProfileStart();
+        loadedExecutable();
+        guestStandaloneProfileEnd("execute " + filename, loadedPhaseStarted);
     };
     GuestStandaloneGlobal.print = console.log;
     GuestStandaloneGlobal.quit = guestStandaloneQuit;
-    var source = NodeFs.readFileSync(path).toString("utf8");
-    GuestStandaloneFrontend.compileExecutable(
-        source, path, guestStandaloneExecute)();
+    var phaseStarted = guestStandaloneProfileStart();
+    var source = guestStandaloneReadSource(path);
+    guestStandaloneProfileEnd("read " + path, phaseStarted);
+    phaseStarted = guestStandaloneProfileStart();
+    var executable = GuestStandaloneFrontend.compileExecutable(
+        source, path, guestStandaloneExecute);
+    guestStandaloneProfileEnd("compile " + path, phaseStarted);
+    phaseStarted = guestStandaloneProfileStart();
+    executable();
+    guestStandaloneProfileEnd("execute " + path, phaseStarted);
 }
 
 function guestStandaloneRunGuestRunner(runnerArguments) {
@@ -188,6 +240,8 @@ function guestStandaloneRunGuestRunner(runnerArguments) {
             snapshotPath = runnerArguments[index++];
         } else if (!programPath && option === "--vm-native") {
             /* The standalone interpreter is already native. */
+        } else if (!programPath && option === "--vm-profile") {
+            GuestStandaloneProfile = true;
         } else if (!programPath && option.charAt(0) === "-") {
             throw new Error("unsupported standalone guest-runner option: " + option);
         } else if (!programPath) programPath = option;

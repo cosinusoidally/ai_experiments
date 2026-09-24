@@ -319,8 +319,11 @@ source needed by `Function#toString`. Unsupported native semantic exits still
 report an error status. Standalone `quit(status)` resolves libc `exit` through
 the guest's direct FFI, so demo shutdown preserves its requested process status
 without a host-language callback. Demo8's self-hosted startup and broader
-lifecycle and performance work remain in progress. The design and staged
-acceptance gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
+lifecycle and performance work remain in progress. The standalone loader keeps
+its filesystem and intrinsic Buffer services separate from same-named globals
+installed by an application runner; this reduced measured `demo8 --help`
+startup from 109.04 seconds to 4.68 seconds. The design and staged acceptance
+gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
 
 The demos retain their normal resolution and FPS options. Correctness coverage
 does not imply that the guest currently meets each requested frame cap:
@@ -330,6 +333,10 @@ and framebuffer images belong only in the ignored `artifacts/` directory.
 Current benchmark commands, measured demo2 progress, and the optional
 `guest_runner.js --vm-profile` opcode profiler are documented in
 `PERFORMANCE.md`.
+
+On a standalone image, place `--vm-profile` before the program filename to
+report guest-owned source read, self-hosted compilation, and execution times.
+It is diagnostic-only and does not change ordinary output or the image format.
 
 For a clean profile of a long-running workload,
 `--vm-profile-duration MILLISECONDS` enables profiling and stops the command

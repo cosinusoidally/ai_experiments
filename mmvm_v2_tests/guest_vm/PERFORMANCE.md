@@ -596,3 +596,34 @@ forms in the Test262 harness. The same 202 fresh-context variants completed in
 23.68 seconds with 202 passes, down from the preceding 25.93 seconds. This is a
 general dynamic-code cache; first-time source still goes through the actual
 guest parser/compiler and no source-specific answer is cached.
+
+## 2026-09-24: standalone source-loader isolation
+
+The generic standalone image accepts `--vm-profile` before the program path.
+This reports read, self-hosted compile, and execution phases from inside the
+guest using the existing `gettimeofday`-backed runtime clock. Profiling remains
+opt-in and neither changes the snapshot format nor adds a host callback.
+
+The first phase run of `demo8_runner.js demo8.js --help` measured 109.04
+seconds total. Reading `demo8_runner.js` took 0.20 seconds and compiling it
+took 1.76 seconds, but reading `demo8.js` took 104.96 seconds. The application
+runner had installed its own global `Buffer`; the loader's retained `NodeFs`
+method resolved that replacement dynamically and therefore copied source
+through the compatibility Buffer's JavaScript byte path.
+
+The loader now retains its intrinsic-backed Buffer together with its filesystem
+service and binds that Buffer only while it reads source, restoring the
+application's Buffer immediately afterwards. No demo or application source was
+changed. The same standalone command then measured:
+
+- `demo8_runner.js` read: 213 ms;
+- `demo8_runner.js` self-hosted compile: 1,921 ms;
+- `demo8.js` read: 251 ms;
+- `demo8.js` self-hosted compile: 2,136 ms;
+- total process time: 4.68 seconds.
+
+This is roughly a 22-fold startup improvement. A normal X11 run subsequently
+created the rally window, generated its procedural sky, initialized the game,
+selected the compiled rasterizer, and entered its render loop. The change is a
+general embedder-boundary fix: arbitrary guest declarations can no longer make
+later standalone source loads silently select their Buffer implementation.

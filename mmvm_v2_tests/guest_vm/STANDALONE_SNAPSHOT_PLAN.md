@@ -246,8 +246,13 @@ native string concatenation covers finite fractional doubles, `NaN`,
 infinities, and negative zero. At 256x192, an observed standalone run completed
 loading, entered attract mode at roughly 18 FPS, and sustained 20 FPS after an
 Escape/F transition into free-driving mode. Self-hosted parse/compile startup
-still takes roughly two minutes and is now the principal standalone demo8
-performance problem. Menu Q now exits through a guest-resolved libc `exit`
+previously took roughly two minutes because the application runner replaced
+the loader's global `Buffer`, causing the next source read to fall back to its
+byte-at-a-time compatibility implementation. The loader now retains its own
+filesystem and intrinsic Buffer services. A profiled `demo8 --help` startup
+fell from 109.04 seconds to 4.68 seconds; its two source reads take about 0.46
+seconds and its two self-hosted compilations about 4.06 seconds. Menu Q exits
+through a guest-resolved libc `exit`
 call: the loader still supplies only `dlsym`, the requested status is
 preserved, and shutdown requires no host-language exception or callback.
 
