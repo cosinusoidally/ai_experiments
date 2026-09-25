@@ -8,6 +8,22 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.58
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Made EarleyBoyer quick correctness pass through the generic standalone
+  `js_runner.exe` image. Non-strict calls now allocate primitive `this`
+  wrappers directly on the guest heap instead of leaving the interpreter.
+- Added a general native `Array.prototype.splice`; this lets the self-hosted
+  compiler handle direct-eval scope insertion while compiling the unchanged
+  EarleyBoyer source.
+- Added a checked-in high-level front-end diagnostic which compiles an
+  arbitrary source file through the guest-owned tokenizer, parser, compiler,
+  and verifier without executing that source.
+
 ## 0.57
 
 Approximate completion: 2026-09-25 evening BST

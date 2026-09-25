@@ -2336,7 +2336,7 @@
                 var removed = Array.prototype.splice.apply(values, spliceArguments);
                 runtime.replaceArray(receiver, values);
                 return runtime.arrayFrom(removed);
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_SPLICE);
         this.arrayMethods.join = this.makeNativeFunction("Array.join",
             function (receiver, args) {
                 var separator = args.length && args[0] !== undefined ?

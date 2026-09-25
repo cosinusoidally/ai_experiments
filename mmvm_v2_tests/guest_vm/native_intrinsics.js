@@ -51,7 +51,8 @@
                       MATH_RANDOM: 80,
                       OBJECT_CONSTRUCTOR: 81,
                       STRING_VALUE_OF: 82,
-                      NUMBER_TO_STRING: 83};
+                      NUMBER_TO_STRING: 83,
+                      ARRAY_SPLICE: 84};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

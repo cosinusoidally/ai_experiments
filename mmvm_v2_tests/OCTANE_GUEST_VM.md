@@ -123,12 +123,12 @@ the before/after measurements, and the regression checks performed.
 ## Bring-up status
 
 Standalone-snapshot validation is tracked independently from the older
-js_min-hosted baselines below. As of 2026-09-25, Richards and NavierStokes pass
-quick correctness through `js_runner.exe`. DeltaBlue, Crypto, RayTrace,
-EarleyBoyer, and zlib still expose native semantic exits which the js_min-hosted
-path can serve but a standalone image intentionally cannot. They are therefore
-not yet claimed as standalone passes. This distinction prevents a host-assisted
-pass from being reported as self-hosted execution.
+js_min-hosted baselines below. As of 2026-09-25, Richards, DeltaBlue, Crypto,
+RayTrace, EarleyBoyer, and NavierStokes pass quick correctness through
+`js_runner.exe`. zlib compiles its wrapper and 185 KiB generated-data source,
+then still exposes a native semantic exit after its benchmark begins. It is
+therefore not yet claimed as a standalone pass. This distinction prevents a
+host-assisted pass from being reported as self-hosted execution.
 
 Richards standalone bring-up added general native facilities for
 `Array.prototype.indexOf`, `Math.log`, `Number.prototype.toPrecision`, Date
@@ -136,6 +136,11 @@ construction, and Date-to-number arithmetic. The generic source runner now
 instantiates top-level declarations before adopted bytecode begins, matching
 ordinary script entry. Platform services are an explicit compiled-interpreter
 parameter; the standalone bootstrap and js_min entry use the same ABI.
+Subsequent bring-up added guest-native ES5 property definition, number
+formatting, random numbers, string-to-number coercion, primitive receiver
+boxing, boxed-string methods, object construction, and `Array.prototype.splice`.
+The splice implementation also removed the last host dependency encountered by
+the self-hosted front end while compiling EarleyBoyer.
 
 The following baselines include native-interpreter compilation and process
 startup in the wall-clock time. They are not directly comparable with the

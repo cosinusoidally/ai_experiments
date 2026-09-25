@@ -407,7 +407,8 @@
         var INTRINSIC_OBJECT_CONSTRUCTOR = 81;
         var INTRINSIC_STRING_VALUE_OF = 82;
         var INTRINSIC_NUMBER_TO_STRING = 83;
-        var INTRINSIC_LAST_ID = 83;
+        var INTRINSIC_ARRAY_SPLICE = 84;
+        var INTRINSIC_LAST_ID = 84;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -3864,11 +3865,8 @@
                 }
                 var calleeProgram = functionMetadata(
                     heapBase, bytecodeCallable);
-                /* Primitive boxing is currently performed by the shared
-                 * semantic allocator. Keep object and strict receivers on the
-                 * native fast path, but leave a non-strict primitive call for
-                 * that general path instead of exposing an unboxed `this`. */
                 var receiverToNormalize = bytecodeThisSource;
+                var receiverNeedsBoxing = 0;
                 if (callOperation !== 2) {
                     if (bytecodeApplyForwarding === 0) {
                         var normalizationReceiverIndex = load32(
@@ -3884,7 +3882,6 @@
                         if (receiverToNormalize !== 0) {
                             var receiverToNormalizeTag = valueCellTag(
                                 0, receiverToNormalize);
-                            var receiverNeedsBoxing = 0;
                             if (receiverToNormalizeTag === VALUE_TAG_INT32) {
                                 receiverNeedsBoxing = 1;
                             } else if (receiverToNormalizeTag ===
@@ -3903,9 +3900,6 @@
                                     HEAP_TYPE_STRING) {
                                     receiverNeedsBoxing = 1;
                                 }
-                            }
-                            if (receiverNeedsBoxing === 1) {
-                                bytecodeCallValid = 0;
                             }
                         }
                     }
@@ -3945,8 +3939,38 @@
                 var calleeFrameReused = 0;
                 var constructedObject = 0;
                 var constructedPrototype = 0;
+                var boxedReceiver = 0;
+                var boxedReceiverProperty = 0;
+                var boxedReceiverPrototype = 0;
                 var bytecodeAllocationEnd = engineHeapBump(heapBase, state);
                 if (bytecodeCallValid === 1) {
+                if (receiverNeedsBoxing === 1) {
+                    boxedReceiver = bytecodeAllocationEnd;
+                    boxedReceiverProperty = boxedReceiver +
+                        OBJECT_RECORD_BYTES;
+                    bytecodeAllocationEnd = boxedReceiverProperty +
+                        PROPERTY_RECORD_BYTES;
+                    var boxedPrototypeIndex =
+                        RUNTIME_SUPPORT_STRING_PROTOTYPE;
+                    var boxedReceiverTag = valueCellTag(
+                        0, receiverToNormalize);
+                    if (boxedReceiverTag === VALUE_TAG_INT32) {
+                        boxedPrototypeIndex =
+                            RUNTIME_SUPPORT_NUMBER_PROTOTYPE;
+                    } else if (boxedReceiverTag === VALUE_TAG_DOUBLE) {
+                        boxedPrototypeIndex =
+                            RUNTIME_SUPPORT_NUMBER_PROTOTYPE;
+                    } else if (boxedReceiverTag === VALUE_TAG_TRUE) {
+                        boxedPrototypeIndex =
+                            RUNTIME_SUPPORT_BOOLEAN_PROTOTYPE;
+                    } else if (boxedReceiverTag === VALUE_TAG_FALSE) {
+                        boxedPrototypeIndex =
+                            RUNTIME_SUPPORT_BOOLEAN_PROTOTYPE;
+                    }
+                    boxedReceiverPrototype = valueCellReference(
+                        0, vectorCellAddress(heapBase, stringSupport,
+                            boxedPrototypeIndex));
+                }
                 if (callOperation === 2) {
                     constructedObject = bytecodeAllocationEnd;
                     bytecodeAllocationEnd = bytecodeAllocationEnd +
@@ -4078,6 +4102,12 @@
                         constructedObject = constructedObject +
                                             bytecodeAllocationMove;
                     }
+                    if (receiverNeedsBoxing === 1) {
+                        boxedReceiver = boxedReceiver +
+                            bytecodeAllocationMove;
+                        boxedReceiverProperty = boxedReceiverProperty +
+                            bytecodeAllocationMove;
+                    }
                     if (calleeFrameReused === 0) {
                         calleeFrame = calleeFrame + bytecodeAllocationMove;
                     }
@@ -4099,6 +4129,38 @@
                 }
                 }
                 if (bytecodeCallValid === 1) {
+                    if (receiverNeedsBoxing === 1) {
+                        setRecordType(heapBase, boxedReceiver,
+                                      HEAP_TYPE_OBJECT);
+                        setRecordSize(heapBase, boxedReceiver,
+                                      OBJECT_RECORD_BYTES);
+                        setRecordMark(heapBase, boxedReceiver, 0);
+                        setRecordFlags(heapBase, boxedReceiver, 0);
+                        setObjectPrototype(heapBase, boxedReceiver,
+                                           boxedReceiverPrototype);
+                        setObjectPropertyHead(heapBase, boxedReceiver,
+                                              boxedReceiverProperty);
+                        setObjectExtensible(heapBase, boxedReceiver, 1);
+                        setObjectReserved(heapBase, boxedReceiver, 0);
+                        setRecordType(heapBase, boxedReceiverProperty,
+                                      HEAP_TYPE_PROPERTY);
+                        setRecordSize(heapBase, boxedReceiverProperty,
+                                      PROPERTY_RECORD_BYTES);
+                        setRecordMark(heapBase, boxedReceiverProperty, 0);
+                        setRecordFlags(heapBase, boxedReceiverProperty, 0);
+                        setPropertyNext(heapBase, boxedReceiverProperty, 0);
+                        setPropertyKey(heapBase, boxedReceiverProperty,
+                            valueCellReference(0, vectorCellAddress(
+                                heapBase, stringSupport,
+                                RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY)));
+                        setPropertyAttributes(
+                            heapBase, boxedReceiverProperty, 0);
+                        setPropertyReserved(
+                            heapBase, boxedReceiverProperty, 0);
+                        copyValueCell(propertyValueCellAddress(
+                            heapBase, boxedReceiverProperty),
+                            receiverToNormalize);
+                    }
                     if (callOperation === 2) {
                         setRecordType(heapBase, constructedObject,
                                       HEAP_TYPE_OBJECT);
@@ -4457,7 +4519,11 @@
                     if (thisSource !== 0) {
                         var thisSourceTag = load32(thisSource);
                         var copyThisSource = 0;
-                        if (strictThisBinding === 1) {
+                        var thisBindingSet = 0;
+                        if (receiverNeedsBoxing === 1) {
+                            setValueCellReference(thisTarget, boxedReceiver);
+                            thisBindingSet = 1;
+                        } else if (strictThisBinding === 1) {
                             copyThisSource = 1;
                         } else if (thisSourceTag !== VALUE_TAG_UNDEFINED) {
                             if (thisSourceTag !== VALUE_TAG_NULL) {
@@ -4473,6 +4539,7 @@
                             store32(thisTarget + VALUE_CELL_AUX,
                                 load32(thisSource + VALUE_CELL_AUX));
                         } else thisSource = 0;
+                        if (thisBindingSet === 1) thisSource = thisTarget;
                     }
                     if (thisSource === 0) {
                         if (strictThisBinding === 1) {
@@ -4701,6 +4768,8 @@
         } else if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_ARRAY_INDEX_OF) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_SPLICE) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
             requiredIntrinsicArguments = 0;
@@ -6015,6 +6084,118 @@
             arrayPrototype, bytecodeWords, pc, opcode, intrinsicId, instructions,
             frame) {
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_ARRAY_SPLICE) {
+            var spliceReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            if (spliceReceiverIndex < 0) return 0;
+            var spliceReceiverCell = heapBase + registerCells +
+                spliceReceiverIndex * VALUE_CELL_BYTES;
+            if (valueCellTag(0, spliceReceiverCell) !==
+                    VALUE_TAG_REFERENCE) return 0;
+            var spliceArray = valueCellReference(0, spliceReceiverCell);
+            if (recordType(heapBase, spliceArray) !== HEAP_TYPE_ARRAY) {
+                return 0;
+            }
+            var spliceVector = arrayElements(heapBase, spliceArray);
+            var spliceLength = vectorLength(heapBase, spliceVector);
+            var spliceStart = 0;
+            if (intrinsicArgumentCount > 0) {
+                var spliceStartCell = programArgumentCellKernel(
+                    heapBase, intrinsicArgumentsVector, registerCells, 0);
+                if (spliceStartCell === 0) return 0;
+                var spliceStartTag = valueCellTag(0, spliceStartCell);
+                if (spliceStartTag !== VALUE_TAG_INT32) {
+                    if (spliceStartTag !== VALUE_TAG_DOUBLE) return 0;
+                }
+                spliceStart = toInt32F64(loadNumberF64(
+                    spliceStartCell + VALUE_CELL_LOW, spliceStartTag));
+            }
+            if (spliceStart < 0) {
+                spliceStart = spliceLength + spliceStart;
+                if (spliceStart < 0) spliceStart = 0;
+            } else if (spliceStart > spliceLength) {
+                spliceStart = spliceLength;
+            }
+            var spliceDelete = spliceLength - spliceStart;
+            if (intrinsicArgumentCount > 1) {
+                var spliceDeleteCell = programArgumentCellKernel(
+                    heapBase, intrinsicArgumentsVector, registerCells, 1);
+                if (spliceDeleteCell === 0) return 0;
+                var spliceDeleteTag = valueCellTag(0, spliceDeleteCell);
+                if (spliceDeleteTag !== VALUE_TAG_INT32) {
+                    if (spliceDeleteTag !== VALUE_TAG_DOUBLE) return 0;
+                }
+                spliceDelete = toInt32F64(loadNumberF64(
+                    spliceDeleteCell + VALUE_CELL_LOW, spliceDeleteTag));
+                if (spliceDelete < 0) spliceDelete = 0;
+                if (spliceDelete > spliceLength - spliceStart) {
+                    spliceDelete = spliceLength - spliceStart;
+                }
+            }
+            var spliceInsert = intrinsicArgumentCount - 2;
+            if (spliceInsert < 0) spliceInsert = 0;
+            var spliceNewLength = spliceLength - spliceDelete + spliceInsert;
+            if (spliceNewLength < 0) return 0;
+            if (ensureArrayCapacityKernel(
+                    heapBase, state, spliceArray, spliceNewLength) === 0) {
+                return 0;
+            }
+            spliceVector = arrayElements(heapBase, spliceArray);
+            if (allocateArrayKernel(heapBase, state, intrinsicTarget,
+                    spliceDelete, arrayPrototype) === 0) return 0;
+            var removedArray = valueCellReference(0, intrinsicTarget);
+            var removedVector = arrayElements(heapBase, removedArray);
+            var spliceIndex = 0;
+            while (spliceIndex < spliceDelete) {
+                copyValueCell(vectorCellAddress(
+                    heapBase, removedVector, spliceIndex),
+                    vectorCellAddress(heapBase, spliceVector,
+                        spliceStart + spliceIndex));
+                spliceIndex = spliceIndex + 1;
+            }
+            if (spliceInsert > spliceDelete) {
+                spliceIndex = spliceLength - spliceDelete;
+                while (spliceIndex > spliceStart) {
+                    spliceIndex = spliceIndex - 1;
+                    copyValueCell(vectorCellAddress(
+                        heapBase, spliceVector,
+                        spliceIndex + spliceInsert),
+                        vectorCellAddress(heapBase, spliceVector,
+                            spliceIndex + spliceDelete));
+                }
+            } else if (spliceInsert < spliceDelete) {
+                spliceIndex = spliceStart;
+                while (spliceIndex < spliceLength - spliceDelete) {
+                    copyValueCell(vectorCellAddress(
+                        heapBase, spliceVector,
+                        spliceIndex + spliceInsert),
+                        vectorCellAddress(heapBase, spliceVector,
+                            spliceIndex + spliceDelete));
+                    spliceIndex = spliceIndex + 1;
+                }
+            }
+            spliceIndex = 0;
+            while (spliceIndex < spliceInsert) {
+                var spliceItem = programArgumentCellKernel(
+                    heapBase, intrinsicArgumentsVector, registerCells,
+                    spliceIndex + 2);
+                if (spliceItem === 0) return 0;
+                copyValueCell(vectorCellAddress(
+                    heapBase, spliceVector, spliceStart + spliceIndex),
+                    spliceItem);
+                spliceIndex = spliceIndex + 1;
+            }
+            spliceIndex = spliceNewLength;
+            while (spliceIndex < spliceLength) {
+                setValueCellUndefined(vectorCellAddress(
+                    heapBase, spliceVector, spliceIndex));
+                spliceIndex = spliceIndex + 1;
+            }
+            setVectorLength(heapBase, spliceVector, spliceNewLength);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_INDEX_OF) {
             var indexOfValid = 1;
             var indexOfReceiverIndex = load32(
@@ -6133,6 +6314,7 @@
             store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
             store32(intrinsicTarget + VALUE_CELL_AUX, 0);
             intrinsicHandled = 1;
+        }
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
