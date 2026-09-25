@@ -155,6 +155,12 @@ without typed-array constructor or set callbacks. It has not yet been promoted
 to a standalone quick-correctness pass; remaining exits are being handled as
 general VM facilities.
 
+ES5 bracket indexing on strings is also handled directly by the compiled
+interpreter. Latin-1 results reuse the rooted one-character table, while other
+UTF-16 code units allocate a one-character guest string. This removed zlib's
+three numeric string-property exits; a repeat initialization profile fell from
+23 semantic exits to 20 without changing the external benchmark source.
+
 The following baselines include native-interpreter compilation and process
 startup in the wall-clock time. They are not directly comparable with the
 score's internal benchmark interval.

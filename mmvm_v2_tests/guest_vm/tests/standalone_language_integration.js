@@ -34,6 +34,10 @@ StandaloneSuite.makeCallback = function () {
 };
 
 print("standalone integration: ES5 native operations");
+if ("abc"[1] !== "b" || "\u20ac"[0] !== "\u20ac" ||
+    "abc"[9] !== undefined) {
+    throw new Error("native string index access is incorrect");
+}
 if (typeof Date.now() !== "number") {
     throw new Error("Date.now did not return a number");
 }

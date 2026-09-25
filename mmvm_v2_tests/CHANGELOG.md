@@ -8,6 +8,19 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.60
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Implemented ES5 string-index property access in the compiled interpreter,
+  including undefined out-of-range results and guest-heap one-character
+  strings for non-Latin-1 code units.
+- Removed zlib's remaining numeric string-property exits. A repeat startup
+  profile reduced semantic exits from 23 to 20; the remaining transitions are
+  calls and loose equality rather than indexed property access.
+
 ## 0.59
 
 Approximate completion: 2026-09-25 evening BST

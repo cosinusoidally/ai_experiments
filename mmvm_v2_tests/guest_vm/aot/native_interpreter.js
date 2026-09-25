@@ -721,7 +721,66 @@
                 if (arrayGetSupported === 1) {
                     var arrayGetObjectType = recordType(
                         heapBase, arrayGetObject);
-                    if (arrayGetObjectType === HEAP_TYPE_BUFFER_VIEW) {
+                    if (arrayGetObjectType === HEAP_TYPE_STRING) {
+                        var indexedStringTarget = heapBase + registerCells +
+                            arrayGetTargetIndex * VALUE_CELL_BYTES;
+                        var indexedStringLength = stringLength(
+                            heapBase, arrayGetObject);
+                        if (arrayGetIndex >= indexedStringLength) {
+                            setValueCellUndefined(indexedStringTarget);
+                            arrayGetSupported = 4;
+                        } else {
+                            var indexedStringCode = stringCharacterCodeUnit(
+                                heapBase, arrayGetObject,
+                                arrayGetIndex) & 65535;
+                            if (indexedStringCode < 256) {
+                                copyValueCell(indexedStringTarget,
+                                    vectorCellAddress(heapBase, stringSupport,
+                                        STRING_SUPPORT_ASCII_BASE +
+                                        indexedStringCode));
+                                arrayGetSupported = 4;
+                            } else {
+                                var indexedStringBytes =
+                                    (STRING_CHARS + 2 + 7) & -8;
+                                if (reserveNativeAllocationKernel(
+                                        heapBase, state,
+                                        indexedStringBytes) === 0) {
+                                    return unsupportedExitKernel(
+                                        heapBase, state, frame, pc, opcode,
+                                        instructions);
+                                }
+                                var indexedString = engineHeapBump(
+                                    heapBase, state);
+                                if (indexedString + indexedStringBytes >
+                                        engineHeapLimit(heapBase, state)) {
+                                    return unsupportedExitKernel(
+                                        heapBase, state, frame, pc, opcode,
+                                        instructions);
+                                }
+                                setRecordType(heapBase, indexedString,
+                                    HEAP_TYPE_STRING);
+                                setRecordSize(heapBase, indexedString,
+                                    indexedStringBytes);
+                                setRecordMark(heapBase, indexedString, 0);
+                                setRecordFlags(heapBase, indexedString, 0);
+                                setStringLength(heapBase, indexedString, 1);
+                                setStringHash(heapBase, indexedString,
+                                    (-2128831035 ^ indexedStringCode) *
+                                    16777619);
+                                setStringCharacterByte(
+                                    heapBase, indexedString, 0,
+                                    indexedStringCode & 255);
+                                setStringCharacterByte(
+                                    heapBase, indexedString, 1,
+                                    (indexedStringCode >>> 8) & 255);
+                                setEngineHeapBump(heapBase, state,
+                                    indexedString + indexedStringBytes);
+                                setValueCellReference(
+                                    indexedStringTarget, indexedString);
+                                arrayGetSupported = 4;
+                            }
+                        }
+                    } else if (arrayGetObjectType === HEAP_TYPE_BUFFER_VIEW) {
                         var arrayGetViewKind = bufferViewKind(
                             heapBase, arrayGetObject);
                         if (arrayGetViewKind !== BUFFER_KIND_ARRAY_BUFFER) {
