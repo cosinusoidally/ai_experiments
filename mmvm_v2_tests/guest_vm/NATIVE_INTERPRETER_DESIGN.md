@@ -1,5 +1,14 @@
 # Native kernel interpreter design
 
+The compiled entry's third argument is the guest-heap address of the
+platform-service record, not the global object. It contains process-local libc
+capabilities such as `snprintf` and is referenced from the engine-state record.
+Host-triggered native collection explicitly roots the engine state, platform
+services, and runtime support vector before invoking the shared marker. The
+compiled collector likewise marks the platform-service entry argument before
+sweeping. These explicit roots are intentional: reclaiming the table can turn
+an ordinary reused heap word into an indirect native call target.
+
 ## Required endpoint
 
 On the MMVM host, SpiderMonkey is a bootstrap compiler driver only. It parses

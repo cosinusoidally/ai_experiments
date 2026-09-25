@@ -172,6 +172,15 @@ self-hosted front end now takes 19.2 seconds and peaks at 136.4 MiB, including
 native-interpreter compilation and front-end module loading. No parsed result
 or source-specific cache is involved.
 
+The faster path exposed a collector stability bug during the first full zlib
+iteration. A host-triggered native collection rooted the string-support vector
+explicitly but relied on structural discovery for the engine state and its
+platform-service child. The service record was reclaimed and reused as an
+ordinary object; `Number.prototype.toFixed` later read `0x1` from the former
+`snprintf` slot. Both authoritative records are now explicit roots. The
+unchanged quick-correctness run completes with the original checksum in 75.2
+seconds at 305.5 MiB peak RSS.
+
 The following baselines include native-interpreter compilation and process
 startup in the wall-clock time. They are not directly comparable with the
 score's internal benchmark interval.

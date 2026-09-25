@@ -4281,6 +4281,10 @@
         }
         if (this.nativeInterpreter) {
             this.linearHeap.setMark(
+                this.nativeInterpreter.stateAddress, generation);
+            this.linearHeap.setMark(
+                this.nativeInterpreter.platformServicesAddress, generation);
+            this.linearHeap.setMark(
                 this.nativeInterpreter.stringSupportAddress, generation);
         }
         var snapshotIndex = 0;

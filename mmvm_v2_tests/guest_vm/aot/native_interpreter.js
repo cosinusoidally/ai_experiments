@@ -11678,7 +11678,7 @@
      * violates the self-hosting boundary and forces unnecessary collections.
      * Free records use their otherwise-unused mark word as a transient next
      * link while ownership belongs to this dispatcher. */
-    function nativeExecutionKernel(heapBase, frame, globalObject,
+    function nativeExecutionKernel(heapBase, frame, platformServices,
                                    arrayLengthKey, arrayPrototype,
                                    stringSupport, budget, state) {
         var FREE_RECORD_HEADER_BYTES = 16;
@@ -11709,7 +11709,7 @@
             }
         }
         var reason = interpreterKernel(
-            heapBase, frame, globalObject, arrayLengthKey,
+            heapBase, frame, platformServices, arrayLengthKey,
             arrayPrototype, stringSupport, budget, state);
         var collectionEnabled = engineGCStackBase(heapBase, state) !== 0;
         var collectionCanResume = collectionEnabled;
@@ -11733,7 +11733,8 @@
             setEngineGCGeneration(
                 heapBase, state, collectionGeneration);
             setRecordMark(heapBase, frame, collectionGeneration);
-            setRecordMark(heapBase, globalObject, collectionGeneration);
+            setRecordMark(
+                heapBase, platformServices, collectionGeneration);
             setRecordMark(heapBase, arrayLengthKey, collectionGeneration);
             setRecordMark(heapBase, arrayPrototype, collectionGeneration);
             setRecordMark(heapBase, stringSupport, collectionGeneration);
@@ -11754,7 +11755,7 @@
                 setEngineAllocationFailed(heapBase, state, 0);
                 frame = engineCurrentFrame(heapBase, state);
                 reason = interpreterKernel(
-                    heapBase, frame, globalObject, arrayLengthKey,
+                    heapBase, frame, platformServices, arrayLengthKey,
                     arrayPrototype, stringSupport, budget, state);
             }
             }

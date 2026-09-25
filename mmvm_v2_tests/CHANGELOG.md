@@ -8,6 +8,24 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.62
+
+Approximate completion: 2026-09-25 late evening BST
+
+### Guest VM
+
+- Fixed a native-collection root omission which could reclaim the runtime's
+  platform-service table under zlib's allocation pressure. A later number
+  formatting call then attempted to invoke a reused object field as the libc
+  `snprintf` pointer and jumped to address `0x1`.
+- The engine-state and platform-service records are now explicit roots of
+  host-triggered native collection. The compiled entry parameter was renamed
+  from the misleading `globalObject` to `platformServices` to document the
+  actual ABI and internal-collector root.
+- The unchanged zlib quick-correctness run now completes with its original
+  checksum in 75.2 seconds at 305.5 MiB peak RSS. Both complete regression
+  suites still pass 12 programs and 264 assertions.
+
 ## 0.61
 
 Approximate completion: 2026-09-25 evening BST
