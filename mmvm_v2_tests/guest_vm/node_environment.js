@@ -1094,6 +1094,23 @@
             }));
     };
 
+    GuestNodeEnvironment.prototype.setRunnerArguments = function (
+            runnerArguments) {
+        this.runnerArguments = runnerArguments;
+        if (!this.nodeHost) NodeProcess.install(runnerArguments);
+        var argv = ["artifacts/js_min.exe", runnerArguments[0]];
+        var index = 1;
+        while (index < runnerArguments.length) {
+            argv.push(runnerArguments[index++]);
+        }
+        var processObject = this.runtime.getGlobal(this.context, "process");
+        this.runtime.setProperty(processObject, "argv",
+                                 this.runtime.arrayFrom(argv));
+        this.runtime.setProperty(processObject, "exitCode", 0);
+        this.exitCode = 0;
+        this.exiting = false;
+    };
+
     GuestNodeEnvironment.prototype.run = function () {
         if (!this.nodeHost) {
             NodeRuntime.run();

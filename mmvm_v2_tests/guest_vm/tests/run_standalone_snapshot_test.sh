@@ -18,12 +18,26 @@ gcc -ansi -m32 js_runner.c \
 
 LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$js_min_binary" guest_runner.js --vm-native \
-    --snapshot "$temporary_directory/snap-a" guest_runner.js >/dev/null
+    --snapshot "$temporary_directory/snap-a" hello.js >/dev/null
+LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$js_min_binary" guest_runner.js --vm-native \
+    --snapshot "$temporary_directory/snap-b" \
+    guest_vm/tests/standalone_alternate_program.js >/dev/null
+cmp "$temporary_directory/snap-a" "$temporary_directory/snap-b"
 standalone_output=$("$temporary_directory/js_runner.exe" \
-    "$temporary_directory/snap-a" hello.js)
+    "$temporary_directory/snap-b" hello.js)
 if [ "$standalone_output" != "Hello, world!" ]; then
     echo "standalone snapshot emitted unexpected stdout:" >&2
     echo "$standalone_output" >&2
+    exit 1
+fi
+
+alternate_output=$("$temporary_directory/js_runner.exe" \
+    "$temporary_directory/snap-a" \
+    guest_vm/tests/standalone_alternate_program.js)
+if [ "$alternate_output" != "Alternate standalone workload" ]; then
+    echo "standalone snapshot could not run alternate program:" >&2
+    echo "$alternate_output" >&2
     exit 1
 fi
 
@@ -37,4 +51,4 @@ if [ "$fixed_point_output" != "Hello, world!" ]; then
 fi
 cmp "$temporary_directory/snap-a" "$temporary_directory/snap2"
 
-echo "generic standalone snapshot and byte-identical fixed point passed"
+echo "program-independent standalone snapshots and byte-identical fixed point passed"

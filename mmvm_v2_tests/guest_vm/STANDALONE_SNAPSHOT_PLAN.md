@@ -51,12 +51,14 @@ must not be produced by merely copying the input image.
 
 ## Current checkpoint
 
-As of 2026-09-14, implementation stage 2 is working. The version-2 image
-contains a position-independent macro-assembled bootstrap, expected program
-name, relocatable native interpreter text, prepared guest frame/context, and a
-canonical guest heap template. The exact requested command prints
-`Hello, world!` and exits zero. Independently generated images are byte-for-byte
-identical, and the version-2 container remains readable through the existing
+The version-2 image now contains a position-independent macro-assembled
+bootstrap, relocatable native interpreter text, initialized runtime, generic
+guest command runner, and canonical guest heap template. It contains no
+expected application name or application program state. The exact requested
+command writes this generic boundary, then prints `Hello, world!` through the
+ordinary post-snapshot execution path and exits zero. Independently generated
+images made while running different applications are byte-for-byte identical,
+and the version-2 container remains readable through the existing
 `--with-snapshot` js_min path.
 
 The older version-1 format is a 32-byte header followed by relocatable native
@@ -230,6 +232,17 @@ absolute pointers.
 Status: the documented `guest_runner.js --vm-native --snapshot ... hello.js`
 command now writes `snap2`, runs the prepared hello payload, and produces a
 byte-identical fixed point. The regression suite compares the complete files.
+
+Snapshot production now has an explicit application-independent boundary.
+The generic guest command runner and initialized runtime are serialized before
+the outer invocation opens, parses, compiles, or installs its requested
+application. The application executes only after the snapshot is complete.
+The regression suite independently creates images while running two different
+programs, requires the complete files to be byte-identical, and cross-runs
+both programs through the opposite image. Native Buffer backing pointers are
+cleared while copying the template and rebuilt from the mapped heap base by
+the macro-assembled bootstrap; process-local addresses therefore neither leak
+into the file nor make independent images differ under ASLR.
 
 The generic image now also loads arbitrary source filenames instead of
 capturing `hello.js`. As of the 2026-09-23 checkpoint it runs unchanged

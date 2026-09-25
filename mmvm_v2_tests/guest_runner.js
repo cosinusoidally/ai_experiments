@@ -113,11 +113,6 @@ if (!guestRunnerArguments.length) {
 
 var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource;
-if (guestRunnerIsNode) {
-    guestProgramSource = require("fs").readFileSync(guestProgramPath, "utf8");
-} else if (typeof NodeFs !== "undefined") {
-    guestProgramSource = NodeFs.readFileSync(guestProgramPath).toString("utf8");
-} else guestProgramSource = read(guestProgramPath);
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
@@ -137,7 +132,8 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                             (!guestRunnerIsNode ||
                                              guestRunnerThreaded)});
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
-    guestProgramVM, guestRunnerArguments);
+    guestProgramVM, guestRunnerSnapshot ? ["guest_runner.js"] :
+                                          guestRunnerArguments);
 var guestRunnerDeferredCleanup = false;
 var guestRunnerCleaned = false;
 var guestRunnerFailure = null;
@@ -179,37 +175,46 @@ function guestRunnerCleanup() {
 }
 
 try {
-    if (guestRunnerSnapshot && guestProgramPath === "guest_runner.js") {
-        guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
-    }
-    guestProgramVM.installGlobal("arguments",
-        guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
-    var guestExecution = guestProgramVM.start(
-        guestRunnerSnapshot && guestProgramPath === "guest_runner.js" ?
-            read("guest_vm/standalone_source_runner.js") : guestProgramSource,
-        guestRunnerSnapshot && guestProgramPath === "guest_runner.js" ?
-            "guest_vm/standalone_source_runner.js" : guestProgramPath);
     if (guestRunnerSnapshot) {
+        /* Snapshot a fixed, generic command-line boundary before the requested
+         * application is opened or represented in the guest heap.  The
+         * temporary environment deliberately has fixed arguments, so the
+         * emitted bytes cannot depend on the program run after this point. */
+        guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
+        var guestSnapshotExecution = guestProgramVM.start(
+            read("guest_vm/standalone_source_runner.js"),
+            "guest_vm/standalone_source_runner.js");
         if (!guestProgramVM.runtime.nativeInterpreter.writeStandaloneSnapshot(
-                guestRunnerSnapshot, guestExecution,
-                guestProgramPath === "guest_runner.js" ? null :
-                    guestProgramPath)) {
+                guestRunnerSnapshot, guestSnapshotExecution, null)) {
             throw new Error("could not write standalone snapshot: " +
                             guestRunnerSnapshot);
         }
+        guestSnapshotExecution.abort();
+        guestNodeEnvironment.setRunnerArguments(guestRunnerArguments);
         if (typeof print === "function") {
             print("wrote standalone snapshot: " + guestRunnerSnapshot);
         } else if (typeof console !== "undefined" && console.log) {
             console.log("wrote standalone snapshot: " + guestRunnerSnapshot);
         }
     }
+
+    /* Application I/O is intentionally after the snapshot boundary. */
+    if (guestRunnerIsNode) {
+        guestProgramSource = require("fs").readFileSync(
+            guestProgramPath, "utf8");
+    } else if (typeof NodeFs !== "undefined") {
+        guestProgramSource = NodeFs.readFileSync(guestProgramPath).
+            toString("utf8");
+    } else guestProgramSource = read(guestProgramPath);
+    guestProgramVM.installGlobal("arguments",
+        guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
+    var guestExecution = guestProgramVM.start(
+        guestProgramSource, guestProgramPath);
     var guestRunnerProfileStarted = new Date().getTime();
     var guestRunnerStoppedForProfile = false;
-    var guestRunnerSnapshotOnly = guestRunnerSnapshot &&
-        guestProgramPath === "guest_runner.js";
     var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
         1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
-    while (!guestRunnerSnapshotOnly) {
+    while (true) {
         var guestExecutionResult = guestExecution.resume(
             guestRunnerResumeBudget);
         if (guestExecutionResult.status === "budget") {
@@ -232,9 +237,7 @@ try {
             break;
         }
     }
-    if (guestRunnerSnapshotOnly) {
-        /* The generic entry obtains its real argc/argv from js_runner. */
-    } else if (guestRunnerStoppedForProfile) {
+    if (guestRunnerStoppedForProfile) {
         if (typeof print === "function") {
             print("guest runner: stopped at an instruction-budget boundary " +
                   "after " + guestRunnerProfileDuration + " ms");

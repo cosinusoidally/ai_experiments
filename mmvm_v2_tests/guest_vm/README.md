@@ -293,12 +293,15 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   --skip-snapshot-hash hello.js
 ```
 
-Both options imply `--vm-native`. `--snapshot FILE` compiles normally, writes
-a version-2 standalone image containing the native interpreter plus the
-prepared program/frame/context/heap, and continues running the requested guest
-program. `--with-snapshot FILE` reads the interpreter segment from either an
-older version-1 code-only image or a version-2 standalone image. It fails rather
-than silently compiling
+Both options imply `--vm-native`. `--snapshot FILE` first writes a version-2
+standalone image containing the native interpreter, initialized guest runtime,
+and generic command runner. This boundary is captured before the requested
+program is opened, parsed, compiled, or installed in the guest heap; the outer
+invocation runs that program only after the image is complete. Consequently
+the output image is independent of that program and can run any supported
+source supplied later to `js_runner.exe`. `--with-snapshot FILE` reads the
+interpreter segment from either an older version-1 code-only image or a
+version-2 standalone image. It fails rather than silently compiling
 when the file is absent, truncated, built for profiling mode, or stale. Remove
 snapshots with `./mk_clean`; they are temporary build artifacts and must not be
 committed.

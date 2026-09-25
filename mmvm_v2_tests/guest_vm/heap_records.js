@@ -690,6 +690,47 @@
         return pointer >= 2147483648 ? pointer - 4294967296 : pointer;
     };
 
+    Records.prototype.setBufferBackingPointer = function (backing, pointer) {
+        this.heap.writeTrustedFieldU32(backing, BUFFER_BACKING_POINTER,
+            pointer, Heap.Types.BUFFER_BACKING);
+    };
+
+    Records.prototype.suspendBufferPointersForSnapshot = function () {
+        var records = this;
+        var saved = [];
+        this.heap.visitRecords(function (address, type) {
+            if (type !== Heap.Types.BUFFER_BACKING) return;
+            saved.push({address: address,
+                        pointer: records.bufferBackingPointer(address)});
+            records.setBufferBackingPointer(address, 0);
+        });
+        return saved;
+    };
+
+    Records.prototype.restoreBufferPointersAfterSnapshot = function (saved) {
+        var index = 0;
+        while (index < saved.length) {
+            this.setBufferBackingPointer(saved[index].address,
+                                         saved[index].pointer);
+            index++;
+        }
+    };
+
+    /* The standalone bootstrap uses this named description to rebuild native
+     * Buffer data pointers after mapping the relocatable heap template.  Keep
+     * record-layout knowledge in HeapRecords rather than duplicating offsets
+     * in the machine-code emitter. */
+    Records.prototype.standaloneBufferRebindLayout = function () {
+        return {
+            firstRecord: 64,
+            recordType: 0,
+            recordSize: 4,
+            bufferBackingType: Heap.Types.BUFFER_BACKING,
+            bufferPointer: Heap.HEADER_SIZE + BUFFER_BACKING_POINTER,
+            bufferData: Heap.HEADER_SIZE + BUFFER_BACKING_DATA
+        };
+    };
+
     Records.prototype.bufferBackingLength = function (backing) {
         return this.heap.readTrustedFieldU32(backing, BUFFER_BACKING_LENGTH,
                                       Heap.Types.BUFFER_BACKING);

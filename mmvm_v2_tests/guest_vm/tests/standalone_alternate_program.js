@@ -1,0 +1,1 @@
+print("Alternate standalone workload");

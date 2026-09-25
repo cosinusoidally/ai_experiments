@@ -458,6 +458,42 @@
         assembler.callEax();
         discardCallWords(3);
 
+        /* Buffer records contain process-local data pointers for fast FFI.
+         * They are zero in the file image and reconstructed from the newly
+         * mapped heap base before any guest instruction can observe them. */
+        var bufferRebind = layout.bufferRebind;
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.movEsiEax();
+        assembler.movEaxImmediate(bufferRebind.firstRecord);
+        assembler.movEbxEax();
+        assembler.label("standalone_rebind_buffer_loop");
+        assembler.movEaxEbx();
+        assembler.compareEaxImmediate(layout.heapImageLength);
+        assembler.jumpGreaterOrEqual("standalone_rebind_buffer_done");
+        assembler.movEaxEbx();
+        assembler.movEaxDwordPtrRegisterPlusEax(
+            "esi", bufferRebind.recordType);
+        assembler.compareEaxImmediate(bufferRebind.bufferBackingType);
+        assembler.jumpNotEqual("standalone_rebind_buffer_next");
+        assembler.movEaxEbx();
+        assembler.addEaxEsi();
+        assembler.addEaxImmediate(bufferRebind.bufferPointer);
+        assembler.movEcxEax();
+        assembler.movEaxEbx();
+        assembler.addEaxEsi();
+        assembler.addEaxImmediate(bufferRebind.bufferData);
+        assembler.movDwordPtrEcxEax();
+        assembler.label("standalone_rebind_buffer_next");
+        assembler.movEaxEbx();
+        assembler.movEaxDwordPtrRegisterPlusEax(
+            "esi", bufferRebind.recordSize);
+        assembler.movEcxEax();
+        assembler.movEaxEbx();
+        assembler.addEaxEcx();
+        assembler.movEbxEax();
+        assembler.jump("standalone_rebind_buffer_loop");
+        assembler.label("standalone_rebind_buffer_done");
+
         /* Rebind the one capability supplied by the loader.  This is a named
          * guest-heap field chosen by HeapRecords, not an open-coded layout. */
         assembler.movEaxLocal(HEAP_BASE_LOCAL);
@@ -609,6 +645,7 @@
             contextAddress: frame.context.heapAddress,
             frameAddress: frame.heapAddress
         };
+        layout.bufferRebind = records.standaloneBufferRebindLayout();
         var mmapNameBytes = standaloneStringBytes("mmap");
         var memcpyNameBytes = standaloneStringBytes("memcpy");
         var bindingNameBytes = [];
@@ -668,6 +705,8 @@
         var savedPlatformPointers =
             records.suspendPlatformPointersForSnapshot(
                 nativeInterpreter.platformServicesAddress);
+        var savedBufferPointers =
+            records.suspendBufferPointersForSnapshot();
         var savedNativeBindingValues = [];
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
@@ -697,6 +736,7 @@
             records.restorePlatformPointersAfterSnapshot(
                 nativeInterpreter.platformServicesAddress,
                 savedPlatformPointers);
+            records.restoreBufferPointersAfterSnapshot(savedBufferPointers);
             records.setEngineGCState(nativeInterpreter.stateAddress,
                 savedGCState[0], savedGCState[1], savedGCState[2],
                 savedGCState[3]);
