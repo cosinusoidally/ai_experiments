@@ -8,6 +8,19 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.56
+
+Approximate completion: 2026-09-25 afternoon BST
+
+### Guest VM
+
+- Kept DeltaBlue and Crypto quick-correctness execution inside the native
+  guest interpreter by adding general native implementations of
+  `Object.defineProperty`, `Number.prototype.toFixed`, and `Math.random`.
+- Property descriptors and formatted-number results are read from and written
+  to the runtime-owned guest heap. The standalone random-number sequence is
+  derived entirely inside the interpreter and owns no host-VM state.
+
 ## 0.55
 
 Approximate completion: 2026-09-25 afternoon BST

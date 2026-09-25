@@ -2531,7 +2531,7 @@
                     object.propertyVersion++;
                     object.valueVersion++;
                     return object;
-                }));
+                }, "intrinsic", NativeIntrinsics.OBJECT_DEFINE_PROPERTY));
         this.setProperty(objectConstructor, "create",
             this.makeNativeFunction("Object.create", function (receiver, args) {
                 return runtime.makeObjectWithPrototype(args[0]);
@@ -2712,7 +2712,7 @@
             function (receiver, args) {
                 return runtime.numberValue(receiver).toFixed(
                     args.length ? runtime.toNumber(args[0]) : 0);
-            });
+            }, "intrinsic", NativeIntrinsics.NUMBER_TO_FIXED);
         this.numberMethods.toPrecision = this.makeNativeFunction(
             "Number.toPrecision", function (receiver, args) {
                 var value = runtime.numberValue(receiver);
@@ -2954,7 +2954,8 @@
         mathMethod("pow", function (receiver, args) {
             return Math.pow(Number(args[0]), Number(args[1]));
         }, NativeIntrinsics.MATH_POW);
-        mathMethod("random", function () { return Math.random(); });
+        mathMethod("random", function () { return Math.random(); },
+                   NativeIntrinsics.MATH_RANDOM);
         mathMethod("min", function (receiver, args) {
             return Math.min.apply(Math, args);
         }, NativeIntrinsics.MATH_MIN);

@@ -401,7 +401,10 @@
         var INTRINSIC_ARRAY_INDEX_OF = 75;
         var INTRINSIC_MATH_LOG = 76;
         var INTRINSIC_NUMBER_TO_PRECISION = 77;
-        var INTRINSIC_LAST_ID = 77;
+        var INTRINSIC_OBJECT_DEFINE_PROPERTY = 78;
+        var INTRINSIC_NUMBER_TO_FIXED = 79;
+        var INTRINSIC_MATH_RANDOM = 80;
+        var INTRINSIC_LAST_ID = 80;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -4671,6 +4674,12 @@
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_NUMBER_TO_FIXED) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_MATH_RANDOM) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
+            requiredIntrinsicArguments = 3;
         } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
@@ -4936,6 +4945,23 @@
         }
         }
         if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
+            var definePropertyResult = objectDefinePropertyKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector);
+            if (definePropertyResult === 1) intrinsicHandled = 1;
+            else if (definePropertyResult === 2) {
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            } else {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_FFI_CALL) {
             var ffiCallResult = ffiCallKernel(
                 heapBase, state, intrinsicTarget, registerCells,
@@ -4948,8 +4974,14 @@
         }
         }
         if (intrinsicHandled === 0) {
+        var isNumberFormatIntrinsic = 0;
         if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
-            var precisionResult = numberToPrecisionKernel(
+            isNumberFormatIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_NUMBER_TO_FIXED) {
+            isNumberFormatIntrinsic = 1;
+        }
+        if (isNumberFormatIntrinsic === 1) {
+            var precisionResult = numberFormatKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 bytecodeWords, pc, intrinsicId,
@@ -4964,6 +4996,23 @@
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_MATH_RANDOM) {
+            /* Math.random has implementation-defined seeding and sequence.
+             * Hash the monotonically increasing guest instruction count so
+             * standalone execution needs no host-owned PRNG state. */
+            var randomValue = (instructions * 1103515245 + 12345) &
+                1073741823;
+            setEngineScratchLeft(heapBase, state, randomValue);
+            setEngineScratchRight(heapBase, state, 1073741824);
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW, divideF64(
+                loadI32F64(engineScratchLeftAddress(heapBase, state)),
+                loadI32F64(engineScratchRightAddress(heapBase, state))));
+            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            intrinsicHandled = 1;
         }
         }
         if (intrinsicHandled === 0) {
@@ -8060,17 +8109,26 @@
         return 1;
     }
 
-    function numberToPrecisionKernel(
+    function numberFormatKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
             bytecodeWords, pc, intrinsicId, platformServices) {
-        if (intrinsicId !== INTRINSIC_NUMBER_TO_PRECISION) return 0;
+        if (intrinsicId !== INTRINSIC_NUMBER_TO_PRECISION) {
+            if (intrinsicId !== INTRINSIC_NUMBER_TO_FIXED) return 0;
+        }
         var CALL_REJECT_INTRINSIC_RECEIVER = 12;
         var CALL_REJECT_INTRINSIC_ARGUMENT = 13;
         var CALL_REJECT_SNPRINTF_SERVICE = 14;
         var CALL_REJECT_INTRINSIC_RESULT = 15;
         var CALL_REJECT_PLATFORM_RECORD = 16;
+        if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
         if (intrinsicArgumentCount !== 1) {
+            setEngineCallRejectReason(
+                heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
+            return 0;
+        }
+        }
+        if (intrinsicArgumentCount > 1) {
             setEngineCallRejectReason(
                 heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
             return 0;
@@ -8093,36 +8151,47 @@
                 return 0;
             }
         }
-        var precisionDescriptor = heapBase + intrinsicArgumentsVector +
-            VECTOR_CELLS;
-        if (valueCellTag(0, precisionDescriptor) !== VALUE_TAG_INT32) {
-            setEngineCallRejectReason(
-                heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
-            return 0;
-        }
-        var precisionRegister = valueCellInt32(0, precisionDescriptor);
-        var precisionCell = heapBase + registerCells +
-            precisionRegister * VALUE_CELL_BYTES;
-        var precisionTag = valueCellTag(0, precisionCell);
-        if (precisionTag !== VALUE_TAG_INT32) {
-            if (precisionTag !== VALUE_TAG_DOUBLE) {
+        var precision = 0;
+        if (intrinsicArgumentCount === 1) {
+            var precisionDescriptor = heapBase + intrinsicArgumentsVector +
+                VECTOR_CELLS;
+            if (valueCellTag(0, precisionDescriptor) !== VALUE_TAG_INT32) {
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
                 return 0;
             }
+            var precisionRegister = valueCellInt32(0, precisionDescriptor);
+            var precisionCell = heapBase + registerCells +
+                precisionRegister * VALUE_CELL_BYTES;
+            var precisionTag = valueCellTag(0, precisionCell);
+            if (precisionTag === VALUE_TAG_UNDEFINED) {
+                if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) return 0;
+            } else {
+                if (precisionTag !== VALUE_TAG_INT32) {
+                    if (precisionTag !== VALUE_TAG_DOUBLE) {
+                        setEngineCallRejectReason(
+                            heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
+                        return 0;
+                    }
+                }
+                precision = toInt32F64(loadNumberF64(
+                    precisionCell + VALUE_CELL_LOW, precisionTag));
+                setEngineScratchLeft(heapBase, state, precision);
+                if (equalF64(loadNumberF64(
+                        precisionCell + VALUE_CELL_LOW, precisionTag),
+                        loadI32F64(engineScratchLeftAddress(
+                            heapBase, state))) === 0) {
+                    setEngineCallRejectReason(
+                        heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
+                    return 0;
+                }
+            }
         }
-        var precision = toInt32F64(loadNumberF64(
-            precisionCell + VALUE_CELL_LOW, precisionTag));
-        setEngineScratchLeft(heapBase, state, precision);
-        if (equalF64(loadNumberF64(
-                precisionCell + VALUE_CELL_LOW, precisionTag),
-                loadI32F64(engineScratchLeftAddress(
-                    heapBase, state))) === 0) {
-            setEngineCallRejectReason(
-                heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
-            return 0;
+        var minimumPrecision = 0;
+        if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
+            minimumPrecision = 1;
         }
-        if (precision < 1) {
+        if (precision < minimumPrecision) {
             setEngineCallRejectReason(
                 heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
             return 0;
@@ -8166,7 +8235,9 @@
         }
         storeRaw8(format + formatIndex, 48 + precision % 10);
         formatIndex = formatIndex + 1;
-        storeRaw8(format + formatIndex, 103);
+        if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
+            storeRaw8(format + formatIndex, 103);
+        } else storeRaw8(format + formatIndex, 102);
         storeRaw8(format + formatIndex + 1, 0);
         var numberBits = receiverCell + VALUE_CELL_LOW;
         if (receiverTag === VALUE_TAG_INT32) {
@@ -10265,6 +10336,238 @@
         return 1;
     }
 
+    /* Return the descriptor field represented by a guest string.  This stays
+     * deliberately independent of host strings so Object.defineProperty can
+     * execute after the standalone handoff. */
+    function descriptorFieldKindKernel(heapBase, key) {
+        var length = stringLength(heapBase, key);
+        if (length === 3) {
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 103) {
+            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 101) {
+            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 116) {
+                return 5;
+            }
+            }
+            }
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 115) {
+            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 101) {
+            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 116) {
+                return 6;
+            }
+            }
+            }
+        } else if (length === 5) {
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 118) {
+            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 97) {
+            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 108) {
+            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 117) {
+            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 101) {
+                return 1;
+            }
+            }
+            }
+            }
+            }
+        } else if (length === 8) {
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 119) {
+            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 114) {
+            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 105) {
+            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 116) {
+            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 97) {
+            if ((stringCharacterCodeUnit(heapBase, key, 5) & 65535) === 98) {
+            if ((stringCharacterCodeUnit(heapBase, key, 6) & 65535) === 108) {
+            if ((stringCharacterCodeUnit(heapBase, key, 7) & 65535) === 101) {
+                return 2;
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+        } else if (length === 10) {
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 101) {
+            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 110) {
+            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 117) {
+            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 109) {
+            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 101) {
+            if ((stringCharacterCodeUnit(heapBase, key, 5) & 65535) === 114) {
+            if ((stringCharacterCodeUnit(heapBase, key, 6) & 65535) === 97) {
+            if ((stringCharacterCodeUnit(heapBase, key, 7) & 65535) === 98) {
+            if ((stringCharacterCodeUnit(heapBase, key, 8) & 65535) === 108) {
+            if ((stringCharacterCodeUnit(heapBase, key, 9) & 65535) === 101) {
+                return 3;
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+        } else if (length === 12) {
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 99) {
+            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 111) {
+            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 110) {
+            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 102) {
+            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 105) {
+            if ((stringCharacterCodeUnit(heapBase, key, 5) & 65535) === 103) {
+            if ((stringCharacterCodeUnit(heapBase, key, 6) & 65535) === 117) {
+            if ((stringCharacterCodeUnit(heapBase, key, 7) & 65535) === 114) {
+            if ((stringCharacterCodeUnit(heapBase, key, 8) & 65535) === 97) {
+            if ((stringCharacterCodeUnit(heapBase, key, 9) & 65535) === 98) {
+            if ((stringCharacterCodeUnit(heapBase, key, 10) & 65535) === 108) {
+            if ((stringCharacterCodeUnit(heapBase, key, 11) & 65535) === 101) {
+                return 4;
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+            }
+        }
+        return 0;
+    }
+
+    function valueCellTruthyKernel(cell) {
+        var tag = valueCellTag(0, cell);
+        if (tag === VALUE_TAG_UNDEFINED) return 0;
+        if (tag === VALUE_TAG_NULL) return 0;
+        if (tag === VALUE_TAG_FALSE) return 0;
+        if (tag === VALUE_TAG_TRUE) return 1;
+        if (tag === VALUE_TAG_INT32) {
+            if (valueCellInt32(0, cell) === 0) return 0;
+            return 1;
+        }
+        if (tag === VALUE_TAG_DOUBLE) {
+            var numberLow = load32(cell + VALUE_CELL_LOW);
+            var numberHigh = load32(cell + VALUE_CELL_HIGH) & 2147483647;
+            if (numberLow === 0) {
+                if (numberHigh === 0) {
+                    return 0;
+                }
+            }
+            if ((numberHigh & 2146435072) === 2146435072) {
+                if ((numberHigh & 1048575) !== 0) return 0;
+                if (numberLow !== 0) return 0;
+            }
+            return 1;
+        }
+        return 1;
+    }
+
+    function objectDefinePropertyKernel(
+            heapBase, state, target, registerCells, argumentsVector) {
+        var objectCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 0);
+        var keyCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 1);
+        var descriptorCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 2);
+        if (objectCell === 0) return 0;
+        if (keyCell === 0) return 0;
+        if (descriptorCell === 0) return 0;
+        if (valueCellTag(0, objectCell) !== VALUE_TAG_REFERENCE) return 0;
+        if (valueCellTag(0, keyCell) !== VALUE_TAG_REFERENCE) return 0;
+        if (valueCellTag(0, descriptorCell) !== VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, objectCell);
+        var key = valueCellReference(0, keyCell);
+        var descriptor = valueCellReference(0, descriptorCell);
+        var objectType = recordType(heapBase, object);
+        var descriptorType = recordType(heapBase, descriptor);
+        if (objectType < HEAP_TYPE_OBJECT) return 0;
+        if (objectType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        if (descriptorType < HEAP_TYPE_OBJECT) return 0;
+        if (descriptorType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        if (recordType(heapBase, key) !== HEAP_TYPE_STRING) return 0;
+
+        var descriptorProperty = objectPropertyHead(heapBase, descriptor);
+        var valueCell = 0;
+        var writableCell = 0;
+        var enumerableCell = 0;
+        var configurableCell = 0;
+        while (descriptorProperty !== 0) {
+            var fieldKind = descriptorFieldKindKernel(
+                heapBase, propertyKey(heapBase, descriptorProperty));
+            if (fieldKind === 1) {
+                valueCell = propertyValueCellAddress(
+                    heapBase, descriptorProperty);
+            } else if (fieldKind === 2) {
+                writableCell = propertyValueCellAddress(
+                    heapBase, descriptorProperty);
+            } else if (fieldKind === 3) {
+                enumerableCell = propertyValueCellAddress(
+                    heapBase, descriptorProperty);
+            } else if (fieldKind === 4) {
+                configurableCell = propertyValueCellAddress(
+                    heapBase, descriptorProperty);
+            } else if (fieldKind === 5) {
+                return 0;
+            } else if (fieldKind === 6) {
+                return 0;
+            }
+            descriptorProperty = propertyNext(heapBase, descriptorProperty);
+        }
+
+        var property = objectPropertyHead(heapBase, object);
+        while (property !== 0) {
+            if (stringKeysEqualKernel(
+                    heapBase, propertyKey(heapBase, property), key) === 1) {
+                return 0;
+            }
+            property = propertyNext(heapBase, property);
+        }
+        if (objectExtensible(heapBase, object) === 0) return 0;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, PROPERTY_RECORD_BYTES) === 0) return 2;
+        property = engineHeapBump(heapBase, state);
+        if (property + PROPERTY_RECORD_BYTES >
+                engineHeapLimit(heapBase, state)) return 2;
+        setRecordType(heapBase, property, HEAP_TYPE_PROPERTY);
+        setRecordSize(heapBase, property, PROPERTY_RECORD_BYTES);
+        setRecordMark(heapBase, property, 0);
+        setRecordFlags(heapBase, property, 0);
+        setPropertyNext(heapBase, property,
+                        objectPropertyHead(heapBase, object));
+        setPropertyKey(heapBase, property, key);
+        var attributes = 0;
+        if (writableCell !== 0) {
+            if (valueCellTruthyKernel(writableCell) === 1) {
+                attributes = attributes + PROPERTY_ATTRIBUTE_WRITABLE;
+            }
+        }
+        if (enumerableCell !== 0) {
+            if (valueCellTruthyKernel(enumerableCell) === 1) {
+                attributes = attributes + PROPERTY_ATTRIBUTE_ENUMERABLE;
+            }
+        }
+        if (configurableCell !== 0) {
+            if (valueCellTruthyKernel(configurableCell) === 1) {
+                attributes = attributes + PROPERTY_ATTRIBUTE_CONFIGURABLE;
+            }
+        }
+        setPropertyAttributes(heapBase, property, attributes);
+        setPropertyReserved(heapBase, property, 0);
+        var destination = propertyValueCellAddress(heapBase, property);
+        if (valueCell === 0) setValueCellUndefined(destination);
+        else copyValueCell(destination, valueCell);
+        setObjectPropertyHead(heapBase, object, property);
+        setEngineHeapBump(
+            heapBase, state, property + PROPERTY_RECORD_BYTES);
+        var cacheClearResult = clearNativePropertyCacheKernel(heapBase, state);
+        copyValueCell(target, objectCell);
+        return 1;
+    }
+
     function unsupportedExitKernel(heapBase, state, frame, pc, opcode,
                                    instructions) {
         setEngineExitReason(heapBase, state, EXIT_UNSUPPORTED);
@@ -12239,7 +12542,8 @@
             localBindingKernel: localBindingKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
-            numberToPrecisionKernel: numberToPrecisionKernel,
+            numberFormatKernel: numberFormatKernel,
+            objectDefinePropertyKernel: objectDefinePropertyKernel,
             objectHasOwnPropertyKernel: objectHasOwnPropertyKernel,
             parseIntIntrinsicKernel: parseIntIntrinsicKernel,
             propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
@@ -12259,8 +12563,10 @@
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
+            descriptorFieldKindKernel: descriptorFieldKindKernel,
             stringReplaceKernel: stringReplaceKernel,
             strictValueCellsEqualKernel: strictValueCellsEqualKernel,
+            valueCellTruthyKernel: valueCellTruthyKernel,
             typeofValueKernel: typeofValueKernel,
             unsupportedExitKernel: unsupportedExitKernel
         };

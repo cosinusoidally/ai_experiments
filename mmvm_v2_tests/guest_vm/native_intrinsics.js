@@ -45,7 +45,10 @@
                       ARRAY_UNSHIFT: 74,
                       ARRAY_INDEX_OF: 75,
                       MATH_LOG: 76,
-                      NUMBER_TO_PRECISION: 77};
+                      NUMBER_TO_PRECISION: 77,
+                      OBJECT_DEFINE_PROPERTY: 78,
+                      NUMBER_TO_FIXED: 79,
+                      MATH_RANDOM: 80};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;
