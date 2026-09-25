@@ -268,6 +268,12 @@ cells. Object values are represented by guest type and heap address so the
 diagnostic does not recursively traverse or retain them. It is disabled by
 default and should not be used for benchmark timings.
 
+Caught exceptions are unwound directly by the native interpreter, including
+handlers in callers and both function-local and top-level catch bindings. A
+standalone application therefore does not need a host transition merely to
+run ordinary `try`/`catch`/`finally`; uncaught exceptions retain the external
+reporting boundary.
+
 Native snapshots are an explicit, experimental startup option and are never
 read or written by default. Generate one into the ignored temporary artifacts
 directory, then opt into it on later runs:

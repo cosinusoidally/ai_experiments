@@ -62,7 +62,7 @@
 
     var HANDLER_NEXT = 0;
     var HANDLER_TARGET = 4;
-    var HANDLER_NAME_CONSTANT = 8;
+    var HANDLER_BINDING_SLOT = 8;
     var HANDLER_RESERVED = 12;
     var HANDLER_BYTES = 16;
 
@@ -866,9 +866,9 @@
         this.heap.writeTrustedFieldU32(frame, FRAME_HANDLER, handler || 0);
     };
 
-    Records.prototype.pushFrameHandler = function (frame, target, nameConstant) {
+    Records.prototype.pushFrameHandler = function (frame, target, bindingSlot) {
         var handler = this.heap.allocateRecordWords(Heap.Types.HANDLER,
-            HANDLER_BYTES, this.frameHandler(frame), target, nameConstant,
+            HANDLER_BYTES, this.frameHandler(frame), target, bindingSlot,
             this.frameEnvironment(frame));
         this.setFrameHandler(frame, handler);
         return handler;
@@ -886,8 +886,8 @@
         return this.heap.readTrustedFieldU32(handler, HANDLER_TARGET);
     };
 
-    Records.prototype.handlerNameConstant = function (handler) {
-        return this.heap.readTrustedFieldU32(handler, HANDLER_NAME_CONSTANT);
+    Records.prototype.handlerBindingSlot = function (handler) {
+        return this.heap.readTrustedFieldU32(handler, HANDLER_BINDING_SLOT);
     };
 
     Records.prototype.handlerEnvironment = function (handler) {

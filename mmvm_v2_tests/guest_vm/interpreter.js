@@ -264,8 +264,8 @@
             var handler = this.runtime.heapRecords.popFrameHandler(
                 frame.heapAddress);
             if (handler) {
-                var nameConstant =
-                    this.runtime.heapRecords.handlerNameConstant(handler);
+                var bindingSlot =
+                    this.runtime.heapRecords.handlerBindingSlot(handler) | 0;
                 var target = this.runtime.heapRecords.handlerTarget(handler);
                 var handlerEnvironment =
                     this.runtime.heapRecords.handlerEnvironment(handler);
@@ -277,9 +277,14 @@
                         frame.program.bindingSlots || {}).handle : null;
                 this.runtime.heapRecords.setFrameEnvironment(
                     frame.heapAddress, handlerEnvironment);
-                this.runtime.setBinding(frame.context, frame.environment,
-                    frame.constants[nameConstant],
-                    this.runtime.importCaughtException(error));
+                var caughtValue = this.runtime.importCaughtException(error);
+                if (bindingSlot >= 0) {
+                    this.runtime.setBinding(frame.context, frame.environment,
+                        frame.program.bindings[bindingSlot], caughtValue);
+                } else {
+                    this.runtime.setBinding(frame.context, frame.environment,
+                        frame.constants[-bindingSlot - 1], caughtValue);
+                }
                 frame.pc = target;
                 /* Handler search runs in the semantic reference path, but the
                  * selected continuation belongs to the authoritative heap

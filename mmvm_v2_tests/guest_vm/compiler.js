@@ -442,7 +442,7 @@
         if (statement.type === "TryStatement") {
             if (!statement.finalizer) {
                 var catchPush = this.emit(op.PUSH_CATCH, 0,
-                                          this.constant(statement.parameter));
+                    this.exceptionBindingOperand(statement.parameter));
                 this.compileStatement(statement.block);
                 this.emit(op.POP_CATCH);
                 var catchEnd = this.emit(op.JUMP, 0);
@@ -452,12 +452,12 @@
                 return;
             }
             var finallyPush = this.emit(op.PUSH_CATCH, 0,
-                this.constant(statement.finallyParameter));
+                this.exceptionBindingOperand(statement.finallyParameter));
             var protectedHandlers = 1;
             var userCatchPush = -1;
             if (statement.handler) {
                 userCatchPush = this.emit(op.PUSH_CATCH, 0,
-                    this.constant(statement.parameter));
+                    this.exceptionBindingOperand(statement.parameter));
                 protectedHandlers = 2;
             }
             this.finallyBlocks.push({block: statement.finalizer,
@@ -647,6 +647,19 @@
             scopeIndex++;
         }
         return null;
+    };
+
+    /* PUSH_CATCH stores one signed binding descriptor. Environment slots are
+     * non-negative. A top-level/global catch name is encoded as the negative
+     * constant index minus one, keeping exception dispatch independent of
+     * host-only compiler metadata. */
+    Compiler.prototype.exceptionBindingOperand = function (name) {
+        var binding = this.resolveBinding(name);
+        if (!binding) return -this.constant(name) - 1;
+        if (binding.kind === "environment" && binding.depth === 0) {
+            return binding.slot;
+        }
+        throw new Error("catch binding is not directly addressable");
     };
 
     Compiler.prototype.loadReference = function (reference, requestedTarget) {

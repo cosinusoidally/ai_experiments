@@ -112,7 +112,7 @@
         var FRAME_REGISTERS = 48;
         var HANDLER_NEXT = 16;
         var HANDLER_TARGET = 20;
-        var HANDLER_NAME_CONSTANT = 24;
+        var HANDLER_BINDING_SLOT = 24;
         var HANDLER_RESERVED = 28;
         var PROGRAM_BYTECODE = 16;
         var PROGRAM_CONSTANTS = 20;
@@ -294,6 +294,7 @@
         var OP_SHIFT_LEFT = 32;
         var OP_SHIFT_RIGHT = 33;
         var OP_SHIFT_UNSIGNED_RIGHT = 34;
+        var OP_THROW = 35;
         var OP_CONSTRUCT = 36;
         var OP_PUSH_CATCH = 37;
         var OP_POP_CATCH = 38;
@@ -2311,6 +2312,143 @@
                 if (falseCondition === 1) {
                     pc = load32(heapBase + bytecodeWords + (pc + SECOND_OPERAND) * WORD_BYTES);
                 } else pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_THROW) {
+                var throwRegister = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var throwSource = heapBase + registerCells +
+                    throwRegister * VALUE_CELL_BYTES;
+                var catchFrame = frame;
+                var catchHandler = frameHandler(heapBase, catchFrame);
+                var nativeUnwindValid = 1;
+                while (catchHandler === 0) {
+                    var nextCatchFrame = frameCaller(heapBase, catchFrame);
+                    if (nextCatchFrame === 0) {
+                        nativeUnwindValid = 0;
+                        catchHandler = -1;
+                    } else {
+                        var unwindFlags = recordFlags(heapBase, catchFrame);
+                        if (unwindFlags !== FRAME_FLAG_NATIVE_CALL) {
+                            if (unwindFlags !== FRAME_FLAG_NATIVE_CONSTRUCT) {
+                                nativeUnwindValid = 0;
+                            }
+                        }
+                        catchFrame = nextCatchFrame;
+                        catchHandler = frameHandler(heapBase, catchFrame);
+                    }
+                }
+                if (nativeUnwindValid === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                var catchEnvironment = handlerEnvironment(
+                    heapBase, catchHandler);
+                var catchBindingSlot = handlerBindingSlot(
+                    heapBase, catchHandler) | 0;
+                var catchDestination = 0;
+                if (catchBindingSlot >= 0) {
+                    if (catchEnvironment === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    if (catchBindingSlot >= environmentCount(
+                            heapBase, catchEnvironment)) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    catchDestination = environmentCellAddress(
+                        heapBase, catchEnvironment, catchBindingSlot);
+                } else {
+                    var catchProgram = frameProgram(heapBase, catchFrame);
+                    var catchConstants = programConstants(
+                        heapBase, catchProgram);
+                    var catchNameCell = vectorCellAddress(
+                        heapBase, catchConstants, -catchBindingSlot - 1);
+                    if (valueCellTag(0, catchNameCell) !==
+                            VALUE_TAG_REFERENCE) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    var catchName = valueCellReference(0, catchNameCell);
+                    var catchGlobal = contextGlobal(heapBase,
+                        frameContext(heapBase, catchFrame));
+                    var catchProperty = objectPropertyHead(
+                        heapBase, catchGlobal);
+                    while (catchProperty !== 0) {
+                        if (stringKeysEqualKernel(heapBase,
+                                propertyKey(heapBase, catchProperty),
+                                catchName) === 1) {
+                            catchDestination = propertyValueCellAddress(
+                                heapBase, catchProperty);
+                            catchProperty = 0;
+                        } else {
+                            catchProperty = propertyNext(
+                                heapBase, catchProperty);
+                        }
+                    }
+                    if (catchDestination === 0) {
+                        if (reserveNativeAllocationKernel(
+                                heapBase, state,
+                                PROPERTY_RECORD_BYTES) === 0) {
+                            return unsupportedExitKernel(
+                                heapBase, state, frame, pc, opcode,
+                                instructions);
+                        }
+                        var catchPropertyHead = objectPropertyHead(
+                            heapBase, catchGlobal);
+                        var newCatchProperty = engineHeapBump(
+                            heapBase, state);
+                        setRecordType(heapBase, newCatchProperty,
+                                      HEAP_TYPE_PROPERTY);
+                        setRecordSize(heapBase, newCatchProperty,
+                                      PROPERTY_RECORD_BYTES);
+                        setRecordMark(heapBase, newCatchProperty, 0);
+                        setRecordFlags(heapBase, newCatchProperty, 0);
+                        setPropertyNext(heapBase, newCatchProperty,
+                                        catchPropertyHead);
+                        setPropertyKey(heapBase, newCatchProperty,
+                                       catchName);
+                        setPropertyAttributes(heapBase, newCatchProperty,
+                            DEFAULT_PROPERTY_ATTRIBUTES);
+                        setPropertyReserved(
+                            heapBase, newCatchProperty, 0);
+                        setObjectPropertyHead(
+                            heapBase, catchGlobal, newCatchProperty);
+                        setEngineHeapBump(heapBase, state,
+                            newCatchProperty + PROPERTY_RECORD_BYTES);
+                        catchDestination = propertyValueCellAddress(
+                            heapBase, newCatchProperty);
+                    }
+                }
+                copyValueCell(catchDestination, throwSource);
+                setFrameHandler(heapBase, catchFrame,
+                    handlerNext(heapBase, catchHandler));
+                setFrameEnvironment(
+                    heapBase, catchFrame, catchEnvironment);
+                var discardedFrame = frame;
+                while (discardedFrame !== catchFrame) {
+                    var nextUnwindFrame = frameCaller(
+                        heapBase, discardedFrame);
+                    setRecordType(
+                        heapBase, discardedFrame, HEAP_TYPE_FREE);
+                    setFrameProgram(heapBase, discardedFrame,
+                        engineFreeFrame(heapBase, state));
+                    setEngineFreeFrame(heapBase, state, discardedFrame);
+                    discardedFrame = nextUnwindFrame;
+                }
+                frame = catchFrame;
+                setEngineCurrentFrame(heapBase, state, frame);
+                currentContext = frameContext(heapBase, frame);
+                currentProgram = frameProgram(heapBase, frame);
+                bytecodeWords = programBytecode(
+                    heapBase, currentProgram) + BYTECODE_WORDS;
+                constantCells = programConstants(
+                    heapBase, currentProgram) + VECTOR_CELLS;
+                globalObject = contextGlobal(heapBase, currentContext);
+                framePC = frame + FRAME_PC;
+                registerCells = frame + FRAME_REGISTERS;
+                environment = catchEnvironment;
+                pc = handlerTarget(heapBase, catchHandler);
             } else if (callOperation > 0) {
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_NONE);
@@ -2389,7 +2527,7 @@
                 setHandlerTarget(heapBase, pushedHandler, load32(
                     heapBase + bytecodeWords +
                     (pc + FIRST_OPERAND) * WORD_BYTES));
-                setHandlerNameConstant(heapBase, pushedHandler, load32(
+                setHandlerBindingSlot(heapBase, pushedHandler, load32(
                     heapBase + bytecodeWords +
                     (pc + SECOND_OPERAND) * WORD_BYTES));
                 setHandlerReserved(heapBase, pushedHandler, environment);
@@ -11729,7 +11867,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 6,
+                compilerVersion: 7,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,

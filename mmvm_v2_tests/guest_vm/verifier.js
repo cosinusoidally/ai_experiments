@@ -124,7 +124,16 @@
                 jumps.push(code[pc + 1]);
             } else if (opcode === op.PUSH_CATCH) {
                 jumps.push(code[pc + 1]);
-                if (code[pc + 2] < 0 || code[pc + 2] >= program.constants.length) {
+                var catchBinding = code[pc + 2];
+                var catchBindingValid = false;
+                if (catchBinding < 0) {
+                    var catchNameConstant = -catchBinding - 1;
+                    catchBindingValid = catchNameConstant >= 0 &&
+                        catchNameConstant < program.constants.length;
+                } else if (program.bindings) {
+                    catchBindingValid = catchBinding < program.bindings.length;
+                }
+                if (!catchBindingValid) {
                     throw new Error("invalid catch binding at bytecode " + pc);
                 }
             } else if (opcode === op.JUMP_IF_FALSE) {

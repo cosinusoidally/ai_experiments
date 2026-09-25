@@ -194,6 +194,13 @@ inside the standalone entry loop. Remove dependence on JavaScript-side frame
 synchronization and weak-metadata cleanup. Platform calls use heap-resident
 request/result records or direct trusted FFI as appropriate.
 
+Status: caught guest throws now unwind heap-resident native frames and handlers
+without leaving the engine. The handler restores its saved environment and
+addresses either a function-local slot or a top-level name through the shared
+signed binding descriptor. This also makes unchanged demo runners' normal
+`process.exit` marker/catch path return the requested status in standalone
+execution.
+
 ### 4. Self-hosted loading and front end
 
 Implement filesystem loading through guest/native libc calls. Run the

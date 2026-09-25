@@ -281,6 +281,18 @@ do not create host environment objects. This rule is essential for closures
 created by repeated calls, because each closure must retain that call's
 distinct guest-heap environment.
 
+`THROW` also remains inside the native engine when a guest handler exists. A
+handler stores its continuation PC, saved lexical environment, and one signed
+catch-binding descriptor. Non-negative descriptors are direct environment
+slots; negative descriptors encode a top-level name-constant index as
+`-index - 1`. The dispatcher finds the first handler through the heap frame
+chain, copies the thrown value before recycling intervening native frames,
+restores the handler environment, and resumes at its bytecode target. This
+representation lets both the JS reference interpreter and native backend use
+the same bytecode without consulting host compiler metadata. An uncaught throw
+still uses the embedder exception boundary so it can be reported with source
+location information.
+
 `MAKE_FUNCTION` follows the same rule. The native opcode allocates the
 bytecode-function record, its ordinary prototype object, and the reciprocal
 `prototype`/`constructor` properties in one checked guest-heap allocation.
