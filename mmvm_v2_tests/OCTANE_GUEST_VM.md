@@ -161,6 +161,17 @@ UTF-16 code units allocate a one-character guest string. This removed zlib's
 three numeric string-property exits; a repeat initialization profile fell from
 23 semantic exits to 20 without changing the external benchmark source.
 
+The first standalone zlib front-end baseline took 151.8 seconds and peaked at
+540.8 MiB RSS. The source contains one large generated string split by regular
+backslash line continuations. Once the tokenizer encountered the first escape,
+its slow path appended every subsequent ordinary character to an immutable
+prefix, making decoding quadratic. The general string scanner now advances
+over ordinary runs directly, records decoded fragments, and combines them in
+a balanced reduction. Compiling the same unchanged 185 KiB file through the
+self-hosted front end now takes 19.2 seconds and peaks at 136.4 MiB, including
+native-interpreter compilation and front-end module loading. No parsed result
+or source-specific cache is involved.
+
 The following baselines include native-interpreter compilation and process
 startup in the wall-clock time. They are not directly comparable with the
 score's internal benchmark interval.

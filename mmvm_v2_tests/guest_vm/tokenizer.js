@@ -69,6 +69,27 @@
                code === 8287 || code === 12288 || code === 65279;
     }
 
+    /* Joining escaped literal fragments from left to right repeatedly copies
+     * the entire prefix.  Pairwise reduction keeps total copying logarithmic
+     * while requiring only ordinary ES3 arrays and string concatenation. */
+    function combineStringSegments(segments) {
+        var count = segments.length;
+        while (count > 1) {
+            var readIndex = 0;
+            var writeIndex = 0;
+            while (readIndex < count) {
+                var combined = segments[readIndex];
+                if (readIndex + 1 < count) {
+                    combined += segments[readIndex + 1];
+                }
+                segments[writeIndex++] = combined;
+                readIndex += 2;
+            }
+            count = writeIndex;
+        }
+        return count ? segments[0] : "";
+    }
+
     function Tokenizer(source, filename, captureRaw, fastNumericConversion) {
         this.source = String(source);
         this.filename = filename || "<source>";
@@ -357,14 +378,32 @@
             fastIndex++;
         }
         this.advance();
-        var value = "";
+        var segments = [];
+        var segmentStart = this.index;
         var legacyOctalEscape = false;
         while (this.index < this.length) {
-            var code = this.codeAt(0);
+            /* Scan ordinary source characters without a guest function call
+             * per character. Escapes are uncommon even in generated strings,
+             * so retain them as explicit segment boundaries. */
+            var scanIndex = this.index;
+            var code = -1;
+            while (scanIndex < this.length) {
+                code = this.source.charCodeAt(scanIndex);
+                if (code === quote || code === 92 ||
+                    isLineTerminator(code)) break;
+                scanIndex++;
+            }
+            this.column += scanIndex - this.index;
+            this.index = scanIndex;
             if (code === quote) {
+                if (segmentStart < this.index) {
+                    segments[segments.length] = this.source.substring(
+                        segmentStart, this.index);
+                }
                 this.advance();
                 var stringToken = this.makeToken(
-                    "string", value, start, line, column, lineBefore);
+                    "string", combineStringSegments(segments),
+                    start, line, column, lineBefore);
                 stringToken.hasEscapeSequence = true;
                 stringToken.legacyOctalEscape = legacyOctalEscape;
                 return stringToken;
@@ -373,28 +412,32 @@
                 this.error("unterminated string literal", line, column);
             }
             if (code !== 92) {
-                value += this.source.charAt(this.index);
-                this.advance();
-                continue;
+                this.error("unterminated string literal", line, column);
+            }
+            if (segmentStart < this.index) {
+                segments[segments.length] = this.source.substring(
+                    segmentStart, this.index);
             }
             this.advance();
             code = this.codeAt(0);
             if (isLineTerminator(code)) {
                 this.advance();
+                segmentStart = this.index;
                 continue;
             }
             if (code < 0) this.error("unterminated string literal", line, column);
             this.advance();
-            if (code === 110) value += "\n";
-            else if (code === 114) value += "\r";
-            else if (code === 116) value += "\t";
-            else if (code === 98) value += "\b";
-            else if (code === 102) value += "\f";
-            else if (code === 118) value += "\v";
+            var escapedSegment = "";
+            if (code === 110) escapedSegment = "\n";
+            else if (code === 114) escapedSegment = "\r";
+            else if (code === 116) escapedSegment = "\t";
+            else if (code === 98) escapedSegment = "\b";
+            else if (code === 102) escapedSegment = "\f";
+            else if (code === 118) escapedSegment = "\v";
             else if (code >= 48 && code <= 57) {
                 var nextEscapeCode = this.codeAt(0);
                 if (code === 48 && !isDecimalDigit(nextEscapeCode)) {
-                    value += "\0";
+                    escapedSegment = "\0";
                 } else if (code <= 55) {
                     legacyOctalEscape = true;
                     var octalEscapeValue = code - 48;
@@ -406,13 +449,13 @@
                         this.advance();
                         remainingOctalDigits--;
                     }
-                    value += String.fromCharCode(octalEscapeValue);
+                    escapedSegment = String.fromCharCode(octalEscapeValue);
                 } else {
                     /* Annex-B-compatible non-strict identity escapes for 8
                      * and 9 are still DecimalDigit escapes and forbidden by
                      * the strict StringLiteral grammar. */
                     legacyOctalEscape = true;
-                    value += String.fromCharCode(code);
+                    escapedSegment = String.fromCharCode(code);
                 }
             }
             else if (code === 120 || code === 117) {
@@ -426,10 +469,12 @@
                     this.advance();
                     count++;
                 }
-                value += String.fromCharCode(escaped);
+                escapedSegment = String.fromCharCode(escaped);
             } else {
-                value += String.fromCharCode(code);
+                escapedSegment = String.fromCharCode(code);
             }
+            segments[segments.length] = escapedSegment;
+            segmentStart = this.index;
         }
         this.error("unterminated string literal", line, column);
     };

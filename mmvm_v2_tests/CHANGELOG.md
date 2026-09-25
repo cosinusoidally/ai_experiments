@@ -8,6 +8,25 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.61
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Reworked escaped string-literal scanning to consume ordinary source runs
+  directly and combine decoded fragments with a balanced reduction. The old
+  path appended every character to an immutable prefix after the first
+  escape, producing quadratic copying for generated sources with regular line
+  continuations.
+- Reduced a self-hosted compile of the unchanged 185 KiB zlib source from
+  151.8 seconds and 540.8 MiB peak RSS to 19.2 seconds and 136.4 MiB. The new
+  measurement includes native-interpreter compilation and front-end module
+  loading.
+- Re-ran the complete Node and js_min suites after the tokenizer change; both
+  pass 12 guest programs and 264 guest assertions, together with the network,
+  web, demo1, demo2, and multi-context command-line paths.
+
 ## 0.60
 
 Approximate completion: 2026-09-25 evening BST

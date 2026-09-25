@@ -1,5 +1,21 @@
 # Guest VM performance notes
 
+## Escaped generated strings
+
+The tokenizer must not build a large escaped literal by repeatedly appending
+one character to an immutable prefix. Generated JavaScript commonly uses a
+backslash line continuation every fixed number of columns; after the first
+continuation, the old slow path made the remainder of the literal quadratic.
+
+`Tokenizer.scanString` now scans ordinary character runs by index, records
+source substrings and decoded escapes as segments, and reduces those segments
+pairwise. This keeps source scanning linear and bounds repeated string copying
+to logarithmic reduction levels using only ES3-compatible arrays and string
+concatenation. On the unchanged 185 KiB Octane zlib source, self-hosted compile
+time fell from 151.8 seconds to 19.2 seconds and peak RSS from 540.8 MiB to
+136.4 MiB. The measurement includes native-interpreter construction and
+self-hosted front-end module loading; it does not use a parsed-source cache.
+
 ## 2026-09-10: native bootstrap and interpreter graph refactor
 
 The native interpreter is no longer compiled as one approximately 7,600-line
