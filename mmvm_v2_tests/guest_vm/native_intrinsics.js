@@ -48,7 +48,10 @@
                       NUMBER_TO_PRECISION: 77,
                       OBJECT_DEFINE_PROPERTY: 78,
                       NUMBER_TO_FIXED: 79,
-                      MATH_RANDOM: 80};
+                      MATH_RANDOM: 80,
+                      OBJECT_CONSTRUCTOR: 81,
+                      STRING_VALUE_OF: 82,
+                      NUMBER_TO_STRING: 83};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

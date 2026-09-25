@@ -404,7 +404,10 @@
         var INTRINSIC_OBJECT_DEFINE_PROPERTY = 78;
         var INTRINSIC_NUMBER_TO_FIXED = 79;
         var INTRINSIC_MATH_RANDOM = 80;
-        var INTRINSIC_LAST_ID = 80;
+        var INTRINSIC_OBJECT_CONSTRUCTOR = 81;
+        var INTRINSIC_STRING_VALUE_OF = 82;
+        var INTRINSIC_NUMBER_TO_STRING = 83;
+        var INTRINSIC_LAST_ID = 83;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -441,6 +444,7 @@
         var RUNTIME_SUPPORT_BUFFER_POINTER_KEY = 291;
         var RUNTIME_SUPPORT_NUMBER_PROTOTYPE = 292;
         var RUNTIME_SUPPORT_BOOLEAN_PROTOTYPE = 293;
+        var RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY = 294;
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
@@ -1805,6 +1809,18 @@
                                 arithmeticLeft = arithmeticLeftNumeric;
                                 arithmeticLeftTag = valueCellTag(
                                     0, arithmeticLeft);
+                            } else {
+                                var arithmeticLeftScratch =
+                                    engineScratchLeftAddress(heapBase, state);
+                                if (stringNumericValueKernel(
+                                        heapBase, valueCellReference(
+                                            0, arithmeticLeft),
+                                        arithmeticLeftScratch,
+                                        platformServices) === 1) {
+                                    arithmeticLeft = arithmeticLeftScratch;
+                                    arithmeticLeftTag = valueCellTag(
+                                        0, arithmeticLeft);
+                                }
                             }
                         }
                         if (arithmeticRightTag === VALUE_TAG_REFERENCE) {
@@ -1816,6 +1832,18 @@
                                 arithmeticRight = arithmeticRightNumeric;
                                 arithmeticRightTag = valueCellTag(
                                     0, arithmeticRight);
+                            } else {
+                                var arithmeticRightScratch =
+                                    engineScratchRightAddress(heapBase, state);
+                                if (stringNumericValueKernel(
+                                        heapBase, valueCellReference(
+                                            0, arithmeticRight),
+                                        arithmeticRightScratch,
+                                        platformServices) === 1) {
+                                    arithmeticRight = arithmeticRightScratch;
+                                    arithmeticRightTag = valueCellTag(
+                                        0, arithmeticRight);
+                                }
                             }
                         }
                     }
@@ -4635,7 +4663,9 @@
             if (intrinsicId !== INTRINSIC_FUNCTION_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_REGEXP_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_BUFFER_CONSTRUCTOR) {
+            if (intrinsicId !== INTRINSIC_OBJECT_CONSTRUCTOR) {
                 intrinsicCallValid = 0;
+            }
             }
             }
             }
@@ -4677,6 +4707,12 @@
         } else if (intrinsicId === INTRINSIC_NUMBER_TO_FIXED) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_MATH_RANDOM) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_OBJECT_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_NUMBER_TO_STRING) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
             requiredIntrinsicArguments = 3;
@@ -4856,6 +4892,16 @@
                     heapBase, state, frame, pc, opcode, instructions);
             }
         }
+        if (intrinsicId === INTRINSIC_OBJECT_CONSTRUCTOR) {
+            intrinsicHandled = objectConstructorKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                stringSupport);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
         var isDateIntrinsic = 0;
         if (intrinsicId >= INTRINSIC_NUMBER_CONSTRUCTOR) {
         if (intrinsicId <= INTRINSIC_DATE_GET_TIME) {
@@ -4971,6 +5017,24 @@
                 return EXIT_UNSUPPORTED;
             }
             if (ffiCallResult === 1) intrinsicHandled = 1;
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_NUMBER_TO_STRING) {
+            var numberStringResult = numberToStringKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                bytecodeWords, pc, stringSupport, platformServices);
+            if (numberStringResult === 1) intrinsicHandled = 1;
+            else if (numberStringResult === 2) {
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            } else {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
         }
         }
         if (intrinsicHandled === 0) {
@@ -5160,6 +5224,8 @@
         } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
             isStringIntrinsic = 1;
         } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
             isStringIntrinsic = 1;
         }
         if (isStringIntrinsic === 1) {
@@ -8109,6 +8175,98 @@
         return 1;
     }
 
+    function numberToStringKernel(
+            heapBase, state, intrinsicTarget, registerCells,
+            intrinsicArgumentsVector, intrinsicArgumentCount,
+            bytecodeWords, pc, stringSupport, platformServices) {
+        if (intrinsicArgumentCount > 1) return 0;
+        if (intrinsicArgumentCount === 1) {
+            var radixCell = programArgumentCellKernel(
+                heapBase, intrinsicArgumentsVector, registerCells, 0);
+            if (radixCell === 0) return 0;
+            var radixTag = valueCellTag(0, radixCell);
+            if (radixTag !== VALUE_TAG_UNDEFINED) {
+                if (radixTag !== VALUE_TAG_INT32) return 0;
+                if (valueCellInt32(0, radixCell) !== 10) return 0;
+            }
+        }
+        var receiverIndex = load32(
+            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        if (receiverIndex < 0) return 0;
+        var receiverCell = heapBase + registerCells +
+            receiverIndex * VALUE_CELL_BYTES;
+        var receiverTag = valueCellTag(0, receiverCell);
+        if (receiverTag === VALUE_TAG_REFERENCE) {
+            var wrapper = valueCellReference(0, receiverCell);
+            receiverCell = primitiveWrapperValueCellKernel(
+                heapBase, wrapper, stringSupport);
+            if (receiverCell === 0) return 0;
+            receiverTag = valueCellTag(0, receiverCell);
+        }
+        if (receiverTag !== VALUE_TAG_INT32) {
+            if (receiverTag !== VALUE_TAG_DOUBLE) return 0;
+        }
+        var stringBytes = (STRING_CHARS + 112 + 7) & -8;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, stringBytes) === 0) return 2;
+        var resultString = engineHeapBump(heapBase, state);
+        if (resultString + stringBytes > engineHeapLimit(heapBase, state)) {
+            return 2;
+        }
+        var nativeBuffer = heapBase + resultString + STRING_CHARS;
+        var format = nativeBuffer + 96;
+        storeRaw8(format, 37);
+        storeRaw8(format + 1, 46);
+        storeRaw8(format + 2, 49);
+        storeRaw8(format + 3, 53);
+        storeRaw8(format + 4, 103);
+        storeRaw8(format + 5, 0);
+        var resultLength = 0;
+        if (receiverTag === VALUE_TAG_INT32) {
+            var numberBits = engineScratchLeftAddress(heapBase, state);
+            storeF64(numberBits, loadI32F64(
+                receiverCell + VALUE_CELL_LOW));
+            var snprintfPointer = platformSnprintfPointer(
+                heapBase, platformServices);
+            if (snprintfPointer === 0) return 0;
+            resultLength = callNativeI32(
+                snprintfPointer, nativeBuffer, 48, format,
+                load32(numberBits), load32(numberBits + 4));
+        } else {
+            resultLength = formatDoubleStringKernel(
+                heapBase, platformServices, receiverCell,
+                nativeBuffer, format);
+        }
+        if (resultLength < 0) return 0;
+        if (resultLength >= 48) return 0;
+        setRecordType(heapBase, resultString, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, resultString, stringBytes);
+        setRecordMark(heapBase, resultString, 0);
+        setRecordFlags(heapBase, resultString, 0);
+        setStringLength(heapBase, resultString, resultLength);
+        var index = resultLength;
+        while (index > 0) {
+            index = index - 1;
+            var code = loadRaw8(nativeBuffer + index);
+            setStringCharacterByte(
+                heapBase, resultString, index * 2, code);
+            setStringCharacterByte(
+                heapBase, resultString, index * 2 + 1, 0);
+        }
+        var hash = -2128831035;
+        index = 0;
+        while (index < resultLength) {
+            code = stringCharacterCodeUnit(
+                heapBase, resultString, index) & 65535;
+            hash = (hash ^ code) * 16777619;
+            index = index + 1;
+        }
+        setStringHash(heapBase, resultString, hash);
+        setEngineHeapBump(heapBase, state, resultString + stringBytes);
+        setValueCellReference(intrinsicTarget, resultString);
+        return 1;
+    }
+
     function numberFormatKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
@@ -8313,6 +8471,31 @@
         setValueCellReference(targetCell, object);
         setEngineHeapBump(heapBase, state, object + OBJECT_RECORD_BYTES);
         return 1;
+    }
+
+    function objectConstructorKernel(
+            heapBase, state, targetCell, registerCells,
+            argumentsVector, argumentCount, stringSupport) {
+        if (argumentCount > 0) {
+            var sourceCell = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 0);
+            if (sourceCell === 0) return 0;
+            var sourceTag = valueCellTag(0, sourceCell);
+            if (sourceTag === VALUE_TAG_REFERENCE) {
+                var source = valueCellReference(0, sourceCell);
+                var sourceType = recordType(heapBase, source);
+                if (sourceType !== HEAP_TYPE_STRING) {
+                    copyValueCell(targetCell, sourceCell);
+                    return 1;
+                }
+                return 0;
+            }
+            if (sourceTag !== VALUE_TAG_UNDEFINED) {
+                if (sourceTag !== VALUE_TAG_NULL) return 0;
+            }
+        }
+        return allocateObjectKernel(
+            heapBase, state, targetCell, stringSupport);
     }
 
     function allocateArrayKernel(heapBase, state, targetCell, capacity,
@@ -9195,6 +9378,29 @@
                                    arrayPrototype, bytecodeWords, pc,
                                    intrinsicId, platformServices) {
         var intrinsicHandled = 0;
+    if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
+        var valueReceiverIndex = load32(
+            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        if (valueReceiverIndex < 0) return 0;
+        var valueReceiverCell = heapBase + registerCells +
+            valueReceiverIndex * VALUE_CELL_BYTES;
+        if (valueCellTag(0, valueReceiverCell) !== VALUE_TAG_REFERENCE) {
+            return 0;
+        }
+        var valueReceiver = valueCellReference(0, valueReceiverCell);
+        if (recordType(heapBase, valueReceiver) === HEAP_TYPE_STRING) {
+            copyValueCell(intrinsicTarget, valueReceiverCell);
+            return 1;
+        }
+        var wrapperCell = primitiveWrapperValueCellKernel(
+            heapBase, valueReceiver, stringSupport);
+        if (wrapperCell === 0) return 0;
+        if (valueCellTag(0, wrapperCell) !== VALUE_TAG_REFERENCE) return 0;
+        if (recordType(heapBase, valueCellReference(0, wrapperCell)) !==
+                HEAP_TYPE_STRING) return 0;
+        copyValueCell(intrinsicTarget, wrapperCell);
+        return 1;
+    }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
         var indexOfReceiverIndex = load32(
@@ -9914,8 +10120,18 @@
         var charAtString = load32(
             charAtReceiverCell + VALUE_CELL_LOW);
         if (charAtValid === 1) {
-            if (recordType(heapBase, charAtString) !==
-                HEAP_TYPE_STRING) charAtValid = 0;
+            if (recordType(heapBase, charAtString) !== HEAP_TYPE_STRING) {
+                var charAtWrapperCell = primitiveWrapperValueCellKernel(
+                    heapBase, charAtString, stringSupport);
+                if (charAtWrapperCell === 0) charAtValid = 0;
+                else if (valueCellTag(0, charAtWrapperCell) !==
+                         VALUE_TAG_REFERENCE) charAtValid = 0;
+                else {
+                    charAtString = valueCellReference(0, charAtWrapperCell);
+                    if (recordType(heapBase, charAtString) !==
+                            HEAP_TYPE_STRING) charAtValid = 0;
+                }
+            }
         }
         var charAtIndex = 0;
         if (intrinsicArgumentCount > 0) {
@@ -10334,6 +10550,26 @@
             index = index + 1;
         }
         return 1;
+    }
+
+    function primitiveWrapperValueCellKernel(
+            heapBase, object, stringSupport) {
+        var objectType = recordType(heapBase, object);
+        if (objectType < HEAP_TYPE_OBJECT) return 0;
+        if (objectType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        var keyCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY);
+        if (valueCellTag(0, keyCell) !== VALUE_TAG_REFERENCE) return 0;
+        var key = valueCellReference(0, keyCell);
+        var property = objectPropertyHead(heapBase, object);
+        while (property !== 0) {
+            if (stringKeysEqualKernel(
+                    heapBase, propertyKey(heapBase, property), key) === 1) {
+                return propertyValueCellAddress(heapBase, property);
+            }
+            property = propertyNext(heapBase, property);
+        }
+        return 0;
     }
 
     /* Return the descriptor field represented by a guest string.  This stays
@@ -12176,6 +12412,73 @@
         return 0;
     }
 
+    function stringNumericValueKernel(
+            heapBase, string, targetCell, platformServices) {
+        if (recordType(heapBase, string) !== HEAP_TYPE_STRING) return 0;
+        var length = stringLength(heapBase, string);
+        var start = 0;
+        var trimming = 1;
+        while (trimming === 1) {
+            if (start >= length) trimming = 0;
+            else {
+                var leadingCharacter = stringCharacterCodeUnit(
+                    heapBase, string, start) & 65535;
+                if (isESWhiteSpaceKernel(leadingCharacter) === 0) {
+                    trimming = 0;
+                } else start = start + 1;
+            }
+        }
+        var end = length;
+        trimming = 1;
+        while (trimming === 1) {
+            if (end <= start) trimming = 0;
+            else {
+                var trailingCharacter = stringCharacterCodeUnit(
+                    heapBase, string, end - 1) & 65535;
+                if (isESWhiteSpaceKernel(trailingCharacter) === 0) {
+                    trimming = 0;
+                } else end = end - 1;
+            }
+        }
+        length = end - start;
+        if (length === 0) {
+            setValueCellInt32(targetCell, 0);
+            return 1;
+        }
+        var mallocPointer = platformMallocPointer(
+            heapBase, platformServices);
+        var freePointer = platformFreePointer(heapBase, platformServices);
+        var strtodPointer = platformStrtodPointer(
+            heapBase, platformServices);
+        if (mallocPointer === 0) return 0;
+        if (freePointer === 0) return 0;
+        if (strtodPointer === 0) return 0;
+        var nativeString = callNativeI32(mallocPointer, length + 8);
+        if (nativeString === 0) return 0;
+        var index = 0;
+        var valid = 1;
+        while (index < length) {
+            var character = stringCharacterCodeUnit(
+                heapBase, string, start + index) & 65535;
+            if (character > 127) valid = 0;
+            storeRaw8(nativeString + index, character);
+            index = index + 1;
+        }
+        storeRaw8(nativeString + length, 0);
+        var endSlot = (nativeString + length + 4) & -4;
+        storeRaw32(endSlot, 0);
+        if (valid === 1) {
+            storeF64(targetCell + VALUE_CELL_LOW,
+                callNativeF64(strtodPointer, nativeString, endSlot));
+            if (loadRaw32(endSlot) !== nativeString + length) valid = 0;
+        }
+        index = callNativeI32(freePointer, nativeString);
+        if (valid === 0) return 0;
+        store32(targetCell, VALUE_TAG_DOUBLE);
+        store32(targetCell + VALUE_CELL_AUX, 0);
+        return 1;
+    }
+
     function isESWhiteSpaceKernel(character) {
         if (character >= 9) {
             if (character <= 13) return 1;
@@ -12543,10 +12846,13 @@
             mathIntrinsicKernel: mathIntrinsicKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
             numberFormatKernel: numberFormatKernel,
+            numberToStringKernel: numberToStringKernel,
             objectDefinePropertyKernel: objectDefinePropertyKernel,
+            objectConstructorKernel: objectConstructorKernel,
             objectHasOwnPropertyKernel: objectHasOwnPropertyKernel,
             parseIntIntrinsicKernel: parseIntIntrinsicKernel,
             propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
+            primitiveWrapperValueCellKernel: primitiveWrapperValueCellKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,
             programCallableKernel: programCallableKernel,
@@ -12563,6 +12869,7 @@
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
+            stringNumericValueKernel: stringNumericValueKernel,
             descriptorFieldKindKernel: descriptorFieldKindKernel,
             stringReplaceKernel: stringReplaceKernel,
             strictValueCellsEqualKernel: strictValueCellsEqualKernel,
@@ -12719,7 +13026,7 @@
                 this.platformServicesAddress,
                 x86Backend.ffi.resolve("snprintf"));
         }
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(294);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(295);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -12830,7 +13137,10 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 293),
             runtime.booleanPrototype.heapAddress);
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 294);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 294),
+            runtime.internStringAddress(runtime.primitiveValueKey));
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 295);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;

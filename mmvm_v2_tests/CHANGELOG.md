@@ -8,6 +8,20 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.57
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Removed RayTrace's remaining arithmetic exits with general guest-side
+  string-to-number coercion, including whitespace trimming and direct libc
+  conversion through the standalone platform table.
+- Added native `Object` construction, boxed primitive lookup,
+  `String.prototype.toString`/`valueOf`, boxed-string character access, and
+  `Number.prototype.toString`. EarleyBoyer quick correctness now has only one
+  benchmark-language transition remaining outside the compiled interpreter.
+
 ## 0.56
 
 Approximate completion: 2026-09-25 afternoon BST

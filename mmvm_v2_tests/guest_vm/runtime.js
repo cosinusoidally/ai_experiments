@@ -2226,9 +2226,11 @@
             }
         }
         this.stringMethods.toString = this.makeNativeFunction("String.toString",
-            function (receiver) { return runtime.stringValue(receiver); });
+            function (receiver) { return runtime.stringValue(receiver); },
+            "intrinsic", NativeIntrinsics.STRING_VALUE_OF);
         this.stringMethods.valueOf = this.makeNativeFunction("String.valueOf",
-            function (receiver) { return runtime.stringValue(receiver); });
+            function (receiver) { return runtime.stringValue(receiver); },
+            "intrinsic", NativeIntrinsics.STRING_VALUE_OF);
         this.setProperty(this.stringPrototype, "toString",
                          this.stringMethods.toString);
         this.setProperty(this.stringPrototype, "valueOf",
@@ -2463,7 +2465,7 @@
                     return runtime.makeObject();
                 }
                 return runtime.toObject(value);
-            });
+            }, "intrinsic", NativeIntrinsics.OBJECT_CONSTRUCTOR);
         objectConstructor.constructCallback = function (args) {
             var value = args.length ? args[0] : undefined;
             if (value && value.guestType) return value;
@@ -2707,7 +2709,7 @@
             function (receiver, args) {
                 return runtime.numberValue(receiver).toString(
                     args.length ? runtime.toNumber(args[0]) : 10);
-            });
+            }, "intrinsic", NativeIntrinsics.NUMBER_TO_STRING);
         this.numberMethods.toFixed = this.makeNativeFunction("Number.toFixed",
             function (receiver, args) {
                 return runtime.numberValue(receiver).toFixed(
