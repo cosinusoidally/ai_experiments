@@ -43,6 +43,17 @@ if [ "$alternate_output" != "Alternate standalone workload" ]; then
     exit 1
 fi
 
+environment_output=$(DISPLAY=:standalone-live \
+    XAUTHORITY=/standalone/live-auth HOME=/standalone/live-home \
+    "$temporary_directory/js_runner.exe" "$temporary_directory/snap-a" \
+    guest_vm/tests/standalone_alternate_program.js --environment)
+if [ "$environment_output" != \
+        ":standalone-live|/standalone/live-auth|/standalone/live-home" ]; then
+    echo "standalone snapshot did not read its launch environment:" >&2
+    echo "$environment_output" >&2
+    exit 1
+fi
+
 fixed_point_output=$("$temporary_directory/js_runner.exe" \
     "$temporary_directory/snap-a" guest_runner.js --vm-native \
     --snapshot "$temporary_directory/snap2")

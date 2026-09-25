@@ -302,8 +302,9 @@ optional: when omitted, the runner exits after writing the image. Consequently
 the output image is independent of any program and can run any supported source
 supplied later to `js_runner.exe`. Snapshot bootstrap also excludes host
 `DISPLAY`, `XAUTHORITY`, and `HOME` values; post-snapshot and standalone
-programs obtain their actual launch environment normally. The snapshot-loading
-option then reads the
+programs obtain their actual launch environment normally. The temporary
+bootstrap `process` object has no `env` property; standalone launch creates it
+from libc. The snapshot-loading option then reads the
 interpreter segment from either an older version-1 code-only image or a
 version-2 standalone image. It fails rather than silently compiling
 when the file is absent, truncated, built for profiling mode, or stale. Remove

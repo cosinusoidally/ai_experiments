@@ -994,15 +994,18 @@
         var argv = ["artifacts/js_min.exe", this.runnerArguments[0]];
         var index = 1;
         while (index < this.runnerArguments.length) argv.push(this.runnerArguments[index++]);
-        var processObject = this.object({
+        var processValues = {
             argv: this.runtime.arrayFrom(argv),
-            env: this.object({
+            exitCode: 0
+        };
+        if (!this.snapshotBootstrap) {
+            processValues.env = this.object({
                 DISPLAY: this.environmentValue("DISPLAY"),
                 XAUTHORITY: this.environmentValue("XAUTHORITY"),
                 HOME: this.environmentValue("HOME")
-            }),
-            exitCode: 0
-        });
+            });
+        }
+        var processObject = this.object(processValues);
         this.runtime.setProperty(processObject, "exit", this.makeFunction("process.exit",
             function (receiver, args) {
                 environment.exitCode = args.length ? Number(args[0]) | 0 : 0;

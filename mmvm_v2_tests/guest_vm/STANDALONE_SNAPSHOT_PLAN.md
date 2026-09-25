@@ -246,7 +246,8 @@ The regression suite independently creates images while running two different
 programs and under deliberately different `DISPLAY`, `XAUTHORITY`, and `HOME`
 values, requires the complete files to be byte-identical, and cross-runs both
 programs through the opposite image. Bootstrap-host environment strings are
-not serialized; the standalone process reads its real environment at launch.
+not serialized, and the temporary bootstrap `process` object has no `env`
+property. The standalone process constructs `process.env` from libc at launch.
 Native Buffer backing pointers are
 cleared while copying the template and rebuilt from the mapped heap base by
 the macro-assembled bootstrap; process-local addresses therefore neither leak

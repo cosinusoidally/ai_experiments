@@ -18,6 +18,9 @@ Approximate completion: 2026-09-25 morning BST
   to `DISPLAY`, `XAUTHORITY`, or `HOME` no longer change snapshot bytes; when
   an outer invocation also runs a program, its real environment is installed
   only after the snapshot boundary.
+- Removed the inert bootstrap `process.env` placeholder itself. The standalone
+  launch path creates `process.env` only when it reads the new process's
+  environment through libc.
 
 ## 0.53
 
