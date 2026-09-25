@@ -281,7 +281,7 @@ directory, then opt into it on later runs:
 ```sh
 LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
-  --snapshot artifacts/native-interpreter.snapshot hello.js
+  --snapshot artifacts/native-interpreter.snapshot
 
 LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
@@ -297,9 +297,10 @@ Both options imply `--vm-native`. `--snapshot FILE` first writes a version-2
 standalone image containing the native interpreter, initialized guest runtime,
 and generic command runner. This boundary is captured before the requested
 program is opened, parsed, compiled, or installed in the guest heap; the outer
-invocation runs that program only after the image is complete. Consequently
-the output image is independent of that program and can run any supported
-source supplied later to `js_runner.exe`. `--with-snapshot FILE` reads the
+invocation runs that program only after the image is complete. The program is
+optional: when omitted, the runner exits after writing the image. Consequently
+the output image is independent of any program and can run any supported source
+supplied later to `js_runner.exe`. `--with-snapshot FILE` reads the
 interpreter segment from either an older version-1 code-only image or a
 version-2 standalone image. It fails rather than silently compiling
 when the file is absent, truncated, built for profiling mode, or stale. Remove

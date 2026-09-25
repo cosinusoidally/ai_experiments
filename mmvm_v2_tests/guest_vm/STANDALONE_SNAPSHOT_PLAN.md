@@ -9,7 +9,7 @@ ANSI C launcher and can execute a JavaScript source file without support from
 ```sh
 LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   ../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native \
-  --snapshot artifacts/snap hello.js
+  --snapshot artifacts/snap
 
 gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
 
@@ -25,7 +25,7 @@ The eventual fixed-point test is stronger:
 
 ```sh
 ./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
-  --snapshot artifacts/snap2 hello.js
+  --snapshot artifacts/snap2
 cmp artifacts/snap artifacts/snap2
 ```
 
@@ -60,6 +60,11 @@ ordinary post-snapshot execution path and exits zero. Independently generated
 images made while running different applications are byte-for-byte identical,
 and the version-2 container remains readable through the existing
 `--with-snapshot` js_min path.
+
+`program.js` is optional for snapshot creation. With no program remaining
+after option parsing, both the js_min-hosted runner and snapshot-hosted runner
+write the generic image and exit successfully. If a program is present, it is
+still executed only after the immutable snapshot boundary has been written.
 
 The older version-1 format is a 32-byte header followed by relocatable native
 interpreter text. It remains readable for compatibility. Its internal entry

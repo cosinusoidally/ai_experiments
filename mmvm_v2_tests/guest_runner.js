@@ -97,14 +97,15 @@ for (var guestRunnerOptionIndex = 0;
 }
 guestRunnerArguments = guestRunnerProgramArguments;
 
-if (!guestRunnerArguments.length) {
+if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
                      "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-no-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
                      "[--vm-native] [--snapshot file | " +
-                     "--with-snapshot file [--skip-snapshot-hash]] program.js";
+                     "--with-snapshot file [--skip-snapshot-hash]] " +
+                     "[program.js]";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -190,7 +191,6 @@ try {
                             guestRunnerSnapshot);
         }
         guestSnapshotExecution.abort();
-        guestNodeEnvironment.setRunnerArguments(guestRunnerArguments);
         if (typeof print === "function") {
             print("wrote standalone snapshot: " + guestRunnerSnapshot);
         } else if (typeof console !== "undefined" && console.log) {
@@ -198,58 +198,62 @@ try {
         }
     }
 
-    /* Application I/O is intentionally after the snapshot boundary. */
-    if (guestRunnerIsNode) {
-        guestProgramSource = require("fs").readFileSync(
-            guestProgramPath, "utf8");
-    } else if (typeof NodeFs !== "undefined") {
-        guestProgramSource = NodeFs.readFileSync(guestProgramPath).
-            toString("utf8");
-    } else guestProgramSource = read(guestProgramPath);
-    guestProgramVM.installGlobal("arguments",
-        guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
-    var guestExecution = guestProgramVM.start(
-        guestProgramSource, guestProgramPath);
-    var guestRunnerProfileStarted = new Date().getTime();
-    var guestRunnerStoppedForProfile = false;
-    var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
-        1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
-    while (true) {
-        var guestExecutionResult = guestExecution.resume(
-            guestRunnerResumeBudget);
-        if (guestExecutionResult.status === "budget") {
-            /* The command-line embedder grants another cooperative time slice. */
-        } else if (guestExecutionResult.status === "hostCall") {
-            guestExecution.serviceHostCall();
-        } else if (guestExecutionResult.status === "completed") {
-            break;
-        } else if (guestExecutionResult.status === "threw") {
-            if (guestNodeEnvironment.isExit(guestExecutionResult.exception)) break;
-            throw guestExecutionResult.exception;
-        } else {
-            throw new Error("unknown guest execution status: " +
-                            guestExecutionResult.status);
+    if (guestProgramPath) {
+        guestNodeEnvironment.setRunnerArguments(guestRunnerArguments);
+        /* Application I/O is intentionally after the snapshot boundary. */
+        if (guestRunnerIsNode) {
+            guestProgramSource = require("fs").readFileSync(
+                guestProgramPath, "utf8");
+        } else if (typeof NodeFs !== "undefined") {
+            guestProgramSource = NodeFs.readFileSync(guestProgramPath).
+                toString("utf8");
+        } else guestProgramSource = read(guestProgramPath);
+        guestProgramVM.installGlobal("arguments",
+            guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
+        var guestExecution = guestProgramVM.start(
+            guestProgramSource, guestProgramPath);
+        var guestRunnerProfileStarted = new Date().getTime();
+        var guestRunnerStoppedForProfile = false;
+        var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
+            1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
+        while (true) {
+            var guestExecutionResult = guestExecution.resume(
+                guestRunnerResumeBudget);
+            if (guestExecutionResult.status === "budget") {
+                /* The command-line embedder grants another cooperative time slice. */
+            } else if (guestExecutionResult.status === "hostCall") {
+                guestExecution.serviceHostCall();
+            } else if (guestExecutionResult.status === "completed") {
+                break;
+            } else if (guestExecutionResult.status === "threw") {
+                if (guestNodeEnvironment.isExit(
+                        guestExecutionResult.exception)) break;
+                throw guestExecutionResult.exception;
+            } else {
+                throw new Error("unknown guest execution status: " +
+                                guestExecutionResult.status);
+            }
+            if (guestRunnerProfileDuration > 0 &&
+                new Date().getTime() - guestRunnerProfileStarted >=
+                    guestRunnerProfileDuration) {
+                guestRunnerStoppedForProfile = true;
+                break;
+            }
         }
-        if (guestRunnerProfileDuration > 0 &&
-            new Date().getTime() - guestRunnerProfileStarted >=
-                guestRunnerProfileDuration) {
-            guestRunnerStoppedForProfile = true;
-            break;
+        if (guestRunnerStoppedForProfile) {
+            if (typeof print === "function") {
+                print("guest runner: stopped at an instruction-budget " +
+                      "boundary after " + guestRunnerProfileDuration + " ms");
+            } else console.log(
+                "guest runner: stopped at an instruction-budget boundary " +
+                "after " + guestRunnerProfileDuration + " ms");
+        } else if (!guestNodeEnvironment.exiting) {
+            guestNodeEnvironment.run();
         }
-    }
-    if (guestRunnerStoppedForProfile) {
-        if (typeof print === "function") {
-            print("guest runner: stopped at an instruction-budget boundary " +
-                  "after " + guestRunnerProfileDuration + " ms");
-        } else console.log(
-            "guest runner: stopped at an instruction-budget boundary after " +
-            guestRunnerProfileDuration + " ms");
-    } else if (!guestNodeEnvironment.exiting) {
-        guestNodeEnvironment.run();
-    }
-    if (guestRunnerIsNode) {
-        guestRunnerDeferredCleanup = true;
-        process.on("exit", guestRunnerCleanup);
+        if (guestRunnerIsNode) {
+            guestRunnerDeferredCleanup = true;
+            process.on("exit", guestRunnerCleanup);
+        }
     }
 } catch (guestRunnerError) {
     guestRunnerFailure = guestRunnerError;

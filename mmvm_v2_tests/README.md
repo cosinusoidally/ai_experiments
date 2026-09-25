@@ -215,7 +215,7 @@ gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
 
 LD_LIBRARY_PATH="$MOZJS_LIB" \
   "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
-  --snapshot artifacts/snap hello.js
+  --snapshot artifacts/snap
 ```
 
 The resulting image can load arbitrary guest source through its libc-backed
@@ -240,11 +240,13 @@ ignored `artifacts/` directory. The file is non-sparse: it contains only
 initialized image and heap bytes, not the heap's reserved growth capacity. At
 startup, the image resolves `mmap` and `memcpy` through the supplied `dlsym`,
 reserves anonymous memory for that capacity, and copies the compact template
-into it. Snapshot creation occurs before the named application is opened,
-parsed, compiled, or installed in the guest heap. The application still runs
-after the image has been written, but changing that application does not
-change the snapshot: independently generated images are byte-identical and
-each image accepts any supported program from `js_runner.exe`'s command line.
+into it. A program argument is optional when `--snapshot` is present; without
+one, the runner writes the image and exits. If a program is supplied, snapshot
+creation occurs before that application is opened, parsed, compiled, or
+installed in the guest heap, and the application runs only after the image has
+been written. Changing that application does not change the snapshot:
+independently generated images are byte-identical and each image accepts any
+supported program from `js_runner.exe`'s command line.
 
 The same image also runs the unchanged X11 demos 1 through 7; the guest runtime
 owns their RegExp execution, Number formatting, Buffer construction, parsing,
@@ -263,10 +265,10 @@ generic runner boundary while the outer invocation subsequently runs
 ```sh
 LD_LIBRARY_PATH="$MOZJS_LIB" \
   "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
-  --snapshot artifacts/snap hello.js
+  --snapshot artifacts/snap
 
 ./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
-  --snapshot artifacts/snap2 hello.js
+  --snapshot artifacts/snap2
 cmp artifacts/snap artifacts/snap2
 ```
 

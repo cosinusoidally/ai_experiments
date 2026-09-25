@@ -248,7 +248,10 @@ function guestStandaloneRunGuestRunner(runnerArguments) {
         else programArguments.push(option);
     }
     if (snapshotPath) guestStandaloneWriteSnapshot(snapshotPath);
-    if (!programPath) throw new Error("guest_runner.js requires a program");
+    if (!programPath) {
+        if (snapshotPath) return;
+        throw new Error("guest_runner.js requires a program");
+    }
     guestStandaloneExecute(programPath, programArguments);
 }
 
