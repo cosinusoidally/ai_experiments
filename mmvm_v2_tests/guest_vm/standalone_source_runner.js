@@ -157,7 +157,8 @@ function guestStandaloneRequire(request, parentFilename) {
         "__filename, __dirname) {\n" + source + "\n};";
     phaseStarted = guestStandaloneProfileStart();
     var factoryProgram = GuestStandaloneFrontend.compileExecutable(
-        factorySource, filename, guestStandaloneExecute);
+        factorySource, filename, guestStandaloneExecute,
+        GuestStandaloneGlobal);
     guestStandaloneProfileEnd("compile " + filename, phaseStarted);
     phaseStarted = guestStandaloneProfileStart();
     factoryProgram();
@@ -206,7 +207,8 @@ function guestStandaloneExecute(path, programArguments) {
         guestStandaloneProfileEnd("read " + filename, loadedPhaseStarted);
         loadedPhaseStarted = guestStandaloneProfileStart();
         var loadedExecutable = GuestStandaloneFrontend.compileExecutable(
-            loadedSource, filename, guestStandaloneExecute);
+            loadedSource, filename, guestStandaloneExecute,
+            GuestStandaloneGlobal);
         guestStandaloneProfileEnd("compile " + filename, loadedPhaseStarted);
         loadedPhaseStarted = guestStandaloneProfileStart();
         loadedExecutable();
@@ -219,7 +221,7 @@ function guestStandaloneExecute(path, programArguments) {
     guestStandaloneProfileEnd("read " + path, phaseStarted);
     phaseStarted = guestStandaloneProfileStart();
     var executable = GuestStandaloneFrontend.compileExecutable(
-        source, path, guestStandaloneExecute);
+        source, path, guestStandaloneExecute, GuestStandaloneGlobal);
     guestStandaloneProfileEnd("compile " + path, phaseStarted);
     phaseStarted = guestStandaloneProfileStart();
     executable();

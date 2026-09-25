@@ -2381,7 +2381,7 @@
                     start++;
                 }
                 return -1;
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_INDEX_OF);
         this.objectMethods = {};
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
@@ -2725,7 +2725,7 @@
                     throw new RangeError("precision out of range");
                 }
                 return value.toPrecision(precision);
-            });
+            }, "intrinsic", NativeIntrinsics.NUMBER_TO_PRECISION);
         this.setProperty(this.numberPrototype, "valueOf",
                          this.numberMethods.valueOf);
         this.setProperty(this.numberPrototype, "toString",
@@ -2948,7 +2948,9 @@
             return Math.cos(Number(args[0]));
         }, NativeIntrinsics.MATH_COS);
         mathMethod("exp", function (receiver, args) { return Math.exp(Number(args[0])); });
-        mathMethod("log", function (receiver, args) { return Math.log(Number(args[0])); });
+        mathMethod("log", function (receiver, args) {
+            return Math.log(Number(args[0]));
+        }, NativeIntrinsics.MATH_LOG);
         mathMethod("pow", function (receiver, args) {
             return Math.pow(Number(args[0]), Number(args[1]));
         }, NativeIntrinsics.MATH_POW);

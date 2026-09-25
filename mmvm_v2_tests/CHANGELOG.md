@@ -8,6 +8,24 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.55
+
+Approximate completion: 2026-09-25 afternoon BST
+
+### Guest VM
+
+- Made the generic standalone snapshot run the Octane wrapper and completed
+  quick-correctness execution of Richards without bootstrap-host language
+  callbacks.
+- Added native guest implementations of `Array.prototype.indexOf`,
+  `Math.log`, `Number.prototype.toPrecision`, Date construction, and numeric
+  Date coercion. The x87 logarithm is emitted through the JavaScript macro
+  assembler, while the Node backend uses the same kernel IR.
+- Corrected self-hosted script declaration instantiation and passed the live
+  platform-service table explicitly through the compiled-interpreter ABI.
+  This also prevents allocation-heavy interpreter construction from leaving
+  its service record outside the runtime root graph.
+
 ## 0.54
 
 Approximate completion: 2026-09-25 morning BST

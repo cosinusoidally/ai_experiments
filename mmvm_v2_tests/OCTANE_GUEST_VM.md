@@ -30,6 +30,17 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
   guest_runner.js --vm-native octane_runner.js Richards
 ```
 
+The same unmodified wrapper can run from a generic standalone image:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap octane_runner.js Richards
+```
+
+The snapshot must have been generated from the current interpreter sources.
+It contains the initialized VM and native interpreter, not an Octane program;
+`octane_runner.js` and the selected external suite are read and compiled after
+launch. `--quick` has the same correctness-only meaning on both paths.
+
 Passing `all` selects every suite. With no suite argument, all suites are also
 selected. `--quick` changes each loaded benchmark to one deterministic,
 non-warmup iteration. This mode is only a bring-up and correctness diagnostic;
@@ -110,6 +121,21 @@ settings. Optimization commits should state the affected general mechanism,
 the before/after measurements, and the regression checks performed.
 
 ## Bring-up status
+
+Standalone-snapshot validation is tracked independently from the older
+js_min-hosted baselines below. As of 2026-09-25, Richards and NavierStokes pass
+quick correctness through `js_runner.exe`. DeltaBlue, Crypto, RayTrace,
+EarleyBoyer, and zlib still expose native semantic exits which the js_min-hosted
+path can serve but a standalone image intentionally cannot. They are therefore
+not yet claimed as standalone passes. This distinction prevents a host-assisted
+pass from being reported as self-hosted execution.
+
+Richards standalone bring-up added general native facilities for
+`Array.prototype.indexOf`, `Math.log`, `Number.prototype.toPrecision`, Date
+construction, and Date-to-number arithmetic. The generic source runner now
+instantiates top-level declarations before adopted bytecode begins, matching
+ordinary script entry. Platform services are an explicit compiled-interpreter
+parameter; the standalone bootstrap and js_min entry use the same ABI.
 
 The following baselines include native-interpreter compilation and process
 startup in the wall-clock time. They are not directly comparable with the

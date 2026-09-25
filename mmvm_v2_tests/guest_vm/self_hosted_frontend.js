@@ -81,9 +81,27 @@ function adoptProgramDescriptor(program, contextAnchor) {
 
 exports.adoptProgram = adoptProgramDescriptor;
 
-exports.compileExecutable = function (source, filename, contextAnchor) {
-    return adoptProgramDescriptor(
-        exports.compile(source, filename), contextAnchor);
+exports.compileExecutable = function (source, filename, contextAnchor,
+                                      owningGlobal) {
+    var program = exports.compile(source, filename);
+    var executable = adoptProgramDescriptor(program, contextAnchor);
+    var globalDeclarations = program.globalDeclarations || [];
+    return function () {
+        /* Adopted programs enter as guest bytecode calls rather than through
+         * JSContext.startProgram. Reproduce global declaration
+         * instantiation before their first instruction, including bindings
+         * which are read by their own initializer. In sloppy script code an
+         * unqualified call supplies the owning global as `this`. */
+        var globalObject = owningGlobal || this;
+        var declarationIndex = 0;
+        while (declarationIndex < globalDeclarations.length) {
+            var declarationName = globalDeclarations[declarationIndex++];
+            if (typeof globalObject[declarationName] === "undefined") {
+                globalObject[declarationName] = undefined;
+            }
+        }
+        return executable();
+    };
 };
 
 exports.compileEvalExecutable = function (source, filename, inheritedStrict) {

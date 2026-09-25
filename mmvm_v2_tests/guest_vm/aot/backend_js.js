@@ -226,6 +226,10 @@
             return "Math.sqrt(" +
                 emitControlF64(node.value, parameters, locals) + ")";
         }
+        if (node.op === "log_f64") {
+            return "Math.log(" +
+                emitControlF64(node.value, parameters, locals) + ")";
+        }
         if (node.op === "truncate_f64") {
             var truncatedValue = emitControlF64(
                 node.value, parameters, locals);
@@ -318,6 +322,9 @@
             }
             return "memory.callNativeF64(" + emit(node.pointer, parameters) +
                 ",[" + nativeArguments.join(",") + "])";
+        }
+        if (node.op === "log_f64") {
+            return "Math.log(" + emitF64(node.value, parameters) + ")";
         }
         if (node.op === "sin_f64" || node.op === "cos_f64") {
             return "Math." + (node.op === "sin_f64" ? "sin" : "cos") + "(" +

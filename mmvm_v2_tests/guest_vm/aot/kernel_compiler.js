@@ -1326,6 +1326,7 @@
                     type: "f64"};
         }
         var unaryOperations = {sqrtF64: "sqrt_f64", absF64: "abs_f64",
+                               logF64: "log_f64",
                                truncateF64: "truncate_f64",
                                sinF64: "sin_f64", cosF64: "cos_f64"};
         if (unaryOperations[name] && node.arguments.length === 1) {

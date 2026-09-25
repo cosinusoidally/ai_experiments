@@ -50,11 +50,23 @@
         throw new Error("octane runner: " + message);
     }
 
+    function asciiLower(value) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            var code = value.charCodeAt(index++);
+            if (code >= 65 && code <= 90) code += 32;
+            result += String.fromCharCode(code);
+        }
+        return result;
+    }
+
     function canonicalSuiteName(name) {
-        var lowered = String(name).toLowerCase();
+        var lowered = asciiLower(name);
         var index = 0;
         while (index < suiteOrder.length) {
-            if (suiteOrder[index].toLowerCase() === lowered) {
+            if (asciiLower(suiteOrder[index]) === lowered) {
                 return suiteOrder[index];
             }
             index++;
@@ -125,14 +137,18 @@
         }
     }
 
-    BenchmarkSuite.RunSuites({
+    var benchmarkRunner = {
         NotifyStart: function (name) {
             print(name + ": running" + (quick ? " (quick correctness)" : ""));
         },
         NotifyResult: reportResult,
-        NotifyError: reportError,
-        NotifyScore: reportScore
-    });
+        NotifyError: reportError
+    };
+    /* A quick run verifies benchmark results but deliberately does not claim
+     * a score. Avoid asking the stock harness to format a meaningless score
+     * after a single deterministic iteration. */
+    if (!quick) benchmarkRunner.NotifyScore = reportScore;
+    BenchmarkSuite.RunSuites(benchmarkRunner);
 
     if (failed) fail("one or more suites failed");
     if (quick) print("Octane quick correctness run passed");

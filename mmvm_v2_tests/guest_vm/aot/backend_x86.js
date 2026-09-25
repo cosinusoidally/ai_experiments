@@ -564,7 +564,7 @@
         assembler.pushEax();
         assembler.movEaxImmediate(layout.arrayLengthKeyAddress);
         assembler.pushEax();
-        assembler.movEaxImmediate(layout.contextAddress);
+        assembler.movEaxImmediate(layout.platformServicesAddress);
         assembler.pushEax();
         assembler.movEaxImmediate(layout.frameAddress);
         assembler.pushEax();
@@ -638,6 +638,8 @@
             argumentCells: expectedProgramPath === null ?
                 runtime.standaloneArgumentCells(frame.context) : null,
             statePayloadAddress: nativeInterpreter.statePayload,
+            platformServicesAddress:
+                nativeInterpreter.platformServicesAddress,
             stringSupportAddress: nativeInterpreter.stringSupportAddress,
             arrayPrototypeAddress: runtime.arrayPrototype ?
                 runtime.arrayPrototype.heapAddress : 0,
@@ -1605,6 +1607,13 @@
             assembler.sqrtF64();
             return;
         }
+        if (node.op === "log_f64") {
+            emitControlF64(assembler, node.value, state);
+            assembler.loadLn2F64();
+            assembler.exchangeF64WithSt1();
+            assembler.multiplyLog2F64Pop();
+            return;
+        }
         if (node.op === "truncate_f64") {
             emitControlF64(assembler, node.value, state);
             truncateF64OnX87Stack(assembler);
@@ -1760,6 +1769,13 @@
             assembler.callDwordPtrEspDisplacement(node.arguments.length * 4);
             nativeArgumentIndex = node.arguments.length + 1;
             while (nativeArgumentIndex-- > 0) assembler.popEcx();
+            return;
+        }
+        if (node.op === "log_f64") {
+            emitF64Expression(assembler, node.value);
+            assembler.loadLn2F64();
+            assembler.exchangeF64WithSt1();
+            assembler.multiplyLog2F64Pop();
             return;
         }
         if (node.op === "sin_f64" || node.op === "cos_f64") {

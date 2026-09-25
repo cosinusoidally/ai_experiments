@@ -429,6 +429,10 @@
         if (this.macros) this.macros.push("fld1()");
         this.emitBytes2(0xd9, 0xe8);
     };
+    Assembler.prototype.loadLn2F64 = function () {
+        if (this.macros) this.macros.push("fldln2()");
+        this.emitBytes2(0xd9, 0xed);
+    };
     Assembler.prototype.scaleF64BySt1 = function () {
         if (this.macros) this.macros.push("fscale()");
         this.emitBytes2(0xd9, 0xfd);

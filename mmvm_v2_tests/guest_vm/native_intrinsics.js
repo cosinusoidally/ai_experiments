@@ -42,7 +42,10 @@
                       BUFFER_READ_U8: 71,
                       BUFFER_WRITE_U8: 72,
                       BUFFER_CONSTRUCTOR: 73,
-                      ARRAY_UNSHIFT: 74};
+                      ARRAY_UNSHIFT: 74,
+                      ARRAY_INDEX_OF: 75,
+                      MATH_LOG: 76,
+                      NUMBER_TO_PRECISION: 77};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

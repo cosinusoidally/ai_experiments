@@ -6,3 +6,11 @@ var selfHostedExecutable = selfHostedFrontend.compileExecutable(
     "<self-hosted-integration>");
 
 selfHostedExecutable();
+
+var selfHostedGlobal = this;
+var selfHostedDeclarationExecutable = selfHostedFrontend.compileExecutable(
+    "var selfHostedDeclared = selfHostedDeclared || {value: 42};",
+    "<self-hosted-global-declaration>", null, selfHostedGlobal);
+selfHostedDeclarationExecutable();
+assertEqual(selfHostedGlobal.selfHostedDeclared.value, 42,
+    "self-hosted execution instantiates global declarations before reads");
