@@ -243,8 +243,11 @@ The generic guest command runner and initialized runtime are serialized before
 the outer invocation opens, parses, compiles, or installs its requested
 application. The application executes only after the snapshot is complete.
 The regression suite independently creates images while running two different
-programs, requires the complete files to be byte-identical, and cross-runs
-both programs through the opposite image. Native Buffer backing pointers are
+programs and under deliberately different `DISPLAY`, `XAUTHORITY`, and `HOME`
+values, requires the complete files to be byte-identical, and cross-runs both
+programs through the opposite image. Bootstrap-host environment strings are
+not serialized; the standalone process reads its real environment at launch.
+Native Buffer backing pointers are
 cleared while copying the template and rebuilt from the mapped heap base by
 the macro-assembled bootstrap; process-local addresses therefore neither leak
 into the file nor make independent images differ under ASLR.

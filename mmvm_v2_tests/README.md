@@ -246,7 +246,11 @@ creation occurs before that application is opened, parsed, compiled, or
 installed in the guest heap, and the application runs only after the image has
 been written. Changing that application does not change the snapshot:
 independently generated images are byte-identical and each image accepts any
-supported program from `js_runner.exe`'s command line.
+supported program from `js_runner.exe`'s command line. Bootstrap-host values
+such as `DISPLAY`, `XAUTHORITY`, and `HOME` are deliberately absent from the
+image. A program run after snapshot creation still receives the real current
+environment, while a program launched from the standalone image obtains its
+environment from libc at launch time.
 
 The same image also runs the unchanged X11 demos 1 through 7; the guest runtime
 owns their RegExp execution, Number formatting, Buffer construction, parsing,

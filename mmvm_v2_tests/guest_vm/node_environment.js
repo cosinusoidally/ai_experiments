@@ -32,7 +32,7 @@
         return result || (absolute ? "/" : ".");
     }
 
-    function GuestNodeEnvironment(vm, runnerArguments) {
+    function GuestNodeEnvironment(vm, runnerArguments, snapshotBootstrap) {
         this.vm = vm;
         this.runtime = vm.runtime;
         this.context = vm.context;
@@ -46,6 +46,7 @@
                                context: 0, contextCreate: 0,
                                harnessExecute: 0, destroy: 0};
         this.runnerArguments = runnerArguments;
+        this.snapshotBootstrap = !!snapshotBootstrap;
         this.nodeHost = typeof module !== "undefined" && module.exports &&
                         typeof require === "function";
         this.exitCode = 0;
@@ -134,6 +135,7 @@
     };
 
     GuestNodeEnvironment.prototype.environmentValue = function (name) {
+        if (this.snapshotBootstrap) return undefined;
         if (this.nodeHost) return this.hostProcess.env[name];
         return NodeMemory.cString(NodeLibc.getenv(name));
     };
@@ -1097,6 +1099,7 @@
     GuestNodeEnvironment.prototype.setRunnerArguments = function (
             runnerArguments) {
         this.runnerArguments = runnerArguments;
+        this.snapshotBootstrap = false;
         if (!this.nodeHost) NodeProcess.install(runnerArguments);
         var argv = ["artifacts/js_min.exe", runnerArguments[0]];
         var index = 1;
@@ -1106,6 +1109,11 @@
         var processObject = this.runtime.getGlobal(this.context, "process");
         this.runtime.setProperty(processObject, "argv",
                                  this.runtime.arrayFrom(argv));
+        this.runtime.setProperty(processObject, "env", this.object({
+            DISPLAY: this.environmentValue("DISPLAY"),
+            XAUTHORITY: this.environmentValue("XAUTHORITY"),
+            HOME: this.environmentValue("HOME")
+        }));
         this.runtime.setProperty(processObject, "exitCode", 0);
         this.exitCode = 0;
         this.exiting = false;

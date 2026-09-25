@@ -8,6 +8,17 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.54
+
+Approximate completion: 2026-09-25 morning BST
+
+### Guest VM
+
+- Removed bootstrap-host environment values from standalone images. Changes
+  to `DISPLAY`, `XAUTHORITY`, or `HOME` no longer change snapshot bytes; when
+  an outer invocation also runs a program, its real environment is installed
+  only after the snapshot boundary.
+
 ## 0.53
 
 Approximate completion: 2026-09-25 morning BST

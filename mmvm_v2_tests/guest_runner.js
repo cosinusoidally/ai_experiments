@@ -134,7 +134,8 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                              guestRunnerThreaded)});
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
     guestProgramVM, guestRunnerSnapshot ? ["guest_runner.js"] :
-                                          guestRunnerArguments);
+                                          guestRunnerArguments,
+    !!guestRunnerSnapshot);
 var guestRunnerDeferredCleanup = false;
 var guestRunnerCleaned = false;
 var guestRunnerFailure = null;

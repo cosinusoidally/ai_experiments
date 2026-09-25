@@ -16,9 +16,11 @@ cd "$suite_directory"
 gcc -ansi -m32 js_runner.c \
     -o "$temporary_directory/js_runner.exe" -ldl
 
+DISPLAY=:snapshot-a XAUTHORITY=/snapshot/a HOME=/snapshot/home-a \
 LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$js_min_binary" guest_runner.js --vm-native \
     --snapshot "$temporary_directory/snap-a" >/dev/null
+DISPLAY=:snapshot-b.0 XAUTHORITY=/snapshot/b HOME=/snapshot/home-b \
 LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$js_min_binary" guest_runner.js --vm-native \
     --snapshot "$temporary_directory/snap-b" \
