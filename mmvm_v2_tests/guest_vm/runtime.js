@@ -2086,14 +2086,16 @@
         this.setGlobal("unescape", this.makeNativeFunction("unescape",
             function (receiver, args) {
                 return legacyUnescape(args.length ? args[0] : undefined);
-            }));
+            }, "intrinsic", NativeIntrinsics.LEGACY_UNESCAPE));
         function installURIFunction(name, encode, component) {
             var callable = runtime.makeNativeFunction(name,
                 function (receiver, args) {
                     var value = args.length ? args[0] : undefined;
                     return encode ? encodeURIValue(value, component) :
                                     decodeURIValue(value, component);
-                });
+                }, "intrinsic", name === "encodeURIComponent" ?
+                    NativeIntrinsics.ENCODE_URI_COMPONENT :
+                    NativeIntrinsics.NONE);
             runtime.defineDataProperty(callable, "length", 1, 0);
             runtime.setGlobal(name, callable);
         }
@@ -2271,7 +2273,7 @@
                 values.reverse();
                 runtime.replaceArray(receiver, values);
                 return receiver;
-            });
+            }, "intrinsic", NativeIntrinsics.ARRAY_REVERSE);
         this.arrayMethods.unshift = this.makeNativeFunction("Array.unshift",
             function (receiver, args) {
                 var values = runtime.arrayToHost(receiver);
@@ -2868,7 +2870,7 @@
         var booleanConstructor = this.makeNativeFunction("Boolean",
             function (receiver, args) {
                 return args.length ? runtime.truthy(args[0]) : false;
-            });
+            }, "intrinsic", NativeIntrinsics.BOOLEAN_CONSTRUCTOR);
         booleanConstructor.constructCallback = function (args) {
             return runtime.makePrimitiveWrapper(
                 args.length ? runtime.truthy(args[0]) : false,
@@ -3070,7 +3072,7 @@
         this.setProperty(dateConstructor, "now",
             this.makeNativeFunction("Date.now", function () {
                 return runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0;
-            }));
+            }, "intrinsic", NativeIntrinsics.DATE_NOW));
         this.setProperty(dateConstructor, "parse",
             this.makeNativeFunction("Date.parse", function (receiver, args) {
                 return DateSupport.parse(runtime.toString(args[0]));

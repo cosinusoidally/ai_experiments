@@ -8,6 +8,28 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.59
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Moved `Boolean`, `Date.now`, `Array.prototype.reverse`,
+  `encodeURIComponent`, Annex B `unescape`, `TypedArray.prototype.set`, and
+  ArrayBuffer/typed-array construction into the compiled guest interpreter.
+- Typed-array constructors now create their backing storage, ArrayBuffer
+  record, and typed view directly in the relocatable guest heap. Length,
+  ordinary-array-copy, and shared-ArrayBuffer forms use the same general path,
+  with runtime-owned prototypes held in named support-vector slots.
+- Corrected native `unescape` so malformed `%XX` and `%uXXXX` sequences remain
+  literal rather than being partially consumed. The standalone integration
+  test now covers malformed escapes and all three typed-array construction
+  forms.
+- A fresh 15-second zlib profile executes just over one million guest
+  bytecodes after initialization without typed-array constructor or set host
+  callbacks. The existing Node and js_min regression suites remain at 12
+  programs and 264 assertions each.
+
 ## 0.58
 
 Approximate completion: 2026-09-25 evening BST

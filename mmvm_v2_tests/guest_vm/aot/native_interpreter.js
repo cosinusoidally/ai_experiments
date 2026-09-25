@@ -408,7 +408,17 @@
         var INTRINSIC_STRING_VALUE_OF = 82;
         var INTRINSIC_NUMBER_TO_STRING = 83;
         var INTRINSIC_ARRAY_SPLICE = 84;
-        var INTRINSIC_LAST_ID = 84;
+        var INTRINSIC_BOOLEAN_CONSTRUCTOR = 85;
+        var INTRINSIC_DATE_NOW = 86;
+        var INTRINSIC_ARRAY_REVERSE = 87;
+        var INTRINSIC_TYPED_ARRAY_SET = 88;
+        var INTRINSIC_ENCODE_URI_COMPONENT = 89;
+        var INTRINSIC_LEGACY_UNESCAPE = 90;
+        var INTRINSIC_TYPED_ARRAY_CONSTRUCTOR_BASE = 90;
+        var INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR = 91;
+        var INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR = 92;
+        var INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR = 99;
+        var INTRINSIC_LAST_ID = 99;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -446,6 +456,8 @@
         var RUNTIME_SUPPORT_NUMBER_PROTOTYPE = 292;
         var RUNTIME_SUPPORT_BOOLEAN_PROTOTYPE = 293;
         var RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY = 294;
+        var RUNTIME_SUPPORT_ARRAY_BUFFER_PROTOTYPE = 295;
+        var RUNTIME_SUPPORT_TYPED_ARRAY_PROTOTYPE_BASE = 294;
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
@@ -4731,7 +4743,14 @@
             if (intrinsicId !== INTRINSIC_REGEXP_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_BUFFER_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_OBJECT_CONSTRUCTOR) {
+            if (intrinsicId !== INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
+            if (intrinsicId < INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
                 intrinsicCallValid = 0;
+            } else if (intrinsicId >
+                       INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
+                intrinsicCallValid = 0;
+            }
+            }
             }
             }
             }
@@ -4770,6 +4789,19 @@
         } else if (intrinsicId === INTRINSIC_ARRAY_INDEX_OF) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_ARRAY_SPLICE) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_DATE_NOW) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId >=
+                   INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
+            if (intrinsicId <= INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
+                requiredIntrinsicArguments = 0;
+            }
+        } else if (intrinsicId === INTRINSIC_ARRAY_REVERSE) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
             requiredIntrinsicArguments = 0;
@@ -4875,6 +4907,87 @@
         var intrinsicTarget = heapBase + registerCells +
             callTargetIndex * VALUE_CELL_BYTES;
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
+            var booleanValue = 0;
+            if (intrinsicArgumentCount > 0) {
+                var booleanCell = programArgumentCellKernel(
+                    heapBase, intrinsicArgumentsVector, registerCells, 0);
+                if (booleanCell === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                booleanValue = valueCellTruthyKernel(booleanCell);
+            }
+            if (booleanValue === 1) setValueCellTrue(intrinsicTarget);
+            else setValueCellFalse(intrinsicTarget);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicId === INTRINSIC_DATE_NOW) {
+            var nowPointer = platformGettimeofdayPointer(
+                heapBase, platformServices);
+            if (nowPointer === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            var nowTimeval = engineScratchLeftAddress(heapBase, state);
+            if (callNativeI32(nowPointer, nowTimeval, 0) !== 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            store32(intrinsicTarget + VALUE_CELL_LOW, 1000);
+            store32(intrinsicTarget, VALUE_TAG_DOUBLE);
+            storeF64(intrinsicTarget + VALUE_CELL_LOW, addF64(
+                multiplyF64(loadI32F64(nowTimeval),
+                    loadI32F64(intrinsicTarget + VALUE_CELL_LOW)),
+                divideF64(loadI32F64(nowTimeval + 4),
+                    loadI32F64(intrinsicTarget + VALUE_CELL_LOW))));
+            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicId === INTRINSIC_ENCODE_URI_COMPONENT) {
+            intrinsicHandled = uriStringIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                intrinsicId);
+            if (intrinsicHandled !== 1) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        if (intrinsicId === INTRINSIC_LEGACY_UNESCAPE) {
+            intrinsicHandled = uriStringIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                intrinsicId);
+            if (intrinsicHandled !== 1) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        var isTypedArrayConstructor = 0;
+        if (intrinsicId === INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
+            isTypedArrayConstructor = 1;
+        } else if (intrinsicId >=
+                   INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
+            if (intrinsicId <= INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
+                isTypedArrayConstructor = 1;
+            }
+        }
+        if (isTypedArrayConstructor === 1) {
+            intrinsicHandled = typedArrayConstructorKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                intrinsicId, stringSupport);
+            if (intrinsicHandled === 2) {
+                setEngineCallRejectReason(
+                    heapBase, state, CALL_REJECT_HEAP_SPACE);
+                intrinsicHandled = 0;
+            }
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
         if (intrinsicId === INTRINSIC_EVAL) {
             intrinsicHandled = evalIntrinsicKernel(
                 heapBase, intrinsicTarget, registerCells,
@@ -5194,6 +5307,18 @@
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 intrinsicId);
+            if (intrinsicHandled === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_TYPED_ARRAY_SET) {
+            intrinsicHandled = typedArraySetKernel(
+                heapBase, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                bytecodeWords, pc);
             if (intrinsicHandled === 0) {
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
@@ -6078,12 +6203,120 @@
         return 1;
     }
 
+    function typedArraySetKernel(
+            heapBase, intrinsicTarget, registerCells, argumentsVector,
+            argumentCount, bytecodeWords, pc) {
+        if (argumentCount < 1) return 0;
+        if (argumentCount > 2) return 0;
+        var receiverIndex = load32(
+            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        if (receiverIndex < 0) return 0;
+        var receiverCell = heapBase + registerCells +
+            receiverIndex * VALUE_CELL_BYTES;
+        if (valueCellTag(0, receiverCell) !== VALUE_TAG_REFERENCE) return 0;
+        var targetView = valueCellReference(0, receiverCell);
+        if (recordType(heapBase, targetView) !== HEAP_TYPE_BUFFER_VIEW) {
+            return 0;
+        }
+        var targetKind = bufferViewKind(heapBase, targetView);
+        if (targetKind === BUFFER_KIND_NATIVE) return 0;
+        if (targetKind === BUFFER_KIND_ARRAY_BUFFER) return 0;
+        if (targetKind === BUFFER_KIND_FLOAT32) return 0;
+        if (targetKind === BUFFER_KIND_FLOAT64) return 0;
+        var sourceCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 0);
+        if (sourceCell === 0) return 0;
+        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
+        var sourceArray = valueCellReference(0, sourceCell);
+        if (recordType(heapBase, sourceArray) !== HEAP_TYPE_ARRAY) return 0;
+        var sourceVector = arrayElements(heapBase, sourceArray);
+        var sourceLength = vectorLength(heapBase, sourceVector);
+        var targetOffset = 0;
+        if (argumentCount > 1) {
+            var offsetCell = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 1);
+            if (offsetCell === 0) return 0;
+            var offsetTag = valueCellTag(0, offsetCell);
+            if (offsetTag !== VALUE_TAG_UNDEFINED) {
+                if (offsetTag !== VALUE_TAG_INT32) {
+                    if (offsetTag !== VALUE_TAG_DOUBLE) return 0;
+                }
+                targetOffset = toInt32F64(loadNumberF64(
+                    offsetCell + VALUE_CELL_LOW, offsetTag));
+            }
+        }
+        if (targetOffset < 0) return 0;
+        if (sourceLength > bufferViewLength(heapBase, targetView) -
+                targetOffset) return 0;
+        var backing = bufferViewBacking(heapBase, targetView);
+        var pointer = bufferBackingPointer(heapBase, backing);
+        if (pointer === 0) return 0;
+        pointer = pointer + bufferViewOffset(heapBase, targetView);
+        var bytes = 1;
+        if (targetKind === BUFFER_KIND_UINT16) bytes = 2;
+        else if (targetKind === BUFFER_KIND_INT16) bytes = 2;
+        else if (targetKind === BUFFER_KIND_UINT32) bytes = 4;
+        else if (targetKind === BUFFER_KIND_INT32) bytes = 4;
+        var index = 0;
+        while (index < sourceLength) {
+            var elementCell = vectorCellAddress(
+                heapBase, sourceVector, index);
+            var elementTag = valueCellTag(0, elementCell);
+            if (elementTag !== VALUE_TAG_INT32) {
+                if (elementTag !== VALUE_TAG_DOUBLE) return 0;
+            }
+            var value = toInt32F64(loadNumberF64(
+                elementCell + VALUE_CELL_LOW, elementTag));
+            var destination = pointer + (targetOffset + index) * bytes;
+            storeRaw8(destination, value);
+            if (bytes > 1) storeRaw8(destination + 1, value >>> 8);
+            if (bytes > 2) {
+                storeRaw8(destination + 2, value >>> 16);
+                storeRaw8(destination + 3, value >>> 24);
+            }
+            index = index + 1;
+        }
+        setValueCellUndefined(intrinsicTarget);
+        return 1;
+    }
+
     function arrayIntrinsicKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
             arrayPrototype, bytecodeWords, pc, opcode, intrinsicId, instructions,
             frame) {
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_ARRAY_REVERSE) {
+            var reverseReceiverIndex = load32(
+                heapBase + bytecodeWords +
+                (pc + THIRD_OPERAND) * WORD_BYTES);
+            if (reverseReceiverIndex < 0) return 0;
+            var reverseReceiverCell = heapBase + registerCells +
+                reverseReceiverIndex * VALUE_CELL_BYTES;
+            if (valueCellTag(0, reverseReceiverCell) !==
+                    VALUE_TAG_REFERENCE) return 0;
+            var reverseArray = valueCellReference(0, reverseReceiverCell);
+            if (recordType(heapBase, reverseArray) !== HEAP_TYPE_ARRAY) {
+                return 0;
+            }
+            var reverseVector = arrayElements(heapBase, reverseArray);
+            var reverseLeft = 0;
+            var reverseRight = vectorLength(heapBase, reverseVector) - 1;
+            while (reverseLeft < reverseRight) {
+                var reverseLeftCell = vectorCellAddress(
+                    heapBase, reverseVector, reverseLeft);
+                var reverseRightCell = vectorCellAddress(
+                    heapBase, reverseVector, reverseRight);
+                copyValueCell(intrinsicTarget, reverseLeftCell);
+                copyValueCell(reverseLeftCell, reverseRightCell);
+                copyValueCell(reverseRightCell, intrinsicTarget);
+                reverseLeft = reverseLeft + 1;
+                reverseRight = reverseRight - 1;
+            }
+            copyValueCell(intrinsicTarget, reverseReceiverCell);
+            intrinsicHandled = 1;
+        }
+        if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_SPLICE) {
             var spliceReceiverIndex = load32(
                 heapBase + bytecodeWords +
@@ -6194,6 +6427,7 @@
             }
             setVectorLength(heapBase, spliceVector, spliceNewLength);
             intrinsicHandled = 1;
+        }
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_INDEX_OF) {
@@ -6865,6 +7099,289 @@
             intrinsicHandled = 1;
         }
         return intrinsicHandled;
+    }
+
+    function typedArrayElementBytesKernel(kind) {
+        if (kind === BUFFER_KIND_UINT8) return 1;
+        if (kind === BUFFER_KIND_INT8) return 1;
+        if (kind === BUFFER_KIND_UINT16) return 2;
+        if (kind === BUFFER_KIND_INT16) return 2;
+        if (kind === BUFFER_KIND_UINT32) return 4;
+        if (kind === BUFFER_KIND_INT32) return 4;
+        if (kind === BUFFER_KIND_FLOAT32) return 4;
+        if (kind === BUFFER_KIND_FLOAT64) return 8;
+        return 0;
+    }
+
+    function allocateArrayBufferKernel(heapBase, state, targetCell,
+                                       byteLength, prototype) {
+        if (byteLength < 0) return 0;
+        if (byteLength > 1073741823) return 0;
+        var backingBytes = (BUFFER_BACKING_DATA + byteLength + 7) & -8;
+        if (backingBytes < byteLength) return 0;
+        var allocationBytes = backingBytes + BUFFER_VIEW_RECORD_BYTES;
+        if (allocationBytes < backingBytes) return 0;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, allocationBytes) === 0) return 2;
+        var backing = engineHeapBump(heapBase, state);
+        var view = backing + backingBytes;
+        if (view + BUFFER_VIEW_RECORD_BYTES >
+                engineHeapLimit(heapBase, state)) return 2;
+        var clearOffset = 0;
+        while (clearOffset < backingBytes) {
+            store32(heapBase + backing + clearOffset, 0);
+            clearOffset = clearOffset + 4;
+        }
+        setRecordType(heapBase, backing, HEAP_TYPE_BUFFER_BACKING);
+        setRecordSize(heapBase, backing, backingBytes);
+        setRecordMark(heapBase, backing, 0);
+        setRecordFlags(heapBase, backing, 0);
+        if (heapBase === 0) {
+            setBufferBackingPointer(heapBase, backing, 0);
+        } else {
+            setBufferBackingPointer(heapBase, backing,
+                heapBase + backing + BUFFER_BACKING_DATA);
+        }
+        setBufferBackingLength(heapBase, backing, byteLength);
+        setBufferBackingMetadata(heapBase, backing, view);
+        setRecordType(heapBase, view, HEAP_TYPE_BUFFER_VIEW);
+        setRecordSize(heapBase, view, BUFFER_VIEW_RECORD_BYTES);
+        setRecordMark(heapBase, view, 0);
+        setRecordFlags(heapBase, view, 0);
+        setBufferViewBacking(heapBase, view, backing);
+        setBufferViewOffset(heapBase, view, 0);
+        setBufferViewLength(heapBase, view, byteLength);
+        setBufferViewPrototype(heapBase, view, prototype);
+        setBufferViewPropertyHead(heapBase, view, 0);
+        setBufferViewKind(heapBase, view, BUFFER_KIND_ARRAY_BUFFER);
+        setEngineHeapBump(heapBase, state,
+            view + BUFFER_VIEW_RECORD_BYTES);
+        setValueCellReference(targetCell, view);
+        return 1;
+    }
+
+    function allocateTypedArrayViewKernel(
+            heapBase, state, targetCell, backing, byteOffset,
+            elementLength, kind, prototype) {
+        if (reserveNativeAllocationKernel(
+                heapBase, state, BUFFER_VIEW_RECORD_BYTES) === 0) return 2;
+        var view = engineHeapBump(heapBase, state);
+        if (view + BUFFER_VIEW_RECORD_BYTES >
+                engineHeapLimit(heapBase, state)) return 2;
+        setRecordType(heapBase, view, HEAP_TYPE_BUFFER_VIEW);
+        setRecordSize(heapBase, view, BUFFER_VIEW_RECORD_BYTES);
+        setRecordMark(heapBase, view, 0);
+        setRecordFlags(heapBase, view, 0);
+        setBufferViewBacking(heapBase, view, backing);
+        setBufferViewOffset(heapBase, view, byteOffset);
+        setBufferViewLength(heapBase, view, elementLength);
+        setBufferViewPrototype(heapBase, view, prototype);
+        setBufferViewPropertyHead(heapBase, view, 0);
+        setBufferViewKind(heapBase, view, kind);
+        setEngineHeapBump(heapBase, state,
+            view + BUFFER_VIEW_RECORD_BYTES);
+        setValueCellReference(targetCell, view);
+        return 1;
+    }
+
+    function typedArrayLengthArgumentKernel(cell) {
+        var tag = valueCellTag(0, cell);
+        if (tag === VALUE_TAG_UNDEFINED) return 0;
+        if (tag !== VALUE_TAG_INT32) {
+            if (tag !== VALUE_TAG_DOUBLE) return -1;
+        }
+        var length = toInt32F64(loadNumberF64(
+            cell + VALUE_CELL_LOW, tag));
+        if (length < 0) return -1;
+        return length;
+    }
+
+    function writeTypedArrayElementKernel(pointer, kind, elementCell) {
+        var tag = valueCellTag(0, elementCell);
+        var integerValue = 0;
+        if (tag === VALUE_TAG_INT32) {
+            if (kind === BUFFER_KIND_FLOAT64) {
+                storeF64(pointer, loadNumberF64(
+                    elementCell + VALUE_CELL_LOW, tag));
+                return 1;
+            }
+            if (kind === BUFFER_KIND_FLOAT32) return 0;
+            integerValue = toInt32F64(loadNumberF64(
+                elementCell + VALUE_CELL_LOW, tag));
+        } else if (tag === VALUE_TAG_DOUBLE) {
+            if (kind === BUFFER_KIND_FLOAT64) {
+                storeF64(pointer, loadNumberF64(
+                    elementCell + VALUE_CELL_LOW, tag));
+                return 1;
+            }
+            if (kind === BUFFER_KIND_FLOAT32) return 0;
+            integerValue = toInt32F64(loadNumberF64(
+                elementCell + VALUE_CELL_LOW, tag));
+        } else if (tag === VALUE_TAG_TRUE) {
+            integerValue = 1;
+        } else if (tag !== VALUE_TAG_FALSE) {
+            if (tag !== VALUE_TAG_NULL) {
+                if (tag !== VALUE_TAG_UNDEFINED) return 0;
+            }
+        }
+        if (kind === BUFFER_KIND_UINT8) {
+            storeRaw8(pointer, integerValue & 255);
+        } else if (kind === BUFFER_KIND_INT8) {
+            storeRaw8(pointer, integerValue & 255);
+        } else if (kind === BUFFER_KIND_UINT16) {
+            storeRaw8(pointer, integerValue & 255);
+            storeRaw8(pointer + 1, (integerValue >>> 8) & 255);
+        } else if (kind === BUFFER_KIND_INT16) {
+            storeRaw8(pointer, integerValue & 255);
+            storeRaw8(pointer + 1, (integerValue >>> 8) & 255);
+        } else if (kind === BUFFER_KIND_UINT32) {
+            storeRaw32(pointer, integerValue);
+        } else if (kind === BUFFER_KIND_INT32) {
+            storeRaw32(pointer, integerValue);
+        } else return 0;
+        return 1;
+    }
+
+    function typedArrayConstructorKernel(
+            heapBase, state, targetCell, registerCells, argumentsVector,
+            argumentCount, intrinsicId, stringSupport) {
+        var prototypeIndex = RUNTIME_SUPPORT_ARRAY_BUFFER_PROTOTYPE;
+        if (intrinsicId !== INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
+            prototypeIndex = RUNTIME_SUPPORT_TYPED_ARRAY_PROTOTYPE_BASE +
+                (intrinsicId - INTRINSIC_TYPED_ARRAY_CONSTRUCTOR_BASE);
+        }
+        var prototypeCell = vectorCellAddress(
+            heapBase, stringSupport, prototypeIndex);
+        var prototype = valueCellReference(0, prototypeCell);
+        var firstArgument = 0;
+        if (argumentCount > 0) {
+            firstArgument = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 0);
+            if (firstArgument === 0) return 0;
+        }
+        if (intrinsicId === INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
+            var arrayBufferLength = 0;
+            if (firstArgument !== 0) {
+                arrayBufferLength = typedArrayLengthArgumentKernel(
+                    firstArgument);
+                if (arrayBufferLength < 0) return 0;
+            }
+            return allocateArrayBufferKernel(
+                heapBase, state, targetCell, arrayBufferLength, prototype);
+        }
+
+        var kind = intrinsicId - INTRINSIC_TYPED_ARRAY_CONSTRUCTOR_BASE;
+        var elementBytes = typedArrayElementBytesKernel(kind);
+        if (elementBytes === 0) return 0;
+        var elementLength = 0;
+        var backing = 0;
+        var byteOffset = 0;
+        var sourceArray = 0;
+        if (firstArgument === 0) {
+            elementLength = 0;
+        } else if (valueCellTag(0, firstArgument) === VALUE_TAG_UNDEFINED) {
+            elementLength = 0;
+        } else if (valueCellTag(0, firstArgument) === VALUE_TAG_INT32) {
+            elementLength = typedArrayLengthArgumentKernel(firstArgument);
+            if (elementLength < 0) return 0;
+        } else if (valueCellTag(0, firstArgument) === VALUE_TAG_DOUBLE) {
+            elementLength = typedArrayLengthArgumentKernel(firstArgument);
+            if (elementLength < 0) return 0;
+        } else if (valueCellTag(0, firstArgument) === VALUE_TAG_REFERENCE) {
+            var source = valueCellReference(0, firstArgument);
+            var sourceType = recordType(heapBase, source);
+            if (sourceType === HEAP_TYPE_ARRAY) {
+                sourceArray = source;
+                elementLength = vectorLength(
+                    heapBase, arrayElements(heapBase, sourceArray));
+            } else if (sourceType === HEAP_TYPE_BUFFER_VIEW) {
+                if (bufferViewKind(heapBase, source) !==
+                        BUFFER_KIND_ARRAY_BUFFER) return 0;
+                backing = bufferViewBacking(heapBase, source);
+                if (argumentCount > 1) {
+                    var offsetCell = programArgumentCellKernel(
+                        heapBase, argumentsVector, registerCells, 1);
+                    if (offsetCell === 0) return 0;
+                    byteOffset = typedArrayLengthArgumentKernel(offsetCell);
+                    if (byteOffset < 0) return 0;
+                }
+                if ((byteOffset % elementBytes) !== 0) return 0;
+                var availableBytes = bufferViewLength(heapBase, source) -
+                    byteOffset;
+                if (availableBytes < 0) return 0;
+                if (argumentCount > 2) {
+                    var lengthCell = programArgumentCellKernel(
+                        heapBase, argumentsVector, registerCells, 2);
+                    if (lengthCell === 0) return 0;
+                    elementLength = typedArrayLengthArgumentKernel(lengthCell);
+                    if (elementLength < 0) return 0;
+                    var availableElements = availableBytes;
+                    if (elementBytes === 2) {
+                        availableElements = availableBytes >>> 1;
+                    } else if (elementBytes === 4) {
+                        availableElements = availableBytes >>> 2;
+                    } else if (elementBytes === 8) {
+                        availableElements = availableBytes >>> 3;
+                    }
+                    if (elementLength > availableElements) return 0;
+                } else {
+                    if ((availableBytes % elementBytes) !== 0) return 0;
+                    elementLength = availableBytes;
+                    if (elementBytes === 2) {
+                        elementLength = availableBytes >>> 1;
+                    } else if (elementBytes === 4) {
+                        elementLength = availableBytes >>> 2;
+                    } else if (elementBytes === 8) {
+                        elementLength = availableBytes >>> 3;
+                    }
+                }
+            } else return 0;
+        } else return 0;
+
+        var maximumElementLength = 1073741823;
+        if (elementBytes === 2) maximumElementLength = 536870911;
+        else if (elementBytes === 4) maximumElementLength = 268435455;
+        else if (elementBytes === 8) maximumElementLength = 134217727;
+        if (elementLength > maximumElementLength) return 0;
+        /* The JavaScript reference backend has no process pointer for raw
+         * byte writes. Preserve its established host implementation for the
+         * copying constructor; shared and zero-filled views remain entirely
+         * guest-heap operations on both backends. */
+        if (sourceArray !== 0) {
+            if (heapBase === 0) return 0;
+        }
+        if (backing === 0) {
+            var arrayBufferPrototypeCell = vectorCellAddress(
+                heapBase, stringSupport,
+                RUNTIME_SUPPORT_ARRAY_BUFFER_PROTOTYPE);
+            var arrayBufferPrototype = valueCellReference(
+                0, arrayBufferPrototypeCell);
+            var allocationResult = allocateArrayBufferKernel(
+                heapBase, state, targetCell,
+                elementLength * elementBytes, arrayBufferPrototype);
+            if (allocationResult !== 1) return allocationResult;
+            var arrayBuffer = valueCellReference(0, targetCell);
+            backing = bufferViewBacking(heapBase, arrayBuffer);
+        }
+        var viewResult = allocateTypedArrayViewKernel(
+            heapBase, state, targetCell, backing, byteOffset,
+            elementLength, kind, prototype);
+        if (viewResult !== 1) return viewResult;
+        if (sourceArray !== 0) {
+            var sourceVector = arrayElements(heapBase, sourceArray);
+            var destination = bufferBackingPointer(heapBase, backing) +
+                byteOffset;
+            var sourceIndex = 0;
+            while (sourceIndex < elementLength) {
+                var sourceElement = vectorCellAddress(
+                    heapBase, sourceVector, sourceIndex);
+                if (writeTypedArrayElementKernel(
+                        destination + sourceIndex * elementBytes,
+                        kind, sourceElement) === 0) return 0;
+                sourceIndex = sourceIndex + 1;
+            }
+        }
+        return 1;
     }
 
     function bufferAllocKernel(heapBase, state, intrinsicTarget,
@@ -12661,6 +13178,269 @@
         return 1;
     }
 
+    function uriHexValueKernel(code) {
+        if (code >= 48) {
+            if (code <= 57) return code - 48;
+        }
+        if (code >= 65) {
+            if (code <= 70) return code - 55;
+        }
+        if (code >= 97) {
+            if (code <= 102) return code - 87;
+        }
+        return -1;
+    }
+
+    function uriComponentSafeKernel(code) {
+        if (code >= 48) {
+            if (code <= 57) return 1;
+        }
+        if (code >= 65) {
+            if (code <= 90) return 1;
+        }
+        if (code >= 97) {
+            if (code <= 122) return 1;
+        }
+        if (code === 33) return 1;
+        if (code === 39) return 1;
+        if (code === 40) return 1;
+        if (code === 41) return 1;
+        if (code === 42) return 1;
+        if (code === 45) return 1;
+        if (code === 46) return 1;
+        if (code === 95) return 1;
+        if (code === 126) return 1;
+        return 0;
+    }
+
+    function setURIStringCodeUnitKernel(
+            heapBase, string, index, code) {
+        setStringCharacterByte(heapBase, string, index * 2, code & 255);
+        setStringCharacterByte(
+            heapBase, string, index * 2 + 1, (code >>> 8) & 255);
+        return index + 1;
+    }
+
+    function appendURIPercentByteKernel(
+            heapBase, string, index, value) {
+        index = setURIStringCodeUnitKernel(heapBase, string, index, 37);
+        var high = (value >>> 4) & 15;
+        var low = value & 15;
+        if (high < 10) high = high + 48;
+        else high = high + 55;
+        if (low < 10) low = low + 48;
+        else low = low + 55;
+        index = setURIStringCodeUnitKernel(heapBase, string, index, high);
+        return setURIStringCodeUnitKernel(heapBase, string, index, low);
+    }
+
+    function uriStringIntrinsicKernel(
+            heapBase, state, targetCell, registerCells, argumentsVector,
+            argumentCount, intrinsicId) {
+        if (argumentCount < 1) return 0;
+        var sourceCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 0);
+        if (sourceCell === 0) return 0;
+        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
+        var source = valueCellReference(0, sourceCell);
+        if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
+        var sourceLength = stringLength(heapBase, source);
+        var sourceIndex = 0;
+        var resultLength = 0;
+        if (intrinsicId === INTRINSIC_ENCODE_URI_COMPONENT) {
+            while (sourceIndex < sourceLength) {
+                var measured = stringCharacterCodeUnit(
+                    heapBase, source, sourceIndex) & 65535;
+                if (uriComponentSafeKernel(measured) === 1) {
+                    resultLength = resultLength + 1;
+                } else if (measured < 128) {
+                    resultLength = resultLength + 3;
+                } else if (measured < 2048) {
+                    resultLength = resultLength + 6;
+                } else if (measured >= 55296) {
+                    if (measured <= 56319) {
+                        if (sourceIndex + 1 >= sourceLength) return 0;
+                        var measuredLow = stringCharacterCodeUnit(
+                            heapBase, source, sourceIndex + 1) & 65535;
+                        if (measuredLow < 56320) return 0;
+                        if (measuredLow > 57343) return 0;
+                        resultLength = resultLength + 12;
+                        sourceIndex = sourceIndex + 1;
+                    } else if (measured <= 57343) return 0;
+                    else resultLength = resultLength + 9;
+                } else resultLength = resultLength + 9;
+                sourceIndex = sourceIndex + 1;
+            }
+        } else {
+            while (sourceIndex < sourceLength) {
+                var consumed = 1;
+                var escaped = stringCharacterCodeUnit(
+                    heapBase, source, sourceIndex) & 65535;
+                if (escaped === 37) {
+                    if (sourceIndex + 5 < sourceLength) {
+                        var unicodeMarker = stringCharacterCodeUnit(
+                            heapBase, source, sourceIndex + 1) & 65535;
+                        var unicodeEscape = 0;
+                        if (unicodeMarker === 117) unicodeEscape = 1;
+                        else if (unicodeMarker === 85) unicodeEscape = 1;
+                        if (unicodeEscape === 1) {
+                            var unicodeDigitsValid = 1;
+                            var unicodeDigitIndex = 0;
+                            while (unicodeDigitIndex < 4) {
+                                if (uriHexValueKernel(
+                                        stringCharacterCodeUnit(
+                                            heapBase, source,
+                                            sourceIndex + 2 +
+                                            unicodeDigitIndex) & 65535) < 0) {
+                                    unicodeDigitsValid = 0;
+                                }
+                                unicodeDigitIndex = unicodeDigitIndex + 1;
+                            }
+                            if (unicodeDigitsValid === 1) consumed = 6;
+                        }
+                    }
+                    if (consumed === 1) {
+                        if (sourceIndex + 2 < sourceLength) {
+                            var measuredFirstHex = uriHexValueKernel(
+                                stringCharacterCodeUnit(
+                                    heapBase, source,
+                                    sourceIndex + 1) & 65535);
+                            var measuredSecondHex = uriHexValueKernel(
+                                stringCharacterCodeUnit(
+                                    heapBase, source,
+                                    sourceIndex + 2) & 65535);
+                            if (measuredFirstHex >= 0) {
+                                if (measuredSecondHex >= 0) consumed = 3;
+                            }
+                        }
+                    }
+                }
+                resultLength = resultLength + 1;
+                sourceIndex = sourceIndex + consumed;
+            }
+        }
+        var resultBytes = (STRING_CHARS + resultLength * 2 + 7) & -8;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, resultBytes) === 0) return 2;
+        var result = engineHeapBump(heapBase, state);
+        if (result + resultBytes > engineHeapLimit(heapBase, state)) return 2;
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, resultBytes);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, 0);
+        setStringLength(heapBase, result, resultLength);
+        sourceIndex = 0;
+        var resultIndex = 0;
+        while (sourceIndex < sourceLength) {
+            var code = stringCharacterCodeUnit(
+                heapBase, source, sourceIndex) & 65535;
+            if (intrinsicId === INTRINSIC_ENCODE_URI_COMPONENT) {
+                if (uriComponentSafeKernel(code) === 1) {
+                    resultIndex = setURIStringCodeUnitKernel(
+                        heapBase, result, resultIndex, code);
+                } else {
+                    var codePoint = code;
+                    if (code >= 55296) {
+                        if (code <= 56319) {
+                            var lowSurrogate = stringCharacterCodeUnit(
+                                heapBase, source, sourceIndex + 1) & 65535;
+                            codePoint = 65536 + ((code - 55296) << 10) +
+                                lowSurrogate - 56320;
+                            sourceIndex = sourceIndex + 1;
+                        }
+                    }
+                    if (codePoint < 128) {
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex, codePoint);
+                    } else if (codePoint < 2048) {
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            192 | (codePoint >>> 6));
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            128 | (codePoint & 63));
+                    } else if (codePoint < 65536) {
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            224 | (codePoint >>> 12));
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            128 | ((codePoint >>> 6) & 63));
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            128 | (codePoint & 63));
+                    } else {
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            240 | (codePoint >>> 18));
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            128 | ((codePoint >>> 12) & 63));
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            128 | ((codePoint >>> 6) & 63));
+                        resultIndex = appendURIPercentByteKernel(
+                            heapBase, result, resultIndex,
+                            128 | (codePoint & 63));
+                    }
+                }
+            } else {
+                var unescaped = code;
+                var escapeLength = 1;
+                if (code === 37) {
+                    if (sourceIndex + 5 < sourceLength) {
+                        var marker = stringCharacterCodeUnit(
+                            heapBase, source, sourceIndex + 1) & 65535;
+                        if (marker === 117) escapeLength = 6;
+                        else if (marker === 85) escapeLength = 6;
+                    }
+                    if (escapeLength === 6) {
+                        unescaped = 0;
+                        var hexIndex = 0;
+                        while (hexIndex < 4) {
+                            var hexValue = uriHexValueKernel(
+                                stringCharacterCodeUnit(heapBase, source,
+                                    sourceIndex + 2 + hexIndex) & 65535);
+                            if (hexValue < 0) escapeLength = 1;
+                            else unescaped = (unescaped << 4) | hexValue;
+                            hexIndex = hexIndex + 1;
+                        }
+                        if (escapeLength === 1) unescaped = code;
+                    } else if (sourceIndex + 2 < sourceLength) {
+                        var firstHex = uriHexValueKernel(
+                            stringCharacterCodeUnit(
+                                heapBase, source, sourceIndex + 1) & 65535);
+                        var secondHex = uriHexValueKernel(
+                            stringCharacterCodeUnit(
+                                heapBase, source, sourceIndex + 2) & 65535);
+                        if (firstHex >= 0) {
+                            if (secondHex >= 0) {
+                                unescaped = (firstHex << 4) | secondHex;
+                                escapeLength = 3;
+                            }
+                        }
+                    }
+                }
+                resultIndex = setURIStringCodeUnitKernel(
+                    heapBase, result, resultIndex, unescaped);
+                sourceIndex = sourceIndex + escapeLength - 1;
+            }
+            sourceIndex = sourceIndex + 1;
+        }
+        var hash = -2128831035;
+        resultIndex = 0;
+        while (resultIndex < resultLength) {
+            code = stringCharacterCodeUnit(
+                heapBase, result, resultIndex) & 65535;
+            hash = (hash ^ code) * 16777619;
+            resultIndex = resultIndex + 1;
+        }
+        setStringHash(heapBase, result, hash);
+        setEngineHeapBump(heapBase, state, result + resultBytes);
+        setValueCellReference(targetCell, result);
+        return 1;
+    }
+
     function isESWhiteSpaceKernel(character) {
         if (character >= 9) {
             if (character <= 13) return 1;
@@ -12980,9 +13760,11 @@
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
         var kernelDependencies = {
+            allocateArrayBufferKernel: allocateArrayBufferKernel,
             allocateArrayKernel: allocateArrayKernel,
             allocateObjectKernel: allocateObjectKernel,
             allocateRegexpKernel: allocateRegexpKernel,
+            allocateTypedArrayViewKernel: allocateTypedArrayViewKernel,
             arrayConcatKernel: arrayConcatKernel,
             arrayConstructorKernel: arrayConstructorKernel,
             arrayIntrinsicKernel: arrayIntrinsicKernel,
@@ -13057,6 +13839,16 @@
             strictValueCellsEqualKernel: strictValueCellsEqualKernel,
             valueCellTruthyKernel: valueCellTruthyKernel,
             typeofValueKernel: typeofValueKernel,
+            typedArrayConstructorKernel: typedArrayConstructorKernel,
+            typedArrayElementBytesKernel: typedArrayElementBytesKernel,
+            typedArrayLengthArgumentKernel: typedArrayLengthArgumentKernel,
+            typedArraySetKernel: typedArraySetKernel,
+            uriStringIntrinsicKernel: uriStringIntrinsicKernel,
+            uriHexValueKernel: uriHexValueKernel,
+            uriComponentSafeKernel: uriComponentSafeKernel,
+            setURIStringCodeUnitKernel: setURIStringCodeUnitKernel,
+            appendURIPercentByteKernel: appendURIPercentByteKernel,
+            writeTypedArrayElementKernel: writeTypedArrayElementKernel,
             unsupportedExitKernel: unsupportedExitKernel
         };
         var snapshotRequested = runtime.nativeSnapshotRead ||
@@ -13208,7 +14000,7 @@
                 this.platformServicesAddress,
                 x86Backend.ffi.resolve("snprintf"));
         }
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(295);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(304);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
@@ -13322,7 +14114,18 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, 294),
             runtime.internStringAddress(runtime.primitiveValueKey));
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 295);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, 295),
+            runtime.typedArraySupport.arrayBufferPrototype.heapAddress);
+        var typedArrayPrototypeKind = 2;
+        while (typedArrayPrototypeKind <= 9) {
+            runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, 294 + typedArrayPrototypeKind),
+                runtime.typedArraySupport.prototypes[
+                    typedArrayPrototypeKind].heapAddress);
+            typedArrayPrototypeKind++;
+        }
+        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 304);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;

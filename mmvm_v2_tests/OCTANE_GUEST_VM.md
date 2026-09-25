@@ -142,6 +142,19 @@ boxing, boxed-string methods, object construction, and `Array.prototype.splice`.
 The splice implementation also removed the last host dependency encountered by
 the self-hosted front end while compiling EarleyBoyer.
 
+The next standalone bring-up stage moved the initialization operations used by
+zlib into the same compiled interpreter: Boolean conversion, `Date.now`, array
+reversal, URI-component encoding, Annex B unescaping, typed-array bulk set,
+and ArrayBuffer/typed-array construction. Typed views are not host objects:
+the constructor allocates a guest backing record, a guest ArrayBuffer view,
+and a guest typed view, and obtains their prototypes from rooted, named runtime
+support slots. Length, ordinary-array-copy, and shared-ArrayBuffer forms are
+covered by the standalone integration path. In a fresh 15-second execution
+profile after initialization, zlib passed one million interpreted bytecodes
+without typed-array constructor or set callbacks. It has not yet been promoted
+to a standalone quick-correctness pass; remaining exits are being handled as
+general VM facilities.
+
 The following baselines include native-interpreter compilation and process
 startup in the wall-clock time. They are not directly comparable with the
 score's internal benchmark interval.

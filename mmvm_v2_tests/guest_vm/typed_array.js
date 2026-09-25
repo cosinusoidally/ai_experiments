@@ -3,6 +3,10 @@
  * an explicit kind so Buffer intrinsics cannot confuse element and byte
  * indexing. */
 (function (root) {
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    if (typeof module !== "undefined" && module.exports) {
+        NativeIntrinsics = require("./native_intrinsics.js");
+    }
     function integer(value) {
         value = Number(value);
         if (value !== value || value === 0) return 0;
@@ -91,12 +95,15 @@
 
     TypedArraySupport.Kinds = Kinds;
 
-    TypedArraySupport.prototype.makeNative = function (name, callback) {
-        return this.runtime.makeNativeFunction(name, callback);
+    TypedArraySupport.prototype.makeNative = function (name, callback,
+                                                        intrinsicId) {
+        return this.runtime.makeNativeFunction(
+            name, callback, "intrinsic", intrinsicId || 0);
     };
 
     TypedArraySupport.prototype.install = function () {
-        var arrayBuffer = this.makeNative("ArrayBuffer", arrayBufferCallback);
+        var arrayBuffer = this.makeNative("ArrayBuffer", arrayBufferCallback,
+            NativeIntrinsics.ARRAY_BUFFER_CONSTRUCTOR);
         arrayBuffer.arrayBufferConstructor = true;
         arrayBuffer.constructCallback = arrayBufferConstructCallback;
         this.runtime.setProperty(arrayBuffer, "prototype", this.arrayBufferPrototype);
@@ -119,8 +126,9 @@
                 subarrayCallback));
         this.runtime.setProperty(prototype, "set",
             this.makeNative(description.name + ".prototype.set",
-                setCallback));
-        var constructor = this.makeNative(description.name, constructorCallback);
+                setCallback, NativeIntrinsics.TYPED_ARRAY_SET));
+        var constructor = this.makeNative(description.name, constructorCallback,
+            NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE + description.kind);
         constructor.typedArrayKind = description.kind;
         constructor.constructCallback = constructorConstructCallback;
         this.runtime.setProperty(constructor, "prototype", prototype);

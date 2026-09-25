@@ -52,7 +52,23 @@
                       OBJECT_CONSTRUCTOR: 81,
                       STRING_VALUE_OF: 82,
                       NUMBER_TO_STRING: 83,
-                      ARRAY_SPLICE: 84};
+                      ARRAY_SPLICE: 84,
+                      BOOLEAN_CONSTRUCTOR: 85,
+                      DATE_NOW: 86,
+                      ARRAY_REVERSE: 87,
+                      TYPED_ARRAY_SET: 88,
+                      ENCODE_URI_COMPONENT: 89,
+                      LEGACY_UNESCAPE: 90,
+                      TYPED_ARRAY_CONSTRUCTOR_BASE: 90,
+                      ARRAY_BUFFER_CONSTRUCTOR: 91,
+                      UINT8_ARRAY_CONSTRUCTOR: 92,
+                      UINT16_ARRAY_CONSTRUCTOR: 93,
+                      UINT32_ARRAY_CONSTRUCTOR: 94,
+                      INT32_ARRAY_CONSTRUCTOR: 95,
+                      FLOAT32_ARRAY_CONSTRUCTOR: 96,
+                      FLOAT64_ARRAY_CONSTRUCTOR: 97,
+                      INT8_ARRAY_CONSTRUCTOR: 98,
+                      INT16_ARRAY_CONSTRUCTOR: 99};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;
