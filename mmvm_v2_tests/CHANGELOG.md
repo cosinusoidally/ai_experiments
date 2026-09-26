@@ -8,6 +8,24 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.64
+
+Approximate completion: 2026-09-26 afternoon BST
+
+### Guest VM
+
+- Completed the JavaScript kernel backend's raw linear-memory contract. Raw
+  byte and word operations now use checked offsets in the runtime-owned
+  `LinearMemory`, while the same shared kernel IR continues to use actual
+  addresses in the i386 backend.
+- This removes the missing `writeRawU8` failure reached by buffer-intensive
+  programs such as EarleyBoyer when the native interpreter kernel is executed
+  through the Node-hosted JavaScript backend.
+- Extended the existing kernel-backend integration test to exercise the raw
+  memory contract on JavaScript and validate the corresponding i386 macro
+  assembly. The full Node reference suite remains at 12 programs and 266
+  guest assertions.
+
 ## 0.63
 
 Approximate completion: 2026-09-26 morning BST

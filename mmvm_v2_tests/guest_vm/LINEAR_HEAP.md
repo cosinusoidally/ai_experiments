@@ -36,6 +36,15 @@ checking and translation within the runtime allocation. `heap.js` owns record
 headers, layout validation, and named typed field access. Consumers must not
 add a field offset to a record address themselves.
 
+Kernel raw-memory operations are deliberately distinct from record-field
+access. They are used for byte-oriented backing stores and explicit native
+buffers, not for decoding heap layouts. In the i386 backend their operand is
+an actual process address. In the JavaScript backend the runtime allocation
+has a conceptual base of zero, so the same operand is a bounds-checked
+`LinearMemory` offset. `LinearMemory.readRawU8`, `writeRawU8`, `readRawU32`,
+and `writeRawU32` are the sole backend translation point; kernel intrinsics
+must not inspect the Node host-memory representation themselves.
+
 ## References and values
 
 Zero is the null heap reference. Valid records begin at offset 64 and are

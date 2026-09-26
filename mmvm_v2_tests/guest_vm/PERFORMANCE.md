@@ -660,3 +660,20 @@ lowering substitutes the named layout values as immediates, so there is no
 per-access table lookup in the hot interpreter. The snapshot source hash now
 includes the sorted override values, preventing a stale native image from
 silently using an older support ABI.
+
+## 2026-09-26: JavaScript kernel raw-memory parity
+
+The shared native-interpreter kernel can also execute as generated JavaScript
+under Node.js. Buffer-heavy code exposed an incomplete backend boundary:
+generated code correctly emitted raw byte and word operations, but
+`LinearMemory` only provided the ordinary allocation-relative methods. The
+result was an immediate `memory.writeRawU8 is not a function` failure during
+EarleyBoyer setup.
+
+Raw operations now resolve centrally in `LinearMemory`. The JavaScript backend
+interprets the address as a checked zero-based runtime-memory offset; the i386
+backend still treats it as a native address and emits the existing direct load
+or store. The shared kernel integration test executes byte and word reads and
+writes through the JavaScript backend and verifies that i386 output uses the
+corresponding macro-assembler operations. This is backend completion rather
+than a benchmark-specific fast path.

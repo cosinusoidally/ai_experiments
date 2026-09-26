@@ -77,6 +77,27 @@
         this.host.write8(this.allocation, address + 1, Number(value) >>> 8);
     };
 
+    /* Kernel "raw" operations mean that the i386 backend receives a native
+     * address rather than a guest record field. In the JavaScript backend the
+     * heap base is zero, so the same value is a checked linear-memory offset.
+     * Keep that translation here instead of teaching individual intrinsics
+     * about the Node memory representation. */
+    LinearMemory.prototype.readRawU8 = function (address) {
+        return this.readU8(address);
+    };
+
+    LinearMemory.prototype.writeRawU8 = function (address, value) {
+        this.writeU8(address, value);
+    };
+
+    LinearMemory.prototype.readRawU32 = function (address) {
+        return this.readU32(address);
+    };
+
+    LinearMemory.prototype.writeRawU32 = function (address, value) {
+        this.writeU32(address, value);
+    };
+
     LinearMemory.prototype.readU32 = function (address) {
         this.checkRange(address, 4);
         return this.host.read32LE(this.allocation, address);

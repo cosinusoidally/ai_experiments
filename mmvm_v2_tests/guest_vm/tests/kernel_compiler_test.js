@@ -137,6 +137,44 @@
                 heap.destroy();
                 recordX86.destroy();
             }
+            function rawMemoryKernel(byteAddress, wordAddress, byteValue,
+                                     wordValue) {
+                var result = 0;
+                storeRaw8(byteAddress, byteValue);
+                storeRaw32(wordAddress, wordValue);
+                result = (loadRaw8(byteAddress) ^ loadRaw32(wordAddress)) | 0;
+                return result;
+            }
+            var rawMemoryIR = compiler.compile(rawMemoryKernel);
+            var rawMemoryJS = new JSBackend().compile(rawMemoryIR);
+            var rawMemoryX86 = new X86Backend().compile(rawMemoryIR);
+            var rawMemoryHeap = new Heap({heapBytes: 4096});
+            try {
+                var rawByteValue = 0xa5;
+                var rawWordValue = 0x76543210;
+                var rawExpected = (rawByteValue ^ rawWordValue) | 0;
+                if (rawMemoryJS.fn(rawMemoryHeap.memory, 64, 68,
+                                   rawByteValue, rawWordValue) !== rawExpected) {
+                    throw new Error("JavaScript raw-memory kernel mismatch");
+                }
+                if (rawMemoryHeap.memory.readU8(64) !== rawByteValue ||
+                    rawMemoryHeap.memory.readU32(68) !== rawWordValue) {
+                    throw new Error("JavaScript raw-memory writes mismatch");
+                }
+                if (rawMemoryX86.fn &&
+                    rawMemoryX86.fn(rawMemoryHeap.memory.nativeAddress(96),
+                                    rawMemoryHeap.memory.nativeAddress(100),
+                                    rawByteValue, rawWordValue) !== rawExpected) {
+                    throw new Error("i386 raw-memory kernel mismatch");
+                }
+                if (rawMemoryX86.assembly.indexOf("mov_byte_ptr_ecx_al()") < 0 ||
+                    rawMemoryX86.assembly.indexOf("mov_dword_ptr_ecx_eax()") < 0) {
+                    throw new Error("i386 raw memory bypassed macro assembly");
+                }
+            } finally {
+                rawMemoryHeap.destroy();
+                rawMemoryX86.destroy();
+            }
             function binary64Kernel(base, left, right, output) {
                 storeF64(base + output,
                     divideF64(multiplyF64(
