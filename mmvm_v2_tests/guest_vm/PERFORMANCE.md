@@ -643,3 +643,20 @@ created the rally window, generated its procedural sky, initialized the game,
 selected the compiled rasterizer, and entered its render loop. The change is a
 general embedder-boundary fix: arbitrary guest declarations can no longer make
 later standalone source loads silently select their Buffer implementation.
+
+## 2026-09-26: self-hosted indirect eval
+
+Non-empty indirect eval no longer requires a semantic transition to a host
+parser. The native dispatcher calls a retained guest front-end function, then
+uses a named frame continuation to invoke the returned global executable.
+This keeps zlib's generated 185 KiB source in the same guest tokenizer,
+parser, compiler, verifier, heap, and bytecode engine used for ordinary loaded
+programs. A Node-hosted kernel-IR run verifies global declaration behavior and
+exception unwinding; the full Node regression suite remains at 12 programs and
+now 266 assertions.
+
+This change also centralizes the runtime-support vector's layout. Kernel
+lowering substitutes the named layout values as immediates, so there is no
+per-access table lookup in the hot interpreter. The snapshot source hash now
+includes the sorted override values, preventing a stale native image from
+silently using an older support ABI.

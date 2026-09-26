@@ -119,9 +119,20 @@ exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
     return callable;
 };
 
+/* Indirect eval is global code rather than a direct-eval extension of the
+ * caller's lexical environment. Keep this as a guest function so the native
+ * engine enters the existing self-hosted front end through an ordinary
+ * bytecode frame. The returned executable owns declaration instantiation;
+ * the engine's eval continuation only has to invoke it. */
+exports.compileIndirectEvalExecutable = function (source) {
+    return exports.compileExecutable(source, "<eval>",
+        exports.compileIndirectEvalExecutable, this);
+};
+
 exports.installEvalCompiler = function () {
     if (typeof __guestVMInstallEvalCompiler !== "function") {
         throw new Error("self-hosted eval installation is unavailable");
     }
-    __guestVMInstallEvalCompiler(exports.compileEvalExecutable);
+    __guestVMInstallEvalCompiler(exports.compileEvalExecutable,
+                                 exports.compileIndirectEvalExecutable);
 };

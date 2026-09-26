@@ -8,6 +8,27 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.63
+
+Approximate completion: 2026-09-26 morning BST
+
+### Guest VM
+
+- Added a guest-owned indirect-eval continuation to the compiled interpreter.
+  Non-empty global eval now enters the retained self-hosted front end as an
+  ordinary bytecode call, then invokes the returned executable without a host
+  parser or host-language callback.
+- Represented the compile/invoke transition with a named frame state so normal
+  guest return, exception unwinding, collection, and frame reuse remain the
+  authoritative lifecycle machinery.
+- Centralized the complete native runtime-support vector layout. Constructor,
+  setter, and kernel code now share named indices through compiler constant
+  overrides, and snapshot compatibility hashing includes those override
+  values.
+- Added high-level coverage for indirect global declarations and exceptions.
+  The full Node reference suite passes 12 programs and 266 assertions, and
+  the same kernel graph continues to validate its macro-assembled i386 output.
+
 ## 0.62
 
 Approximate completion: 2026-09-25 late evening BST

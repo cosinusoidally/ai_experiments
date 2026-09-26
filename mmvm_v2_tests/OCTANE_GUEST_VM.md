@@ -217,6 +217,14 @@ evaluated 185 KiB generated program is still parsed and compiled on every run.
 The snapshot file is an ignored temporary artifact and is not part of the
 repository.
 
+The self-hosted zlib path now has a native indirect-eval continuation. Its
+generated source enters the guest tokenizer, parser, verifier, and bytecode
+adopter through a retained guest function, and the resulting executable is
+called by the normal guest frame engine. This is a general implementation of
+indirect global eval rather than a zlib source hook. Direct eval remains a
+distinct lexical operation and is deliberately not redirected through this
+global-code path.
+
 Zlib bring-up added general ES5 facilities rather than source accommodations:
 indirect global eval, labelled statements and labelled abrupt control flow,
 the global `NaN`, `Infinity`, and `Boolean` bindings, Annex B `escape` and

@@ -32,6 +32,71 @@
     var NUMBER_CONSTRUCTOR_INTRINSIC_ID = 41;
     var DATE_CONSTRUCTOR_INTRINSIC_ID = 42;
     var DATE_GET_TIME_INTRINSIC_ID = 43;
+    var RuntimeSupportLayout = {
+        CHAR_AT_KEY: 0,
+        CHAR_AT_FUNCTION: 1,
+        EMPTY_STRING: 2,
+        ASCII_STRING_BASE: 3,
+        BUFFER_PROTOTYPE: 259,
+        OBJECT_PROTOTYPE: 260,
+        STRING_PROTOTYPE: 261,
+        REGEXP_PROTOTYPE: 262,
+        PROTOTYPE_KEY: 263,
+        CONSTRUCTOR_KEY: 264,
+        TYPE_UNDEFINED: 265,
+        TYPE_OBJECT: 266,
+        TYPE_BOOLEAN: 267,
+        TYPE_NUMBER: 268,
+        TYPE_STRING: 269,
+        TYPE_FUNCTION: 270,
+        REGEXP_CLASS_BASE: 271,
+        FUNCTION_PROTOTYPE: 276,
+        DATE_PROTOTYPE: 277,
+        DATE_VALUE_KEY: 278,
+        FUNCTION_PROGRAM_CACHE: 279,
+        REGEXP_SOURCE_KEY: 280,
+        REGEXP_GLOBAL_KEY: 281,
+        REGEXP_IGNORE_CASE_KEY: 282,
+        REGEXP_MULTILINE_KEY: 283,
+        REGEXP_LAST_INDEX_KEY: 284,
+        EMPTY_REGEXP_SOURCE: 285,
+        ARGUMENTS_CALLEE_KEY: 286,
+        ARGUMENTS_LENGTH_KEY: 287,
+        NULL_STRING: 288,
+        TRUE_STRING: 289,
+        FALSE_STRING: 290,
+        BUFFER_POINTER_KEY: 291,
+        NUMBER_PROTOTYPE: 292,
+        BOOLEAN_PROTOTYPE: 293,
+        PRIMITIVE_VALUE_KEY: 294,
+        ARRAY_BUFFER_PROTOTYPE: 295,
+        TYPED_ARRAY_PROTOTYPE_BASE: 294,
+        EVAL_COMPILER: 304,
+        INDIRECT_EVAL_COMPILER: 305,
+        COUNT: 306
+    };
+
+    function runtimeSupportConstantOverrides(profileOpcodes) {
+        var overrides = {
+            PROFILE_OPCODES: profileOpcodes ? 1 : 0
+        };
+        var name;
+        for (name in RuntimeSupportLayout) {
+            if (name !== "COUNT" && Object.prototype.hasOwnProperty.call(
+                    RuntimeSupportLayout, name)) {
+                overrides["RUNTIME_SUPPORT_" + name] =
+                    RuntimeSupportLayout[name];
+            }
+        }
+        overrides.STRING_SUPPORT_CHAR_AT_KEY =
+            RuntimeSupportLayout.CHAR_AT_KEY;
+        overrides.STRING_SUPPORT_CHAR_AT_FUNCTION =
+            RuntimeSupportLayout.CHAR_AT_FUNCTION;
+        overrides.STRING_SUPPORT_EMPTY = RuntimeSupportLayout.EMPTY_STRING;
+        overrides.STRING_SUPPORT_ASCII_BASE =
+            RuntimeSupportLayout.ASCII_STRING_BASE;
+        return overrides;
+    }
 
     function interpreterKernel(heapBase, frame, platformServices,
                                arrayLengthKey,
@@ -196,6 +261,11 @@
         var FRAME_FIXED_BYTES = 48;
         var FRAME_FLAG_NATIVE_CALL = 1;
         var FRAME_FLAG_NATIVE_CONSTRUCT = 2;
+        var FRAME_FLAG_INDIRECT_EVAL_COMPILE = 3;
+        var INTRINSIC_RESULT_COMPLETE = 1;
+        /* Distinct from helper-local handled/allocation results (1 and 2)
+         * and from public engine exits (1 through 4). */
+        var INTRINSIC_RESULT_FRAME_ENTERED = 5;
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
         var ENVIRONMENT_PROGRAM = 24;
@@ -419,45 +489,48 @@
         var INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR = 92;
         var INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR = 99;
         var INTRINSIC_LAST_ID = 99;
-        var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 279;
+        var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 0;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
-        var STRING_SUPPORT_CHAR_AT_FUNCTION = 1;
-        var STRING_SUPPORT_EMPTY = 2;
-        var STRING_SUPPORT_ASCII_BASE = 3;
-        var RUNTIME_SUPPORT_BUFFER_PROTOTYPE = 259;
-        var RUNTIME_SUPPORT_OBJECT_PROTOTYPE = 260;
-        var RUNTIME_SUPPORT_STRING_PROTOTYPE = 261;
-        var RUNTIME_SUPPORT_REGEXP_PROTOTYPE = 262;
-        var RUNTIME_SUPPORT_PROTOTYPE_KEY = 263;
-        var RUNTIME_SUPPORT_CONSTRUCTOR_KEY = 264;
-        var RUNTIME_SUPPORT_TYPE_UNDEFINED = 265;
-        var RUNTIME_SUPPORT_TYPE_OBJECT = 266;
-        var RUNTIME_SUPPORT_TYPE_BOOLEAN = 267;
-        var RUNTIME_SUPPORT_TYPE_NUMBER = 268;
-        var RUNTIME_SUPPORT_TYPE_STRING = 269;
-        var RUNTIME_SUPPORT_TYPE_FUNCTION = 270;
-        var RUNTIME_SUPPORT_REGEXP_CLASS_BASE = 271;
-        var RUNTIME_SUPPORT_FUNCTION_PROTOTYPE = 276;
-        var RUNTIME_SUPPORT_DATE_PROTOTYPE = 277;
-        var RUNTIME_SUPPORT_DATE_VALUE_KEY = 278;
-        var RUNTIME_SUPPORT_REGEXP_SOURCE_KEY = 280;
-        var RUNTIME_SUPPORT_REGEXP_GLOBAL_KEY = 281;
-        var RUNTIME_SUPPORT_REGEXP_IGNORE_CASE_KEY = 282;
-        var RUNTIME_SUPPORT_REGEXP_MULTILINE_KEY = 283;
-        var RUNTIME_SUPPORT_REGEXP_LAST_INDEX_KEY = 284;
-        var RUNTIME_SUPPORT_EMPTY_REGEXP_SOURCE = 285;
-        var RUNTIME_SUPPORT_ARGUMENTS_CALLEE_KEY = 286;
-        var RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY = 287;
-        var RUNTIME_SUPPORT_NULL_STRING = 288;
-        var RUNTIME_SUPPORT_TRUE_STRING = 289;
-        var RUNTIME_SUPPORT_FALSE_STRING = 290;
-        var RUNTIME_SUPPORT_BUFFER_POINTER_KEY = 291;
-        var RUNTIME_SUPPORT_NUMBER_PROTOTYPE = 292;
-        var RUNTIME_SUPPORT_BOOLEAN_PROTOTYPE = 293;
-        var RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY = 294;
-        var RUNTIME_SUPPORT_ARRAY_BUFFER_PROTOTYPE = 295;
-        var RUNTIME_SUPPORT_TYPED_ARRAY_PROTOTYPE_BASE = 294;
+        var STRING_SUPPORT_CHAR_AT_FUNCTION = 0;
+        var STRING_SUPPORT_EMPTY = 0;
+        var STRING_SUPPORT_ASCII_BASE = 0;
+        var RUNTIME_SUPPORT_BUFFER_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_OBJECT_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_STRING_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_REGEXP_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_PROTOTYPE_KEY = 0;
+        var RUNTIME_SUPPORT_CONSTRUCTOR_KEY = 0;
+        var RUNTIME_SUPPORT_TYPE_UNDEFINED = 0;
+        var RUNTIME_SUPPORT_TYPE_OBJECT = 0;
+        var RUNTIME_SUPPORT_TYPE_BOOLEAN = 0;
+        var RUNTIME_SUPPORT_TYPE_NUMBER = 0;
+        var RUNTIME_SUPPORT_TYPE_STRING = 0;
+        var RUNTIME_SUPPORT_TYPE_FUNCTION = 0;
+        var RUNTIME_SUPPORT_REGEXP_CLASS_BASE = 0;
+        var RUNTIME_SUPPORT_FUNCTION_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_DATE_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_DATE_VALUE_KEY = 0;
+        var RUNTIME_SUPPORT_REGEXP_SOURCE_KEY = 0;
+        var RUNTIME_SUPPORT_REGEXP_GLOBAL_KEY = 0;
+        var RUNTIME_SUPPORT_REGEXP_IGNORE_CASE_KEY = 0;
+        var RUNTIME_SUPPORT_REGEXP_MULTILINE_KEY = 0;
+        var RUNTIME_SUPPORT_REGEXP_LAST_INDEX_KEY = 0;
+        var RUNTIME_SUPPORT_EMPTY_REGEXP_SOURCE = 0;
+        var RUNTIME_SUPPORT_ARGUMENTS_CALLEE_KEY = 0;
+        var RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY = 0;
+        var RUNTIME_SUPPORT_NULL_STRING = 0;
+        var RUNTIME_SUPPORT_TRUE_STRING = 0;
+        var RUNTIME_SUPPORT_FALSE_STRING = 0;
+        var RUNTIME_SUPPORT_BUFFER_POINTER_KEY = 0;
+        var RUNTIME_SUPPORT_NUMBER_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_BOOLEAN_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY = 0;
+        var RUNTIME_SUPPORT_ARRAY_BUFFER_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_TYPED_ARRAY_PROTOTYPE_BASE = 0;
+        /* Authoritative values are supplied by RuntimeSupportLayout through
+         * the kernel compiler's constantOverrides. */
+        var RUNTIME_SUPPORT_INDIRECT_EVAL_COMPILER = 0;
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
@@ -2465,7 +2538,10 @@
                         var unwindFlags = recordFlags(heapBase, catchFrame);
                         if (unwindFlags !== FRAME_FLAG_NATIVE_CALL) {
                             if (unwindFlags !== FRAME_FLAG_NATIVE_CONSTRUCT) {
-                                nativeUnwindValid = 0;
+                                if (unwindFlags !==
+                                        FRAME_FLAG_INDIRECT_EVAL_COMPILE) {
+                                    nativeUnwindValid = 0;
+                                }
                             }
                         }
                         catchFrame = nextCatchFrame;
@@ -2609,7 +2685,29 @@
                     callArgumentsCell, callOperation, callTargetIndex,
                     currentContext, stringSupport, arrayPrototype,
                     bytecodeWords, registerCells, pc, framePC);
-                if (bytecodeCallHandled === 1) {
+                var callFrameEntered = bytecodeCallHandled;
+                if (bytecodeCallHandled === 0) {
+                    var intrinsicDispatchResult = intrinsicCallKernel(
+                        heapBase, state, frame, callFunctionCell,
+                        callArgumentsCell, callOperation, callTargetIndex,
+                        currentContext, stringSupport, arrayPrototype,
+                        bytecodeWords, registerCells, pc, opcode, instructions,
+                        platformServices);
+                    if (intrinsicDispatchResult === EXIT_UNSUPPORTED) {
+                        return EXIT_UNSUPPORTED;
+                    }
+                    if (intrinsicDispatchResult ===
+                            INTRINSIC_RESULT_FRAME_ENTERED) {
+                        callFrameEntered = 1;
+                    } else if (intrinsicDispatchResult !==
+                               INTRINSIC_RESULT_COMPLETE) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    } else if (callOperation === 2) {
+                        pc = pc + FOUR_WORD_INSTRUCTION;
+                    } else pc = pc + FIVE_WORD_INSTRUCTION;
+                }
+                if (callFrameEntered === 1) {
                     frame = engineCurrentFrame(heapBase, state);
                     currentContext = frameContext(heapBase, frame);
                     currentProgram = frameProgram(heapBase, frame);
@@ -2617,30 +2715,11 @@
                         heapBase, currentProgram) + BYTECODE_WORDS;
                     constantCells = programConstants(
                         heapBase, currentProgram) + VECTOR_CELLS;
-                    globalObject = contextGlobal(
-                        heapBase, currentContext);
+                    globalObject = contextGlobal(heapBase, currentContext);
                     framePC = frame + FRAME_PC;
                     registerCells = frame + FRAME_REGISTERS;
                     environment = frameEnvironment(heapBase, frame);
                     pc = 0;
-                }
-                if (bytecodeCallHandled === 0) {
-                var intrinsicDispatchResult = intrinsicCallKernel(
-                    heapBase, state, frame, callFunctionCell,
-                    callArgumentsCell, callOperation, callTargetIndex,
-                    currentContext, stringSupport, arrayPrototype,
-                    bytecodeWords, registerCells, pc, opcode, instructions,
-                    platformServices);
-                if (intrinsicDispatchResult === EXIT_UNSUPPORTED) {
-                    return EXIT_UNSUPPORTED;
-                }
-                if (intrinsicDispatchResult !== 1) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, instructions);
-                }
-                if (callOperation === 2) {
-                    pc = pc + FOUR_WORD_INSTRUCTION;
-                } else pc = pc + FIVE_WORD_INSTRUCTION;
                 }
             } else if (opcode === OP_PUSH_CATCH) {
                 if (reserveNativeAllocationKernel(
@@ -3660,6 +3739,9 @@
             } else if (nativeFrameFlags ===
                        FRAME_FLAG_NATIVE_CONSTRUCT) {
                 returnInsideNativeEngine = 1;
+            } else if (nativeFrameFlags ===
+                       FRAME_FLAG_INDIRECT_EVAL_COMPILE) {
+                returnInsideNativeEngine = 1;
             }
         }
         if (returnInsideNativeEngine === 1) {
@@ -3669,7 +3751,34 @@
             var nativeReturnTarget = heapBase + nativeCallerFrame +
                 FRAME_REGISTERS + nativeReturnSlot * VALUE_CELL_BYTES;
             var copyNativeReturn = 1;
-            if (nativeFrameFlags === FRAME_FLAG_NATIVE_CONSTRUCT) {
+            if (nativeFrameFlags === FRAME_FLAG_INDIRECT_EVAL_COMPILE) {
+                var compiledEvalValid = 0;
+                if (valueCellTag(0, nativeReturnSource) ===
+                        VALUE_TAG_REFERENCE) {
+                    var compiledEvalCallable = valueCellReference(
+                        0, nativeReturnSource);
+                    if (recordType(heapBase, compiledEvalCallable) ===
+                            HEAP_TYPE_BYTECODE_FUNCTION) {
+                        compiledEvalValid = 1;
+                    }
+                }
+                if (compiledEvalValid === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, OP_CALL, instructions);
+                }
+                var evalCallerProgram = frameProgram(
+                    heapBase, nativeCallerFrame);
+                var evalCallerCode = programBytecode(
+                    heapBase, evalCallerProgram) + BYTECODE_WORDS;
+                var evalCallPC = frameSavedPC(
+                    heapBase, nativeCallerFrame) - FIVE_WORD_INSTRUCTION;
+                var evalFunctionRegister = load32(
+                    heapBase + evalCallerCode +
+                    (evalCallPC + SECOND_OPERAND) * WORD_BYTES);
+                nativeReturnTarget = heapBase + nativeCallerFrame +
+                    FRAME_REGISTERS + evalFunctionRegister * VALUE_CELL_BYTES;
+                setFramePC(heapBase, nativeCallerFrame, evalCallPC);
+            } else if (nativeFrameFlags === FRAME_FLAG_NATIVE_CONSTRUCT) {
                 copyNativeReturn = 0;
                 if (valueCellTag(0, nativeReturnSource) ===
                     VALUE_TAG_REFERENCE) {
@@ -4762,7 +4871,7 @@
             return 1;
         }
         var sourceIsEmpty = emptyEvalSourceKernel(heapBase, source);
-        if (sourceIsEmpty === 0) return 0;
+        if (sourceIsEmpty === 0) return 2;
         setValueCellUndefined(target);
         return 1;
     }
@@ -5051,6 +5160,31 @@
             intrinsicHandled = evalIntrinsicKernel(
                 heapBase, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount);
+            if (intrinsicHandled === 2) {
+                var evalReceiverIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                if (evalReceiverIndex === -2) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                var indirectEvalCompilerCell = vectorCellAddress(
+                    heapBase, stringSupport,
+                    RUNTIME_SUPPORT_INDIRECT_EVAL_COMPILER);
+                var indirectEvalCompileEntered = bytecodeCallKernel(
+                    heapBase, state, frame, indirectEvalCompilerCell,
+                    callArgumentsCell, 1, callTargetIndex, currentContext,
+                    stringSupport, arrayPrototype, bytecodeWords,
+                    registerCells, pc, frame + FRAME_PC);
+                if (indirectEvalCompileEntered !== 1) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                setRecordFlags(heapBase,
+                    engineCurrentFrame(heapBase, state),
+                    FRAME_FLAG_INDIRECT_EVAL_COMPILE);
+                return INTRINSIC_RESULT_FRAME_ENTERED;
+            }
             if (intrinsicHandled === 0) {
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
@@ -13913,6 +14047,8 @@
         };
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
+        var kernelConstantOverrides = runtimeSupportConstantOverrides(
+            runtime.profileOpcodeCounts);
         var snapshotNeedsSource = runtime.nativeSnapshotWrite ||
             (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
         var kernelSource = null;
@@ -13933,6 +14069,21 @@
                     kernelDependencyNames[kernelDependencyIndex++];
                 kernelSource += "\n" +
                     kernelDependencies[kernelDependencyName].toString();
+            }
+            var kernelConstantNames = [];
+            var kernelConstantName;
+            for (kernelConstantName in kernelConstantOverrides) {
+                if (Object.prototype.hasOwnProperty.call(
+                        kernelConstantOverrides, kernelConstantName)) {
+                    kernelConstantNames.push(kernelConstantName);
+                }
+            }
+            kernelConstantNames.sort();
+            var kernelConstantIndex = 0;
+            while (kernelConstantIndex < kernelConstantNames.length) {
+                kernelConstantName = kernelConstantNames[kernelConstantIndex++];
+                kernelSource += "\n" + kernelConstantName + "=" +
+                    kernelConstantOverrides[kernelConstantName];
             }
         }
         var snapshotMetadata = null;
@@ -13976,9 +14127,7 @@
                     interpreterKernel: ["heapBase", "pc", "bytecodeWords"]
                 },
                 timings: loweringTimings,
-                constantOverrides: {
-                    PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0
-                }
+                constantOverrides: kernelConstantOverrides
             };
             this.ir = new KernelCompiler().compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
@@ -14060,55 +14209,60 @@
                 this.platformServicesAddress,
                 x86Backend.ffi.resolve("snprintf"));
         }
-        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(304);
+        this.stringSupportAddress = runtime.heapRecords.allocateValueVector(
+            RuntimeSupportLayout.COUNT);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 0), runtime.internStringAddress("charAt"));
+            this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_KEY),
+            runtime.internStringAddress("charAt"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 1),
+            this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_FUNCTION),
             runtime.stringMethods.charAt.heapAddress);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 2), runtime.internStringAddress(""));
+            this.stringSupportAddress, RuntimeSupportLayout.EMPTY_STRING),
+            runtime.internStringAddress(""));
         var characterIndex = 0;
         while (characterIndex < 256) {
             runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, characterIndex + 3),
+                this.stringSupportAddress,
+                characterIndex + RuntimeSupportLayout.ASCII_STRING_BASE),
                 runtime.internStringAddress(
                     String.fromCharCode(characterIndex)));
             characterIndex++;
         }
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 259),
+            this.stringSupportAddress, RuntimeSupportLayout.BUFFER_PROTOTYPE),
             runtime.bufferSupport.prototype.heapAddress);
         var objectPrototypeSupportCell = runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 260);
+            this.stringSupportAddress, RuntimeSupportLayout.OBJECT_PROTOTYPE);
         if (runtime.objectPrototype) {
             runtime.valueCells.writeReferenceAt(objectPrototypeSupportCell,
                 runtime.objectPrototype.heapAddress);
         } else runtime.writeHeapValue(objectPrototypeSupportCell, undefined);
         var stringPrototypeSupportCell = runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 261);
+            this.stringSupportAddress, RuntimeSupportLayout.STRING_PROTOTYPE);
         if (runtime.stringPrototype) {
             runtime.valueCells.writeReferenceAt(stringPrototypeSupportCell,
                 runtime.stringPrototype.heapAddress);
         } else runtime.writeHeapValue(stringPrototypeSupportCell, undefined);
         var regexpPrototypeSupportCell = runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 262);
+            this.stringSupportAddress, RuntimeSupportLayout.REGEXP_PROTOTYPE);
         if (runtime.regexpPrototype) {
             runtime.valueCells.writeReferenceAt(regexpPrototypeSupportCell,
                 runtime.regexpPrototype.heapAddress);
         } else runtime.writeHeapValue(regexpPrototypeSupportCell, undefined);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 263),
+            this.stringSupportAddress, RuntimeSupportLayout.PROTOTYPE_KEY),
             runtime.internStringAddress("prototype"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 264),
+            this.stringSupportAddress, RuntimeSupportLayout.CONSTRUCTOR_KEY),
             runtime.internStringAddress("constructor"));
         var typeofNames = ["undefined", "object", "boolean", "number",
                            "string", "function"];
         var typeofNameIndex = 0;
         while (typeofNameIndex < typeofNames.length) {
             runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 265 + typeofNameIndex),
+                this.stringSupportAddress,
+                RuntimeSupportLayout.TYPE_UNDEFINED + typeofNameIndex),
                 runtime.internStringAddress(typeofNames[typeofNameIndex]));
             typeofNameIndex++;
         }
@@ -14117,75 +14271,94 @@
         var regexpClassIndex = 0;
         while (regexpClassIndex < regexpClassPatterns.length) {
             runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 271 + regexpClassIndex),
+                this.stringSupportAddress,
+                RuntimeSupportLayout.REGEXP_CLASS_BASE + regexpClassIndex),
                 runtime.internStringAddress(
                     regexpClassPatterns[regexpClassIndex]));
             regexpClassIndex++;
         }
         var functionPrototypeSupportCell = runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 276);
+            this.stringSupportAddress, RuntimeSupportLayout.FUNCTION_PROTOTYPE);
         if (runtime.functionPrototype) {
             runtime.valueCells.writeReferenceAt(functionPrototypeSupportCell,
                 runtime.functionPrototype.heapAddress);
         } else runtime.writeHeapValue(functionPrototypeSupportCell, undefined);
         runtime.writeHeapValue(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 277), undefined);
+            this.stringSupportAddress, RuntimeSupportLayout.DATE_PROTOTYPE),
+            undefined);
         runtime.writeHeapValue(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 278), undefined);
+            this.stringSupportAddress, RuntimeSupportLayout.DATE_VALUE_KEY),
+            undefined);
         runtime.writeHeapValue(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 279), undefined);
+            this.stringSupportAddress,
+            RuntimeSupportLayout.FUNCTION_PROGRAM_CACHE), undefined);
         var regexpPropertyNames = ["source", "global", "ignoreCase",
                                    "multiline", "lastIndex"];
         var regexpPropertyIndex = 0;
         while (regexpPropertyIndex < regexpPropertyNames.length) {
             runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 280 + regexpPropertyIndex),
+                this.stringSupportAddress,
+                RuntimeSupportLayout.REGEXP_SOURCE_KEY + regexpPropertyIndex),
                 runtime.internStringAddress(
                     regexpPropertyNames[regexpPropertyIndex]));
             regexpPropertyIndex++;
         }
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 285),
+            this.stringSupportAddress,
+            RuntimeSupportLayout.EMPTY_REGEXP_SOURCE),
             runtime.internStringAddress("(?:)"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 286),
+            this.stringSupportAddress,
+            RuntimeSupportLayout.ARGUMENTS_CALLEE_KEY),
             runtime.internStringAddress("callee"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 287),
+            this.stringSupportAddress,
+            RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY),
             runtime.internStringAddress("length"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 288),
+            this.stringSupportAddress, RuntimeSupportLayout.NULL_STRING),
             runtime.internStringAddress("null"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 289),
+            this.stringSupportAddress, RuntimeSupportLayout.TRUE_STRING),
             runtime.internStringAddress("true"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 290),
+            this.stringSupportAddress, RuntimeSupportLayout.FALSE_STRING),
             runtime.internStringAddress("false"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 291),
+            this.stringSupportAddress, RuntimeSupportLayout.BUFFER_POINTER_KEY),
             runtime.internStringAddress("_nodePointer"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 292),
+            this.stringSupportAddress, RuntimeSupportLayout.NUMBER_PROTOTYPE),
             runtime.numberPrototype.heapAddress);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 293),
+            this.stringSupportAddress, RuntimeSupportLayout.BOOLEAN_PROTOTYPE),
             runtime.booleanPrototype.heapAddress);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 294),
+            this.stringSupportAddress,
+            RuntimeSupportLayout.PRIMITIVE_VALUE_KEY),
             runtime.internStringAddress(runtime.primitiveValueKey));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-            this.stringSupportAddress, 295),
+            this.stringSupportAddress,
+            RuntimeSupportLayout.ARRAY_BUFFER_PROTOTYPE),
             runtime.typedArraySupport.arrayBufferPrototype.heapAddress);
         var typedArrayPrototypeKind = 2;
         while (typedArrayPrototypeKind <= 9) {
             runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 294 + typedArrayPrototypeKind),
+                this.stringSupportAddress,
+                RuntimeSupportLayout.TYPED_ARRAY_PROTOTYPE_BASE +
+                    typedArrayPrototypeKind),
                 runtime.typedArraySupport.prototypes[
                     typedArrayPrototypeKind].heapAddress);
             typedArrayPrototypeKind++;
         }
-        runtime.heapRecords.setVectorLength(this.stringSupportAddress, 304);
+        runtime.writeHeapValue(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.EVAL_COMPILER),
+            undefined);
+        runtime.writeHeapValue(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.INDIRECT_EVAL_COMPILER), undefined);
+        runtime.heapRecords.setVectorLength(
+            this.stringSupportAddress, RuntimeSupportLayout.COUNT);
         this.runCount = 0;
         this.instructionCount = 0;
         this.nativeElapsedMs = 0;
@@ -14307,17 +14480,35 @@
     NativeInterpreter.prototype.setDateSupport = function (prototype, key) {
         this.runtime.valueCells.writeReferenceAt(
             this.runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 277), prototype.heapAddress);
+                this.stringSupportAddress,
+                RuntimeSupportLayout.DATE_PROTOTYPE), prototype.heapAddress);
         this.runtime.valueCells.writeReferenceAt(
             this.runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 278),
+                this.stringSupportAddress,
+                RuntimeSupportLayout.DATE_VALUE_KEY),
             this.runtime.internStringAddress(key));
     };
 
     NativeInterpreter.prototype.setFunctionProgramCache = function (cache) {
         this.runtime.valueCells.writeReferenceAt(
             this.runtime.heapRecords.vectorCell(
-                this.stringSupportAddress, 279), cache.heapAddress);
+                this.stringSupportAddress,
+                RuntimeSupportLayout.FUNCTION_PROGRAM_CACHE),
+            cache.heapAddress);
+    };
+
+    NativeInterpreter.prototype.setEvalCompilers = function (
+            directCompiler, indirectCompiler) {
+        this.runtime.valueCells.writeReferenceAt(
+            this.runtime.heapRecords.vectorCell(
+                this.stringSupportAddress,
+                RuntimeSupportLayout.EVAL_COMPILER),
+            directCompiler.heapAddress);
+        this.runtime.valueCells.writeReferenceAt(
+            this.runtime.heapRecords.vectorCell(
+                this.stringSupportAddress,
+                RuntimeSupportLayout.INDIRECT_EVAL_COMPILER),
+            indirectCompiler.heapAddress);
     };
 
     /* A published native allocation suffix is private only between

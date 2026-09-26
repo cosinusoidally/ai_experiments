@@ -302,6 +302,23 @@ the same bytecode without consulting host compiler metadata. An uncaught throw
 still uses the embedder exception boundary so it can be reported with source
 location information.
 
+Indirect `eval` uses the same frame machinery. The runtime retains two guest
+front-end entry points: the lexical direct-eval compiler and a global-code
+indirect-eval compiler. A non-empty indirect eval enters the latter as an
+ordinary bytecode frame. That frame returns an executable guest function, and
+a named `INDIRECT_EVAL_COMPILE` continuation rewinds only the internal call
+site and invokes the executable through normal bytecode dispatch. No source,
+AST, compiler product, or completion value crosses into a host parser. Direct
+eval retains its separate lexical-environment path until that continuation is
+migrated with its declaration-instantiation semantics intact.
+
+The support-vector ABI used by compiled code is described once by
+`RuntimeSupportLayout`. Kernel-local symbolic constants receive those values
+through `constantOverrides`, so generated code retains immediate operands
+without duplicating layout numbers throughout the implementation. The sorted
+override names and values participate in the native snapshot source hash;
+changing a support slot therefore invalidates an incompatible code snapshot.
+
 `MAKE_FUNCTION` follows the same rule. The native opcode allocates the
 bytecode-function record, its ordinary prototype object, and the reciprocal
 `prototype`/`constructor` properties in one checked guest-heap allocation.

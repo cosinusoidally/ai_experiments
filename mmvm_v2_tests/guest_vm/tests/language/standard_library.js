@@ -13,6 +13,17 @@ assertEqual(dynamicAdd(19, 23), 42,
 assertEqual(new Function("return 7;")(), 7,
             "Function constructor is constructible");
 assertEqual(eval("010"), 8, "non-strict legacy octal literal");
+var indirectEvalFunction = eval;
+indirectEvalFunction("var indirectEvalGlobal = 6 * 7;");
+assertEqual(indirectEvalGlobal, 42, "indirect eval executes as global code");
+var indirectEvalThrew = false;
+try {
+    indirectEvalFunction("throw new Error('indirect eval failure');");
+} catch (indirectEvalError) {
+    indirectEvalThrew = indirectEvalError instanceof Error;
+}
+assertEqual(indirectEvalThrew, true,
+            "indirect eval exceptions unwind into the caller");
 var strictOctalRejected = false;
 try {
     eval("'use strict'; 010");

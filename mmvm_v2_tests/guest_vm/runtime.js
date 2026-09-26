@@ -318,6 +318,7 @@
         this.heapStateSnapshots = [];
         this.hostRoots = [];
         this.evalCompilerRoot = 0;
+        this.indirectEvalCompilerRoot = 0;
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
             normalizeGCThreshold(options.gcThreshold);
@@ -3167,15 +3168,30 @@
             this.makeNativeFunction("__guestVMInstallEvalCompiler",
                 function (receiver, args) {
                     var compiler = args[0];
+                    var indirectCompiler = args[1];
                     if (!compiler || compiler.guestType !==
                             "bytecodeFunction") {
                         throw new TypeError(
                             "eval compiler must be guest bytecode");
                     }
+                    if (!indirectCompiler || indirectCompiler.guestType !==
+                            "bytecodeFunction") {
+                        throw new TypeError(
+                            "indirect eval compiler must be guest bytecode");
+                    }
                     if (runtime.evalCompilerRoot) {
                         runtime.release(runtime.evalCompilerRoot);
                     }
+                    if (runtime.indirectEvalCompilerRoot) {
+                        runtime.release(runtime.indirectEvalCompilerRoot);
+                    }
                     runtime.evalCompilerRoot = runtime.retain(compiler);
+                    runtime.indirectEvalCompilerRoot =
+                        runtime.retain(indirectCompiler);
+                    if (runtime.nativeInterpreter) {
+                        runtime.nativeInterpreter.setEvalCompilers(
+                            compiler, indirectCompiler);
+                    }
                     return undefined;
                 }));
         this.setGlobal("__guestVMProgramCreate", this.makeNativeFunction(
