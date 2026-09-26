@@ -395,15 +395,24 @@ it does not require a host-side special case. Property descriptors are not yet
 implemented. Native functions are trusted implementation records whose
 callbacks receive `(receiver, argumentsArray)` on the semantic path.
 
-## Current standard-library bridge
+## Guest standard-library runtime
 
 The current application-driven subset includes `String`,
 `String.fromCharCode`, the String methods used by `net.js`, `parseInt`, array
-`push`/`sort`, regexp `test`, and regexp-backed String `replace`. Guest regexp
-literals are always tokenized manually. Execution of the provisional regexp
-objects currently delegates matching to the host regexp engine; this is not a
-claim of complete ES5.1 RegExp semantics and must eventually be replaced or
-conformance-qualified where the two supported hosts differ.
+`push`/`sort`, and regular expressions. Guest regexp literals are tokenized
+manually. `regexp_runtime.js` parses and executes patterns as guest bytecode;
+it owns capture state, backtracking, and `lastIndex` behavior and does not call
+the host regexp engine. Immutable parsed trees are retained in a bounded cache
+by source text. `number_runtime.js` similarly provides the guest implementation
+of `Number.prototype.toFixed`.
+
+`GuestNodeEnvironment.installGuestRuntimeLibraries` installs those bytecode
+methods for every native-kernel environment before application execution.
+Standalone snapshot preparation uses that same installed state rather than a
+second bootstrap-specific prototype path. Some RegExp-aware String operations
+remain transitional native intrinsics or semantic callbacks; migrating those
+operations into guest/runtime-kernel code is still required before the full
+standard library can run without semantic exits.
 
 ## Guest Node embedding profile
 

@@ -417,9 +417,49 @@
             });
     }
 
+    var PARSED_PATTERN_CACHE_LIMIT = 256;
+    var parsedPatternSources = [];
+    var parsedPatternTrees = [];
+    var parsedPatternNext = 0;
+    var mostRecentPatternSource = null;
+    var mostRecentPatternTree = null;
+
+    function parsedPattern(source) {
+        if (source === mostRecentPatternSource && mostRecentPatternTree) {
+            return mostRecentPatternTree;
+        }
+        var index = 0;
+        while (index < parsedPatternSources.length) {
+            if (parsedPatternSources[index] === source) {
+                mostRecentPatternSource = source;
+                mostRecentPatternTree = parsedPatternTrees[index];
+                return mostRecentPatternTree;
+            }
+            index++;
+        }
+        var parsed = new Parser(source).parse();
+        if (parsedPatternSources.length < PARSED_PATTERN_CACHE_LIMIT) {
+            parsedPatternSources.push(source);
+            parsedPatternTrees.push(parsed);
+        } else {
+            parsedPatternSources[parsedPatternNext] = source;
+            parsedPatternTrees[parsedPatternNext] = parsed;
+            parsedPatternNext++;
+            if (parsedPatternNext === PARSED_PATTERN_CACHE_LIMIT) {
+                parsedPatternNext = 0;
+            }
+        }
+        mostRecentPatternSource = source;
+        mostRecentPatternTree = parsed;
+        return parsed;
+    }
+
     function execute(regexp, value) {
         var input = String(value);
-        var parsed = new Parser(String(regexp.source)).parse();
+        /* RegExp source and flags are immutable in ES5.1. Parsed pattern trees
+         * can therefore be shared by different RegExp instances with the same
+         * source while lastIndex remains instance-local below. */
+        var parsed = parsedPattern(String(regexp.source));
         var global = !!regexp.global;
         var start = global ? Number(regexp.lastIndex) : 0;
         if (!(start >= 0)) start = 0;

@@ -8,6 +8,25 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.66
+
+Approximate completion: 2026-09-26 late afternoon BST
+
+### Guest VM
+
+- Installed the guest-owned Number and RegExp runtime libraries in every
+  native-kernel environment, not only while preparing a standalone snapshot.
+  Node and js_min therefore exercise the same guest bytecode implementation.
+- Factored runtime-library installation out of standalone snapshot setup, so
+  snapshot preparation no longer carries a duplicate prototype-patching path.
+- Added a bounded, guest-heap compiled-pattern cache to the RegExp engine.
+  Immutable parser trees are shared by RegExp instances with the same ES5.1
+  `source`, while `lastIndex` and flags remain instance execution state.
+- A bounded RegExp profile now records only its five bootstrap/output host
+  calls rather than approximately 20,000 calls to host RegExp/String methods.
+  The full Node regression path continues to pass 12 programs, 266 guest
+  assertions, demo1/demo2 integration, and context multiplexing.
+
 ## 0.65
 
 Approximate completion: 2026-09-26 afternoon BST

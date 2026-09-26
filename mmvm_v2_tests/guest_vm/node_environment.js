@@ -86,7 +86,36 @@
             }
         }
         this.installGlobals();
+        if (this.runtime.regexpPrototype && this.runtime.numberPrototype) {
+            this.installGuestRuntimeLibraries();
+        }
     }
+
+    GuestNodeEnvironment.prototype.installGuestRuntimeLibraries = function () {
+        this.context.run([
+            "load(\"guest_vm/number_runtime.js\");",
+            "load(\"guest_vm/regexp_runtime.js\");"
+        ].join("\n"), "<guest-runtime-libraries>");
+        var methodAttributes =
+            this.runtime.heapRecords.constructor.Attributes.WRITABLE |
+            this.runtime.heapRecords.constructor.Attributes.CONFIGURABLE;
+        this.runtime.defineDataProperty(this.runtime.regexpPrototype, "exec",
+            this.runtime.getGlobal(this.context, "__guestRegExpExec"),
+            methodAttributes);
+        this.runtime.defineDataProperty(this.runtime.regexpPrototype, "test",
+            this.runtime.getGlobal(this.context, "__guestRegExpTest"),
+            methodAttributes);
+        this.runtime.defineDataProperty(this.runtime.numberPrototype,
+            "toFixed",
+            this.runtime.getGlobal(this.context, "__guestNumberToFixed"),
+            methodAttributes);
+        this.runtime.deleteProperty(
+            this.context.globalObject, "__guestRegExpExec", false);
+        this.runtime.deleteProperty(
+            this.context.globalObject, "__guestRegExpTest", false);
+        this.runtime.deleteProperty(
+            this.context.globalObject, "__guestNumberToFixed", false);
+    };
 
     GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
         if (this.nodeHost) {
@@ -107,31 +136,10 @@
             "load(\"node_compat/net.js\");",
             "load(\"node_compat/fs.js\");",
             "load(\"node_compat/http.js\");",
-            "load(\"guest_vm/number_runtime.js\");",
-            "load(\"guest_vm/regexp_runtime.js\");",
             "var GuestStandaloneFrontend = require(" +
                 "\"./guest_vm/self_hosted_frontend.js\");",
             "GuestStandaloneFrontend.installEvalCompiler();"
         ].join("\n"), "<standalone-runtime-bootstrap>");
-        var regexpAttributes =
-            this.runtime.heapRecords.constructor.Attributes.WRITABLE |
-            this.runtime.heapRecords.constructor.Attributes.CONFIGURABLE;
-        this.runtime.defineDataProperty(this.runtime.regexpPrototype, "exec",
-            this.runtime.getGlobal(this.context, "__guestRegExpExec"),
-            regexpAttributes);
-        this.runtime.defineDataProperty(this.runtime.regexpPrototype, "test",
-            this.runtime.getGlobal(this.context, "__guestRegExpTest"),
-            regexpAttributes);
-        this.runtime.defineDataProperty(this.runtime.numberPrototype,
-            "toFixed",
-            this.runtime.getGlobal(this.context, "__guestNumberToFixed"),
-            regexpAttributes);
-        this.runtime.deleteProperty(
-            this.context.globalObject, "__guestRegExpExec", false);
-        this.runtime.deleteProperty(
-            this.context.globalObject, "__guestRegExpTest", false);
-        this.runtime.deleteProperty(
-            this.context.globalObject, "__guestNumberToFixed", false);
     };
 
     GuestNodeEnvironment.prototype.environmentValue = function (name) {

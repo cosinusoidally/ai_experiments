@@ -698,3 +698,24 @@ With both retained changes, EarleyBoyer quick correctness completes in
 2:07.04 at approximately 254 MiB peak RSS. It passes its stock Octane result
 verification. These are general Node execution-backend changes: no benchmark
 source, opcode, property name, or application path is recognized.
+
+## 2026-09-26: guest-owned RegExp execution on every host
+
+The standalone snapshot already replaced `RegExp.prototype.exec` and `test`
+with bytecode functions from `regexp_runtime.js`, but an ordinary native-kernel
+run retained the transitional host callbacks. A RegExp Octane profile crossed
+the semantic boundary roughly 20,000 times in its first few million guest
+bytecodes, principally for `RegExp.exec`.
+
+Guest runtime-library installation is now a single environment operation used
+by ordinary native-kernel execution and snapshot preparation. The same bounded
+profile subsequently recorded only five calls: four source-loader calls for
+the runtime and benchmark modules, plus `print`. RegExp matching and
+backtracking remained in guest bytecode throughout.
+
+The guest RegExp engine now retains at most 256 immutable parsed pattern trees,
+keyed by ES5.1 RegExp source text, with a most-recent entry fast path. Flags and
+`lastIndex` are deliberately excluded: flags are consumed as execution state,
+and `lastIndex` belongs to each RegExp instance. Bounding the cache avoids an
+unbounded runtime-lifetime retention path for dynamically generated patterns.
+This is general engine state and does not recognize benchmark patterns.
