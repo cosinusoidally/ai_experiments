@@ -719,3 +719,34 @@ keyed by ES5.1 RegExp source text, with a most-recent entry fast path. Flags and
 and `lastIndex` belongs to each RegExp instance. Bounding the cache avoids an
 unbounded runtime-lifetime retention path for dynamically generated patterns.
 This is general engine state and does not recognize benchmark patterns.
+
+## 2026-09-26: explicit guest RegExp machine
+
+The original guest matcher represented sequencing, alternatives, and repeats
+with newly allocated continuation closures and capture-array copies. A full
+RegExp quick run under Node remained active after 8:24 and reached about
+652 MiB RSS. Installing guest String methods exposed the same allocation model
+more broadly; it was not suitable as the final self-hosted engine.
+
+Patterns now compile once to named instructions for characters, classes,
+assertions, captures, branches, lookahead, backreferences, and counted
+repetition. The executor uses explicit program counters and reusable flat
+backtracking workspaces. Counted repeat instructions avoid source/code growth
+for large `{m,n}` quantifiers and record the previous input position so an
+empty repeated atom cannot loop indefinitely. Conservative anchored and common
+leading-literal metadata rejects impossible start positions before allocating
+matcher state.
+
+Across successive versions of the same three-million-bytecode Node profile,
+the guest heap bump changed from roughly 22.0 MiB for continuation execution,
+to 15.5 MiB for the first explicit machine, and to 13.0 MiB after reusable
+workspaces. Kernel time moved from 7.66 seconds to 6.88 seconds. The profile
+continues to report only five host calls for module loading and output.
+
+The standalone i386 smoke path now runs RegExp `exec`/`test` and String
+`split`, global/capturing `match`, string replacement, and callback replacement
+without a host VM. The complete Node and js_min suites pass, together with the
+standalone generic-program and byte-identical snapshot fixed-point tests. The
+full Octane RegExp workload remains too slow and is not recorded as complete;
+further work must reduce general guest matcher/interpreter cost rather than
+delegate matching back to a host regexp engine.

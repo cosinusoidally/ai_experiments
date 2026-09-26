@@ -241,16 +241,6 @@
         return {alternatives: alternatives, captures: this.captureCount};
     };
 
-    function copyCaptures(captures) {
-        var result = [];
-        var index = 0;
-        while (index < captures.length) {
-            result[index] = captures[index];
-            index++;
-        }
-        return result;
-    }
-
     function lowerAscii(code) {
         return code >= 65 && code <= 90 ? code + 32 : code;
     }
@@ -292,129 +282,327 @@
         return node.invert ? !matched : matched;
     }
 
-    function alternatives(machine, branches, position, captures, done) {
-        var index = 0;
-        while (index < branches.length) {
-            var result = sequence(machine, branches[index++], 0, position,
-                                  copyCaptures(captures), done);
-            if (result) return result;
-        }
-        return null;
+    var RX_MATCH = 0;
+    var RX_LITERAL = 1;
+    var RX_DOT = 2;
+    var RX_CLASS = 3;
+    var RX_CLASS_ESCAPE = 4;
+    var RX_START = 5;
+    var RX_END = 6;
+    var RX_BOUNDARY = 7;
+    var RX_BACKREF = 8;
+    var RX_SAVE_START = 9;
+    var RX_SAVE_END = 10;
+    var RX_SPLIT = 11;
+    var RX_JUMP = 12;
+    var RX_LOOKAHEAD = 13;
+    var RX_REPEAT_INIT = 14;
+    var RX_REPEAT_DECIDE = 15;
+    var RX_REPEAT_MARK = 16;
+    var RX_REPEAT_NEXT = 17;
+
+    function emit(code, instruction) {
+        code.push(instruction);
+        return code.length - 1;
     }
 
-    function atom(machine, node, position, captures, done) {
-        var input = machine.input;
-        var code;
-        if (node.kind === "start") {
-            if (position === 0 || machine.multiline && position > 0 &&
-                (input.charCodeAt(position - 1) === 10 ||
-                 input.charCodeAt(position - 1) === 13)) {
-                return done(position, captures);
+    function compileAlternatives(branches, code, compiler) {
+        var endJumps = [];
+        var branchIndex = 0;
+        while (branchIndex < branches.length) {
+            var splitIndex = -1;
+            if (branchIndex + 1 < branches.length) {
+                splitIndex = emit(code, {opcode: RX_SPLIT, first: code.length + 1,
+                                         second: 0});
             }
-            return null;
-        }
-        if (node.kind === "end") {
-            if (position === input.length || machine.multiline &&
-                (input.charCodeAt(position) === 10 ||
-                 input.charCodeAt(position) === 13)) {
-                return done(position, captures);
+            compileSequence(branches[branchIndex++], code, compiler);
+            if (branchIndex < branches.length) {
+                endJumps.push(emit(code, {opcode: RX_JUMP, target: 0}));
+                code[splitIndex].second = code.length;
             }
-            return null;
         }
-        if (node.kind === "boundary") {
-            var before = position > 0 && word(input.charCodeAt(position - 1));
-            var after = position < input.length && word(input.charCodeAt(position));
-            return ((before !== after) !== node.invert) ?
-                done(position, captures) : null;
+        var end = code.length;
+        var jumpIndex = 0;
+        while (jumpIndex < endJumps.length) {
+            code[endJumps[jumpIndex++]].target = end;
         }
-        if (node.kind === "lookahead") {
-            var look = alternatives(machine, node.alternatives, position,
-                copyCaptures(captures), function (end, resultCaptures) {
-                    return {position: end, captures: resultCaptures};
-                });
-            if (node.positive) {
-                return look ? done(position, look.captures) : null;
-            }
-            return look ? null : done(position, captures);
-        }
+    }
+
+    function compileAtom(node, code, compiler) {
         if (node.kind === "group") {
-            var start = position;
-            return alternatives(machine, node.alternatives, position, captures,
-                function (end, resultCaptures) {
-                    if (node.capture > 0) {
-                        resultCaptures = copyCaptures(resultCaptures);
-                        resultCaptures[node.capture * 2] = start;
-                        resultCaptures[node.capture * 2 + 1] = end;
-                    }
-                    return done(end, resultCaptures);
-                });
-        }
-        if (node.kind === "backref") {
-            var captureStart = captures[node.capture * 2];
-            var captureEnd = captures[node.capture * 2 + 1];
-            if (captureStart === undefined || captureEnd === undefined) {
-                return done(position, captures);
+            if (node.capture > 0) {
+                emit(code, {opcode: RX_SAVE_START, capture: node.capture});
             }
-            var length = captureEnd - captureStart;
-            if (position + length > input.length) return null;
-            var offset = 0;
-            while (offset < length) {
-                var left = input.charCodeAt(captureStart + offset);
-                var right = input.charCodeAt(position + offset);
-                if (machine.ignoreCase) {
-                    left = lowerAscii(left);
-                    right = lowerAscii(right);
+            compileAlternatives(node.alternatives, code, compiler);
+            if (node.capture > 0) {
+                emit(code, {opcode: RX_SAVE_END, capture: node.capture});
+            }
+        } else if (node.kind === "lookahead") {
+            var lookCode = [];
+            compileAlternatives(node.alternatives, lookCode, compiler);
+            emit(lookCode, {opcode: RX_MATCH});
+            var lookProgram = {code: lookCode, stateSlots: 0, workspace: null};
+            compiler.programs.push(lookProgram);
+            emit(code, {opcode: RX_LOOKAHEAD, program: lookProgram,
+                        positive: node.positive});
+        } else {
+            var opcodes = {literal: RX_LITERAL, dot: RX_DOT,
+                "class": RX_CLASS, classEscape: RX_CLASS_ESCAPE,
+                start: RX_START, end: RX_END, boundary: RX_BOUNDARY,
+                backref: RX_BACKREF};
+            emit(code, {opcode: opcodes[node.kind], node: node});
+        }
+    }
+
+    function compilePiece(piece, code, compiler) {
+        var countSlot = compiler.nextStateSlot++;
+        var positionSlot = compiler.nextStateSlot++;
+        var initialize = emit(code, {opcode: RX_REPEAT_INIT,
+                                     countSlot: countSlot});
+        var decide = emit(code, {opcode: RX_REPEAT_DECIDE,
+            countSlot: countSlot, minimum: piece.minimum,
+            maximum: piece.maximum, greedy: piece.greedy,
+            body: 0, exit: 0});
+        code[initialize].target = decide;
+        code[decide].body = code.length;
+        emit(code, {opcode: RX_REPEAT_MARK, positionSlot: positionSlot});
+        compileAtom(piece.atom, code, compiler);
+        emit(code, {opcode: RX_REPEAT_NEXT, countSlot: countSlot,
+            positionSlot: positionSlot, decide: decide, exit: 0});
+        var exit = code.length;
+        code[decide].exit = exit;
+        code[code.length - 1].exit = exit;
+    }
+
+    function compileSequence(pieces, code, compiler) {
+        var index = 0;
+        while (index < pieces.length) {
+            compilePiece(pieces[index++], code, compiler);
+        }
+    }
+
+    function patternStartMetadata(parsed) {
+        var anchored = true;
+        var firstLiteralCode = -1;
+        var literalKnown = true;
+        var branchIndex = 0;
+        while (branchIndex < parsed.alternatives.length) {
+            var pieces = parsed.alternatives[branchIndex++];
+            var pieceIndex = 0;
+            var branchAnchored = false;
+            if (pieceIndex < pieces.length && pieces[pieceIndex].minimum > 0 &&
+                pieces[pieceIndex].atom.kind === "start") {
+                branchAnchored = true;
+                pieceIndex++;
+            }
+            if (!branchAnchored) anchored = false;
+            if (pieceIndex >= pieces.length ||
+                pieces[pieceIndex].minimum <= 0 ||
+                pieces[pieceIndex].atom.kind !== "literal") {
+                literalKnown = false;
+            } else if (firstLiteralCode < 0) {
+                firstLiteralCode = pieces[pieceIndex].atom.code;
+            } else if (firstLiteralCode !== pieces[pieceIndex].atom.code) {
+                literalKnown = false;
+            }
+        }
+        if (!literalKnown) firstLiteralCode = -1;
+        return {anchored: anchored, firstLiteralCode: firstLiteralCode};
+    }
+
+    function compilePattern(parsed) {
+        var compiler = {nextStateSlot: parsed.captures * 2 + 2, programs: []};
+        var code = [];
+        var startMetadata = patternStartMetadata(parsed);
+        compileAlternatives(parsed.alternatives, code, compiler);
+        emit(code, {opcode: RX_MATCH});
+        var program = {code: code, captures: parsed.captures,
+                stateSlots: compiler.nextStateSlot,
+                anchored: startMetadata.anchored,
+                firstLiteralCode: startMetadata.firstLiteralCode,
+                workspace: null};
+        compiler.programs.push(program);
+        var programIndex = 0;
+        while (programIndex < compiler.programs.length) {
+            compiler.programs[programIndex++].stateSlots =
+                compiler.nextStateSlot;
+        }
+        return program;
+    }
+
+    function runPattern(program, machine, start, initialState) {
+        var code = program.code;
+        var input = machine.input;
+        var pc = 0;
+        var position = start;
+        var workspace = program.workspace;
+        if (!workspace) {
+            workspace = {state: [], stackPc: [], stackPosition: [],
+                         stackState: []};
+            program.workspace = workspace;
+        }
+        var state = workspace.state;
+        var stateIndex = 0;
+        while (stateIndex < program.stateSlots) {
+            state[stateIndex] = initialState ?
+                initialState[stateIndex] : undefined;
+            stateIndex++;
+        }
+        var stackPc = workspace.stackPc;
+        var stackPosition = workspace.stackPosition;
+        var stackState = workspace.stackState;
+        var stackDepth = 0;
+
+        function fail() {
+            if (stackDepth === 0) return false;
+            stackDepth--;
+            pc = stackPc[stackDepth];
+            position = stackPosition[stackDepth];
+            var stateOffset = stackDepth * program.stateSlots;
+            var restoreIndex = 0;
+            while (restoreIndex < program.stateSlots) {
+                state[restoreIndex] = stackState[stateOffset + restoreIndex];
+                restoreIndex++;
+            }
+            return true;
+        }
+
+        function push(nextPc) {
+            stackPc[stackDepth] = nextPc;
+            stackPosition[stackDepth] = position;
+            var stateOffset = stackDepth * program.stateSlots;
+            var saveIndex = 0;
+            while (saveIndex < program.stateSlots) {
+                stackState[stateOffset + saveIndex] = state[saveIndex];
+                saveIndex++;
+            }
+            stackDepth++;
+        }
+
+        while (true) {
+            var instruction = code[pc];
+            var node = instruction.node;
+            var matched = true;
+            var characterCode;
+            if (instruction.opcode === RX_MATCH) {
+                return {position: position, state: state};
+            } else if (instruction.opcode === RX_SPLIT) {
+                push(instruction.second);
+                pc = instruction.first;
+                continue;
+            } else if (instruction.opcode === RX_JUMP) {
+                pc = instruction.target;
+                continue;
+            } else if (instruction.opcode === RX_REPEAT_INIT) {
+                state[instruction.countSlot] = 0;
+                pc = instruction.target;
+                continue;
+            } else if (instruction.opcode === RX_REPEAT_DECIDE) {
+                var repeatCount = state[instruction.countSlot];
+                if (repeatCount < instruction.minimum) {
+                    pc = instruction.body;
+                } else if (instruction.maximum >= 0 &&
+                           repeatCount >= instruction.maximum) {
+                    pc = instruction.exit;
+                } else if (instruction.greedy) {
+                    push(instruction.exit);
+                    pc = instruction.body;
+                } else {
+                    push(instruction.body);
+                    pc = instruction.exit;
                 }
-                if (left !== right) return null;
-                offset++;
-            }
-            return done(position + length, captures);
-        }
-        if (position >= input.length) return null;
-        code = input.charCodeAt(position);
-        var matched = false;
-        if (node.kind === "dot") matched = code !== 10 && code !== 13 &&
-            code !== 8232 && code !== 8233;
-        else if (node.kind === "class") matched = classMatches(node, code,
-                                                                machine.ignoreCase);
-        else if (node.kind === "classEscape") matched = classEscape(node.name, code);
-        else {
-            var expected = node.code;
-            if (machine.ignoreCase) {
-                code = lowerAscii(code);
-                expected = lowerAscii(expected);
-            }
-            matched = code === expected;
-        }
-        return matched ? done(position + 1, captures) : null;
-    }
-
-    function repeat(machine, piece, count, position, captures, done) {
-        function stop() {
-            return count >= piece.minimum ? done(position, captures) : null;
-        }
-        function more() {
-            if (piece.maximum >= 0 && count >= piece.maximum) return null;
-            return atom(machine, piece.atom, position, copyCaptures(captures),
-                function (end, resultCaptures) {
-                    if (end === position) {
-                        return count + 1 >= piece.minimum ?
-                            done(end, resultCaptures) : null;
+                continue;
+            } else if (instruction.opcode === RX_REPEAT_MARK) {
+                state[instruction.positionSlot] = position;
+                pc++;
+                continue;
+            } else if (instruction.opcode === RX_REPEAT_NEXT) {
+                state[instruction.countSlot]++;
+                pc = state[instruction.positionSlot] === position ?
+                    instruction.exit : instruction.decide;
+                continue;
+            } else if (instruction.opcode === RX_SAVE_START) {
+                state[instruction.capture * 2] = position;
+                pc++;
+                continue;
+            } else if (instruction.opcode === RX_SAVE_END) {
+                state[instruction.capture * 2 + 1] = position;
+                pc++;
+                continue;
+            } else if (instruction.opcode === RX_LOOKAHEAD) {
+                var look = runPattern(
+                    instruction.program, machine, position, state);
+                if (!!look === instruction.positive) {
+                    if (instruction.positive) {
+                        var lookStateIndex = 0;
+                        while (lookStateIndex < program.stateSlots) {
+                            state[lookStateIndex] =
+                                look.state[lookStateIndex];
+                            lookStateIndex++;
+                        }
                     }
-                    return repeat(machine, piece, count + 1, end,
-                                  resultCaptures, done);
-                });
+                    pc++;
+                    continue;
+                }
+                matched = false;
+            } else if (instruction.opcode === RX_START) {
+                matched = position === 0 || machine.multiline && position > 0 &&
+                    (input.charCodeAt(position - 1) === 10 ||
+                     input.charCodeAt(position - 1) === 13);
+            } else if (instruction.opcode === RX_END) {
+                matched = position === input.length || machine.multiline &&
+                    (input.charCodeAt(position) === 10 ||
+                     input.charCodeAt(position) === 13);
+            } else if (instruction.opcode === RX_BOUNDARY) {
+                var before = position > 0 && word(input.charCodeAt(position - 1));
+                var after = position < input.length &&
+                    word(input.charCodeAt(position));
+                matched = (before !== after) !== node.invert;
+            } else if (instruction.opcode === RX_BACKREF) {
+                var captureStart = state[node.capture * 2];
+                var captureEnd = state[node.capture * 2 + 1];
+                if (captureStart !== undefined && captureEnd !== undefined) {
+                    var captureLength = captureEnd - captureStart;
+                    matched = position + captureLength <= input.length;
+                    var captureOffset = 0;
+                    while (matched && captureOffset < captureLength) {
+                        var leftCode = input.charCodeAt(captureStart + captureOffset);
+                        var rightCode = input.charCodeAt(position + captureOffset);
+                        if (machine.ignoreCase) {
+                            leftCode = lowerAscii(leftCode);
+                            rightCode = lowerAscii(rightCode);
+                        }
+                        matched = leftCode === rightCode;
+                        captureOffset++;
+                    }
+                    if (matched) position += captureLength;
+                }
+            } else {
+                matched = position < input.length;
+                if (matched) {
+                    characterCode = input.charCodeAt(position);
+                    if (instruction.opcode === RX_DOT) {
+                        matched = characterCode !== 10 && characterCode !== 13 &&
+                            characterCode !== 8232 && characterCode !== 8233;
+                    } else if (instruction.opcode === RX_CLASS) {
+                        matched = classMatches(node, characterCode,
+                                               machine.ignoreCase);
+                    } else if (instruction.opcode === RX_CLASS_ESCAPE) {
+                        matched = classEscape(node.name, characterCode);
+                    } else {
+                        var expectedCode = node.code;
+                        if (machine.ignoreCase) {
+                            characterCode = lowerAscii(characterCode);
+                            expectedCode = lowerAscii(expectedCode);
+                        }
+                        matched = characterCode === expectedCode;
+                    }
+                    if (matched) position++;
+                }
+            }
+            if (matched) pc++;
+            else if (!fail()) return null;
         }
-        return piece.greedy ? more() || stop() : stop() || more();
-    }
-
-    function sequence(machine, pieces, index, position, captures, done) {
-        if (index >= pieces.length) return done(position, captures);
-        return repeat(machine, pieces[index], 0, position, captures,
-            function (end, resultCaptures) {
-                return sequence(machine, pieces, index + 1, end,
-                                resultCaptures, done);
-            });
     }
 
     var PARSED_PATTERN_CACHE_LIMIT = 256;
@@ -437,7 +625,7 @@
             }
             index++;
         }
-        var parsed = new Parser(source).parse();
+        var parsed = compilePattern(new Parser(source).parse());
         if (parsedPatternSources.length < PARSED_PATTERN_CACHE_LIMIT) {
             parsedPatternSources.push(source);
             parsedPatternTrees.push(parsed);
@@ -467,18 +655,27 @@
         var machine = {input: input, ignoreCase: !!regexp.ignoreCase,
                        multiline: !!regexp.multiline};
         while (start <= input.length) {
-            var captures = [];
-            var result = alternatives(machine, parsed.alternatives, start,
-                captures, function (end, resultCaptures) {
-                    return {position: end, captures: resultCaptures};
-                });
+            if (parsed.anchored && !machine.multiline && start > 0) break;
+            if (parsed.firstLiteralCode >= 0 && start < input.length) {
+                var candidateCode = input.charCodeAt(start);
+                var requiredCode = parsed.firstLiteralCode;
+                if (machine.ignoreCase) {
+                    candidateCode = lowerAscii(candidateCode);
+                    requiredCode = lowerAscii(requiredCode);
+                }
+                if (candidateCode !== requiredCode) {
+                    start++;
+                    continue;
+                }
+            }
+            var result = runPattern(parsed, machine, start, null);
             if (result) {
                 var match = [];
                 match[0] = input.substring(start, result.position);
                 var capture = 1;
                 while (capture <= parsed.captures) {
-                    var captureStart = result.captures[capture * 2];
-                    var captureEnd = result.captures[capture * 2 + 1];
+                    var captureStart = result.state[capture * 2];
+                    var captureEnd = result.state[capture * 2 + 1];
                     match[capture] = captureStart === undefined ? undefined :
                         input.substring(captureStart, captureEnd);
                     capture++;
@@ -500,6 +697,218 @@
     var guestTest = function (value) {
         return execute(this, value) !== null;
     };
+
+    function regexpFlags(regexp, forceGlobal) {
+        var flags = "";
+        if (regexp.global || forceGlobal) flags += "g";
+        if (regexp.ignoreCase) flags += "i";
+        if (regexp.multiline) flags += "m";
+        return flags;
+    }
+
+    function asRegExp(value, forceGlobal) {
+        if (value instanceof RegExp) {
+            if (!forceGlobal || value.global) return value;
+            return new RegExp(value.source, regexpFlags(value, true));
+        }
+        return new RegExp(value === undefined ? "" : String(value),
+                          forceGlobal ? "g" : "");
+    }
+
+    function advanceEmptyMatch(regexp, match, inputLength) {
+        if (match[0] !== "") return false;
+        if (regexp.lastIndex > inputLength) return true;
+        regexp.lastIndex = Number(regexp.lastIndex) + 1;
+        return false;
+    }
+
+    function stringReceiver(value) {
+        /* Non-strict guest calls box a primitive receiver. Unbox the ordinary
+         * String wrapper before invoking the general String conversion, whose
+         * object-to-primitive continuation is not needed for this hot path. */
+        if (typeof value === "string") return value;
+        if (value instanceof String) return value.valueOf();
+        return String(value);
+    }
+
+    var guestStringMatch = function (value) {
+        var input = stringReceiver(this);
+        var regexp = asRegExp(value, false);
+        if (!regexp.global) return execute(regexp, input);
+        regexp.lastIndex = 0;
+        var matches = [];
+        var match;
+        while ((match = execute(regexp, input)) !== null) {
+            matches.push(match[0]);
+            if (advanceEmptyMatch(regexp, match, input.length)) break;
+        }
+        regexp.lastIndex = 0;
+        return matches.length ? matches : null;
+    };
+
+    function replacementText(template, match, input) {
+        template = String(template);
+        var output = "";
+        var index = 0;
+        while (index < template.length) {
+            var character = template.charAt(index++);
+            if (character !== "$" || index >= template.length) {
+                output += character;
+                continue;
+            }
+            var marker = template.charAt(index);
+            if (marker === "$") {
+                output += "$";
+                index++;
+            } else if (marker === "&") {
+                output += match[0];
+                index++;
+            } else if (marker === "`") {
+                output += input.substring(0, match.index);
+                index++;
+            } else if (marker === "'") {
+                output += input.substring(match.index + match[0].length);
+                index++;
+            } else {
+                var first = marker.charCodeAt(0) - 48;
+                if (first < 0 || first > 9 || first === 0) {
+                    output += "$";
+                    continue;
+                }
+                var capture = first;
+                var consumed = 1;
+                if (index + 1 < template.length) {
+                    var second = template.charCodeAt(index + 1) - 48;
+                    var combined = capture * 10 + second;
+                    if (second >= 0 && second <= 9 &&
+                        combined < match.length) {
+                        capture = combined;
+                        consumed = 2;
+                    }
+                }
+                if (capture < match.length) {
+                    if (match[capture] !== undefined) {
+                        output += match[capture];
+                    }
+                    index += consumed;
+                } else output += "$";
+            }
+        }
+        return output;
+    }
+
+    function replacementFor(replacement, match, input) {
+        if (typeof replacement === "function") {
+            var argumentsList = [];
+            var index = 0;
+            while (index < match.length) argumentsList.push(match[index++]);
+            argumentsList.push(match.index);
+            argumentsList.push(input);
+            return String(replacement.apply(undefined, argumentsList));
+        }
+        return replacementText(replacement, match, input);
+    }
+
+    var guestStringReplace = function (searchValue, replacement) {
+        var input = stringReceiver(this);
+        if (!(searchValue instanceof RegExp)) {
+            var searchText = String(searchValue);
+            var position = input.indexOf(searchText);
+            if (position < 0) return input;
+            var plainMatch = [searchText];
+            plainMatch.index = position;
+            plainMatch.input = input;
+            return input.substring(0, position) +
+                replacementFor(replacement, plainMatch, input) +
+                input.substring(position + searchText.length);
+        }
+        var regexp = searchValue;
+        var global = !!regexp.global;
+        if (global) regexp.lastIndex = 0;
+        var output = "";
+        var sourcePosition = 0;
+        var match;
+        while ((match = execute(regexp, input)) !== null) {
+            output += input.substring(sourcePosition, match.index);
+            output += replacementFor(replacement, match, input);
+            sourcePosition = match.index + match[0].length;
+            if (!global) break;
+            if (advanceEmptyMatch(regexp, match, input.length)) break;
+        }
+        if (global) regexp.lastIndex = 0;
+        return output + input.substring(sourcePosition);
+    };
+
+    function splitLimit(value) {
+        if (value === undefined) return 4294967295;
+        var number = Number(value);
+        if (!(number === number) || number === 0 ||
+            number === Infinity || number === -Infinity) return 0;
+        number = number < 0 ? Math.ceil(number) : Math.floor(number);
+        number %= 4294967296;
+        if (number < 0) number += 4294967296;
+        return number;
+    }
+
+    var guestStringSplit = function (separator, limitValue) {
+        var input = stringReceiver(this);
+        var limit = splitLimit(limitValue);
+        var result = [];
+        if (limit === 0) return result;
+        if (separator === undefined) {
+            result.push(input);
+            return result;
+        }
+        if (!(separator instanceof RegExp)) {
+            var separatorText = String(separator);
+            if (separatorText === "") {
+                var characterIndex = 0;
+                while (characterIndex < input.length && result.length < limit) {
+                    result.push(input.charAt(characterIndex++));
+                }
+                return result;
+            }
+            var stringStart = 0;
+            var stringMatch;
+            while (result.length < limit &&
+                   (stringMatch = input.indexOf(separatorText, stringStart)) >= 0) {
+                result.push(input.substring(stringStart, stringMatch));
+                stringStart = stringMatch + separatorText.length;
+            }
+            if (result.length < limit) result.push(input.substring(stringStart));
+            return result;
+        }
+        var splitter = asRegExp(separator, true);
+        splitter.lastIndex = 0;
+        var sourcePosition = 0;
+        var match;
+        while (result.length < limit &&
+               (match = execute(splitter, input)) !== null) {
+            var matchEnd = match.index + match[0].length;
+            if (matchEnd === sourcePosition && match[0] === "") {
+                if (advanceEmptyMatch(splitter, match, input.length)) break;
+                continue;
+            }
+            result.push(input.substring(sourcePosition, match.index));
+            var capture = 1;
+            while (capture < match.length && result.length < limit) {
+                result.push(match[capture++]);
+            }
+            sourcePosition = matchEnd;
+            if (advanceEmptyMatch(splitter, match, input.length)) break;
+        }
+        if (result.length < limit) result.push(input.substring(sourcePosition));
+        return result;
+    };
+
+    var guestStringSearch = function (value) {
+        var regexp = asRegExp(value, false);
+        var previousLastIndex = regexp.lastIndex;
+        regexp.lastIndex = 0;
+        var match = execute(regexp, stringReceiver(this));
+        regexp.lastIndex = previousLastIndex;
+        return match ? match.index : -1;
+    };
     /* The snapshot embedder installs these bytecode functions on the guest
      * RegExp prototype after this bootstrap program returns.  Publishing the
      * functions also keeps this module independent of the bootstrap host: the
@@ -507,4 +916,8 @@
      * runtime heap. */
     this.__guestRegExpExec = guestExec;
     this.__guestRegExpTest = guestTest;
+    this.__guestStringMatch = guestStringMatch;
+    this.__guestStringReplace = guestStringReplace;
+    this.__guestStringSplit = guestStringSplit;
+    this.__guestStringSearch = guestStringSearch;
 }());

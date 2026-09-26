@@ -409,10 +409,19 @@ of `Number.prototype.toFixed`.
 `GuestNodeEnvironment.installGuestRuntimeLibraries` installs those bytecode
 methods for every native-kernel environment before application execution.
 Standalone snapshot preparation uses that same installed state rather than a
-second bootstrap-specific prototype path. Some RegExp-aware String operations
-remain transitional native intrinsics or semantic callbacks; migrating those
-operations into guest/runtime-kernel code is still required before the full
-standard library can run without semantic exits.
+second bootstrap-specific prototype path. RegExp-aware `String.match`,
+`replace`, `split`, and `search` are installed from the same module and consume
+guest matcher results without a semantic callback.
+
+The matcher compiles parser trees to a compact internal instruction graph.
+Alternation and repetition use explicit backtracking states; capture slots and
+repeat counters live in a flat state vector. Each compiled program owns a
+reusable workspace with flat snapshot storage, avoiding continuation closures
+and per-candidate stack arrays. Lookahead subprograms have independent
+workspaces, so nested matching cannot overwrite the caller's state. Parsed
+programs also retain conservative start metadata for fully anchored patterns
+and a common mandatory first literal. The metadata can reject impossible
+candidate positions but never changes the accepted language.
 
 ## Guest Node embedding profile
 

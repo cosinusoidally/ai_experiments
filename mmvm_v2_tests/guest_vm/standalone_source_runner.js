@@ -228,7 +228,7 @@ function guestStandaloneExecute(path, programArguments) {
     guestStandaloneProfileEnd("execute " + path, phaseStarted);
 }
 
-function guestStandaloneRunGuestRunner(runnerArguments) {
+function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
     var snapshotPath = null;
     var programPath = null;
     var programArguments = [];
@@ -255,6 +255,16 @@ function guestStandaloneRunGuestRunner(runnerArguments) {
         throw new Error("guest_runner.js requires a program");
     }
     guestStandaloneExecute(programPath, programArguments);
+}
+
+function guestStandaloneRunGuestRunner(runnerArguments) {
+    try {
+        guestStandaloneRunGuestRunnerUnchecked(runnerArguments);
+    } catch (error) {
+        var description = error && error.stack ? error.stack : String(error);
+        console.error(description);
+        guestStandaloneQuit(3);
+    }
 }
 
 __guestVMStandaloneRunGuestRunner = guestStandaloneRunGuestRunner;

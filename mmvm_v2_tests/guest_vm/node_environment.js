@@ -99,22 +99,21 @@
         var methodAttributes =
             this.runtime.heapRecords.constructor.Attributes.WRITABLE |
             this.runtime.heapRecords.constructor.Attributes.CONFIGURABLE;
-        this.runtime.defineDataProperty(this.runtime.regexpPrototype, "exec",
-            this.runtime.getGlobal(this.context, "__guestRegExpExec"),
-            methodAttributes);
-        this.runtime.defineDataProperty(this.runtime.regexpPrototype, "test",
-            this.runtime.getGlobal(this.context, "__guestRegExpTest"),
-            methodAttributes);
-        this.runtime.defineDataProperty(this.runtime.numberPrototype,
-            "toFixed",
-            this.runtime.getGlobal(this.context, "__guestNumberToFixed"),
-            methodAttributes);
-        this.runtime.deleteProperty(
-            this.context.globalObject, "__guestRegExpExec", false);
-        this.runtime.deleteProperty(
-            this.context.globalObject, "__guestRegExpTest", false);
-        this.runtime.deleteProperty(
-            this.context.globalObject, "__guestNumberToFixed", false);
+        var environment = this;
+        function install(prototype, name, globalName) {
+            environment.runtime.defineDataProperty(prototype, name,
+                environment.runtime.getGlobal(environment.context, globalName),
+                methodAttributes);
+            environment.runtime.deleteProperty(
+                environment.context.globalObject, globalName, false);
+        }
+        install(this.runtime.regexpPrototype, "exec", "__guestRegExpExec");
+        install(this.runtime.regexpPrototype, "test", "__guestRegExpTest");
+        install(this.runtime.stringPrototype, "match", "__guestStringMatch");
+        install(this.runtime.stringPrototype, "replace", "__guestStringReplace");
+        install(this.runtime.stringPrototype, "split", "__guestStringSplit");
+        install(this.runtime.stringPrototype, "search", "__guestStringSearch");
+        install(this.runtime.numberPrototype, "toFixed", "__guestNumberToFixed");
     };
 
     GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {

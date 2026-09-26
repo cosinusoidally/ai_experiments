@@ -8,6 +8,28 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.67
+
+Approximate completion: 2026-09-26 evening BST
+
+### Guest VM
+
+- Moved RegExp-aware `String.match`, `replace`, `split`, and `search` onto the
+  guest-owned matcher, including captures, global and zero-length progress,
+  replacement substitutions, and callable replacement arguments.
+- Replaced the allocation-heavy continuation matcher with an explicit
+  backtracking VM. Named instructions cover alternatives, groups, lookahead,
+  backreferences, assertions, and counted greedy/lazy repetition without
+  expanding large quantifiers into repeated code.
+- Added reusable flat state/backtracking workspaces and compile-time anchored
+  and mandatory-leading-literal metadata. The same bounded RegExp workload's
+  guest heap bump fell from 22.0 MiB to 13.0 MiB while host semantic calls
+  remained limited to module loading and output.
+- Standalone programs now format caught guest exceptions before exiting, and
+  guest String wrappers are unboxed without requiring a semantic callback.
+  Full Node and js_min suites pass, as does the generic standalone snapshot
+  and byte-identical fixed-point suite.
+
 ## 0.66
 
 Approximate completion: 2026-09-26 late afternoon BST
