@@ -98,6 +98,22 @@
         this.writeU32(address, value);
     };
 
+    LinearMemory.prototype.readRawU8Trusted = function (address) {
+        return this.readU8Trusted(address);
+    };
+
+    LinearMemory.prototype.writeRawU8Trusted = function (address, value) {
+        this.writeU8Trusted(address, value);
+    };
+
+    LinearMemory.prototype.readRawU32Trusted = function (address) {
+        return this.readU32Trusted(address);
+    };
+
+    LinearMemory.prototype.writeRawU32Trusted = function (address, value) {
+        this.writeU32Trusted(address, value);
+    };
+
     LinearMemory.prototype.readU32 = function (address) {
         this.checkRange(address, 4);
         return this.host.read32LE(this.allocation, address);
@@ -132,8 +148,15 @@
     };
 
     LinearMemory.prototype.readF64Trusted = function (address) {
-        return Binary64.decode(this.host.read32LE(this.allocation, address),
-            this.host.read32LE(this.allocation, address + 4));
+        return Binary64.decode(
+            this.host.read32LETrusted(this.allocation, address),
+            this.host.read32LETrusted(this.allocation, address + 4));
+    };
+
+    LinearMemory.prototype.writeF64Trusted = function (address, value) {
+        var words = Binary64.encode(Number(value));
+        this.host.write32LETrusted(this.allocation, address, words.low);
+        this.host.write32LETrusted(this.allocation, address + 4, words.high);
     };
 
     LinearMemory.prototype.writeF64 = function (address, value) {

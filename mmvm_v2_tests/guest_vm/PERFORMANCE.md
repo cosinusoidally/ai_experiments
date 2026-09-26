@@ -677,3 +677,24 @@ or store. The shared kernel integration test executes byte and word reads and
 writes through the JavaScript backend and verifies that i386 output uses the
 corresponding macro-assembler operations. This is backend completion rather
 than a benchmark-specific fast path.
+
+## 2026-09-26: direct paged words in the JavaScript backend
+
+A CPU profile of a fixed EarleyBoyer prefix showed that Node spent most of its
+time in `HostMemory`: every 32-bit heap field load performed four byte-helper
+calls, and each helper repeated allocation/page work. Reading or writing all
+four bytes after one page lookup reduced 1,018,021 bytecodes from 14.71 seconds
+to 5.55 seconds. Cross-page words still use the byte helpers, preserving
+unaligned boundary behavior.
+
+Generated JavaScript kernels were also paying checked public-memory overhead
+that generated i386 code does not have. Routing compiler-emitted byte, word,
+and binary64 operations through named trusted accessors reduced the same
+prefix to 4.89 seconds. The public API remains checked. An experiment with a
+shared `Uint32Array` page view was discarded after it regressed the prefix to
+6.06 seconds; the committed representation remains the simpler byte page.
+
+With both retained changes, EarleyBoyer quick correctness completes in
+2:07.04 at approximately 254 MiB peak RSS. It passes its stock Octane result
+verification. These are general Node execution-backend changes: no benchmark
+source, opcode, property name, or application path is recognized.

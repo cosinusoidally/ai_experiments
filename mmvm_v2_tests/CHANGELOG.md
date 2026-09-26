@@ -8,6 +8,23 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.65
+
+Approximate completion: 2026-09-26 afternoon BST
+
+### Guest VM
+
+- Reworked the Node host-memory backend to read or write an in-page 32-bit
+  word directly rather than reconstructing it through four separately checked
+  byte operations. Cross-page accesses retain the portable byte path.
+- Made generated JavaScript kernels use the same trusted-memory contract as
+  generated i386 kernels. Public linear-memory operations remain checked;
+  only compiler-produced code bypasses the redundant boundary check.
+- Reduced a fixed 1,018,021-bytecode EarleyBoyer profile from 14.71 seconds to
+  4.89 seconds without changing its exits, allocation, or collection counts.
+  Quick correctness now completes under the Node kernel backend in 2:07.04,
+  down from 2:29.39 after the first word-access improvement.
+
 ## 0.64
 
 Approximate completion: 2026-09-26 afternoon BST

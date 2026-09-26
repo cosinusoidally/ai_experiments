@@ -55,6 +55,43 @@
         page[offset & NODE_PAGE_MASK] = value;
     }
 
+    function readPagedWordLE(allocation, offset) {
+        var pageOffset = offset & NODE_PAGE_MASK;
+        if (pageOffset <= NODE_PAGE_SIZE - 4) {
+            var page = allocation.pages[offset >>> NODE_PAGE_SHIFT];
+            if (!page) return 0;
+            return (page[pageOffset] |
+                    (page[pageOffset + 1] << 8) |
+                    (page[pageOffset + 2] << 16) |
+                    (page[pageOffset + 3] << 24)) >>> 0;
+        }
+        return (readPagedByte(allocation, offset) |
+                (readPagedByte(allocation, offset + 1) << 8) |
+                (readPagedByte(allocation, offset + 2) << 16) |
+                (readPagedByte(allocation, offset + 3) << 24)) >>> 0;
+    }
+
+    function writePagedWordLE(allocation, offset, value) {
+        var pageOffset = offset & NODE_PAGE_MASK;
+        if (pageOffset <= NODE_PAGE_SIZE - 4) {
+            var pageIndex = offset >>> NODE_PAGE_SHIFT;
+            var page = allocation.pages[pageIndex];
+            if (!page) {
+                if (value === 0) return;
+                page = allocation.pages[pageIndex] = allocateNodePage();
+            }
+            page[pageOffset] = value & 255;
+            page[pageOffset + 1] = (value >>> 8) & 255;
+            page[pageOffset + 2] = (value >>> 16) & 255;
+            page[pageOffset + 3] = (value >>> 24) & 255;
+            return;
+        }
+        writePagedByte(allocation, offset, value);
+        writePagedByte(allocation, offset + 1, value >>> 8);
+        writePagedByte(allocation, offset + 2, value >>> 16);
+        writePagedByte(allocation, offset + 3, value >>> 24);
+    }
+
     HostMemory.prototype.allocate = function (length, sparse) {
         var actualLength = length > 0 ? length : 1;
         this.allocations++;
@@ -102,13 +139,16 @@
         if (offset < 0 || offset + 4 > allocation.length) {
             throw new RangeError("32-bit read is out of bounds");
         }
-        if (allocation.isNative && ((allocation.pointer + offset) & 3) === 0) {
-            return peek32(allocation.pointer + offset) >>> 0;
+        if (allocation.isNative) {
+            if (((allocation.pointer + offset) & 3) === 0) {
+                return peek32(allocation.pointer + offset) >>> 0;
+            }
+            return (this.read8(allocation, offset) |
+                    (this.read8(allocation, offset + 1) << 8) |
+                    (this.read8(allocation, offset + 2) << 16) |
+                    (this.read8(allocation, offset + 3) << 24)) >>> 0;
         }
-        return (this.read8(allocation, offset) |
-                (this.read8(allocation, offset + 1) << 8) |
-                (this.read8(allocation, offset + 2) << 16) |
-                (this.read8(allocation, offset + 3) << 24)) >>> 0;
+        return readPagedWordLE(allocation, offset);
     };
 
     HostMemory.prototype.write32LE = function (allocation, offset, value) {
@@ -117,27 +157,28 @@
         }
         value = Number(value) % 4294967296;
         if (value < 0) value += 4294967296;
-        if (allocation.isNative && ((allocation.pointer + offset) & 3) === 0) {
-            /* Old SpiderMonkey saturates some uint32-to-native-int argument
-             * conversions. Pass the identical bits through the signed range. */
-            poke32(allocation.pointer + offset,
-                   value >= 2147483648 ? value - 4294967296 : value);
+        if (allocation.isNative) {
+            if (((allocation.pointer + offset) & 3) === 0) {
+                /* Old SpiderMonkey saturates some uint32-to-native-int argument
+                 * conversions. Pass the identical bits through the signed range. */
+                poke32(allocation.pointer + offset,
+                       value >= 2147483648 ? value - 4294967296 : value);
+                return;
+            }
+            this.write8(allocation, offset, value);
+            this.write8(allocation, offset + 1, value >>> 8);
+            this.write8(allocation, offset + 2, value >>> 16);
+            this.write8(allocation, offset + 3, value >>> 24);
             return;
         }
-        this.write8(allocation, offset, value);
-        this.write8(allocation, offset + 1, value >>> 8);
-        this.write8(allocation, offset + 2, value >>> 16);
-        this.write8(allocation, offset + 3, value >>> 24);
+        writePagedWordLE(allocation, offset, value);
     };
 
     HostMemory.prototype.read32LETrusted = function (allocation, offset) {
         if (allocation.isNative) {
             return peek32(allocation.pointer + offset) >>> 0;
         }
-        return (readPagedByte(allocation, offset) |
-                (readPagedByte(allocation, offset + 1) << 8) |
-                (readPagedByte(allocation, offset + 2) << 16) |
-                (readPagedByte(allocation, offset + 3) << 24)) >>> 0;
+        return readPagedWordLE(allocation, offset);
     };
 
     HostMemory.prototype.write32LETrusted = function (allocation, offset, value) {
@@ -148,10 +189,7 @@
                    value >= 2147483648 ? value - 4294967296 : value);
             return;
         }
-        writePagedByte(allocation, offset, value);
-        writePagedByte(allocation, offset + 1, value >>> 8);
-        writePagedByte(allocation, offset + 2, value >>> 16);
-        writePagedByte(allocation, offset + 3, value >>> 24);
+        writePagedWordLE(allocation, offset, value);
     };
 
     HostMemory.prototype.free = function (allocation) {

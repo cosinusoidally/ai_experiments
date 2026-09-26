@@ -45,6 +45,13 @@ has a conceptual base of zero, so the same operand is a bounds-checked
 and `writeRawU32` are the sole backend translation point; kernel intrinsics
 must not inspect the Node host-memory representation themselves.
 
+Public `LinearMemory` reads and writes validate their address and width.
+Compiler-generated kernels instead use the corresponding `Trusted` methods.
+This mirrors the i386 backend, whose emitted loads and stores operate directly
+on the runtime allocation and therefore cannot perform a JavaScript bounds
+check. The compiler/verifier and runtime-owned addresses establish the trusted
+boundary; embedders and semantic code must continue to use the checked API.
+
 ## References and values
 
 Zero is the null heap reference. Valid records begin at offset 64 and are

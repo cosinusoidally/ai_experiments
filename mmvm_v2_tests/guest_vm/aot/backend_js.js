@@ -12,12 +12,12 @@
         while (index < ir.instructions.length) {
             var instruction = ir.instructions[index++];
             if (instruction.op === "store_f64") {
-                body += "memory.writeF64(" + emit(instruction.address, parameters) +
+                body += "memory.writeF64Trusted(" + emit(instruction.address, parameters) +
                         "," + emitF64(instruction.value, parameters) + ");";
             } else if (instruction.op !== "store_u32") {
                 throw new Error("unsupported JS kernel instruction " + instruction.op);
             } else {
-                body += "memory.writeU32(" + emit(instruction.address, parameters) +
+                body += "memory.writeU32Trusted(" + emit(instruction.address, parameters) +
                         "," + emit(instruction.value, parameters) + ");";
             }
         }
@@ -87,18 +87,18 @@
         }
         if (node.op === "store_u32" || node.op === "store_u8") {
             return "memory." + (node.op === "store_u8" ?
-                "writeU8" : "writeU32") + "(" +
+                "writeU8Trusted" : "writeU32Trusted") + "(" +
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlExpression(node.value, parameters, locals) + ");";
         }
         if (node.op === "store_f64") {
-            return "memory.writeF64(" +
+            return "memory.writeF64Trusted(" +
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlF64(node.value, parameters, locals) + ");";
         }
         if (node.op === "store_raw_u8" || node.op === "store_raw_u32") {
             return "memory." + (node.op === "store_raw_u8" ?
-                "writeRawU8" : "writeRawU32") + "(" +
+                "writeRawU8Trusted" : "writeRawU32Trusted") + "(" +
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlExpression(node.value, parameters, locals) + ");";
         }
@@ -155,11 +155,11 @@
                 emitControlExpression(node.pointer, parameters, locals) +
                 ",[" + nativeArguments.join(",") + "])|0)";
         }
-        if (node.op === "load_u32") return "(memory.readU32(" +
+        if (node.op === "load_u32") return "(memory.readU32Trusted(" +
             emitControlExpression(node.address, parameters, locals) + ")|0)";
         if (node.op === "load_raw_u8" || node.op === "load_raw_u32") {
             return "(memory." + (node.op === "load_raw_u8" ?
-                "readRawU8" : "readRawU32") + "(" +
+                "readRawU8Trusted" : "readRawU32Trusted") + "(" +
                 emitControlExpression(node.address, parameters, locals) + ")|0)";
         }
         if (node.op === "logical_not_i32") return "(!" +
@@ -241,19 +241,19 @@
                 emitControlF64(node.value, parameters, locals) + ")";
         }
         if (node.op === "load_f64") {
-            return "memory.readF64(" +
+            return "memory.readF64Trusted(" +
                 emitControlExpression(node.address, parameters, locals) + ")";
         }
         if (node.op === "load_i32_f64") {
-            return "(memory.readU32(" +
+            return "(memory.readU32Trusted(" +
                 emitControlExpression(node.address, parameters, locals) + ")|0)";
         }
         if (node.op === "load_number_f64") {
             var numberAddress = emitControlExpression(
                 node.address, parameters, locals);
             return "(" + emitControlExpression(node.tag, parameters, locals) +
-                "===5?(memory.readU32(" + numberAddress + ")|0):" +
-                "memory.readF64(" + numberAddress + "))";
+                "===5?(memory.readU32Trusted(" + numberAddress + ")|0):" +
+                "memory.readF64Trusted(" + numberAddress + "))";
         }
         if (node.op === "pow_f64") {
             return "Math.pow(" + emitControlF64(node.left, parameters, locals) +
@@ -331,7 +331,7 @@
                 emitF64(node.value, parameters) + ")";
         }
         if (node.op === "load_f64") {
-            return "memory.readF64(" + emit(node.address, parameters) + ")";
+            return "memory.readF64Trusted(" + emit(node.address, parameters) + ")";
         }
         var operators = {add_f64: "+", sub_f64: "-", mul_f64: "*", div_f64: "/"};
         if (!operators[node.op]) throw new Error("unsupported JS f64 IR " + node.op);
