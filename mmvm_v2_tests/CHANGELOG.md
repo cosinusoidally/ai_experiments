@@ -8,6 +8,31 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.72
+
+Approximate completion: 2026-09-27 late morning BST
+
+### Guest VM
+
+- Added general native `String(number)` conversion for non-integral binary64
+  values by sharing the kernel's existing number-formatting path. This removes
+  Splay's per-key semantic exit without benchmark-specific handling.
+- Changed the self-hosted collector to grow its logical heap limit when a
+  completed collection proves that live records occupy at least two thirds of
+  the current limit. Reclaimed regions remain reusable and guest addresses do
+  not move; the policy avoids repeatedly marking and sweeping a mostly-live
+  graph after only 1 MiB of new allocation.
+- Standalone Splay quick correctness improved from exceeding 180 seconds to
+  2.12 seconds. Its stock suite now completes in 4.28 seconds with score 784
+  (`Splay` 484 and `SplayLatency` 1272).
+- The same collector correction prevents RayTrace's former three-second native
+  crash. Quick correctness still passes, though the current stock run remains
+  too slow and reached a 180-second diagnostic ceiling.
+- Rechecked both complete guest regression suites at 12 programs and 266
+  assertions, along with net.js, node_web.js, demo1, demo2, and context
+  multiplexing. Richards, DeltaBlue, Crypto, and NavierStokes retain their
+  standalone stock passes.
+
 ## 0.71
 
 Approximate completion: 2026-09-27 evening BST

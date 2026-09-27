@@ -198,6 +198,31 @@ stock-scored suites plus RayTrace, EarleyBoyer, and RegExp. Quick correctness
 does not promote the latter three to stock passes and is never used as an
 Octane score.
 
+### Post-sweep progress, 2026-09-27
+
+Commit `82d1da7` removes Splay's first standalone semantic exit by sharing the
+native number-to-string formatter with `String(number)`. More importantly, the
+self-hosted collector now grows its logical limit when a collection shows that
+live records occupy at least two thirds of the current limit. Previously it
+could rescan an approximately 100 MiB mostly-live graph after every 1 MiB of
+new allocation.
+
+With the unchanged external suite and a newly generated generic image:
+
+- Splay quick correctness fell from more than 180 seconds to 2.12 seconds;
+- stock Splay passed in 4.28 seconds with score 784 (`Splay` 484 and
+  `SplayLatency` 1272) and 375,808 KiB peak RSS;
+- RayTrace no longer segfaulted after three seconds and retained its quick
+  correctness pass, although stock execution still exceeded a separate
+  180-second diagnostic ceiling; and
+- Richards, DeltaBlue, Crypto, and NavierStokes retained stock passes, with
+  observed scores of 79.6, 85.2, 124, and 227 respectively.
+
+The Splay result increases the current standalone stock total to 5/15. The
+remaining work deliberately excludes tuning the RegExp benchmark itself;
+regular-expression functionality will still be completed or improved where a
+different suite depends on it.
+
 ### Earlier bring-up history
 
 Standalone-snapshot validation is tracked independently from the older
