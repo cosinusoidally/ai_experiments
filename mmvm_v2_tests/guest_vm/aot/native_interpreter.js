@@ -5355,8 +5355,8 @@
             var stringConstructorResult = stringConstructorKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
-                stringSupport, intrinsicId, pc, opcode, instructions,
-                frame);
+                stringSupport, platformServices, intrinsicId, pc, opcode,
+                instructions, frame);
             if (stringConstructorResult === EXIT_UNSUPPORTED) {
                 return EXIT_UNSUPPORTED;
             }
@@ -5997,7 +5997,8 @@
     function stringConstructorKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
-            stringSupport, intrinsicId, pc, opcode, instructions, frame) {
+            stringSupport, platformServices, intrinsicId, pc, opcode,
+            instructions, frame) {
         var intrinsicHandled = 0;
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
@@ -6021,6 +6022,7 @@
             var stringConvertSignedDouble = 0;
             var stringConvertUnsigned = 0;
             var stringConvertUnsignedWord = 0;
+            var stringConvertFormattedDouble = 0;
             if (intrinsicArgumentCount === 0) {
                 var stringConvertEmptyCell = heapBase + stringSupport +
                     VECTOR_CELLS + 2 * VALUE_CELL_BYTES;
@@ -6075,10 +6077,10 @@
                     if ((stringConvertDoubleHigh &
                          IEEE754_EXPONENT_MASK) !==
                         POSITIVE_2147483648_HIGH) {
-                        stringConvertValid = 0;
+                        stringConvertFormattedDouble = 1;
                     } else if ((stringConvertDoubleLow &
                                 UINT32_LOW_UNUSED_MASK) !== 0) {
-                        stringConvertValid = 0;
+                        stringConvertFormattedDouble = 1;
                     } else {
                         stringConvertUnsigned = 1;
                         stringConvertUnsignedWord = IEEE754_SIGN_BIT |
@@ -6100,6 +6102,17 @@
                     store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
                     store32(intrinsicTarget + VALUE_CELL_AUX, 0);
                     intrinsicHandled = 1;
+                } else if (stringConvertFormattedDouble === 1) {
+                    var stringConvertFormatResult =
+                        numberCellToStringKernel(
+                            heapBase, state, intrinsicTarget,
+                            stringConvertSourceCell, stringConvertTag,
+                            platformServices);
+                    if (stringConvertFormatResult === 1) {
+                        intrinsicHandled = 1;
+                    } else if (stringConvertFormatResult === 2) {
+                        stringConvertAllocationFailed = 1;
+                    }
                 } else {
                     var stringConvertNegative = 0;
                     var stringConvertNumber = 0;
@@ -9073,6 +9086,70 @@
         return 1;
     }
 
+    function numberCellToStringKernel(
+            heapBase, state, intrinsicTarget, numberCell, numberTag,
+            platformServices) {
+        var stringBytes = (STRING_CHARS + 112 + 7) & -8;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, stringBytes) === 0) return 2;
+        var resultString = engineHeapBump(heapBase, state);
+        if (resultString + stringBytes > engineHeapLimit(heapBase, state)) {
+            return 2;
+        }
+        var nativeBuffer = heapBase + resultString + STRING_CHARS;
+        var format = nativeBuffer + 96;
+        storeRaw8(format, 37);
+        storeRaw8(format + 1, 46);
+        storeRaw8(format + 2, 49);
+        storeRaw8(format + 3, 53);
+        storeRaw8(format + 4, 103);
+        storeRaw8(format + 5, 0);
+        var resultLength = 0;
+        if (numberTag === VALUE_TAG_INT32) {
+            var numberBits = engineScratchLeftAddress(heapBase, state);
+            storeF64(numberBits, loadI32F64(
+                numberCell + VALUE_CELL_LOW));
+            var snprintfPointer = platformSnprintfPointer(
+                heapBase, platformServices);
+            if (snprintfPointer === 0) return 0;
+            resultLength = callNativeI32(
+                snprintfPointer, nativeBuffer, 48, format,
+                load32(numberBits), load32(numberBits + 4));
+        } else {
+            resultLength = formatDoubleStringKernel(
+                heapBase, platformServices, numberCell,
+                nativeBuffer, format);
+        }
+        if (resultLength < 0) return 0;
+        if (resultLength >= 48) return 0;
+        setRecordType(heapBase, resultString, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, resultString, stringBytes);
+        setRecordMark(heapBase, resultString, 0);
+        setRecordFlags(heapBase, resultString, 0);
+        setStringLength(heapBase, resultString, resultLength);
+        var index = resultLength;
+        while (index > 0) {
+            index = index - 1;
+            var code = loadRaw8(nativeBuffer + index);
+            setStringCharacterByte(
+                heapBase, resultString, index * 2, code);
+            setStringCharacterByte(
+                heapBase, resultString, index * 2 + 1, 0);
+        }
+        var hash = -2128831035;
+        index = 0;
+        while (index < resultLength) {
+            code = stringCharacterCodeUnit(
+                heapBase, resultString, index) & 65535;
+            hash = (hash ^ code) * 16777619;
+            index = index + 1;
+        }
+        setStringHash(heapBase, resultString, hash);
+        setEngineHeapBump(heapBase, state, resultString + stringBytes);
+        setValueCellReference(intrinsicTarget, resultString);
+        return 1;
+    }
+
     function numberToStringKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
@@ -9104,65 +9181,10 @@
         if (receiverTag !== VALUE_TAG_INT32) {
             if (receiverTag !== VALUE_TAG_DOUBLE) return 0;
         }
-        var stringBytes = (STRING_CHARS + 112 + 7) & -8;
-        if (reserveNativeAllocationKernel(
-                heapBase, state, stringBytes) === 0) return 2;
-        var resultString = engineHeapBump(heapBase, state);
-        if (resultString + stringBytes > engineHeapLimit(heapBase, state)) {
-            return 2;
-        }
-        var nativeBuffer = heapBase + resultString + STRING_CHARS;
-        var format = nativeBuffer + 96;
-        storeRaw8(format, 37);
-        storeRaw8(format + 1, 46);
-        storeRaw8(format + 2, 49);
-        storeRaw8(format + 3, 53);
-        storeRaw8(format + 4, 103);
-        storeRaw8(format + 5, 0);
-        var resultLength = 0;
-        if (receiverTag === VALUE_TAG_INT32) {
-            var numberBits = engineScratchLeftAddress(heapBase, state);
-            storeF64(numberBits, loadI32F64(
-                receiverCell + VALUE_CELL_LOW));
-            var snprintfPointer = platformSnprintfPointer(
-                heapBase, platformServices);
-            if (snprintfPointer === 0) return 0;
-            resultLength = callNativeI32(
-                snprintfPointer, nativeBuffer, 48, format,
-                load32(numberBits), load32(numberBits + 4));
-        } else {
-            resultLength = formatDoubleStringKernel(
-                heapBase, platformServices, receiverCell,
-                nativeBuffer, format);
-        }
-        if (resultLength < 0) return 0;
-        if (resultLength >= 48) return 0;
-        setRecordType(heapBase, resultString, HEAP_TYPE_STRING);
-        setRecordSize(heapBase, resultString, stringBytes);
-        setRecordMark(heapBase, resultString, 0);
-        setRecordFlags(heapBase, resultString, 0);
-        setStringLength(heapBase, resultString, resultLength);
-        var index = resultLength;
-        while (index > 0) {
-            index = index - 1;
-            var code = loadRaw8(nativeBuffer + index);
-            setStringCharacterByte(
-                heapBase, resultString, index * 2, code);
-            setStringCharacterByte(
-                heapBase, resultString, index * 2 + 1, 0);
-        }
-        var hash = -2128831035;
-        index = 0;
-        while (index < resultLength) {
-            code = stringCharacterCodeUnit(
-                heapBase, resultString, index) & 65535;
-            hash = (hash ^ code) * 16777619;
-            index = index + 1;
-        }
-        setStringHash(heapBase, resultString, hash);
-        setEngineHeapBump(heapBase, state, resultString + stringBytes);
-        setValueCellReference(intrinsicTarget, resultString);
-        return 1;
+        var numberStringResult = numberCellToStringKernel(
+            heapBase, state, intrinsicTarget, receiverCell, receiverTag,
+            platformServices);
+        return numberStringResult;
     }
 
     function numberFormatKernel(
@@ -11812,6 +11834,26 @@
         return 0;
     }
 
+    function growNativeHeapLimitKernel(heapBase, state) {
+        var MINIMUM_HEAP_GROWTH_BYTES = 16777216;
+        var currentTailLimit = engineNativeTailLimit(heapBase, state);
+        var maximumTailLimit = engineNativeMaximumLimit(heapBase, state);
+        if (currentTailLimit >= maximumTailLimit) return 0;
+        var growthBytes = currentTailLimit >> 1;
+        if (growthBytes < MINIMUM_HEAP_GROWTH_BYTES) {
+            growthBytes = MINIMUM_HEAP_GROWTH_BYTES;
+        }
+        var grownTailLimit = currentTailLimit + growthBytes;
+        if (grownTailLimit > maximumTailLimit) {
+            grownTailLimit = maximumTailLimit;
+        } else if (grownTailLimit < currentTailLimit) {
+            grownTailLimit = maximumTailLimit;
+        }
+        setEngineNativeTailLimit(heapBase, state, grownTailLimit);
+        setEngineHeapLimit(heapBase, state, grownTailLimit);
+        return 1;
+    }
+
     /* Keep reclaimed-region selection inside the compiled engine.  A guest
      * program can execute millions of bytecodes between observable yields;
      * returning to the host every time one fragmented arena is consumed both
@@ -11838,7 +11880,6 @@
         var ENGINE_GC_STACK_LIMIT = 0;
         var ENGINE_GC_COLLECTIONS = 0;
         var MINIMUM_POST_COLLECTION_HEADROOM = 1048576;
-        var MINIMUM_HEAP_GROWTH_BYTES = 16777216;
         var EXIT_UNSUPPORTED = 3;
         if (engineNativeRegionActive(heapBase, state) === 0) {
             var freeRegion = engineNativeFreeRegion(heapBase, state);
@@ -11880,19 +11921,8 @@
                     if (currentTailLimit >= maximumTailLimit) {
                         collectionCanResume = 0;
                     } else {
-                        var growthBytes = currentTailLimit >> 1;
-                        if (growthBytes < MINIMUM_HEAP_GROWTH_BYTES) {
-                            growthBytes = MINIMUM_HEAP_GROWTH_BYTES;
-                        }
-                        var grownTailLimit = currentTailLimit + growthBytes;
-                        if (grownTailLimit > maximumTailLimit) {
-                            grownTailLimit = maximumTailLimit;
-                        } else if (grownTailLimit < currentTailLimit) {
-                            grownTailLimit = maximumTailLimit;
-                        }
-                        setEngineNativeTailLimit(
-                            heapBase, state, grownTailLimit);
-                        setEngineHeapLimit(heapBase, state, grownTailLimit);
+                        var retryLimitGrowth = growNativeHeapLimitKernel(
+                            heapBase, state);
                         setEngineAllocationFailed(heapBase, state, 0);
                         collectionJustRan = 0;
                         frame = engineCurrentFrame(heapBase, state);
@@ -11934,6 +11964,23 @@
                     heapBase, collectionBump, collectionGeneration);
                 var collectionFreeHead = rebuildNativeAllocatorKernel(
                     heapBase, state, collectionBump);
+                /* Repeatedly sweeping a mostly-live graph after only the
+                 * minimum allocation headroom makes little progress. Grow
+                 * the logical limit as soon as collection proves that live
+                 * records occupy at least two thirds of it. The address
+                 * reservation is unchanged and reclaimed holes remain first
+                 * in the native allocator, so this changes pressure policy
+                 * rather than object placement or pointer stability. */
+                var collectionLiveBytes =
+                    collectionBump - collectionReclaimed;
+                var collectionTailLimit = engineNativeTailLimit(
+                    heapBase, state);
+                var collectionLiveThreshold =
+                    divideI32(collectionTailLimit, 3) * 2;
+                if (collectionLiveBytes >= collectionLiveThreshold) {
+                    var pressureLimitGrowth = growNativeHeapLimitKernel(
+                        heapBase, state);
+                }
                 /* Match the hosted collector's adaptive pressure policy.
                  * A high-churn program must receive useful allocation
                  * headroom after paying for a complete mark/sweep; otherwise
@@ -14071,6 +14118,7 @@
             functionToStringKernel: functionToStringKernel,
             formatDoubleStringKernel: formatDoubleStringKernel,
             getKeysKernel: getKeysKernel,
+            growNativeHeapLimitKernel: growNativeHeapLimitKernel,
             clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
             heapMarkKernel: heapMarkKernel,
             heapSweepKernel: heapSweepKernel,
@@ -14085,6 +14133,7 @@
             localBindingKernel: localBindingKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
+            numberCellToStringKernel: numberCellToStringKernel,
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
             objectDefinePropertyKernel: objectDefinePropertyKernel,
