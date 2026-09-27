@@ -120,6 +120,12 @@ Octane score work begins only after all suites complete correctly with stock
 settings. Optimization commits should state the affected general mechanism,
 the before/after measurements, and the regression checks performed.
 
+Regular-expression work is intentionally demand-driven during the remaining
+suite bring-up. If another benchmark depends on a RegExp feature, that feature
+must be correct and reasonably implemented in the guest VM. A highly tuned
+standalone RegExp benchmark is not an immediate milestone; broader bytecode,
+object, string, allocation, and self-hosting bottlenecks take priority.
+
 ## Bring-up status
 
 ### Complete standalone stock sweep, 2026-09-27
@@ -493,3 +499,29 @@ literal runs reduced hosted total time from 91.7 to 89.9 seconds. Simple
 quantifiers reduced it to 85.1 seconds, and shared state snapshots to 82.6
 seconds. Setup itself moved from 78.2 to 67.8 seconds. Peak RSS remained around
 255--261 MiB and the Octane checksum passed after each stage.
+
+## 2026-09-27: PdfJS enters standalone execution
+
+Native guest implementations of object-literal accessors, `Object.create`,
+primitive string-addition coercions, and `in` removed PdfJS's initialization
+exits. These are ordinary ES5 operations over guest records; none recognizes
+PdfJS or delegates semantics to the bootstrap host. The generic standalone
+image now reads, self-host parses, compiles, and initializes the unmodified
+external source before printing `PdfJS: running (quick correctness)`.
+
+With standalone phase timing enabled, the current quick run reads
+`pdfjs.js` in about 2.6 seconds and compiles it in about 20.9 seconds. It then
+runs for roughly a minute before exhausting a string-concatenation allocation
+at `ADD`; this remains a failure, not a quick correctness pass.
+
+A hosted allocation trace explains the pathology. The flat-string
+implementation copies and re-hashes the complete accumulated string for each
+small append. PdfJS contains several general byte/string construction loops,
+including base64 conversion. In one stopped trace, the live heap remained near
+19 MiB and a contiguous free region remained near 47 MiB, yet more than 100
+full collections occurred because copied flat strings rapidly consumed that
+region. Raising the heap maximum would only defer the same quadratic work.
+The next string improvement must therefore change the general representation
+or construction algorithm (for example, a guest-owned rope/concatenation
+representation with bounded-depth traversal or flattening), while preserving
+ES5 string immutability and both backends' semantics.

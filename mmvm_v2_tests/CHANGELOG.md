@@ -8,6 +8,35 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.73
+
+Approximate completion: 2026-09-27 afternoon BST
+
+### Guest VM
+
+- Added native guest implementations of `Object.create`, object-literal
+  getter/setter definition, and the ES5 `in` operator. `in` traverses guest
+  prototypes and understands ordinary, array, RegExp, and typed-buffer-view
+  records without returning to the host VM.
+- Extended native `+` coercion for strings combined with `undefined`, `null`,
+  and booleans, and numeric coercion of `null` and booleans. This allowed the
+  standalone self-hosted frontend to finish loading PdfJS and enter its
+  benchmark instead of exiting during compilation.
+- Added an explicit standalone unsupported-bytecode diagnostic containing the
+  opcode and guest bytecode PC. Previously the standalone loader returned only
+  status 70, which obscured the distinction between a language gap and an
+  allocation failure.
+- Added `arrayPrototype` to the kernel compiler's named record accessors; the
+  native `in` implementation therefore shares the authoritative heap layout
+  rather than embedding an offset.
+- Rechecked both complete guest regression suites at 12 programs and 266
+  assertions, plus net.js, node_web.js, demo1, demo2, and context multiplexing.
+- PdfJS quick correctness now gets past loading and `in`, but its repeated
+  string building exposes a general quadratic flat-string concatenation cost.
+  The current run is not recorded as a pass: it spends most of its time
+  allocating copied strings and repeatedly collecting a roughly 19 MiB live
+  heap despite tens of MiB of reclaimed space.
+
 ## 0.72
 
 Approximate completion: 2026-09-27 late morning BST

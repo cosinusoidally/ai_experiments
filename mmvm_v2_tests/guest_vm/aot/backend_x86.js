@@ -591,6 +591,24 @@
         assembler.movEaxImmediate(70);
         assembler.jump("standalone_return");
         assembler.label("standalone_unsupported_error");
+        resolveSymbol(layout.dprintfNameOffset);
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.addEaxImmediate(layout.statePayloadAddress +
+                                  layout.engineDiagnostic.pc);
+        assembler.movEaxDwordPtrEax();
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.addEaxImmediate(layout.statePayloadAddress +
+                                  layout.engineDiagnostic.opcode);
+        assembler.movEaxDwordPtrEax();
+        assembler.pushEax();
+        imageAddress(layout.unsupportedFormatOffset);
+        assembler.pushEax();
+        assembler.movEaxImmediate(2);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(4);
         assembler.movEaxImmediate(70);
         assembler.jump("standalone_return");
         assembler.label("standalone_allocation_error");
@@ -621,6 +639,9 @@
         var frame = execution.frames[0];
         var expectedNameBytes = standaloneStringBytes(expectedProgramPath || "");
         var strcmpNameBytes = standaloneStringBytes("strcmp");
+        var dprintfNameBytes = standaloneStringBytes("dprintf");
+        var unsupportedFormatBytes = standaloneStringBytes(
+            "guest VM unsupported opcode %d at bytecode pc %d\n");
         var layout = {
             entryOffset: STANDALONE_HEADER_BYTES,
             heapOffset: 0,
@@ -629,6 +650,8 @@
             mmapNameOffset: 0,
             memcpyNameOffset: 0,
             strcmpNameOffset: 0,
+            dprintfNameOffset: 0,
+            unsupportedFormatOffset: 0,
             expectedNameOffset: 0,
             acceptAnyProgram: expectedProgramPath === null,
             codeOffset: 0,
@@ -647,6 +670,8 @@
             contextAddress: frame.context.heapAddress,
             frameAddress: frame.heapAddress
         };
+        layout.engineDiagnostic =
+            records.standaloneEngineDiagnosticLayout();
         layout.bufferRebind = records.standaloneBufferRebindLayout();
         var mmapNameBytes = standaloneStringBytes("mmap");
         var memcpyNameBytes = standaloneStringBytes("memcpy");
@@ -665,6 +690,10 @@
                                     strcmpNameBytes.length;
         var nextDataOffset = layout.expectedNameOffset +
                              expectedNameBytes.length;
+        layout.dprintfNameOffset = nextDataOffset;
+        nextDataOffset += dprintfNameBytes.length;
+        layout.unsupportedFormatOffset = nextDataOffset;
+        nextDataOffset += unsupportedFormatBytes.length;
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
             layout.nativeBindings[bindingIndex].nameOffset = nextDataOffset;
@@ -791,6 +820,10 @@
                               strcmpNameBytes);
             copyBytesToNative(staging + layout.expectedNameOffset,
                               expectedNameBytes);
+            copyBytesToNative(staging + layout.dprintfNameOffset,
+                              dprintfNameBytes);
+            copyBytesToNative(staging + layout.unsupportedFormatOffset,
+                              unsupportedFormatBytes);
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
                 copyBytesToNative(staging +

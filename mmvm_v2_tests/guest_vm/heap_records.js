@@ -1359,6 +1359,13 @@
             Heap.Types.ENGINE_STATE);
     };
 
+    /* The standalone machine-code bootstrap reports an unsupported opcode
+     * without a host VM. Expose the two diagnostic fields as one named ABI
+     * description so the emitter never duplicates engine-state offsets. */
+    Records.prototype.standaloneEngineDiagnosticLayout = function () {
+        return {pc: ENGINE_PC, opcode: ENGINE_RESULT_CELL};
+    };
+
     Records.prototype.clearEnginePropertyCache = function (state) {
         var payload = this.engineStatePayloadAddress(state);
         this.heap.memory.fill(payload + ENGINE_PROPERTY_CACHE,

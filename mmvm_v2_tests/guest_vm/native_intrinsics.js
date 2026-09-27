@@ -68,7 +68,8 @@
                       FLOAT32_ARRAY_CONSTRUCTOR: 96,
                       FLOAT64_ARRAY_CONSTRUCTOR: 97,
                       INT8_ARRAY_CONSTRUCTOR: 98,
-                      INT16_ARRAY_CONSTRUCTOR: 99};
+                      INT16_ARRAY_CONSTRUCTOR: 99,
+                      OBJECT_CREATE: 100};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

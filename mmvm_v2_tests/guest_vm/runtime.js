@@ -2540,7 +2540,7 @@
         this.setProperty(objectConstructor, "create",
             this.makeNativeFunction("Object.create", function (receiver, args) {
                 return runtime.makeObjectWithPrototype(args[0]);
-            }));
+            }, "intrinsic", NativeIntrinsics.OBJECT_CREATE));
         this.setProperty(objectConstructor, "getPrototypeOf",
             this.makeNativeFunction("Object.getPrototypeOf",
                 function (receiver, args) {
