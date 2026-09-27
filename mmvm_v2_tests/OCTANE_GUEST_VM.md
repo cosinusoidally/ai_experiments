@@ -369,3 +369,24 @@ took 91.7 seconds total, still better than the original 100.5-second hosted
 baseline but slower than consuming fresh tail pages. This is the intended
 trade: further speed must come from less matcher work and better native region
 execution, not unbounded heap expansion.
+
+## 2026-09-27: literal runs and simple quantifiers
+
+The guest regex compiler now coalesces consecutive exactly-once literal atoms
+into one instruction. It also lowers quantified literals, dot, classes, and
+class escapes to a simple-quantifier instruction. The latter scans the atom
+once, then records possible continuation positions in the same LIFO order as
+the generic greedy/lazy backtracking machine. Groups, captures, lookahead, and
+backreferences continue through the general instruction sequence.
+
+Simple quantifier alternatives all begin with the same capture state. Stack
+entries therefore carry a typed-array snapshot index: the quantifier copies
+state once and all of its alternatives reference that immutable slot. Normal
+branches continue to own one snapshot each. This preserves later restoration
+when intervening instructions mutate captures.
+
+With stock deterministic input and the conservative reclaimed-region policy,
+literal runs reduced hosted total time from 91.7 to 89.9 seconds. Simple
+quantifiers reduced it to 85.1 seconds, and shared state snapshots to 82.6
+seconds. Setup itself moved from 78.2 to 67.8 seconds. Peak RSS remained around
+255--261 MiB and the Octane checksum passed after each stage.

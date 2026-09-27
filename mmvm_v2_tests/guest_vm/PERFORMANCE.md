@@ -818,3 +818,24 @@ The lower-memory run took 91.7 seconds total rather than 79.5 seconds, because
 it reused and swept existing records rather than continually touching fresh
 pages. The pre-optimization baseline was 100.5 seconds. Demo8 remained stable
 at 16.5 FPS at 256x192 with roughly 2.9 seconds of initialization.
+
+## 2026-09-27: reduce RegExp machine dispatch
+
+Three compiler/executor changes reduce work before introducing a kernel
+intrinsic:
+
+1. consecutive exactly-once literals compile to one literal-run instruction;
+2. quantified single-character atoms compile to one scanning instruction that
+   records greedy/lazy continuation positions; and
+3. those continuation entries share one capture-state snapshot because the
+   simple atom cannot mutate captures.
+
+Complex atoms retain the generic counted-repeat instructions. Backtracking
+stack entries explicitly name their snapshot slot, so a path that mutates
+captures before failing still restores the quantifier-entry state.
+
+On deterministic Octane RegExp setup under the reclaimed-region policy, total
+time fell from 91.7 to 82.6 seconds and setup time from 78.2 to 67.8 seconds.
+Peak RSS remained about 259 MiB and the stock checksum passed. The remaining
+control-flow volume is still large enough to justify compiling the low-level
+matcher executor from the kernel dialect next.

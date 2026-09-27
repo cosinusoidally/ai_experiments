@@ -8,6 +8,26 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.71
+
+Approximate completion: 2026-09-27 evening BST
+
+### Guest VM
+
+- Added fixed literal-run matcher instructions so consecutive exactly-once
+  characters no longer require one regex dispatch each.
+- Added a general simple-quantifier instruction for literals, dot, character
+  classes, and class escapes. It scans once and records alternative positions
+  in ECMAScript greedy or lazy order; complex/capturing atoms retain the
+  generic repeat machine.
+- Backtracking entries now name their capture-state snapshot. Alternatives
+  produced by one simple quantifier share a single immutable snapshot rather
+  than copying identical state for every possible match length.
+- The stock deterministic RegExp checksum continues to pass. Under the
+  conservative reclaimed-region policy, hosted total time improved from 91.7
+  to 82.6 seconds and setup time from 78.2 to 67.8 seconds, with peak RSS
+  remaining about 259 MiB.
+
 ## 0.70
 
 Approximate completion: 2026-09-27 late afternoon BST
