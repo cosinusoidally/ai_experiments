@@ -122,13 +122,91 @@ the before/after measurements, and the regression checks performed.
 
 ## Bring-up status
 
+### Complete standalone stock sweep, 2026-09-27
+
+All 15 Octane 2.0 suites were run individually through the generic standalone
+image on 2026-09-27 between approximately 10:51 and 11:23 BST. This is the
+first complete stock sweep that records standalone scores rather than carrying
+forward scores from the js_min-hosted guest path.
+
+The measured revision and image were:
+
+- repository commit: `5956d6957a875d0fcbe5c9609f17ea081fa08ddf`;
+- snapshot size: 16,437,872 bytes, non-sparse;
+- snapshot SHA-256:
+  `c21fad71ac9743810d11bc74629607c25ed179936eb255bf2bd1ded5ebb6267d`;
+- host: Linux 6.8.0-138-generic on a QEMU Virtual CPU version 2.5+; and
+- limit: 900 wall-clock seconds per stock suite.
+
+The stock command shape was:
+
+```sh
+/usr/bin/time -f \
+  'wall=%e user=%U sys=%S maxrss_kib=%M exit=%x' \
+  timeout --signal=TERM --kill-after=10s 900 \
+  ./artifacts/js_runner.exe artifacts/snap octane_runner.js SUITE
+```
+
+The complete stock result is 4 passing/scored suites, 2 timeouts, 1 native
+crash, and 8 standalone semantic exits. There is no valid aggregate Octane
+score because all suites must finish successfully before the harness may
+produce one.
+
+| Suite | Current standalone stock status | Score | Wall time | Peak RSS |
+| --- | --- | ---: | ---: | ---: |
+| Richards | pass | 77.5 | 3.52 s | 39,552 KiB |
+| DeltaBlue | pass | 83.9 | 4.92 s | 62,208 KiB |
+| Crypto | pass | 125 | 33.53 s | 60,544 KiB |
+| RayTrace | `SIGSEGV` after entering the benchmark | — | 3.02 s | 106,368 KiB |
+| EarleyBoyer | timed out; no validation result | — | 900.00 s | 77,952 KiB |
+| RegExp | timed out; no validation result | — | 900.03 s | 541,568 KiB |
+| Splay | standalone semantic exit, status 70 | — | 0.50 s | 38,400 KiB |
+| NavierStokes | pass | 236 | 11.83 s | 43,776 KiB |
+| PdfJS | semantic exit during load/initialization, status 70 | — | 2.95 s | 42,880 KiB |
+| Mandreel | semantic exit during load/initialization, status 70 | — | 8.36 s | 54,016 KiB |
+| Gameboy | semantic exit during load/initialization, status 70 | — | 1.99 s | 47,488 KiB |
+| CodeLoad | standalone semantic exit after benchmark entry, status 70 | — | 0.67 s | 41,472 KiB |
+| Box2D | semantic exit during load/initialization, status 70 | — | 6.48 s | 99,584 KiB |
+| zlib | standalone semantic exit after benchmark entry, status 70 | — | 12.00 s | 100,736 KiB |
+| Typescript | semantic exit during load/initialization, status 70 | — | 8.12 s | 88,704 KiB |
+
+Every non-scoring suite was subsequently rerun with one deterministic
+iteration and no warmup by placing `--quick` after `octane_runner.js`. A quick
+run deliberately produces no Octane score. It exists only to separate a stock
+repetition/performance failure from failure of the benchmark's basic
+correctness path.
+
+- RayTrace passes quick correctness in 1.05 seconds at 70,016 KiB peak RSS.
+  Its stock crash is therefore repetition, lifecycle, or collection related,
+  rather than a failure of its first deterministic result.
+- EarleyBoyer passes quick correctness in 6.51 seconds at 85,376 KiB peak RSS.
+  Its current stock limitation is throughput.
+- RegExp passes quick correctness in 114.84 seconds at 317,440 KiB peak RSS.
+  Its stock run remains both too slow and memory intensive: it reaches the
+  900-second ceiling and peaks at approximately 529 MiB.
+- Splay, PdfJS, Mandreel, Gameboy, CodeLoad, Box2D, zlib, and Typescript all
+  reproduce standalone status 70 in quick mode. They are not current
+  standalone correctness passes.
+
+The `--vm-profile` standalone option also returned status 70 before loading
+each diagnostic program in this image, so it could not identify the operation
+behind the semantic exits. The statuses above consequently do not claim a
+more specific cause than the output establishes.
+
+This yields a secondary quick-correctness summary of 7/15 passing: the four
+stock-scored suites plus RayTrace, EarleyBoyer, and RegExp. Quick correctness
+does not promote the latter three to stock passes and is never used as an
+Octane score.
+
+### Earlier bring-up history
+
 Standalone-snapshot validation is tracked independently from the older
-js_min-hosted baselines below. As of 2026-09-25, Richards, DeltaBlue, Crypto,
-RayTrace, EarleyBoyer, and NavierStokes pass quick correctness through
-`js_runner.exe`. zlib compiles its wrapper and 185 KiB generated-data source,
-then still exposes a native semantic exit after its benchmark begins. It is
-therefore not yet claimed as a standalone pass. This distinction prevents a
-host-assisted pass from being reported as self-hosted execution.
+js_min-hosted baselines below. At the 2026-09-25 checkpoint, Richards,
+DeltaBlue, Crypto, RayTrace, EarleyBoyer, and NavierStokes passed quick
+correctness through `js_runner.exe`. zlib compiled its wrapper and 185 KiB
+generated-data source, then exposed a native semantic exit after its benchmark
+began. This distinction prevents a host-assisted pass from being reported as
+self-hosted execution.
 
 Richards standalone bring-up added general native facilities for
 `Array.prototype.indexOf`, `Math.log`, `Number.prototype.toPrecision`, Date
