@@ -594,6 +594,16 @@
         resolveSymbol(layout.dprintfNameOffset);
         assembler.movEaxLocal(HEAP_BASE_LOCAL);
         assembler.addEaxImmediate(layout.statePayloadAddress +
+                                  layout.engineDiagnostic.allocation);
+        assembler.movEaxDwordPtrEax();
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.addEaxImmediate(layout.statePayloadAddress +
+                                  layout.engineDiagnostic.detail);
+        assembler.movEaxDwordPtrEax();
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.addEaxImmediate(layout.statePayloadAddress +
                                   layout.engineDiagnostic.pc);
         assembler.movEaxDwordPtrEax();
         assembler.pushEax();
@@ -608,7 +618,7 @@
         assembler.pushEax();
         assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
         assembler.callEax();
-        discardCallWords(4);
+        discardCallWords(6);
         assembler.movEaxImmediate(70);
         assembler.jump("standalone_return");
         assembler.label("standalone_allocation_error");
@@ -641,7 +651,8 @@
         var strcmpNameBytes = standaloneStringBytes("strcmp");
         var dprintfNameBytes = standaloneStringBytes("dprintf");
         var unsupportedFormatBytes = standaloneStringBytes(
-            "guest VM unsupported opcode %d at bytecode pc %d\n");
+            "guest VM unsupported opcode %d at bytecode pc %d " +
+            "(detail %d, allocation %d)\n");
         var layout = {
             entryOffset: STANDALONE_HEADER_BYTES,
             heapOffset: 0,

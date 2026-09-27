@@ -310,6 +310,9 @@
         valueCellInt32: "VALUE_CELL_INT32",
         stringLength: "STRING_LENGTH",
         stringHash: "STRING_HASH",
+        stringRopeLeft: "STRING_ROPE_LEFT",
+        stringRopeRight: "STRING_ROPE_RIGHT",
+        stringRopeDepth: "STRING_ROPE_DEPTH",
         vectorLength: "VECTOR_LENGTH",
         vectorCapacity: "VECTOR_CAPACITY",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
@@ -368,6 +371,9 @@
         setFunctionHomeContext: "FUNCTION_HOME_CONTEXT",
         setStringLength: "STRING_LENGTH",
         setStringHash: "STRING_HASH",
+        setStringRopeLeft: "STRING_ROPE_LEFT",
+        setStringRopeRight: "STRING_ROPE_RIGHT",
+        setStringRopeDepth: "STRING_ROPE_DEPTH",
         setArrayPrototype: "ARRAY_PROTOTYPE",
         setArrayPropertyHead: "ARRAY_PROPERTY_HEAD",
         setArrayElements: "ARRAY_ELEMENTS",
@@ -1044,7 +1050,7 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
-            node.callee.name === "stringCharacterCodeUnit" &&
+            node.callee.name === "flatStringCharacterCodeUnit" &&
             node.arguments.length === 3) {
             return {op: "load_u32", address: stringCharacterAddress(
                 node.arguments, symbols), type: "i32"};

@@ -151,6 +151,9 @@
         var STRING_LENGTH = 16;
         var STRING_HASH = 20;
         var STRING_CHARS = 24;
+        var STRING_ROPE_LEFT = 0;
+        var STRING_ROPE_RIGHT = 0;
+        var STRING_ROPE_DEPTH = 0;
         var IEEE754_SIGN_BIT = -2147483648;
         var MINIMUM_INT32 = -2147483648;
         var INVALID_PROGRAM_INTEGER = -2147483648;
@@ -167,6 +170,7 @@
         var ASCII_LOWER_Z = 122;
         var IEEE754_EXPONENT_MASK = 2146435072;
         var IEEE754_FRACTION_HIGH_MASK = 1048575;
+        var IEEE754_QUIET_NAN_HIGH = 2146959360;
         var POSITIVE_2147483648_HIGH = 1105199104;
         var UINT32_LOW_UNUSED_MASK = 2097151;
         var UINT32_MANTISSA_LOW_SHIFT = 21;
@@ -1775,8 +1779,29 @@
                                 stringConcatenation = 1;
                             }
                         }
+                        if (concatenationLeftIsString === 1) {
+                            if (concatenationRightIsString === 1) {
+                                stringConcatenation = 2;
+                            }
+                        }
                     }
-                    if (stringConcatenation === 1) {
+                    if (stringConcatenation === 2) {
+                        var ropeConcatenation = concatenateStringsKernel(
+                            heapBase, state, concatenationLeft,
+                            concatenationRight);
+                        if (ropeConcatenation === 0) {
+                            setEngineCallRejectReason(
+                                heapBase, state, 4900);
+                            return unsupportedExitKernel(
+                                heapBase, state, frame, pc, opcode,
+                                instructions);
+                        }
+                        store32(arithmeticTarget, VALUE_TAG_REFERENCE);
+                        store32(arithmeticTarget + VALUE_CELL_LOW,
+                                ropeConcatenation);
+                        store32(arithmeticTarget + VALUE_CELL_HIGH, 0);
+                        store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                    } else if (stringConcatenation === 1) {
                         var concatenationNative = 0;
                         var concatenationLeftNative = 0;
                         var concatenationRightNative = 0;
@@ -2036,6 +2061,16 @@
                             heapBase, state);
                         arithmeticRightTag = VALUE_TAG_INT32;
                     }
+                    var arithmeticUndefined = 0;
+                    if (arithmeticLeftTag === VALUE_TAG_UNDEFINED) {
+                        arithmeticUndefined = 1;
+                    } else if (arithmeticRightTag === VALUE_TAG_UNDEFINED) {
+                        arithmeticUndefined = 1;
+                    }
+                    if (arithmeticUndefined === 1) {
+                        setValueCellDoubleBits(
+                            arithmeticTarget, 0, IEEE754_QUIET_NAN_HIGH);
+                    } else {
                     if (opcode !== OP_ADD) {
                         if (arithmeticLeftTag === VALUE_TAG_REFERENCE) {
                             var arithmeticLeftNumeric =
@@ -2086,6 +2121,9 @@
                     }
                     if (arithmeticLeftTag !== VALUE_TAG_INT32) {
                         if (arithmeticLeftTag !== VALUE_TAG_DOUBLE) {
+                            setEngineCallRejectReason(heapBase, state,
+                                4000 + arithmeticLeftTag * 16 +
+                                arithmeticRightTag);
                             return unsupportedExitKernel(
                                 heapBase, state, frame, pc, opcode,
                                 instructions);
@@ -2093,6 +2131,9 @@
                     }
                     if (arithmeticRightTag !== VALUE_TAG_INT32) {
                         if (arithmeticRightTag !== VALUE_TAG_DOUBLE) {
+                            setEngineCallRejectReason(heapBase, state,
+                                4000 + arithmeticLeftTag * 16 +
+                                arithmeticRightTag);
                             return unsupportedExitKernel(
                                 heapBase, state, frame, pc, opcode,
                                 instructions);
@@ -2167,6 +2208,7 @@
                                               arithmeticRightTag)));
                         }
                         store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                    }
                     }
                     }
                     pc = pc + FOUR_WORD_INSTRUCTION;
@@ -2772,11 +2814,29 @@
                     callFunctionIndex * VALUE_CELL_BYTES;
                 var callArgumentsCell = heapBase + constantCells +
                     callArgumentsIndex * VALUE_CELL_BYTES;
+                var diagnosticCallableTag = valueCellTag(
+                    0, callFunctionCell);
+                var diagnosticCallableKind = 2000 + diagnosticCallableTag;
+                if (diagnosticCallableTag === VALUE_TAG_REFERENCE) {
+                    var diagnosticCallable = valueCellReference(
+                        0, callFunctionCell);
+                    var diagnosticCallableType = recordType(
+                        heapBase, diagnosticCallable);
+                    diagnosticCallableKind = 3000 + diagnosticCallableType;
+                    if (diagnosticCallableType ===
+                            HEAP_TYPE_NATIVE_FUNCTION) {
+                        diagnosticCallableKind = 1000 +
+                            nativeFunctionMetadata(
+                                heapBase, diagnosticCallable);
+                    }
+                }
+                setEngineCallRejectReason(
+                    heapBase, state, diagnosticCallableKind);
                 var bytecodeCallHandled = bytecodeCallKernel(
                     heapBase, state, frame, callFunctionCell,
                     callArgumentsCell, callOperation, callTargetIndex,
                     currentContext, stringSupport, arrayPrototype,
-                    bytecodeWords, registerCells, pc, framePC);
+                    bytecodeWords, registerCells, pc, framePC, 0, 0);
                 var callFrameEntered = bytecodeCallHandled;
                 if (bytecodeCallHandled === 0) {
                     var intrinsicDispatchResult = intrinsicCallKernel(
@@ -3422,6 +3482,7 @@
                 var propertyConstantKey = load32(
                     propertyKeyCell + VALUE_CELL_LOW);
                 var propertyRecord = 0;
+                var propertyAccessorEntered = 0;
                 var virtualPropertyObjectType = recordType(
                     heapBase, propertyObject);
                 var propertyReceiver = propertyObject;
@@ -3584,7 +3645,29 @@
                     if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
                         if ((propertyAttributes(heapBase, propertyRecord) &
                              PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            propertyRecord = 0;
+                            var getterCell = propertyValueCellAddress(
+                                heapBase, propertyRecord);
+                            if (valueCellTag(0, getterCell) ===
+                                    VALUE_TAG_UNDEFINED) {
+                                setValueCellUndefined(
+                                    frameRegisterCellAddress(
+                                        heapBase, frame,
+                                        propertyTargetIndex));
+                                propertyRecord = PROPERTY_FOUND_SENTINEL;
+                            } else {
+                                propertyAccessorEntered = bytecodeCallKernel(
+                                    heapBase, state, frame, getterCell, 0, 1,
+                                    propertyTargetIndex, currentContext,
+                                    stringSupport, arrayPrototype,
+                                    bytecodeWords, registerCells, pc, framePC,
+                                    propertyObjectCell,
+                                    FOUR_WORD_INSTRUCTION);
+                                if (propertyAccessorEntered !== 1) {
+                                    propertyRecord = 0;
+                                } else {
+                                    propertyRecord = PROPERTY_FOUND_SENTINEL;
+                                }
+                            }
                         }
                     }
                 }
@@ -3621,7 +3704,20 @@
                     store32(propertyTarget + VALUE_CELL_AUX,
                             load32(propertySource + VALUE_CELL_AUX));
                 }
-                pc = pc + FOUR_WORD_INSTRUCTION;
+                if (propertyAccessorEntered === 1) {
+                    frame = engineCurrentFrame(heapBase, state);
+                    currentContext = frameContext(heapBase, frame);
+                    currentProgram = frameProgram(heapBase, frame);
+                    bytecodeWords = programBytecode(
+                        heapBase, currentProgram) + BYTECODE_WORDS;
+                    constantCells = programConstants(
+                        heapBase, currentProgram) + VECTOR_CELLS;
+                    globalObject = contextGlobal(heapBase, currentContext);
+                    framePC = frame + FRAME_PC;
+                    registerCells = frame + FRAME_REGISTERS;
+                    environment = frameEnvironment(heapBase, frame);
+                    pc = 0;
+                } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_PROPERTY_CONST) {
                 var setPropertyObjectIndex = load32(
                     heapBase + bytecodeWords +
@@ -4087,7 +4183,8 @@
     function bytecodeCallKernel(
             heapBase, state, frame, callFunctionCell, callArgumentsCell,
             callOperation, callTargetIndex, currentContext, stringSupport,
-            arrayPrototype, bytecodeWords, registerCells, pc, framePC) {
+            arrayPrototype, bytecodeWords, registerCells, pc, framePC,
+            explicitReceiverCell, explicitCallerAdvance) {
         var bytecodeCallHandled = 0;
         var bytecodeCallableCell = callFunctionCell;
         var bytecodeArgumentVector = 0;
@@ -4265,7 +4362,11 @@
             if (recordType(heapBase, bytecodeCallable) ===
                 HEAP_TYPE_BYTECODE_FUNCTION) {
                 var bytecodeCallValid = 1;
-                if (bytecodeApplyForwarding === 0) {
+                if (explicitReceiverCell !== 0) {
+                    bytecodeThisSource = explicitReceiverCell;
+                    bytecodeArgumentsAreValues = 1;
+                    bytecodeArgumentCount = 0;
+                } else if (bytecodeApplyForwarding === 0) {
                     if (load32(callArgumentsCell) !==
                         VALUE_TAG_REFERENCE) {
                         bytecodeCallValid = 0;
@@ -4273,9 +4374,13 @@
                             heapBase, state, CALL_REJECT_ARGUMENT_LIST);
                     }
                 }
-                var bytecodeArgumentRegisters = load32(
-                    callArgumentsCell + VALUE_CELL_LOW);
+                var bytecodeArgumentRegisters = 0;
+                if (explicitReceiverCell === 0) {
+                    bytecodeArgumentRegisters = load32(
+                        callArgumentsCell + VALUE_CELL_LOW);
+                }
                 if (bytecodeCallValid === 1) {
+                if (explicitReceiverCell === 0) {
                     if (load32(heapBase +
                         bytecodeArgumentRegisters) !==
                         HEAP_TYPE_ARRAY) {
@@ -4284,6 +4389,8 @@
                             heapBase, state, CALL_REJECT_ARGUMENT_LIST);
                     }
                 }
+                }
+                if (explicitReceiverCell === 0) {
                 if (bytecodeApplyForwarding === 0) {
                     if (bytecodeCallValid === 1) {
                         bytecodeArgumentVector = arrayElements(
@@ -4292,12 +4399,15 @@
                             heapBase, bytecodeArgumentVector);
                     }
                 }
+                }
                 var calleeProgram = functionMetadata(
                     heapBase, bytecodeCallable);
                 var receiverToNormalize = bytecodeThisSource;
                 var receiverNeedsBoxing = 0;
                 if (callOperation !== 2) {
-                    if (bytecodeApplyForwarding === 0) {
+                    if (explicitReceiverCell !== 0) {
+                        receiverToNormalize = explicitReceiverCell;
+                    } else if (bytecodeApplyForwarding === 0) {
                         var normalizationReceiverIndex = load32(
                             heapBase + bytecodeWords +
                             (pc + THIRD_OPERAND) * WORD_BYTES);
@@ -4355,10 +4465,6 @@
                 if ((programFlags(heapBase, calleeProgram) &
                      PROGRAM_FLAG_USES_ARGUMENTS) !== 0) {
                     calleeNeedsArguments = 1;
-                    if ((programFlags(heapBase, calleeProgram) &
-                         PROGRAM_FLAG_STRICT) !== 0) {
-                        bytecodeCallValid = 0;
-                    }
                 }
                 var calleeRegisterCount = programRegisterCount(
                     heapBase, calleeProgram);
@@ -4936,6 +5042,8 @@
                     if (callOperation === 2) {
                         thisSource = heapBase + registerCells +
                             callTargetIndex * VALUE_CELL_BYTES;
+                    } else if (explicitReceiverCell !== 0) {
+                        thisSource = explicitReceiverCell;
                     } else if (bytecodeApplyForwarding === 0) {
                         receiverIndex = load32(
                             heapBase + bytecodeWords +
@@ -5008,9 +5116,12 @@
                         store32(functionNameTarget + VALUE_CELL_HIGH, 0);
                         store32(functionNameTarget + VALUE_CELL_AUX, 0);
                     }
-                    var callerAdvance = FIVE_WORD_INSTRUCTION;
-                    if (callOperation === 2) {
-                        callerAdvance = FOUR_WORD_INSTRUCTION;
+                    var callerAdvance = explicitCallerAdvance;
+                    if (callerAdvance === 0) {
+                        callerAdvance = FIVE_WORD_INSTRUCTION;
+                        if (callOperation === 2) {
+                            callerAdvance = FOUR_WORD_INSTRUCTION;
+                        }
                     }
                     setFramePC(heapBase, frame, pc + callerAdvance);
                     setEngineHeapBump(
@@ -5152,6 +5263,13 @@
             else if (intrinsicId > INTRINSIC_LAST_ID) {
                 intrinsicCallValid = 0;
             }
+        }
+        if (intrinsicCallValid === 1) {
+            /* Standalone diagnostics have no host function object to name.
+             * Preserve the stable intrinsic ID unless a more specific reject
+             * reason below replaces it. */
+            setEngineCallRejectReason(
+                heapBase, state, 1000 + intrinsicId);
         }
         if (callOperation === 2) {
             if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
@@ -5426,7 +5544,7 @@
                     heapBase, state, frame, indirectEvalCompilerCell,
                     callArgumentsCell, 1, callTargetIndex, currentContext,
                     stringSupport, arrayPrototype, bytecodeWords,
-                    registerCells, pc, frame + FRAME_PC);
+                    registerCells, pc, frame + FRAME_PC, 0, 0);
                 if (indirectEvalCompileEntered !== 1) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
@@ -11109,16 +11227,29 @@
                     }
                     var fromCharCodeTag = valueCellTag(
                         0, fromCharCodeValueCell);
-                    if (fromCharCodeTag !== VALUE_TAG_INT32) {
-                        if (fromCharCodeTag !== VALUE_TAG_DOUBLE) {
+                    var fromCharCodeValue = 0;
+                    if (fromCharCodeValid === 1) {
+                        if (fromCharCodeTag === VALUE_TAG_INT32) {
+                            fromCharCodeValue = valueCellInt32(
+                                0, fromCharCodeValueCell) & 65535;
+                        } else if (fromCharCodeTag === VALUE_TAG_DOUBLE) {
+                            fromCharCodeValue = toInt32F64(loadF64(
+                                fromCharCodeValueCell + VALUE_CELL_LOW)) &
+                                65535;
+                        } else if (fromCharCodeTag === VALUE_TAG_TRUE) {
+                            fromCharCodeValue = 1;
+                        } else if (fromCharCodeTag === VALUE_TAG_FALSE) {
+                            fromCharCodeValue = 0;
+                        } else if (fromCharCodeTag === VALUE_TAG_NULL) {
+                            fromCharCodeValue = 0;
+                        } else if (fromCharCodeTag === VALUE_TAG_UNDEFINED) {
+                            /* ToUint16(NaN) is zero. */
+                            fromCharCodeValue = 0;
+                        } else {
                             fromCharCodeValid = 0;
                         }
                     }
                     if (fromCharCodeValid === 1) {
-                        var fromCharCodeValue = toInt32F64(
-                            loadNumberF64(fromCharCodeValueCell +
-                                VALUE_CELL_LOW,
-                                fromCharCodeTag)) & 65535;
                         setStringCharacterByte(heapBase,
                             fromCharCodeResult,
                             fromCharCodeIndex * 2,
@@ -11770,6 +11901,187 @@
             index = index + 1;
         }
         return 1;
+    }
+
+    /* Flat and rope strings share the ordinary STRING record type and length
+     * field. Rope records are immutable internal nodes whose flag selects two
+     * child references in place of inline UTF-16 data. Keeping traversal in a
+     * kernel function gives the Node and i386 backends identical semantics. */
+    function stringCharacterCodeUnit(heapBase, string, index) {
+        var STRING_ROPE_FLAG = 1;
+        var STRING_ROPE_LEFT = 0;
+        var STRING_ROPE_RIGHT = 0;
+        while ((recordFlags(heapBase, string) & STRING_ROPE_FLAG) !== 0) {
+            var left = stringRopeLeft(heapBase, string);
+            var leftLength = stringLength(heapBase, left);
+            if (index < leftLength) string = left;
+            else {
+                index = index - leftLength;
+                string = stringRopeRight(heapBase, string);
+            }
+        }
+        return flatStringCharacterCodeUnit(heapBase, string, index);
+    }
+
+    function stringTreeDepthKernel(heapBase, string) {
+        var STRING_ROPE_FLAG = 1;
+        var STRING_ROPE_DEPTH = 0;
+        if ((recordFlags(heapBase, string) & STRING_ROPE_FLAG) === 0) return 0;
+        return stringRopeDepth(heapBase, string);
+    }
+
+    function allocateStringRopeKernel(heapBase, state, left, right) {
+        var HEAP_TYPE_STRING = 7;
+        var STRING_ROPE_FLAG = 1;
+        var STRING_ROPE_RECORD_BYTES = 40;
+        var STRING_ROPE_LEFT = 0;
+        var STRING_ROPE_RIGHT = 0;
+        var STRING_ROPE_DEPTH = 0;
+        var leftLength = stringLength(heapBase, left);
+        var rightLength = stringLength(heapBase, right);
+        var length = leftLength + rightLength;
+        if (length < leftLength) return 0;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, STRING_ROPE_RECORD_BYTES) === 0) return 0;
+        var rope = engineHeapBump(heapBase, state);
+        if (rope + STRING_ROPE_RECORD_BYTES >
+                engineHeapLimit(heapBase, state)) return 0;
+        var leftDepth = stringTreeDepthKernel(heapBase, left);
+        var rightDepth = stringTreeDepthKernel(heapBase, right);
+        var depth = leftDepth;
+        if (rightDepth > depth) depth = rightDepth;
+        depth = depth + 1;
+        setRecordType(heapBase, rope, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, rope, STRING_ROPE_RECORD_BYTES);
+        setRecordMark(heapBase, rope, 0);
+        setRecordFlags(heapBase, rope, STRING_ROPE_FLAG);
+        setStringLength(heapBase, rope, length);
+        setStringHash(heapBase, rope, 0);
+        setStringRopeLeft(heapBase, rope, left);
+        setStringRopeRight(heapBase, rope, right);
+        setStringRopeDepth(heapBase, rope, depth);
+        setEngineHeapBump(heapBase, state,
+                          rope + STRING_ROPE_RECORD_BYTES);
+        return rope;
+    }
+
+    function allocateFlatStringConcatenationKernel(
+            heapBase, state, left, right) {
+        var HEAP_TYPE_STRING = 7;
+        var STRING_CHARS = 24;
+        var leftLength = stringLength(heapBase, left);
+        var rightLength = stringLength(heapBase, right);
+        var length = leftLength + rightLength;
+        if (length < leftLength) return 0;
+        var bytes = (STRING_CHARS + length * 2 + 7) & -8;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) {
+            return 0;
+        }
+        var result = engineHeapBump(heapBase, state);
+        if (result + bytes > engineHeapLimit(heapBase, state)) return 0;
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, bytes);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, 0);
+        setStringLength(heapBase, result, length);
+        var hash = -2128831035;
+        var index = 0;
+        while (index < length) {
+            var code = 0;
+            if (index < leftLength) {
+                code = stringCharacterCodeUnit(heapBase, left, index) & 65535;
+            } else {
+                code = stringCharacterCodeUnit(
+                    heapBase, right, index - leftLength) & 65535;
+            }
+            setStringCharacterByte(
+                heapBase, result, index * 2, code & 255);
+            setStringCharacterByte(
+                heapBase, result, index * 2 + 1, (code >>> 8) & 255);
+            hash = (hash ^ code) * 16777619;
+            index = index + 1;
+        }
+        setStringHash(heapBase, result, hash);
+        setEngineHeapBump(heapBase, state, result + bytes);
+        return result;
+    }
+
+    /* Join two immutable strings into an AVL-style rope. Sequential `+=`
+     * construction therefore shares old data and retains logarithmic
+     * character lookup without changing JavaScript string alias semantics. */
+    function concatenateStringsKernel(heapBase, state, left, right) {
+        var STRING_ROPE_FLAG = 1;
+        var STRING_ROPE_LEFT = 0;
+        var STRING_ROPE_RIGHT = 0;
+        var leftLength = stringLength(heapBase, left);
+        var rightLength = stringLength(heapBase, right);
+        if (leftLength === 0) return right;
+        if (rightLength === 0) return left;
+        if (leftLength + rightLength <= 64) {
+            return allocateFlatStringConcatenationKernel(
+                heapBase, state, left, right);
+        }
+        var leftDepth = stringTreeDepthKernel(heapBase, left);
+        var rightDepth = stringTreeDepthKernel(heapBase, right);
+        if (leftDepth > rightDepth + 1) {
+            if ((recordFlags(heapBase, left) & STRING_ROPE_FLAG) === 0) {
+                return allocateStringRopeKernel(
+                    heapBase, state, left, right);
+            }
+            var leftLeft = stringRopeLeft(heapBase, left);
+            var leftRight = stringRopeRight(heapBase, left);
+            var leftLeftDepth = stringTreeDepthKernel(heapBase, leftLeft);
+            var leftRightDepth = stringTreeDepthKernel(heapBase, leftRight);
+            if (leftLeftDepth >= leftRightDepth) {
+                var rotatedRight = allocateStringRopeKernel(
+                    heapBase, state, leftRight, right);
+                if (rotatedRight === 0) return 0;
+                return allocateStringRopeKernel(
+                    heapBase, state, leftLeft, rotatedRight);
+            }
+            if ((recordFlags(heapBase, leftRight) &
+                    STRING_ROPE_FLAG) === 0) return 0;
+            var pivotLeft = stringRopeLeft(heapBase, leftRight);
+            var pivotRight = stringRopeRight(heapBase, leftRight);
+            var rotatedLeft = allocateStringRopeKernel(
+                heapBase, state, leftLeft, pivotLeft);
+            if (rotatedLeft === 0) return 0;
+            rotatedRight = allocateStringRopeKernel(
+                heapBase, state, pivotRight, right);
+            if (rotatedRight === 0) return 0;
+            return allocateStringRopeKernel(
+                heapBase, state, rotatedLeft, rotatedRight);
+        }
+        if (rightDepth > leftDepth + 1) {
+            if ((recordFlags(heapBase, right) & STRING_ROPE_FLAG) === 0) {
+                return allocateStringRopeKernel(
+                    heapBase, state, left, right);
+            }
+            var rightLeft = stringRopeLeft(heapBase, right);
+            var rightRight = stringRopeRight(heapBase, right);
+            var rightLeftDepth = stringTreeDepthKernel(heapBase, rightLeft);
+            var rightRightDepth = stringTreeDepthKernel(heapBase, rightRight);
+            if (rightRightDepth >= rightLeftDepth) {
+                rotatedLeft = allocateStringRopeKernel(
+                    heapBase, state, left, rightLeft);
+                if (rotatedLeft === 0) return 0;
+                return allocateStringRopeKernel(
+                    heapBase, state, rotatedLeft, rightRight);
+            }
+            if ((recordFlags(heapBase, rightLeft) &
+                    STRING_ROPE_FLAG) === 0) return 0;
+            pivotLeft = stringRopeLeft(heapBase, rightLeft);
+            pivotRight = stringRopeRight(heapBase, rightLeft);
+            rotatedLeft = allocateStringRopeKernel(
+                heapBase, state, left, pivotLeft);
+            if (rotatedLeft === 0) return 0;
+            rotatedRight = allocateStringRopeKernel(
+                heapBase, state, pivotRight, rightRight);
+            if (rotatedRight === 0) return 0;
+            return allocateStringRopeKernel(
+                heapBase, state, rotatedLeft, rotatedRight);
+        }
+        return allocateStringRopeKernel(heapBase, state, left, right);
     }
 
     function primitiveWrapperValueCellKernel(
@@ -14545,6 +14857,7 @@
             growNativeHeapLimitKernel: growNativeHeapLimitKernel,
             hasPropertyKernel: hasPropertyKernel,
             clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
+            concatenateStringsKernel: concatenateStringsKernel,
             heapMarkKernel: heapMarkKernel,
             heapSweepKernel: heapSweepKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
@@ -14584,6 +14897,11 @@
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
+            stringCharacterCodeUnit: stringCharacterCodeUnit,
+            stringTreeDepthKernel: stringTreeDepthKernel,
+            allocateStringRopeKernel: allocateStringRopeKernel,
+            allocateFlatStringConcatenationKernel:
+                allocateFlatStringConcatenationKernel,
             stringNumericValueKernel: stringNumericValueKernel,
             descriptorFieldKindKernel: descriptorFieldKindKernel,
             stringReplaceKernel: stringReplaceKernel,

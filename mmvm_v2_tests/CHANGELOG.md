@@ -8,6 +8,35 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.74
+
+Approximate completion: 2026-09-27 evening BST
+
+### Guest VM
+
+- Replaced repeated large flat-string copying in the native guest interpreter
+  with immutable, balanced concatenation records. Small strings remain flat;
+  larger concatenations form bounded-depth trees which preserve ES5 string
+  immutability and are traversed by the same character accessor used by both
+  host backends.
+- Taught both guest collectors to trace concatenation children. The record
+  layout, character access, hashing, and traversal remain behind named heap
+  accessors rather than leaking offsets into benchmark code.
+- Added guest bytecode invocation for property getters, including the original
+  access receiver, resumable caller state, and strict functions which use an
+  unmapped `arguments` object. Corrected `String.fromCharCode` coercion for
+  the primitive values covered by ES5 `ToUint16`.
+- Extended standalone failure diagnostics with the rejected callable kind and
+  allocation status. This distinguishes missing language semantics from heap
+  pressure without calling back into the host VM.
+- PdfJS quick correctness now reaches benchmark execution in about 26.6
+  seconds at roughly 207 MiB peak RSS. It advances past its former repeated
+  string-allocation failure and its first accessor call; the subsequent
+  `String.fromCharCode` call is the current bring-up point, not a recorded
+  correctness pass.
+- Rechecked both complete guest regression suites at 12 programs and 266
+  assertions, plus net.js, node_web.js, demo1, demo2, and context multiplexing.
+
 ## 0.73
 
 Approximate completion: 2026-09-27 afternoon BST

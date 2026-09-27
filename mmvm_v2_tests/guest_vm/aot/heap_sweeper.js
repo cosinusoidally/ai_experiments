@@ -42,6 +42,7 @@
         var RECORD_TYPE = 0;
         var RECORD_SIZE = 4;
         var RECORD_MARK = 8;
+        var RECORD_FLAGS = 12;
         var OBJECT_PROTOTYPE = 16;
         var OBJECT_PROPERTY_HEAD = 20;
         var ARRAY_ELEMENTS = 24;
@@ -59,6 +60,8 @@
         var PROPERTY_ATTRIBUTES = 24;
         var PROPERTY_SETTER = 28;
         var PROPERTY_VALUE = 32;
+        var STRING_ROPE_LEFT = 24;
+        var STRING_ROPE_RIGHT = 28;
         var HANDLER_RESERVED = 28;
         var PROPERTY_ATTRIBUTE_ACCESSOR = 8;
         var REGEXP_PATTERN = 16;
@@ -93,6 +96,7 @@
         var VALUE_CELL_TAG = 0;
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;
+        var STRING_ROPE_FLAG = 1;
         var address = HEAP_FIRST_RECORD;
         var stackCount = 0;
         while (address < heapBump) {
@@ -181,6 +185,15 @@
                         }
                     }
                     else referenceIndex = -2;
+                } else if (type === HEAP_TYPE_STRING) {
+                    if ((recordFlags(heapBase, address) &
+                         STRING_ROPE_FLAG) !== 0) {
+                        if (referenceIndex === 0) {
+                            target = stringRopeLeft(heapBase, address);
+                        } else if (referenceIndex === 1) {
+                            target = stringRopeRight(heapBase, address);
+                        } else referenceIndex = -2;
+                    } else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_REGEXP) {
                     if (referenceIndex === 0) target = regexpPattern(heapBase, address);
                     else if (referenceIndex === 1) target = regexpFlags(heapBase, address);

@@ -525,3 +525,27 @@ The next string improvement must therefore change the general representation
 or construction algorithm (for example, a guest-owned rope/concatenation
 representation with bounded-depth traversal or flattening), while preserving
 ES5 string immutability and both backends' semantics.
+
+## 2026-09-27: balanced guest strings and accessor calls
+
+The native heap now represents sufficiently large concatenations as immutable
+balanced string trees while retaining flat records for strings of at most 64
+UTF-16 code units. This is a general representation change: string character
+access, comparisons, hashing consumers, and both collectors understand the
+tree through the guest heap's named accessors. It does not recognize PdfJS or
+cache benchmark output. Keeping small strings flat is important because source
+tokens and property names dominate frontend access patterns; making every
+two-character concatenation a tree made parsing substantially slower.
+
+The first standalone PdfJS run with this representation reached benchmark
+execution in 28.9 seconds at 212,224 KiB peak RSS instead of repeatedly
+collecting until the 512 MiB heap limit. Native bytecode getter entry then
+advanced the same run to 26.6 seconds at 212,096 KiB. Its next exit identifies
+the general `String.fromCharCode` coercion path (intrinsic 48); that operation
+is being corrected as an ES5 semantic rather than special-cased for PdfJS.
+
+Standalone diagnostics now report the bytecode PC, opcode, callable record or
+intrinsic identifier, and whether allocation failed. These fields are intended
+for broad bring-up: a callable value such as `1048` names intrinsic 48, while
+`3004` names a bytecode-function heap record. They avoid mistaking an ordinary
+semantic gap for collector or heap-growth failure.

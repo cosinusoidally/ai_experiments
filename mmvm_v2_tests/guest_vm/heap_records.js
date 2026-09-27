@@ -26,6 +26,10 @@
     var STRING_LENGTH = 0;
     var STRING_HASH = 4;
     var STRING_CHARS = 8;
+    var STRING_ROPE_LEFT = 8;
+    var STRING_ROPE_RIGHT = 12;
+    var STRING_ROPE_DEPTH = 16;
+    var STRING_ROPE_FLAG = 1;
 
     var VECTOR_LENGTH = 0;
     var VECTOR_CAPACITY = 4;
@@ -194,7 +198,10 @@
         ENGINE_GC_GENERATION: ENGINE_GC_GENERATION,
         ENGINE_GC_STACK_BASE: ENGINE_GC_STACK_BASE,
         ENGINE_GC_STACK_LIMIT: ENGINE_GC_STACK_LIMIT,
-        ENGINE_GC_COLLECTIONS: ENGINE_GC_COLLECTIONS
+        ENGINE_GC_COLLECTIONS: ENGINE_GC_COLLECTIONS,
+        STRING_ROPE_LEFT: 16 + STRING_ROPE_LEFT,
+        STRING_ROPE_RIGHT: 16 + STRING_ROPE_RIGHT,
+        STRING_ROPE_DEPTH: 16 + STRING_ROPE_DEPTH
     };
 
     Records.prototype.makeHandle = function (runtime, address) {
@@ -239,15 +246,45 @@
         return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
     };
 
+    Records.prototype.stringIsRope = function (address) {
+        this.heap.requireRecord(address, Heap.Types.STRING);
+        return !!(this.heap.flags(address) & STRING_ROPE_FLAG);
+    };
+
+    Records.prototype.stringRopeLeft = function (address) {
+        return this.heap.readTrustedFieldU32(
+            address, STRING_ROPE_LEFT, Heap.Types.STRING);
+    };
+
+    Records.prototype.stringRopeRight = function (address) {
+        return this.heap.readTrustedFieldU32(
+            address, STRING_ROPE_RIGHT, Heap.Types.STRING);
+    };
+
+    Records.prototype.stringRopeDepth = function (address) {
+        if (!this.stringIsRope(address)) return 0;
+        return this.heap.readTrustedFieldU32(
+            address, STRING_ROPE_DEPTH, Heap.Types.STRING);
+    };
+
     Records.prototype.stringCharacterCodeUnit = function (address, index) {
         var length = this.stringLength(address);
         if (index < 0 || index >= length || index !== Math.floor(index)) {
             throw new RangeError("string character index is out of bounds");
         }
+        while (this.stringIsRope(address)) {
+            var left = this.stringRopeLeft(address);
+            var leftLength = this.stringLength(left);
+            if (index < leftLength) address = left;
+            else {
+                index -= leftLength;
+                address = this.stringRopeRight(address);
+            }
+        }
         var low = this.heap.readTrustedFieldU8(
-            address, STRING_CHARS + index * 2);
+            address, STRING_CHARS + index * 2, Heap.Types.STRING);
         var high = this.heap.readTrustedFieldU8(
-            address, STRING_CHARS + index * 2 + 1);
+            address, STRING_CHARS + index * 2 + 1, Heap.Types.STRING);
         return low | (high << 8);
     };
 
@@ -256,11 +293,8 @@
         var result = "";
         var index = 0;
         while (index < length) {
-            var low = this.heap.readTrustedFieldU8(address, STRING_CHARS + index * 2,
-                                            Heap.Types.STRING);
-            var high = this.heap.readTrustedFieldU8(address, STRING_CHARS + index * 2 + 1,
-                                             Heap.Types.STRING);
-            result += String.fromCharCode(low | (high << 8));
+            result += String.fromCharCode(
+                this.stringCharacterCodeUnit(address, index));
             index++;
         }
         return result;
@@ -1363,7 +1397,12 @@
      * without a host VM. Expose the two diagnostic fields as one named ABI
      * description so the emitter never duplicates engine-state offsets. */
     Records.prototype.standaloneEngineDiagnosticLayout = function () {
-        return {pc: ENGINE_PC, opcode: ENGINE_RESULT_CELL};
+        return {
+            pc: ENGINE_PC,
+            opcode: ENGINE_RESULT_CELL,
+            detail: ENGINE_CALL_REJECT_REASON,
+            allocation: ENGINE_ALLOCATION_FAILED
+        };
     };
 
     Records.prototype.clearEnginePropertyCache = function (state) {
@@ -1561,6 +1600,10 @@
             if (records.propertyAttributes(address) & ATTR_ACCESSOR) {
                 reference(records.propertySetter(address));
             }
+        } else if (type === Heap.Types.STRING &&
+                   records.stringIsRope(address)) {
+            reference(records.stringRopeLeft(address));
+            reference(records.stringRopeRight(address));
         } else if (type === Heap.Types.REGEXP) {
             reference(this.heap.readTrustedFieldU32(
                 address, REGEXP_PATTERN, Heap.Types.REGEXP));
