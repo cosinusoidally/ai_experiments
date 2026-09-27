@@ -779,3 +779,23 @@ first collection was deferred to the maximum reservation. Execution remained
 too slow and is not considered complete; the subsequent compact RegExp
 instruction work reduced a fixed Node-kernel slice from about 31.5 to 29.9
 seconds without adding a host semantic call.
+
+## 2026-09-27: typed matcher state
+
+The guest RegExp compiler now emits one fixed-width `Int32Array` instruction
+stream. Reusable capture and backtracking workspaces are also typed arrays,
+grown geometrically at their high-water mark. Buffer backing bytes live inside
+ordinary guest heap records, so collection, snapshots, and the Node memory
+backend use the same ownership model.
+
+This is a representation improvement rather than a special interpreter path.
+The normal typed-array constructor and indexed element operations service the
+matcher. On deterministic Octane RegExp setup, hosted native total time fell
+from 100.5 to 86.2 seconds. Standalone total time fell from 108.1 to 76.5
+seconds and its peak RSS fell from about 211 MiB to 194 MiB. Both runs passed
+the stock checksum.
+
+The final profile still executed approximately 2.51 billion guest bytecodes;
+typed storage reduced the cost per bytecode but did not eliminate matcher
+dispatch. This makes low-level matcher control flow, rather than heap capacity
+or host transitions, the next high-value target.

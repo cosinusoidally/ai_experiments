@@ -8,6 +8,27 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.69
+
+Approximate completion: 2026-09-27 afternoon BST
+
+### Guest VM
+
+- Corrected the Octane `--setup-only` diagnostic to install Octane's seeded
+  random-number generator before setup, matching the stock suite harness and
+  preserving its checksum validation.
+- Extended RegExp start metadata from one character to the longest common
+  literal prefix of every alternative. Case-sensitive searches use the guest
+  VM's native String search intrinsic to skip impossible candidate positions.
+- Packed matcher instructions into one fixed-width `Int32Array` and moved
+  capture/backtracking workspaces to reusable, geometrically grown typed
+  arrays. These remain ordinary guest-owned buffer-backing records and use the
+  same typed-array implementation as application code.
+- Stock deterministic RegExp setup now passes in both hosted native and
+  standalone modes. Hosted total time fell from 100.5 to 86.2 seconds;
+  standalone total time fell from 108.1 to 76.5 seconds, with standalone peak
+  RSS falling from about 211 MiB to 194 MiB.
+
 ## 0.68
 
 Approximate completion: 2026-09-27 morning BST

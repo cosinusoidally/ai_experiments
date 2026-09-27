@@ -313,3 +313,37 @@ these changes to about 29.9 seconds. Constant-property operations in that
 slice fell by roughly 600,000. The remaining runtime is dominated by general
 guest bytecode/property/array work; it must be improved without recognizing
 Octane sources or delegating regular expressions to the host.
+
+## 2026-09-27: typed RegExp machine storage
+
+The setup-only runner now calls `BenchmarkSuite.ResetRNG()` before entering
+the selected setup functions, as the stock Octane harness does. Without that
+step, both stock Node RegExp and the guest matcher correctly reject the final
+checksum because the generated input variants are nondeterministic. With the
+seed restored, the benchmark's own checksum is authoritative in this mode.
+
+Matcher start metadata now retains the longest common literal prefix across
+alternatives, not merely a common first character. The search remains
+conservative: only consecutive, exactly-once literal atoms participate, and
+case-insensitive patterns retain their explicit character scan.
+
+Compiled instructions use one fixed-width `Int32Array`. Capture state and the
+backtracking PC, input-position, and saved-state stacks use reusable typed
+arrays that double only when their previous high-water mark is exceeded.
+These are guest heap buffer-backing records; neither backend stores a host
+array as guest state. Structured character classes and nested lookahead
+programs remain in a side table.
+
+On the deterministic stock setup checksum:
+
+- hosted native execution changed from 100.5 seconds total / 86.3 seconds in
+  setup to 86.2 / 72.3 seconds;
+- standalone execution changed from 108.1 seconds total / 106.1 seconds in
+  setup to 76.5 / 74.6 seconds; and
+- standalone peak RSS changed from approximately 211 MiB to 194 MiB.
+
+A profiling run still records approximately 2.51 billion guest bytecodes.
+Typed storage makes those operations cheaper and avoids many heap records, but
+the next major improvement must reduce matcher control-flow work itself, most
+likely by moving the low-level executor into the kernel dialect while keeping
+parsing and compilation guest-owned.

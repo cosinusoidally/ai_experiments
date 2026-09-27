@@ -300,6 +300,7 @@
     var RX_REPEAT_DECIDE = 15;
     var RX_REPEAT_MARK = 16;
     var RX_REPEAT_NEXT = 17;
+    var RX_INSTRUCTION_WORDS = 8;
 
     function emit(code, instruction) {
         code.push(instruction);
@@ -393,6 +394,7 @@
         var anchored = true;
         var firstLiteralCode = -1;
         var literalKnown = true;
+        var commonPrefix = null;
         var branchIndex = 0;
         while (branchIndex < parsed.alternatives.length) {
             var pieces = parsed.alternatives[branchIndex++];
@@ -404,6 +406,31 @@
                 pieceIndex++;
             }
             if (!branchAnchored) anchored = false;
+            var branchPrefix = "";
+            var prefixIndex = pieceIndex;
+            while (prefixIndex < pieces.length) {
+                var prefixPiece = pieces[prefixIndex];
+                if (prefixPiece.minimum !== 1 ||
+                    prefixPiece.maximum !== 1 ||
+                    prefixPiece.atom.kind !== "literal") break;
+                branchPrefix += String.fromCharCode(prefixPiece.atom.code);
+                prefixIndex++;
+            }
+            if (commonPrefix === null) {
+                commonPrefix = branchPrefix;
+            } else {
+                var commonLength = commonPrefix.length;
+                if (branchPrefix.length < commonLength) {
+                    commonLength = branchPrefix.length;
+                }
+                var commonIndex = 0;
+                while (commonIndex < commonLength &&
+                       commonPrefix.charCodeAt(commonIndex) ===
+                           branchPrefix.charCodeAt(commonIndex)) {
+                    commonIndex++;
+                }
+                commonPrefix = commonPrefix.substring(0, commonIndex);
+            }
             if (pieceIndex >= pieces.length ||
                 pieces[pieceIndex].minimum <= 0 ||
                 pieces[pieceIndex].atom.kind !== "literal") {
@@ -415,7 +442,9 @@
             }
         }
         if (!literalKnown) firstLiteralCode = -1;
-        return {anchored: anchored, firstLiteralCode: firstLiteralCode};
+        if (!commonPrefix) commonPrefix = null;
+        return {anchored: anchored, firstLiteralCode: firstLiteralCode,
+                leadingLiteral: commonPrefix};
     }
 
     /* Convert the convenient compiler objects into a compact structure of
@@ -425,62 +454,51 @@
      * few operations that genuinely need a class or nested program object. */
     function packProgram(program) {
         var source = program.code;
-        var opcodes = [];
-        var arg0 = [];
-        var arg1 = [];
-        var arg2 = [];
-        var arg3 = [];
-        var arg4 = [];
-        var arg5 = [];
+        var packed = new Int32Array(source.length * RX_INSTRUCTION_WORDS);
         var nodeData = [];
         var index = 0;
         while (index < source.length) {
             var instruction = source[index];
             var opcode = instruction.opcode;
-            opcodes[index] = opcode;
+            var base = index * RX_INSTRUCTION_WORDS;
+            packed[base] = opcode;
             nodeData[index] = instruction.node || instruction.program || null;
             if (opcode === RX_SPLIT) {
-                arg0[index] = instruction.first;
-                arg1[index] = instruction.second;
+                packed[base + 1] = instruction.first;
+                packed[base + 2] = instruction.second;
             } else if (opcode === RX_JUMP) {
-                arg0[index] = instruction.target;
+                packed[base + 1] = instruction.target;
             } else if (opcode === RX_REPEAT_INIT) {
-                arg0[index] = instruction.countSlot;
-                arg1[index] = instruction.target;
+                packed[base + 1] = instruction.countSlot;
+                packed[base + 2] = instruction.target;
             } else if (opcode === RX_REPEAT_DECIDE) {
-                arg0[index] = instruction.countSlot;
-                arg1[index] = instruction.minimum;
-                arg2[index] = instruction.maximum;
-                arg3[index] = instruction.greedy ? 1 : 0;
-                arg4[index] = instruction.body;
-                arg5[index] = instruction.exit;
+                packed[base + 1] = instruction.countSlot;
+                packed[base + 2] = instruction.minimum;
+                packed[base + 3] = instruction.maximum;
+                packed[base + 4] = instruction.greedy ? 1 : 0;
+                packed[base + 5] = instruction.body;
+                packed[base + 6] = instruction.exit;
             } else if (opcode === RX_REPEAT_MARK) {
-                arg0[index] = instruction.positionSlot;
+                packed[base + 1] = instruction.positionSlot;
             } else if (opcode === RX_REPEAT_NEXT) {
-                arg0[index] = instruction.countSlot;
-                arg1[index] = instruction.positionSlot;
-                arg2[index] = instruction.decide;
-                arg3[index] = instruction.exit;
+                packed[base + 1] = instruction.countSlot;
+                packed[base + 2] = instruction.positionSlot;
+                packed[base + 3] = instruction.decide;
+                packed[base + 4] = instruction.exit;
             } else if (opcode === RX_SAVE_START || opcode === RX_SAVE_END) {
-                arg0[index] = instruction.capture;
+                packed[base + 1] = instruction.capture;
             } else if (opcode === RX_LOOKAHEAD) {
-                arg0[index] = instruction.positive ? 1 : 0;
+                packed[base + 1] = instruction.positive ? 1 : 0;
             } else if (opcode === RX_LITERAL) {
-                arg0[index] = instruction.node.code;
+                packed[base + 1] = instruction.node.code;
             } else if (opcode === RX_BACKREF) {
-                arg0[index] = instruction.node.capture;
+                packed[base + 1] = instruction.node.capture;
             } else if (opcode === RX_BOUNDARY) {
-                arg0[index] = instruction.node.invert ? 1 : 0;
+                packed[base + 1] = instruction.node.invert ? 1 : 0;
             }
             index++;
         }
-        program.opcodes = opcodes;
-        program.arg0 = arg0;
-        program.arg1 = arg1;
-        program.arg2 = arg2;
-        program.arg3 = arg3;
-        program.arg4 = arg4;
-        program.arg5 = arg5;
+        program.packedCode = packed;
         program.nodeData = nodeData;
         program.code = null;
     }
@@ -495,8 +513,9 @@
                 stateSlots: compiler.nextStateSlot,
                 anchored: startMetadata.anchored,
                 firstLiteralCode: startMetadata.firstLiteralCode,
-                firstLiteral: startMetadata.firstLiteralCode < 0 ? null :
-                    String.fromCharCode(startMetadata.firstLiteralCode),
+                leadingLiteral: startMetadata.leadingLiteral ||
+                    (startMetadata.firstLiteralCode < 0 ? null :
+                     String.fromCharCode(startMetadata.firstLiteralCode)),
                 workspace: null};
         compiler.programs.push(program);
         var programIndex = 0;
@@ -508,29 +527,53 @@
         return program;
     }
 
+    function makeMatcherWorkspace(stateSlots) {
+        var stackCapacity = 16;
+        return {state: new Int32Array(stateSlots),
+                stackPc: new Int32Array(stackCapacity),
+                stackPosition: new Int32Array(stackCapacity),
+                stackState: new Int32Array(stackCapacity * stateSlots)};
+    }
+
+    function growMatcherWorkspace(workspace, stateSlots) {
+        var oldCapacity = workspace.stackPc.length;
+        var newCapacity = oldCapacity ? oldCapacity * 2 : 16;
+        var newPc = new Int32Array(newCapacity);
+        var newPosition = new Int32Array(newCapacity);
+        var newState = new Int32Array(newCapacity * stateSlots);
+        var index = 0;
+        while (index < oldCapacity) {
+            newPc[index] = workspace.stackPc[index];
+            newPosition[index] = workspace.stackPosition[index];
+            index++;
+        }
+        index = 0;
+        var oldStateLength = oldCapacity * stateSlots;
+        while (index < oldStateLength) {
+            newState[index] = workspace.stackState[index];
+            index++;
+        }
+        workspace.stackPc = newPc;
+        workspace.stackPosition = newPosition;
+        workspace.stackState = newState;
+    }
+
     function runPattern(program, machine, start, initialState) {
-        var opcodes = program.opcodes;
-        var arg0 = program.arg0;
-        var arg1 = program.arg1;
-        var arg2 = program.arg2;
-        var arg3 = program.arg3;
-        var arg4 = program.arg4;
-        var arg5 = program.arg5;
+        var packedCode = program.packedCode;
         var nodeData = program.nodeData;
         var input = machine.input;
         var pc = 0;
         var position = start;
         var workspace = program.workspace;
         if (!workspace) {
-            workspace = {state: [], stackPc: [], stackPosition: [],
-                         stackState: []};
+            workspace = makeMatcherWorkspace(program.stateSlots);
             program.workspace = workspace;
         }
         var state = workspace.state;
         var stateIndex = 0;
         while (stateIndex < program.stateSlots) {
             state[stateIndex] = initialState ?
-                initialState[stateIndex] : undefined;
+                initialState[stateIndex] : -1;
             stateIndex++;
         }
         var stackPc = workspace.stackPc;
@@ -539,14 +582,21 @@
         var stackDepth = 0;
 
         while (true) {
-            var opcode = opcodes[pc];
+            var instructionBase = pc * RX_INSTRUCTION_WORDS;
+            var opcode = packedCode[instructionBase];
             var node = nodeData[pc];
             var matched = true;
             var characterCode;
             if (opcode === RX_MATCH) {
                 return {position: position, state: state};
             } else if (opcode === RX_SPLIT) {
-                stackPc[stackDepth] = arg1[pc];
+                if (stackDepth >= stackPc.length) {
+                    growMatcherWorkspace(workspace, program.stateSlots);
+                    stackPc = workspace.stackPc;
+                    stackPosition = workspace.stackPosition;
+                    stackState = workspace.stackState;
+                }
+                stackPc[stackDepth] = packedCode[instructionBase + 2];
                 stackPosition[stackDepth] = position;
                 var splitStateOffset = stackDepth * program.stateSlots;
                 var splitSaveIndex = 0;
@@ -556,23 +606,30 @@
                     splitSaveIndex++;
                 }
                 stackDepth++;
-                pc = arg0[pc];
+                pc = packedCode[instructionBase + 1];
                 continue;
             } else if (opcode === RX_JUMP) {
-                pc = arg0[pc];
+                pc = packedCode[instructionBase + 1];
                 continue;
             } else if (opcode === RX_REPEAT_INIT) {
-                state[arg0[pc]] = 0;
-                pc = arg1[pc];
+                state[packedCode[instructionBase + 1]] = 0;
+                pc = packedCode[instructionBase + 2];
                 continue;
             } else if (opcode === RX_REPEAT_DECIDE) {
-                var repeatCount = state[arg0[pc]];
-                if (repeatCount < arg1[pc]) {
-                    pc = arg4[pc];
-                } else if (arg2[pc] >= 0 && repeatCount >= arg2[pc]) {
-                    pc = arg5[pc];
-                } else if (arg3[pc]) {
-                    stackPc[stackDepth] = arg5[pc];
+                var repeatCount = state[packedCode[instructionBase + 1]];
+                if (repeatCount < packedCode[instructionBase + 2]) {
+                    pc = packedCode[instructionBase + 5];
+                } else if (packedCode[instructionBase + 3] >= 0 &&
+                           repeatCount >= packedCode[instructionBase + 3]) {
+                    pc = packedCode[instructionBase + 6];
+                } else if (packedCode[instructionBase + 4]) {
+                    if (stackDepth >= stackPc.length) {
+                        growMatcherWorkspace(workspace, program.stateSlots);
+                        stackPc = workspace.stackPc;
+                        stackPosition = workspace.stackPosition;
+                        stackState = workspace.stackState;
+                    }
+                    stackPc[stackDepth] = packedCode[instructionBase + 6];
                     stackPosition[stackDepth] = position;
                     var greedyStateOffset = stackDepth * program.stateSlots;
                     var greedySaveIndex = 0;
@@ -582,9 +639,15 @@
                         greedySaveIndex++;
                     }
                     stackDepth++;
-                    pc = arg4[pc];
+                    pc = packedCode[instructionBase + 5];
                 } else {
-                    stackPc[stackDepth] = arg4[pc];
+                    if (stackDepth >= stackPc.length) {
+                        growMatcherWorkspace(workspace, program.stateSlots);
+                        stackPc = workspace.stackPc;
+                        stackPosition = workspace.stackPosition;
+                        stackState = workspace.stackState;
+                    }
+                    stackPc[stackDepth] = packedCode[instructionBase + 5];
                     stackPosition[stackDepth] = position;
                     var lazyStateOffset = stackDepth * program.stateSlots;
                     var lazySaveIndex = 0;
@@ -594,30 +657,32 @@
                         lazySaveIndex++;
                     }
                     stackDepth++;
-                    pc = arg5[pc];
+                    pc = packedCode[instructionBase + 6];
                 }
                 continue;
             } else if (opcode === RX_REPEAT_MARK) {
-                state[arg0[pc]] = position;
+                state[packedCode[instructionBase + 1]] = position;
                 pc++;
                 continue;
             } else if (opcode === RX_REPEAT_NEXT) {
-                state[arg0[pc]]++;
-                pc = state[arg1[pc]] === position ? arg3[pc] : arg2[pc];
+                state[packedCode[instructionBase + 1]]++;
+                pc = state[packedCode[instructionBase + 2]] === position ?
+                    packedCode[instructionBase + 4] :
+                    packedCode[instructionBase + 3];
                 continue;
             } else if (opcode === RX_SAVE_START) {
-                state[arg0[pc] * 2] = position;
+                state[packedCode[instructionBase + 1] * 2] = position;
                 pc++;
                 continue;
             } else if (opcode === RX_SAVE_END) {
-                state[arg0[pc] * 2 + 1] = position;
+                state[packedCode[instructionBase + 1] * 2 + 1] = position;
                 pc++;
                 continue;
             } else if (opcode === RX_LOOKAHEAD) {
                 var look = runPattern(
                     node, machine, position, state);
-                if (!!look === !!arg0[pc]) {
-                    if (arg0[pc]) {
+                if (!!look === !!packedCode[instructionBase + 1]) {
+                    if (packedCode[instructionBase + 1]) {
                         var lookStateIndex = 0;
                         while (lookStateIndex < program.stateSlots) {
                             state[lookStateIndex] =
@@ -641,11 +706,13 @@
                 var before = position > 0 && word(input.charCodeAt(position - 1));
                 var after = position < input.length &&
                     word(input.charCodeAt(position));
-                matched = (before !== after) !== !!arg0[pc];
+                matched = (before !== after) !==
+                    !!packedCode[instructionBase + 1];
             } else if (opcode === RX_BACKREF) {
-                var captureStart = state[arg0[pc] * 2];
-                var captureEnd = state[arg0[pc] * 2 + 1];
-                if (captureStart !== undefined && captureEnd !== undefined) {
+                var captureSlot = packedCode[instructionBase + 1] * 2;
+                var captureStart = state[captureSlot];
+                var captureEnd = state[captureSlot + 1];
+                if (captureStart >= 0 && captureEnd >= 0) {
                     var captureLength = captureEnd - captureStart;
                     matched = position + captureLength <= input.length;
                     var captureOffset = 0;
@@ -674,7 +741,8 @@
                     } else if (opcode === RX_CLASS_ESCAPE) {
                         matched = classEscape(node.name, characterCode);
                     } else {
-                        var expectedCode = arg0[pc];
+                        var expectedCode =
+                            packedCode[instructionBase + 1];
                         if (machine.ignoreCase) {
                             characterCode = lowerAscii(characterCode);
                             expectedCode = lowerAscii(expectedCode);
@@ -753,7 +821,7 @@
         while (start <= input.length) {
             if (parsed.anchored && !machine.multiline && start > 0) break;
             if (parsed.firstLiteralCode >= 0 && !machine.ignoreCase) {
-                start = input.indexOf(parsed.firstLiteral, start);
+                start = input.indexOf(parsed.leadingLiteral, start);
                 if (start < 0) break;
             }
             if (parsed.firstLiteralCode >= 0 && machine.ignoreCase &&
@@ -775,7 +843,7 @@
                 while (capture <= parsed.captures) {
                     var captureStart = result.state[capture * 2];
                     var captureEnd = result.state[capture * 2 + 1];
-                    match[capture] = captureStart === undefined ? undefined :
+                    match[capture] = captureStart < 0 ? undefined :
                         input.substring(captureStart, captureEnd);
                     capture++;
                 }

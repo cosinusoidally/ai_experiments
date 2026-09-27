@@ -121,6 +121,10 @@
     }
 
     if (setupOnly) {
+        /* RunSuites performs this before entering the suites. Setup routines
+         * such as RegExp construct deterministic input variants and their
+         * stock checksum depends on the same seeded generator. */
+        BenchmarkSuite.ResetRNG();
         var setupSuiteIndex = 0;
         while (setupSuiteIndex < BenchmarkSuite.suites.length) {
             var setupSuite = BenchmarkSuite.suites[setupSuiteIndex++];
