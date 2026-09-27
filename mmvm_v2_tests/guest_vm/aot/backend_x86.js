@@ -691,10 +691,12 @@
          * snapshot with untouched zero pages. */
         records.setEngineHeapBounds(nativeInterpreter.stateAddress,
                                     heapImageLength,
-                                    heap.maximumAllocationLimit);
+                                    runtime.gcHeapPressureBump);
         records.setEngineNativeTailBounds(nativeInterpreter.stateAddress,
                                           heapImageLength,
-                                          heap.maximumAllocationLimit);
+                                          runtime.gcHeapPressureBump);
+        records.setEngineNativeMaximumLimit(nativeInterpreter.stateAddress,
+                                            heap.maximumAllocationLimit);
         var savedGCState = [
             records.engineGCGeneration(nativeInterpreter.stateAddress),
             records.engineGCStackBase(nativeInterpreter.stateAddress),

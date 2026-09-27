@@ -355,6 +355,14 @@
     }
 
     function compilePiece(piece, code, compiler) {
+        /* The overwhelmingly common case is an unquantified atom. Lower it
+         * directly: routing every literal and assertion through the generic
+         * repeat machine added four dispatches, two state slots, and much
+         * larger backtracking snapshots without changing its meaning. */
+        if (piece.minimum === 1 && piece.maximum === 1) {
+            compileAtom(piece.atom, code, compiler);
+            return;
+        }
         var countSlot = compiler.nextStateSlot++;
         var positionSlot = compiler.nextStateSlot++;
         var initialize = emit(code, {opcode: RX_REPEAT_INIT,
@@ -410,6 +418,73 @@
         return {anchored: anchored, firstLiteralCode: firstLiteralCode};
     }
 
+    /* Convert the convenient compiler objects into a compact structure of
+     * arrays. The matcher keeps these arrays in locals, so one dispatch does
+     * not repeatedly resolve fields on an instruction object. Six integer
+     * operands cover the largest instruction; nodeData is used only by the
+     * few operations that genuinely need a class or nested program object. */
+    function packProgram(program) {
+        var source = program.code;
+        var opcodes = [];
+        var arg0 = [];
+        var arg1 = [];
+        var arg2 = [];
+        var arg3 = [];
+        var arg4 = [];
+        var arg5 = [];
+        var nodeData = [];
+        var index = 0;
+        while (index < source.length) {
+            var instruction = source[index];
+            var opcode = instruction.opcode;
+            opcodes[index] = opcode;
+            nodeData[index] = instruction.node || instruction.program || null;
+            if (opcode === RX_SPLIT) {
+                arg0[index] = instruction.first;
+                arg1[index] = instruction.second;
+            } else if (opcode === RX_JUMP) {
+                arg0[index] = instruction.target;
+            } else if (opcode === RX_REPEAT_INIT) {
+                arg0[index] = instruction.countSlot;
+                arg1[index] = instruction.target;
+            } else if (opcode === RX_REPEAT_DECIDE) {
+                arg0[index] = instruction.countSlot;
+                arg1[index] = instruction.minimum;
+                arg2[index] = instruction.maximum;
+                arg3[index] = instruction.greedy ? 1 : 0;
+                arg4[index] = instruction.body;
+                arg5[index] = instruction.exit;
+            } else if (opcode === RX_REPEAT_MARK) {
+                arg0[index] = instruction.positionSlot;
+            } else if (opcode === RX_REPEAT_NEXT) {
+                arg0[index] = instruction.countSlot;
+                arg1[index] = instruction.positionSlot;
+                arg2[index] = instruction.decide;
+                arg3[index] = instruction.exit;
+            } else if (opcode === RX_SAVE_START || opcode === RX_SAVE_END) {
+                arg0[index] = instruction.capture;
+            } else if (opcode === RX_LOOKAHEAD) {
+                arg0[index] = instruction.positive ? 1 : 0;
+            } else if (opcode === RX_LITERAL) {
+                arg0[index] = instruction.node.code;
+            } else if (opcode === RX_BACKREF) {
+                arg0[index] = instruction.node.capture;
+            } else if (opcode === RX_BOUNDARY) {
+                arg0[index] = instruction.node.invert ? 1 : 0;
+            }
+            index++;
+        }
+        program.opcodes = opcodes;
+        program.arg0 = arg0;
+        program.arg1 = arg1;
+        program.arg2 = arg2;
+        program.arg3 = arg3;
+        program.arg4 = arg4;
+        program.arg5 = arg5;
+        program.nodeData = nodeData;
+        program.code = null;
+    }
+
     function compilePattern(parsed) {
         var compiler = {nextStateSlot: parsed.captures * 2 + 2, programs: []};
         var code = [];
@@ -420,18 +495,28 @@
                 stateSlots: compiler.nextStateSlot,
                 anchored: startMetadata.anchored,
                 firstLiteralCode: startMetadata.firstLiteralCode,
+                firstLiteral: startMetadata.firstLiteralCode < 0 ? null :
+                    String.fromCharCode(startMetadata.firstLiteralCode),
                 workspace: null};
         compiler.programs.push(program);
         var programIndex = 0;
         while (programIndex < compiler.programs.length) {
-            compiler.programs[programIndex++].stateSlots =
-                compiler.nextStateSlot;
+            var compiledProgram = compiler.programs[programIndex++];
+            compiledProgram.stateSlots = compiler.nextStateSlot;
+            packProgram(compiledProgram);
         }
         return program;
     }
 
     function runPattern(program, machine, start, initialState) {
-        var code = program.code;
+        var opcodes = program.opcodes;
+        var arg0 = program.arg0;
+        var arg1 = program.arg1;
+        var arg2 = program.arg2;
+        var arg3 = program.arg3;
+        var arg4 = program.arg4;
+        var arg5 = program.arg5;
+        var nodeData = program.nodeData;
         var input = machine.input;
         var pc = 0;
         var position = start;
@@ -453,87 +538,86 @@
         var stackState = workspace.stackState;
         var stackDepth = 0;
 
-        function fail() {
-            if (stackDepth === 0) return false;
-            stackDepth--;
-            pc = stackPc[stackDepth];
-            position = stackPosition[stackDepth];
-            var stateOffset = stackDepth * program.stateSlots;
-            var restoreIndex = 0;
-            while (restoreIndex < program.stateSlots) {
-                state[restoreIndex] = stackState[stateOffset + restoreIndex];
-                restoreIndex++;
-            }
-            return true;
-        }
-
-        function push(nextPc) {
-            stackPc[stackDepth] = nextPc;
-            stackPosition[stackDepth] = position;
-            var stateOffset = stackDepth * program.stateSlots;
-            var saveIndex = 0;
-            while (saveIndex < program.stateSlots) {
-                stackState[stateOffset + saveIndex] = state[saveIndex];
-                saveIndex++;
-            }
-            stackDepth++;
-        }
-
         while (true) {
-            var instruction = code[pc];
-            var node = instruction.node;
+            var opcode = opcodes[pc];
+            var node = nodeData[pc];
             var matched = true;
             var characterCode;
-            if (instruction.opcode === RX_MATCH) {
+            if (opcode === RX_MATCH) {
                 return {position: position, state: state};
-            } else if (instruction.opcode === RX_SPLIT) {
-                push(instruction.second);
-                pc = instruction.first;
+            } else if (opcode === RX_SPLIT) {
+                stackPc[stackDepth] = arg1[pc];
+                stackPosition[stackDepth] = position;
+                var splitStateOffset = stackDepth * program.stateSlots;
+                var splitSaveIndex = 0;
+                while (splitSaveIndex < program.stateSlots) {
+                    stackState[splitStateOffset + splitSaveIndex] =
+                        state[splitSaveIndex];
+                    splitSaveIndex++;
+                }
+                stackDepth++;
+                pc = arg0[pc];
                 continue;
-            } else if (instruction.opcode === RX_JUMP) {
-                pc = instruction.target;
+            } else if (opcode === RX_JUMP) {
+                pc = arg0[pc];
                 continue;
-            } else if (instruction.opcode === RX_REPEAT_INIT) {
-                state[instruction.countSlot] = 0;
-                pc = instruction.target;
+            } else if (opcode === RX_REPEAT_INIT) {
+                state[arg0[pc]] = 0;
+                pc = arg1[pc];
                 continue;
-            } else if (instruction.opcode === RX_REPEAT_DECIDE) {
-                var repeatCount = state[instruction.countSlot];
-                if (repeatCount < instruction.minimum) {
-                    pc = instruction.body;
-                } else if (instruction.maximum >= 0 &&
-                           repeatCount >= instruction.maximum) {
-                    pc = instruction.exit;
-                } else if (instruction.greedy) {
-                    push(instruction.exit);
-                    pc = instruction.body;
+            } else if (opcode === RX_REPEAT_DECIDE) {
+                var repeatCount = state[arg0[pc]];
+                if (repeatCount < arg1[pc]) {
+                    pc = arg4[pc];
+                } else if (arg2[pc] >= 0 && repeatCount >= arg2[pc]) {
+                    pc = arg5[pc];
+                } else if (arg3[pc]) {
+                    stackPc[stackDepth] = arg5[pc];
+                    stackPosition[stackDepth] = position;
+                    var greedyStateOffset = stackDepth * program.stateSlots;
+                    var greedySaveIndex = 0;
+                    while (greedySaveIndex < program.stateSlots) {
+                        stackState[greedyStateOffset + greedySaveIndex] =
+                            state[greedySaveIndex];
+                        greedySaveIndex++;
+                    }
+                    stackDepth++;
+                    pc = arg4[pc];
                 } else {
-                    push(instruction.body);
-                    pc = instruction.exit;
+                    stackPc[stackDepth] = arg4[pc];
+                    stackPosition[stackDepth] = position;
+                    var lazyStateOffset = stackDepth * program.stateSlots;
+                    var lazySaveIndex = 0;
+                    while (lazySaveIndex < program.stateSlots) {
+                        stackState[lazyStateOffset + lazySaveIndex] =
+                            state[lazySaveIndex];
+                        lazySaveIndex++;
+                    }
+                    stackDepth++;
+                    pc = arg5[pc];
                 }
                 continue;
-            } else if (instruction.opcode === RX_REPEAT_MARK) {
-                state[instruction.positionSlot] = position;
+            } else if (opcode === RX_REPEAT_MARK) {
+                state[arg0[pc]] = position;
                 pc++;
                 continue;
-            } else if (instruction.opcode === RX_REPEAT_NEXT) {
-                state[instruction.countSlot]++;
-                pc = state[instruction.positionSlot] === position ?
-                    instruction.exit : instruction.decide;
+            } else if (opcode === RX_REPEAT_NEXT) {
+                state[arg0[pc]]++;
+                pc = state[arg1[pc]] === position ? arg3[pc] : arg2[pc];
                 continue;
-            } else if (instruction.opcode === RX_SAVE_START) {
-                state[instruction.capture * 2] = position;
+            } else if (opcode === RX_SAVE_START) {
+                state[arg0[pc] * 2] = position;
                 pc++;
                 continue;
-            } else if (instruction.opcode === RX_SAVE_END) {
-                state[instruction.capture * 2 + 1] = position;
+            } else if (opcode === RX_SAVE_END) {
+                state[arg0[pc] * 2 + 1] = position;
                 pc++;
                 continue;
-            } else if (instruction.opcode === RX_LOOKAHEAD) {
+            } else if (opcode === RX_LOOKAHEAD) {
                 var look = runPattern(
-                    instruction.program, machine, position, state);
-                if (!!look === instruction.positive) {
-                    if (instruction.positive) {
+                    node, machine, position, state);
+                if (!!look === !!arg0[pc]) {
+                    if (arg0[pc]) {
                         var lookStateIndex = 0;
                         while (lookStateIndex < program.stateSlots) {
                             state[lookStateIndex] =
@@ -545,22 +629,22 @@
                     continue;
                 }
                 matched = false;
-            } else if (instruction.opcode === RX_START) {
+            } else if (opcode === RX_START) {
                 matched = position === 0 || machine.multiline && position > 0 &&
                     (input.charCodeAt(position - 1) === 10 ||
                      input.charCodeAt(position - 1) === 13);
-            } else if (instruction.opcode === RX_END) {
+            } else if (opcode === RX_END) {
                 matched = position === input.length || machine.multiline &&
                     (input.charCodeAt(position) === 10 ||
                      input.charCodeAt(position) === 13);
-            } else if (instruction.opcode === RX_BOUNDARY) {
+            } else if (opcode === RX_BOUNDARY) {
                 var before = position > 0 && word(input.charCodeAt(position - 1));
                 var after = position < input.length &&
                     word(input.charCodeAt(position));
-                matched = (before !== after) !== node.invert;
-            } else if (instruction.opcode === RX_BACKREF) {
-                var captureStart = state[node.capture * 2];
-                var captureEnd = state[node.capture * 2 + 1];
+                matched = (before !== after) !== !!arg0[pc];
+            } else if (opcode === RX_BACKREF) {
+                var captureStart = state[arg0[pc] * 2];
+                var captureEnd = state[arg0[pc] * 2 + 1];
                 if (captureStart !== undefined && captureEnd !== undefined) {
                     var captureLength = captureEnd - captureStart;
                     matched = position + captureLength <= input.length;
@@ -581,16 +665,16 @@
                 matched = position < input.length;
                 if (matched) {
                     characterCode = input.charCodeAt(position);
-                    if (instruction.opcode === RX_DOT) {
+                    if (opcode === RX_DOT) {
                         matched = characterCode !== 10 && characterCode !== 13 &&
                             characterCode !== 8232 && characterCode !== 8233;
-                    } else if (instruction.opcode === RX_CLASS) {
+                    } else if (opcode === RX_CLASS) {
                         matched = classMatches(node, characterCode,
                                                machine.ignoreCase);
-                    } else if (instruction.opcode === RX_CLASS_ESCAPE) {
+                    } else if (opcode === RX_CLASS_ESCAPE) {
                         matched = classEscape(node.name, characterCode);
                     } else {
-                        var expectedCode = node.code;
+                        var expectedCode = arg0[pc];
                         if (machine.ignoreCase) {
                             characterCode = lowerAscii(characterCode);
                             expectedCode = lowerAscii(expectedCode);
@@ -601,7 +685,19 @@
                 }
             }
             if (matched) pc++;
-            else if (!fail()) return null;
+            else {
+                if (stackDepth === 0) return null;
+                stackDepth--;
+                pc = stackPc[stackDepth];
+                position = stackPosition[stackDepth];
+                var restoreStateOffset = stackDepth * program.stateSlots;
+                var restoreIndex = 0;
+                while (restoreIndex < program.stateSlots) {
+                    state[restoreIndex] =
+                        stackState[restoreStateOffset + restoreIndex];
+                    restoreIndex++;
+                }
+            }
         }
     }
 
@@ -656,13 +752,16 @@
                        multiline: !!regexp.multiline};
         while (start <= input.length) {
             if (parsed.anchored && !machine.multiline && start > 0) break;
-            if (parsed.firstLiteralCode >= 0 && start < input.length) {
+            if (parsed.firstLiteralCode >= 0 && !machine.ignoreCase) {
+                start = input.indexOf(parsed.firstLiteral, start);
+                if (start < 0) break;
+            }
+            if (parsed.firstLiteralCode >= 0 && machine.ignoreCase &&
+                start < input.length) {
                 var candidateCode = input.charCodeAt(start);
                 var requiredCode = parsed.firstLiteralCode;
-                if (machine.ignoreCase) {
-                    candidateCode = lowerAscii(candidateCode);
-                    requiredCode = lowerAscii(requiredCode);
-                }
+                candidateCode = lowerAscii(candidateCode);
+                requiredCode = lowerAscii(requiredCode);
                 if (candidateCode !== requiredCode) {
                     start++;
                     continue;

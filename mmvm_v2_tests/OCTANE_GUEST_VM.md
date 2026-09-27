@@ -277,3 +277,39 @@ Publishing a loaded script's callee under the entry context could leave a freed
 frame reachable after return. Frame construction is now rooted before any
 allocation-capable value conversion, frame release clears its owning context,
 and yielded executions publish active roots per context.
+
+## 2026-09-27: standalone pressure and compact RegExp instructions
+
+`octane_runner.js --setup-only <suite>` loads the ordinary external suite,
+invokes every selected benchmark's stock `Setup`, reports its elapsed time,
+and then invokes `TearDown`. It does not replace benchmark data or correctness
+logic. This isolates construction and warm-up costs without editing anything
+under `../../js_tests/`.
+
+Standalone snapshots previously installed the full 512 MiB reserved maximum
+as the allocator's active limit. Consequently, allocation-heavy code did not
+ask the native collector to run until it had touched essentially the complete
+reservation. Engine state now records the maximum separately from the active
+pressure limit. A standalone image starts at the same ordinary pressure point
+as hosted execution, reuses swept free records first, and increases headroom
+after a collection in proportion to reclaimed bytes. In a stopped RegExp
+setup diagnostic this changed resident memory from approximately 541 MiB to
+66--82 MiB. The setup was still far too slow, so this is a memory/collector
+correction rather than a claim that RegExp is complete.
+
+The following general matcher costs were then removed:
+
+- an unquantified atom no longer goes through four counted-repeat instructions
+  or consumes two repeat-state slots;
+- the matcher loop no longer allocates `push` and `fail` closures for every
+  candidate position; and
+- compiled matcher instructions are parallel opcode/operand arrays rather than
+  per-dispatch objects. Character-class and lookahead objects remain only for
+  operations that require structured data.
+
+A fixed 30-second Node kernel profile still reaches the same 11,001,861
+bytecode budget, but native-kernel time fell from about 31.5 seconds before
+these changes to about 29.9 seconds. Constant-property operations in that
+slice fell by roughly 600,000. The remaining runtime is dominated by general
+guest bytecode/property/array work; it must be improved without recognizing
+Octane sources or delegating regular expressions to the host.

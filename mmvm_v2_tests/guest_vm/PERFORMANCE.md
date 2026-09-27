@@ -750,3 +750,32 @@ standalone generic-program and byte-identical snapshot fixed-point tests. The
 full Octane RegExp workload remains too slow and is not recorded as complete;
 further work must reduce general guest matcher/interpreter cost rather than
 delegate matching back to a host regexp engine.
+
+## 2026-09-27: standalone collection pressure
+
+Standalone engine state distinguishes three allocator concepts: the current
+tail bump, the active pressure limit, and the maximum address reservation. The
+snapshot file contains only initialized heap bytes; the maximum remains a
+virtual-address reservation and does not inflate or fix the snapshot image.
+
+Allocation failure at the active pressure limit runs the native mark/sweep
+collector. Reclaimed regions are indexed and consumed before untouched tail
+space. After collection, the dispatcher grants at least 1 MiB of headroom and
+otherwise half the reclaimed byte count. If the very same instruction still
+cannot allocate before executing another bytecode, the logical limit grows
+geometrically up to the separately recorded maximum. This avoids both failure
+modes: touching the whole reservation before the first collection, and
+repeatedly collecting an unchanged live set that cannot satisfy one request.
+
+The engine-record offsets used by these kernels are exported once by
+`heap_records.js` as named compiler constants. Accesses remain named field
+accessors in kernel source; the shared compiler substitutes immediate offsets,
+so the maintainability boundary adds no runtime lookup.
+
+On the standalone RegExp setup diagnostic, periodic collection held RSS near
+66 MiB with a fixed pressure line. Adaptive post-collection headroom held it
+near 82 MiB over the measured interval, versus approximately 541 MiB when the
+first collection was deferred to the maximum reservation. Execution remained
+too slow and is not considered complete; the subsequent compact RegExp
+instruction work reduced a fixed Node-kernel slice from about 31.5 to 29.9
+seconds without adding a host semantic call.

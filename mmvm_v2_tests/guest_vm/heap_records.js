@@ -111,7 +111,8 @@
     var ENGINE_NATIVE_FREE_REGION = ENGINE_NATIVE_REGION_END + 4;
     var ENGINE_NATIVE_TAIL_BUMP = ENGINE_NATIVE_FREE_REGION + 4;
     var ENGINE_NATIVE_TAIL_LIMIT = ENGINE_NATIVE_TAIL_BUMP + 4;
-    var ENGINE_NATIVE_REGION_ACTIVE = ENGINE_NATIVE_TAIL_LIMIT + 4;
+    var ENGINE_NATIVE_MAX_LIMIT = ENGINE_NATIVE_TAIL_LIMIT + 4;
+    var ENGINE_NATIVE_REGION_ACTIVE = ENGINE_NATIVE_MAX_LIMIT + 4;
     var ENGINE_ALLOCATION_FAILED = ENGINE_NATIVE_REGION_ACTIVE + 4;
     var ENGINE_NATIVE_RETIRED_REGION = ENGINE_ALLOCATION_FAILED + 4;
     var ENGINE_PROPERTY_CACHE = ENGINE_NATIVE_RETIRED_REGION + 4;
@@ -177,6 +178,24 @@
                           CONFIGURABLE: ATTR_CONFIGURABLE,
                           ACCESSOR: ATTR_ACCESSOR,
                           DEFAULT: DEFAULT_ATTRIBUTES};
+
+    /* Kernel-dialect source declares same-named constants so it remains
+     * independently parseable. The compiler substitutes these authoritative
+     * record-layout values, avoiding duplicated offsets in the dispatcher. */
+    Records.KernelConstants = {
+        ENGINE_NATIVE_REGION_END: ENGINE_NATIVE_REGION_END,
+        ENGINE_NATIVE_FREE_REGION: ENGINE_NATIVE_FREE_REGION,
+        ENGINE_NATIVE_TAIL_BUMP: ENGINE_NATIVE_TAIL_BUMP,
+        ENGINE_NATIVE_TAIL_LIMIT: ENGINE_NATIVE_TAIL_LIMIT,
+        ENGINE_NATIVE_MAX_LIMIT: ENGINE_NATIVE_MAX_LIMIT,
+        ENGINE_NATIVE_REGION_ACTIVE: ENGINE_NATIVE_REGION_ACTIVE,
+        ENGINE_ALLOCATION_FAILED: ENGINE_ALLOCATION_FAILED,
+        ENGINE_NATIVE_RETIRED_REGION: ENGINE_NATIVE_RETIRED_REGION,
+        ENGINE_GC_GENERATION: ENGINE_GC_GENERATION,
+        ENGINE_GC_STACK_BASE: ENGINE_GC_STACK_BASE,
+        ENGINE_GC_STACK_LIMIT: ENGINE_GC_STACK_LIMIT,
+        ENGINE_GC_COLLECTIONS: ENGINE_GC_COLLECTIONS
+    };
 
     Records.prototype.makeHandle = function (runtime, address) {
         this.heap.requireRecord(address);
@@ -1416,6 +1435,16 @@
             bump, Heap.Types.ENGINE_STATE);
         this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_TAIL_LIMIT,
             limit, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineNativeMaximumLimit = function (state, limit) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_MAX_LIMIT,
+            limit, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineNativeMaximumLimit = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_NATIVE_MAX_LIMIT,
+            Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.engineNativeFreeRegion = function (state) {

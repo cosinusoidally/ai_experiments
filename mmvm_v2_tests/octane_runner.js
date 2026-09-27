@@ -3,6 +3,7 @@
  * From mmvm_v2_tests:
  *   js_min.exe guest_runner.js --vm-native octane_runner.js Richards
  *   js_min.exe guest_runner.js --vm-native octane_runner.js --quick all
+ *   js_min.exe guest_runner.js --vm-native octane_runner.js --setup-only RegExp
  *
  * The external suite is deliberately loaded in place.  Nothing below copies
  * or patches ../../js_tests/octane.
@@ -75,12 +76,15 @@
     }
 
     var quick = false;
+    var setupOnly = false;
     var requested = [];
     var argumentIndex = 0;
     while (argumentIndex < runnerArguments.length) {
         var argument = String(runnerArguments[argumentIndex++]);
         if (argument === "--quick") {
             quick = true;
+        } else if (argument === "--setup-only") {
+            setupOnly = true;
         } else if (argument === "all") {
             requested = suiteOrder.slice(0);
         } else {
@@ -114,6 +118,26 @@
                 benchmarkIndex++;
             }
         }
+    }
+
+    if (setupOnly) {
+        var setupSuiteIndex = 0;
+        while (setupSuiteIndex < BenchmarkSuite.suites.length) {
+            var setupSuite = BenchmarkSuite.suites[setupSuiteIndex++];
+            var setupBenchmarkIndex = 0;
+            while (setupBenchmarkIndex < setupSuite.benchmarks.length) {
+                var setupBenchmark =
+                    setupSuite.benchmarks[setupBenchmarkIndex++];
+                var setupStarted = new Date().getTime();
+                setupBenchmark.Setup();
+                var setupFinished = new Date().getTime();
+                print(setupSuite.name + "/" + setupBenchmark.name +
+                      ": setup passed in " +
+                      (setupFinished - setupStarted) + " ms");
+                setupBenchmark.TearDown();
+            }
+        }
+        return;
     }
 
     var failed = false;

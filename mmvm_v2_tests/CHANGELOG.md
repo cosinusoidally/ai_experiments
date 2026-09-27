@@ -8,6 +8,32 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.68
+
+Approximate completion: 2026-09-27 morning BST
+
+### Guest VM
+
+- Added an independent maximum reservation bound to native engine state.
+  Standalone snapshots now begin at the runtime's ordinary collection-pressure
+  boundary, collect before exhausting the complete 512 MiB reservation, and
+  grow logical headroom only after collection shows that it is useful.
+- Made the standalone collector's post-collection pressure adaptive. Reclaimed
+  regions remain the allocator's first choice, while a high-churn workload is
+  given headroom proportional to the work reclaimed so it does not repeatedly
+  sweep the same mostly-live graph.
+- Centralized native engine-layout constants in the record accessor module.
+  Both kernel backends receive the named authoritative offsets; the dispatcher
+  no longer owns an independent copy of the engine ABI.
+- Reduced general guest RegExp work by lowering unquantified atoms directly,
+  removing per-match helper closures, and packing matcher instructions into
+  local parallel opcode/operand arrays. Case-sensitive leading literals use
+  the guest String search implementation to skip impossible start positions.
+- Added the general Octane `--setup-only` diagnostic. The complete Node and
+  js_min suites remain at 12 programs and 266 assertions; demo8 starts and
+  renders through the native guest path, and standalone program-independent
+  snapshots retain their byte-identical fixed point.
+
 ## 0.67
 
 Approximate completion: 2026-09-26 evening BST

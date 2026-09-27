@@ -76,11 +76,17 @@
         COUNT: 306
     };
 
-    function runtimeSupportConstantOverrides(profileOpcodes) {
+    function runtimeSupportConstantOverrides(profileOpcodes,
+                                             recordConstants) {
         var overrides = {
             PROFILE_OPCODES: profileOpcodes ? 1 : 0
         };
         var name;
+        for (name in recordConstants) {
+            if (Object.prototype.hasOwnProperty.call(recordConstants, name)) {
+                overrides[name] = recordConstants[name];
+            }
+        }
         for (name in RuntimeSupportLayout) {
             if (name !== "COUNT" && Object.prototype.hasOwnProperty.call(
                     RuntimeSupportLayout, name)) {
@@ -11816,17 +11822,23 @@
                                    arrayLengthKey, arrayPrototype,
                                    stringSupport, budget, state) {
         var FREE_RECORD_HEADER_BYTES = 16;
-        var ENGINE_NATIVE_REGION_END = 292;
-        var ENGINE_NATIVE_FREE_REGION = 296;
-        var ENGINE_NATIVE_TAIL_BUMP = 300;
-        var ENGINE_NATIVE_TAIL_LIMIT = 304;
-        var ENGINE_NATIVE_REGION_ACTIVE = 308;
-        var ENGINE_ALLOCATION_FAILED = 312;
-        var ENGINE_NATIVE_RETIRED_REGION = 316;
-        var ENGINE_GC_GENERATION = 6464;
-        var ENGINE_GC_STACK_BASE = 6468;
-        var ENGINE_GC_STACK_LIMIT = 6472;
-        var ENGINE_GC_COLLECTIONS = 6476;
+        /* Record offsets are compiler-substituted from
+         * HeapRecords.KernelConstants. The zero initializers are kernel
+         * syntax placeholders, not a second copy of the engine-state ABI. */
+        var ENGINE_NATIVE_REGION_END = 0;
+        var ENGINE_NATIVE_FREE_REGION = 0;
+        var ENGINE_NATIVE_TAIL_BUMP = 0;
+        var ENGINE_NATIVE_TAIL_LIMIT = 0;
+        var ENGINE_NATIVE_MAX_LIMIT = 0;
+        var ENGINE_NATIVE_REGION_ACTIVE = 0;
+        var ENGINE_ALLOCATION_FAILED = 0;
+        var ENGINE_NATIVE_RETIRED_REGION = 0;
+        var ENGINE_GC_GENERATION = 0;
+        var ENGINE_GC_STACK_BASE = 0;
+        var ENGINE_GC_STACK_LIMIT = 0;
+        var ENGINE_GC_COLLECTIONS = 0;
+        var MINIMUM_POST_COLLECTION_HEADROOM = 1048576;
+        var MINIMUM_HEAP_GROWTH_BYTES = 16777216;
         var EXIT_UNSUPPORTED = 3;
         if (engineNativeRegionActive(heapBase, state) === 0) {
             var freeRegion = engineNativeFreeRegion(heapBase, state);
@@ -11847,12 +11859,50 @@
             arrayPrototype, stringSupport, budget, state);
         var collectionEnabled = engineGCStackBase(heapBase, state) !== 0;
         var collectionCanResume = collectionEnabled;
+        var collectionJustRan = 0;
         while (collectionCanResume === 1) {
             if (reason !== EXIT_UNSUPPORTED) {
                 collectionCanResume = 0;
             } else if (engineAllocationFailed(heapBase, state) === 0) {
                 collectionCanResume = 0;
             } else {
+            var shouldCollect = 1;
+            if (collectionJustRan === 1) {
+                if (engineInstructions(heapBase, state) === 0) {
+                    /* An instruction that still cannot allocate immediately
+                     * after collection needs a larger logical heap. The
+                     * reservation is unchanged, so references never move. */
+                    var currentTailLimit = engineNativeTailLimit(
+                        heapBase, state);
+                    var maximumTailLimit = engineNativeMaximumLimit(
+                        heapBase, state);
+                    shouldCollect = 0;
+                    if (currentTailLimit >= maximumTailLimit) {
+                        collectionCanResume = 0;
+                    } else {
+                        var growthBytes = currentTailLimit >> 1;
+                        if (growthBytes < MINIMUM_HEAP_GROWTH_BYTES) {
+                            growthBytes = MINIMUM_HEAP_GROWTH_BYTES;
+                        }
+                        var grownTailLimit = currentTailLimit + growthBytes;
+                        if (grownTailLimit > maximumTailLimit) {
+                            grownTailLimit = maximumTailLimit;
+                        } else if (grownTailLimit < currentTailLimit) {
+                            grownTailLimit = maximumTailLimit;
+                        }
+                        setEngineNativeTailLimit(
+                            heapBase, state, grownTailLimit);
+                        setEngineHeapLimit(heapBase, state, grownTailLimit);
+                        setEngineAllocationFailed(heapBase, state, 0);
+                        collectionJustRan = 0;
+                        frame = engineCurrentFrame(heapBase, state);
+                        reason = interpreterKernel(
+                            heapBase, frame, platformServices, arrayLengthKey,
+                            arrayPrototype, stringSupport, budget, state);
+                    }
+                }
+            }
+            if (shouldCollect === 1) {
             var collectionBump = engineNativeTailBump(heapBase, state);
             setEngineNativeRegionEnd(heapBase, state, 0);
             setEngineNativeFreeRegion(heapBase, state, 0);
@@ -11884,13 +11934,45 @@
                     heapBase, collectionBump, collectionGeneration);
                 var collectionFreeHead = rebuildNativeAllocatorKernel(
                     heapBase, state, collectionBump);
+                /* Match the hosted collector's adaptive pressure policy.
+                 * A high-churn program must receive useful allocation
+                 * headroom after paying for a complete mark/sweep; otherwise
+                 * it repeatedly scans the same mostly-live heap. Reclaimed
+                 * holes remain the allocator's first choice, so extending the
+                 * tail pressure bound does not discard reusable storage. */
+                var postCollectionHeadroom = collectionReclaimed >> 1;
+                if (postCollectionHeadroom <
+                        MINIMUM_POST_COLLECTION_HEADROOM) {
+                    postCollectionHeadroom =
+                        MINIMUM_POST_COLLECTION_HEADROOM;
+                }
+                var postCollectionLimit =
+                    engineNativeTailBump(heapBase, state) +
+                    postCollectionHeadroom;
+                var postCollectionMaximum = engineNativeMaximumLimit(
+                    heapBase, state);
+                if (postCollectionLimit > postCollectionMaximum) {
+                    postCollectionLimit = postCollectionMaximum;
+                } else if (postCollectionLimit <
+                           engineNativeTailBump(heapBase, state)) {
+                    postCollectionLimit = postCollectionMaximum;
+                }
+                if (postCollectionLimit >
+                        engineNativeTailLimit(heapBase, state)) {
+                    setEngineNativeTailLimit(
+                        heapBase, state, postCollectionLimit);
+                    setEngineHeapLimit(
+                        heapBase, state, postCollectionLimit);
+                }
                 setEngineGCCollections(heapBase, state,
                     engineGCCollections(heapBase, state) + 1);
                 setEngineAllocationFailed(heapBase, state, 0);
+                collectionJustRan = 1;
                 frame = engineCurrentFrame(heapBase, state);
                 reason = interpreterKernel(
                     heapBase, frame, platformServices, arrayLengthKey,
                     arrayPrototype, stringSupport, budget, state);
+            }
             }
             }
         }
@@ -14048,7 +14130,8 @@
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
         var kernelConstantOverrides = runtimeSupportConstantOverrides(
-            runtime.profileOpcodeCounts);
+            runtime.profileOpcodeCounts,
+            runtime.heapRecords.constructor.KernelConstants);
         var snapshotNeedsSource = runtime.nativeSnapshotWrite ||
             (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
         var kernelSource = null;
@@ -14091,7 +14174,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 8,
+                compilerVersion: 9,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     hashKernelSource(kernelSource) : 0,
