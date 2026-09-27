@@ -561,17 +561,21 @@
     function runPattern(program, machine, start, initialState) {
         var packedCode = program.packedCode;
         var nodeData = program.nodeData;
+        var stateSlots = program.stateSlots;
         var input = machine.input;
+        var inputLength = input.length;
+        var ignoreCase = machine.ignoreCase;
+        var multiline = machine.multiline;
         var pc = 0;
         var position = start;
         var workspace = program.workspace;
         if (!workspace) {
-            workspace = makeMatcherWorkspace(program.stateSlots);
+            workspace = makeMatcherWorkspace(stateSlots);
             program.workspace = workspace;
         }
         var state = workspace.state;
         var stateIndex = 0;
-        while (stateIndex < program.stateSlots) {
+        while (stateIndex < stateSlots) {
             state[stateIndex] = initialState ?
                 initialState[stateIndex] : -1;
             stateIndex++;
@@ -579,6 +583,7 @@
         var stackPc = workspace.stackPc;
         var stackPosition = workspace.stackPosition;
         var stackState = workspace.stackState;
+        var stackCapacity = stackPc.length;
         var stackDepth = 0;
 
         while (true) {
@@ -590,17 +595,18 @@
             if (opcode === RX_MATCH) {
                 return {position: position, state: state};
             } else if (opcode === RX_SPLIT) {
-                if (stackDepth >= stackPc.length) {
-                    growMatcherWorkspace(workspace, program.stateSlots);
+                if (stackDepth >= stackCapacity) {
+                    growMatcherWorkspace(workspace, stateSlots);
                     stackPc = workspace.stackPc;
                     stackPosition = workspace.stackPosition;
                     stackState = workspace.stackState;
+                    stackCapacity = stackPc.length;
                 }
                 stackPc[stackDepth] = packedCode[instructionBase + 2];
                 stackPosition[stackDepth] = position;
-                var splitStateOffset = stackDepth * program.stateSlots;
+                var splitStateOffset = stackDepth * stateSlots;
                 var splitSaveIndex = 0;
-                while (splitSaveIndex < program.stateSlots) {
+                while (splitSaveIndex < stateSlots) {
                     stackState[splitStateOffset + splitSaveIndex] =
                         state[splitSaveIndex];
                     splitSaveIndex++;
@@ -623,17 +629,18 @@
                            repeatCount >= packedCode[instructionBase + 3]) {
                     pc = packedCode[instructionBase + 6];
                 } else if (packedCode[instructionBase + 4]) {
-                    if (stackDepth >= stackPc.length) {
-                        growMatcherWorkspace(workspace, program.stateSlots);
+                    if (stackDepth >= stackCapacity) {
+                        growMatcherWorkspace(workspace, stateSlots);
                         stackPc = workspace.stackPc;
                         stackPosition = workspace.stackPosition;
                         stackState = workspace.stackState;
+                        stackCapacity = stackPc.length;
                     }
                     stackPc[stackDepth] = packedCode[instructionBase + 6];
                     stackPosition[stackDepth] = position;
-                    var greedyStateOffset = stackDepth * program.stateSlots;
+                    var greedyStateOffset = stackDepth * stateSlots;
                     var greedySaveIndex = 0;
-                    while (greedySaveIndex < program.stateSlots) {
+                    while (greedySaveIndex < stateSlots) {
                         stackState[greedyStateOffset + greedySaveIndex] =
                             state[greedySaveIndex];
                         greedySaveIndex++;
@@ -641,17 +648,18 @@
                     stackDepth++;
                     pc = packedCode[instructionBase + 5];
                 } else {
-                    if (stackDepth >= stackPc.length) {
-                        growMatcherWorkspace(workspace, program.stateSlots);
+                    if (stackDepth >= stackCapacity) {
+                        growMatcherWorkspace(workspace, stateSlots);
                         stackPc = workspace.stackPc;
                         stackPosition = workspace.stackPosition;
                         stackState = workspace.stackState;
+                        stackCapacity = stackPc.length;
                     }
                     stackPc[stackDepth] = packedCode[instructionBase + 5];
                     stackPosition[stackDepth] = position;
-                    var lazyStateOffset = stackDepth * program.stateSlots;
+                    var lazyStateOffset = stackDepth * stateSlots;
                     var lazySaveIndex = 0;
-                    while (lazySaveIndex < program.stateSlots) {
+                    while (lazySaveIndex < stateSlots) {
                         stackState[lazyStateOffset + lazySaveIndex] =
                             state[lazySaveIndex];
                         lazySaveIndex++;
@@ -684,7 +692,7 @@
                 if (!!look === !!packedCode[instructionBase + 1]) {
                     if (packedCode[instructionBase + 1]) {
                         var lookStateIndex = 0;
-                        while (lookStateIndex < program.stateSlots) {
+                        while (lookStateIndex < stateSlots) {
                             state[lookStateIndex] =
                                 look.state[lookStateIndex];
                             lookStateIndex++;
@@ -695,16 +703,16 @@
                 }
                 matched = false;
             } else if (opcode === RX_START) {
-                matched = position === 0 || machine.multiline && position > 0 &&
+                matched = position === 0 || multiline && position > 0 &&
                     (input.charCodeAt(position - 1) === 10 ||
                      input.charCodeAt(position - 1) === 13);
             } else if (opcode === RX_END) {
-                matched = position === input.length || machine.multiline &&
+                matched = position === inputLength || multiline &&
                     (input.charCodeAt(position) === 10 ||
                      input.charCodeAt(position) === 13);
             } else if (opcode === RX_BOUNDARY) {
                 var before = position > 0 && word(input.charCodeAt(position - 1));
-                var after = position < input.length &&
+                var after = position < inputLength &&
                     word(input.charCodeAt(position));
                 matched = (before !== after) !==
                     !!packedCode[instructionBase + 1];
@@ -714,12 +722,12 @@
                 var captureEnd = state[captureSlot + 1];
                 if (captureStart >= 0 && captureEnd >= 0) {
                     var captureLength = captureEnd - captureStart;
-                    matched = position + captureLength <= input.length;
+                    matched = position + captureLength <= inputLength;
                     var captureOffset = 0;
                     while (matched && captureOffset < captureLength) {
                         var leftCode = input.charCodeAt(captureStart + captureOffset);
                         var rightCode = input.charCodeAt(position + captureOffset);
-                        if (machine.ignoreCase) {
+                        if (ignoreCase) {
                             leftCode = lowerAscii(leftCode);
                             rightCode = lowerAscii(rightCode);
                         }
@@ -729,7 +737,7 @@
                     if (matched) position += captureLength;
                 }
             } else {
-                matched = position < input.length;
+                matched = position < inputLength;
                 if (matched) {
                     characterCode = input.charCodeAt(position);
                     if (opcode === RX_DOT) {
@@ -737,13 +745,13 @@
                             characterCode !== 8232 && characterCode !== 8233;
                     } else if (opcode === RX_CLASS) {
                         matched = classMatches(node, characterCode,
-                                               machine.ignoreCase);
+                                               ignoreCase);
                     } else if (opcode === RX_CLASS_ESCAPE) {
                         matched = classEscape(node.name, characterCode);
                     } else {
                         var expectedCode =
                             packedCode[instructionBase + 1];
-                        if (machine.ignoreCase) {
+                        if (ignoreCase) {
                             characterCode = lowerAscii(characterCode);
                             expectedCode = lowerAscii(expectedCode);
                         }
@@ -758,9 +766,9 @@
                 stackDepth--;
                 pc = stackPc[stackDepth];
                 position = stackPosition[stackDepth];
-                var restoreStateOffset = stackDepth * program.stateSlots;
+                var restoreStateOffset = stackDepth * stateSlots;
                 var restoreIndex = 0;
-                while (restoreIndex < program.stateSlots) {
+                while (restoreIndex < stateSlots) {
                     state[restoreIndex] =
                         stackState[restoreStateOffset + restoreIndex];
                     restoreIndex++;

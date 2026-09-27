@@ -347,3 +347,25 @@ Typed storage makes those operations cheaper and avoids many heap records, but
 the next major improvement must reduce matcher control-flow work itself, most
 likely by moving the low-level executor into the kernel dialect while keeping
 parsing and compilation guest-owned.
+
+## 2026-09-27: matcher invariants and reclaimed-region growth
+
+The matcher now reads flags, input length, state-slot count, and current stack
+capacity once per invocation. These values do not change during its inner
+instruction loop. Hoisting them reduced one hosted deterministic setup from
+72.3 to 65.9 seconds without changing its checksum.
+
+That run also exposed an allocator policy error: the hosted collector doubled
+the logical heap whenever its untouched tail was exhausted, even when the
+sweep had produced hundreds of MiB of reusable records and a single very large
+contiguous arena. The speed measurement consequently touched nearly the full
+heap reservation and peaked at 602 MiB RSS despite a 6--7 MiB live set.
+
+An exhausted tail now causes fragmentation growth only when the largest
+reusable block is less than one sixteenth of total reusable bytes. Persistent
+live-set pressure and a genuine inability to supply the minimum native arena
+remain independent growth reasons. The next measured run peaked at 257 MiB and
+took 91.7 seconds total, still better than the original 100.5-second hosted
+baseline but slower than consuming fresh tail pages. This is the intended
+trade: further speed must come from less matcher work and better native region
+execution, not unbounded heap expansion.

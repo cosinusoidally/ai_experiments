@@ -799,3 +799,22 @@ The final profile still executed approximately 2.51 billion guest bytecodes;
 typed storage reduced the cost per bytecode but did not eliminate matcher
 dispatch. This makes low-level matcher control flow, rather than heap capacity
 or host transitions, the next high-value target.
+
+## 2026-09-27: do not confuse tail exhaustion with a live heap
+
+Hosted logical-heap growth previously included `tail >= 15/16 * limit` as an
+independent reason to double capacity. That condition is not sufficient after
+a moving-free-list collector: a high-churn program can exhaust the untouched
+tail while retaining only 6--7 MiB and exposing a very large swept arena.
+
+The collector now distinguishes fragmentation from tail exhaustion. If the
+largest reusable block holds at least one sixteenth of total free bytes, the
+native allocator reuses the existing logical heap. It still grows for a live
+set above two thirds of capacity, for failure to provide the minimum native
+arena, or when reusable storage is genuinely fragmented below that ratio.
+
+On deterministic RegExp setup this reduced an observed 602 MiB peak to 257 MiB.
+The lower-memory run took 91.7 seconds total rather than 79.5 seconds, because
+it reused and swept existing records rather than continually touching fresh
+pages. The pre-optimization baseline was 100.5 seconds. Demo8 remained stable
+at 16.5 FPS at 256x192 with roughly 2.9 seconds of initialization.

@@ -4686,21 +4686,36 @@
                 this.nativeInterpreter.needsLogicalHeapGrowth();
             var exhaustedContiguousTail = this.linearHeap.bump >=
                 Math.floor(this.linearHeap.allocationLimit * 15 / 16);
+            var largestReusableBlock =
+                this.linearHeap.largestFreeBlockSize();
+            /* An exhausted tail is not itself evidence that the logical heap
+             * is too small. High-churn programs commonly leave a tiny live
+             * set plus one very large reusable arena. Grow for fragmentation
+             * only when no block holds even one sixteenth of the reclaimed
+             * bytes; otherwise native execution can consume those regions
+             * without touching new pages. */
+            var fragmentedReusableHeap = false;
+            if (exhaustedContiguousTail && reusableBytes > 0) {
+                if (largestReusableBlock <
+                        Math.floor(reusableBytes / 16)) {
+                    fragmentedReusableHeap = true;
+                }
+            }
             if ((liveBytes >= Math.floor(
                     this.linearHeap.allocationLimit * 2 / 3) ||
                  nativeFragmentationRequiresGrowth ||
-                 exhaustedContiguousTail) &&
+                 fragmentedReusableHeap) &&
                 this.linearHeap.allocationLimit <
                     this.linearHeap.maximumAllocationLimit) {
                 /* A large, persistent working set (for example demo8's
                  * renderer) should not repeatedly collect the same live
                  * graph at the current pressure line. Likewise, abundant
                  * free bytes split into blocks smaller than the native
-                 * allocation region cannot service native execution cheaply;
-                 * once the contiguous tail is exhausted, cycling thousands
-                 * of small regions causes collection thrash even if one block
-                 * happens to exceed the minimum at the sampling instant. Grow
-                 * only after collection proves one of those conditions;
+                 * allocation region cannot service native execution cheaply.
+                 * An exhausted tail grows only when reclaimed bytes are split
+                 * so broadly that the largest block is less than one
+                 * sixteenth of their total. Grow only after collection proves
+                 * one of those conditions;
                  * high-churn compiler/test workloads continue reusing the
                  * original logical heap while suitable blocks remain. */
                 this.linearHeap.growToFit(

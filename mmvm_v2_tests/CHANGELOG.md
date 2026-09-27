@@ -8,6 +8,26 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.70
+
+Approximate completion: 2026-09-27 late afternoon BST
+
+### Guest VM
+
+- Hoisted immutable RegExp matcher values—flags, input length, state-slot
+  count, and stack capacity—out of the instruction loop. Stock hosted setup
+  fell as low as 65.9 seconds while retaining the benchmark checksum.
+- Corrected logical-heap growth so an exhausted tail does not force a larger
+  heap when collection has produced large reusable arenas. Growth for
+  fragmentation now requires the largest block to be less than one sixteenth
+  of all reusable bytes.
+- On the same RegExp setup, the revised reuse policy reduced observed peak RSS
+  from 602 MiB to 257 MiB. Total time was 91.7 seconds versus the original
+  100.5-second baseline; future work will move matcher control flow into the
+  kernel dialect rather than buying speed by touching fresh heap pages.
+- Rechecked demo8 through the hosted native guest path: initialization remains
+  about 2.9 seconds and attract mode rendered at 16.5 FPS at 256x192.
+
 ## 0.69
 
 Approximate completion: 2026-09-27 afternoon BST
