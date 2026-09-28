@@ -56,6 +56,15 @@ A `hostCall` result must be completed or failed by the embedder before the next
 resume. Inline low-level intrinsics are explicitly classified exceptions to
 host-call yielding; arbitrary native callbacks are not.
 
+For boundary diagnostics, construct the runtime with `logHostCalls: true`.
+The runtime reports native CALL/CONSTRUCT fallbacks and actual embedder
+CALL/CONSTRUCT yields with guest source locations and value kinds. Values are
+not coerced or printed. `forbidHostCalls: true` is the corresponding
+enforcement option: it throws `HostCallError` before an embedder callback is
+entered. Direct guest intrinsics are deliberately outside both mechanisms.
+The command-line equivalents are `--vm-log-host-calls` and
+`--vm-no-host-calls`.
+
 ## Resuming and scheduling execution
 
 `context.start` compiles source and returns an execution without running guest

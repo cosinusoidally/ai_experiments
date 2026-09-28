@@ -43,6 +43,31 @@ transitional `load()`, and compatibility services still cross the embedding
 boundary. It becomes the default only after those services have moved into
 MMVM platform code.
 
+Use `guest_runner.js --vm-log-host-calls program.js` when auditing that
+boundary.  It writes one line for every native-to-semantic call fallback and
+every actual embedder call or constructor.  Each line contains a monotonically
+increasing sequence number, transition kind, callable name, guest source
+location, receiver kind, and argument kinds.  It deliberately does not print
+argument values, so tracing does not invoke guest coercion or expose application
+data.  Combine it with `--vm-native --vm-profile` to distinguish a missing
+native semantic implementation from an intentional embedder service:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --vm-native --vm-profile --vm-log-host-calls program.js
+```
+
+`native-fallback-call` and `native-fallback-construct` mean the compiled
+interpreter returned to the JavaScript semantic engine.  `embedder-call` and
+`embedder-construct` mean execution is about to yield an externally registered
+callback to the command runner.  One operation can therefore produce both a
+fallback line and an embedder line.  Direct guest intrinsics and standalone
+libc FFI do not cross the host-JavaScript boundary and are not logged.  A
+`js_runner` snapshot has no host JavaScript VM to call, so unsupported native
+semantics terminate with the opcode/PC/reason diagnostic instead of producing
+this hosted trace.
+
 The native interpreter also completes the common ES5 `parseInt` path entirely
 against guest string and value-cell records. Its native case includes ES
 whitespace, sign and prefix processing, radices 2 through 36, NaN, negative

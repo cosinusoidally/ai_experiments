@@ -352,6 +352,8 @@
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.traceExceptions = !!options.traceExceptions;
         this.forbidHostCalls = !!options.forbidHostCalls;
+        this.logHostCalls = !!options.logHostCalls;
+        this.hostCallLogCount = 0;
         this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.nativeSnapshotWrite = options.snapshot || null;
         this.nativeSnapshotRead = options.withSnapshot || null;
@@ -1915,6 +1917,58 @@
         if (this.profileInstructionCount >= this.profileNextReport) {
             this.reportProfile();
             this.profileNextReport += 1000000;
+        }
+    };
+
+    Runtime.prototype.hostCallValueKind = function (value) {
+        if (value && value.guestType) return value.guestType;
+        if (value === null) return "null";
+        if (value === undefined) return "undefined";
+        var kind = typeof value;
+        if (kind === "number") {
+            if (value === (value | 0)) return "number-int32";
+            if (value >= 0 && value <= 4294967295 &&
+                value === Math.floor(value)) return "number-uint32";
+            return "number-double";
+        }
+        return kind;
+    };
+
+    Runtime.prototype.hostCallLocation = function (frame, pc) {
+        var program = frame && frame.program;
+        var location = null;
+        var scan = pc === undefined ? -1 : pc;
+        while (program && scan >= 0 && !location) {
+            location = program.sourceLocations &&
+                       program.sourceLocations[scan];
+            scan--;
+        }
+        var filename = location && location.filename ||
+                       program && program.filename || "<guest>";
+        var line = location && location.line || 1;
+        var column = location && location.column || 1;
+        return filename + ":" + line + ":" + column;
+    };
+
+    Runtime.prototype.logHostCallTransition = function (
+            transition, callable, receiver, args, frame, pc) {
+        if (!this.logHostCalls) return;
+        this.hostCallLogCount++;
+        var argumentKinds = [];
+        var index = 0;
+        args = args || [];
+        while (index < args.length) {
+            argumentKinds.push(this.hostCallValueKind(args[index++]));
+        }
+        var name = callable && callable.name || "<anonymous>";
+        var line = "guest VM host call #" + this.hostCallLogCount +
+            ": " + transition + " " + name + " at " +
+            this.hostCallLocation(frame, pc) + " receiver=" +
+            this.hostCallValueKind(receiver) + " args=(" +
+            argumentKinds.join(",") + ")";
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) {
+            console.log(line);
         }
     };
 

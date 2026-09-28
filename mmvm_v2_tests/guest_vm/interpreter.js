@@ -837,7 +837,8 @@
                         continue;
                     }
                     if (this.runtime.nativeInterpreter &&
-                        this.runtime.profileOpcodeCounts) {
+                        (this.runtime.profileOpcodeCounts ||
+                         this.runtime.logHostCalls)) {
                         this.runtime.nativeInterpreter.noteFallbackCall(
                             callableValue, args, frame, pc);
                     }
@@ -959,6 +960,9 @@
                             forbiddenCallError.name = "HostCallError";
                             throw forbiddenCallError;
                         }
+                        this.runtime.logHostCallTransition(
+                            "embedder-call", callableValue, receiver, args,
+                            frame, pc);
                         this.pendingHostCall = {callable: callableValue,
                                                 receiver: receiver, args: args,
                                                 frame: frame, destination: destination,
@@ -991,6 +995,13 @@
                         frame.nativeHeapCurrent = true;
                         continue;
                     }
+                    if (this.runtime.nativeInterpreter &&
+                        (this.runtime.profileOpcodeCounts ||
+                         this.runtime.logHostCalls)) {
+                        this.runtime.nativeInterpreter.noteFallbackCall(
+                            constructorValue, args, frame, pc,
+                            "native-fallback-construct");
+                    }
                     var constructDestination = code[pc + 1];
                     frame.pc = pc + 4;
                     if (constructorValue && constructorValue.guestType === "function" &&
@@ -1002,6 +1013,9 @@
                             forbiddenConstructError.name = "HostCallError";
                             throw forbiddenConstructError;
                         }
+                        this.runtime.logHostCallTransition(
+                            "embedder-construct", constructorValue,
+                            undefined, args, frame, pc);
                         this.pendingHostCall = {callable: constructorValue,
                                                 receiver: undefined, args: args,
                                                 frame: frame,

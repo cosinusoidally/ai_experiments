@@ -193,8 +193,12 @@ function guestStandaloneExecute(path, programArguments) {
     GuestStandaloneGlobal.arguments = programArguments;
     GuestStandaloneGlobal.assertEqual = function (actual, expected, message) {
         if (actual !== expected) {
-            throw new Error((message ? String(message) + ": " : "") +
-                "expected " + expected + ", got " + actual);
+            /* Keep assertion reporting independent of the guest Error
+             * constructor.  A missing constructor intrinsic must not mask the
+             * language mismatch that caused a standalone regression test to
+             * fail. */
+            throw (message ? String(message) + ": " : "") +
+                "expected " + expected + ", got " + actual;
         }
     };
     GuestStandaloneGlobal.require = function (request) {

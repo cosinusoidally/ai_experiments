@@ -16,6 +16,7 @@ var guestRunnerSnapshot = null;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
 var guestRunnerForbidHostCalls = false;
+var guestRunnerLogHostCalls = false;
 var guestRunnerProfileDuration = 0;
 
 if (guestRunnerIsNode) {
@@ -58,6 +59,9 @@ for (var guestRunnerOptionIndex = 0;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-no-host-calls") {
         guestRunnerForbidHostCalls = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--vm-log-host-calls") {
+        guestRunnerLogHostCalls = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--snapshot" ||
                guestRunnerArguments[guestRunnerOptionIndex] ===
                "--with-snapshot") {
@@ -102,6 +106,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-no-host-calls] " +
+                     "[--vm-log-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
                      "[--vm-native] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] " +
@@ -120,6 +125,8 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                             guestRunnerTraceExceptions,
                                         forbidHostCalls:
                                             guestRunnerForbidHostCalls,
+                                        logHostCalls:
+                                            guestRunnerLogHostCalls,
                                         verifyNativeHeap: guestRunnerVerifyHeap,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,

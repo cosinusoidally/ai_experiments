@@ -2176,7 +2176,8 @@
                             arithmeticConversionValid =
                                 convertValueToNumberKernel(
                                     heapBase, arithmeticTarget,
-                                    arithmeticRight, platformServices);
+                                    arithmeticRight, platformServices,
+                                    stringSupport);
                             if (arithmeticConversionValid === 1) {
                                 var convertedArithmeticRightTag =
                                     valueCellTag(0, arithmeticTarget);
@@ -2187,13 +2188,15 @@
                                 arithmeticConversionValid =
                                     convertValueToNumberKernel(
                                         heapBase, arithmeticTarget,
-                                        arithmeticLeft, platformServices);
+                                        arithmeticLeft, platformServices,
+                                        stringSupport);
                             }
                         } else {
                             arithmeticConversionValid =
                                 convertValueToNumberKernel(
                                     heapBase, arithmeticTarget,
-                                    arithmeticLeft, platformServices);
+                                    arithmeticLeft, platformServices,
+                                    stringSupport);
                             if (arithmeticConversionValid === 1) {
                                 var convertedArithmeticLeftTag =
                                     valueCellTag(0, arithmeticTarget);
@@ -2204,7 +2207,8 @@
                                 arithmeticConversionValid =
                                     convertValueToNumberKernel(
                                         heapBase, arithmeticTarget,
-                                        arithmeticRight, platformServices);
+                                        arithmeticRight, platformServices,
+                                        stringSupport);
                             }
                         }
                         if (arithmeticConversionValid === 1) {
@@ -2728,7 +2732,8 @@
                                         convertValueToNumberKernel(
                                             heapBase, comparisonTarget,
                                             comparisonLeft,
-                                            platformServices);
+                                            platformServices,
+                                            stringSupport);
                                     if (comparisonValid === 1) {
                                         var looseConvertedLeftTag =
                                             valueCellTag(
@@ -2742,7 +2747,8 @@
                                             convertValueToNumberKernel(
                                                 heapBase, comparisonTarget,
                                                 comparisonRight,
-                                                platformServices);
+                                                platformServices,
+                                                stringSupport);
                                     }
                                     if (comparisonValid === 1) {
                                         var looseConvertedRightTag =
@@ -2826,7 +2832,8 @@
                         if (comparisonUsesStrings === 0) {
                             comparisonValid = convertValueToNumberKernel(
                                 heapBase, comparisonTarget,
-                                comparisonLeft, platformServices);
+                                comparisonLeft, platformServices,
+                                stringSupport);
                             if (comparisonValid === 1) {
                                 var convertedLeftTag = valueCellTag(
                                     0, comparisonTarget);
@@ -2836,7 +2843,8 @@
                                         convertedLeftTag));
                                 comparisonValid = convertValueToNumberKernel(
                                     heapBase, comparisonTarget,
-                                    comparisonRight, platformServices);
+                                    comparisonRight, platformServices,
+                                    stringSupport);
                             }
                             if (comparisonValid === 1) {
                                 comparisonRightTag = valueCellTag(
@@ -6007,11 +6015,13 @@
                 requiredIntrinsicArguments = 2;
             }
         }
-        if (intrinsicArgumentCount < requiredIntrinsicArguments) {
-            intrinsicCallValid = 0;
-            setEngineCallRejectReason(
-                heapBase, state,
-                CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE + intrinsicId);
+        if (intrinsicCallValid === 1) {
+            if (intrinsicArgumentCount < requiredIntrinsicArguments) {
+                intrinsicCallValid = 0;
+                setEngineCallRejectReason(
+                    heapBase, state,
+                    CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE + intrinsicId);
+            }
         }
         if (intrinsicCallValid === 0) {
             return unsupportedExitKernel(
@@ -14803,6 +14813,46 @@
             heapBase, stringSupport, RUNTIME_SUPPORT_DATE_PROTOTYPE);
         if (objectPrototype(heapBase, object) !==
             valueCellReference(0, prototypeCell)) return 0;
+        /* ToNumber(Date) uses the ordinary number-hint valueOf-first path.
+         * Bypass method invocation only while the first visible valueOf is
+         * still the built-in Date numeric intrinsic.  An own override, or a
+         * modified prototype, must return to the semantic engine. */
+        var valueOfKeyCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_VALUE_OF_KEY);
+        var valueOfKey = valueCellReference(0, valueOfKeyCell);
+        var currentObject = object;
+        var foundValueOf = 0;
+        while (currentObject !== 0) {
+            var methodProperty = objectPropertyHead(
+                heapBase, currentObject);
+            while (methodProperty !== 0) {
+                if (stringKeysEqualKernel(
+                        heapBase,
+                        propertyKey(heapBase, methodProperty),
+                        valueOfKey) === 1) {
+                    var methodCell = propertyValueCellAddress(
+                        heapBase, methodProperty);
+                    if (valueCellTag(0, methodCell) !==
+                            VALUE_TAG_REFERENCE) return 0;
+                    var methodFunction = valueCellReference(0, methodCell);
+                    if (recordType(heapBase, methodFunction) !==
+                            HEAP_TYPE_NATIVE_FUNCTION) return 0;
+                    if (nativeFunctionMetadata(heapBase, methodFunction) !==
+                            INTRINSIC_DATE_GET_TIME) return 0;
+                    foundValueOf = 1;
+                    methodProperty = 0;
+                    currentObject = 0;
+                } else {
+                    methodProperty = propertyNext(
+                        heapBase, methodProperty);
+                }
+            }
+            if (currentObject !== 0) {
+                currentObject = objectPrototype(
+                    heapBase, currentObject);
+            }
+        }
+        if (foundValueOf === 0) return 0;
         var keyCell = vectorCellAddress(
             heapBase, stringSupport, RUNTIME_SUPPORT_DATE_VALUE_KEY);
         var key = valueCellReference(0, keyCell);
@@ -15187,7 +15237,8 @@
     }
 
     function convertValueToNumberKernel(
-            heapBase, targetCell, sourceCell, platformServices) {
+            heapBase, targetCell, sourceCell, platformServices,
+            stringSupport) {
         var IEEE754_QUIET_NAN_HIGH = 2146959360;
         var sourceTag = valueCellTag(0, sourceCell);
         if (sourceTag === VALUE_TAG_INT32) {
@@ -15216,6 +15267,14 @@
         }
         if (sourceTag !== VALUE_TAG_REFERENCE) return 0;
         var source = valueCellReference(0, sourceCell);
+        if (stringSupport !== 0) {
+            var dateValueCell = dateNumericValueCellKernel(
+                heapBase, source, stringSupport);
+            if (dateValueCell !== 0) {
+                copyValueCell(targetCell, dateValueCell);
+                return 1;
+            }
+        }
         if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
         var length = stringLength(heapBase, source);
         var start = 0;
@@ -15361,7 +15420,7 @@
         if (sourceCell === 0) return 0;
         if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) {
             return convertValueToNumberKernel(
-                heapBase, targetCell, sourceCell, platformServices);
+                heapBase, targetCell, sourceCell, platformServices, 0);
         }
         var source = valueCellReference(0, sourceCell);
         if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
@@ -15408,7 +15467,7 @@
             if (sourceCell === 0) return 0;
             if (convertValueToNumberKernel(
                     heapBase, convertedCell, sourceCell,
-                    platformServices) === 0) return 0;
+                    platformServices, 0) === 0) return 0;
         }
         if (valueCellTag(0, convertedCell) === VALUE_TAG_UNDEFINED) {
             setValueCellTrue(targetCell);
@@ -16979,8 +17038,11 @@
     };
 
     NativeInterpreter.prototype.noteFallbackCall = function (
-            callable, args, frame, pc) {
+            callable, args, frame, pc, transition) {
         var name = callable && callable.name || "<anonymous>";
+        if (!transition) transition = "native-fallback-call";
+        this.runtime.logHostCallTransition(
+            transition, callable, undefined, args, frame, pc);
         this.fallbackCallCounts[name] =
             (this.fallbackCallCounts[name] || 0) + 1;
         if (callable && callable.guestType === "bytecodeFunction") {
