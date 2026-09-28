@@ -2071,11 +2071,11 @@
         this.setGlobal("parseFloat", this.makeNativeFunction("parseFloat",
             function (receiver, args) {
                 return parseFloat(String(args[0]));
-            }));
+            }, "intrinsic", NativeIntrinsics.PARSE_FLOAT));
         this.setGlobal("isNaN", this.makeNativeFunction("isNaN",
             function (receiver, args) {
                 return isNaN(Number(args[0]));
-            }));
+            }, "intrinsic", NativeIntrinsics.IS_NAN));
         this.setGlobal("isFinite", this.makeNativeFunction("isFinite",
             function (receiver, args) {
                 return isFinite(Number(args[0]));
@@ -2216,7 +2216,8 @@
                 return replaced;
             }, "intrinsic", NativeIntrinsics.STRING_REPLACE);
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
-            function (receiver) { return runtime.toString(receiver).toUpperCase(); });
+            function (receiver) { return runtime.toString(receiver).toUpperCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_UPPER_CASE);
         this.stringMethods.trim = this.makeNativeFunction("String.trim",
             function (receiver) { return runtime.toString(receiver).replace(/^\s+|\s+$/g, ""); });
         if (this.stringPrototype) {
@@ -2422,14 +2423,14 @@
                 if (typeof receiver === "number") return "[object Number]";
                 if (typeof receiver === "boolean") return "[object Boolean]";
                 return "[object Object]";
-            });
+            }, "intrinsic", NativeIntrinsics.OBJECT_TO_STRING);
         this.objectMethods.valueOf = this.makeNativeFunction(
             "Object.valueOf", function (receiver) {
                 if (receiver === null || receiver === undefined) {
                     throw new TypeError("Object.valueOf receiver is null or undefined");
                 }
                 return receiver;
-            });
+            }, "intrinsic", NativeIntrinsics.OBJECT_VALUE_OF);
         if (this.objectPrototype) {
             this.setProperty(this.objectPrototype, "hasOwnProperty",
                              this.objectMethods.hasOwnProperty);

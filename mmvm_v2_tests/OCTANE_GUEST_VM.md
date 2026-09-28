@@ -128,6 +128,44 @@ object, string, allocation, and self-hosting bottlenecks take priority.
 
 ## Bring-up status
 
+### PdfJS native-semantics checkpoint, 2026-09-28
+
+PdfJS now completes the self-hosted source read/compile stage and executes the
+benchmark body. A standalone profiled run measured approximately 2.96 seconds
+to read and 23.09 seconds to compile `pdfjs.js`, followed by about 0.11 seconds
+for its top-level initialization. These are uncached operations performed by
+the guest frontend after the generic snapshot starts.
+
+The bring-up exposed and corrected several general guest-runtime defects:
+
+- native string uppercase IDs were incorrectly classified as typed-array
+  constructor IDs by an open-ended arity range;
+- arithmetic coercion converted already-numeric integer subtraction operands
+  to doubles, breaking integer bytecode indices emitted by the self-hosted
+  compiler;
+- `in` did not recognize exact integral values stored with the double tag;
+- typed-array `.buffer` was present only on the hosted semantic path, so a
+  standalone `new Uint8Array(existingView.buffer)` received `undefined`; and
+- expanding an array to a high index created explicit `undefined` values in
+  intervening slots rather than absent holes, making `index in array` report
+  false cache entries as present.
+
+After these fixes the hosted native path reaches PdfJS's Octane result check in
+approximately 66.0 seconds at about 312 MiB peak RSS. It does not yet pass:
+PdfJS reports `Unknown command "eq"`, then produces `6 1694498816` instead of
+the expected `36788 939524096`. The next task is to identify that remaining
+rendering-semantic discrepancy. No score is recorded for PdfJS until its stock
+validation succeeds.
+
+Regression status at this checkpoint:
+
+- Node and i386 js_min guest suites: 12 programs, 266 assertions, pass;
+- guest hello, net.js, node_web.js, demo1, demo2, and three-context paths:
+  pass;
+- program-independent standalone snapshot and byte-identical fixed point:
+  pass; and
+- unchanged demos 1 through 8: live native-guest X11 smoke pass at 64x64.
+
 ### Complete standalone stock sweep, 2026-09-27
 
 All 15 Octane 2.0 suites were run individually through the generic standalone

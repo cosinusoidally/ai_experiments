@@ -69,7 +69,12 @@
                       FLOAT64_ARRAY_CONSTRUCTOR: 97,
                       INT8_ARRAY_CONSTRUCTOR: 98,
                       INT16_ARRAY_CONSTRUCTOR: 99,
-                      OBJECT_CREATE: 100};
+                      OBJECT_CREATE: 100,
+                      PARSE_FLOAT: 101,
+                      IS_NAN: 102,
+                      STRING_TO_UPPER_CASE: 103,
+                      OBJECT_VALUE_OF: 104,
+                      OBJECT_TO_STRING: 105};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

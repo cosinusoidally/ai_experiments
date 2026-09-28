@@ -8,6 +8,50 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.75
+
+Approximate completion: 2026-09-28 afternoon BST
+
+### Guest VM
+
+- Added bytecode invocation of guest-defined property setters and completed
+  the corresponding receiver/argument/return-state handling. Accessor calls
+  remain resumable guest frames rather than host semantic callbacks.
+- Added native guest implementations for `parseFloat`, `isNaN`, and the ASCII
+  portion of `String.prototype.toUpperCase`, together with shared primitive
+  numeric conversion used by arithmetic, comparison, and loose equality.
+  Non-ASCII case conversion remains an explicit unsupported path until the
+  authoritative ES5 Unicode mapping is integrated.
+- Implemented lexicographic UTF-16 string comparison, primitive loose-equality
+  coercions, and the default ordinary-object primitive conversion cases needed
+  by general ES5 code. Numeric coercion no longer stores a value cell in the
+  engine's two adjacent 32-bit scratch fields.
+- Corrected the intrinsic arity classifier so IDs after the typed-array
+  constructor range are not accidentally consumed by an open-ended range.
+  Standalone `String.prototype.toUpperCase` now stays within the native guest.
+- Extended the guest `in` operator to exact non-negative integral double keys.
+  Corrected sparse array growth to preserve absent holes instead of filling
+  them with present `undefined` properties.
+- Implemented the typed-array `buffer` virtual property in both computed-key
+  and constant-key native property paths. The returned ArrayBuffer is the
+  authoritative guest backing record, not a host wrapper.
+- Centralized standalone diagnostic ranges, heap-first-record policy, rope
+  flags/sizes, and native-region thresholds. Recursive kernel functions now
+  consume the compiler's shared constants instead of redeclaring tag, heap
+  type, or record-layout numbers.
+- PdfJS standalone compilation is approximately 23 seconds and now enters the
+  benchmark after correctly reading its XRef substreams. The hosted native
+  path reaches Octane's final verification in approximately 66 seconds, but
+  currently reports `Unknown command "eq"` and an incorrect result (`6
+  1694498816` instead of `36788 939524096`); this is the next correctness
+  point, not a pass.
+- Rechecked the complete Node and i386 js_min guest suites at 12 programs and
+  266 assertions, including net.js, node_web.js, demo1, demo2, and context
+  multiplexing. Program-independent standalone snapshots and their
+  byte-identical fixed point pass. Live native-guest smoke runs of unchanged
+  demos 1 through 8 all created their X11 windows and entered their main
+  rendering or attract loops.
+
 ## 0.74
 
 Approximate completion: 2026-09-27 evening BST

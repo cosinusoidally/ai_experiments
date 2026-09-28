@@ -397,6 +397,7 @@
         setPropertyNext: "PROPERTY_NEXT",
         setPropertyKey: "PROPERTY_KEY",
         setPropertyAttributes: "PROPERTY_ATTRIBUTES",
+        setPropertySetter: "PROPERTY_SETTER",
         setPropertyReserved: "PROPERTY_RESERVED",
         setFrameHandler: "FRAME_HANDLER",
         setFrameProgram: "FRAME_PROGRAM",
