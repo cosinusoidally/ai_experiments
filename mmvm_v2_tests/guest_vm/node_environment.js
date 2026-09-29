@@ -86,16 +86,13 @@
             }
         }
         this.installGlobals();
-        if (this.runtime.regexpPrototype && this.runtime.numberPrototype) {
-            this.installGuestRuntimeLibraries();
-        }
+        this.installGuestRuntimeLibraries();
     }
 
     GuestNodeEnvironment.prototype.installGuestRuntimeLibraries = function () {
-        this.context.run([
-            "load(\"guest_vm/number_runtime.js\");",
-            "load(\"guest_vm/regexp_runtime.js\");"
-        ].join("\n"), "<guest-runtime-libraries>");
+        this.context.run(
+            "load(\"guest_vm/array_runtime.js\");",
+            "<guest-array-runtime>");
         var methodAttributes =
             this.runtime.heapRecords.constructor.Attributes.WRITABLE |
             this.runtime.heapRecords.constructor.Attributes.CONFIGURABLE;
@@ -107,6 +104,15 @@
             environment.runtime.deleteProperty(
                 environment.context.globalObject, globalName, false);
         }
+        install(this.runtime.arrayPrototype, "map", "__guestArrayMap");
+
+        if (!this.runtime.regexpPrototype || !this.runtime.numberPrototype) {
+            return;
+        }
+        this.context.run([
+            "load(\"guest_vm/number_runtime.js\");",
+            "load(\"guest_vm/regexp_runtime.js\");"
+        ].join("\n"), "<guest-runtime-libraries>");
         install(this.runtime.regexpPrototype, "exec", "__guestRegExpExec");
         install(this.runtime.regexpPrototype, "test", "__guestRegExpTest");
         install(this.runtime.stringPrototype, "match", "__guestStringMatch");

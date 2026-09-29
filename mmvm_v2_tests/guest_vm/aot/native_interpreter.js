@@ -83,7 +83,10 @@
         REFERENCE_ERROR_NAME: 313,
         NOT_DEFINED_SUFFIX: 314,
         GLOBAL_DECLARATIONS_KEY: 315,
-        COUNT: 316
+        TYPE_ERROR_PROTOTYPE: 316,
+        TYPE_ERROR_NAME: 317,
+        NOT_CALLABLE_MESSAGE: 318,
+        COUNT: 319
     };
 
     function runtimeSupportConstantOverrides(profileOpcodes,
@@ -597,6 +600,9 @@
         var RUNTIME_SUPPORT_REFERENCE_ERROR_NAME = 0;
         var RUNTIME_SUPPORT_NOT_DEFINED_SUFFIX = 0;
         var RUNTIME_SUPPORT_GLOBAL_DECLARATIONS_KEY = 0;
+        var RUNTIME_SUPPORT_TYPE_ERROR_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_TYPE_ERROR_NAME = 0;
+        var RUNTIME_SUPPORT_NOT_CALLABLE_MESSAGE = 0;
         /* Authoritative values are supplied by RuntimeSupportLayout through
          * the kernel compiler's constantOverrides. */
         var RUNTIME_SUPPORT_INDIRECT_EVAL_COMPILER = 0;
@@ -3234,11 +3240,55 @@
                 }
                 setEngineCallRejectReason(
                     heapBase, state, diagnosticCallableKind);
-                var bytecodeCallHandled = bytecodeCallKernel(
-                    heapBase, state, frame, callFunctionCell,
-                    callArgumentsCell, callOperation, callTargetIndex,
-                    currentContext, stringSupport, arrayPrototype,
-                    bytecodeWords, registerCells, pc, framePC, 0, 0, 0);
+                var bytecodeCallHandled = 0;
+                var callableValueValid = 0;
+                if (diagnosticCallableTag === VALUE_TAG_REFERENCE) {
+                    if (diagnosticCallableType ===
+                            HEAP_TYPE_NATIVE_FUNCTION) {
+                        callableValueValid = 1;
+                    } else if (diagnosticCallableType ===
+                               HEAP_TYPE_BYTECODE_FUNCTION) {
+                        callableValueValid = 1;
+                    }
+                }
+                if (callableValueValid === 0) {
+                    var invalidCallTarget = heapBase + registerCells +
+                        callTargetIndex * VALUE_CELL_BYTES;
+                    var typeErrorAllocated = allocateTypeErrorKernel(
+                        heapBase, state, invalidCallTarget, stringSupport);
+                    if (typeErrorAllocated === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode,
+                            instructions);
+                    }
+                    var invalidCallUnwound = unwindExceptionKernel(
+                        heapBase, state, frame, invalidCallTarget);
+                    if (invalidCallUnwound === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode,
+                            instructions);
+                    }
+                    frame = engineCurrentFrame(heapBase, state);
+                    currentContext = frameContext(heapBase, frame);
+                    currentProgram = frameProgram(heapBase, frame);
+                    bytecodeWords = programBytecode(
+                        heapBase, currentProgram) + BYTECODE_WORDS;
+                    constantCells = programConstants(
+                        heapBase, currentProgram) + VECTOR_CELLS;
+                    globalObject = contextGlobal(
+                        heapBase, currentContext);
+                    framePC = frame + FRAME_PC;
+                    registerCells = frame + FRAME_REGISTERS;
+                    environment = frameEnvironment(heapBase, frame);
+                    pc = frameSavedPC(heapBase, frame);
+                    bytecodeCallHandled = 2;
+                } else {
+                    bytecodeCallHandled = bytecodeCallKernel(
+                        heapBase, state, frame, callFunctionCell,
+                        callArgumentsCell, callOperation, callTargetIndex,
+                        currentContext, stringSupport, arrayPrototype,
+                        bytecodeWords, registerCells, pc, framePC, 0, 0, 0);
+                }
                 var callFrameEntered = bytecodeCallHandled;
                 if (bytecodeCallHandled === 0) {
                     var intrinsicDispatchResult = intrinsicCallKernel(
@@ -10489,6 +10539,15 @@
             heapBase, state, missingName,
             valueCellReference(0, suffixCell));
         if (message === 0) return 0;
+        return allocateErrorKernel(
+            heapBase, state, targetCell, message,
+            RUNTIME_SUPPORT_REFERENCE_ERROR_PROTOTYPE,
+            RUNTIME_SUPPORT_REFERENCE_ERROR_NAME, stringSupport);
+    }
+
+    function allocateErrorKernel(
+            heapBase, state, targetCell, message, prototypeIndex,
+            nameIndex, stringSupport) {
         var errorBytes = OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
         if (reserveNativeAllocationKernel(
                 heapBase, state, errorBytes) === 0) return 0;
@@ -10498,8 +10557,7 @@
         if (nameProperty + PROPERTY_RECORD_BYTES >
                 engineHeapLimit(heapBase, state)) return 0;
         var prototypeCell = vectorCellAddress(
-            heapBase, stringSupport,
-            RUNTIME_SUPPORT_REFERENCE_ERROR_PROTOTYPE);
+            heapBase, stringSupport, prototypeIndex);
         setRecordType(heapBase, errorObject, HEAP_TYPE_OBJECT);
         setRecordSize(heapBase, errorObject, OBJECT_RECORD_BYTES);
         setRecordMark(heapBase, errorObject, 0);
@@ -10520,12 +10578,22 @@
                 heapBase, stringSupport, RUNTIME_SUPPORT_NAME_KEY),
             DEFAULT_PROPERTY_ATTRIBUTES, 0,
             valueCellReference(0, vectorCellAddress(
-                heapBase, stringSupport,
-                RUNTIME_SUPPORT_REFERENCE_ERROR_NAME)));
+                heapBase, stringSupport, nameIndex)));
         setValueCellReference(targetCell, errorObject);
         setEngineHeapBump(
             heapBase, state, nameProperty + PROPERTY_RECORD_BYTES);
         return 1;
+    }
+
+    function allocateTypeErrorKernel(
+            heapBase, state, targetCell, stringSupport) {
+        return allocateErrorKernel(
+            heapBase, state, targetCell,
+            valueCellReference(0, vectorCellAddress(
+                heapBase, stringSupport,
+                RUNTIME_SUPPORT_NOT_CALLABLE_MESSAGE)),
+            RUNTIME_SUPPORT_TYPE_ERROR_PROTOTYPE,
+            RUNTIME_SUPPORT_TYPE_ERROR_NAME, stringSupport);
     }
 
     function objectCreateKernel(
@@ -16036,10 +16104,12 @@
         var kernelDependencies = {
             allocateArrayBufferKernel: allocateArrayBufferKernel,
             allocateArrayKernel: allocateArrayKernel,
+            allocateErrorKernel: allocateErrorKernel,
             allocateObjectKernel: allocateObjectKernel,
             allocateObjectWithPrototypeKernel:
                 allocateObjectWithPrototypeKernel,
             allocateReferenceErrorKernel: allocateReferenceErrorKernel,
+            allocateTypeErrorKernel: allocateTypeErrorKernel,
             allocateRegexpKernel: allocateRegexpKernel,
             allocateTypedArrayViewKernel: allocateTypedArrayViewKernel,
             arrayConcatKernel: arrayConcatKernel,
@@ -16496,6 +16566,18 @@
             this.stringSupportAddress,
             RuntimeSupportLayout.GLOBAL_DECLARATIONS_KEY),
             runtime.internStringAddress("__guestVMGlobalDeclarations"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.TYPE_ERROR_PROTOTYPE),
+            runtime.errorPrototypes.$TypeError.heapAddress);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.TYPE_ERROR_NAME),
+            runtime.internStringAddress("TypeError"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.NOT_CALLABLE_MESSAGE),
+            runtime.internStringAddress("value is not callable"));
         runtime.heapRecords.setVectorLength(
             this.stringSupportAddress, RuntimeSupportLayout.COUNT);
         this.runCount = 0;
