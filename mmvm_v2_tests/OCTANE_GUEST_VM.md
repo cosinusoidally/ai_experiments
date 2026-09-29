@@ -372,6 +372,18 @@ indirect global eval rather than a zlib source hook. Direct eval remains a
 distinct lexical operation and is deliberately not redirected through this
 global-code path.
 
+The generic standalone `js_runner` image now passes zlib quick correctness as
+well. The 2026-09-29 validation completed in 81.96 seconds at 257,664 KiB peak
+RSS. The indirect-eval compiler returns the actual guest callable and its
+global-declaration metadata, allowing the interpreter to bind the callable to
+the caller's JSContext instead of accidentally retaining the compiler
+module's global realm. Consequently the generated program reaches the normal
+guest `require` loader; neither `fs` nor `path` is special-cased by the
+interpreter. The standalone bootstrap also resumes ordinary instruction-budget
+yields, which is required because quick zlib executes slightly more than one
+2,147,483,647-instruction slice. Native `DELETE_NAME` completes the benchmark's
+global teardown.
+
 Zlib bring-up added general ES5 facilities rather than source accommodations:
 indirect global eval, labelled statements and labelled abrupt control flow,
 the global `NaN`, `Infinity`, and `Boolean` bindings, Annex B `escape` and

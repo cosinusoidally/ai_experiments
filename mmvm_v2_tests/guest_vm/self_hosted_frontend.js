@@ -125,8 +125,11 @@ exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
  * bytecode frame. The returned executable owns declaration instantiation;
  * the engine's eval continuation only has to invoke it. */
 exports.compileIndirectEvalExecutable = function (source) {
-    return exports.compileExecutable(source, "<eval>",
-        exports.compileIndirectEvalExecutable, this);
+    var program = exports.compile(source, "<eval>");
+    var callable = adoptProgramDescriptor(
+        program, exports.compileIndirectEvalExecutable);
+    callable.__guestVMGlobalDeclarations = program.globalDeclarations || [];
+    return callable;
 };
 
 exports.installEvalCompiler = function () {

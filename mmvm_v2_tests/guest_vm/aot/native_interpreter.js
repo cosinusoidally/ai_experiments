@@ -77,7 +77,13 @@
         TO_STRING_KEY: 307,
         OBJECT_OBJECT_STRING: 308,
         BUFFER_KEY: 309,
-        COUNT: 310
+        REFERENCE_ERROR_PROTOTYPE: 310,
+        NAME_KEY: 311,
+        MESSAGE_KEY: 312,
+        REFERENCE_ERROR_NAME: 313,
+        NOT_DEFINED_SUFFIX: 314,
+        GLOBAL_DECLARATIONS_KEY: 315,
+        COUNT: 316
     };
 
     function runtimeSupportConstantOverrides(profileOpcodes,
@@ -438,6 +444,7 @@
         var OP_GET_NAME = 56;
         var OP_SET_NAME = 57;
         var OP_TYPEOF_NAME = 58;
+        var OP_DELETE_NAME = 59;
 
         /* Stable IDs from native_intrinsics.js. */
         var INTRINSIC_PEEK8 = 1;
@@ -584,6 +591,12 @@
         var RUNTIME_SUPPORT_TO_STRING_KEY = 0;
         var RUNTIME_SUPPORT_OBJECT_OBJECT_STRING = 0;
         var RUNTIME_SUPPORT_BUFFER_KEY = 0;
+        var RUNTIME_SUPPORT_REFERENCE_ERROR_PROTOTYPE = 0;
+        var RUNTIME_SUPPORT_NAME_KEY = 0;
+        var RUNTIME_SUPPORT_MESSAGE_KEY = 0;
+        var RUNTIME_SUPPORT_REFERENCE_ERROR_NAME = 0;
+        var RUNTIME_SUPPORT_NOT_DEFINED_SUFFIX = 0;
+        var RUNTIME_SUPPORT_GLOBAL_DECLARATIONS_KEY = 0;
         /* Authoritative values are supplied by RuntimeSupportLayout through
          * the kernel compiler's constantOverrides. */
         var RUNTIME_SUPPORT_INDIRECT_EVAL_COMPILER = 0;
@@ -604,6 +617,8 @@
         setEngineCurrentFrame(heapBase, state, frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
+            setEngineCallRejectReason(
+                heapBase, state, CALL_REJECT_NONE);
             var callOperation = 0;
             if (opcode === OP_CALL) callOperation = 1;
             else if (opcode === OP_CONSTRUCT) callOperation = 2;
@@ -615,10 +630,12 @@
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
             }
             if (opcode >= OP_ENTER_WITH) {
-                return unsupportedExitKernel(
-                    heapBase, state, frame, pc, opcode, instructions);
+                if (opcode !== OP_DELETE_NAME) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
             }
-            beginOpcodeDispatch(opcode, OP_CONST, OP_TYPEOF_NAME);
+            beginOpcodeDispatch(opcode, OP_CONST, OP_DELETE_NAME);
             if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -655,12 +672,14 @@
                 var globalKey = load32(globalKeyCell + VALUE_CELL_LOW);
                 var globalProperty = load32(
                     heapBase + globalObject + OBJECT_PROPERTY_HEAD);
+                var globalAccessor = 0;
                 while (globalProperty > 0) {
                     if (stringKeysEqualKernel(heapBase,
                         propertyKey(heapBase, globalProperty),
                         globalKey) === 1) {
                         if ((propertyAttributes(heapBase, globalProperty) &
                              PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                            globalAccessor = 1;
                             globalProperty = 0;
                         } else {
                             var globalValue = heapBase + globalProperty + PROPERTY_VALUE;
@@ -681,10 +700,42 @@
                     }
                 }
                 if (globalProperty === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, instructions);
+                    if (globalAccessor === 1) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    var missingGlobalDestination = heapBase + registerCells +
+                        globalTargetIndex * VALUE_CELL_BYTES;
+                    var referenceErrorAllocated =
+                        allocateReferenceErrorKernel(
+                            heapBase, state, missingGlobalDestination,
+                            globalKey, stringSupport);
+                    if (referenceErrorAllocated === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    var missingGlobalUnwound = unwindExceptionKernel(
+                        heapBase, state, frame, missingGlobalDestination);
+                    if (missingGlobalUnwound === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    }
+                    frame = engineCurrentFrame(heapBase, state);
+                    currentContext = frameContext(heapBase, frame);
+                    currentProgram = frameProgram(heapBase, frame);
+                    bytecodeWords = programBytecode(
+                        heapBase, currentProgram) + BYTECODE_WORDS;
+                    constantCells = programConstants(
+                        heapBase, currentProgram) + VECTOR_CELLS;
+                    globalObject = contextGlobal(
+                        heapBase, currentContext);
+                    framePC = frame + FRAME_PC;
+                    registerCells = frame + FRAME_REGISTERS;
+                    environment = frameEnvironment(heapBase, frame);
+                    pc = frameSavedPC(heapBase, frame);
+                } else {
+                    pc = pc + THREE_WORD_INSTRUCTION;
                 }
-                pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_GLOBAL) {
                 var setGlobalConstantIndex = load32(
                     heapBase + bytecodeWords + (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -3123,129 +3174,13 @@
                     (pc + FIRST_OPERAND) * WORD_BYTES);
                 var throwSource = heapBase + registerCells +
                     throwRegister * VALUE_CELL_BYTES;
-                var catchFrame = frame;
-                var catchHandler = frameHandler(heapBase, catchFrame);
-                var nativeUnwindValid = 1;
-                while (catchHandler === 0) {
-                    var nextCatchFrame = frameCaller(heapBase, catchFrame);
-                    if (nextCatchFrame === 0) {
-                        nativeUnwindValid = 0;
-                        catchHandler = -1;
-                    } else {
-                        var unwindFlags = recordFlags(heapBase, catchFrame);
-                        if (unwindFlags !== FRAME_FLAG_NATIVE_CALL) {
-                            if (unwindFlags !== FRAME_FLAG_NATIVE_CONSTRUCT) {
-                                if (unwindFlags !==
-                                        FRAME_FLAG_INDIRECT_EVAL_COMPILE) {
-                                    nativeUnwindValid = 0;
-                                }
-                            }
-                        }
-                        catchFrame = nextCatchFrame;
-                        catchHandler = frameHandler(heapBase, catchFrame);
-                    }
-                }
-                if (nativeUnwindValid === 0) {
+                var throwUnwound = unwindExceptionKernel(
+                    heapBase, state, frame, throwSource);
+                if (throwUnwound === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
                 }
-                var catchEnvironment = handlerEnvironment(
-                    heapBase, catchHandler);
-                var catchBindingSlot = handlerBindingSlot(
-                    heapBase, catchHandler) | 0;
-                var catchDestination = 0;
-                if (catchBindingSlot >= 0) {
-                    if (catchEnvironment === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                    if (catchBindingSlot >= environmentCount(
-                            heapBase, catchEnvironment)) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                    catchDestination = environmentCellAddress(
-                        heapBase, catchEnvironment, catchBindingSlot);
-                } else {
-                    var catchProgram = frameProgram(heapBase, catchFrame);
-                    var catchConstants = programConstants(
-                        heapBase, catchProgram);
-                    var catchNameCell = vectorCellAddress(
-                        heapBase, catchConstants, -catchBindingSlot - 1);
-                    if (valueCellTag(0, catchNameCell) !==
-                            VALUE_TAG_REFERENCE) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, instructions);
-                    }
-                    var catchName = valueCellReference(0, catchNameCell);
-                    var catchGlobal = contextGlobal(heapBase,
-                        frameContext(heapBase, catchFrame));
-                    var catchProperty = objectPropertyHead(
-                        heapBase, catchGlobal);
-                    while (catchProperty !== 0) {
-                        if (stringKeysEqualKernel(heapBase,
-                                propertyKey(heapBase, catchProperty),
-                                catchName) === 1) {
-                            catchDestination = propertyValueCellAddress(
-                                heapBase, catchProperty);
-                            catchProperty = 0;
-                        } else {
-                            catchProperty = propertyNext(
-                                heapBase, catchProperty);
-                        }
-                    }
-                    if (catchDestination === 0) {
-                        if (reserveNativeAllocationKernel(
-                                heapBase, state,
-                                PROPERTY_RECORD_BYTES) === 0) {
-                            return unsupportedExitKernel(
-                                heapBase, state, frame, pc, opcode,
-                                instructions);
-                        }
-                        var catchPropertyHead = objectPropertyHead(
-                            heapBase, catchGlobal);
-                        var newCatchProperty = engineHeapBump(
-                            heapBase, state);
-                        setRecordType(heapBase, newCatchProperty,
-                                      HEAP_TYPE_PROPERTY);
-                        setRecordSize(heapBase, newCatchProperty,
-                                      PROPERTY_RECORD_BYTES);
-                        setRecordMark(heapBase, newCatchProperty, 0);
-                        setRecordFlags(heapBase, newCatchProperty, 0);
-                        setPropertyNext(heapBase, newCatchProperty,
-                                        catchPropertyHead);
-                        setPropertyKey(heapBase, newCatchProperty,
-                                       catchName);
-                        setPropertyAttributes(heapBase, newCatchProperty,
-                            DEFAULT_PROPERTY_ATTRIBUTES);
-                        setPropertyReserved(
-                            heapBase, newCatchProperty, 0);
-                        setObjectPropertyHead(
-                            heapBase, catchGlobal, newCatchProperty);
-                        setEngineHeapBump(heapBase, state,
-                            newCatchProperty + PROPERTY_RECORD_BYTES);
-                        catchDestination = propertyValueCellAddress(
-                            heapBase, newCatchProperty);
-                    }
-                }
-                copyValueCell(catchDestination, throwSource);
-                setFrameHandler(heapBase, catchFrame,
-                    handlerNext(heapBase, catchHandler));
-                setFrameEnvironment(
-                    heapBase, catchFrame, catchEnvironment);
-                var discardedFrame = frame;
-                while (discardedFrame !== catchFrame) {
-                    var nextUnwindFrame = frameCaller(
-                        heapBase, discardedFrame);
-                    setRecordType(
-                        heapBase, discardedFrame, HEAP_TYPE_FREE);
-                    setFrameProgram(heapBase, discardedFrame,
-                        engineFreeFrame(heapBase, state));
-                    setEngineFreeFrame(heapBase, state, discardedFrame);
-                    discardedFrame = nextUnwindFrame;
-                }
-                frame = catchFrame;
-                setEngineCurrentFrame(heapBase, state, frame);
+                frame = engineCurrentFrame(heapBase, state);
                 currentContext = frameContext(heapBase, frame);
                 currentProgram = frameProgram(heapBase, frame);
                 bytecodeWords = programBytecode(
@@ -3255,8 +3190,8 @@
                 globalObject = contextGlobal(heapBase, currentContext);
                 framePC = frame + FRAME_PC;
                 registerCells = frame + FRAME_REGISTERS;
-                environment = catchEnvironment;
-                pc = handlerTarget(heapBase, catchHandler);
+                environment = frameEnvironment(heapBase, frame);
+                pc = frameSavedPC(heapBase, frame);
             } else if (callOperation > 0) {
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_NONE);
@@ -3383,7 +3318,7 @@
                     (pc + FIRST_OPERAND) * WORD_BYTES);
                 var returnResult = returnFromBytecodeKernel(
                     heapBase, state, frame, registerCells, returnIndex, pc,
-                    instructions);
+                    instructions, stringSupport);
                 if (returnResult === EXIT_RETURN) return EXIT_RETURN;
                 frame = engineCurrentFrame(heapBase, state);
                 currentContext = frameContext(heapBase, frame);
@@ -3758,6 +3693,60 @@
                     frameRegisterCellAddress(heapBase, frame,
                                              typeofGlobalTargetIndex),
                     typeofGlobalValueCell, stringSupport);
+                pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_DELETE_NAME) {
+                var deleteNameTargetIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var deleteNameConstantIndex = load32(
+                    heapBase + bytecodeWords +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var deleteNameKeyCell = heapBase + constantCells +
+                    deleteNameConstantIndex * VALUE_CELL_BYTES;
+                if (valueCellTag(0, deleteNameKeyCell) !==
+                        VALUE_TAG_REFERENCE) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                var deleteNameKey = valueCellReference(
+                    0, deleteNameKeyCell);
+                if (recordType(heapBase, deleteNameKey) !==
+                        HEAP_TYPE_STRING) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                /* Static lexical bindings are compiled to the constant
+                 * false result and never reach DELETE_NAME. A dynamic
+                 * object environment (with/eval) still requires its full
+                 * environment-record lookup and therefore remains an
+                 * explicit semantic boundary. */
+                var deleteNameEnvironment = environment;
+                var deleteNameDynamicObject = 0;
+                while (deleteNameEnvironment !== 0) {
+                    if (environmentObject(
+                            heapBase, deleteNameEnvironment) !== 0) {
+                        deleteNameDynamicObject = 1;
+                        deleteNameEnvironment = 0;
+                    } else {
+                        deleteNameEnvironment = environmentParent(
+                            heapBase, deleteNameEnvironment);
+                    }
+                }
+                if (deleteNameDynamicObject !== 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                var deleteNameTarget = frameRegisterCellAddress(
+                    heapBase, frame, deleteNameTargetIndex);
+                setValueCellReference(deleteNameTarget, globalObject);
+                if (deletePropertyKernel(
+                        heapBase, deleteNameTarget, deleteNameTarget,
+                        deleteNameKeyCell,
+                        programFlags(heapBase, currentProgram) &
+                            PROGRAM_FLAG_STRICT) === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_DELETE_PROPERTY) {
                 var deleteTargetIndex = load32(
@@ -4612,7 +4601,7 @@
 
     function returnFromBytecodeKernel(
             heapBase, state, frame, registerCells, returnIndex, pc,
-            instructions) {
+            instructions, stringSupport) {
         var nativeCallerFrame = frameCaller(heapBase, frame);
         var nativeFrameFlags = recordFlags(heapBase, frame);
         var returnInsideNativeEngine = 0;
@@ -4649,6 +4638,24 @@
                 if (compiledEvalValid === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, OP_CALL, instructions);
+                }
+                /* The compiler itself lives in the bootstrap module context.
+                 * Indirect eval is global code in the caller's realm, not in
+                 * the compiler's implementation realm.  Re-home the adopted
+                 * callable before it is entered so application globals
+                 * resolve through the correct context. */
+                setFunctionHomeContext(
+                    heapBase, compiledEvalCallable,
+                    frameContext(heapBase, nativeCallerFrame));
+                var evalDeclarationsInstantiated =
+                    instantiateGlobalDeclarationsKernel(
+                        heapBase, state, compiledEvalCallable,
+                        frameContext(heapBase, nativeCallerFrame),
+                        stringSupport);
+                if (evalDeclarationsInstantiated !== 1) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, OP_RETURN,
+                        instructions);
                 }
                 var evalCallerProgram = frameProgram(
                     heapBase, nativeCallerFrame);
@@ -4715,6 +4722,88 @@
         setEngineInstructions(heapBase, state, instructions + 1);
         setFramePC(heapBase, frame, pc);
         return EXIT_RETURN;
+        }
+        return 1;
+    }
+
+    function instantiateGlobalDeclarationsKernel(
+            heapBase, state, callable, context, stringSupport) {
+        var declarationsKeyCell = vectorCellAddress(
+            heapBase, stringSupport,
+            RUNTIME_SUPPORT_GLOBAL_DECLARATIONS_KEY);
+        var declarationsKey = valueCellReference(
+            0, declarationsKeyCell);
+        var callableProperty = objectPropertyHead(heapBase, callable);
+        var declarations = 0;
+        while (callableProperty !== 0) {
+            if (stringKeysEqualKernel(
+                    heapBase, propertyKey(heapBase, callableProperty),
+                    declarationsKey) === 1) {
+                var declarationsCell = propertyValueCellAddress(
+                    heapBase, callableProperty);
+                if (valueCellTag(0, declarationsCell) !==
+                        VALUE_TAG_REFERENCE) return 0;
+                declarations = valueCellReference(0, declarationsCell);
+                callableProperty = 0;
+            } else {
+                callableProperty = propertyNext(
+                    heapBase, callableProperty);
+            }
+        }
+        if (declarations === 0) return 0;
+        if (recordType(heapBase, declarations) !== HEAP_TYPE_ARRAY) return 0;
+        var declarationVector = arrayElements(heapBase, declarations);
+        var declarationCount = vectorLength(
+            heapBase, declarationVector);
+        var globalObject = contextGlobal(heapBase, context);
+        var declarationIndex = 0;
+        while (declarationIndex < declarationCount) {
+            var declarationCell = vectorCellAddress(
+                heapBase, declarationVector, declarationIndex);
+            if (valueCellTag(0, declarationCell) !==
+                    VALUE_TAG_REFERENCE) return 0;
+            var declarationName = valueCellReference(
+                0, declarationCell);
+            if (recordType(heapBase, declarationName) !==
+                    HEAP_TYPE_STRING) return 0;
+            var existingProperty = objectPropertyHead(
+                heapBase, globalObject);
+            var propertyExists = 0;
+            while (existingProperty !== 0) {
+                if (stringKeysEqualKernel(
+                        heapBase,
+                        propertyKey(heapBase, existingProperty),
+                        declarationName) === 1) {
+                    propertyExists = 1;
+                    existingProperty = 0;
+                } else {
+                    existingProperty = propertyNext(
+                        heapBase, existingProperty);
+                }
+            }
+            if (propertyExists === 0) {
+                if (reserveNativeAllocationKernel(
+                        heapBase, state,
+                        PROPERTY_RECORD_BYTES) === 0) return 2;
+                var declarationProperty = engineHeapBump(
+                    heapBase, state);
+                var initializedDeclaration =
+                    initializeDataPropertyKernel(
+                        heapBase, declarationProperty,
+                        objectPropertyHead(heapBase, globalObject),
+                        declarationCell,
+                        PROPERTY_ATTRIBUTE_WRITABLE |
+                            PROPERTY_ATTRIBUTE_ENUMERABLE,
+                        0, 0);
+                setValueCellUndefined(propertyValueCellAddress(
+                    heapBase, declarationProperty));
+                setObjectPropertyHead(
+                    heapBase, globalObject, declarationProperty);
+                setEngineHeapBump(
+                    heapBase, state,
+                    declarationProperty + PROPERTY_RECORD_BYTES);
+            }
+            declarationIndex = declarationIndex + 1;
         }
         return 1;
     }
@@ -10392,6 +10481,53 @@
         return allocated;
     }
 
+    function allocateReferenceErrorKernel(
+            heapBase, state, targetCell, missingName, stringSupport) {
+        var suffixCell = vectorCellAddress(
+            heapBase, stringSupport, RUNTIME_SUPPORT_NOT_DEFINED_SUFFIX);
+        var message = concatenateStringsKernel(
+            heapBase, state, missingName,
+            valueCellReference(0, suffixCell));
+        if (message === 0) return 0;
+        var errorBytes = OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+        if (reserveNativeAllocationKernel(
+                heapBase, state, errorBytes) === 0) return 0;
+        var errorObject = engineHeapBump(heapBase, state);
+        var messageProperty = errorObject + OBJECT_RECORD_BYTES;
+        var nameProperty = messageProperty + PROPERTY_RECORD_BYTES;
+        if (nameProperty + PROPERTY_RECORD_BYTES >
+                engineHeapLimit(heapBase, state)) return 0;
+        var prototypeCell = vectorCellAddress(
+            heapBase, stringSupport,
+            RUNTIME_SUPPORT_REFERENCE_ERROR_PROTOTYPE);
+        setRecordType(heapBase, errorObject, HEAP_TYPE_OBJECT);
+        setRecordSize(heapBase, errorObject, OBJECT_RECORD_BYTES);
+        setRecordMark(heapBase, errorObject, 0);
+        setRecordFlags(heapBase, errorObject, 0);
+        setObjectPrototype(heapBase, errorObject,
+            valueCellReference(0, prototypeCell));
+        setObjectPropertyHead(heapBase, errorObject, nameProperty);
+        setObjectExtensible(heapBase, errorObject, 1);
+        setObjectReserved(heapBase, errorObject, 0);
+        var propertyInitialized = initializeDataPropertyKernel(
+            heapBase, messageProperty, 0,
+            vectorCellAddress(
+                heapBase, stringSupport, RUNTIME_SUPPORT_MESSAGE_KEY),
+            DEFAULT_PROPERTY_ATTRIBUTES, 0, message);
+        propertyInitialized = initializeDataPropertyKernel(
+            heapBase, nameProperty, messageProperty,
+            vectorCellAddress(
+                heapBase, stringSupport, RUNTIME_SUPPORT_NAME_KEY),
+            DEFAULT_PROPERTY_ATTRIBUTES, 0,
+            valueCellReference(0, vectorCellAddress(
+                heapBase, stringSupport,
+                RUNTIME_SUPPORT_REFERENCE_ERROR_NAME)));
+        setValueCellReference(targetCell, errorObject);
+        setEngineHeapBump(
+            heapBase, state, nameProperty + PROPERTY_RECORD_BYTES);
+        return 1;
+    }
+
     function objectCreateKernel(
             heapBase, state, targetCell, registerCells,
             argumentsVector, argumentCount) {
@@ -13000,6 +13136,113 @@
             heapBase, state, property + PROPERTY_RECORD_BYTES);
         var cacheClearResult = clearNativePropertyCacheKernel(heapBase, state);
         copyValueCell(target, objectCell);
+        return 1;
+    }
+
+    function unwindExceptionKernel(heapBase, state, frame, throwSource) {
+        var catchFrame = frame;
+        var catchHandler = frameHandler(heapBase, catchFrame);
+        var nativeUnwindValid = 1;
+        while (catchHandler === 0) {
+            var nextCatchFrame = frameCaller(heapBase, catchFrame);
+            if (nextCatchFrame === 0) {
+                nativeUnwindValid = 0;
+                catchHandler = -1;
+            } else {
+                var unwindFlags = recordFlags(heapBase, catchFrame);
+                if (unwindFlags !== FRAME_FLAG_NATIVE_CALL) {
+                    if (unwindFlags !== FRAME_FLAG_NATIVE_CONSTRUCT) {
+                        if (unwindFlags !==
+                                FRAME_FLAG_INDIRECT_EVAL_COMPILE) {
+                            nativeUnwindValid = 0;
+                        }
+                    }
+                }
+                catchFrame = nextCatchFrame;
+                catchHandler = frameHandler(heapBase, catchFrame);
+            }
+        }
+        if (nativeUnwindValid === 0) return 0;
+        var catchEnvironment = handlerEnvironment(
+            heapBase, catchHandler);
+        var catchBindingSlot = handlerBindingSlot(
+            heapBase, catchHandler) | 0;
+        var catchDestination = 0;
+        if (catchBindingSlot >= 0) {
+            if (catchEnvironment === 0) return 0;
+            if (catchBindingSlot >= environmentCount(
+                    heapBase, catchEnvironment)) return 0;
+            catchDestination = environmentCellAddress(
+                heapBase, catchEnvironment, catchBindingSlot);
+        } else {
+            var catchProgram = frameProgram(heapBase, catchFrame);
+            var catchConstants = programConstants(
+                heapBase, catchProgram);
+            var catchNameCell = vectorCellAddress(
+                heapBase, catchConstants, -catchBindingSlot - 1);
+            if (valueCellTag(0, catchNameCell) !==
+                    VALUE_TAG_REFERENCE) return 0;
+            var catchName = valueCellReference(0, catchNameCell);
+            var catchGlobal = contextGlobal(
+                heapBase, frameContext(heapBase, catchFrame));
+            var catchProperty = objectPropertyHead(
+                heapBase, catchGlobal);
+            while (catchProperty !== 0) {
+                if (stringKeysEqualKernel(
+                        heapBase, propertyKey(heapBase, catchProperty),
+                        catchName) === 1) {
+                    catchDestination = propertyValueCellAddress(
+                        heapBase, catchProperty);
+                    catchProperty = 0;
+                } else {
+                    catchProperty = propertyNext(
+                        heapBase, catchProperty);
+                }
+            }
+            if (catchDestination === 0) {
+                if (reserveNativeAllocationKernel(
+                        heapBase, state,
+                        PROPERTY_RECORD_BYTES) === 0) return 0;
+                var catchPropertyHead = objectPropertyHead(
+                    heapBase, catchGlobal);
+                var newCatchProperty = engineHeapBump(heapBase, state);
+                setRecordType(
+                    heapBase, newCatchProperty, HEAP_TYPE_PROPERTY);
+                setRecordSize(
+                    heapBase, newCatchProperty, PROPERTY_RECORD_BYTES);
+                setRecordMark(heapBase, newCatchProperty, 0);
+                setRecordFlags(heapBase, newCatchProperty, 0);
+                setPropertyNext(
+                    heapBase, newCatchProperty, catchPropertyHead);
+                setPropertyKey(heapBase, newCatchProperty, catchName);
+                setPropertyAttributes(heapBase, newCatchProperty,
+                    DEFAULT_PROPERTY_ATTRIBUTES);
+                setPropertyReserved(heapBase, newCatchProperty, 0);
+                setObjectPropertyHead(
+                    heapBase, catchGlobal, newCatchProperty);
+                setEngineHeapBump(heapBase, state,
+                    newCatchProperty + PROPERTY_RECORD_BYTES);
+                catchDestination = propertyValueCellAddress(
+                    heapBase, newCatchProperty);
+            }
+        }
+        copyValueCell(catchDestination, throwSource);
+        setFrameHandler(heapBase, catchFrame,
+            handlerNext(heapBase, catchHandler));
+        setFrameEnvironment(
+            heapBase, catchFrame, catchEnvironment);
+        var discardedFrame = frame;
+        while (discardedFrame !== catchFrame) {
+            var nextUnwindFrame = frameCaller(heapBase, discardedFrame);
+            setRecordType(heapBase, discardedFrame, HEAP_TYPE_FREE);
+            setFrameProgram(heapBase, discardedFrame,
+                engineFreeFrame(heapBase, state));
+            setEngineFreeFrame(heapBase, state, discardedFrame);
+            discardedFrame = nextUnwindFrame;
+        }
+        setFramePC(
+            heapBase, catchFrame, handlerTarget(heapBase, catchHandler));
+        setEngineCurrentFrame(heapBase, state, catchFrame);
         return 1;
     }
 
@@ -15796,6 +16039,7 @@
             allocateObjectKernel: allocateObjectKernel,
             allocateObjectWithPrototypeKernel:
                 allocateObjectWithPrototypeKernel,
+            allocateReferenceErrorKernel: allocateReferenceErrorKernel,
             allocateRegexpKernel: allocateRegexpKernel,
             allocateTypedArrayViewKernel: allocateTypedArrayViewKernel,
             arrayConcatKernel: arrayConcatKernel,
@@ -15836,6 +16080,8 @@
             heapSweepKernel: heapSweepKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
+            instantiateGlobalDeclarationsKernel:
+                instantiateGlobalDeclarationsKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             interpreterKernel: interpreterKernel,
             intrinsicCallKernel: intrinsicCallKernel,
@@ -15893,6 +16139,7 @@
             typedArrayElementBytesKernel: typedArrayElementBytesKernel,
             typedArrayLengthArgumentKernel: typedArrayLengthArgumentKernel,
             typedArraySetKernel: typedArraySetKernel,
+            unwindExceptionKernel: unwindExceptionKernel,
             uriStringIntrinsicKernel: uriStringIntrinsicKernel,
             uriHexValueKernel: uriHexValueKernel,
             uriComponentSafeKernel: uriComponentSafeKernel,
@@ -16227,6 +16474,28 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.BUFFER_KEY),
             runtime.internStringAddress("buffer"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.REFERENCE_ERROR_PROTOTYPE),
+            runtime.errorPrototypes.$ReferenceError.heapAddress);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.NAME_KEY),
+            runtime.internStringAddress("name"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.MESSAGE_KEY),
+            runtime.internStringAddress("message"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.REFERENCE_ERROR_NAME),
+            runtime.internStringAddress("ReferenceError"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.NOT_DEFINED_SUFFIX),
+            runtime.internStringAddress(" is not defined"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress,
+            RuntimeSupportLayout.GLOBAL_DECLARATIONS_KEY),
+            runtime.internStringAddress("__guestVMGlobalDeclarations"));
         runtime.heapRecords.setVectorLength(
             this.stringSupportAddress, RuntimeSupportLayout.COUNT);
         this.runCount = 0;

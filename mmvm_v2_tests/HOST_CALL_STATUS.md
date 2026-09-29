@@ -145,8 +145,8 @@ Outstanding general work exposed by this group:
 
 Outstanding general work exposed by this group:
 
-- provide a guest-native `require("fs")` binding and synchronous source reads;
-  standalone `load` itself is already used successfully by Octane;
+- complete the guest-owned Test262 driver on top of the existing standalone
+  `require`, `load`, and synchronous filesystem implementation;
 - implement `Test262VM.runVariant` on the guest-owned runtime/context API so it
   creates a cheap fresh `JSContext`, evaluates the harness/test, reports its
   structured result, and tears the context down without an embedder callback;
@@ -172,8 +172,10 @@ an Octane performance score.
 - Failed: PdfJS, native `CALL` gap (28.20 s, 212,352 KiB).
 - Failed: Gameboy, native `CALL` gap (8.95 s, 105,088 KiB).
 - Failed: CodeLoad, native `CALL` gap (1.03 s, 38,528 KiB).
-- Failed: zlib, native `GET_GLOBAL` gap after entering the benchmark
-  (17.18 s, 111,488 KiB).
+- Passed: zlib (81.96 s, 257,664 KiB). This includes self-hosted indirect
+  eval, ordinary guest `require("fs")`/`require("path")`, a 128 MiB
+  ArrayBuffer, automatic heap growth/collection, budget resumption, and
+  native global teardown.
 - Failed: Typescript, native constructor gap while loading/running the suite
   (28.06 s, 211,072 KiB).
 - Crashed: Box2D terminates with SIGSEGV after 7.71 s.  This is a standalone
@@ -192,14 +194,33 @@ Outstanding general work exposed by this group, in priority order:
 2. Complete general native CALL and CONSTRUCT handling.  This is shared by the
    language suite, Test262 bootstrap, `node_web.js`, PdfJS, Gameboy, CodeLoad,
    Typescript, and Buffer/typed-array coverage.
-3. Complete ordinary object constant-property lookup and global resolution for
-   the object layouts exercised by EarleyBoyer and zlib.
+3. Complete ordinary object constant-property lookup for the remaining object
+   layouts exercised by EarleyBoyer and the other failing suites. Zlib's
+   missing-global ReferenceError path and indirect-eval global realm are now
+   native and passing.
 4. Profile and fix Mandreel's large startup/execution cost through general
    parser, compiler, heap, GC, and dispatch improvements.
 5. Implement the correct regex subset needed by dependent programs; defer a
    specialized high-performance regex engine and the standalone RegExp score.
 6. After correctness, run stock (non-quick) Octane via `js_runner`, record
    scores, and optimize only general VM mechanisms.
+
+### 2026-09-29: standalone zlib closure
+
+- Before: standalone zlib stopped on missing-global `Module` resolution, then
+  on `require` resolved in the self-hosted compiler module's realm, and later
+  exhausted the standalone bootstrap's single instruction slice.
+- After: Octane quick correctness passes through the generic `js_runner`
+  snapshot in 81.96 seconds at 257,664 KiB peak RSS, with exit status 0.
+- General VM work: native ReferenceError construction/unwinding for missing
+  globals; an explicit indirect-eval compiler result carrying global
+  declaration metadata; rebinding the actual compiled callable to the
+  caller's JSContext; standalone budget-yield resumption from the engine's
+  named current-frame field; and native `DELETE_NAME` for statically resolved
+  lexical/global code.
+- Deliberately not added: no intrinsic dispatch on module-name strings, no
+  zlib source hook, no cached zlib parse, and no program state in the generic
+  snapshot.
 
 ## Completion criteria
 

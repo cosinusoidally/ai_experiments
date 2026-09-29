@@ -242,6 +242,11 @@
     var STANDALONE_SNAPSHOT_MAGIC = 0x32535647;
     var STANDALONE_SNAPSHOT_VERSION = 2;
     var STANDALONE_HEADER_BYTES = 128;
+    var STANDALONE_ENGINE_BUDGET = 2147483647;
+    var ENGINE_EXIT_BUDGET = 1;
+    var ENGINE_EXIT_RETURN = 2;
+    var ENGINE_EXIT_UNSUPPORTED = 3;
+    var ENGINE_EXIT_ALLOCATION = 4;
 
     X86Backend.prototype.loadExecutableSnapshot = function (path, expected) {
         if (!this.ffi.isMMVM) {
@@ -554,9 +559,10 @@
             assembler.jumpNotZero("standalone_usage_error");
         }
 
+        assembler.label("standalone_execute_guest");
         assembler.movEaxImmediate(layout.statePayloadAddress);
         assembler.pushEax();
-        assembler.movEaxImmediate(2147483647);
+        assembler.movEaxImmediate(STANDALONE_ENGINE_BUDGET);
         assembler.pushEax();
         assembler.movEaxImmediate(layout.stringSupportAddress);
         assembler.pushEax();
@@ -566,18 +572,24 @@
         assembler.pushEax();
         assembler.movEaxImmediate(layout.platformServicesAddress);
         assembler.pushEax();
-        assembler.movEaxImmediate(layout.frameAddress);
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.addEaxImmediate(
+            layout.statePayloadAddress +
+            layout.engineExecution.currentFrame);
+        assembler.movEaxDwordPtrEax();
         assembler.pushEax();
         assembler.movEaxLocal(HEAP_BASE_LOCAL);
         assembler.pushEax();
         imageAddress(layout.codeOffset);
         assembler.callEax();
         discardCallWords(8);
-        assembler.compareEaxImmediate(2);
+        assembler.compareEaxImmediate(ENGINE_EXIT_BUDGET);
+        assembler.jumpEqual("standalone_execute_guest");
+        assembler.compareEaxImmediate(ENGINE_EXIT_RETURN);
         assembler.jumpEqual("standalone_execution_complete");
-        assembler.compareEaxImmediate(3);
+        assembler.compareEaxImmediate(ENGINE_EXIT_UNSUPPORTED);
         assembler.jumpEqual("standalone_unsupported_error");
-        assembler.compareEaxImmediate(4);
+        assembler.compareEaxImmediate(ENGINE_EXIT_ALLOCATION);
         assembler.jumpEqual("standalone_allocation_error");
         assembler.jump("standalone_runtime_error");
         assembler.label("standalone_execution_complete");
@@ -683,6 +695,8 @@
         };
         layout.engineDiagnostic =
             records.standaloneEngineDiagnosticLayout();
+        layout.engineExecution =
+            records.standaloneEngineExecutionLayout();
         layout.bufferRebind = records.standaloneBufferRebindLayout();
         var mmapNameBytes = standaloneStringBytes("mmap");
         var memcpyNameBytes = standaloneStringBytes("memcpy");
@@ -743,6 +757,10 @@
             records.engineGCStackLimit(nativeInterpreter.stateAddress),
             records.engineGCCollections(nativeInterpreter.stateAddress)
         ];
+        var savedCurrentFrame = records.engineCurrentFrame(
+            nativeInterpreter.stateAddress);
+        records.setEngineCurrentFrame(
+            nativeInterpreter.stateAddress, frame.heapAddress);
         records.setEngineGCState(nativeInterpreter.stateAddress,
             runtime.gcGeneration, heap.collectorStackBase,
             heap.byteLength, 0);
@@ -784,6 +802,8 @@
             records.setEngineGCState(nativeInterpreter.stateAddress,
                 savedGCState[0], savedGCState[1], savedGCState[2],
                 savedGCState[3]);
+            records.setEngineCurrentFrame(
+                nativeInterpreter.stateAddress, savedCurrentFrame);
         }
 
         var openPointer = this.ffi.resolve("open");

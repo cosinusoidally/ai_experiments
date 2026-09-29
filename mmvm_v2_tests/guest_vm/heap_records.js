@@ -1410,6 +1410,15 @@
         };
     };
 
+    Records.prototype.standaloneEngineExecutionLayout = function () {
+        return {currentFrame: ENGINE_CURRENT_FRAME};
+    };
+
+    Records.prototype.setEngineCurrentFrame = function (state, frame) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_CURRENT_FRAME, frame, Heap.Types.ENGINE_STATE);
+    };
+
     Records.prototype.clearEnginePropertyCache = function (state) {
         var payload = this.engineStatePayloadAddress(state);
         this.heap.memory.fill(payload + ENGINE_PROPERTY_CACHE,
