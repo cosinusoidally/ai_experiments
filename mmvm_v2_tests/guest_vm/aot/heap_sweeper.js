@@ -97,6 +97,11 @@
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;
         var STRING_ROPE_FLAG = 1;
+        var RECORD_ALIGNMENT_MASK = 7;
+        var MINIMUM_RECORD_BYTES = 16;
+        var MARK_INVALID_REFERENCE = -2;
+        var MARK_INVALID_RECORD_LAYOUT = -3;
+        var INVALID_REFERENCE_INDEX_RECORD_LAYOUT = 255;
         var address = HEAP_FIRST_RECORD;
         var stackCount = 0;
         while (address < heapBump) {
@@ -133,6 +138,38 @@
                 itemCount = vectorLength(heapBase, address);
             } else if (type === HEAP_TYPE_FRAME) {
                 itemCount = frameRegisterCount(heapBase, address);
+            }
+            var recordBytes = recordSize(heapBase, address);
+            var cellBytes = 0;
+            if (type === HEAP_TYPE_ENVIRONMENT) {
+                cellBytes = ENVIRONMENT_CELLS;
+            } else if (type === HEAP_TYPE_VALUE_VECTOR) {
+                cellBytes = VECTOR_CELLS;
+            } else if (type === HEAP_TYPE_FRAME) {
+                cellBytes = FRAME_REGISTERS;
+            }
+            var recordLayoutValid = 1;
+            if (recordBytes < MINIMUM_RECORD_BYTES) recordLayoutValid = 0;
+            else if ((recordBytes & RECORD_ALIGNMENT_MASK) !== 0) {
+                recordLayoutValid = 0;
+            } else if (address + recordBytes > heapBump) {
+                recordLayoutValid = 0;
+            } else if (address + recordBytes < address) {
+                recordLayoutValid = 0;
+            } else if (cellBytes !== 0) {
+                if (recordBytes < cellBytes) recordLayoutValid = 0;
+                else if (itemCount > divideI32(
+                        recordBytes - cellBytes, VALUE_CELL_BYTES)) {
+                    recordLayoutValid = 0;
+                }
+            }
+            if (recordLayoutValid === 0) {
+                store32(heapBase + stackBase, address);
+                store32(heapBase + stackBase + 4, type);
+                store32(heapBase + stackBase + 8,
+                        INVALID_REFERENCE_INDEX_RECORD_LAYOUT);
+                store32(heapBase + stackBase + 12, itemCount);
+                return MARK_INVALID_RECORD_LAYOUT;
             }
             while (referenceIndex >= 0) {
                 var target = 0;
@@ -263,6 +300,23 @@
                     }
                 }
                 if (target !== 0) {
+                    var targetValid = 1;
+                    if (target < HEAP_FIRST_RECORD) targetValid = 0;
+                    else if (target >= heapBump) targetValid = 0;
+                    else if ((target & RECORD_ALIGNMENT_MASK) !== 0) {
+                        targetValid = 0;
+                    }
+                    if (targetValid === 0) {
+                        /* The collector workspace is private while marking.
+                         * Preserve the complete bad edge for the engine's
+                         * structured standalone diagnostic instead of
+                         * dereferencing corrupt guest state. */
+                        store32(heapBase + stackBase, address);
+                        store32(heapBase + stackBase + 4, type);
+                        store32(heapBase + stackBase + 8, referenceIndex);
+                        store32(heapBase + stackBase + 12, target);
+                        return MARK_INVALID_REFERENCE;
+                    }
                     if (recordType(heapBase, target) !== HEAP_TYPE_FREE) {
                         if (recordMark(heapBase, target) !== generation) {
                             setRecordMark(heapBase, target, generation);

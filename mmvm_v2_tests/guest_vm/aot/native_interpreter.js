@@ -374,6 +374,8 @@
         var CALL_DIAGNOSTIC_VALUE_KIND_RADIX = 32;
         var CALL_DIAGNOSTIC_REFERENCE_KIND_BASE = 16;
         var CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE = 6000;
+        var CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE = 7000;
+        var CALL_DIAGNOSTIC_GC_TYPE_RADIX = 256;
 
         var RECORD_TYPE = 0;
         var RECORD_SIZE = 4;
@@ -13544,6 +13546,20 @@
                 engineGCStackLimit(heapBase, state),
                 collectionGeneration);
             if (markResult !== 0) {
+                var invalidParent = load32(
+                    heapBase + engineGCStackBase(heapBase, state));
+                var invalidParentType = load32(
+                    heapBase + engineGCStackBase(heapBase, state) + 4);
+                var invalidReferenceIndex = load32(
+                    heapBase + engineGCStackBase(heapBase, state) + 8);
+                var invalidTarget = load32(
+                    heapBase + engineGCStackBase(heapBase, state) + 12);
+                setEnginePC(heapBase, state, invalidParent);
+                setEngineResult(heapBase, state, invalidTarget);
+                setEngineCallRejectReason(heapBase, state,
+                    CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE +
+                    invalidParentType * CALL_DIAGNOSTIC_GC_TYPE_RADIX +
+                    invalidReferenceIndex);
                 collectionCanResume = 0;
             } else {
                 var collectionReclaimed = heapSweepKernel(
