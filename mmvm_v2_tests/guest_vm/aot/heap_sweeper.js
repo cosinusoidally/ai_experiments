@@ -18,7 +18,11 @@
     var sharedIndexX86 = null;
 
     function heapMarkKernel(
-            heapBase, heapBump, stackBase, heapLimit, generation) {
+            heapBase, heapBump, stackBase, heapLimit, generation,
+            rootFrame, rootPlatformServices, rootArrayLengthKey,
+            rootArrayPrototype, rootStringSupport, rootGlobal,
+            rootContext, rootNativeFunction, rootEngineState,
+            rootPersistentSlot, scanStructuralRoots) {
         var HEAP_FIRST_RECORD = 64;
         var HEAP_TYPE_FREE = 0;
         var HEAP_TYPE_OBJECT = 1;
@@ -50,6 +54,7 @@
         var FUNCTION_CLOSURE = 24;
         var FUNCTION_METADATA = 28;
         var FUNCTION_HOME_CONTEXT = 32;
+        var FUNCTION_GC_NEXT = 36;
         var ENVIRONMENT_PARENT = 16;
         var ENVIRONMENT_COUNT = 20;
         var ENVIRONMENT_PROGRAM = 24;
@@ -90,13 +95,16 @@
         var PROGRAM_SOURCE = 64;
         var CONTEXT_GLOBAL = 16;
         var CONTEXT_ACTIVE_FRAME = 20;
+        var CONTEXT_NEXT = 28;
         var HANDLER_NEXT = 16;
         var ENGINE_RECORD_CURRENT_FRAME = 40;
         var ENGINE_RECORD_PLATFORM_SERVICES = 60;
         var VALUE_CELL_TAG = 0;
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;
+        var ROOT_SLOT_NEXT = 32;
         var STRING_ROPE_FLAG = 1;
+        var HEAP_LAST_RECORD_TYPE = 20;
         var RECORD_ALIGNMENT_MASK = 7;
         var MINIMUM_RECORD_BYTES = 16;
         var MARK_INVALID_REFERENCE = -2;
@@ -104,6 +112,66 @@
         var INVALID_REFERENCE_INDEX_RECORD_LAYOUT = 255;
         var address = HEAP_FIRST_RECORD;
         var stackCount = 0;
+        if (scanStructuralRoots === 0) {
+            if (rootFrame !== 0) {
+                setRecordMark(heapBase, rootFrame, generation);
+                store32(heapBase + stackBase + stackCount * 4, rootFrame);
+                stackCount = stackCount + 1;
+            }
+            if (rootPlatformServices !== 0) {
+                setRecordMark(heapBase, rootPlatformServices, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootPlatformServices);
+                stackCount = stackCount + 1;
+            }
+            if (rootArrayLengthKey !== 0) {
+                setRecordMark(heapBase, rootArrayLengthKey, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootArrayLengthKey);
+                stackCount = stackCount + 1;
+            }
+            if (rootArrayPrototype !== 0) {
+                setRecordMark(heapBase, rootArrayPrototype, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootArrayPrototype);
+                stackCount = stackCount + 1;
+            }
+            if (rootStringSupport !== 0) {
+                setRecordMark(heapBase, rootStringSupport, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootStringSupport);
+                stackCount = stackCount + 1;
+            }
+            if (rootGlobal !== 0) {
+                setRecordMark(heapBase, rootGlobal, generation);
+                store32(heapBase + stackBase + stackCount * 4, rootGlobal);
+                stackCount = stackCount + 1;
+            }
+            if (rootContext !== 0) {
+                setRecordMark(heapBase, rootContext, generation);
+                store32(heapBase + stackBase + stackCount * 4, rootContext);
+                stackCount = stackCount + 1;
+            }
+            if (rootNativeFunction !== 0) {
+                setRecordMark(heapBase, rootNativeFunction, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootNativeFunction);
+                stackCount = stackCount + 1;
+            }
+            if (rootEngineState !== 0) {
+                setRecordMark(heapBase, rootEngineState, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootEngineState);
+                stackCount = stackCount + 1;
+            }
+            if (rootPersistentSlot !== 0) {
+                setRecordMark(heapBase, rootPersistentSlot, generation);
+                store32(heapBase + stackBase + stackCount * 4,
+                        rootPersistentSlot);
+                stackCount = stackCount + 1;
+            }
+            address = heapBump;
+        }
         while (address < heapBump) {
             var rootType = recordType(heapBase, address);
             if (rootType !== HEAP_TYPE_FREE) {
@@ -168,7 +236,7 @@
                 store32(heapBase + stackBase + 4, type);
                 store32(heapBase + stackBase + 8,
                         INVALID_REFERENCE_INDEX_RECORD_LAYOUT);
-                store32(heapBase + stackBase + 12, itemCount);
+                store32(heapBase + stackBase + 12, recordBytes);
                 return MARK_INVALID_RECORD_LAYOUT;
             }
             while (referenceIndex >= 0) {
@@ -192,6 +260,7 @@
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
                     else if (referenceIndex === 2) target = functionClosure(heapBase, address);
                     else if (referenceIndex === 3) target = functionHomeContext(heapBase, address);
+                    else if (referenceIndex === 4) target = functionGCNext(heapBase, address);
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_BYTECODE_FUNCTION) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
@@ -248,6 +317,9 @@
                     } else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ROOT_SLOT) {
                     if (referenceIndex === 0) cellAddress = address + 16;
+                    else if (referenceIndex === 1) {
+                        target = rootSlotNext(heapBase, address);
+                    }
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_VALUE_VECTOR) {
                     if (itemIndex < itemCount) {
@@ -277,6 +349,7 @@
                 } else if (type === HEAP_TYPE_CONTEXT) {
                     if (referenceIndex === 0) target = contextGlobal(heapBase, address);
                     else if (referenceIndex === 1) target = contextActiveFrame(heapBase, address);
+                    else if (referenceIndex === 2) target = contextNext(heapBase, address);
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_HANDLER) {
                     if (referenceIndex === 0) target = handlerNext(heapBase, address);
@@ -306,6 +379,24 @@
                     else if ((target & RECORD_ALIGNMENT_MASK) !== 0) {
                         targetValid = 0;
                     }
+                    var targetType = 0;
+                    var targetBytes = 0;
+                    if (targetValid === 1) {
+                        targetType = recordType(heapBase, target);
+                        targetBytes = recordSize(heapBase, target);
+                        if (targetType <= HEAP_TYPE_FREE) targetValid = 0;
+                        else if (targetType > HEAP_LAST_RECORD_TYPE) {
+                            targetValid = 0;
+                        } else if (targetBytes < MINIMUM_RECORD_BYTES) {
+                            targetValid = 0;
+                        } else if ((targetBytes & RECORD_ALIGNMENT_MASK) !== 0) {
+                            targetValid = 0;
+                        } else if (target + targetBytes > heapBump) {
+                            targetValid = 0;
+                        } else if (target + targetBytes < target) {
+                            targetValid = 0;
+                        }
+                    }
                     if (targetValid === 0) {
                         /* The collector workspace is private while marking.
                          * Preserve the complete bad edge for the engine's
@@ -313,7 +404,12 @@
                          * dereferencing corrupt guest state. */
                         store32(heapBase + stackBase, address);
                         store32(heapBase + stackBase + 4, type);
-                        store32(heapBase + stackBase + 8, referenceIndex);
+                        var diagnosticReferenceIndex = referenceIndex;
+                        if (cellAddress !== 0) {
+                            diagnosticReferenceIndex = itemIndex;
+                        }
+                        store32(heapBase + stackBase + 8,
+                                diagnosticReferenceIndex);
                         store32(heapBase + stackBase + 12, target);
                         return MARK_INVALID_REFERENCE;
                     }
@@ -327,7 +423,26 @@
                         }
                     }
                 }
-                referenceIndex = referenceIndex + 1;
+                /* Environment, vector and frame cells are homogeneous runs.
+                 * Keep their selector fixed while itemIndex advances instead
+                 * of growing an unrelated referenceIndex once per cell. This
+                 * makes the generated loop smaller and avoids carrying a
+                 * potentially large synthetic selector through the native
+                 * marker. Fixed cell fields (property values and root slots)
+                 * still advance normally. */
+                var advanceReferenceIndex = 1;
+                if (cellAddress !== 0) {
+                    if (type === HEAP_TYPE_ENVIRONMENT) {
+                        advanceReferenceIndex = 0;
+                    } else if (type === HEAP_TYPE_VALUE_VECTOR) {
+                        advanceReferenceIndex = 0;
+                    } else if (type === HEAP_TYPE_FRAME) {
+                        advanceReferenceIndex = 0;
+                    }
+                }
+                if (advanceReferenceIndex !== 0) {
+                    referenceIndex = referenceIndex + 1;
+                }
             }
         }
         return 0;
@@ -452,11 +567,13 @@
         if (this.marker.backend === "i386") {
             return this.marker.fn(this.heap.memory.nativeAddress(0),
                 this.heap.bump, this.heap.collectorStackBase,
-                this.heap.byteLength, generation) | 0;
+                this.heap.byteLength, generation,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1) | 0;
         }
         return this.marker.fn(this.heap.memory, 0, this.heap.bump,
                               this.heap.collectorStackBase,
-                              this.heap.byteLength, generation) | 0;
+                              this.heap.byteLength, generation,
+                              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1) | 0;
     };
 
     HeapSweeper.prototype.sweep = function (generation) {

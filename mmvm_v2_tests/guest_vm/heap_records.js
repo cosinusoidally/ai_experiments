@@ -52,6 +52,7 @@
     var FUNCTION_CLOSURE = 8;
     var FUNCTION_METADATA = 12;
     var FUNCTION_HOME_CONTEXT = 16;
+    var FUNCTION_GC_NEXT = 20;
     var FUNCTION_BYTES = 24;
 
     var FRAME_PROGRAM = 0;
@@ -91,7 +92,12 @@
     var CONTEXT_GLOBAL = 0;
     var CONTEXT_ACTIVE_FRAME = 4;
     var CONTEXT_FLAGS = 8;
+    var CONTEXT_NEXT = 12;
     var CONTEXT_BYTES = 16;
+
+    var ROOT_SLOT_VALUE = 0;
+    var ROOT_SLOT_NEXT = CELL_BYTES;
+    var ROOT_SLOT_BYTES = ROOT_SLOT_NEXT + 4;
 
     var ENGINE_EXIT_REASON = 0;
     var ENGINE_PC = 4;
@@ -122,12 +128,22 @@
     var ENGINE_PROPERTY_CACHE = ENGINE_NATIVE_RETIRED_REGION + 4;
     var PROPERTY_CACHE_ENTRY_BYTES = 24;
     var PROPERTY_CACHE_ENTRY_COUNT = 256;
+    var ENGINE_PROPERTY_CACHE_OBJECT = ENGINE_PROPERTY_CACHE;
+    var ENGINE_PROPERTY_CACHE_KEY = ENGINE_PROPERTY_CACHE + 4;
+    var ENGINE_PROPERTY_CACHE_VERSION = ENGINE_PROPERTY_CACHE + 8;
+    var ENGINE_PROPERTY_CACHE_GENERATION = ENGINE_PROPERTY_CACHE + 12;
+    var ENGINE_PROPERTY_CACHE_HEAD = ENGINE_PROPERTY_CACHE + 16;
+    var ENGINE_PROPERTY_CACHE_PROPERTY = ENGINE_PROPERTY_CACHE + 20;
     var ENGINE_GC_GENERATION = ENGINE_PROPERTY_CACHE +
         PROPERTY_CACHE_ENTRY_BYTES * PROPERTY_CACHE_ENTRY_COUNT;
     var ENGINE_GC_STACK_BASE = ENGINE_GC_GENERATION + 4;
     var ENGINE_GC_STACK_LIMIT = ENGINE_GC_STACK_BASE + 4;
     var ENGINE_GC_COLLECTIONS = ENGINE_GC_STACK_LIMIT + 4;
-    var ENGINE_STATE_BYTES = ENGINE_GC_COLLECTIONS + 4;
+    var ENGINE_GC_ROOT = ENGINE_GC_COLLECTIONS + 4;
+    var ENGINE_GC_CONTEXT_HEAD = ENGINE_GC_ROOT + 4;
+    var ENGINE_GC_NATIVE_FUNCTION_HEAD = ENGINE_GC_CONTEXT_HEAD + 4;
+    var ENGINE_GC_ROOT_SLOT_HEAD = ENGINE_GC_NATIVE_FUNCTION_HEAD + 4;
+    var ENGINE_STATE_BYTES = ENGINE_GC_ROOT_SLOT_HEAD + 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -195,10 +211,21 @@
         ENGINE_NATIVE_REGION_ACTIVE: ENGINE_NATIVE_REGION_ACTIVE,
         ENGINE_ALLOCATION_FAILED: ENGINE_ALLOCATION_FAILED,
         ENGINE_NATIVE_RETIRED_REGION: ENGINE_NATIVE_RETIRED_REGION,
+        ENGINE_PROPERTY_CACHE_OBJECT: ENGINE_PROPERTY_CACHE_OBJECT,
+        ENGINE_PROPERTY_CACHE_KEY: ENGINE_PROPERTY_CACHE_KEY,
+        ENGINE_PROPERTY_CACHE_VERSION: ENGINE_PROPERTY_CACHE_VERSION,
+        ENGINE_PROPERTY_CACHE_GENERATION: ENGINE_PROPERTY_CACHE_GENERATION,
+        ENGINE_PROPERTY_CACHE_HEAD: ENGINE_PROPERTY_CACHE_HEAD,
+        ENGINE_PROPERTY_CACHE_PROPERTY: ENGINE_PROPERTY_CACHE_PROPERTY,
+        PROPERTY_CACHE_ENTRY_BYTES: PROPERTY_CACHE_ENTRY_BYTES,
         ENGINE_GC_GENERATION: ENGINE_GC_GENERATION,
         ENGINE_GC_STACK_BASE: ENGINE_GC_STACK_BASE,
         ENGINE_GC_STACK_LIMIT: ENGINE_GC_STACK_LIMIT,
         ENGINE_GC_COLLECTIONS: ENGINE_GC_COLLECTIONS,
+        ENGINE_GC_ROOT: ENGINE_GC_ROOT,
+        ENGINE_GC_CONTEXT_HEAD: ENGINE_GC_CONTEXT_HEAD,
+        ENGINE_GC_NATIVE_FUNCTION_HEAD: ENGINE_GC_NATIVE_FUNCTION_HEAD,
+        ENGINE_GC_ROOT_SLOT_HEAD: ENGINE_GC_ROOT_SLOT_HEAD,
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
@@ -861,6 +888,17 @@
             address, FUNCTION_HOME_CONTEXT, type);
     };
 
+    Records.prototype.functionGCNext = function (address) {
+        return this.heap.readTrustedFieldU32(
+            address, FUNCTION_GC_NEXT, Heap.Types.NATIVE_FUNCTION);
+    };
+
+    Records.prototype.setFunctionGCNext = function (address, next) {
+        this.heap.writeTrustedFieldU32(
+            address, FUNCTION_GC_NEXT, next || 0,
+            Heap.Types.NATIVE_FUNCTION);
+    };
+
     Records.prototype.allocateFrame = function (program, environment, caller,
                                                   returnSlot, registerCount,
                                                   context) {
@@ -1127,6 +1165,28 @@
                                               globalObject, 0, 0, 0);
     };
 
+    Records.prototype.allocateRootSlot = function (reference, next) {
+        var slot = this.heap.allocateRecord(
+            Heap.Types.ROOT_SLOT, ROOT_SLOT_BYTES);
+        this.cells.writeReferenceAt(
+            this.heap.trustedPayloadAddress(
+                slot, ROOT_SLOT_VALUE, CELL_BYTES, Heap.Types.ROOT_SLOT),
+            reference);
+        this.heap.writeTrustedFieldU32(
+            slot, ROOT_SLOT_NEXT, next || 0, Heap.Types.ROOT_SLOT);
+        return slot;
+    };
+
+    Records.prototype.rootSlotNext = function (slot) {
+        return this.heap.readTrustedFieldU32(
+            slot, ROOT_SLOT_NEXT, Heap.Types.ROOT_SLOT);
+    };
+
+    Records.prototype.setRootSlotNext = function (slot, next) {
+        this.heap.writeTrustedFieldU32(
+            slot, ROOT_SLOT_NEXT, next || 0, Heap.Types.ROOT_SLOT);
+    };
+
     Records.prototype.contextGlobal = function (context) {
         return this.heap.readTrustedFieldU32(context, CONTEXT_GLOBAL, Heap.Types.CONTEXT);
     };
@@ -1146,6 +1206,16 @@
             context, CONTEXT_ACTIVE_FRAME, Heap.Types.CONTEXT);
     };
 
+    Records.prototype.contextNext = function (context) {
+        return this.heap.readTrustedFieldU32(
+            context, CONTEXT_NEXT, Heap.Types.CONTEXT);
+    };
+
+    Records.prototype.setContextNext = function (context, next) {
+        this.heap.writeTrustedFieldU32(
+            context, CONTEXT_NEXT, next || 0, Heap.Types.CONTEXT);
+    };
+
     Records.prototype.allocateEngineState = function () {
         return this.heap.allocateRecordWords(
             Heap.Types.ENGINE_STATE, ENGINE_STATE_BYTES, 0, 0, 0, 0);
@@ -1154,6 +1224,12 @@
     Records.prototype.engineGCGeneration = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_GC_GENERATION, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCGeneration = function (state, generation) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_GC_GENERATION, generation || 0,
+            Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.engineGCStackBase = function (state) {
@@ -1169,6 +1245,51 @@
     Records.prototype.engineGCCollections = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_GC_COLLECTIONS, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCRoot = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_ROOT, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCRoot = function (state, root) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_GC_ROOT, root || 0, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCContextHead = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_CONTEXT_HEAD, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCContextHead = function (state, context) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_GC_CONTEXT_HEAD, context || 0,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCNativeFunctionHead = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_NATIVE_FUNCTION_HEAD,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCNativeFunctionHead = function (
+            state, callable) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_GC_NATIVE_FUNCTION_HEAD, callable || 0,
+            Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCRootSlotHead = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_ROOT_SLOT_HEAD, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCRootSlotHead = function (state, slot) {
+        this.heap.writeTrustedFieldU32(
+            state, ENGINE_GC_ROOT_SLOT_HEAD, slot || 0,
+            Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.setEngineGCState = function (
@@ -1599,6 +1720,9 @@
                 reference(records.functionMetadata(address));
             }
             reference(records.functionHomeContext(address));
+            if (type === Heap.Types.NATIVE_FUNCTION) {
+                reference(records.functionGCNext(address));
+            }
         } else if (type === Heap.Types.ENVIRONMENT) {
             reference(records.environmentParent(address));
             reference(records.environmentProgram(address));
@@ -1633,6 +1757,7 @@
             reference(records.bufferBackingMetadata(address));
         } else if (type === Heap.Types.ROOT_SLOT) {
             cell(this.heap.trustedPayloadAddress(address, 0));
+            reference(records.rootSlotNext(address));
         } else if (type === Heap.Types.VALUE_VECTOR) {
             var vectorIndex = 0;
             while (vectorIndex < records.vectorLength(address)) {
@@ -1658,6 +1783,7 @@
         } else if (type === Heap.Types.CONTEXT) {
             reference(records.contextGlobal(address));
             reference(records.contextActiveFrame(address));
+            reference(records.contextNext(address));
         } else if (type === Heap.Types.HANDLER) {
             reference(this.heap.readTrustedFieldU32(
                 address, HANDLER_NEXT, Heap.Types.HANDLER));

@@ -317,6 +317,7 @@
         this.retainedProgramAddresses = {};
         this.heapStateSnapshots = [];
         this.hostRoots = [];
+        this.hostRootPersistentAddresses = [];
         this.evalCompilerRoot = 0;
         this.indirectEvalCompilerRoot = 0;
         this.gcGeneration = 0;
@@ -461,6 +462,9 @@
         callable.callMode = callMode || "intrinsic";
         callable.nativeIntrinsic = intrinsicId || NativeIntrinsics.NONE;
         this.functionMetadata["$" + address] = callable;
+        if (this.nativeInterpreter) {
+            this.nativeInterpreter.registerNativeFunctionRoot(address);
+        }
         return callable;
     };
 
@@ -1496,6 +1500,14 @@
     };
 
     Runtime.prototype.registerContext = function (context) {
+        if (this.nativeInterpreter) {
+            var records = this.heapRecords;
+            records.setContextNext(context.heapAddress,
+                records.engineGCContextHead(
+                    this.nativeInterpreter.stateAddress));
+            records.setEngineGCContextHead(
+                this.nativeInterpreter.stateAddress, context.heapAddress);
+        }
         this.contexts.push(context);
     };
 
@@ -1605,12 +1617,21 @@
 
     Runtime.prototype.retainProgram = function (program) {
         var address = this.registerProgram(program);
+        var alreadyRetained = this.retainedProgramAddresses["$" + address];
         this.retainedProgramAddresses["$" + address] = address;
+        if (!alreadyRetained && this.nativeInterpreter) {
+            this.nativeInterpreter.registerPersistentRoot(address);
+        }
         return program;
     };
 
     Runtime.prototype.releaseProgram = function (program) {
         if (program && program.heapAddress) {
+            if (this.retainedProgramAddresses["$" + program.heapAddress] &&
+                    this.nativeInterpreter) {
+                this.nativeInterpreter.unregisterPersistentRoot(
+                    program.heapAddress);
+            }
             delete this.retainedProgramAddresses["$" + program.heapAddress];
         }
     };
@@ -1842,6 +1863,18 @@
             index++;
         }
         this.contexts = survivors;
+        if (this.nativeInterpreter) {
+            var records = this.heapRecords;
+            var contextHead = 0;
+            index = this.contexts.length;
+            while (index > 0) {
+                var liveContext = this.contexts[--index].heapAddress;
+                records.setContextNext(liveContext, contextHead);
+                contextHead = liveContext;
+            }
+            records.setEngineGCContextHead(
+                this.nativeInterpreter.stateAddress, contextHead);
+        }
     };
 
     Runtime.prototype.internString = function (value) {
@@ -2027,15 +2060,26 @@
     };
 
     Runtime.prototype.retain = function (value) {
+        var persistentAddress = value && value.heapAddress ?
+            value.heapAddress : 0;
         var index = 0;
         while (index < this.hostRoots.length) {
             if (this.hostRoots[index] === null) {
                 this.hostRoots[index] = value;
+                this.hostRootPersistentAddresses[index] = persistentAddress;
+                if (persistentAddress && this.nativeInterpreter) {
+                    this.nativeInterpreter.registerPersistentRoot(
+                        persistentAddress);
+                }
                 return index + 1;
             }
             index++;
         }
         this.hostRoots.push(value);
+        this.hostRootPersistentAddresses.push(persistentAddress);
+        if (persistentAddress && this.nativeInterpreter) {
+            this.nativeInterpreter.registerPersistentRoot(persistentAddress);
+        }
         return this.hostRoots.length;
     };
 
@@ -2051,6 +2095,11 @@
         if (this.hostRoots[index] === null) {
             throw new Error("guest host root has already been released");
         }
+        var persistentAddress = this.hostRootPersistentAddresses[index] || 0;
+        if (persistentAddress && this.nativeInterpreter) {
+            this.nativeInterpreter.unregisterPersistentRoot(persistentAddress);
+        }
+        this.hostRootPersistentAddresses[index] = 0;
         this.hostRoots[index] = null;
     };
 
@@ -4562,8 +4611,19 @@
             var heapBumpBeforeCollection = this.linearHeap.bump;
             var collectionStarted = this.profileOpcodeCounts ?
                 new Date().getTime() : 0;
+            if (this.nativeInterpreter) {
+                var nativeGeneration = this.heapRecords.engineGCGeneration(
+                    this.nativeInterpreter.stateAddress);
+                if (nativeGeneration > this.gcGeneration) {
+                    this.gcGeneration = nativeGeneration;
+                }
+            }
             this.gcGeneration++;
             var generation = this.gcGeneration;
+            if (this.nativeInterpreter) {
+                this.heapRecords.setEngineGCGeneration(
+                    this.nativeInterpreter.stateAddress, generation);
+            }
             var key;
             var nativeMarking = this.heapSweeper &&
                 this.heapSweeper.marker.backend === "i386";
@@ -4937,6 +4997,7 @@
         this.heapSweeper = null;
         this.heapObjects = [];
         this.hostRoots = [];
+        this.hostRootPersistentAddresses = [];
         this.contexts = [];
         this.internedStrings = {};
         this.stringAddresses = {};

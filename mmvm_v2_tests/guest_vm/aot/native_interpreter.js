@@ -312,13 +312,15 @@
         var ENGINE_SCRATCH_RIGHT = 40;
         var ENGINE_PLATFORM_SERVICES = 44;
         var ENGINE_OPCODE_COUNTS = 48;
-        var ENGINE_PROPERTY_CACHE_OBJECT = 320;
-        var ENGINE_PROPERTY_CACHE_KEY = 324;
-        var ENGINE_PROPERTY_CACHE_VERSION = 328;
-        var ENGINE_PROPERTY_CACHE_GENERATION = 332;
-        var ENGINE_PROPERTY_CACHE_HEAD = 336;
-        var ENGINE_PROPERTY_CACHE_PROPERTY = 340;
-        var PROPERTY_CACHE_ENTRY_BYTES = 24;
+        /* Authoritative offsets and stride are compiler-substituted from
+         * HeapRecords.KernelConstants. */
+        var ENGINE_PROPERTY_CACHE_OBJECT = 0;
+        var ENGINE_PROPERTY_CACHE_KEY = 0;
+        var ENGINE_PROPERTY_CACHE_VERSION = 0;
+        var ENGINE_PROPERTY_CACHE_GENERATION = 0;
+        var ENGINE_PROPERTY_CACHE_HEAD = 0;
+        var ENGINE_PROPERTY_CACHE_PROPERTY = 0;
+        var PROPERTY_CACHE_ENTRY_BYTES = 0;
         var PROPERTY_CACHE_ENTRY_MASK = 255;
         var PLATFORM_DLSYM_POINTER = 16;
         var PLATFORM_ARRAY_SLICE_POINTER = 36;
@@ -623,6 +625,8 @@
         var instructions = 0;
         setEngineAllocationFailed(heapBase, state, 0);
         setEngineCurrentFrame(heapBase, state, frame);
+        setContextActiveFrame(
+            heapBase, frameContext(heapBase, frame), frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
             setEngineCallRejectReason(
@@ -1464,6 +1468,10 @@
                                     load32(oldArrayCell + VALUE_CELL_AUX));
                                 grownCellIndex = grownCellIndex + 1;
                             }
+                            var clearedGrownArrayCells =
+                                clearAbsentValueCellsKernel(
+                                heapBase, grownVector, grownArrayLength,
+                                grownArrayCapacity);
                             setArrayElements(heapBase, arraySetObject,
                                              grownVector);
                             setEngineHeapBump(heapBase, state,
@@ -4651,10 +4659,25 @@
         return EXIT_BUDGET;
     }
 
+    function restoreContextActiveFrameKernel(
+            heapBase, context, candidateFrame) {
+        var activeFrame = candidateFrame;
+        while (activeFrame !== 0) {
+            if (frameContext(heapBase, activeFrame) === context) {
+                setContextActiveFrame(heapBase, context, activeFrame);
+                return activeFrame;
+            }
+            activeFrame = frameCaller(heapBase, activeFrame);
+        }
+        setContextActiveFrame(heapBase, context, 0);
+        return 0;
+    }
+
     function returnFromBytecodeKernel(
             heapBase, state, frame, registerCells, returnIndex, pc,
             instructions, stringSupport) {
         var nativeCallerFrame = frameCaller(heapBase, frame);
+        var returnedContext = frameContext(heapBase, frame);
         var nativeFrameFlags = recordFlags(heapBase, frame);
         var returnInsideNativeEngine = 0;
         if (nativeCallerFrame !== 0) {
@@ -4757,6 +4780,11 @@
                         load32(nativeReturnSource + VALUE_CELL_AUX));
             }
             var returnedNativeFrame = frame;
+            var restoredReturnedContext = restoreContextActiveFrameKernel(
+                heapBase, returnedContext, nativeCallerFrame);
+            setContextActiveFrame(
+                heapBase, frameContext(heapBase, nativeCallerFrame),
+                nativeCallerFrame);
             var nativeFreeFrame = engineFreeFrame(heapBase, state);
             setRecordType(
                 heapBase, returnedNativeFrame, HEAP_TYPE_FREE);
@@ -4767,6 +4795,7 @@
             frame = nativeCallerFrame;
             setEngineCurrentFrame(heapBase, state, frame);
         } else {
+        setContextActiveFrame(heapBase, returnedContext, 0);
         setEngineExitReason(heapBase, state, EXIT_RETURN);
         setEnginePC(heapBase, state, pc);
         setEngineResult(heapBase, state,
@@ -5309,8 +5338,12 @@
                     engineHeapBump(heapBase, state);
                 var bytecodeAllocationBytes =
                     bytecodeAllocationEnd - bytecodeAllocationStart;
-                if (reserveNativeAllocationKernel(
-                        heapBase, state, bytecodeAllocationBytes) === 1) {
+                var bytecodeAllocationReserved = 1;
+                if (bytecodeAllocationBytes !== 0) {
+                    bytecodeAllocationReserved = reserveNativeAllocationKernel(
+                        heapBase, state, bytecodeAllocationBytes);
+                }
+                if (bytecodeAllocationReserved === 1) {
                     var bytecodeAllocationMove =
                         engineHeapBump(heapBase, state) -
                         bytecodeAllocationStart;
@@ -5339,9 +5372,16 @@
                         calleeArgumentsVector = calleeArgumentsVector +
                             bytecodeAllocationMove;
                     }
-                }
-                if (bytecodeAllocationEnd > engineHeapLimit(heapBase, state)) {
+                } else {
                     bytecodeCallValid = 0;
+                    /* Reservation may switch arenas before failing. Return
+                     * the borrowed frame to its cache without publishing any
+                     * of the call's proposed addresses. */
+                    if (calleeFrameReused === 1) {
+                        setFrameProgram(heapBase, calleeFrame,
+                            engineFreeFrame(heapBase, state));
+                        setEngineFreeFrame(heapBase, state, calleeFrame);
+                    }
                     setEngineCallRejectReason(
                         heapBase, state, CALL_REJECT_HEAP_SPACE);
                 }
@@ -5560,6 +5600,8 @@
                         heapBase, bytecodeCallable);
                     if (calleeContext === 0) calleeContext = currentContext;
                     setFrameContext(heapBase, calleeFrame, calleeContext);
+                    setContextActiveFrame(
+                        heapBase, calleeContext, calleeFrame);
                     var clearCalleeRegister = 0;
                     while (clearCalleeRegister < calleeRegisterCount) {
                         var clearCalleeCell = heapBase + calleeFrame +
@@ -7049,17 +7091,11 @@
                                 arrayConstructLength);
                 setVectorCapacity(heapBase, arrayConstructVector,
                                   arrayConstructCapacity);
+                var clearedConstructedArrayCells =
+                    clearAbsentValueCellsKernel(
+                    heapBase, arrayConstructVector, 0,
+                    arrayConstructCapacity);
                 var arrayConstructIndex = 0;
-                while (arrayConstructIndex < arrayConstructCapacity) {
-                    var arrayConstructElement = heapBase +
-                        arrayConstructVector + VECTOR_CELLS +
-                        arrayConstructIndex * VALUE_CELL_BYTES;
-                    store32(arrayConstructElement, 0);
-                    store32(arrayConstructElement + VALUE_CELL_LOW, 0);
-                    store32(arrayConstructElement + VALUE_CELL_HIGH, 0);
-                    store32(arrayConstructElement + VALUE_CELL_AUX, 0);
-                    arrayConstructIndex = arrayConstructIndex + 1;
-                }
                 if (arrayConstructCopiesArguments === 1) {
                     arrayConstructIndex = 0;
                     while (arrayConstructIndex <
@@ -10675,6 +10711,8 @@
          * remain absent because their value cells stay undefined. */
         setVectorLength(heapBase, vector, capacity);
         setVectorCapacity(heapBase, vector, capacity);
+        var clearedArrayCells = clearAbsentValueCellsKernel(
+            heapBase, vector, 0, capacity);
         setRecordType(heapBase, array, HEAP_TYPE_ARRAY);
         setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
         setRecordMark(heapBase, array, 0);
@@ -10686,6 +10724,24 @@
         setValueCellReference(targetCell, array);
         setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
         return 1;
+    }
+
+    /* Reclaimed vector storage contains bytes from its previous owner.  A
+     * freshly allocated array must publish only absent elements until its
+     * caller fills them; otherwise an allocation-triggered collection can
+     * interpret an old reference as a live element, or a later length growth
+     * can resurrect an already reclaimed object. */
+    function clearAbsentValueCellsKernel(heapBase, vector, first, end) {
+        var index = first;
+        while (index < end) {
+            var cell = vectorCellAddress(heapBase, vector, index);
+            store32(cell, 0);
+            store32(cell + VALUE_CELL_LOW, 0);
+            store32(cell + VALUE_CELL_HIGH, 0);
+            store32(cell + VALUE_CELL_AUX, 0);
+            index = index + 1;
+        }
+        return index;
     }
 
     function initializeDataPropertyKernel(
@@ -13304,6 +13360,10 @@
         var discardedFrame = frame;
         while (discardedFrame !== catchFrame) {
             var nextUnwindFrame = frameCaller(heapBase, discardedFrame);
+            var discardedContext = frameContext(
+                heapBase, discardedFrame);
+            var restoredDiscardedContext = restoreContextActiveFrameKernel(
+                heapBase, discardedContext, nextUnwindFrame);
             setRecordType(heapBase, discardedFrame, HEAP_TYPE_FREE);
             setFrameProgram(heapBase, discardedFrame,
                 engineFreeFrame(heapBase, state));
@@ -13313,6 +13373,8 @@
         setFramePC(
             heapBase, catchFrame, handlerTarget(heapBase, catchHandler));
         setEngineCurrentFrame(heapBase, state, catchFrame);
+        var catchContext = frameContext(heapBase, catchFrame);
+        setContextActiveFrame(heapBase, catchContext, catchFrame);
         return 1;
     }
 
@@ -13324,6 +13386,19 @@
         setEngineInstructions(heapBase, state, instructions);
         setFramePC(heapBase, frame, pc);
         return EXIT_UNSUPPORTED;
+    }
+
+    function releaseNativeCachedFramesKernel(heapBase, state) {
+        var cachedFrame = engineFreeFrame(heapBase, state);
+        var releasedFrames = 0;
+        setEngineFreeFrame(heapBase, state, 0);
+        while (cachedFrame !== 0) {
+            var nextCachedFrame = frameProgram(heapBase, cachedFrame);
+            setRecordFlags(heapBase, cachedFrame, 0);
+            cachedFrame = nextCachedFrame;
+            releasedFrames = releasedFrames + 1;
+        }
+        return releasedFrames;
     }
 
     function rebuildNativeAllocatorKernel(heapBase, state, heapBump) {
@@ -13467,7 +13542,12 @@
         var ENGINE_GC_STACK_BASE = 0;
         var ENGINE_GC_STACK_LIMIT = 0;
         var ENGINE_GC_COLLECTIONS = 0;
+        var ENGINE_GC_ROOT = 0;
+        var ENGINE_GC_CONTEXT_HEAD = 0;
+        var ENGINE_GC_NATIVE_FUNCTION_HEAD = 0;
+        var ENGINE_GC_ROOT_SLOT_HEAD = 0;
         var MINIMUM_POST_COLLECTION_HEADROOM = 1048576;
+        var RECORD_HEADER_BYTES = 16;
         var EXIT_UNSUPPORTED = 3;
         if (engineNativeRegionActive(heapBase, state) === 0) {
             var freeRegion = engineNativeFreeRegion(heapBase, state);
@@ -13489,6 +13569,7 @@
         var collectionEnabled = engineGCStackBase(heapBase, state) !== 0;
         var collectionCanResume = collectionEnabled;
         var collectionJustRan = 0;
+        var collectionFailed = 0;
         while (collectionCanResume === 1) {
             if (reason !== EXIT_UNSUPPORTED) {
                 collectionCanResume = 0;
@@ -13521,12 +13602,41 @@
                 }
             }
             if (shouldCollect === 1) {
+            /* interpreterKernel can enter one or more guest callees before an
+             * allocation exit. The wrapper's incoming frame is then only the
+             * bottom of that call chain; the engine state owns the
+             * authoritative suspended frame which collection must retain and
+             * from which execution resumes. */
+            frame = engineCurrentFrame(heapBase, state);
             var collectionBump = engineNativeTailBump(heapBase, state);
+            /* An active interior arena has an allocated prefix followed by an
+             * unpublished suffix. The collector walks the complete record
+             * graph up to collectionBump, so materialize that suffix before
+             * dropping allocator ownership. Otherwise stale payload bytes at
+             * the native bump cursor are misread as record headers and the
+             * subsequent sweep can reclaim unrelated live objects. */
+            if (engineNativeRegionActive(heapBase, state) !== 0) {
+                var collectionRegionRemainder = engineHeapBump(
+                    heapBase, state);
+                var collectionRegionRemainderBytes =
+                    engineNativeRegionEnd(heapBase, state) -
+                    collectionRegionRemainder;
+                if (collectionRegionRemainderBytes >=
+                        FREE_RECORD_HEADER_BYTES) {
+                    setRecordType(heapBase, collectionRegionRemainder,
+                                  HEAP_TYPE_FREE);
+                    setRecordSize(heapBase, collectionRegionRemainder,
+                                  collectionRegionRemainderBytes);
+                    setRecordMark(heapBase, collectionRegionRemainder, 0);
+                    setRecordFlags(heapBase, collectionRegionRemainder, 0);
+                }
+            }
             setEngineNativeRegionEnd(heapBase, state, 0);
             setEngineNativeFreeRegion(heapBase, state, 0);
             setEngineNativeRegionActive(heapBase, state, 0);
             setEngineNativeRetiredRegion(heapBase, state, 0);
-            setEngineFreeFrame(heapBase, state, 0);
+            var releasedCachedFrames = releaseNativeCachedFramesKernel(
+                heapBase, state);
             var clearedPropertyCache = clearNativePropertyCacheKernel(
                 heapBase, state);
             var collectionGeneration =
@@ -13540,12 +13650,31 @@
             setRecordMark(heapBase, arrayLengthKey, collectionGeneration);
             setRecordMark(heapBase, arrayPrototype, collectionGeneration);
             setRecordMark(heapBase, stringSupport, collectionGeneration);
+            var collectionGlobalRoot = engineGCRoot(heapBase, state);
+            if (collectionGlobalRoot !== 0) {
+                setRecordMark(
+                    heapBase, collectionGlobalRoot, collectionGeneration);
+            }
+            var collectionPersistentRoot = engineGCRootSlotHead(
+                heapBase, state);
+            if (collectionPersistentRoot !== 0) {
+                setRecordMark(
+                    heapBase, collectionPersistentRoot,
+                    collectionGeneration);
+            }
             var markResult = heapMarkKernel(
                 heapBase, collectionBump,
                 engineGCStackBase(heapBase, state),
                 engineGCStackLimit(heapBase, state),
-                collectionGeneration);
+                collectionGeneration, frame, platformServices,
+                arrayLengthKey, arrayPrototype, stringSupport,
+                engineGCRoot(heapBase, state),
+                engineGCContextHead(heapBase, state),
+                engineGCNativeFunctionHead(heapBase, state),
+                state - RECORD_HEADER_BYTES,
+                collectionPersistentRoot, 0);
             if (markResult !== 0) {
+                collectionFailed = 1;
                 var invalidParent = load32(
                     heapBase + engineGCStackBase(heapBase, state));
                 var invalidParentType = load32(
@@ -13560,6 +13689,13 @@
                     CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE +
                     invalidParentType * CALL_DIAGNOSTIC_GC_TYPE_RADIX +
                     invalidReferenceIndex);
+                /* The standalone diagnostic's allocation field is otherwise
+                 * meaningless after a marker failure.  Report the stale
+                 * target record's size so the bad edge can be tied back to
+                 * its former record class without dereferencing host state. */
+                setEngineAllocationFailed(
+                    heapBase, state,
+                    recordSize(heapBase, invalidTarget));
                 collectionCanResume = 0;
             } else {
                 var collectionReclaimed = heapSweepKernel(
@@ -13626,8 +13762,15 @@
             }
         }
         if (engineNativeRegionActive(heapBase, state) === 0) {
+        if (collectionFailed === 0) {
+            /* A failed mark leaves ENGINE_HEAP_BUMP at the cursor of the
+             * interior arena which was materialized before collection.  It
+             * is not the high-water tail.  Preserve the separately tracked
+             * tail on the diagnostic exit; replacing it here makes a caller
+             * that inspects or resumes the failure overwrite live records. */
             setEngineNativeTailBump(
                 heapBase, state, engineHeapBump(heapBase, state));
+        }
         } else {
             var remainingRegion = engineHeapBump(heapBase, state);
             var remainingRegionSize =
@@ -13644,12 +13787,38 @@
     }
 
     function reserveNativeAllocationKernel(heapBase, state, bytes) {
+        var MINIMUM_RECORD_BYTES = 16;
+        var RECORD_ALIGNMENT_MASK = 7;
         var current = engineHeapBump(heapBase, state);
-        if (current + bytes <= engineHeapLimit(heapBase, state)) return 1;
+        var currentLimit = engineHeapLimit(heapBase, state);
+
+        /* Validate the allocation before doing address arithmetic.  The old
+         * `current + bytes <= limit` test could itself overflow and accept a
+         * wrapped heap bump.  All heap records are aligned and include the
+         * common header, so rejecting any other request makes this function
+         * the single authoritative boundary for native heap allocation. */
+        if (bytes < MINIMUM_RECORD_BYTES) {
+            setEngineAllocationFailed(heapBase, state, 1);
+            return 0;
+        }
+        if ((bytes & RECORD_ALIGNMENT_MASK) !== 0) {
+            setEngineAllocationFailed(heapBase, state, 1);
+            return 0;
+        }
+        if (current >= HEAP_FIRST_RECORD) {
+            if (current <= currentLimit) {
+                if (bytes <= currentLimit - current) return 1;
+            }
+        }
         if (engineNativeRegionActive(heapBase, state) !== 0) {
             var remaining = current;
-            var remainingSize =
-                engineNativeRegionEnd(heapBase, state) - remaining;
+            var activeRegionEnd = engineNativeRegionEnd(heapBase, state);
+            var remainingSize = 0;
+            if (remaining >= HEAP_FIRST_RECORD) {
+                if (remaining <= activeRegionEnd) {
+                    remainingSize = activeRegionEnd - remaining;
+                }
+            }
             if (remainingSize >= FREE_RECORD_HEADER_BYTES) {
                 setRecordType(heapBase, remaining, HEAP_TYPE_FREE);
                 setRecordSize(heapBase, remaining, remainingSize);
@@ -13669,9 +13838,16 @@
         var previousFreeRegion = 0;
         while (freeRegion !== 0) {
             var nextFreeRegion = recordMark(heapBase, freeRegion);
-            var freeRegionEnd = freeRegion + recordSize(heapBase, freeRegion);
-            if (freeRegion + bytes <=
-                    freeRegionEnd - FREE_RECORD_HEADER_BYTES) {
+            var freeRegionSize = recordSize(heapBase, freeRegion);
+            var usableFreeBytes = 0;
+            if (freeRegion >= HEAP_FIRST_RECORD) {
+                if (freeRegionSize >= FREE_RECORD_HEADER_BYTES) {
+                    usableFreeBytes =
+                        freeRegionSize - FREE_RECORD_HEADER_BYTES;
+                }
+            }
+            if (bytes <= usableFreeBytes) {
+                var freeRegionEnd = freeRegion + freeRegionSize;
                 if (previousFreeRegion === 0) {
                     setEngineNativeFreeRegion(
                         heapBase, state, nextFreeRegion);
@@ -13690,11 +13866,13 @@
             freeRegion = nextFreeRegion;
         }
         var tailBump = engineNativeTailBump(heapBase, state);
+        var tailLimit = engineNativeTailLimit(heapBase, state);
         setEngineHeapBump(heapBase, state, tailBump);
-        setEngineHeapLimit(heapBase, state,
-            engineNativeTailLimit(heapBase, state));
-        if (tailBump + bytes <= engineNativeTailLimit(heapBase, state)) {
-            return 1;
+        setEngineHeapLimit(heapBase, state, tailLimit);
+        if (tailBump >= HEAP_FIRST_RECORD) {
+            if (tailBump <= tailLimit) {
+                if (bytes <= tailLimit - tailBump) return 1;
+            }
         }
         setEngineAllocationFailed(heapBase, state, 1);
         return 0;
@@ -16161,6 +16339,7 @@
             growNativeHeapLimitKernel: growNativeHeapLimitKernel,
             hasPropertyKernel: hasPropertyKernel,
             clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
+            clearAbsentValueCellsKernel: clearAbsentValueCellsKernel,
             concatenateStringsKernel: concatenateStringsKernel,
             heapMarkKernel: heapMarkKernel,
             heapSweepKernel: heapSweepKernel,
@@ -16205,6 +16384,9 @@
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
             rebuildNativeAllocatorKernel: rebuildNativeAllocatorKernel,
+            releaseNativeCachedFramesKernel: releaseNativeCachedFramesKernel,
+            restoreContextActiveFrameKernel:
+                restoreContextActiveFrameKernel,
             returnFromBytecodeKernel: returnFromBytecodeKernel,
             reserveNativeAllocationKernel: reserveNativeAllocationKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
@@ -16383,6 +16565,58 @@
         this.stateAddress = runtime.heapRecords.allocateEngineState();
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
+        runtime.heapRecords.setEngineGCRoot(
+            this.stateAddress, runtime.globalObject.heapAddress);
+        /* Contexts normally join the native GC list through
+         * Runtime.registerContext(). The bootstrap context predates the
+         * NativeInterpreter, however, so import every existing context when
+         * native ownership begins. Without this handoff a suspended module or
+         * self-hosted compiler context is collectible whenever it is not on
+         * the current frame chain. */
+        var contextHead = 0;
+        var contextIndex = runtime.contexts.length;
+        while (contextIndex > 0) {
+            var existingContext = runtime.contexts[--contextIndex];
+            runtime.heapRecords.setContextNext(
+                existingContext.heapAddress, contextHead);
+            contextHead = existingContext.heapAddress;
+        }
+        runtime.heapRecords.setEngineGCContextHead(
+            this.stateAddress, contextHead);
+        var nativeFunctionHead = 0;
+        var nativeFunctionKey;
+        for (nativeFunctionKey in runtime.functionMetadata) {
+            if (Object.prototype.hasOwnProperty.call(
+                    runtime.functionMetadata, nativeFunctionKey)) {
+                var nativeFunction =
+                    runtime.functionMetadata[nativeFunctionKey];
+                if (nativeFunction &&
+                        nativeFunction.guestType === "function") {
+                    runtime.heapRecords.setFunctionGCNext(
+                        nativeFunction.heapAddress, nativeFunctionHead);
+                    nativeFunctionHead = nativeFunction.heapAddress;
+                }
+            }
+        }
+        runtime.heapRecords.setEngineGCNativeFunctionHead(
+            this.stateAddress, nativeFunctionHead);
+        this.persistentRootSlots = {};
+        var retainedProgramKey;
+        for (retainedProgramKey in runtime.retainedProgramAddresses) {
+            if (Object.prototype.hasOwnProperty.call(
+                    runtime.retainedProgramAddresses, retainedProgramKey)) {
+                this.registerPersistentRoot(
+                    runtime.retainedProgramAddresses[retainedProgramKey]);
+            }
+        }
+        var persistentHostRootIndex = 0;
+        while (persistentHostRootIndex < runtime.hostRoots.length) {
+            var persistentHostRoot =
+                runtime.hostRoots[persistentHostRootIndex++];
+            if (persistentHostRoot && persistentHostRoot.heapAddress) {
+                this.registerPersistentRoot(persistentHostRoot.heapAddress);
+            }
+        }
         runtime.nativeInterpreter = this;
         this.platformServicesAddress =
             runtime.heapRecords.allocatePlatformServices();
@@ -16709,6 +16943,51 @@
             this.platformServicesAddress, Number(pointer) | 0);
     };
 
+    NativeInterpreter.prototype.registerNativeFunctionRoot = function (
+            address) {
+        var records = this.runtime.heapRecords;
+        records.setFunctionGCNext(address,
+            records.engineGCNativeFunctionHead(this.stateAddress));
+        records.setEngineGCNativeFunctionHead(this.stateAddress, address);
+    };
+
+    NativeInterpreter.prototype.registerPersistentRoot = function (address) {
+        var key = "$" + address;
+        var existing = this.persistentRootSlots[key];
+        if (existing) {
+            existing.count++;
+            return;
+        }
+        var records = this.runtime.heapRecords;
+        var slot = records.allocateRootSlot(address,
+            records.engineGCRootSlotHead(this.stateAddress));
+        this.persistentRootSlots[key] = {slot: slot, count: 1};
+        records.setEngineGCRootSlotHead(this.stateAddress, slot);
+    };
+
+    NativeInterpreter.prototype.unregisterPersistentRoot = function (address) {
+        var key = "$" + address;
+        var entry = this.persistentRootSlots[key];
+        if (!entry) return;
+        if (entry.count > 1) {
+            entry.count--;
+            return;
+        }
+        var removed = entry.slot;
+        var records = this.runtime.heapRecords;
+        var previous = 0;
+        var slot = records.engineGCRootSlotHead(this.stateAddress);
+        while (slot && slot !== removed) {
+            previous = slot;
+            slot = records.rootSlotNext(slot);
+        }
+        if (!slot) return;
+        var next = records.rootSlotNext(slot);
+        if (previous) records.setRootSlotNext(previous, next);
+        else records.setEngineGCRootSlotHead(this.stateAddress, next);
+        delete this.persistentRootSlots[key];
+    };
+
     NativeInterpreter.prototype.setGettimeofdayPointer = function (pointer) {
         this.runtime.heapRecords.setPlatformGettimeofdayPointer(
             this.platformServicesAddress, Number(pointer) | 0);
@@ -16824,7 +17103,6 @@
         if (this.nativeFreeRegionsOwned) return;
         var heap = this.runtime.linearHeap;
         var nativeHead = 0;
-        var retained = [];
         var nativeRegions = [];
         var index = 0;
         while (index < heap.freeBlocks.length) {
@@ -16832,9 +17110,16 @@
             var size = heap.freeRecordSize(address);
             if (size >= MIN_NATIVE_ALLOCATION_REGION_BYTES) {
                 nativeRegions.push({address: address, size: size});
-            } else retained.push(address);
+            }
         }
-        if (!nativeRegions.length) return;
+        /* A collection wholly inside the native engine may coalesce free
+         * records and rebuild its allocator.  Therefore no address from the
+         * old host index, including a small block which native allocation
+         * currently ignores, may survive the ownership transfer.  Those
+         * records are re-indexed from authoritative headers when ownership
+         * returns to the host. */
+        heap.freeBlocks = [];
+        heap.freeBlocksAreMaxHeap = false;
         /* Keep large compound allocations on the constant-time head path.
          * An unsorted fragmented list can make each such allocation walk and
          * restore thousands of smaller regions. Sorting happens once when
@@ -16849,8 +17134,6 @@
             heap.setFreeRecordNext(address, nativeHead);
             nativeHead = address;
         }
-        heap.freeBlocks = retained;
-        heap.freeBlocksAreMaxHeap = false;
         this.runtime.heapRecords.setEngineNativeFreeRegion(
             this.stateAddress, nativeHead);
         this.nativeFreeRegionsOwned = true;
@@ -16913,6 +17196,11 @@
     };
 
     NativeInterpreter.prototype.tryRefillAllocationRegion = function () {
+        /* Native ownership transfers every reusable region to the compiled
+         * allocator.  It has already tried those regions, the tail, and its
+         * internal collector before reporting an allocation exit; claiming
+         * another host-side region here would duplicate allocator ownership. */
+        if (this.nativeFreeRegionsOwned) return false;
         if (this.allocationRegion) {
             /* The current largest reclaimed arena was too small for this
              * compound allocation.  Return its untouched suffix and retry
@@ -16961,56 +17249,29 @@
         var arrayPrototype = this.runtime.arrayPrototype ?
             this.runtime.arrayPrototype.heapAddress : 0;
         var heap = this.runtime.linearHeap;
-        var allocationBump = heap.bump;
-        var allocationLimit = heap.allocationLimit;
-        /* Keep one reclaimed arena attached to the native interpreter at a
-         * time.  The multi-region hand-off remains available for further
-         * development, but switching between independently reclaimed arenas
-         * during one dispatch can expose stale ranges after host/native
-         * ownership transitions.  The persistent single arena is both
-         * general and stable, and falls back to untouched tail space when a
-         * compound allocation does not fit. */
-        /* Prefer reclaimed guest-heap storage at every native entry.  Waiting
-         * until the bump cursor reached the next pressure boundary made a
-         * high-churn renderer manufacture tens of megabytes of fresh garbage
-         * after each collection while equivalent free records already
-         * existed.  The maximum-block index makes this selection independent
-         * of free-list order and preserves large compound-allocation arenas. */
-        var forceTailAllocation = this.forceTailAllocation;
-        this.forceTailAllocation = false;
-        if (!this.allocationRegion && !forceTailAllocation) {
-            var claimedRegion = heap.claimLargestFreeBlock(
-                MIN_NATIVE_ALLOCATION_REGION_BYTES);
-            if (claimedRegion) {
-                this.allocationRegion = {
-                    cursor: claimedRegion.address,
-                    end: claimedRegion.address + claimedRegion.size
-                };
-            }
-        }
-        if (!this.allocationRegion &&
-            allocationLimit > this.runtime.gcHeapPressureBump) {
+        var tailBump = heap.bump;
+        var tailLimit = heap.allocationLimit;
+        /* Transfer reusable records as one ownership domain.  An internal
+         * native collection rebuilds this same list; leaving any of those
+         * addresses in the host free-block index would let the two allocators
+         * hand out overlapping storage. */
+        if (!this.nativeFreeRegionsOwned) this.installNativeFreeRegions();
+        if (tailLimit > this.runtime.gcHeapPressureBump) {
             /* Stop the native bump allocator at the collection-pressure
              * boundary. It will publish its frame and return an allocation
              * exit, allowing the ordinary collector to reclaim dead records
              * before the logical heap is grown. A genuinely live heap can
              * still grow through the normal post-collection allocation path. */
-            allocationLimit = this.runtime.gcHeapPressureBump;
-            if (allocationLimit < allocationBump) {
-                allocationLimit = allocationBump;
+            tailLimit = this.runtime.gcHeapPressureBump;
+            if (tailLimit < tailBump) {
+                tailLimit = tailBump;
             }
         }
-        if (this.allocationRegion) {
-            allocationBump = this.allocationRegion.cursor;
-            /* Keep space for a valid free-record header at every yield. */
-            allocationLimit = this.allocationRegion.end -
-                              FREE_RECORD_HEADER_BYTES;
-        }
         records.setEngineNativeTailBounds(
-            this.stateAddress, allocationBump, allocationLimit);
+            this.stateAddress, tailBump, tailLimit);
         if (!records.engineNativeRegionActive(this.stateAddress)) {
             records.setEngineHeapBounds(this.stateAddress,
-                                        allocationBump, allocationLimit);
+                                        tailBump, tailLimit);
         }
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var nativeStarted = this.runtime.profileOpcodeCounts ?
@@ -17028,21 +17289,8 @@
         }
         var nativeHeapBump = records.engineHeapBump(this.stateAddress);
         var nativeTailBump = records.engineNativeTailBump(this.stateAddress);
-        var exhaustedAllocationRegion = false;
-        if (this.allocationRegion) {
-            this.allocationRegion.cursor = nativeHeapBump;
-            var regionRemaining = this.allocationRegion.end - nativeHeapBump;
-            heap.publishFreeRegion(nativeHeapBump, regionRemaining,
-                                   NATIVE_ALLOCATION_REGION_FLAG);
-            if (regionRemaining < MIN_NATIVE_ALLOCATION_REGION_BYTES) {
-                /* Keep the region identity until an unsupported exit has
-                 * been classified below.  If the current operation failed
-                 * for space, tryRefillAllocationRegion must know that this
-                 * was a reclaimed arena so it can retry from unused tail
-                 * space instead of claiming another undersized hole. */
-                exhaustedAllocationRegion = true;
-            }
-        } else if (nativeHeapBump > heap.bump) {
+        if (!records.engineNativeRegionActive(this.stateAddress) &&
+            nativeHeapBump > heap.bump) {
             heap.bump = nativeHeapBump;
             this.runtime.noteNativeHeapBump(nativeHeapBump);
         }
@@ -17084,9 +17332,6 @@
                     }
                 }
             }
-        }
-        if (exhaustedAllocationRegion && reason !== Exit.ALLOCATION) {
-            this.releaseAllocationRegionForCollection();
         }
         if (reason === Exit.UNSUPPORTED) {
             this.unsupportedExitCount++;

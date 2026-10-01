@@ -50,3 +50,37 @@ a value vector. The bootstrap heap audit passes on the freshly built image
 (58,527 reachable records, zero missing marks on the compiled i386 graph).
 The remaining defect is therefore still being investigated during subsequent
 native execution. Demo8 stability is not yet established.
+
+## 2026-10-01: allocation ownership and frame lifetimes
+
+The subsequent investigation found a compound-allocation failure in bytecode
+calls. A failed native reservation switches from an interior free region back
+to the tail arena. The call builder was comparing an address calculated for
+the old region against the new arena's limit, and could publish overlapping
+records despite the reservation failing. It now requires a successful
+reservation before publishing any call records, returns a borrowed cached
+frame on failure, and does not reserve storage for a zero-byte request.
+
+Native collection also discarded the cached-frame list without removing its
+frames' allocator-protection flags. Those free records could consequently
+never be reused or coalesced. Collection now explicitly releases the cached
+frames before sweeping. Runtime roots, context active frames and frontend
+adoption roots are maintained explicitly; native and hosted allocation no
+longer retain competing free-region ownership.
+
+Verification of this working point:
+
+- Node and js_min test suites pass: 12 guest programs and 266 assertions,
+  plus embedding, GC/lifetime, contexts, kernel and command-line checks.
+- A standalone demo8 run completed its ten-minute stress limit without a
+  crash, switching between garage and automatic free driving at 320x240,
+  with a 20 FPS limit. Steady frame rates were generally 18–19 FPS.
+- The current snapshot's JS marker audit finds 58,578 reachable records
+  and zero missing marks.
+- Snapshot regeneration under js_runner is byte-identical.
+- Standalone Octane quick checks pass Richards, DeltaBlue, Crypto and RayTrace.
+
+Memory residency still grows during the long demo8 run. This checkpoint fixes
+the reproduced corruption, but bounded long-running memory use remains under
+investigation. Existing standalone language/HTTP semantic gaps also remain;
+the command-line smoke checks do not establish full HTTP request coverage.
