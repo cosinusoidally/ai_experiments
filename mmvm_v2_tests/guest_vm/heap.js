@@ -533,6 +533,23 @@
         return this.memory.readU32(address + HEADER_TYPE);
     };
 
+    /* Diagnostic record walks also inspect free storage. Return the common
+     * header through one accessor so tools do not duplicate its layout. */
+    Heap.prototype.inspectRecordHeader = function (address) {
+        if (address < FIRST_RECORD || address % 8 !== 0 ||
+                address + HEADER_SIZE > this.bump) {
+            throw new RangeError("invalid record header address " + address);
+        }
+        var size = this.memory.readU32(address + HEADER_SIZE_FIELD);
+        if (size < HEADER_SIZE || size % 8 !== 0 ||
+                size > this.bump - address) {
+            throw new RangeError("invalid record size at " + address);
+        }
+        return {type: this.memory.readU32(address + HEADER_TYPE),
+                size: size, mark: this.memory.readU32(address + HEADER_MARK),
+                flags: this.memory.readU32(address + HEADER_FLAGS)};
+    };
+
     Heap.prototype.isFreeRecord = function (address) {
         address = Number(address);
         if (!address || address < FIRST_RECORD || address >= this.bump) {

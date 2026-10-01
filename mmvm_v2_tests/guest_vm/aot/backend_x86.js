@@ -72,6 +72,7 @@
             result.pointer = 0;
             result.fn = null;
         };
+        installArgumentVectorBridge(this, result, ir.parameters.length);
         return result;
     };
 
@@ -154,7 +155,70 @@
             result.pointer = 0;
             result.fn = null;
         };
+        installArgumentVectorBridge(backend, result,
+                                    graph.functions[0].parameters.length);
         return result;
+    }
+
+    /* The shell FFI accepts eight words. Marshal larger kernel signatures
+     * through a vector and a cdecl macro-assembler bridge. */
+    function installArgumentVectorBridge(backend, result, arity) {
+        if (arity <= 8) return;
+        var assembler = new Assembler(backend.captureAssembly);
+        assembler.pushEbp();
+        assembler.movEbpEsp();
+        var index = arity;
+        while (index > 0) {
+            index--;
+            assembler.movEaxEbpArgument(0);
+            assembler.addEaxImmediate(index * 4);
+            assembler.movEaxDwordPtrEax();
+            assembler.pushEax();
+        }
+        assembler.movEaxImmediate(result.pointer);
+        assembler.callEax();
+        var discardedWord = 0;
+        while (discardedWord < arity) {
+            assembler.popEcx();
+            discardedWord++;
+        }
+        assembler.leave();
+        assembler.ret();
+        var bridgeBytes = Math.max(4096,
+            Math.ceil(assembler.bytes.length / 4096) * 4096);
+        var ffi = backend.ffi;
+        var bridge = ffi.call(backend.mmap,
+            [0, bridgeBytes, 7, 0x22, -1, 0]);
+        if (!bridge || bridge === -1) throw new Error("argument bridge mmap failed");
+        copyBytesToNative(bridge, assembler.bytes);
+        var calloc = ffi.resolve("calloc");
+        var free = ffi.resolve("free");
+        result.fn = function () {
+            if (arguments.length !== arity) {
+                throw new RangeError("kernel expects " + arity + " arguments");
+            }
+            var vector = ffi.call(calloc, [arity, 4]);
+            if (!vector) throw new Error("argument vector allocation failed");
+            try {
+                var argumentIndex = 0;
+                while (argumentIndex < arity) {
+                    ffi.poke32(vector + argumentIndex * 4,
+                        Number(arguments[argumentIndex]) | 0);
+                    argumentIndex++;
+                }
+                return ffi.call(bridge, [vector]) | 0;
+            } finally {
+                ffi.call(free, [vector]);
+            }
+        };
+        var destroyKernel = result.destroy;
+        result.destroy = function () {
+            if (bridge) {
+                ffi.call(backend.munmap, [bridge, bridgeBytes]);
+                bridge = 0;
+            }
+            destroyKernel();
+        };
     }
 
     function compileControlFlow(backend, ir) {
@@ -214,6 +278,7 @@
             result.pointer = 0;
             result.fn = null;
         };
+        installArgumentVectorBridge(backend, result, ir.parameters.length);
         return result;
     }
 
@@ -761,8 +826,13 @@
             nativeInterpreter.stateAddress);
         records.setEngineCurrentFrame(
             nativeInterpreter.stateAddress, frame.heapAddress);
+        var snapshotGCGeneration =
+            records.engineGCGeneration(nativeInterpreter.stateAddress);
+        if (runtime.gcGeneration > snapshotGCGeneration) {
+            snapshotGCGeneration = runtime.gcGeneration;
+        }
         records.setEngineGCState(nativeInterpreter.stateAddress,
-            runtime.gcGeneration, heap.collectorStackBase,
+            snapshotGCGeneration, heap.collectorStackBase,
             heap.byteLength, 0);
         var savedPlatformPointers =
             records.suspendPlatformPointersForSnapshot(
