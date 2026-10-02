@@ -333,3 +333,20 @@ The X11 input driver now accepts simultaneous held keys, for example
 and js_min with node_runner.js. It does not change any demo source.
 Continued RSS growth in the stress runs remains an open investigation;
 these results must not be interpreted as proving bounded memory use.
+
+Ordinary-GC comparison (same new snapshot, no `--vm-gc-stress`):
+
+- demo1, approximately 3m10s at 320x240, 20 FPS limit: typing and a
+  mouse drag, Escape, exit 0. Last sampled RSS 347 MiB. Rendering was
+  approximately 0.8–1.1 FPS; this remains an unresolved performance issue,
+  not an acceptable frame-rate result. Log: artifacts/stability-demo1-normal.log.
+- demo8, approximately 6m30s: attract mode, garage and mouse drag,
+  autodrive, manual free driving with simultaneous acceleration/turning
+  and braking/turning, then Escape, q; exit 0. Garage generally reported
+  18–20 FPS, autodrive approximately 18–19 FPS, manual driving 18–20 FPS.
+  RSS rose to approximately 532 MiB and then stayed near that value from
+  the third minute through exit. Log: artifacts/stability-demo8-normal.log.
+
+These ordinary runs are also finite observations, not proof of indefinitely
+bounded memory or absence of all GC bugs. The tests use one heavy VM workload
+at a time. The small input driver exits after each input sequence.
