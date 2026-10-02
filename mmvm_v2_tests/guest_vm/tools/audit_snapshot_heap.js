@@ -57,10 +57,12 @@
          * emulated heap. Header interpretation still belongs to Heap. */
         var inspectionHeap = new Heap({heapBytes: 4096});
         inspectionHeap.memory.destroy();
+        function inspectionWord(offset) {
+            return file.readUInt32LE(offset);
+        }
         inspectionHeap.memory = {
-            readU32: function (offset) {
-                return file.readUInt32LE(offset);
-            },
+            readU32: inspectionWord,
+            readU32Trusted: inspectionWord,
             byteLength: heapLength,
             destroy: function () {}
         };
@@ -101,9 +103,15 @@
         var position = Heap.FIRST_RECORD;
         var totalLiveBytes = 0, totalFreeBytes = 0, protectedFreeBytes = 0;
         var largestFree = 0;
+        var engineRecord = 0;
         var typeBytes = {}, typeCounts = {};
         while (position < inspectedHeap.bump) {
             var record = inspectedHeap.inspectRecordHeader(position);
+            if (record.type === Heap.Types.ENGINE_STATE &&
+                    record.size >= Heap.HEADER_SIZE +
+                    Records.KernelConstants.ENGINE_GC_LIVE_BYTES + 4) {
+                engineRecord = position;
+            }
             if (record.type === Heap.Types.FREE) {
                 totalFreeBytes += record.size;
                 if (record.flags) protectedFreeBytes += record.size;
@@ -117,6 +125,23 @@
             totalLiveBytes + "; free: " + totalFreeBytes +
             "; protected free: " + protectedFreeBytes +
             "; largest reusable region: " + largestFree);
+        if (engineRecord) {
+            var inspectionRecords = new Records(inspectedHeap, null);
+            output("native GC: collections=" +
+                inspectionRecords.engineGCCollections(engineRecord) +
+                "; post-GC occupied=" +
+                inspectionRecords.engineGCLiveBytes(engineRecord) +
+                "; last phases (us): mark=" +
+                inspectionRecords.engineGCMarkMicroseconds(engineRecord) +
+                ", sweep=" +
+                inspectionRecords.engineGCSweepMicroseconds(engineRecord) +
+                ", index=" +
+                inspectionRecords.engineGCIndexMicroseconds(engineRecord) +
+                "; total=" +
+                inspectionRecords.engineGCTotalMicroseconds(engineRecord) +
+                "; maximum pause=" +
+                inspectionRecords.engineGCMaximumPauseMicroseconds(engineRecord));
+        }
         var name;
         for (name in Heap.Types) {
             if (Object.prototype.hasOwnProperty.call(Heap.Types, name)) {

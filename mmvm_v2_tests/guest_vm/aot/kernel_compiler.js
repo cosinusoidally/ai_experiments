@@ -343,6 +343,12 @@
         engineGCStackBase: "ENGINE_GC_STACK_BASE",
         engineGCStackLimit: "ENGINE_GC_STACK_LIMIT",
         engineGCCollections: "ENGINE_GC_COLLECTIONS",
+        engineGCMarkMicroseconds: "ENGINE_GC_MARK_US",
+        engineGCSweepMicroseconds: "ENGINE_GC_SWEEP_US",
+        engineGCIndexMicroseconds: "ENGINE_GC_INDEX_US",
+        engineGCTotalMicroseconds: "ENGINE_GC_TOTAL_US",
+        engineGCMaximumPauseMicroseconds: "ENGINE_GC_MAX_PAUSE_US",
+        engineGCLiveBytes: "ENGINE_GC_LIVE_BYTES",
         engineGCRoot: "ENGINE_GC_ROOT",
         engineGCContextHead: "ENGINE_GC_CONTEXT_HEAD",
         engineGCNativeFunctionHead: "ENGINE_GC_NATIVE_FUNCTION_HEAD",
@@ -453,7 +459,13 @@
         setEngineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
         setEngineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION",
         setEngineGCGeneration: "ENGINE_GC_GENERATION",
-        setEngineGCCollections: "ENGINE_GC_COLLECTIONS"
+        setEngineGCCollections: "ENGINE_GC_COLLECTIONS",
+        setEngineGCMarkMicroseconds: "ENGINE_GC_MARK_US",
+        setEngineGCSweepMicroseconds: "ENGINE_GC_SWEEP_US",
+        setEngineGCIndexMicroseconds: "ENGINE_GC_INDEX_US",
+        setEngineGCTotalMicroseconds: "ENGINE_GC_TOTAL_US",
+        setEngineGCMaximumPauseMicroseconds: "ENGINE_GC_MAX_PAUSE_US",
+        setEngineGCLiveBytes: "ENGINE_GC_LIVE_BYTES"
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {

@@ -824,6 +824,11 @@
         ];
         var savedCurrentFrame = records.engineCurrentFrame(
             nativeInterpreter.stateAddress);
+        var savedGCDiagnostics = records.engineGCDiagnostics(
+            nativeInterpreter.stateAddress);
+        /* Timings describe the producing process, never the ready-to-run
+         * runtime image. Exclude them from deterministic snapshots. */
+        records.setEngineGCDiagnostics(nativeInterpreter.stateAddress, null);
         records.setEngineCurrentFrame(
             nativeInterpreter.stateAddress, frame.heapAddress);
         var snapshotGCGeneration =
@@ -874,6 +879,8 @@
                 savedGCState[3]);
             records.setEngineCurrentFrame(
                 nativeInterpreter.stateAddress, savedCurrentFrame);
+            records.setEngineGCDiagnostics(
+                nativeInterpreter.stateAddress, savedGCDiagnostics);
         }
 
         var openPointer = this.ffi.resolve("open");

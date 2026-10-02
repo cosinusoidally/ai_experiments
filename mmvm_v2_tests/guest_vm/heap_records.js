@@ -143,7 +143,13 @@
     var ENGINE_GC_CONTEXT_HEAD = ENGINE_GC_ROOT + 4;
     var ENGINE_GC_NATIVE_FUNCTION_HEAD = ENGINE_GC_CONTEXT_HEAD + 4;
     var ENGINE_GC_ROOT_SLOT_HEAD = ENGINE_GC_NATIVE_FUNCTION_HEAD + 4;
-    var ENGINE_STATE_BYTES = ENGINE_GC_ROOT_SLOT_HEAD + 4;
+    var ENGINE_GC_MARK_US = ENGINE_GC_ROOT_SLOT_HEAD + 4;
+    var ENGINE_GC_SWEEP_US = ENGINE_GC_MARK_US + 4;
+    var ENGINE_GC_INDEX_US = ENGINE_GC_SWEEP_US + 4;
+    var ENGINE_GC_TOTAL_US = ENGINE_GC_INDEX_US + 4;
+    var ENGINE_GC_MAX_PAUSE_US = ENGINE_GC_TOTAL_US + 4;
+    var ENGINE_GC_LIVE_BYTES = ENGINE_GC_MAX_PAUSE_US + 4;
+    var ENGINE_STATE_BYTES = ENGINE_GC_LIVE_BYTES + 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -226,6 +232,12 @@
         ENGINE_GC_CONTEXT_HEAD: ENGINE_GC_CONTEXT_HEAD,
         ENGINE_GC_NATIVE_FUNCTION_HEAD: ENGINE_GC_NATIVE_FUNCTION_HEAD,
         ENGINE_GC_ROOT_SLOT_HEAD: ENGINE_GC_ROOT_SLOT_HEAD,
+        ENGINE_GC_MARK_US: ENGINE_GC_MARK_US,
+        ENGINE_GC_SWEEP_US: ENGINE_GC_SWEEP_US,
+        ENGINE_GC_INDEX_US: ENGINE_GC_INDEX_US,
+        ENGINE_GC_TOTAL_US: ENGINE_GC_TOTAL_US,
+        ENGINE_GC_MAX_PAUSE_US: ENGINE_GC_MAX_PAUSE_US,
+        ENGINE_GC_LIVE_BYTES: ENGINE_GC_LIVE_BYTES,
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
@@ -1245,6 +1257,60 @@
     Records.prototype.engineGCCollections = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_GC_COLLECTIONS, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCMarkMicroseconds = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_MARK_US, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCSweepMicroseconds = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_SWEEP_US, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCIndexMicroseconds = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_INDEX_US, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCTotalMicroseconds = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_TOTAL_US, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCMaximumPauseMicroseconds = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_MAX_PAUSE_US, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCLiveBytes = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_LIVE_BYTES, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCDiagnostics = function (state) {
+        return {mark: this.engineGCMarkMicroseconds(state),
+                sweep: this.engineGCSweepMicroseconds(state),
+                index: this.engineGCIndexMicroseconds(state),
+                total: this.engineGCTotalMicroseconds(state),
+                maximum: this.engineGCMaximumPauseMicroseconds(state),
+                live: this.engineGCLiveBytes(state)};
+    };
+
+    Records.prototype.setEngineGCDiagnostics = function (state, diagnostics) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_MARK_US,
+            diagnostics ? diagnostics.mark : 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_SWEEP_US,
+            diagnostics ? diagnostics.sweep : 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_INDEX_US,
+            diagnostics ? diagnostics.index : 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_TOTAL_US,
+            diagnostics ? diagnostics.total : 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_MAX_PAUSE_US,
+            diagnostics ? diagnostics.maximum : 0, Heap.Types.ENGINE_STATE);
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_LIVE_BYTES,
+            diagnostics ? diagnostics.live : 0, Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.engineGCRoot = function (state) {

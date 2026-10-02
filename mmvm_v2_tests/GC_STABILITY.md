@@ -121,3 +121,41 @@ the dump into its array-emulated heap. Both hosts reported identical results
 for the first live dump: 130,491,400 total bytes, 28,419,664 occupied bytes,
 102,071,672 free bytes and 12,560 protected free bytes. Occupied bytes include
 not-yet-collected garbage; they are not a post-mark reachability measurement.
+
+## 2026-10-02: reusable arena suffixes and native pause diagnostics
+
+Useful remainders of abandoned native allocation arenas now return directly
+to the allocator's reusable-region list. Previously those remainders were
+parked until the next full collection even when subsequent smaller requests
+could use them. Smaller suffixes retain the existing retirement policy. All
+ownership changes still publish a complete free record before reuse.
+
+The isolated standalone demo8 verification ran for ten minutes, including
+garage and automatic free driving, then exited normally through the menu.
+Garage was generally 18–19 FPS at 320x240 with a 20 FPS limit; automatic
+driving was generally 18–19 FPS, with some five-second samples near 17 FPS.
+RSS readings settled around 480–483 MiB during the final several minutes.
+No second benchmark, VM build or test-suite workload ran concurrently.
+This establishes that the reproduced corruption is fixed in this run; it is
+not proof that every long-running workload has bounded memory consumption.
+
+Native GC now keeps named engine-state diagnostics for the last mark, sweep
+and allocator-index phases, total collector time, maximum observed pause and
+post-collection occupied bytes. They use microseconds from the existing libc
+gettimeofday service, without allocating guest objects or entering the host
+VM. Mark time includes root/cache preparation; the timings exclude resumed
+guest execution. Clock discontinuities are clamped for diagnostics only and
+do not affect collection policy. `--vm-profile` reports these counters;
+`--heap-stats` reports them for a sufficiently recent quiescent heap dump.
+Snapshot serialization clears these process-specific counters temporarily,
+then restores them, so timings cannot leak into the deterministic image.
+
+The marker failure path no longer dereferences its rejected diagnostic target.
+That word may be an invalid address or, for a malformed record, a size. A
+controlled collector failure must not cause a second invalid read or retry.
+
+Both host suites pass again: 12 guest programs, 266 assertions and all
+ancillary checks. The updated standalone snapshot runs hello.js and reproduces
+itself byte-for-byte. The JS kernel audit finds 58,832 reachable records and
+zero missing marks. The reported long-pause issue remains under measurement;
+the native counters distinguish collector work from other frame-time stalls.

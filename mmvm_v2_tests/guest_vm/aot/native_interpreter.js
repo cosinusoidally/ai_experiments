@@ -13503,6 +13503,21 @@
         return 0;
     }
 
+    /* A modular 32-bit microsecond clock is sufficient for individual GC
+     * phases. Subtract readings with signed wrap; each phase must be shorter
+     * than half the clock period. No guest allocation or host VM call occurs.
+     * gettimeofday is already supplied by the platform service table. */
+    function nativeCollectorClockKernel(heapBase, state, platformServices) {
+        var clockPointer = platformGettimeofdayPointer(
+            heapBase, platformServices);
+        if (clockPointer === 0) return 0;
+        var timeval = engineScratchLeftAddress(heapBase, state);
+        if (callNativeI32(clockPointer, timeval, 0) !== 0) return 0;
+        var MICROSECONDS_PER_SECOND = 1000000;
+        return (engineScratchLeft(heapBase, state) *
+            MICROSECONDS_PER_SECOND + engineScratchRight(heapBase, state)) | 0;
+    }
+
     function growNativeHeapLimitKernel(heapBase, state) {
         var MINIMUM_HEAP_GROWTH_BYTES = 16777216;
         var currentTailLimit = engineNativeTailLimit(heapBase, state);
@@ -13552,6 +13567,12 @@
         var ENGINE_GC_CONTEXT_HEAD = 0;
         var ENGINE_GC_NATIVE_FUNCTION_HEAD = 0;
         var ENGINE_GC_ROOT_SLOT_HEAD = 0;
+        var ENGINE_GC_MARK_US = 0;
+        var ENGINE_GC_SWEEP_US = 0;
+        var ENGINE_GC_INDEX_US = 0;
+        var ENGINE_GC_TOTAL_US = 0;
+        var ENGINE_GC_MAX_PAUSE_US = 0;
+        var ENGINE_GC_LIVE_BYTES = 0;
         var MINIMUM_POST_COLLECTION_HEADROOM = 1048576;
         var RECORD_HEADER_BYTES = 16;
         var EXIT_UNSUPPORTED = 3;
@@ -13608,6 +13629,8 @@
                 }
             }
             if (shouldCollect === 1) {
+            var collectionStarted = nativeCollectorClockKernel(
+                heapBase, state, platformServices);
             /* interpreterKernel can enter one or more guest callees before an
              * allocation exit. The wrapper's incoming frame is then only the
              * bottom of that call chain; the engine state owns the
@@ -13679,6 +13702,8 @@
                 engineGCNativeFunctionHead(heapBase, state),
                 state - RECORD_HEADER_BYTES,
                 collectionPersistentRoot, 0);
+            var markingFinished = nativeCollectorClockKernel(
+                heapBase, state, platformServices);
             if (markResult !== 0) {
                 collectionFailed = 1;
                 var invalidParent = load32(
@@ -13695,19 +13720,47 @@
                     CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE +
                     invalidParentType * CALL_DIAGNOSTIC_GC_TYPE_RADIX +
                     invalidReferenceIndex);
-                /* The standalone diagnostic's allocation field is otherwise
-                 * meaningless after a marker failure.  Report the stale
-                 * target record's size so the bad edge can be tied back to
-                 * its former record class without dereferencing host state. */
-                setEngineAllocationFailed(
-                    heapBase, state,
-                    recordSize(heapBase, invalidTarget));
+                /* An invalid reference is not safe to dereference, even for
+                 * diagnostics. For malformed layouts the final diagnostic
+                 * word is a size rather than an address. Keep the marker's
+                 * reported value above and do not turn this controlled exit
+                 * into a second invalid read or an allocation retry. */
+                setEngineAllocationFailed(heapBase, state, 0);
                 collectionCanResume = 0;
             } else {
                 var collectionReclaimed = heapSweepKernel(
                     heapBase, collectionBump, collectionGeneration);
+                var sweepingFinished = nativeCollectorClockKernel(
+                    heapBase, state, platformServices);
                 var collectionLiveBytes = rebuildNativeAllocatorKernel(
                     heapBase, state, collectionBump);
+                var indexingFinished = nativeCollectorClockKernel(
+                    heapBase, state, platformServices);
+                var markMicroseconds =
+                    (markingFinished - collectionStarted) | 0;
+                var sweepMicroseconds =
+                    (sweepingFinished - markingFinished) | 0;
+                var indexMicroseconds =
+                    (indexingFinished - sweepingFinished) | 0;
+                /* Wall-clock adjustments must not produce huge unsigned
+                 * timings. Clamping affects diagnostics only, never policy. */
+                if (markMicroseconds < 0) markMicroseconds = 0;
+                if (sweepMicroseconds < 0) sweepMicroseconds = 0;
+                if (indexMicroseconds < 0) indexMicroseconds = 0;
+                var pauseMicroseconds = markMicroseconds +
+                    sweepMicroseconds + indexMicroseconds;
+                setEngineGCMarkMicroseconds(heapBase, state, markMicroseconds);
+                setEngineGCSweepMicroseconds(heapBase, state, sweepMicroseconds);
+                setEngineGCIndexMicroseconds(heapBase, state, indexMicroseconds);
+                setEngineGCLiveBytes(heapBase, state, collectionLiveBytes);
+                setEngineGCTotalMicroseconds(heapBase, state,
+                    engineGCTotalMicroseconds(heapBase, state) +
+                    pauseMicroseconds);
+                if (pauseMicroseconds >
+                        engineGCMaximumPauseMicroseconds(heapBase, state)) {
+                    setEngineGCMaximumPauseMicroseconds(
+                        heapBase, state, pauseMicroseconds);
+                }
                 /* Repeatedly sweeping a mostly-live graph after only the
                  * minimum allocation headroom makes little progress. Grow
                  * the logical limit as soon as collection proves that live
@@ -13829,7 +13882,17 @@
                 setRecordMark(heapBase, remaining, 0);
                 setRecordFlags(heapBase, remaining, 0);
             }
-            if (remainingSize >= FREE_RECORD_HEADER_BYTES + 8) {
+            if (remainingSize >= MIN_NATIVE_REGION_BYTES) {
+                /* A larger request can leave a useful remainder in this
+                 * arena. Publish it back to the allocator immediately: it
+                 * may not fit this request, but subsequent smaller records
+                 * must not consume the tail while reusable storage waits
+                 * for another full collection. The active arena has already
+                 * been detached and its suffix is a complete free record. */
+                setRecordMark(heapBase, remaining,
+                    engineNativeFreeRegion(heapBase, state));
+                setEngineNativeFreeRegion(heapBase, state, remaining);
+            } else if (remainingSize >= FREE_RECORD_HEADER_BYTES + 8) {
                 setRecordMark(heapBase, remaining,
                     engineNativeRetiredRegion(heapBase, state));
                 setEngineNativeRetiredRegion(heapBase, state, remaining);
@@ -16388,6 +16451,7 @@
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
             rebuildNativeAllocatorKernel: rebuildNativeAllocatorKernel,
+            nativeCollectorClockKernel: nativeCollectorClockKernel,
             releaseNativeCachedFramesKernel: releaseNativeCachedFramesKernel,
             restoreContextActiveFrameKernel:
                 restoreContextActiveFrameKernel,
@@ -17436,6 +17500,22 @@
                    this.allocationRefillElapsedMs + "ms" +
                    " runs=" + this.runCount + " " +
                    parts.join(" ");
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
+        var records = this.runtime.heapRecords;
+        line = "native guest GC: collections=" +
+               records.engineGCCollections(this.stateAddress) +
+               " liveBytes=" + records.engineGCLiveBytes(this.stateAddress) +
+               " lastMarkUs=" +
+               records.engineGCMarkMicroseconds(this.stateAddress) +
+               " lastSweepUs=" +
+               records.engineGCSweepMicroseconds(this.stateAddress) +
+               " lastIndexUs=" +
+               records.engineGCIndexMicroseconds(this.stateAddress) +
+               " totalUs=" +
+               records.engineGCTotalMicroseconds(this.stateAddress) +
+               " maximumPauseUs=" +
+               records.engineGCMaximumPauseMicroseconds(this.stateAddress);
         if (typeof print === "function") print(line);
         else if (typeof console !== "undefined" && console.log) console.log(line);
         var heap = this.runtime.linearHeap;
