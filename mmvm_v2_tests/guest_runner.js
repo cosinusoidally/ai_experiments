@@ -18,6 +18,7 @@ var guestRunnerSkipSnapshotHash = false;
 var guestRunnerForbidHostCalls = false;
 var guestRunnerLogHostCalls = false;
 var guestRunnerProfileDuration = 0;
+var guestRunnerGCStress = false;
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -52,6 +53,9 @@ for (var guestRunnerOptionIndex = 0;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-verify-heap") {
         guestRunnerVerifyHeap = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--vm-gc-stress") {
+        guestRunnerGCStress = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-threaded") {
         guestRunnerThreaded = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
@@ -105,6 +109,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
                      "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
+                     "[--vm-gc-stress] " +
                      "[--vm-no-host-calls] " +
                      "[--vm-log-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
@@ -207,6 +212,11 @@ try {
     }
 
     if (guestProgramPath) {
+        if (guestRunnerGCStress) guestProgramVM.runtime.gcThreshold = 256;
+        if (guestRunnerGCStress && guestProgramVM.runtime.nativeInterpreter) {
+            guestProgramVM.runtime.heapRecords.setEngineGCStressInterval(
+                guestProgramVM.runtime.nativeInterpreter.stateAddress, true);
+        }
         guestNodeEnvironment.setRunnerArguments(guestRunnerArguments);
         /* Application I/O is intentionally after the snapshot boundary. */
         if (guestRunnerIsNode) {

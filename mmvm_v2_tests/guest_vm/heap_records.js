@@ -149,7 +149,10 @@
     var ENGINE_GC_TOTAL_US = ENGINE_GC_INDEX_US + 4;
     var ENGINE_GC_MAX_PAUSE_US = ENGINE_GC_TOTAL_US + 4;
     var ENGINE_GC_LIVE_BYTES = ENGINE_GC_MAX_PAUSE_US + 4;
-    var ENGINE_STATE_BYTES = ENGINE_GC_LIVE_BYTES + 4;
+    var ENGINE_GC_STRESS_INTERVAL = ENGINE_GC_LIVE_BYTES + 4;
+    var GC_STRESS_DEFAULT_INTERVAL = 1000000;
+    var ENGINE_GC_STRESS_REMAINING = ENGINE_GC_STRESS_INTERVAL + 4;
+    var ENGINE_STATE_BYTES = ENGINE_GC_STRESS_REMAINING + 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -238,6 +241,9 @@
         ENGINE_GC_TOTAL_US: ENGINE_GC_TOTAL_US,
         ENGINE_GC_MAX_PAUSE_US: ENGINE_GC_MAX_PAUSE_US,
         ENGINE_GC_LIVE_BYTES: ENGINE_GC_LIVE_BYTES,
+        ENGINE_GC_STRESS_INTERVAL: ENGINE_GC_STRESS_INTERVAL,
+        ENGINE_GC_STRESS_REMAINING: ENGINE_GC_STRESS_REMAINING,
+        GC_STRESS_DEFAULT_INTERVAL: GC_STRESS_DEFAULT_INTERVAL,
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
@@ -1287,6 +1293,23 @@
     Records.prototype.engineGCLiveBytes = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_GC_LIVE_BYTES, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineGCStressInterval = function (state) {
+        return this.heap.readTrustedFieldU32(
+            state, ENGINE_GC_STRESS_INTERVAL, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.resetEngineGCStress = function (state) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_STRESS_REMAINING,
+            this.engineGCStressInterval(state), Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineGCStressInterval = function (state, interval) {
+        if (interval === true) interval = GC_STRESS_DEFAULT_INTERVAL;
+        this.heap.writeTrustedFieldU32(state, ENGINE_GC_STRESS_INTERVAL,
+            interval, Heap.Types.ENGINE_STATE);
+        this.resetEngineGCStress(state);
     };
 
     Records.prototype.engineGCDiagnostics = function (state) {

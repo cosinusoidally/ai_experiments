@@ -458,3 +458,41 @@ The output is deterministic and starts like this:
 
 It ends only after `cx_c` has processed call 100, requested shutdown, and
 returned from that invocation.
+
+## Optional GC stress mode
+
+Use `--vm-gc-stress` before the program name when investigating lifetime and
+rooting bugs. Normal execution leaves this mode disabled.
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js --vm-native --vm-gc-stress demo1.js
+
+./artifacts/js_runner.exe artifacts/snap \
+  guest_runner.js --vm-gc-stress demo1.js
+```
+
+The compiled interpreter requests collection every one million opcode
+boundaries, even if ordinary heap pressure would not require it. The interval
+is defined once in HeapRecords.KernelConstants. Collection uses the regular
+suspended-frame mark/sweep path; it is never inserted into a partially executed
+opcode or the construction of a heap record. Internal collection preserves the
+caller's instruction budget. Opcode fusion means this is a safepoint interval,
+not an exact count of all logical bytecode instructions.
+
+The hosted semantic collector additionally uses a lower allocation-debt
+threshold (256 rather than 16384). The standalone path does not need a host
+callback to configure or run the collector. After the standalone event loop
+returns, it reports the number of native collections. A libc exit, fatal VM
+exit or signal can bypass that final report; absence of a report is not a pass.
+
+The private embedder diagnostic `__guestVMGCStress(true)` enables the default
+interval, a nonnegative int32 argument selects an interval (zero disables it),
+and a call with no arguments returns the collection count. Native execution
+handles it as an intrinsic. These diagnostics are not ECMAScript APIs.
+
+Snapshot creation happens before enabling the command-line stress mode. The
+flag therefore does not change the ready-to-run image or normal execution of
+other programs using that image. Stress mode intentionally adds pauses and
+must not be used for production FPS or benchmark measurements.

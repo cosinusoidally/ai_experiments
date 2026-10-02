@@ -3254,6 +3254,27 @@
      * The callbacks below define the reference-backend semantics. */
     Runtime.prototype.installProgramBuilder = function () {
         var runtime = this;
+        /* Private embedder diagnostic; not part of ECMAScript's API. Native
+         * execution handles this directly and never calls this host fallback. */
+        this.setGlobal("__guestVMGCStress", this.makeNativeFunction(
+            "__guestVMGCStress", function (receiver, args) {
+                if (args.length) {
+                    var interval = args[0] === true ?
+                        HeapRecords.KernelConstants.GC_STRESS_DEFAULT_INTERVAL :
+                        Number(args[0]);
+                    if (interval < 0 || interval > 2147483647 ||
+                        interval !== Math.floor(interval)) {
+                        throw new RangeError("GC stress interval must be a nonnegative int32");
+                    }
+                    runtime.gcThreshold = interval ? 256 : 16384;
+                    if (runtime.nativeInterpreter) {
+                        runtime.heapRecords.setEngineGCStressInterval(
+                            runtime.nativeInterpreter.stateAddress, interval);
+                    }
+                    return interval;
+                }
+                return runtime.collectionCount;
+            }, "intrinsic", NativeIntrinsics.GC_STRESS_CONTROL));
         function integer(value, name) {
             value = Number(value);
             if (value !== Math.floor(value)) {
@@ -4781,6 +4802,10 @@
             this.gcAllocationDebt = 0;
             this.gcPending = false;
             this.collectionCount++;
+            if (this.nativeInterpreter) {
+                this.heapRecords.resetEngineGCStress(
+                    this.nativeInterpreter.stateAddress);
+            }
             /* A large live graph can leave the bump above the ordinary 75%
              * pressure mark.  Do not collect that same live graph again at
              * every native/semantic boundary.  Give it useful bump headroom;

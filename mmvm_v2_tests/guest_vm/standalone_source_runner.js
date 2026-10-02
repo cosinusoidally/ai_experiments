@@ -6,6 +6,7 @@ var GuestStandaloneGlobal = this;
 var GuestStandaloneModuleCache = {};
 var GuestStandaloneExitPointer = 0;
 var GuestStandaloneProfile = false;
+var GuestStandaloneGCStress = false;
 /* Guest programs execute in this context and may legitimately declare the
  * same compatibility-layer globals.  Keep the embedder's service objects in
  * private bindings so loading the next file cannot silently switch to a
@@ -248,6 +249,8 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
             /* The standalone interpreter is already native. */
         } else if (!programPath && option === "--vm-profile") {
             GuestStandaloneProfile = true;
+        } else if (!programPath && option === "--vm-gc-stress") {
+            GuestStandaloneGCStress = true;
         } else if (!programPath && option.charAt(0) === "-") {
             throw new Error("unsupported standalone guest-runner option: " + option);
         } else if (!programPath) programPath = option;
@@ -257,6 +260,11 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
     if (!programPath) {
         if (snapshotPath) return;
         throw new Error("guest_runner.js requires a program");
+    }
+    if (GuestStandaloneGCStress) {
+        var stressInterval = __guestVMGCStress(true);
+        console.log("GC stress enabled: collection every " + stressInterval +
+                    " opcode boundaries");
     }
     guestStandaloneExecute(programPath, programArguments);
 }
@@ -288,4 +296,8 @@ try {
         }
         throw GuestStandaloneError;
     }
+}
+if (GuestStandaloneGCStress) {
+    console.log("GC stress completed: " + __guestVMGCStress() +
+                " native collections");
 }

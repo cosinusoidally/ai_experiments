@@ -349,6 +349,8 @@
         engineGCTotalMicroseconds: "ENGINE_GC_TOTAL_US",
         engineGCMaximumPauseMicroseconds: "ENGINE_GC_MAX_PAUSE_US",
         engineGCLiveBytes: "ENGINE_GC_LIVE_BYTES",
+        engineGCStressInterval: "ENGINE_GC_STRESS_INTERVAL",
+        engineGCStressRemaining: "ENGINE_GC_STRESS_REMAINING",
         engineGCRoot: "ENGINE_GC_ROOT",
         engineGCContextHead: "ENGINE_GC_CONTEXT_HEAD",
         engineGCNativeFunctionHead: "ENGINE_GC_NATIVE_FUNCTION_HEAD",
@@ -465,7 +467,9 @@
         setEngineGCIndexMicroseconds: "ENGINE_GC_INDEX_US",
         setEngineGCTotalMicroseconds: "ENGINE_GC_TOTAL_US",
         setEngineGCMaximumPauseMicroseconds: "ENGINE_GC_MAX_PAUSE_US",
-        setEngineGCLiveBytes: "ENGINE_GC_LIVE_BYTES"
+        setEngineGCLiveBytes: "ENGINE_GC_LIVE_BYTES",
+        setEngineGCStressInterval: "ENGINE_GC_STRESS_INTERVAL",
+        setEngineGCStressRemaining: "ENGINE_GC_STRESS_REMAINING"
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {

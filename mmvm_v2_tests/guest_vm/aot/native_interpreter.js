@@ -118,7 +118,8 @@
             RuntimeSupportLayout.ASCII_STRING_BASE;
         overrides.INTRINSIC_BUFFER_READ_I16_LE =
             NativeIntrinsics.BUFFER_READ_I16_LE;
-        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.BUFFER_READ_I16_LE;
+        overrides.INTRINSIC_GC_STRESS_CONTROL = NativeIntrinsics.GC_STRESS_CONTROL;
+        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.GC_STRESS_CONTROL;
         return overrides;
     }
 
@@ -560,7 +561,11 @@
         var INTRINSIC_OBJECT_VALUE_OF = 104;
         var INTRINSIC_OBJECT_TO_STRING = 105;
         var INTRINSIC_BUFFER_READ_I16_LE = 0;
+        var INTRINSIC_GC_STRESS_CONTROL = 0;
         var INTRINSIC_LAST_ID = 0;
+        var ENGINE_GC_STRESS_INTERVAL = 0;
+        var ENGINE_GC_STRESS_REMAINING = 0;
+        var GC_STRESS_DEFAULT_INTERVAL = 0;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 0;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -635,6 +640,18 @@
             heapBase, frameContext(heapBase, frame), frame);
         while (budget > 0) {
             var opcode = load32(heapBase + bytecodeWords + pc * WORD_BYTES);
+            /* Stress only at an opcode boundary, before temporary allocation
+             * state exists. Use the ordinary suspended-frame collection path,
+             * never collect in the middle of constructing a heap record. */
+            if (engineGCStressInterval(heapBase, state) !== 0) {
+                var stressRemaining = engineGCStressRemaining(heapBase, state);
+                if (stressRemaining === 0) {
+                    setEngineAllocationFailed(heapBase, state, 1);
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                setEngineGCStressRemaining(heapBase, state, stressRemaining - 1);
+            }
             setEngineCallRejectReason(
                 heapBase, state, CALL_REJECT_NONE);
             var callOperation = 0;
@@ -6122,6 +6139,8 @@
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_NUMBER_TO_STRING) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_GC_STRESS_CONTROL) {
+            requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
             requiredIntrinsicArguments = 3;
         } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
@@ -6219,6 +6238,30 @@
         var intrinsicTarget = heapBase + registerCells +
             callTargetIndex * VALUE_CELL_BYTES;
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_GC_STRESS_CONTROL) {
+            if (intrinsicArgumentCount > 0) {
+                var stressCell = programArgumentCellKernel(
+                    heapBase, intrinsicArgumentsVector, registerCells, 0);
+                if (stressCell === 0) return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+                var stressTag = valueCellTag(0, stressCell);
+                var stressInterval = GC_STRESS_DEFAULT_INTERVAL;
+                if (stressTag !== VALUE_TAG_TRUE) {
+                    if ((stressTag !== VALUE_TAG_INT32) &
+                        (stressTag !== VALUE_TAG_DOUBLE)) return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, instructions);
+                    stressInterval = toInt32F64(loadNumberF64(
+                        stressCell + VALUE_CELL_LOW, stressTag));
+                }
+                if (stressInterval < 0) return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+                setEngineGCStressInterval(heapBase, state, stressInterval);
+                setEngineGCStressRemaining(heapBase, state, stressInterval);
+                setValueCellInt32(intrinsicTarget, stressInterval);
+            } else setValueCellInt32(intrinsicTarget,
+                    engineGCCollections(heapBase, state));
+            intrinsicHandled = 1;
+        }
         if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
             var booleanValue = 0;
             if (intrinsicArgumentCount > 0) {
@@ -13684,6 +13727,8 @@
         var reason = interpreterKernel(
             heapBase, frame, platformServices, arrayLengthKey,
             arrayPrototype, stringSupport, budget, state);
+        var instructionsCompleted = engineInstructions(heapBase, state);
+        budget = budget - instructionsCompleted;
         var collectionEnabled = engineGCStackBase(heapBase, state) !== 0;
         var collectionCanResume = collectionEnabled;
         var collectionJustRan = 0;
@@ -13716,6 +13761,9 @@
                         reason = interpreterKernel(
                             heapBase, frame, platformServices, arrayLengthKey,
                             arrayPrototype, stringSupport, budget, state);
+                        instructionsCompleted = instructionsCompleted +
+                            engineInstructions(heapBase, state);
+                        budget = budget - engineInstructions(heapBase, state);
                     }
                 }
             }
@@ -13729,6 +13777,12 @@
              * from which execution resumes. */
             frame = engineCurrentFrame(heapBase, state);
             var collectionBump = engineNativeTailBump(heapBase, state);
+            if (engineNativeRegionActive(heapBase, state) === 0) {
+                /* Pressure exits normally publish this in reserveAllocation.
+                 * A diagnostic safepoint can collect before such an exit. */
+                collectionBump = engineHeapBump(heapBase, state);
+                setEngineNativeTailBump(heapBase, state, collectionBump);
+            }
             /* An active interior arena has an allocated prefix followed by an
              * unpublished suffix. The collector walks the complete record
              * graph up to collectionBump, so materialize that suffix before
@@ -13899,16 +13953,22 @@
                 }
                 setEngineGCCollections(heapBase, state,
                     engineGCCollections(heapBase, state) + 1);
+                setEngineGCStressRemaining(heapBase, state,
+                    engineGCStressInterval(heapBase, state));
                 setEngineAllocationFailed(heapBase, state, 0);
                 collectionJustRan = 1;
                 frame = engineCurrentFrame(heapBase, state);
                 reason = interpreterKernel(
                     heapBase, frame, platformServices, arrayLengthKey,
                     arrayPrototype, stringSupport, budget, state);
+                instructionsCompleted = instructionsCompleted +
+                    engineInstructions(heapBase, state);
+                budget = budget - engineInstructions(heapBase, state);
             }
             }
             }
         }
+        setEngineInstructions(heapBase, state, instructionsCompleted);
         if (engineNativeRegionActive(heapBase, state) === 0) {
         if (collectionFailed === 0) {
             /* A failed mark leaves ENGINE_HEAP_BUMP at the cursor of the

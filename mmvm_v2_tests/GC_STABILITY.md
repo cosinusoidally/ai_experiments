@@ -270,3 +270,25 @@ under the new snapshot regenerates a bit-identical snapshot and runs hello.js.
 The temporary artifacts/snap is replaced with the verified image; its previous
 contents are retained as artifacts/snap.before-demo1-fix. Generated snapshots,
 executables and test logs are not checked in.
+
+## 2026-10-03: longer demo runs and optional forced collection
+
+Added the opt-in `--vm-gc-stress` runner option, documented in guest_vm/README.md.
+The native engine requests collection at every one million opcode boundaries;
+the normal pressure policy remains unchanged when the option is absent.
+The forced safepoint uses the normal frame publication and native collector.
+It publishes the current tail bump even when no failed allocation has done so,
+and internal collections now preserve the caller's remaining instruction
+budget and total executed-instruction count. The engine state uses named
+accessors and shared layout/default constants. No demo or C source changed.
+
+Longer-run log (sequential workloads, 320x240, 20 FPS limit):
+
+- demo1, approximately 3 minutes 8 seconds under js_runner with GC stress:
+  typing and two button-1 drags, then Escape; exit 0, 1,486 native collections.
+  Sampled RSS increased from about 68 MiB near startup to 240 MiB near the end.
+  Rendering under stress was roughly 0.6–0.9 FPS. This is a crash/lifetime test,
+  not a performance result or evidence that memory use has reached a plateau.
+  Log: ignored artifacts/stability-demo1-stress.log.
+
+Further demo runs and regression results are recorded below as they complete.

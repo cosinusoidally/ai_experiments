@@ -75,7 +75,8 @@
                       STRING_TO_UPPER_CASE: 103,
                       OBJECT_VALUE_OF: 104,
                       OBJECT_TO_STRING: 105,
-                      BUFFER_READ_I16_LE: 106};
+                      BUFFER_READ_I16_LE: 106,
+                      GC_STRESS_CONTROL: 107};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;
