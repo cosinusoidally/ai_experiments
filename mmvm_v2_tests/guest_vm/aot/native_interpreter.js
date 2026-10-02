@@ -13405,6 +13405,7 @@
         var address = HEAP_FIRST_RECORD;
         var freeHead = 0;
         var tailBump = heapBump;
+        var liveBytes = 0;
         while (address < heapBump) {
             var size = recordSize(heapBase, address);
             if (recordType(heapBase, address) === HEAP_TYPE_FREE) {
@@ -13416,6 +13417,8 @@
                         freeHead = address;
                     }
                 }
+            } else {
+                liveBytes = liveBytes + size;
             }
             address = address + size;
         }
@@ -13427,7 +13430,10 @@
         setEngineHeapBump(heapBase, state, tailBump);
         setEngineHeapLimit(heapBase, state,
                            engineNativeTailLimit(heapBase, state));
-        return freeHead;
+        /* The free-region head is published in engine state. Return actual
+         * occupied storage for pressure policy: subtracting only this sweep's
+         * newly reclaimed bytes incorrectly counts older holes as live. */
+        return liveBytes;
     }
 
     function formatDoubleStringKernel(
@@ -13700,7 +13706,7 @@
             } else {
                 var collectionReclaimed = heapSweepKernel(
                     heapBase, collectionBump, collectionGeneration);
-                var collectionFreeHead = rebuildNativeAllocatorKernel(
+                var collectionLiveBytes = rebuildNativeAllocatorKernel(
                     heapBase, state, collectionBump);
                 /* Repeatedly sweeping a mostly-live graph after only the
                  * minimum allocation headroom makes little progress. Grow
@@ -13709,8 +13715,6 @@
                  * reservation is unchanged and reclaimed holes remain first
                  * in the native allocator, so this changes pressure policy
                  * rather than object placement or pointer stability. */
-                var collectionLiveBytes =
-                    collectionBump - collectionReclaimed;
                 var collectionTailLimit = engineNativeTailLimit(
                     heapBase, state);
                 var collectionLiveThreshold =

@@ -84,3 +84,23 @@ Memory residency still grows during the long demo8 run. This checkpoint fixes
 the reproduced corruption, but bounded long-running memory use remains under
 investigation. Existing standalone language/HTTP semantic gaps also remain;
 the command-line smoke checks do not establish full HTTP request coverage.
+
+## 2026-10-02: accurate native heap-pressure accounting
+
+The allocator rebuild now sums occupied record sizes in its existing scan.
+Previously the pressure calculation subtracted only newly reclaimed bytes
+from the bump pointer, counting older free regions as live storage. There is
+no additional heap traversal and no change to object layout or placement.
+
+Both host suites pass again (12 programs, 266 assertions and the ancillary
+checks). The i386 bootstrap audit reports 58,578 reachable records with zero
+missing marks, and standalone snapshot regeneration remains byte-identical.
+Standalone Octane quick correctness passes Splay/SplayLatency, NavierStokes
+and zlib. Demos 1–7 each reached rendering in timed standalone smoke runs;
+these are correctness smokes, not performance measurements.
+
+Before the session restart, the corrected demo8 run reached five minutes
+without a crash. Its RSS levelled at about 531 MiB between the third and fifth
+minutes. This is still high: investigation continues into occupied storage,
+reusable regions and allocator fragmentation rather than treating RSS alone
+as a reachability measurement.
