@@ -224,3 +224,49 @@ Final checks on the current working point:
   This verifies the hosted guest paths, not the outstanding standalone HTTP
   intrinsic gaps described earlier.
 - Temporary servers and test workloads are stopped after verification.
+
+## 2026-10-02: demo1 standalone input exits
+
+Reproduced the reported demo1 failure using the existing `artifacts/snap`.
+The window rendered until input arrived; the reproduced failures were native
+unsupported-call exits (status 70), not segmentation faults or freed-record
+errors:
+
+- Keyboard input with the default debug logging called `Number.toString(16)`.
+  The native number-to-string implementation accepted only decimal output.
+  Its diagnostic was `CALL` at bytecode PC 37, detail 1083 (intrinsic 83).
+- After enabling radix conversion, mouse input reached `Buffer.readInt16LE`
+  while decoding X11 pointer coordinates. That method had no native intrinsic
+  ID and therefore attempted an unavailable embedding callback. The diagnostic
+  was `CALL` at bytecode PC 4, detail 20 (unrecognized intrinsic).
+
+The compiled guest kernel now formats signed 32-bit integers in bases 2–36,
+including exact integer-valued doubles and the minimum signed integer. The
+formatter writes and hashes a UTF-16 string on the guest heap; it does not call
+the host VM. Fractional/out-of-range number formatting and nonnumeric radix
+coercions remain semantic fallbacks; this is not a claim of complete native
+Number.prototype.toString support. Buffer.readInt16LE now shares the existing
+native buffer bounds/backing-store access path and sign-extends its two bytes.
+The new intrinsic ID is defined in native_intrinsics.js and supplied to the
+kernel as a shared compile-time constant.
+
+A regenerated standalone snapshot successfully processes typed characters,
+button-1 press/release and pointer dragging, then closes normally on Escape
+(exit 0). The existing dual-host suite passes on Node and js_min: 12 guest
+programs and 269 assertions on each host, plus embedding, lifetime, automatic
+GC, context, kernel and CLI checks. Existing buffer coverage already exercises
+signed 16-bit reads; the standard-library coverage additionally checks zero,
+base-36 digits and the signed integer boundary. No demo or C source changed.
+
+At 320x240 the standalone demo1 rendering observed during this reproduction
+is only about 1 FPS. This input-correctness fix does not claim to resolve that
+separate performance limitation or to constitute a new long-duration GC audit.
+
+Final snapshot verification also passes a short demo8 attract/garage/automatic
+free-driving smoke at 320x240, including a clean menu quit. Automatic driving
+reports approximately 17–19 FPS after switching modes; the short run is not a
+sustained-performance or long-duration stability claim. Running guest_runner.js
+under the new snapshot regenerates a bit-identical snapshot and runs hello.js.
+The temporary artifacts/snap is replaced with the verified image; its previous
+contents are retained as artifacts/snap.before-demo1-fix. Generated snapshots,
+executables and test logs are not checked in.

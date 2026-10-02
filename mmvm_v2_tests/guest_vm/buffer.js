@@ -140,7 +140,7 @@
                 var value = support.read(receiver, offset) |
                             (support.read(receiver, offset + 1) << 8);
                 return value & 32768 ? value - 65536 : value;
-            });
+            }, NativeIntrinsics.BUFFER_READ_I16_LE);
         properties.$writeUInt16LE = this.makeNative("Buffer.prototype.writeUInt16LE",
             function (receiver, args) {
                 support.requireBuffer(receiver);

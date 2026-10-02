@@ -157,6 +157,10 @@ assertEqual("mixed".toUpperCase(), "MIXED", "String.toUpperCase");
 assertEqual("  spaced \n".trim(), "spaced", "String.trim");
 assertEqual(Number("12"), 12, "Number conversion");
 assertEqual((15).toString(16), "f", "Number.toString radix");
+assertEqual((-2147483648).toString(16), "-80000000",
+            "Number.toString minimum signed integer");
+assertEqual((0).toString(2), "0", "Number.toString zero in base two");
+assertEqual((35).toString(36), "z", "Number.toString alphabetic digit");
 assertEqual((1.25).toFixed(1), "1.3", "Number.toFixed");
 assertEqual((12.345).toPrecision(4), "12.35", "Number.toPrecision");
 assertEqual(Math.floor(2.9), 2, "Math.floor");

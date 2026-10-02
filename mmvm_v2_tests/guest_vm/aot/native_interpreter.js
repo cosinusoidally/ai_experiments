@@ -6,12 +6,14 @@
     var X86Backend = root.GuestVMKernelX86Backend;
     var Bytecode = root.GuestVMBytecode;
     var HeapSweeper = root.GuestVMHeapSweeper;
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
         Bytecode = require("../bytecode.js");
         HeapSweeper = require("./heap_sweeper.js");
+        NativeIntrinsics = require("../native_intrinsics.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -114,6 +116,9 @@
         overrides.STRING_SUPPORT_EMPTY = RuntimeSupportLayout.EMPTY_STRING;
         overrides.STRING_SUPPORT_ASCII_BASE =
             RuntimeSupportLayout.ASCII_STRING_BASE;
+        overrides.INTRINSIC_BUFFER_READ_I16_LE =
+            NativeIntrinsics.BUFFER_READ_I16_LE;
+        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.BUFFER_READ_I16_LE;
         return overrides;
     }
 
@@ -554,7 +559,8 @@
         var INTRINSIC_STRING_TO_UPPER_CASE = 103;
         var INTRINSIC_OBJECT_VALUE_OF = 104;
         var INTRINSIC_OBJECT_TO_STRING = 105;
-        var INTRINSIC_LAST_ID = 105;
+        var INTRINSIC_BUFFER_READ_I16_LE = 0;
+        var INTRINSIC_LAST_ID = 0;
         var RUNTIME_SUPPORT_FUNCTION_PROGRAM_CACHE = 0;
         var ENABLE_NATIVE_REGEXP_TEST = 0;
         var STRING_SUPPORT_CHAR_AT_KEY = 0;
@@ -9115,6 +9121,8 @@
             isBufferAccessIntrinsic = 1;
         } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U8) {
             isBufferAccessIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_BUFFER_READ_I16_LE) {
+            isBufferAccessIntrinsic = 1;
         } else if (intrinsicId >= INTRINSIC_BUFFER_READ_U16_LE) {
             if (intrinsicId <= INTRINSIC_BUFFER_WRITE_I16_LE) {
                 isBufferAccessIntrinsic = 1;
@@ -9507,8 +9515,8 @@
             bufferWriteAccess = 1;
         } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U8) {
             bufferWriteAccess = 1;
-        } else if (intrinsicId >=
-                   INTRINSIC_BUFFER_WRITE_U16_LE) {
+        } else if ((intrinsicId === INTRINSIC_BUFFER_WRITE_U16_LE) |
+                   (intrinsicId === INTRINSIC_BUFFER_WRITE_I16_LE)) {
             bufferWriteAccess = 1;
         }
         if (bufferWriteAccess === 1) {
@@ -9571,12 +9579,15 @@
                         bufferReadValue);
                 store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
             }
-        } else if (intrinsicId ===
-                   INTRINSIC_BUFFER_READ_U16_LE) {
+        } else if ((intrinsicId === INTRINSIC_BUFFER_READ_U16_LE) |
+                   (intrinsicId === INTRINSIC_BUFFER_READ_I16_LE)) {
+            var shortValue = loadRaw8(bufferAddress) |
+                (loadRaw8(bufferAddress + 1) << 8);
+            if (intrinsicId === INTRINSIC_BUFFER_READ_I16_LE) {
+                shortValue = (shortValue << 16) >> 16;
+            }
             store32(intrinsicTarget, VALUE_TAG_INT32);
-            store32(intrinsicTarget + VALUE_CELL_LOW,
-                loadRaw8(bufferAddress) |
-                (loadRaw8(bufferAddress + 1) << 8));
+            store32(intrinsicTarget + VALUE_CELL_LOW, shortValue);
             store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
         } else if (intrinsicId ===
                    INTRINSIC_BUFFER_READ_U16_BE) {
@@ -10319,19 +10330,87 @@
         return 1;
     }
 
+    /* Keep the magnitude negative so INT32_MIN needs no unsigned division
+     * and cannot overflow when taking its absolute value. */
+    function integerRadixStringKernel(heapBase, state, target, number, radix) {
+        var magnitude = number;
+        if (magnitude > 0) magnitude = -magnitude;
+        var remaining = magnitude;
+        var length = 1;
+        while (remaining <= -radix) {
+            remaining = divideI32(remaining, radix);
+            length = length + 1;
+        }
+        if (number < 0) length = length + 1;
+        var bytes = (STRING_CHARS + length * 2 + 7) & -8;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) {
+            return 2;
+        }
+        var result = engineHeapBump(heapBase, state);
+        var index = length;
+        remaining = magnitude;
+        while (index > 0) {
+            index = index - 1;
+            var code = 45;
+            if ((index !== 0) | (number >= 0)) {
+                var digit = -(remaining % radix);
+                code = 48 + digit;
+                if (digit >= 10) code = 97 + digit - 10;
+                remaining = divideI32(remaining, radix);
+            }
+            setStringCharacterByte(heapBase, result, index * 2, code);
+            setStringCharacterByte(heapBase, result, index * 2 + 1, 0);
+        }
+        var hash = -2128831035;
+        index = 0;
+        while (index < length) {
+            hash = (hash ^ (stringCharacterCodeUnit(
+                heapBase, result, index) & 65535)) * 16777619;
+            index = index + 1;
+        }
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, bytes);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, 0);
+        setStringLength(heapBase, result, length);
+        setStringHash(heapBase, result, hash);
+        setEngineHeapBump(heapBase, state, result + bytes);
+        setValueCellReference(target, result);
+        return 1;
+    }
+
     function numberToStringKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
             bytecodeWords, pc, stringSupport, platformServices) {
-        if (intrinsicArgumentCount > 1) return 0;
-        if (intrinsicArgumentCount === 1) {
+        var MINIMUM_NUMBER_RADIX = 2;
+        var MAXIMUM_NUMBER_RADIX = 36;
+        var radix = 10;
+        if (intrinsicArgumentCount >= 1) {
             var radixCell = programArgumentCellKernel(
                 heapBase, intrinsicArgumentsVector, registerCells, 0);
             if (radixCell === 0) return 0;
             var radixTag = valueCellTag(0, radixCell);
             if (radixTag !== VALUE_TAG_UNDEFINED) {
-                if (radixTag !== VALUE_TAG_INT32) return 0;
-                if (valueCellInt32(0, radixCell) !== 10) return 0;
+                if (radixTag === VALUE_TAG_INT32) {
+                    radix = valueCellInt32(0, radixCell);
+                } else if (radixTag === VALUE_TAG_DOUBLE) {
+                    /* Check before truncation: ToInt32 alone would wrap a
+                     * large invalid radix into the accepted range. NaN and
+                     * infinities must also take the semantic fallback. */
+                    setEngineScratchLeft(heapBase, state, MINIMUM_NUMBER_RADIX);
+                    setEngineScratchRight(heapBase, state,
+                        MAXIMUM_NUMBER_RADIX + 1);
+                    if (greaterEqualF64(loadF64(radixCell + VALUE_CELL_LOW),
+                            loadI32F64(engineScratchLeftAddress(
+                                heapBase, state))) === 0) return 0;
+                    if (lessF64(loadF64(radixCell + VALUE_CELL_LOW),
+                            loadI32F64(engineScratchRightAddress(
+                                heapBase, state))) === 0) return 0;
+                    radix = toInt32F64(loadF64(radixCell + VALUE_CELL_LOW));
+                } else return 0;
+                if (radix < MINIMUM_NUMBER_RADIX) return 0;
+                if (radix > MAXIMUM_NUMBER_RADIX) return 0;
             }
         }
         var receiverIndex = load32(
@@ -10349,6 +10428,18 @@
         }
         if (receiverTag !== VALUE_TAG_INT32) {
             if (receiverTag !== VALUE_TAG_DOUBLE) return 0;
+        }
+        if (radix !== 10) {
+            var integer = valueCellInt32(0, receiverCell);
+            if (receiverTag === VALUE_TAG_DOUBLE) {
+                integer = toInt32F64(loadF64(receiverCell + VALUE_CELL_LOW));
+                setEngineScratchLeft(heapBase, state, integer);
+                if (equalF64(loadF64(receiverCell + VALUE_CELL_LOW),
+                        loadI32F64(engineScratchLeftAddress(
+                            heapBase, state))) === 0) return 0;
+            }
+            return integerRadixStringKernel(heapBase, state,
+                intrinsicTarget, integer, radix);
         }
         var numberStringResult = numberCellToStringKernel(
             heapBase, state, intrinsicTarget, receiverCell, receiverTag,
@@ -16426,6 +16517,7 @@
             numberCellToStringKernel: numberCellToStringKernel,
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
+            integerRadixStringKernel: integerRadixStringKernel,
             objectDefinePropertyKernel: objectDefinePropertyKernel,
             objectConstructorKernel: objectConstructorKernel,
             objectCreateKernel: objectCreateKernel,

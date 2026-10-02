@@ -74,7 +74,8 @@
                       IS_NAN: 102,
                       STRING_TO_UPPER_CASE: 103,
                       OBJECT_VALUE_OF: 104,
-                      OBJECT_TO_STRING: 105};
+                      OBJECT_TO_STRING: 105,
+                      BUFFER_READ_I16_LE: 106};
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;
