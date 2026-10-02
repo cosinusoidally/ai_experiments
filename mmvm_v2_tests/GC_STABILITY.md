@@ -208,3 +208,19 @@ host-side weak wrapper/metadata maintenance. No claim is made here that the
 collector has become incremental or that host compatibility bookkeeping has
 been fully eliminated. Tests and profiles run sequentially to bound memory
 pressure; generated images, logs and debugger dumps remain ignored artifacts.
+
+Final checks on the current working point:
+
+- A newly generated standalone snapshot runs hello.js and regenerates an
+  identical file under js_runner (`cmp` exits successfully).
+- The compiled i386 heap audit finds 58,898 reachable records and zero
+  missing marks.
+- A three-minute standalone demo8 attract/garage smoke reaches rendering
+  without a crash before its explicit timeout. This is additional coverage,
+  not a replacement for the earlier ten-minute garage/automatic-driving run.
+- Both net.js and node_web.js serve text, binary and directory-listing
+  requests under `js_min guest_runner.js --vm-native`. Text and binary bodies
+  compare byte-for-byte with the source files; all requests return HTTP 200.
+  This verifies the hosted guest paths, not the outstanding standalone HTTP
+  intrinsic gaps described earlier.
+- Temporary servers and test workloads are stopped after verification.
