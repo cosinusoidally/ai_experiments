@@ -636,6 +636,16 @@ performance are separate mandatory regression gates.
   Complete Node and `js_min.exe` regression gates pass with all 264 guest
   assertions and the existing integration checks.
 
+### 2026-10-02 — GC stability regression check
+
+- Revision `966169c`, native js_min host, authored `ch10/10.1` selection,
+  20,000-instruction allowance: 43 files/variants executed, 43 passed,
+  0 failed, 0 not run, and 0 timed out. This is a focused regression check
+  after allocator ownership and collector preparation changes, not a new
+  full-suite conformance result. Elapsed time and peak RSS were not captured.
+  The existing corpus was not modified. Raw output remains an ignored
+  artifact in `artifacts/gc-test262-contexts.log`.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure
