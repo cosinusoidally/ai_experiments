@@ -12,6 +12,7 @@
     var HEADER_MARK = 8;
     var HEADER_FLAGS = 12;
     var FIRST_RECORD = 64;
+    var RECORD_ALIGNMENT = 8;
 
     var Types = {
         FREE: 0,
@@ -38,7 +39,7 @@
     };
 
     function align8(value) {
-        return (value + 7) & ~7;
+        return (value + RECORD_ALIGNMENT - 1) & ~(RECORD_ALIGNMENT - 1);
     }
 
     function Heap(options) {
@@ -84,6 +85,13 @@
     Heap.Types = Types;
     Heap.HEADER_SIZE = HEADER_SIZE;
     Heap.FIRST_RECORD = FIRST_RECORD;
+    Heap.RECORD_ALIGNMENT = RECORD_ALIGNMENT;
+    Heap.HeaderFields = {
+        TYPE: HEADER_TYPE,
+        SIZE: HEADER_SIZE_FIELD,
+        MARK: HEADER_MARK,
+        FLAGS: HEADER_FLAGS
+    };
 
     Heap.prototype.allocateRecord = function (type, payloadBytes) {
         return this.allocateRecordWords(type, payloadBytes, 0, 0, 0, 0);

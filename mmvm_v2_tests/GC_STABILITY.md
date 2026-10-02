@@ -184,3 +184,27 @@ code is the next pause-reduction step; the pause issue is not declared fixed.
 
 The updated standalone snapshot also passes Octane quick correctness for
 Richards, DeltaBlue, Crypto, RayTrace, Splay/SplayLatency, NavierStokes and zlib.
+
+## 2026-10-02: kernel-owned free-link cleanup
+
+Free-region and retired-fragment link cleanup now runs in a shared kernel
+function instead of crossing the accessor layers once per fragment. Header
+offsets and alignment come from the allocator's named ABI exports. The same
+front end compiles the operation to JS for Node and native i386 for js_min.
+It checks reference bounds, alignment and FREE record type before reading a
+link, and reports an invalid chain rather than dereferencing arbitrary memory.
+
+The repeated isolated 90-second hosted demo8 profile completed without a
+crash. Preparation measured 1–2 ms instead of the earlier 63–72 ms. Later
+garage collection totals were 119–147 ms, versus 175–222 ms in the preceding
+sample; the scenes were comparable but allocation histories are not identical.
+Steady garage samples were approximately 20 FPS. Both regression suites pass
+again (12 programs, 266 assertions and ancillary checks).
+
+The reproduced heap-corruption crashes are fixed in the recorded stress
+runs. Collector pauses have improved, but are still above a 50 ms frame
+budget. Remaining measured costs include mark/sweep/index traversal and
+host-side weak wrapper/metadata maintenance. No claim is made here that the
+collector has become incremental or that host compatibility bookkeeping has
+been fully eliminated. Tests and profiles run sequentially to bound memory
+pressure; generated images, logs and debugger dumps remain ignored artifacts.

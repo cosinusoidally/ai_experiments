@@ -4,10 +4,12 @@
     var KernelCompiler = root.GuestVMKernelCompiler;
     var JSBackend = root.GuestVMKernelJSBackend;
     var X86Backend = root.GuestVMKernelX86Backend;
+    var Heap = root.GuestVMHeap;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
+        Heap = require("../heap.js");
     }
 
     var sharedJS = null;
@@ -16,6 +18,33 @@
     var sharedMarkX86 = null;
     var sharedIndexJS = null;
     var sharedIndexX86 = null;
+    var sharedClearLinksJS = null;
+    var sharedClearLinksX86 = null;
+
+    /* Free-region links use the otherwise-unused mark word. Release them
+     * before weak metadata is filtered: a stale next address must never be
+     * mistaken for the collection generation. The shared allocator ABI is
+     * substituted by the compiler; the zeros are dialect placeholders. */
+    function clearFreeRegionLinksKernel(heapBase, heapBump, region) {
+        var RECORD_TYPE = 0;
+        var RECORD_MARK = 0;
+        var HEAP_FIRST_RECORD = 0;
+        var RECORD_HEADER_BYTES = 0;
+        var HEAP_TYPE_FREE = 0;
+        var RECORD_ALIGNMENT_MASK = 0;
+        var count = 0;
+        while (region !== 0) {
+            if (region < HEAP_FIRST_RECORD) return -1;
+            if (region > heapBump - RECORD_HEADER_BYTES) return -1;
+            if ((region & RECORD_ALIGNMENT_MASK) !== 0) return -1;
+            if (recordType(heapBase, region) !== HEAP_TYPE_FREE) return -1;
+            var next = recordMark(heapBase, region);
+            setRecordMark(heapBase, region, 0);
+            region = next;
+            count = count + 1;
+        }
+        return count;
+    }
 
     function heapMarkKernel(
             heapBase, heapBump, stackBase, heapLimit, generation,
@@ -553,6 +582,19 @@
             });
             sharedIndexJS = new JSBackend().compile(indexIR);
             sharedIndexX86 = new X86Backend().compile(indexIR);
+            var clearLinksIR = new KernelCompiler().compile(
+                clearFreeRegionLinksKernel, {
+                    constantOverrides: {
+                        RECORD_TYPE: Heap.HeaderFields.TYPE,
+                        RECORD_MARK: Heap.HeaderFields.MARK,
+                        HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
+                        RECORD_HEADER_BYTES: Heap.HEADER_SIZE,
+                        HEAP_TYPE_FREE: Heap.Types.FREE,
+                        RECORD_ALIGNMENT_MASK: Heap.RECORD_ALIGNMENT - 1
+                    }
+                });
+            sharedClearLinksJS = new JSBackend().compile(clearLinksIR);
+            sharedClearLinksX86 = new X86Backend().compile(clearLinksIR);
         }
         this.heap = heap;
         this.compiled = heap.memory.nativeAddress(0) && sharedX86.fn ?
@@ -561,7 +603,21 @@
                       sharedMarkX86 : sharedMarkJS;
         this.indexer = heap.memory.nativeAddress(0) && sharedIndexX86.fn ?
                        sharedIndexX86 : sharedIndexJS;
+        this.linkReleaser = heap.memory.nativeAddress(0) &&
+            sharedClearLinksX86.fn ? sharedClearLinksX86 : sharedClearLinksJS;
     }
+
+    HeapSweeper.prototype.clearFreeRegionLinks = function (head) {
+        if (!head) return 0;
+        var heap = this.heap;
+        var cleared = this.linkReleaser.backend === "i386" ?
+            this.linkReleaser.fn(heap.memory.nativeAddress(0), heap.bump, head) :
+            this.linkReleaser.fn(heap.memory, 0, heap.bump, head);
+        if (cleared < 0) {
+            throw new Error("invalid native allocator free-region chain");
+        }
+        return cleared;
+    };
 
     HeapSweeper.prototype.mark = function (generation) {
         if (this.marker.backend === "i386") {

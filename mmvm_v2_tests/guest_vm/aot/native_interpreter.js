@@ -17109,18 +17109,10 @@
             if (tailBump > heap.bump) heap.bump = tailBump;
             var freeRegion = records.engineNativeFreeRegion(
                 this.stateAddress);
-            while (freeRegion) {
-                var nextFreeRegion = heap.freeRecordNext(freeRegion);
-                heap.setFreeRecordNext(freeRegion, 0);
-                freeRegion = nextFreeRegion;
-            }
+            this.runtime.heapSweeper.clearFreeRegionLinks(freeRegion);
             var retiredRegion = records.engineNativeRetiredRegion(
                 this.stateAddress);
-            while (retiredRegion) {
-                var nextRetiredRegion = heap.freeRecordNext(retiredRegion);
-                heap.setFreeRecordNext(retiredRegion, 0);
-                retiredRegion = nextRetiredRegion;
-            }
+            this.runtime.heapSweeper.clearFreeRegionLinks(retiredRegion);
             if (records.engineNativeRegionActive(this.stateAddress)) {
                 var regionBump = records.engineHeapBump(this.stateAddress);
                 var regionEnd = records.engineNativeRegionEnd(
