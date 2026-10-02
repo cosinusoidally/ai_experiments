@@ -4600,16 +4600,22 @@
         if (this.gcCollecting) return this.heapObjects.length;
         this.gcCollecting = true;
         try {
+            var collectionStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
             if (this.nativeInterpreter) {
-                this.nativeInterpreter.releaseAllocationRegionForCollection();
-                this.nativeInterpreter.releaseCachedFramesForCollection();
+                /* No guest allocation occurs during collection. Discard
+                 * derived allocator indexes now and rebuild them once from
+                 * the post-sweep graph, rather than copying and indexing
+                 * pre-collection free regions twice only to replace them. */
+                this.nativeInterpreter.releaseAllocationRegionForCollection(true);
+                this.nativeInterpreter.releaseCachedFramesForCollection(true);
                 /* Inline property entries are weak derived state. Clear them
                  * before reclaimed object/property addresses can be reused. */
                 this.heapRecords.clearEnginePropertyCache(
                     this.nativeInterpreter.stateAddress);
             }
             var heapBumpBeforeCollection = this.linearHeap.bump;
-            var collectionStarted = this.profileOpcodeCounts ?
+            var preparationFinished = this.profileOpcodeCounts ?
                 new Date().getTime() : 0;
             if (this.nativeInterpreter) {
                 var nativeGeneration = this.heapRecords.engineGCGeneration(
@@ -4859,11 +4865,13 @@
                     this.linearHeap.largestFreeBlockSize() +
                     " freeDistribution(min:count/bytes)=" +
                     freeDistribution + " markMs=" +
-                    (markingFinished - collectionStarted) + " sweepMs=" +
+                    (markingFinished - preparationFinished) + " sweepMs=" +
                     (sweepingFinished - markingFinished) + " nextPressure=" +
                     this.gcHeapPressureBump + " liveBytes=" + liveBytes +
                     " limit=" +
-                    this.linearHeap.allocationLimit;
+                    this.linearHeap.allocationLimit + " preparationMs=" +
+                    (preparationFinished - collectionStarted) + " totalMs=" +
+                    (sweepingFinished - collectionStarted);
                 if (nativeSweepStarted) {
                     collectionLine += " phasesMs=wrappers:" +
                         (handlesStarted - markingFinished) +

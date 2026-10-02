@@ -159,3 +159,28 @@ ancillary checks. The updated standalone snapshot runs hello.js and reproduces
 itself byte-for-byte. The JS kernel audit finds 58,832 reachable records and
 zero missing marks. The reported long-pause issue remains under measurement;
 the native counters distinguish collector work from other frame-time stalls.
+
+## 2026-10-02: hosted collector preparation
+
+The hosted native demo8 profile completed a 90-second execution sample,
+including garage mode, without a crash. Reported mark/sweep work ranged from
+about 93 to 130 ms. Those old totals excluded allocator preparation, so they
+must not be presented as complete pause measurements. Host wrapper/metadata
+maintenance accounted for roughly 55–60 ms of that work.
+
+Collection now discards derived native allocator indexes and rebuilds them
+only after sweeping. Previously releasing allocation arenas and cached frames
+each rebuilt an index which the sweep immediately replaced. Normal ownership
+transitions outside collection still rebuild immediately. Free-list mark-word
+links are cleared before weak-cache filtering, and no guest allocations occur
+while the index is deferred.
+
+Both host suites pass again, and a second 90-second hosted demo8 profile
+completed without a crash. The profile now includes preparation and total
+pause time. Later samples measured 63–72 ms of preparation and total pauses
+of 175–222 ms. This reveals another real bottleneck: traversing retired native
+arena links through host accessors. Moving that bulk operation into kernel
+code is the next pause-reduction step; the pause issue is not declared fixed.
+
+The updated standalone snapshot also passes Octane quick correctness for
+Richards, DeltaBlue, Crypto, RayTrace, Splay/SplayLatency, NavierStokes and zlib.

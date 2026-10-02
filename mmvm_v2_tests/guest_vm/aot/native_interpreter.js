@@ -17101,19 +17101,17 @@
      * both fragment the heap and leave this object describing pre-collection
      * layout. */
     NativeInterpreter.prototype.releaseAllocationRegionForCollection =
-            function () {
+            function (deferIndexRebuild) {
         var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;
         if (this.nativeFreeRegionsOwned) {
             var tailBump = records.engineNativeTailBump(this.stateAddress);
             if (tailBump > heap.bump) heap.bump = tailBump;
-            var returnedRegions = [];
             var freeRegion = records.engineNativeFreeRegion(
                 this.stateAddress);
             while (freeRegion) {
                 var nextFreeRegion = heap.freeRecordNext(freeRegion);
                 heap.setFreeRecordNext(freeRegion, 0);
-                returnedRegions.push(freeRegion);
                 freeRegion = nextFreeRegion;
             }
             var retiredRegion = records.engineNativeRetiredRegion(
@@ -17121,7 +17119,6 @@
             while (retiredRegion) {
                 var nextRetiredRegion = heap.freeRecordNext(retiredRegion);
                 heap.setFreeRecordNext(retiredRegion, 0);
-                returnedRegions.push(retiredRegion);
                 retiredRegion = nextRetiredRegion;
             }
             if (records.engineNativeRegionActive(this.stateAddress)) {
@@ -17131,24 +17128,20 @@
                 var regionBytes = regionEnd - regionBump;
                 if (regionBytes >= FREE_RECORD_HEADER_BYTES) {
                     heap.publishFreeRegion(regionBump, regionBytes, 0);
-                    returnedRegions.push(regionBump);
                 }
             }
             records.setEngineNativeAllocator(
                 this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0,
                 0);
             this.nativeFreeRegionsOwned = false;
-            var returnedIndex = 0;
-            while (returnedIndex < returnedRegions.length) {
-                heap.freeBlocks.push(returnedRegions[returnedIndex++]);
-            }
             heap.freeBlocksAreMaxHeap = false;
             /* Reconstruct the reusable index from record boundaries at the
              * ownership transition.  Native execution may split one arena
              * into allocated prefixes and several retired suffixes; the
              * record graph is authoritative and avoids carrying a stale or
              * overlapping range into host allocation. */
-            this.runtime.rebuildFreeBlockIndex();
+            if (deferIndexRebuild) heap.freeBlocks = [];
+            else this.runtime.rebuildFreeBlockIndex();
         }
         if (!this.allocationRegion) {
             records.setEngineNativeAllocator(
@@ -17164,7 +17157,8 @@
         this.allocationRegion = null;
         records.setEngineNativeAllocator(
             this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0, 0);
-        this.runtime.rebuildFreeBlockIndex();
+        if (deferIndexRebuild) heap.freeBlocks = [];
+        else this.runtime.rebuildFreeBlockIndex();
     };
 
     NativeInterpreter.prototype.installNativeFreeRegions = function () {
@@ -17297,7 +17291,8 @@
         return true;
     };
 
-    NativeInterpreter.prototype.releaseCachedFramesForCollection = function () {
+    NativeInterpreter.prototype.releaseCachedFramesForCollection = function (
+            deferIndexRebuild) {
         var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;
         var frame = records.engineFreeFrame(this.stateAddress);
@@ -17307,7 +17302,7 @@
             heap.setFreeRecordFlags(frame, 0);
             frame = next;
         }
-        this.runtime.rebuildFreeBlockIndex();
+        if (!deferIndexRebuild) this.runtime.rebuildFreeBlockIndex();
     };
 
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
