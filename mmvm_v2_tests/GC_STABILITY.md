@@ -317,3 +317,19 @@ The dual-host regression suite also passes after adding stress mode: 12 guest
 programs and 269 assertions per host, plus the embedding/lifetime/context/GC,
 kernel and command-line checks. Standalone snapshot regeneration with the
 stress flag produces a bit-identical image (the flag is applied after writing).
+
+- demo8, approximately 10 minutes under standalone GC stress at 320x240,
+  20 FPS limit: attract mode, garage with two mouse drags, autodrive,
+  manual free driving with simultaneous acceleration/turning and then
+  braking/turning, back to garage and autodrive. Exit 0 using Escape, q;
+  no fatal VM error or signal. Rendering generally reported 13–16 FPS,
+  reaching about 20 FPS when stationary. Last sampled RSS was 520 MiB.
+  The q path invokes process exit, so it bypasses the final collection-count
+  message; no collection total is claimed for this run. Log:
+  ignored artifacts/stability-demo8-stress.log.
+
+The X11 input driver now accepts simultaneous held keys, for example
+`--hold w+a:8000` and `--hold s+a:8000`. This was exercised under both Node
+and js_min with node_runner.js. It does not change any demo source.
+Continued RSS growth in the stress runs remains an open investigation;
+these results must not be interpreted as proving bounded memory use.
