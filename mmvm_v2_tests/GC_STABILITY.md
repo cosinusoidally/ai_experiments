@@ -292,3 +292,28 @@ Longer-run log (sequential workloads, 320x240, 20 FPS limit):
   Log: ignored artifacts/stability-demo1-stress.log.
 
 Further demo runs and regression results are recorded below as they complete.
+
+- demo2, 3m26s monitored: keyboard and two button-1 drags, Escape, exit 0;
+  2,058 native collections; maximum sampled RSS 283 MiB.
+- demo3, 3m24s: continuously animated full-frame blits plus input, Escape,
+  exit 0; 1,538 native collections; maximum sampled RSS 304 MiB.
+- demo4, 3m24s: continuously animated lighting/normal-mapped full-frame blits
+  plus input, Escape, exit 0; 1,509 collections; sampled RSS 343 MiB.
+- demo5, 3m25s: textured 3D rendering, keyboard and two drags, Escape,
+  exit 0; 1,564 collections; sampled RSS 255 MiB.
+- demo6, 3m09s: attract mode, Space and held-forward driving input, Escape,
+  exit 0; 1,400 collections; sampled RSS 223 MiB.
+- demo7, 3m09s: attract mode, Space and held-forward driving input, Escape,
+  exit 0; 1,044 collections; sampled RSS 247 MiB.
+
+These runs total 10,599 native collections with no fatal VM exits or signals.
+Durations for demos2–7 are measured by the monitor (demo2 was already running
+when monitoring began). RSS is sampled, not an exact process high-water mark.
+Each process is stopped before starting the next. Logs are ignored artifacts
+named stability-demoN-stress.log. They are finite stress runs, not proof that
+every collector bug is absent or that RSS remains bounded indefinitely.
+
+The dual-host regression suite also passes after adding stress mode: 12 guest
+programs and 269 assertions per host, plus the embedding/lifetime/context/GC,
+kernel and command-line checks. Standalone snapshot regeneration with the
+stress flag produces a bit-identical image (the flag is applied after writing).
