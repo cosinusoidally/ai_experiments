@@ -104,3 +104,20 @@ without a crash. Its RSS levelled at about 531 MiB between the third and fifth
 minutes. This is still high: investigation continues into occupied storage,
 reusable regions and allocator fragmentation rather than treating RSS alone
 as a reachability measurement.
+
+The heap audit tool also accepts a raw, quiescent debugger heap dump:
+
+```
+node guest_vm/tools/audit_snapshot_heap.js --heap-stats artifacts/heap.dump
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib ../../mmvm_v2/artifacts/js_min.exe guest_vm/tools/audit_snapshot_heap.js --heap-stats artifacts/heap.dump
+```
+
+Dump from the native heap base through the allocator's authoritative tail
+bump while execution is stopped. The tool validates record boundaries using
+`Heap.inspectRecordHeader` and reports occupied/free bytes, protected free
+records, the largest reusable region and a breakdown by record kind. Node
+inspects the file through a borrowed read-only memory view; it does not expand
+the dump into its array-emulated heap. Both hosts reported identical results
+for the first live dump: 130,491,400 total bytes, 28,419,664 occupied bytes,
+102,071,672 free bytes and 12,560 protected free bytes. Occupied bytes include
+not-yet-collected garbage; they are not a post-mark reachability measurement.

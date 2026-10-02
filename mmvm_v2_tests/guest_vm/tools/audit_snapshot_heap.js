@@ -26,7 +26,12 @@
         args = shellArguments;
         output = print;
     }
-    if (!args.length) throw new Error("usage: audit_snapshot_heap.js snapshot");
+    var statisticsOnly = args[0] === "--heap-stats";
+    if (statisticsOnly) args = args.slice(1);
+    if (!args.length) {
+        throw new Error("usage: audit_snapshot_heap.js snapshot | " +
+                        "--heap-stats raw-heap-dump");
+    }
     var header, file, ffi, descriptor;
     if (nodeHost) {
         file = require("fs").readFileSync(args[0]);
@@ -44,8 +49,26 @@
             return ffi.peek32(headerPointer + offset) >>> 0;
         };
     }
-    var heapOffset = header(28);
-    var heapLength = header(32);
+    var heapOffset = statisticsOnly ? 0 : header(28);
+    var heapLength = statisticsOnly ? (nodeHost ? file.length :
+        ffi.call(ffi.resolve("lseek"), [descriptor, 0, 2])) : header(32);
+    if (statisticsOnly && nodeHost) {
+        /* Inspect a debugger dump without expanding its bytes into the Node
+         * emulated heap. Header interpretation still belongs to Heap. */
+        var inspectionHeap = new Heap({heapBytes: 4096});
+        inspectionHeap.memory.destroy();
+        inspectionHeap.memory = {
+            readU32: function (offset) {
+                return file.readUInt32LE(offset);
+            },
+            byteLength: heapLength,
+            destroy: function () {}
+        };
+        inspectionHeap.bump = heapLength;
+        reportStatistics(inspectionHeap);
+        inspectionHeap.destroy();
+        return;
+    }
     var heap = new Heap({heapBytes: heapLength + 1048576,
                          collectorWorkspace: true});
     if (nodeHost) {
@@ -69,6 +92,41 @@
         ffi.call(ffi.resolve("free"), [headerPointer]);
     }
     heap.bump = heapLength;
+    if (statisticsOnly) {
+        reportStatistics(heap);
+        heap.destroy();
+        return;
+    }
+    function reportStatistics(inspectedHeap) {
+        var position = Heap.FIRST_RECORD;
+        var totalLiveBytes = 0, totalFreeBytes = 0, protectedFreeBytes = 0;
+        var largestFree = 0;
+        var typeBytes = {}, typeCounts = {};
+        while (position < inspectedHeap.bump) {
+            var record = inspectedHeap.inspectRecordHeader(position);
+            if (record.type === Heap.Types.FREE) {
+                totalFreeBytes += record.size;
+                if (record.flags) protectedFreeBytes += record.size;
+                else if (record.size > largestFree) largestFree = record.size;
+            } else totalLiveBytes += record.size;
+            typeBytes[record.type] = (typeBytes[record.type] || 0) + record.size;
+            typeCounts[record.type] = (typeCounts[record.type] || 0) + 1;
+            position += record.size;
+        }
+        output("heap bytes: " + inspectedHeap.bump + "; occupied: " +
+            totalLiveBytes + "; free: " + totalFreeBytes +
+            "; protected free: " + protectedFreeBytes +
+            "; largest reusable region: " + largestFree);
+        var name;
+        for (name in Heap.Types) {
+            if (Object.prototype.hasOwnProperty.call(Heap.Types, name)) {
+                var type = Heap.Types[name];
+                if (typeCounts[type]) output(name + ": " +
+                    typeCounts[type] + " records, " + typeBytes[type] +
+                    " bytes");
+            }
+        }
+    }
     var records = new Records(heap, new Cells(heap));
     function recordKind(record) {
         return heap.inspectRecordHeader(record).type;
