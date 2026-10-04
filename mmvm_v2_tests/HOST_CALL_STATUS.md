@@ -309,6 +309,11 @@ alone proves demo GC stability or frame-rate parity.
   (404), binary GET and binary HEAD through unchanged `node_web.js`. The index
   and binary bodies compare byte-for-byte with their files. Log dates now
   agree with the system calendar. Regenerated snapshots remain bit-identical.
+- Live index and binary GET checks also pass through hosted
+  `node guest_runner.js --vm-native node_web.js` and the corresponding js_min
+  invocation. The unchanged libc-only `net.js` passes those same standalone
+  checks. The final verified image is available as ignored artifacts/snap;
+  the preceding generated image was retained as artifacts/snap-before-http.
 
 The five pre-existing standalone test gaps listed above remain open. All eight
 demos completed the finite interactive regression runs recorded in
