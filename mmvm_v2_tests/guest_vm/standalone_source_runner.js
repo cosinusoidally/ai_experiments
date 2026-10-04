@@ -273,10 +273,22 @@ function guestStandaloneRunGuestRunner(runnerArguments) {
     try {
         guestStandaloneRunGuestRunnerUnchecked(runnerArguments);
     } catch (error) {
-        var description = error && error.stack ? error.stack : String(error);
+        var description = guestStandaloneDescribeError(error);
         console.error(description);
         guestStandaloneQuit(3);
     }
+}
+
+/* Native exceptions need not carry a host-generated stack. Report their
+ * message before attempting object-to-string conversion, so a second missing
+ * operation cannot hide the original failure at the standalone boundary. */
+function guestStandaloneDescribeError(error) {
+    if (error && error.stack) return error.stack;
+    if (error && typeof error.message === "string") {
+        return (typeof error.name === "string" ? error.name : "Error") +
+               ": " + error.message;
+    }
+    return String(error);
 }
 
 __guestVMStandaloneRunGuestRunner = guestStandaloneRunGuestRunner;
@@ -289,11 +301,7 @@ try {
     NodeRuntime.run();
 } catch (GuestStandaloneError) {
     if (GuestStandaloneError !== NodeProcess.exitMarker) {
-        if (GuestStandaloneError && GuestStandaloneError.stack) {
-            console.log(String(GuestStandaloneError.stack));
-        } else {
-            console.log(String(GuestStandaloneError));
-        }
+        console.log(guestStandaloneDescribeError(GuestStandaloneError));
         throw GuestStandaloneError;
     }
 }

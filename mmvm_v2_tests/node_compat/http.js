@@ -54,8 +54,13 @@ NodeServerResponse.prototype.end = function (body) {
     if (this._ended) throw new Error("write after end");
     this._ended = true;
     body = body === undefined || body === null ? "" : body;
+    var bodyIsBuffer = body && !body._nodeBytes &&
+                       Buffer.isBuffer && Buffer.isBuffer(body);
+    /* The portable shell Buffer exposes an array; the guest VM Buffer owns
+     * native storage instead. Never stringify a Buffer: decoding/re-encoding
+     * corrupts arbitrary binary response bodies. */
     var bodyBytes = body && body._nodeBytes ? body._nodeBytes :
-                    NodeEncoding.utf8Bytes(String(body));
+                    bodyIsBuffer ? body : NodeEncoding.utf8Bytes(String(body));
 
     if (!nodeHeaderHas(this._headers, "Content-Length")) {
         this._headers["Content-Length"] = String(bodyBytes.length);
@@ -74,7 +79,9 @@ NodeServerResponse.prototype.end = function (body) {
 
     var output = NodeEncoding.utf8Bytes(header);
     if (this._request.method !== "HEAD") {
-        for (var i = 0; i < bodyBytes.length; i++) output.push(bodyBytes[i]);
+        for (var i = 0; i < bodyBytes.length; i++) {
+            output.push(bodyIsBuffer ? bodyBytes.readUInt8(i) : bodyBytes[i]);
+        }
     }
     this.headersSent = true;
     this._client.queueBytes(output);

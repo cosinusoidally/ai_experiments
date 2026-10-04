@@ -76,7 +76,17 @@
                       OBJECT_VALUE_OF: 104,
                       OBJECT_TO_STRING: 105,
                       BUFFER_READ_I16_LE: 106,
-                      GC_STRESS_CONTROL: 107};
+                      GC_STRESS_CONTROL: 107,
+                      DECODE_URI_COMPONENT: 108,
+                      DECODE_URI: 109,
+                      STRING_TO_LOWER_CASE: 110,
+                      BUFFER_IS_BUFFER: 111,
+                      FIRST_ERROR_CONSTRUCTOR: 112,
+                      LAST_ERROR_CONSTRUCTOR: 118};
+    /* This order is the shared mapping from constructor names to IDs and
+     * native runtime-support slots. Do not repeat it in either backend. */
+    Intrinsics.ERROR_CONSTRUCTOR_NAMES = ["Error", "EvalError", "RangeError",
+        "ReferenceError", "SyntaxError", "TypeError", "URIError"];
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

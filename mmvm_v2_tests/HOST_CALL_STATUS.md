@@ -222,6 +222,66 @@ Outstanding general work exposed by this group, in priority order:
   zlib source hook, no cached zlib parse, and no program state in the generic
   snapshot.
 
+### 2026-10-04: standalone HTTP runtime repair
+
+The old `node_web.js` first-request blocker described above is now closed.
+This is a runtime repair; `node_web.js`, the demos, test programs and C sources
+were not changed.
+
+- URI decoding executes in the native kernel, including UTF-8 validation,
+  surrogate-pair output and `decodeURI`'s reserved-escape preservation.
+  Malformed string input constructs and unwinds a guest URIError, rather than
+  returning to the host for the error path. Non-string coercion and unhandled
+  exceptions still have semantic-boundary limitations; this is not a claim
+  that every form of URI conversion is standalone-complete.
+- Uppercase and lowercase share the existing native ASCII case-conversion
+  algorithm. Unicode case conversion remains a separate outstanding feature.
+- `Buffer.isBuffer` inspects the native view kind. The HTTP compatibility
+  runtime reads heap-backed response Buffers as bytes, rather than attempting
+  to stringify them or assuming the array fallback's private `_nodeBytes`.
+- `Buffer.byteLength` now runs guest JavaScript, not a Node/js_min callback.
+  Its UTF-8 count handles surrogate pairs and lone-surrogate replacement;
+  single-byte and UTF-16 encodings are also handled. This helper is not a
+  claim of complete support for every Node encoding/API.
+- All seven standard Error constructors share a native construction helper
+  and one authoritative constructor-name/ID mapping. This supports filesystem
+  failures without changing the caller's error handling. Other Error API
+  details, including standalone object-to-string conversion, remain open.
+- Array sorting uses an iterative guest merge sort, including comparator
+  calls, undefined entries and holes; no host array sort is involved in the
+  Node-compatible guest environment. This is general language functionality,
+  not a directory-listing-specific hook.
+- Self-hosted program adoption accepts exact int32-valued doubles as well as
+  int32 cells. Negative global catch descriptors previously failed because
+  their numeric representation was mistaken for a language/type violation.
+- The standalone reporting boundary uses an exception's name/message when
+  there is no stack, so another object-to-string failure does not mask it.
+
+Verification at this checkpoint:
+
+- Existing dual-host suite: all 12 guest programs and 269 assertions pass
+  under each of Node and js_min, together with the existing embedding, heap,
+  GC, context, compiler and runner checks.
+- Fresh generic standalone image: text GET, binary GET, HEAD, malformed URL
+  (400), missing file (404) and generated directory listing (200) pass through
+  unchanged `node_web.js`. Text and executable bodies compare byte-for-byte
+  with their source files. These calls use guest-owned libc filesystem/socket
+  services; there is no JavaScript host in `js_runner`.
+- Writing another snapshot through `js_runner` and `guest_runner.js` produces
+  a byte-identical image.
+- An additional direct standalone audit of the 12 guest programs passes 7
+  and exposes 5 existing incomplete paths: Function.bind, isFinite and later
+  standard-library coverage, the test embedder's `guestCollect` service,
+  typed-array property coverage (first failure: byteLength), and Buffer.fill
+  and later Buffer operations. The pre-refactor snapshot was checked against
+  the same five programs and also fails them. Hosted passes are not being
+  misreported as standalone passes. The Buffer audit now reaches fill whereas
+  the baseline stopped earlier at Buffer.isBuffer.
+
+Generated logs and snapshots remain in ignored `artifacts/`. Long-running
+demo observations are recorded separately; neither HTTP nor unit-test success
+alone proves demo GC stability or frame-rate parity.
+
 ## Completion criteria
 
 This ledger can be closed only when all of the following are true:

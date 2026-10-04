@@ -2199,6 +2199,9 @@
                                     decodeURIValue(value, component);
                 }, "intrinsic", name === "encodeURIComponent" ?
                     NativeIntrinsics.ENCODE_URI_COMPONENT :
+                    name === "decodeURIComponent" ?
+                    NativeIntrinsics.DECODE_URI_COMPONENT :
+                    name === "decodeURI" ? NativeIntrinsics.DECODE_URI :
                     NativeIntrinsics.NONE);
             runtime.defineDataProperty(callable, "length", 1, 0);
             runtime.setGlobal(name, callable);
@@ -2238,7 +2241,8 @@
                     Number(args[1])) : runtime.toString(receiver).substr(Number(args[0]));
             }, "intrinsic", NativeIntrinsics.STRING_SUBSTR);
         this.stringMethods.toLowerCase = this.makeNativeFunction("String.toLowerCase",
-            function (receiver) { return runtime.toString(receiver).toLowerCase(); });
+            function (receiver) { return runtime.toString(receiver).toLowerCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_LOWER_CASE);
         this.stringMethods.split = this.makeNativeFunction("String.split",
             function (receiver, args) {
                 var separator = args.length ? args[0] : undefined;

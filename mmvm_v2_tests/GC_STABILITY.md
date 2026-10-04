@@ -350,3 +350,24 @@ Ordinary-GC comparison (same new snapshot, no `--vm-gc-stress`):
 These ordinary runs are also finite observations, not proof of indefinitely
 bounded memory or absence of all GC bugs. The tests use one heavy VM workload
 at a time. The small input driver exits after each input sequence.
+
+### 2026-10-04: HTTP-runtime repair regression checkpoint
+
+The fresh generic image was exercised with unchanged demo8 at 320x240,
+20 FPS limit for approximately five minutes. Inputs covered attract mode,
+garage, mouse dragging, all three rasterizer modes, free-drive autopilot and
+manual simultaneous acceleration/turning and braking/turning. Escape/q closed
+the application normally, exit 0; no native error or crash was observed.
+
+- Initialization: 4,679 ms, including 2,361 ms procedural sky generation.
+- Warm garage: usually 18–19 FPS. Autodrive: approximately 16–19 FPS.
+- Manual free drive: 16–19 FPS during the input sequences, then approximately
+  20 FPS in the final stationary interval. These are scene-dependent samples,
+  not a claim of a sustained 20 FPS minimum.
+- RSS rose to 544,688 KiB (approximately 532 MiB) and was unchanged at the last
+  two samples, roughly 48 seconds apart. This does not prove long-term bounded
+  memory use.
+- A captured free-drive frame was inspected for gross framebuffer/rendering
+  faults. No demo or test-source changes were used for this check.
+- Log: ignored artifacts/uri-demo8-soak.log. The existing dual-host suite
+  remains green (12 guest programs / 269 assertions per host).

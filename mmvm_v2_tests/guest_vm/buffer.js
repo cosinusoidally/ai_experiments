@@ -202,7 +202,7 @@
         this.runtime.setProperty(constructor, "isBuffer", this.makeNative("Buffer.isBuffer",
             function (receiver, args) {
                 return !!args[0] && args[0].guestType === "buffer";
-            }));
+            }, NativeIntrinsics.BUFFER_IS_BUFFER));
         this.runtime.setProperty(constructor, "from", this.makeNative("Buffer.from",
             function (receiver, args) {
                 return support.fromValue(args[0], args[1]);

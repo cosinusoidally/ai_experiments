@@ -34,6 +34,12 @@
     var NUMBER_CONSTRUCTOR_INTRINSIC_ID = 41;
     var DATE_CONSTRUCTOR_INTRINSIC_ID = 42;
     var DATE_GET_TIME_INTRINSIC_ID = 43;
+    var INTRINSIC_DECODE_URI_COMPONENT = NativeIntrinsics.DECODE_URI_COMPONENT;
+    var INTRINSIC_DECODE_URI = NativeIntrinsics.DECODE_URI;
+    var INTRINSIC_STRING_TO_LOWER_CASE = NativeIntrinsics.STRING_TO_LOWER_CASE;
+    var INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
+    var INTRINSIC_FIRST_ERROR_CONSTRUCTOR = NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR;
+    var INTRINSIC_LAST_ERROR_CONSTRUCTOR = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
     var RuntimeSupportLayout = {
         CHAR_AT_KEY: 0,
         CHAR_AT_FUNCTION: 1,
@@ -88,8 +94,24 @@
         TYPE_ERROR_PROTOTYPE: 316,
         TYPE_ERROR_NAME: 317,
         NOT_CALLABLE_MESSAGE: 318,
-        COUNT: 319
+        URI_ERROR_PROTOTYPE: 319,
+        URI_ERROR_NAME: 320,
+        MALFORMED_URI_MESSAGE: 321,
+        ERROR_CONSTRUCTOR_PROTOTYPE_BASE: 322,
+        ERROR_CONSTRUCTOR_RECORD_STRIDE: 2,
+        ERROR_CONSTRUCTOR_NAME_OFFSET: 1,
+        COUNT: 322 + NativeIntrinsics.ERROR_CONSTRUCTOR_NAMES.length * 2
     };
+    var RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE =
+        RuntimeSupportLayout.URI_ERROR_PROTOTYPE;
+    var RUNTIME_SUPPORT_URI_ERROR_NAME = RuntimeSupportLayout.URI_ERROR_NAME;
+    var RUNTIME_SUPPORT_MALFORMED_URI_MESSAGE =
+        RuntimeSupportLayout.MALFORMED_URI_MESSAGE;
+    var URI_DECODE_MALFORMED = -1;
+    var INTRINSIC_RESULT_EXCEPTION_HANDLED = 6;
+    var ERROR_CONSTRUCTOR_PROTOTYPE_BASE = RuntimeSupportLayout.ERROR_CONSTRUCTOR_PROTOTYPE_BASE;
+    var ERROR_CONSTRUCTOR_RECORD_STRIDE = RuntimeSupportLayout.ERROR_CONSTRUCTOR_RECORD_STRIDE;
+    var ERROR_CONSTRUCTOR_NAME_OFFSET = RuntimeSupportLayout.ERROR_CONSTRUCTOR_NAME_OFFSET;
 
     function runtimeSupportConstantOverrides(profileOpcodes,
                                              recordConstants) {
@@ -119,7 +141,13 @@
         overrides.INTRINSIC_BUFFER_READ_I16_LE =
             NativeIntrinsics.BUFFER_READ_I16_LE;
         overrides.INTRINSIC_GC_STRESS_CONTROL = NativeIntrinsics.GC_STRESS_CONTROL;
-        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.GC_STRESS_CONTROL;
+        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
+        overrides.INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
+        overrides.INTRINSIC_STRING_TO_LOWER_CASE =
+            NativeIntrinsics.STRING_TO_LOWER_CASE;
+        overrides.INTRINSIC_DECODE_URI_COMPONENT =
+            NativeIntrinsics.DECODE_URI_COMPONENT;
+        overrides.INTRINSIC_DECODE_URI = NativeIntrinsics.DECODE_URI;
         return overrides;
     }
 
@@ -3323,8 +3351,9 @@
                         bytecodeWords, registerCells, pc, framePC, 0, 0, 0);
                 }
                 var callFrameEntered = bytecodeCallHandled;
+                var intrinsicDispatchResult = 0;
                 if (bytecodeCallHandled === 0) {
-                    var intrinsicDispatchResult = intrinsicCallKernel(
+                    intrinsicDispatchResult = intrinsicCallKernel(
                         heapBase, state, frame, callFunctionCell,
                         callArgumentsCell, callOperation, callTargetIndex,
                         currentContext, stringSupport, arrayPrototype,
@@ -3335,6 +3364,9 @@
                     }
                     if (intrinsicDispatchResult ===
                             INTRINSIC_RESULT_FRAME_ENTERED) {
+                        callFrameEntered = 1;
+                    } else if (intrinsicDispatchResult ===
+                               INTRINSIC_RESULT_EXCEPTION_HANDLED) {
                         callFrameEntered = 1;
                     } else if (intrinsicDispatchResult !==
                                INTRINSIC_RESULT_COMPLETE) {
@@ -3356,7 +3388,10 @@
                     framePC = frame + FRAME_PC;
                     registerCells = frame + FRAME_REGISTERS;
                     environment = frameEnvironment(heapBase, frame);
-                    pc = 0;
+                    if (intrinsicDispatchResult ===
+                            INTRINSIC_RESULT_EXCEPTION_HANDLED) {
+                        pc = frameSavedPC(heapBase, frame);
+                    } else pc = 0;
                 }
             } else if (opcode === OP_PUSH_CATCH) {
                 if (reserveNativeAllocationKernel(
@@ -6041,30 +6076,30 @@
                 heapBase, state,
                 CALL_DIAGNOSTIC_INTRINSIC_BASE + intrinsicId);
         }
+        var isErrorConstructor = 0;
+        if (intrinsicId >= INTRINSIC_FIRST_ERROR_CONSTRUCTOR) {
+            if (intrinsicId <= INTRINSIC_LAST_ERROR_CONSTRUCTOR) {
+                isErrorConstructor = 1;
+            }
+        }
         if (callOperation === 2) {
-            if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
-            if (intrinsicId !== INTRINSIC_ARRAY_CONSTRUCTOR) {
-            if (intrinsicId !== INTRINSIC_FUNCTION_CONSTRUCTOR) {
-            if (intrinsicId !== INTRINSIC_REGEXP_CONSTRUCTOR) {
-            if (intrinsicId !== INTRINSIC_BUFFER_CONSTRUCTOR) {
-            if (intrinsicId !== INTRINSIC_OBJECT_CONSTRUCTOR) {
-            if (intrinsicId !== INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
-            if (intrinsicId < INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
+            var constructible = isErrorConstructor;
+            if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === INTRINSIC_FUNCTION_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === INTRINSIC_REGEXP_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === INTRINSIC_BUFFER_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === INTRINSIC_OBJECT_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) constructible = 1;
+            if (intrinsicId >= INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
+                if (intrinsicId <= INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
+                    constructible = 1;
+                }
+            }
+            if (constructible === 0) {
                 intrinsicCallValid = 0;
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_INTRINSIC_CALL_FORM);
-            } else if (intrinsicId >
-                       INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
-                intrinsicCallValid = 0;
-                setEngineCallRejectReason(
-                    heapBase, state, CALL_REJECT_INTRINSIC_CALL_FORM);
-            }
-            }
-            }
-            }
-            }
-            }
-            }
             }
         }
         if (callOperation === 1) {
@@ -6094,7 +6129,9 @@
             }
         }
         var requiredIntrinsicArguments = 1;
-        if (intrinsicId === INTRINSIC_GET_DLSYM) {
+        if (isErrorConstructor === 1) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_GET_DLSYM) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
             requiredIntrinsicArguments = 2;
@@ -6137,6 +6174,8 @@
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_STRING_TO_UPPER_CASE) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_STRING_TO_LOWER_CASE) {
+            requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_NUMBER_TO_STRING) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_GC_STRESS_CONTROL) {
@@ -6173,6 +6212,8 @@
         } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_BUFFER_TO_STRING) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_BUFFER_IS_BUFFER) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_FUNCTION_TO_STRING) {
             requiredIntrinsicArguments = 0;
@@ -6309,6 +6350,35 @@
                     heapBase, state, frame, pc, opcode, instructions);
             }
         }
+        var uriDecodeComponent = -1;
+        if (intrinsicId === INTRINSIC_DECODE_URI_COMPONENT) {
+            uriDecodeComponent = 1;
+        }
+        if (intrinsicId === INTRINSIC_DECODE_URI) uriDecodeComponent = 0;
+        if (uriDecodeComponent >= 0) {
+            intrinsicHandled = decodeURIIntrinsicKernel(
+                heapBase, state, intrinsicTarget, registerCells,
+                intrinsicArgumentsVector, intrinsicArgumentCount,
+                uriDecodeComponent);
+            if (intrinsicHandled === URI_DECODE_MALFORMED) {
+                var uriErrorAllocated = allocateErrorKernel(heapBase, state,
+                    intrinsicTarget, valueCellReference(0, vectorCellAddress(
+                        heapBase, stringSupport,
+                        RUNTIME_SUPPORT_MALFORMED_URI_MESSAGE)),
+                    RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE,
+                    RUNTIME_SUPPORT_URI_ERROR_NAME, stringSupport);
+                if (uriErrorAllocated === 1) {
+                    if (unwindExceptionKernel(
+                            heapBase, state, frame, intrinsicTarget) === 1) {
+                        return INTRINSIC_RESULT_EXCEPTION_HANDLED;
+                    }
+                }
+            }
+            if (intrinsicHandled !== 1) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
         if (intrinsicId === INTRINSIC_LEGACY_UNESCAPE) {
             intrinsicHandled = uriStringIntrinsicKernel(
                 heapBase, state, intrinsicTarget, registerCells,
@@ -6376,6 +6446,14 @@
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
+        } else if (isErrorConstructor === 1) {
+            intrinsicHandled = errorConstructorKernel(heapBase, state,
+                intrinsicTarget, registerCells, intrinsicArgumentsVector,
+                intrinsicArgumentCount, stringSupport, platformServices,
+                intrinsicId, pc, opcode, instructions, frame);
+        } else if (intrinsicId === INTRINSIC_BUFFER_IS_BUFFER) {
+            intrinsicHandled = bufferIsBufferKernel(heapBase, intrinsicTarget,
+                registerCells, intrinsicArgumentsVector, intrinsicArgumentCount);
         } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
             intrinsicHandled = programCreateKernel(
                 heapBase, state, intrinsicTarget, registerCells,
@@ -6384,16 +6462,16 @@
                 stringSupport);
         } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
             intrinsicHandled = programSetCodeKernel(
-                heapBase, intrinsicTarget, registerCells,
+                heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector);
         } else if (intrinsicId ===
                    INTRINSIC_PROGRAM_SET_CONSTANT) {
             intrinsicHandled = programSetConstantKernel(
-                heapBase, intrinsicTarget, registerCells,
+                heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector);
         } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
             intrinsicHandled = programSetVectorKernel(
-                heapBase, intrinsicTarget, registerCells,
+                heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector);
         }
         if (intrinsicId >= INTRINSIC_PROGRAM_CREATE) {
@@ -6843,6 +6921,8 @@
         } else if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
             isStringIntrinsic = 1;
         } else if (intrinsicId === INTRINSIC_STRING_TO_UPPER_CASE) {
+            isStringIntrinsic = 1;
+        } else if (intrinsicId === INTRINSIC_STRING_TO_LOWER_CASE) {
             isStringIntrinsic = 1;
         }
         if (isStringIntrinsic === 1) {
@@ -10717,6 +10797,29 @@
             RUNTIME_SUPPORT_REFERENCE_ERROR_NAME, stringSupport);
     }
 
+    function errorConstructorKernel(heapBase, state, targetCell, registerCells,
+            argumentsVector, argumentCount, stringSupport, platformServices,
+            intrinsicId, pc, opcode, instructions, frame) {
+        var messageCount = argumentCount;
+        if (messageCount > 0) {
+            var messageCell = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 0);
+            if (messageCell === 0) return 0;
+            if (valueCellTag(0, messageCell) === VALUE_TAG_UNDEFINED) messageCount = 0;
+        }
+        var converted = stringConstructorKernel(heapBase, state, targetCell,
+            registerCells, argumentsVector, messageCount, stringSupport,
+            platformServices, INTRINSIC_STRING_CONSTRUCTOR,
+            pc, opcode, instructions, frame);
+        if (converted !== 1) return converted;
+        var prototypeIndex = ERROR_CONSTRUCTOR_PROTOTYPE_BASE +
+            (intrinsicId - INTRINSIC_FIRST_ERROR_CONSTRUCTOR) *
+            ERROR_CONSTRUCTOR_RECORD_STRIDE;
+        return allocateErrorKernel(heapBase, state, targetCell,
+            valueCellReference(0, targetCell), prototypeIndex,
+            prototypeIndex + ERROR_CONSTRUCTOR_NAME_OFFSET, stringSupport);
+    }
+
     function allocateErrorKernel(
             heapBase, state, targetCell, message, prototypeIndex,
             nameIndex, stringSupport) {
@@ -11724,65 +11827,75 @@
                                    arrayPrototype, bytecodeWords, pc,
                                    intrinsicId, platformServices) {
         var intrinsicHandled = 0;
-    if (intrinsicId === INTRINSIC_STRING_TO_UPPER_CASE) {
-        var upperReceiverIndex = load32(
+    var isCaseConversion = 0;
+    if (intrinsicId === INTRINSIC_STRING_TO_UPPER_CASE) isCaseConversion = 1;
+    else if (intrinsicId === INTRINSIC_STRING_TO_LOWER_CASE) isCaseConversion = 1;
+    if (isCaseConversion === 1) {
+        var caseReceiverIndex = load32(
             heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
-        if (upperReceiverIndex < 0) return 0;
-        var upperReceiverCell = heapBase + registerCells +
-            upperReceiverIndex * VALUE_CELL_BYTES;
-        if (valueCellTag(0, upperReceiverCell) !== VALUE_TAG_REFERENCE) {
+        if (caseReceiverIndex < 0) return 0;
+        var caseReceiverCell = heapBase + registerCells +
+            caseReceiverIndex * VALUE_CELL_BYTES;
+        if (valueCellTag(0, caseReceiverCell) !== VALUE_TAG_REFERENCE) {
             return 0;
         }
-        var upperSource = valueCellReference(0, upperReceiverCell);
-        if (recordType(heapBase, upperSource) !== HEAP_TYPE_STRING) return 0;
-        var upperLength = stringLength(heapBase, upperSource);
-        if (upperLength === 0) {
-            copyValueCell(intrinsicTarget, upperReceiverCell);
+        var caseSource = valueCellReference(0, caseReceiverCell);
+        if (recordType(heapBase, caseSource) !== HEAP_TYPE_STRING) return 0;
+        var caseLength = stringLength(heapBase, caseSource);
+        if (caseLength === 0) {
+            copyValueCell(intrinsicTarget, caseReceiverCell);
             return 1;
         }
-        var upperIndex = 0;
-        while (upperIndex < upperLength) {
+        var caseIndex = 0;
+        while (caseIndex < caseLength) {
             if ((stringCharacterCodeUnit(
-                    heapBase, upperSource, upperIndex) & 65535) > 127) {
+                    heapBase, caseSource, caseIndex) & 65535) > 127) {
                 return 0;
             }
-            upperIndex = upperIndex + 1;
+            caseIndex = caseIndex + 1;
         }
-        var upperBytes = (STRING_CHARS + upperLength * 2 + 7) & -8;
+        var caseBytes = (STRING_CHARS + caseLength * 2 + 7) & -8;
         if (reserveNativeAllocationKernel(
-                heapBase, state, upperBytes) === 0) return 0;
-        var upperResult = engineHeapBump(heapBase, state);
-        if (upperResult + upperBytes > engineHeapLimit(heapBase, state)) {
+                heapBase, state, caseBytes) === 0) return 0;
+        var caseResult = engineHeapBump(heapBase, state);
+        if (caseResult + caseBytes > engineHeapLimit(heapBase, state)) {
             return 0;
         }
-        setRecordType(heapBase, upperResult, HEAP_TYPE_STRING);
-        setRecordSize(heapBase, upperResult, upperBytes);
-        setRecordMark(heapBase, upperResult, 0);
-        setRecordFlags(heapBase, upperResult, 0);
-        setStringLength(heapBase, upperResult, upperLength);
-        var upperHash = -2128831035;
-        upperIndex = 0;
-        while (upperIndex < upperLength) {
-            var upperCharacter = stringCharacterCodeUnit(
-                heapBase, upperSource, upperIndex) & 65535;
-            if (upperCharacter >= ASCII_LOWER_A) {
-                if (upperCharacter <= ASCII_LOWER_Z) {
-                    upperCharacter = upperCharacter - ASCII_LOWER_A +
-                                     ASCII_UPPER_A;
+        setRecordType(heapBase, caseResult, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, caseResult, caseBytes);
+        setRecordMark(heapBase, caseResult, 0);
+        setRecordFlags(heapBase, caseResult, 0);
+        setStringLength(heapBase, caseResult, caseLength);
+        var caseHash = -2128831035;
+        var caseFirst = ASCII_LOWER_A;
+        var caseLast = ASCII_LOWER_Z;
+        var caseDelta = ASCII_UPPER_A - ASCII_LOWER_A;
+        if (intrinsicId === INTRINSIC_STRING_TO_LOWER_CASE) {
+            caseFirst = ASCII_UPPER_A;
+            caseLast = ASCII_UPPER_A + ASCII_LOWER_Z - ASCII_LOWER_A;
+            caseDelta = ASCII_LOWER_A - ASCII_UPPER_A;
+        }
+        caseIndex = 0;
+        while (caseIndex < caseLength) {
+            var caseCharacter = stringCharacterCodeUnit(
+                heapBase, caseSource, caseIndex) & 65535;
+            if (caseCharacter >= caseFirst) {
+                if (caseCharacter <= caseLast) {
+                    caseCharacter = caseCharacter + caseDelta;
                 }
             }
             setStringCharacterByte(
-                heapBase, upperResult, upperIndex * 2,
-                upperCharacter & 255);
+                heapBase, caseResult, caseIndex * 2,
+                caseCharacter & 255);
             setStringCharacterByte(
-                heapBase, upperResult, upperIndex * 2 + 1,
-                (upperCharacter >>> 8) & 255);
-            upperHash = (upperHash ^ upperCharacter) * 16777619;
-            upperIndex = upperIndex + 1;
+                heapBase, caseResult, caseIndex * 2 + 1,
+                (caseCharacter >>> 8) & 255);
+            caseHash = (caseHash ^ caseCharacter) * 16777619;
+            caseIndex = caseIndex + 1;
         }
-        setStringHash(heapBase, upperResult, upperHash);
-        setEngineHeapBump(heapBase, state, upperResult + upperBytes);
-        setValueCellReference(intrinsicTarget, upperResult);
+        setStringHash(heapBase, caseResult, caseHash);
+        setEngineHeapBump(heapBase, state, caseResult + caseBytes);
+        setValueCellReference(intrinsicTarget, caseResult);
         return 1;
     }
     if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
@@ -14434,6 +14547,29 @@
         return 1;
     }
 
+    function bufferIsBufferKernel(heapBase, targetCell, registerCells,
+                                  argumentsVector, argumentCount) {
+        var matches = 0;
+        if (argumentCount > 0) {
+            var cell = programArgumentCellKernel(
+                heapBase, argumentsVector, registerCells, 0);
+            if (cell !== 0) {
+                if (valueCellTag(0, cell) === VALUE_TAG_REFERENCE) {
+                    var object = valueCellReference(0, cell);
+                    if (recordType(heapBase, object) === HEAP_TYPE_BUFFER_VIEW) {
+                        if (bufferViewKind(heapBase, object) ===
+                                BUFFER_KIND_NATIVE) {
+                            matches = 1;
+                        }
+                    }
+                }
+            }
+        }
+        if (matches === 1) setValueCellTrue(targetCell);
+        else setValueCellFalse(targetCell);
+        return 1;
+    }
+
     function programArgumentCellKernel(heapBase, argumentsVector,
                                        registerCells, argumentIndex) {
         var descriptor = vectorCellAddress(
@@ -14444,15 +14580,26 @@
         return valueCellAddress(heapBase, registerCells, registerIndex);
     }
 
-    function programIntArgumentKernel(heapBase, argumentsVector,
+    function programIntArgumentKernel(heapBase, state, argumentsVector,
                                       registerCells, argumentIndex) {
         var cell = programArgumentCellKernel(
             heapBase, argumentsVector, registerCells, argumentIndex);
         if (cell === 0) return INVALID_PROGRAM_INTEGER;
-        if (valueCellTag(0, cell) !== VALUE_TAG_INT32) {
-            return INVALID_PROGRAM_INTEGER;
+        var tag = valueCellTag(0, cell);
+        if (tag === VALUE_TAG_INT32) return valueCellInt32(0, cell);
+        /* Guest arithmetic may keep exact integers in double cells. Program
+         * adoption validates the number, not the VM's choice of representation.
+         * In particular, negative top-level catch descriptors use this path. */
+        if (tag === VALUE_TAG_DOUBLE) {
+            var integer = toInt32F64(loadNumberF64(
+                cell + VALUE_CELL_LOW, tag));
+            setEngineScratchLeft(heapBase, state, integer);
+            if (equalF64(loadNumberF64(cell + VALUE_CELL_LOW, tag),
+                    loadI32F64(engineScratchLeftAddress(heapBase, state))) === 1) {
+                return integer;
+            }
         }
-        return valueCellInt32(0, cell);
+        return INVALID_PROGRAM_INTEGER;
     }
 
     function programBooleanArgumentKernel(heapBase, argumentsVector,
@@ -14554,25 +14701,25 @@
                                  argumentsVector, argumentCount, context,
                                  stringSupport) {
         var codeLength = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 0);
+            heapBase, state, argumentsVector, registerCells, 0);
         var constantLength = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 1);
+            heapBase, state, argumentsVector, registerCells, 1);
         var bindingLength = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 2);
+            heapBase, state, argumentsVector, registerCells, 2);
         var parameterLength = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 3);
+            heapBase, state, argumentsVector, registerCells, 3);
         var registerCount = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 4);
+            heapBase, state, argumentsVector, registerCells, 4);
         var argumentsSlot = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 5);
+            heapBase, state, argumentsVector, registerCells, 5);
         var thisSlot = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 6);
+            heapBase, state, argumentsVector, registerCells, 6);
         var functionNameSlot = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 7);
+            heapBase, state, argumentsVector, registerCells, 7);
         var usesArguments = programBooleanArgumentKernel(
             heapBase, argumentsVector, registerCells, 8);
         var bindingCount = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 9);
+            heapBase, state, argumentsVector, registerCells, 9);
         var strictProgram = programBooleanArgumentKernel(
             heapBase, argumentsVector, registerCells, 10);
         var evalProgram = programBooleanArgumentKernel(
@@ -14696,14 +14843,14 @@
         return callable;
     }
 
-    function programSetCodeKernel(heapBase, targetCell, registerCells,
+    function programSetCodeKernel(heapBase, state, targetCell, registerCells,
                                   argumentsVector) {
         var callable = programCallableKernel(
             heapBase, argumentsVector, registerCells);
         var index = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 1);
+            heapBase, state, argumentsVector, registerCells, 1);
         var value = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 2);
+            heapBase, state, argumentsVector, registerCells, 2);
         if (callable === 0) return 0;
         if (index < 0) return 0;
         if (value === INVALID_PROGRAM_INTEGER) return 0;
@@ -14715,12 +14862,12 @@
         return 1;
     }
 
-    function programSetConstantKernel(heapBase, targetCell, registerCells,
+    function programSetConstantKernel(heapBase, state, targetCell, registerCells,
                                      argumentsVector) {
         var callable = programCallableKernel(
             heapBase, argumentsVector, registerCells);
         var index = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 1);
+            heapBase, state, argumentsVector, registerCells, 1);
         var source = programArgumentCellKernel(
             heapBase, argumentsVector, registerCells, 2);
         if (callable === 0) return 0;
@@ -14742,16 +14889,16 @@
         return 1;
     }
 
-    function programSetVectorKernel(heapBase, targetCell, registerCells,
+    function programSetVectorKernel(heapBase, state, targetCell, registerCells,
                                    argumentsVector) {
         var callable = programCallableKernel(
             heapBase, argumentsVector, registerCells);
         var kind = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 1);
+            heapBase, state, argumentsVector, registerCells, 1);
         var index = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 2);
+            heapBase, state, argumentsVector, registerCells, 2);
         var value = programIntArgumentKernel(
-            heapBase, argumentsVector, registerCells, 3);
+            heapBase, state, argumentsVector, registerCells, 3);
         if (callable === 0) return 0;
         if (kind < 0) return 0;
         if (kind > 2) return 0;
@@ -15924,6 +16071,176 @@
         return 1;
     }
 
+    /* ES5.1 URI reserved characters: ; / ? : @ & = + $ , #.
+     * decodeURI preserves the original escape spelling for these characters;
+     * decodeURIComponent decodes them like every other byte. */
+    function uriReservedKernel(code) {
+        if (code === 59) return 1;
+        if (code === 47) return 1;
+        if (code === 63) return 1;
+        if (code === 58) return 1;
+        if (code === 64) return 1;
+        if (code === 38) return 1;
+        if (code === 61) return 1;
+        if (code === 43) return 1;
+        if (code === 36) return 1;
+        if (code === 44) return 1;
+        if (code === 35) return 1;
+        return 0;
+    }
+
+    function uriEscapedByteKernel(heapBase, source, index, length) {
+        var URI_PERCENT = 37;
+        if (index + 2 >= length) return -1;
+        if ((stringCharacterCodeUnit(heapBase, source, index) & 65535) !==
+                URI_PERCENT) {
+            return -1;
+        }
+        var high = uriHexValueKernel(
+            stringCharacterCodeUnit(heapBase, source, index + 1) & 65535);
+        var low = uriHexValueKernel(
+            stringCharacterCodeUnit(heapBase, source, index + 2) & 65535);
+        if (high < 0) return -1;
+        if (low < 0) return -1;
+        return (high << 4) | low;
+    }
+
+    /* Return a Unicode scalar, or -1 for malformed/non-minimal UTF-8.
+     * Escaped continuation bytes must remain escaped, never raw characters. */
+    function uriDecodedCodePointKernel(heapBase, source, index, length) {
+        var first = uriEscapedByteKernel(heapBase, source, index, length);
+        if (first < 0) return -1;
+        if (first < 128) return first;
+        var count = 0;
+        var minimum = 0;
+        var code = 0;
+        if (first >= 194) {
+            if (first <= 223) {
+                count = 2;
+                minimum = 128;
+                code = first & 31;
+            } else if (first <= 239) {
+                count = 3;
+                minimum = 2048;
+                code = first & 15;
+            } else if (first <= 244) {
+                count = 4;
+                minimum = 65536;
+                code = first & 7;
+            }
+        }
+        if (count === 0) return -1;
+        var byteIndex = 1;
+        while (byteIndex < count) {
+            var next = uriEscapedByteKernel(
+                heapBase, source, index + byteIndex * 3, length);
+            if (next < 128) return -1;
+            if (next > 191) return -1;
+            code = (code << 6) | (next & 63);
+            byteIndex = byteIndex + 1;
+        }
+        if (code < minimum) return -1;
+        if (code > 1114111) return -1;
+        if (code >= 55296) {
+            if (code <= 57343) return -1;
+        }
+        return code;
+    }
+
+    function decodeURIIntrinsicKernel(heapBase, state, targetCell,
+            registerCells, argumentsVector, argumentCount, component) {
+        var URI_PERCENT = 37;
+        if (argumentCount < 1) return 0;
+        var sourceCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerCells, 0);
+        if (sourceCell === 0) return 0;
+        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
+        var source = valueCellReference(0, sourceCell);
+        if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
+        var length = stringLength(heapBase, source);
+        var sourceIndex = 0;
+        var resultLength = 0;
+        /* Validate and measure before allocating: failed input must never
+         * leave a partially published string record in the heap. */
+        while (sourceIndex < length) {
+            var code = stringCharacterCodeUnit(
+                heapBase, source, sourceIndex) & 65535;
+            var consumed = 1;
+            var produced = 1;
+            if (code === URI_PERCENT) {
+                code = uriDecodedCodePointKernel(
+                    heapBase, source, sourceIndex, length);
+                if (code < 0) return URI_DECODE_MALFORMED;
+                consumed = 3;
+                if (code >= 128) consumed = 6;
+                if (code >= 2048) consumed = 9;
+                if (code >= 65536) {
+                    consumed = 12;
+                    produced = 2;
+                }
+                if (component === 0) {
+                    if (uriReservedKernel(code) === 1) produced = 3;
+                }
+            }
+            sourceIndex = sourceIndex + consumed;
+            resultLength = resultLength + produced;
+        }
+        var bytes = (STRING_CHARS + resultLength * 2 + 7) & -8;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 2;
+        var result = engineHeapBump(heapBase, state);
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, bytes);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, 0);
+        setStringLength(heapBase, result, resultLength);
+        sourceIndex = 0;
+        var resultIndex = 0;
+        while (sourceIndex < length) {
+            code = stringCharacterCodeUnit(
+                heapBase, source, sourceIndex) & 65535;
+            consumed = 1;
+            if (code === URI_PERCENT) {
+                code = uriDecodedCodePointKernel(
+                    heapBase, source, sourceIndex, length);
+                consumed = 3;
+                if (code >= 128) consumed = 6;
+                if (code >= 2048) consumed = 9;
+                if (code >= 65536) consumed = 12;
+                if (component === 0) {
+                    if (uriReservedKernel(code) === 1) {
+                        resultIndex = setURIStringCodeUnitKernel(
+                            heapBase, result, resultIndex, URI_PERCENT);
+                        resultIndex = setURIStringCodeUnitKernel(heapBase,
+                            result, resultIndex, stringCharacterCodeUnit(
+                                heapBase, source, sourceIndex + 1) & 65535);
+                        code = stringCharacterCodeUnit(
+                            heapBase, source, sourceIndex + 2) & 65535;
+                    }
+                }
+            }
+            if (code >= 65536) {
+                code = code - 65536;
+                resultIndex = setURIStringCodeUnitKernel(heapBase, result,
+                    resultIndex, 55296 + (code >> 10));
+                code = 56320 + (code & 1023);
+            }
+            resultIndex = setURIStringCodeUnitKernel(
+                heapBase, result, resultIndex, code);
+            sourceIndex = sourceIndex + consumed;
+        }
+        var hash = -2128831035;
+        resultIndex = 0;
+        while (resultIndex < resultLength) {
+            code = stringCharacterCodeUnit(heapBase, result, resultIndex) & 65535;
+            hash = (hash ^ code) * 16777619;
+            resultIndex = resultIndex + 1;
+        }
+        setStringHash(heapBase, result, hash);
+        setEngineHeapBump(heapBase, state, result + bytes);
+        setValueCellReference(targetCell, result);
+        return 1;
+    }
+
     function isESWhiteSpaceKernel(character) {
         if (character >= 9) {
             if (character <= 13) return 1;
@@ -16517,6 +16834,7 @@
             allocateArrayBufferKernel: allocateArrayBufferKernel,
             allocateArrayKernel: allocateArrayKernel,
             allocateErrorKernel: allocateErrorKernel,
+            errorConstructorKernel: errorConstructorKernel,
             allocateObjectKernel: allocateObjectKernel,
             allocateObjectWithPrototypeKernel:
                 allocateObjectWithPrototypeKernel,
@@ -16544,6 +16862,10 @@
             dateNumericValueCellKernel: dateNumericValueCellKernel,
             dateWithinDayUnitKernel: dateWithinDayUnitKernel,
             deletePropertyKernel: deletePropertyKernel,
+            decodeURIIntrinsicKernel: decodeURIIntrinsicKernel,
+            uriEscapedByteKernel: uriEscapedByteKernel,
+            uriDecodedCodePointKernel: uriDecodedCodePointKernel,
+            uriReservedKernel: uriReservedKernel,
             dateYearFromDayKernel: dateYearFromDayKernel,
             ffiCallKernel: ffiCallKernel,
             emptyEvalSourceKernel: emptyEvalSourceKernel,
@@ -16597,6 +16919,7 @@
             programCallableKernel: programCallableKernel,
             programCreateKernel: programCreateKernel,
             programIntArgumentKernel: programIntArgumentKernel,
+            bufferIsBufferKernel: bufferIsBufferKernel,
             programSetCodeKernel: programSetCodeKernel,
             programSetConstantKernel: programSetConstantKernel,
             programSetVectorKernel: programSetVectorKernel,
@@ -16714,6 +17037,22 @@
                 reportSnapshot("lowering native interpreter kernel");
             }
             var compilerOptions = {
+                constantBindings: {
+                    INTRINSIC_DECODE_URI_COMPONENT: INTRINSIC_DECODE_URI_COMPONENT,
+                    INTRINSIC_DECODE_URI: INTRINSIC_DECODE_URI,
+                    INTRINSIC_STRING_TO_LOWER_CASE: INTRINSIC_STRING_TO_LOWER_CASE,
+                    INTRINSIC_BUFFER_IS_BUFFER: INTRINSIC_BUFFER_IS_BUFFER,
+                    INTRINSIC_FIRST_ERROR_CONSTRUCTOR: INTRINSIC_FIRST_ERROR_CONSTRUCTOR,
+                    INTRINSIC_LAST_ERROR_CONSTRUCTOR: INTRINSIC_LAST_ERROR_CONSTRUCTOR,
+                    ERROR_CONSTRUCTOR_PROTOTYPE_BASE: ERROR_CONSTRUCTOR_PROTOTYPE_BASE,
+                    ERROR_CONSTRUCTOR_RECORD_STRIDE: ERROR_CONSTRUCTOR_RECORD_STRIDE,
+                    ERROR_CONSTRUCTOR_NAME_OFFSET: ERROR_CONSTRUCTOR_NAME_OFFSET,
+                    URI_DECODE_MALFORMED: URI_DECODE_MALFORMED,
+                    INTRINSIC_RESULT_EXCEPTION_HANDLED: INTRINSIC_RESULT_EXCEPTION_HANDLED,
+                    RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE: RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE,
+                    RUNTIME_SUPPORT_URI_ERROR_NAME: RUNTIME_SUPPORT_URI_ERROR_NAME,
+                    RUNTIME_SUPPORT_MALFORMED_URI_MESSAGE: RUNTIME_SUPPORT_MALFORMED_URI_MESSAGE
+                },
                 /* Temporary compatibility while the interpreter's placeholder
                  * declarations migrate to real lexical layout bindings. */
                 legacyConstantLocals: true,
@@ -17051,6 +17390,30 @@
             this.stringSupportAddress,
             RuntimeSupportLayout.NOT_CALLABLE_MESSAGE),
             runtime.internStringAddress("value is not callable"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.URI_ERROR_PROTOTYPE),
+            runtime.errorPrototypes.$URIError.heapAddress);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.URI_ERROR_NAME),
+            runtime.internStringAddress("URIError"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.MALFORMED_URI_MESSAGE),
+            runtime.internStringAddress("URI malformed"));
+        var errorConstructorIndex = 0;
+        while (errorConstructorIndex < NativeIntrinsics.ERROR_CONSTRUCTOR_NAMES.length) {
+            var errorConstructorName = NativeIntrinsics.ERROR_CONSTRUCTOR_NAMES[
+                errorConstructorIndex];
+            var errorPrototypeSlot = ERROR_CONSTRUCTOR_PROTOTYPE_BASE +
+                errorConstructorIndex * ERROR_CONSTRUCTOR_RECORD_STRIDE;
+            runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, errorPrototypeSlot),
+                runtime.errorPrototypes["$" + errorConstructorName].heapAddress);
+            runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+                this.stringSupportAddress,
+                errorPrototypeSlot + ERROR_CONSTRUCTOR_NAME_OFFSET),
+                runtime.internStringAddress(errorConstructorName));
+            errorConstructorIndex++;
+        }
         runtime.heapRecords.setVectorLength(
             this.stringSupportAddress, RuntimeSupportLayout.COUNT);
         this.runCount = 0;

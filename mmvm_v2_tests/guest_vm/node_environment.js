@@ -91,7 +91,8 @@
 
     GuestNodeEnvironment.prototype.installGuestRuntimeLibraries = function () {
         this.context.run(
-            "load(\"guest_vm/array_runtime.js\");",
+            "load(\"guest_vm/array_runtime.js\");\n" +
+            "load(\"guest_vm/buffer_runtime.js\");",
             "<guest-array-runtime>");
         var methodAttributes =
             this.runtime.heapRecords.constructor.Attributes.WRITABLE |
@@ -105,6 +106,9 @@
                 environment.context.globalObject, globalName, false);
         }
         install(this.runtime.arrayPrototype, "map", "__guestArrayMap");
+        install(this.runtime.arrayPrototype, "sort", "__guestArraySort");
+        install(this.runtime.getGlobal(this.context, "Buffer"),
+                "byteLength", "__guestBufferByteLength");
 
         if (!this.runtime.regexpPrototype || !this.runtime.numberPrototype) {
             return;
@@ -1042,14 +1046,6 @@
                 environment.writeOutput(2, args);
             }));
         publish("console", consoleObject);
-
-        var bufferConstructor = this.runtime.getGlobal(this.context, "Buffer");
-        this.runtime.setProperty(bufferConstructor, "byteLength",
-            this.makeFunction("Buffer.byteLength", function (receiver, args) {
-                return environment.nodeHost ?
-                    environment.HostBuffer.byteLength(String(args[0]), "utf8") :
-                    NodeEncoding.utf8Bytes(String(args[0])).length;
-            }, true));
 
         /* MMVM's Node compatibility layer exposes this internal helper to
          * renderers which batch native framebuffer writes.  Keep it an

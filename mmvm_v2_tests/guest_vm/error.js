@@ -1,5 +1,9 @@
 /* ES5.1 native Error objects and their prototype hierarchy. */
 (function (root) {
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    if (typeof module !== "undefined" && module.exports) {
+        NativeIntrinsics = require("./native_intrinsics.js");
+    }
     function intrinsicImplementedByRuntime() {
         throw new Error("Error intrinsic must be dispatched by Runtime");
     }
@@ -23,8 +27,11 @@
          * Avoid a constructor-specific host closure: js_min's SpiderMonkey
          * predates modern closure fixes, and the guest operation should be
          * directly recognizable by the native interpreter anyway. */
+        var index = 0;
+        while (NativeIntrinsics.ERROR_CONSTRUCTOR_NAMES[index] !== name) index++;
         var constructor = runtime.makeNativeFunction(
-            name, intrinsicImplementedByRuntime);
+            name, intrinsicImplementedByRuntime, "intrinsic",
+            NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR + index);
         constructor.errorConstructorName = name;
         runtime.setProperty(constructor, "prototype", prototype);
         runtime.setProperty(prototype, "constructor", constructor);
