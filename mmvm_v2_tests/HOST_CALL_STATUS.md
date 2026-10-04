@@ -282,6 +282,40 @@ Generated logs and snapshots remain in ignored `artifacts/`. Long-running
 demo observations are recorded separately; neither HTTP nor unit-test success
 alone proves demo GC stability or frame-rate parity.
 
+### 2026-10-04: final regression and calendar follow-up
+
+- The HTTP audit exposed an existing native DayFromYear error: the 400-year
+  leap-day term used the century-exclusion base (1901) rather than its own
+  ES5.1 base (1601). System timestamps consequently appeared one day late in
+  guest logs. The corrected kernel agrees with UTC calendar reference values
+  for 1970, 2000, 2001, 2100, 1900 and year 1, including weekdays.
+- The URI percent constant is now one genuine module-level lexical binding,
+  supplied through `constantBindings`, rather than duplicated uppercase local
+  declarations depending on the legacy compiler convention.
+- Comparing the native-code sections of the HTTP-repair image and the final
+  image gives equal lengths (388,188 bytes) and exactly two differing bytes:
+  the immediate operand changing 1901 to 1601. The constant cleanup changes
+  no generated instructions. The long demo observations therefore exercised
+  the same rendering/GC engine; the follow-up does not introduce an unmeasured
+  interpreter rewrite.
+- The dual-host suite was rerun after the follow-up: all 12 programs / 269
+  assertions pass on each host, along with the existing ancillary checks.
+- Standalone quick correctness: Splay, SplayLatency, NavierStokes and zlib all
+  pass. The combined run took 91.02 seconds with 318,464 KiB peak RSS, exit 0.
+  This is a correctness checkpoint, not a full Octane score or a directly
+  comparable timing for the earlier zlib-only run.
+- The final generic image serves a default index, generated subdirectory
+  listing (200), slash redirect (301), malformed URL (400), missing file
+  (404), binary GET and binary HEAD through unchanged `node_web.js`. The index
+  and binary bodies compare byte-for-byte with their files. Log dates now
+  agree with the system calendar. Regenerated snapshots remain bit-identical.
+
+The five pre-existing standalone test gaps listed above remain open. All eight
+demos completed the finite interactive regression runs recorded in
+GC_STABILITY.md, without a crash or native error. Poor performance of demos
+1–7 remains open; these runs must not be described as completing the overall
+standalone or performance work.
+
 ## Completion criteria
 
 This ledger can be closed only when all of the following are true:

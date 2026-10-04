@@ -371,3 +371,21 @@ the application normally, exit 0; no native error or crash was observed.
   faults. No demo or test-source changes were used for this check.
 - Log: ignored artifacts/uri-demo8-soak.log. The existing dual-host suite
   remains green (12 guest programs / 269 assertions per host).
+
+Follow-up on the same image, one heavy workload at a time:
+
+- Demo1 ran for approximately three minutes under `--vm-gc-stress`, with
+  typing and a mouse drag, then closed on Escape with exit 0. The runner
+  reported 1,283 native collections. Stress-mode rendering was approximately
+  0.6–0.9 FPS; this is a GC exercise, not a performance result. Log:
+  artifacts/uri-demo1-stress.log.
+- Demos 2 through 7 each ran for approximately two minutes at 320x240 and a
+  20 FPS limit, then closed on Escape with exit 0. Demos 2–5 received typing
+  and a mouse drag; demos 6–7 received Space to enter human control and held
+  acceleration/turning inputs. No native error, segfault or assertion failure
+  was observed. Logs: artifacts/uri-demo2-soak.log through
+  artifacts/uri-demo7-soak.log.
+- Approximate ordinary frame rates: demo2 0.8 FPS, demo3 1.3 FPS, demo4
+  1.2–1.3 FPS, demo5 0.6–0.7 FPS, demo6 0.4–0.6 FPS and demo7 0.7–0.8 FPS.
+  These remain poor, pre-existing performance results. The checks establish
+  finite-run stability, not satisfactory speed or indefinite GC correctness.

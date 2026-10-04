@@ -108,6 +108,7 @@
     var RUNTIME_SUPPORT_MALFORMED_URI_MESSAGE =
         RuntimeSupportLayout.MALFORMED_URI_MESSAGE;
     var URI_DECODE_MALFORMED = -1;
+    var URI_PERCENT = 37;
     var INTRINSIC_RESULT_EXCEPTION_HANDLED = 6;
     var ERROR_CONSTRUCTOR_PROTOTYPE_BASE = RuntimeSupportLayout.ERROR_CONSTRUCTOR_PROTOTYPE_BASE;
     var ERROR_CONSTRUCTOR_RECORD_STRIDE = RuntimeSupportLayout.ERROR_CONSTRUCTOR_RECORD_STRIDE;
@@ -15148,10 +15149,13 @@
     }
 
     function dateDayFromYearKernel(year) {
+        /* ES5.1 DayFromYear counts four-century leap days from 1601,
+         * not the 1901 base used for century exclusions. Using 1901 in
+         * both terms makes real timestamps decode one day late after 2000. */
         return 365 * (year - 1970) +
             floorDivideDateIntegerKernel(year - 1969, 4) -
             floorDivideDateIntegerKernel(year - 1901, 100) +
-            floorDivideDateIntegerKernel(year - 1901, 400);
+            floorDivideDateIntegerKernel(year - 1601, 400);
     }
 
     function dateDaysBeforeMonthKernel(year, month) {
@@ -16090,7 +16094,6 @@
     }
 
     function uriEscapedByteKernel(heapBase, source, index, length) {
-        var URI_PERCENT = 37;
         if (index + 2 >= length) return -1;
         if ((stringCharacterCodeUnit(heapBase, source, index) & 65535) !==
                 URI_PERCENT) {
@@ -16149,7 +16152,6 @@
 
     function decodeURIIntrinsicKernel(heapBase, state, targetCell,
             registerCells, argumentsVector, argumentCount, component) {
-        var URI_PERCENT = 37;
         if (argumentCount < 1) return 0;
         var sourceCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerCells, 0);
@@ -17048,6 +17050,7 @@
                     ERROR_CONSTRUCTOR_RECORD_STRIDE: ERROR_CONSTRUCTOR_RECORD_STRIDE,
                     ERROR_CONSTRUCTOR_NAME_OFFSET: ERROR_CONSTRUCTOR_NAME_OFFSET,
                     URI_DECODE_MALFORMED: URI_DECODE_MALFORMED,
+                    URI_PERCENT: URI_PERCENT,
                     INTRINSIC_RESULT_EXCEPTION_HANDLED: INTRINSIC_RESULT_EXCEPTION_HANDLED,
                     RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE: RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE,
                     RUNTIME_SUPPORT_URI_ERROR_NAME: RUNTIME_SUPPORT_URI_ERROR_NAME,
