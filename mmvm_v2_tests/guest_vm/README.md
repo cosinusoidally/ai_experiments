@@ -104,6 +104,13 @@ installs those precollected locals instead of traversing every function again.
 The standalone `KernelCompiler.compile` path continues to discover locals
 itself, so its API does not require callers to manufacture graph metadata.
 
+Kernel locals now retain ordinary `var` semantics regardless of capitalization.
+The interpreter's old uppercase-constant/initializer-override convention is
+temporarily retained only through explicit `legacyConstantLocals` options.
+New kernels use real external bindings and named field accessors. See
+[KERNEL_READABILITY.md](../KERNEL_READABILITY.md) for the migration boundary,
+supported loop syntax, verification, and remaining semantic/architecture debt.
+
 The native numeric intrinsic set includes both `Math.atan2(y, x)` and
 `Math.atan(x)`. The latter materializes the constant denominator in a named
 engine scratch cell before invoking the same binary64 x87 operation. Kernel

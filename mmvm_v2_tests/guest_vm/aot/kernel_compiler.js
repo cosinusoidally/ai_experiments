@@ -12,6 +12,7 @@
                                                        options) {
         dependencies = dependencies || {};
         options = options || {};
+        validateConstantOptions(options);
         var functions = [];
         var signatures = {};
         var aggregateTimings = options.timings || null;
@@ -71,7 +72,8 @@
         var sharedConstants = collectFunctionConstants(
             entry, options.constantOverrides || {}, functions[0].expression,
             dependencies, signatures, entryDependencies,
-            functions[0].localNames);
+            functions[0].localNames, options.legacyConstantLocals === true);
+        copyExternalConstants(sharedConstants, options.constantBindings);
         entryDependencies.sort();
         var entryDependencyIndex = 0;
         while (entryDependencyIndex < entryDependencies.length) {
@@ -87,7 +89,8 @@
                 options.constantOverrides || {},
                 functions[constantMemberIndex].expression,
                 dependencies, signatures, memberDependencies,
-                functions[constantMemberIndex].localNames);
+                functions[constantMemberIndex].localNames,
+                options.legacyConstantLocals === true);
             var memberConstantName;
             for (memberConstantName in memberConstants) {
                 if (Object.prototype.hasOwnProperty.call(
@@ -182,7 +185,7 @@
     function collectFunctionConstants(functionObject, overrides,
                                       parsedExpression, dependencies,
                                       signatures, dependencyNames,
-                                      localNames) {
+                                      localNames, legacyConstantLocals) {
         var expression = parsedExpression ||
             kernelFunctionExpression(functionObject);
         var result = {};
@@ -209,7 +212,8 @@
                 var declarationIndex = 0;
                 while (declarationIndex < node.declarations.length) {
                     var declaration = node.declarations[declarationIndex++];
-                    if (isKernelConstantDeclaration(declaration)) {
+                    if (legacyConstantLocals &&
+                        isKernelConstantDeclaration(declaration)) {
                         result[declaration.name] =
                             Object.prototype.hasOwnProperty.call(
                                 overrides, declaration.name) ?
@@ -520,6 +524,7 @@
             throw new TypeError("kernel compiler requires a function");
         }
         options = options || {};
+        validateConstantOptions(options);
         var timings = options.timings || null;
         var started = timings ? new Date().getTime() : 0;
         var source = options.source === undefined ?
@@ -532,7 +537,8 @@
         if (!fn || fn.type !== "FunctionExpression") {
             throw new SyntaxError("kernel source must contain one function");
         }
-        if (needsControlFlow(fn.body.body) || options.kernelFunctions) {
+        if (needsControlFlow(fn.body.body) || options.kernelFunctions ||
+            options.constantBindings) {
             return compileControlFlow(fn, source, options, timings);
         }
         var locals = {};
@@ -582,9 +588,11 @@
             if (statement.type === "VariableStatement" ||
                 statement.type === "IfStatement" ||
                 statement.type === "WhileStatement" ||
+                statement.type === "ForStatement" ||
                 statement.type === "BlockStatement") return true;
             if (statement.type === "ExpressionStatement" &&
-                statement.expression.type === "AssignmentExpression") return true;
+                (statement.expression.type === "AssignmentExpression" ||
+                 statement.expression.type === "UpdateExpression")) return true;
         }
         return false;
     }
@@ -615,7 +623,10 @@
                     options.precollectedLocalNames.length) {
                 var precollectedName =
                     options.precollectedLocalNames[precollectedIndex++];
-                if (symbolAt(symbols, precollectedName) === undefined) {
+                var existing = symbolAt(symbols, precollectedName);
+                if (existing === undefined ||
+                    (!options.legacyConstantLocals &&
+                     existing.kind === "constant")) {
                     symbols["$" + precollectedName] = {
                         kind: "local", index: localNames.length
                     };
@@ -624,7 +635,8 @@
             }
         } else {
             collectLocals(fn.body, symbols, localNames,
-                          options.constantOverrides || {});
+                          options.constantOverrides || {},
+                          options.legacyConstantLocals === true);
         }
         symbols.$kernelFunctions = options.kernelFunctions || null;
         symbols.$kernelFunctionName = fn.name || "kernel";
@@ -662,15 +674,19 @@
         return preferences;
     }
 
-    function collectLocals(node, symbols, names, constantOverrides) {
+    function collectLocals(node, symbols, names, constantOverrides,
+                           legacyConstantLocals) {
         if (!node || typeof node !== "object") return;
         if (node.type === "VariableStatement") {
             var declarationIndex = 0;
             while (declarationIndex < node.declarations.length) {
                 var declaration = node.declarations[declarationIndex++];
                 var name = declaration.name;
-                if (symbolAt(symbols, name) === undefined) {
-                    if (isKernelConstantDeclaration(declaration)) {
+                var existing = symbolAt(symbols, name);
+                if (existing === undefined ||
+                    (!legacyConstantLocals && existing.kind === "constant")) {
+                    if (legacyConstantLocals &&
+                        isKernelConstantDeclaration(declaration)) {
                         symbols["$" + name] = {
                             kind: "constant",
                             value: Object.prototype.hasOwnProperty.call(
@@ -694,10 +710,10 @@
                         var index = 0;
                         while (index < value.length) {
                             collectLocals(value[index++], symbols, names,
-                                          constantOverrides);
+                                          constantOverrides, legacyConstantLocals);
                         }
                     } else collectLocals(value, symbols, names,
-                                         constantOverrides);
+                                         constantOverrides, legacyConstantLocals);
                 }
             }
         }
@@ -706,6 +722,28 @@
     function isKernelConstantDeclaration(declaration) {
         return isKernelConstantName(declaration.name) &&
                kernelConstantValue(declaration.initial) !== null;
+    }
+
+    function validateConstantOptions(options) {
+        if (options.constantOverrides && !options.legacyConstantLocals) {
+            throw new SyntaxError("constantOverrides requires the temporary " +
+                "legacyConstantLocals mode; use real external bindings instead");
+        }
+        copyExternalConstants({}, options.constantBindings);
+    }
+
+    function copyExternalConstants(target, bindings) {
+        if (!bindings) return;
+        for (var name in bindings) {
+            if (Object.prototype.hasOwnProperty.call(bindings, name)) {
+                var value = bindings[name];
+                if (typeof value !== "number" || value !== (value | 0)) {
+                    throw new TypeError("kernel external binding must be int32: " +
+                                        name);
+                }
+                target[name] = value;
+            }
+        }
     }
 
     function isKernelConstantName(name) {
@@ -770,6 +808,9 @@
     }
 
     function lowerStatement(statement, symbols) {
+        if (statement.type === "EmptyStatement") {
+            return {op: "block", body: []};
+        }
         if (statement.type === "BlockStatement") {
             return {op: "block", body: lowerStatements(statement.body, symbols)};
         }
@@ -800,6 +841,21 @@
         }
         if (statement.type === "ExpressionStatement") {
             var expression = statement.expression;
+            /* The value of a standalone ++/-- is discarded, so prefix and
+             * postfix forms have the same effect here. Expression-valued
+             * updates remain unsupported rather than losing their value. */
+            if (expression.type === "UpdateExpression" &&
+                expression.argument.type === "Identifier") {
+                var updateTarget = writableKernelIdentifier(
+                    symbols, expression.argument.name);
+                return {op: updateTarget.kind === "local" ?
+                            "set_local" : "set_argument",
+                    index: updateTarget.index,
+                    value: {op: expression.operator === "++" ? "add_i32" : "sub_i32",
+                        left: lowerKernelExpression(expression.argument, symbols),
+                        right: {op: "const_i32", value: 1, type: "i32"},
+                        type: "i32"}};
+            }
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
                 expression.callee.name === "copyValueCell" &&
@@ -839,13 +895,8 @@
             if (expression.type === "AssignmentExpression" &&
                 expression.operator === "=" &&
                 expression.left.type === "Identifier") {
-                var target = symbolAt(symbols, expression.left.name);
-                if (!target) throw new SyntaxError("unknown kernel assignment " +
-                                                   expression.left.name);
-                if (target.kind === "constant") {
-                    throw new SyntaxError("kernel constant cannot be assigned: " +
-                                          expression.left.name);
-                }
+                var target = writableKernelIdentifier(
+                    symbols, expression.left.name);
                 return {op: target.kind === "local" ? "set_local" : "set_argument",
                         index: target.index,
                         value: lowerKernelExpression(expression.right, symbols)};
@@ -931,6 +982,30 @@
             return {op: "while", test: lowerKernelExpression(statement.test, symbols),
                     body: lowerStatement(statement.body, symbols)};
         }
+        if (statement.type === "ForStatement") {
+            /* Desugar to existing control-flow IR, shared by both backends.
+             * break/continue are still rejected: a future continue lowering
+             * must target the update, not simply the loop condition. */
+            var loopStatements = [];
+            if (statement.initial !== null) {
+                loopStatements.push(lowerStatement(
+                    statement.initial.type === "VariableStatement" ?
+                        statement.initial :
+                        {type: "ExpressionStatement",
+                         expression: statement.initial}, symbols));
+            }
+            var iteration = [lowerStatement(statement.body, symbols)];
+            if (statement.update !== null) {
+                iteration.push(lowerStatement({type: "ExpressionStatement",
+                    expression: statement.update}, symbols));
+            }
+            loopStatements.push({op: "while",
+                test: statement.test === null ?
+                    {op: "const_i32", value: 1, type: "i32"} :
+                    lowerKernelExpression(statement.test, symbols),
+                body: {op: "block", body: iteration}});
+            return {op: "block", body: loopStatements};
+        }
         if (statement.type === "ReturnStatement" &&
             statement.argument !== null) {
             return {op: "return",
@@ -948,14 +1023,35 @@
         return symbol;
     }
 
+    function writableKernelIdentifier(symbols, name) {
+        var target = symbolAt(symbols, name);
+        if (!target) throw new SyntaxError("unknown kernel assignment " + name);
+        if (target.kind === "constant") {
+            throw new SyntaxError("kernel constant cannot be assigned: " + name);
+        }
+        return target;
+    }
+
     function valueCellFieldAddress(expression, fieldName, symbols) {
         var field = symbolAt(symbols, fieldName);
         if (!field || field.kind !== "constant") {
             throw new SyntaxError("value-cell operation requires " + fieldName);
         }
-        return {op: "add_i32",
-                left: lowerKernelExpression(expression, symbols),
-                right: {op: "const_i32", value: field.value, type: "i32"},
+        return offsetAddress(lowerKernelExpression(expression, symbols),
+                             field.value);
+    }
+
+    /* Nested named accessors describe one address, not several runtime adds.
+     * Fold their static displacements without moving or repeating evaluation
+     * of the base expression. Both backends receive the same simplified IR. */
+    function offsetAddress(address, displacement) {
+        if (address.op === "add_i32" && address.right.op === "const_i32") {
+            displacement = (address.right.value + displacement) | 0;
+            address = address.left;
+        }
+        if (displacement === 0) return address;
+        return {op: "add_i32", left: address,
+                right: {op: "const_i32", value: displacement, type: "i32"},
                 type: "i32"};
     }
 

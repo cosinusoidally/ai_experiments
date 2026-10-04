@@ -16714,6 +16714,9 @@
                 reportSnapshot("lowering native interpreter kernel");
             }
             var compilerOptions = {
+                /* Temporary compatibility while the interpreter's placeholder
+                 * declarations migrate to real lexical layout bindings. */
+                legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "state", "budget"],
                 registerPreferencesByFunction: {
                     interpreterKernel: ["heapBase", "pc", "bytecodeWords"]

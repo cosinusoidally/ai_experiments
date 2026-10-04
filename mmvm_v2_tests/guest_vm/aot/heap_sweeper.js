@@ -21,17 +21,29 @@
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
 
+    /* Ordinary closure bindings, taken from the authoritative heap layout.
+     * The compiler receives these same values as its external environment;
+     * it must never replace a different initializer inside the function. */
+    var RECORD_TYPE = Heap.HeaderFields.TYPE;
+    var RECORD_MARK = Heap.HeaderFields.MARK;
+    var HEAP_FIRST_RECORD = Heap.FIRST_RECORD;
+    var RECORD_HEADER_BYTES = Heap.HEADER_SIZE;
+    var HEAP_TYPE_FREE = Heap.Types.FREE;
+    var RECORD_ALIGNMENT_MASK = Heap.RECORD_ALIGNMENT - 1;
+    var freeRegionLayoutBindings = {
+        RECORD_TYPE: RECORD_TYPE,
+        RECORD_MARK: RECORD_MARK,
+        HEAP_FIRST_RECORD: HEAP_FIRST_RECORD,
+        RECORD_HEADER_BYTES: RECORD_HEADER_BYTES,
+        HEAP_TYPE_FREE: HEAP_TYPE_FREE,
+        RECORD_ALIGNMENT_MASK: RECORD_ALIGNMENT_MASK
+    };
+
     /* Free-region links use the otherwise-unused mark word. Release them
      * before weak metadata is filtered: a stale next address must never be
-     * mistaken for the collection generation. The shared allocator ABI is
-     * substituted by the compiler; the zeros are dialect placeholders. */
+     * mistaken for the collection generation. Layout names refer to the
+     * closure bindings above, just as they do in ordinary JavaScript. */
     function clearFreeRegionLinksKernel(heapBase, heapBump, region) {
-        var RECORD_TYPE = 0;
-        var RECORD_MARK = 0;
-        var HEAP_FIRST_RECORD = 0;
-        var RECORD_HEADER_BYTES = 0;
-        var HEAP_TYPE_FREE = 0;
-        var RECORD_ALIGNMENT_MASK = 0;
         var count = 0;
         while (region !== 0) {
             if (region < HEAP_FIRST_RECORD) return -1;
@@ -568,30 +580,26 @@
     function HeapSweeper(heap) {
         if (!sharedJS) {
             var ir = new KernelCompiler().compile(heapSweepKernel, {
+                legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "heapBump", "address"]
             });
             sharedJS = new JSBackend().compile(ir);
             sharedX86 = new X86Backend().compile(ir);
             var markIR = new KernelCompiler().compile(heapMarkKernel, {
+                legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "address", "stackCount"]
             });
             sharedMarkJS = new JSBackend().compile(markIR);
             sharedMarkX86 = new X86Backend().compile(markIR);
             var indexIR = new KernelCompiler().compile(indexFreeBlocksKernel, {
+                legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "address", "count"]
             });
             sharedIndexJS = new JSBackend().compile(indexIR);
             sharedIndexX86 = new X86Backend().compile(indexIR);
             var clearLinksIR = new KernelCompiler().compile(
                 clearFreeRegionLinksKernel, {
-                    constantOverrides: {
-                        RECORD_TYPE: Heap.HeaderFields.TYPE,
-                        RECORD_MARK: Heap.HeaderFields.MARK,
-                        HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
-                        RECORD_HEADER_BYTES: Heap.HEADER_SIZE,
-                        HEAP_TYPE_FREE: Heap.Types.FREE,
-                        RECORD_ALIGNMENT_MASK: Heap.RECORD_ALIGNMENT - 1
-                    }
+                    constantBindings: freeRegionLayoutBindings
                 });
             sharedClearLinksJS = new JSBackend().compile(clearLinksIR);
             sharedClearLinksX86 = new X86Backend().compile(clearLinksIR);

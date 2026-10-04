@@ -23,6 +23,12 @@
 
     ValueCells.Tags = Tags;
     ValueCells.PAYLOAD_BYTES = PAYLOAD_BYTES;
+    ValueCells.KernelConstants = {
+        VALUE_CELL_TAG: TAG_OFFSET,
+        VALUE_CELL_LOW: LOW_OFFSET,
+        VALUE_CELL_HIGH: HIGH_OFFSET,
+        VALUE_CELL_AUX: AUX_OFFSET
+    };
 
     ValueCells.prototype.allocate = function () {
         return this.heap.allocateRecord(Heap.Types.ROOT_SLOT, PAYLOAD_BYTES);

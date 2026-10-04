@@ -193,7 +193,8 @@
     var generation = maximumMark + 1;
     var compiled = new Backend().compile(
         new Compiler().compileGraph(Sweeper.markKernel, {},
-            {constantOverrides: Records.KernelConstants}));
+            {legacyConstantLocals: true,
+             constantOverrides: Records.KernelConstants}));
     var parameters = [nodeHost ? 0 : heap.memory.nativeAddress(0),
         heapLength, heap.collectorStackBase, heap.byteLength, generation,
         roots[0], roots[1], 0, 0, 0, roots[2], roots[3], roots[4],

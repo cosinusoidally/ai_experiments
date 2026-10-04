@@ -212,6 +212,23 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        RECORD_TYPE: Heap.HeaderFields.TYPE,
+        RECORD_SIZE: Heap.HeaderFields.SIZE,
+        RECORD_MARK: Heap.HeaderFields.MARK,
+        RECORD_FLAGS: Heap.HeaderFields.FLAGS,
+        HEAP_TYPE_PROPERTY: Heap.Types.PROPERTY,
+        PROPERTY_RECORD_BYTES: Heap.HEADER_SIZE + PROPERTY_BYTES,
+        PROPERTY_NEXT: Heap.HEADER_SIZE + PROPERTY_NEXT,
+        PROPERTY_KEY: Heap.HEADER_SIZE + PROPERTY_KEY,
+        PROPERTY_ATTRIBUTES: Heap.HEADER_SIZE + PROPERTY_ATTRIBUTES,
+        PROPERTY_SETTER: Heap.HEADER_SIZE + PROPERTY_SETTER,
+        PROPERTY_VALUE: Heap.HEADER_SIZE + PROPERTY_VALUE,
+        PROPERTY_ENUMERABLE: ATTR_ENUMERABLE,
+        OBJECT_PROPERTY_HEAD: Heap.HEADER_SIZE + OBJECT_PROPERTIES,
+        VALUE_CELL_TAG: ValueCells.KernelConstants.VALUE_CELL_TAG,
+        VALUE_CELL_LOW: ValueCells.KernelConstants.VALUE_CELL_LOW,
+        VALUE_CELL_HIGH: ValueCells.KernelConstants.VALUE_CELL_HIGH,
+        VALUE_CELL_AUX: ValueCells.KernelConstants.VALUE_CELL_AUX,
         ENGINE_NATIVE_REGION_END: ENGINE_NATIVE_REGION_END,
         ENGINE_NATIVE_FREE_REGION: ENGINE_NATIVE_FREE_REGION,
         ENGINE_NATIVE_TAIL_BUMP: ENGINE_NATIVE_TAIL_BUMP,

@@ -4,6 +4,37 @@
             return (((left + right) * 3) ^ (left - right)) | 0;
         }
         var compiler = new Compiler();
+        /* Compare normal JavaScript with both backends, rather than asserting
+         * a particular private IR shape for the loop implementation. */
+        function loopChecksum(rows) {
+            var CHECKSUM = 0;
+            for (var row = 0; row < rows; row++) {
+                for (var column = 3; column > 0; --column) {
+                    CHECKSUM = CHECKSUM + row * column;
+                }
+            }
+            for (; row < rows + 2; row = row + 1);
+            for (;;) {
+                if (row >= rows + 2) return CHECKSUM + row;
+                row++;
+            }
+        }
+        var loopIR = compiler.compile(loopChecksum);
+        var loopJS = new JSBackend().compile(loopIR);
+        var loopX86 = new X86Backend().compile(loopIR);
+        try {
+            var loopInputs = [-3, 0, 1, 8, 100];
+            for (var loopIndex = 0; loopIndex < loopInputs.length; loopIndex++) {
+                var rows = loopInputs[loopIndex];
+                var expectedLoop = loopChecksum(rows);
+                if (loopJS.fn(null, rows) !== expectedLoop ||
+                    (loopX86.fn && loopX86.fn(rows) !== expectedLoop)) {
+                    throw new Error("kernel for-loop checksum differs from JS");
+                }
+            }
+        } finally {
+            loopX86.destroy();
+        }
         var ir = compiler.compile(arithmeticKernel);
         var jsResult = new JSBackend().compile(ir);
         var x86Result = new X86Backend().compile(ir);
@@ -291,7 +322,8 @@
                 var PREVIOUS_WORD = -1;
                 return value * WORD_BYTES + PREVIOUS_WORD;
             }
-            var namedConstantIR = compiler.compile(namedConstantKernel);
+            var namedConstantIR = compiler.compile(namedConstantKernel,
+                {legacyConstantLocals: true});
             var namedConstantJS = new JSBackend().compile(namedConstantIR);
             var namedConstantX86 = new X86Backend().compile(namedConstantIR);
             try {
@@ -306,7 +338,7 @@
                         var IMMUTABLE_WORDS = 4;
                         IMMUTABLE_WORDS = 8;
                         return IMMUTABLE_WORDS;
-                    });
+                    }, {legacyConstantLocals: true});
                 } catch (constantError) {
                     rejectedConstantAssignment =
                         String(constantError).indexOf(
@@ -369,14 +401,16 @@
                 dispatchHeap.destroy();
                 dispatchX86.destroy();
             }
+            var VECTOR_CELLS = 24;
+            var VALUE_CELL_BYTES = 16;
             function graphEntry(base, address, value, fourth, fifth) {
-                var VECTOR_CELLS = 24;
-                var VALUE_CELL_BYTES = 16;
-                var carried = fourth + value;
+                var LOCAL_WEIGHT = 0;
+                var carried = fourth + value + LOCAL_WEIGHT;
                 return graphMiddle(base, address, value, carried, fifth) + 1;
             }
             function graphMiddle(base, address, value, fourth, fifth) {
-                return graphLeaf(base, address, value * 3, fourth, fifth);
+                var LOCAL_WEIGHT = 3;
+                return graphLeaf(base, address, value * LOCAL_WEIGHT, fourth, fifth);
             }
             function graphLeaf(base, address, value, fourth, fifth) {
                 var result = value + fourth + fifth;
@@ -386,7 +420,10 @@
             var graphIR = compiler.compileGraph(graphEntry, {
                 graphMiddle: graphMiddle,
                 graphLeaf: graphLeaf
-            });
+            }, {constantBindings: {
+                VECTOR_CELLS: VECTOR_CELLS,
+                VALUE_CELL_BYTES: VALUE_CELL_BYTES
+            }});
             var graphJS = new JSBackend().compile(graphIR);
             var graphX86 = new X86Backend().compile(graphIR);
             var graphHeap = new Heap({heapBytes: 4096});
