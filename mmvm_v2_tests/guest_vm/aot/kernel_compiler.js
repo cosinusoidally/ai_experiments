@@ -8,6 +8,71 @@
 
     function KernelCompiler() {}
 
+    /* Function#toString formatting is host-specific. Fingerprint the parsed
+     * syntax, retaining semantic fields but excluding source positions/text.
+     * This is equally usable by the bootstrap shell and a standalone guest;
+     * it does not require compiling machine code merely to validate an image. */
+    KernelCompiler.prototype.sourceFingerprint = function (source) {
+        var tree = new Parser(source, "<kernel-fingerprint>", {
+            captureRaw: false, captureLocations: false,
+            captureFunctionSource: false, compactLiterals: true
+        }).parseProgram();
+        var FNV1A_OFFSET_BASIS = -2128831035;
+        var FNV1A_PRIME = 16777619;
+        var hash = FNV1A_OFFSET_BASIS;
+        function append(text) {
+            var index = 0;
+            while (index < text.length) {
+                var code = text.charCodeAt(index++);
+                hash = ((hash ^ (code & 255)) * FNV1A_PRIME) | 0;
+                hash = ((hash ^ (code >>> 8)) * FNV1A_PRIME) | 0;
+            }
+        }
+        function visit(value) {
+            if (value === null) { append("null;"); return; }
+            var type = typeof value;
+            if (type !== "object") {
+                var text = String(value);
+                append(type + ":" + text.length + ":" + text + ";");
+                return;
+            }
+            /* SpiderMonkey's decompiler inserts braces around a single
+             * controlled statement. Kernel blocks have no lexical bindings;
+             * those braces do not change this dialect's execution. */
+            if (value.type === "BlockStatement" && value.body.length === 1) {
+                visit(value.body[0]);
+                return;
+            }
+            if (value instanceof Array) {
+                append("[");
+                var index = 0;
+                while (index < value.length) visit(value[index++]);
+                append("]");
+                return;
+            }
+            var keys = [];
+            var key;
+            for (key in value) {
+                if (key !== "location" && key !== "source" &&
+                    key !== "sourceEnd" && key !== "filename" &&
+                    Object.prototype.hasOwnProperty.call(value, key)) {
+                    keys.push(key);
+                }
+            }
+            keys.sort();
+            append("{");
+            var keyIndex = 0;
+            while (keyIndex < keys.length) {
+                key = keys[keyIndex++];
+                append(key.length + ":" + key + ":");
+                visit(value[key]);
+            }
+            append("}");
+        }
+        visit(tree);
+        return hash >>> 0;
+    };
+
     KernelCompiler.prototype.compileGraph = function (entry, dependencies,
                                                        options) {
         dependencies = dependencies || {};
@@ -314,6 +379,7 @@
         valueCellTag: "VALUE_CELL_TAG",
         valueCellReference: "VALUE_CELL_REFERENCE",
         valueCellInt32: "VALUE_CELL_INT32",
+        valueCellDoubleHigh: "VALUE_CELL_HIGH",
         stringLength: "STRING_LENGTH",
         stringHash: "STRING_HASH",
         stringRopeLeft: "STRING_ROPE_LEFT",
@@ -1481,6 +1547,7 @@
         var unaryOperations = {sqrtF64: "sqrt_f64", absF64: "abs_f64",
                                logF64: "log_f64",
                                truncateF64: "truncate_f64",
+                               floorF64: "floor_f64", ceilF64: "ceil_f64",
                                sinF64: "sin_f64", cosF64: "cos_f64"};
         if (unaryOperations[name] && node.arguments.length === 1) {
             return {op: unaryOperations[name],

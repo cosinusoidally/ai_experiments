@@ -1749,6 +1749,28 @@
             while (nativeArgumentIndex-- > 0) assembler.popEcx();
             return;
         }
+        if (node.op === "floor_f64" || node.op === "ceil_f64") {
+            emitControlF64(assembler, node.value, state);
+            /* Change only the rounding-control bits, then restore the caller's
+             * x87 control word. FRNDINT retains binary64 range and signed zero. */
+            var X87_ROUNDING_MASK = 0x0c00;
+            var X87_ROUND_DOWN = 0x0400;
+            var X87_ROUND_UP = 0x0800;
+            assembler.reserveStackBytes(4);
+            assembler.storeX87ControlWordAtStack(0);
+            assembler.loadStackWordToEax(0);
+            assembler.movEcxEax();
+            assembler.movEaxImmediate(~X87_ROUNDING_MASK);
+            assembler.andEaxEcx();
+            assembler.orEaxImmediate(node.op === "floor_f64" ?
+                X87_ROUND_DOWN : X87_ROUND_UP);
+            assembler.storeAxAtStack(2);
+            assembler.loadX87ControlWordFromStack(2);
+            assembler.roundF64ToIntegral();
+            assembler.loadX87ControlWordFromStack(0);
+            assembler.releaseStackBytes(4);
+            return;
+        }
         if (node.op === "abs_f64") {
             emitControlF64(assembler, node.value, state);
             assembler.absF64();

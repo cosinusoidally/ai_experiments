@@ -223,6 +223,10 @@
                 emitControlExpression(node.pointer, parameters, locals) +
                 ",[" + nativeArguments.join(",") + "])";
         }
+        if (node.op === "floor_f64" || node.op === "ceil_f64") {
+            return "Math." + (node.op === "floor_f64" ? "floor" : "ceil") +
+                "(" + emitControlF64(node.value, parameters, locals) + ")";
+        }
         if (node.op === "abs_f64") {
             return "Math.abs(" +
                 emitControlF64(node.value, parameters, locals) + ")";

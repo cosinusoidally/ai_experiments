@@ -74,13 +74,58 @@ modify the caller's bytecode. The kernel front/middle end and both backends
 also support short-circuit `&&` and `||` for integer operands, preserving the
 selected operand value and skipping evaluation of the unused operand.
 
-The from-source guest build has completed, and its newly serialized image
-executes hello, the alternate workload, and the demo8 and HTTP command line
+The first from-source guest build completed, and its newly serialized image
+executed hello, the alternate workload, and the demo8 and HTTP command line
 paths. A subsequent fixed-source build completed in 222.29 seconds, including
 lowering, assembly, runtime construction, and serialization. Its image also
-executes hello. This is not yet a verified self-hosted fixed point: the native
-code has the same length (390514 bytes), but differs in local stack layout;
-the startup heap is 384 bytes larger and the source fingerprint differs.
+executed hello, but was not yet a fixed point: local stack layout, eight
+typed-array prototype properties, numeric payloads, and the fingerprint
+differed. The build audit now compares named function/local reports and
+record contents rather than trying to hide differences in serialized bytes.
+
+The build fingerprint hashes parsed kernel syntax, not host-specific
+`Function.prototype.toString()` whitespace or source locations. It also
+normalizes redundant single-statement blocks: SpiderMonkey's decompiler
+inserts those braces, but this kernel dialect has no block-scoped bindings.
+All 124 kernel-function fingerprints now agree between Node's source-preserving
+Function.toString and the bootstrap shell's decompiled form. The integer
+kernel keeps descriptive local names such as `viewPrototype` and
+`propertyAncestor`. The typed-array installer likewise uses `viewPrototype`;
+bootstrap and guest builds now agree on the eight prototypes' own
+`BYTES_PER_ELEMENT` properties. Compiler metadata version 11 identifies the
+new binary64 floor/ceil lowering contract.
+
+The numeric audit exposed a general native Math bug: the small-integer
+`Math.round` path used modulo `ToInt32` on large arguments, corrupting the
+binary64 serializer when the VM ran under itself. Native rounding now keeps
+large values in binary64, uses macro-assembled x87 rounding with the caller's
+control word restored, and leaves already-integral large values unchanged.
+The existing small-number path remains available. Integer Math.round inputs
+are copied directly. This is a language/runtime fix, not snapshot-specific
+normalization. Bootstrap and guest diagnostics now agree on binary64 words
+for MAX_VALUE, subnormals, and large products.
+
+Diagnostic tools run with Node or js_min, and can also be loaded as programs
+under a standalone snapshot:
+
+```sh
+# Named kernel functions, argument/local lists, and code offsets.
+node guest_vm/tools/inspect_kernel_build.js
+# A selected function's report and source.
+node guest_vm/tools/inspect_kernel_build.js hasPropertyKernel
+# Builtin prototype ownership, or binary64 conversion diagnostics.
+node guest_vm/tools/inspect_kernel_build.js --builtins
+node guest_vm/tools/inspect_kernel_build.js --numbers
+# Inspect a debugger's raw heap dump without expanding it into a second heap.
+node guest_vm/tools/audit_snapshot_heap.js --heap-stats artifacts/heap-dump
+node guest_vm/tools/audit_snapshot_heap.js --heap-properties artifacts/heap-dump
+```
+
+Node is optional for these tools, not a dependency of the build. Substitute
+the js_min executable, or `./artifacts/js_runner.exe artifacts/snap`, for
+`node`. `retainNativeBuildIR` is an opt-in diagnostic VM constructor option;
+normal native execution still releases compiler IR after assembly.
+
 Acceptance requires a byte-identical comparison and
 execution of the resulting image. A VM source change must affect the
 rebuilt image where applicable: copying an input template cannot satisfy
@@ -90,7 +135,9 @@ build path.
 The full portable regression driver passed on both Node and js_min at this
 checkpoint: 12 guest programs and 269 assertions per host, plus the heap,
 collector, embedding, kernel compiler, native interpreter, CLI, and context
-multiplexing checks. Application help checks are smoke tests, not substitutes
+multiplexing checks. The native interpreter integration check now also
+exercises large binary64 and int32 rounding boundaries. Application help
+checks are smoke tests, not substitutes
 for the longer interactive demo stability runs.
 
 The version-2 image now contains a position-independent macro-assembled

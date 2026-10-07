@@ -232,6 +232,31 @@
                     throw new Error("native numeric unary opcode mismatch");
                 }
 
+                /* Exercise numeric serialization's actual dependencies, not
+                 * just small Math results: these values used to wrap through
+                 * ToInt32 and corrupt a guest-hosted VM's binary64 payloads. */
+                var roundingContext = integratedVM.jsRuntime.createContext();
+                roundingContext.run(
+                    "var samples=[1073741824.25,2147483648.75," +
+                    "-2147483648.75,4503599627370495.5," +
+                    "4503599627370496,1.7976931348623157e308];" +
+                    "var floors=[1073741824,2147483648,-2147483649," +
+                    "4503599627370495,4503599627370496,1.7976931348623157e308];" +
+                    "var ceilings=[1073741825,2147483649,-2147483648," +
+                    "4503599627370496,4503599627370496,1.7976931348623157e308];" +
+                    "var rounded=[1073741824,2147483649,-2147483649," +
+                    "4503599627370496,4503599627370496,1.7976931348623157e308];" +
+                    "for(var i=0;i<samples.length;i++) {" +
+                    "if(Math.floor(samples[i])!==floors[i] ||" +
+                    "Math.ceil(samples[i])!==ceilings[i] ||" +
+                    "Math.round(samples[i])!==rounded[i])" +
+                    "throw new Error('binary64 rounding mismatch at '+i); }" +
+                    "if(Math.round(2147483647)!==2147483647 ||" +
+                    "Math.round(-2147483648)!==-2147483648)" +
+                    "throw new Error('integer rounding wrapped');",
+                    "native-binary64-rounding.js");
+                roundingContext.destroy();
+
                 var negativeZeroContext = integratedVM.jsRuntime.createContext();
                 var negativeZeroProgram = {
                     code: [bytecode.CONST, 0, 0,

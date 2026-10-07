@@ -288,6 +288,8 @@
 
     function Runtime(options) {
         options = options || {};
+        /* Opt-in compiler diagnostics; ordinary native runs release build IR. */
+        this.retainNativeBuildIR = !!options.retainNativeBuildIR;
         this.contexts = [];
         this.internedStrings = {};
         this.stringAddresses = {};

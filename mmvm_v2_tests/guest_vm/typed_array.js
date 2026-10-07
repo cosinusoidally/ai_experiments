@@ -119,21 +119,21 @@
     };
 
     TypedArraySupport.prototype.installTypedConstructor = function (description) {
-        var prototype = this.runtime.makeObject();
-        this.prototypes[description.kind] = prototype;
-        this.runtime.setProperty(prototype, "subarray",
+        var viewPrototype = this.runtime.makeObject();
+        this.prototypes[description.kind] = viewPrototype;
+        this.runtime.setProperty(viewPrototype, "subarray",
             this.makeNative(description.name + ".prototype.subarray",
                 subarrayCallback));
-        this.runtime.setProperty(prototype, "set",
+        this.runtime.setProperty(viewPrototype, "set",
             this.makeNative(description.name + ".prototype.set",
                 setCallback, NativeIntrinsics.TYPED_ARRAY_SET));
         var constructor = this.makeNative(description.name, constructorCallback,
             NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE + description.kind);
         constructor.typedArrayKind = description.kind;
         constructor.constructCallback = constructorConstructCallback;
-        this.runtime.setProperty(constructor, "prototype", prototype);
+        this.runtime.setProperty(constructor, "prototype", viewPrototype);
         this.runtime.setProperty(constructor, "BYTES_PER_ELEMENT", description.bytes);
-        this.runtime.setProperty(prototype, "BYTES_PER_ELEMENT", description.bytes);
+        this.runtime.setProperty(viewPrototype, "BYTES_PER_ELEMENT", description.bytes);
         this.runtime.setGlobal(description.name, constructor);
     };
 

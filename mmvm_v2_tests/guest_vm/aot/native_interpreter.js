@@ -8827,7 +8827,7 @@
         }
         var prototypeCell = vectorCellAddress(
             heapBase, stringSupport, prototypeIndex);
-        var prototype = valueCellReference(0, prototypeCell);
+        var viewPrototype = valueCellReference(0, prototypeCell);
         var firstArgument = 0;
         if (argumentCount > 0) {
             firstArgument = programArgumentCellKernel(
@@ -8842,7 +8842,7 @@
                 if (arrayBufferLength < 0) return 0;
             }
             return allocateArrayBufferKernel(
-                heapBase, state, targetCell, arrayBufferLength, prototype);
+                heapBase, state, targetCell, arrayBufferLength, viewPrototype);
         }
 
         var kind = intrinsicId - INTRINSIC_TYPED_ARRAY_CONSTRUCTOR_BASE;
@@ -8940,7 +8940,7 @@
         }
         var viewResult = allocateTypedArrayViewKernel(
             heapBase, state, targetCell, backing, byteOffset,
-            elementLength, kind, prototype);
+            elementLength, kind, viewPrototype);
         if (viewResult !== 1) return viewResult;
         if (sourceArray !== 0) {
             var sourceVector = arrayElements(heapBase, sourceArray);
@@ -10017,6 +10017,42 @@
         return 1;
     }
 
+    /* Values outside the small-integer rounding path must stay binary64.
+     * ToInt32 is a modulo conversion, not a valid overflow test. */
+    function roundLargeNumberKernel(heapBase, state, target, source,
+                                    intrinsicId) {
+        var IEEE754_TWO_TO_30_HIGH = 1104150528;
+        var IEEE754_TWO_TO_52_HIGH = 1127219200;
+        var absoluteHigh = valueCellDoubleHigh(0, source) & IEEE754_ABSOLUTE_MASK;
+        if (absoluteHigh < IEEE754_TWO_TO_30_HIGH) return 0;
+        if (absoluteHigh >= IEEE754_TWO_TO_52_HIGH) {
+            copyValueCell(target, source);
+        } else if (intrinsicId === INTRINSIC_MATH_FLOOR) {
+            storeF64(target + VALUE_CELL_LOW,
+                floorF64(loadF64(source + VALUE_CELL_LOW)));
+        } else if (intrinsicId === INTRINSIC_MATH_CEIL) {
+            storeF64(target + VALUE_CELL_LOW,
+                ceilF64(loadF64(source + VALUE_CELL_LOW)));
+        } else {
+            setEngineScratchLeft(heapBase, state, 1);
+            setEngineScratchRight(heapBase, state, 2);
+            if (greaterEqualF64(subtractF64(loadF64(source + VALUE_CELL_LOW),
+                    floorF64(loadF64(source + VALUE_CELL_LOW))),
+                    divideF64(loadI32F64(engineScratchLeftAddress(heapBase, state)),
+                        loadI32F64(engineScratchRightAddress(heapBase, state)))) === 1) {
+                storeF64(target + VALUE_CELL_LOW, addF64(
+                    floorF64(loadF64(source + VALUE_CELL_LOW)),
+                    loadI32F64(engineScratchLeftAddress(heapBase, state))));
+            } else {
+                storeF64(target + VALUE_CELL_LOW,
+                    floorF64(loadF64(source + VALUE_CELL_LOW)));
+            }
+        }
+        store32(target, VALUE_TAG_DOUBLE);
+        store32(target + VALUE_CELL_AUX, 0);
+        return 1;
+    }
+
     function mathIntrinsicKernel(heapBase, state, intrinsicTarget,
                                  registerCells, intrinsicArgumentsVector,
                                  intrinsicArgumentCount, intrinsicId) {
@@ -10321,6 +10357,14 @@
              * non-tie odd value. Exact negative odd values are the
              * ES tie case and round toward positive infinity. */
             var roundTag = load32(unaryMathCell);
+            if (roundTag === VALUE_TAG_INT32) {
+                copyValueCell(intrinsicTarget, unaryMathCell);
+                return 1;
+            }
+            if (roundTag === VALUE_TAG_DOUBLE) {
+                if (roundLargeNumberKernel(heapBase, state, intrinsicTarget,
+                        unaryMathCell, intrinsicId) === 1) return 1;
+            }
             var roundTwiceInteger = toInt32F64(addF64(
                 loadNumberF64(
                     unaryMathCell + VALUE_CELL_LOW, roundTag),
@@ -10388,6 +10432,10 @@
             }
         } else if (intrinsicId >= INTRINSIC_MATH_FLOOR) {
             var roundingTag = load32(unaryMathCell);
+            if (roundingTag === VALUE_TAG_DOUBLE) {
+                if (roundLargeNumberKernel(heapBase, state, intrinsicTarget,
+                        unaryMathCell, intrinsicId) === 1) return 1;
+            }
             var roundingValue = toInt32F64(loadNumberF64(
                 unaryMathCell + VALUE_CELL_LOW, roundingTag));
             setEngineScratchLeft(heapBase, state, roundingValue);
@@ -14480,7 +14528,7 @@
         while (current !== 0) {
             var currentType = recordType(heapBase, current);
             var property = 0;
-            var prototype = 0;
+            var propertyAncestor = 0;
             if (currentType === HEAP_TYPE_ARRAY) {
                 if (numericKey === 1) {
                     var elements = arrayElements(heapBase, current);
@@ -14503,7 +14551,7 @@
                 var currentArrayPrototype = arrayPrototype(
                     heapBase, current);
                 property = currentArrayProperties;
-                prototype = currentArrayPrototype;
+                propertyAncestor = currentArrayPrototype;
             } else if (currentType >= HEAP_TYPE_OBJECT) {
                 if (currentType <= HEAP_TYPE_BYTECODE_FUNCTION) {
                     var currentObjectProperties = objectPropertyHead(
@@ -14511,14 +14559,14 @@
                     var currentObjectPrototype = objectPrototype(
                         heapBase, current);
                     property = currentObjectProperties;
-                    prototype = currentObjectPrototype;
+                    propertyAncestor = currentObjectPrototype;
                 } else if (currentType === HEAP_TYPE_REGEXP) {
                     var currentRegexpProperties = regexpPropertyHead(
                         heapBase, current);
                     var currentRegexpPrototype = regexpPrototype(
                         heapBase, current);
                     property = currentRegexpProperties;
-                    prototype = currentRegexpPrototype;
+                    propertyAncestor = currentRegexpPrototype;
                 } else if (currentType === HEAP_TYPE_BUFFER_VIEW) {
                     if (numericKey === 1) {
                         var viewLength = bufferViewLength(heapBase, current);
@@ -14535,7 +14583,7 @@
                     var currentViewPrototype = bufferViewPrototype(
                         heapBase, current);
                     property = currentViewProperties;
-                    prototype = currentViewPrototype;
+                    propertyAncestor = currentViewPrototype;
                 } else return 0;
             } else return 0;
 
@@ -14558,7 +14606,7 @@
                 }
                 property = propertyNext(heapBase, property);
             }
-            current = prototype;
+            current = propertyAncestor;
         }
         setValueCellFalse(targetCell);
         return 1;
@@ -16977,6 +17025,7 @@
             argumentsMappedCellKernel: argumentsMappedCellKernel,
             localBindingKernel: localBindingKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
+            roundLargeNumberKernel: roundLargeNumberKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
             numberCellToStringKernel: numberCellToStringKernel,
             numberFormatKernel: numberFormatKernel,
@@ -17089,10 +17138,10 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 9,
+                compilerVersion: 11,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
-                    hashKernelSource(kernelSource) : 0,
+                    new KernelCompiler().sourceFingerprint(kernelSource) : 0,
                 skipSourceHash: !snapshotNeedsSource
             };
         }
@@ -17564,7 +17613,7 @@
                 console.log(timingLine);
             }
         }
-        if (this.nativeResult.fn) {
+        if (this.nativeResult.fn && !runtime.retainNativeBuildIR) {
             /* The installed native entry point and its mapping are the only
              * executable state needed after compilation. Keeping the shared
              * IR, generated JS reference source, and assembler byte array
@@ -17581,17 +17630,6 @@
     }
 
     NativeInterpreter.Exit = Exit;
-
-    function hashKernelSource(source) {
-        var hash = -2128831035;
-        var index = 0;
-        while (index < source.length) {
-            var code = source.charCodeAt(index++);
-            hash = ((hash ^ (code & 255)) * 16777619) | 0;
-            hash = ((hash ^ (code >>> 8)) * 16777619) | 0;
-        }
-        return hash >>> 0;
-    }
 
     function reportSnapshot(message) {
         if (typeof print === "function") print(message);

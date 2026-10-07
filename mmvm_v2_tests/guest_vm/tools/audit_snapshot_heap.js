@@ -26,11 +26,13 @@
         args = shellArguments;
         output = print;
     }
-    var statisticsOnly = args[0] === "--heap-stats";
+    var propertiesOnly = args[0] === "--heap-properties";
+    var statisticsOnly = args[0] === "--heap-stats" || propertiesOnly;
     if (statisticsOnly) args = args.slice(1);
     if (!args.length) {
         throw new Error("usage: audit_snapshot_heap.js snapshot | " +
-                        "--heap-stats raw-heap-dump");
+                        "--heap-stats raw-heap-dump | " +
+                        "--heap-properties raw-heap-dump");
     }
     var header, file, ffi, descriptor;
     if (nodeHost) {
@@ -63,11 +65,14 @@
         inspectionHeap.memory = {
             readU32: inspectionWord,
             readU32Trusted: inspectionWord,
+            readU8: function (offset) { return file[offset]; },
+            readU8Trusted: function (offset) { return file[offset]; },
             byteLength: heapLength,
             destroy: function () {}
         };
         inspectionHeap.bump = heapLength;
-        reportStatistics(inspectionHeap);
+        if (propertiesOnly) reportProperties(inspectionHeap);
+        else reportStatistics(inspectionHeap);
         inspectionHeap.destroy();
         return;
     }
@@ -95,9 +100,35 @@
     }
     heap.bump = heapLength;
     if (statisticsOnly) {
-        reportStatistics(heap);
+        if (propertiesOnly) reportProperties(heap);
+        else reportStatistics(heap);
         heap.destroy();
         return;
+    }
+    function reportProperties(inspectedHeap) {
+        var inspectionRecords = new Records(
+            inspectedHeap, new Cells(inspectedHeap));
+        var position = Heap.FIRST_RECORD;
+        while (position < inspectedHeap.bump) {
+            var record = inspectedHeap.inspectRecordHeader(position);
+            if (record.type === Heap.Types.PROPERTY) {
+                var key = inspectionRecords.readString(
+                    inspectionRecords.propertyKey(position));
+                /* Keep records comparable when all later addresses move.
+                 * Escape control characters without relying on host JSON. */
+                var printable = "";
+                var index = 0;
+                while (index < key.length) {
+                    var code = key.charCodeAt(index++);
+                    if (code < 32 || code === 127) {
+                        printable += "\\u" + ("0000" + code.toString(16)).slice(-4);
+                    } else printable += String.fromCharCode(code);
+                }
+                output("property " + printable + " attributes=" +
+                    inspectionRecords.propertyAttributes(position));
+            }
+            position += record.size;
+        }
     }
     function reportStatistics(inspectedHeap) {
         var position = Heap.FIRST_RECORD;
@@ -126,7 +157,8 @@
             "; protected free: " + protectedFreeBytes +
             "; largest reusable region: " + largestFree);
         if (engineRecord) {
-            var inspectionRecords = new Records(inspectedHeap, null);
+            var inspectionRecords = new Records(
+                inspectedHeap, new Cells(inspectedHeap));
             output("native GC: collections=" +
                 inspectionRecords.engineGCCollections(engineRecord) +
                 "; post-GC occupied=" +
