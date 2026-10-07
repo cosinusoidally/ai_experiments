@@ -38,12 +38,6 @@
             GuestVMKernelCompiler;
         report("fingerprint=" + new compilerClass().sourceFingerprint(
             "function sample(a) { return a + 1; }"));
-        var diagnosticHash = -2128831035;
-        var hashIndex = 0;
-        while (hashIndex < 10000) {
-            diagnosticHash = ((diagnosticHash ^ hashIndex++) * 16777619) | 0;
-        }
-        report("multiply fingerprint=" + (diagnosticHash >>> 0));
         return;
     }
     var builtinsOnly = args[0] === "--builtins";

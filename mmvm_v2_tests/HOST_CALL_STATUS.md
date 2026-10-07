@@ -328,10 +328,15 @@ and byte-identical fixed-point checks exercised an input-image copy writer,
 not an independent compiler/bootstrap/serializer run. Those checks do not
 establish self-hosting. The copy writer has now been removed and standalone
 snapshot requests reload the implementation sources and enter the ordinary
-build pipeline. Bring-up has reached native kernel lowering and assembly
-under the standalone guest. A completed independently rebuilt image and
-byte-identical comparison are still required; the previous application
-execution results above remain separate evidence, not rebuild evidence.
+build pipeline. A genuine independent rebuild and whole-file byte comparison
+passed on 2026-10-07: both images are 16,266,056 bytes with SHA-256
+`a4cbe306e8cb3214fc3047acaae440d2ed6e59587677e9fa49de7456f95c8dc0`.
+Bootstrap took 106.00 seconds; rebuilding from sources under the standalone
+guest took 229.44 seconds. The rebuilt image executes hello and an alternate
+workload and obtains the launch environment from libc. This closes the
+copy/export defect, not the outstanding native language gaps in this ledger.
+The standalone language integration script still rejects numeric-array join
+(CALL detail 1037), exactly as the pre-change bootstrap image does.
 
 This ledger can be closed only when all of the following are true:
 

@@ -263,8 +263,8 @@ rally demos. Demo2 rendered about 1.9--2.1 FPS, versus about 5--6 FPS through
 the ordinary js_min-hosted guest path. Unsupported native semantic exits still
 terminate with status 70.
 
-The self-hosted rebuild target is to reconstruct this image from the VM
-sources without SpiderMonkey. The commands for that fixed-point test are:
+The self-hosted rebuild reconstructs this image from the VM sources without
+SpiderMonkey. The commands for that fixed-point test are:
 
 ```sh
 LD_LIBRARY_PATH="$MOZJS_LIB" \
@@ -281,8 +281,16 @@ was not a rebuild and its byte equality did not establish a self-hosting
 fixed point. The copy writer has been removed. Snapshot requests now execute
 the ordinary constructor/compiler/serializer pipeline, reloading the VM
 implementation from disk when running under a standalone bootstrap image.
-This path is being brought up; a completed independently rebuilt,
-byte-identical image is not yet verified. See
+This is now a verified from-source fixed point. On 2026-10-07, the bootstrap
+build took 106.00 seconds and the guest-hosted rebuild took 229.44 seconds.
+Both independently serialized images were 16,266,056 bytes, fully allocated
+(not sparse), with SHA-256
+`a4cbe306e8cb3214fc3047acaae440d2ed6e59587677e9fa49de7456f95c8dc0`.
+The rebuilt image runs hello and an alternate workload and reads its current
+launch environment. No program argument is required when only generating an
+image. These timings are actual compilation/runtime-construction times, not
+the old copy/export timings. This establishes the self-hosted build, not
+completion of the remaining ES5.1 language bring-up. See
 [the standalone snapshot plan](guest_vm/STANDALONE_SNAPSHOT_PLAN.md).
 
 The high-level regression test builds its runner in a temporary ignored

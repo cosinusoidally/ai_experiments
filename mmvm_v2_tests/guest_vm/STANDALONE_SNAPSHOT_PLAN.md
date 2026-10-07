@@ -21,7 +21,7 @@ address of `dlsym`, transfer control to the image entry point, and return its
 status. It must not implement guest allocation, parsing, JavaScript semantics,
 GC, filesystem operations, FFI dispatch, or any other VM service.
 
-The eventual fixed-point test is stronger:
+The fixed-point rebuild check is stronger:
 
 ```sh
 ./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
@@ -126,8 +126,32 @@ the js_min executable, or `./artifacts/js_runner.exe artifacts/snap`, for
 `node`. `retainNativeBuildIR` is an opt-in diagnostic VM constructor option;
 normal native execution still releases compiler IR after assembly.
 
-Acceptance requires a byte-identical comparison and
-execution of the resulting image. A VM source change must affect the
+The independent fixed point was verified on 2026-10-07:
+
+- Bootstrap from current sources under js_min: 106.00 seconds wall time.
+- Rebuild those same sources under the bootstrap image: 229.44 seconds wall
+  time, including lowering, assembly, startup construction, and serialization.
+- Both images: 16,266,056 bytes; 31,776 allocated 512-byte disk blocks, so
+  neither file is sparse.
+- `cmp` succeeded over the entire files. Both SHA-256 digests were
+  `a4cbe306e8cb3214fc3047acaae440d2ed6e59587677e9fa49de7456f95c8dc0`.
+- The independently rebuilt image printed `Hello, world!`, ran the alternate
+  workload, and read a deliberately changed DISPLAY/XAUTHORITY/HOME at launch.
+- The complete `run_standalone_snapshot_test.sh` regression also passed:
+  separate bootstrap builds with different program arguments and environments,
+  alternate program execution, launch-time environment checks, and a genuine
+  source rebuild under the test's newly compiled i386 launcher.
+- The tested images are available as ignored `artifacts/snap` and
+  `artifacts/snap2`; the previous images were retained as
+  `artifacts/snap-before-selfhost-20261007` and
+  `artifacts/snap2-before-selfhost-20261007`.
+
+This verifies a source rebuild and independent serialization, not a template
+copy, a machine-code cache load, or re-export of the loaded heap. The source
+changes during bring-up produced different independently constructed images,
+and the final unchanged sources produced the fixed point above.
+
+A VM source change must affect the
 rebuilt image where applicable: copying an input template cannot satisfy
 this check. Existing application execution must remain independent of this
 build path.
@@ -139,6 +163,30 @@ multiplexing checks. The native interpreter integration check now also
 exercises large binary64 and int32 rounding boundaries. Application help
 checks are smoke tests, not substitutes
 for the longer interactive demo stability runs.
+
+Additional checks against the independently rebuilt standalone image:
+
+- All demo command-line help paths (1 through 8) completed; these are only
+  module-loading/CLI checks for demos 2 through 7.
+- Demo1 rendered at 320x240 for over a minute and closed via its Escape key
+  handler without an error. Its roughly 0.9 FPS remains poor, but agrees with
+  the previous image's 0.8--0.9 FPS in the same setup; this change does not
+  claim to fix that performance gap.
+- Demo8 ran through rolling, garage, and free-drive autopilot at 320x240,
+  then closed normally through Escape/Q. Rolling intervals were about
+  13.6--18.8 FPS. Garage was about 17--18 FPS after its transition interval,
+  and autopilot about 17--18 FPS. Menu-only intervals reached about 20 FPS;
+  these results do not establish sustained 20 FPS during active play.
+- `net.js` and `node_web.js` served GET and HEAD requests on loopback.
+  Response bodies matched both hello.js and the binary js_runner executable
+  byte-for-byte. Test outputs remain ignored artifacts, not checked-in data.
+
+The standalone language integration script still stops at its numeric-array
+`join` check with native CALL rejection detail 1037. The previous bootstrap
+image stops at the identical bytecode PC and reason: this is an existing
+standalone semantic gap, not a new regression or evidence that the fixed
+point test passed all ES5.1 features. The general language bring-up remains
+tracked separately in HOST_CALL_STATUS.md.
 
 The version-2 image now contains a position-independent macro-assembled
 bootstrap, relocatable native interpreter text, initialized runtime, generic
