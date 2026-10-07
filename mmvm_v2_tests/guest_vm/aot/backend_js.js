@@ -162,6 +162,11 @@
                 "readRawU8Trusted" : "readRawU32Trusted") + "(" +
                 emitControlExpression(node.address, parameters, locals) + ")|0)";
         }
+        if (node.op === "logical_and_i32" || node.op === "logical_or_i32") {
+            return "((" + emitControlExpression(node.left, parameters, locals) +
+                (node.op === "logical_and_i32" ? "&&" : "||") +
+                emitControlExpression(node.right, parameters, locals) + ")|0)";
+        }
         if (node.op === "logical_not_i32") return "(!" +
             emitControlExpression(node.value, parameters, locals) + "|0)";
         if (node.op === "arg_i32") return "(" + parameters[node.index] + "|0)";

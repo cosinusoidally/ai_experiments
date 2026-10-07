@@ -1,4 +1,20 @@
-if (typeof __guestVMStandaloneRunGuestRunner === "function") {
+/* Running applications can use the existing standalone runtime. Rebuilding
+ * must instead execute the ordinary constructor/compiler/serializer below;
+ * exporting the image that launched us is not a self-hosted rebuild. */
+function guestRunnerRequestsSnapshot(runnerArguments) {
+    var index = 0;
+    while (index < runnerArguments.length) {
+        var option = runnerArguments[index++];
+        if (option === "--snapshot") return true;
+        if (option === "--with-snapshot" ||
+            option === "--vm-profile-duration") index++;
+        else if (option.charAt(0) !== "-") return false;
+    }
+    return false;
+}
+
+if (typeof __guestVMStandaloneRunGuestRunner === "function" &&
+    !guestRunnerRequestsSnapshot(arguments)) {
     __guestVMStandaloneRunGuestRunner(arguments);
 } else {
 var guestRunnerIsNode = typeof process !== "undefined" && process.argv &&
@@ -25,9 +41,27 @@ if (guestRunnerIsNode) {
     GuestRunnerNodeEnvironment = require("./guest_vm/node_environment.js");
     guestRunnerArguments = process.argv.slice(2);
 } else {
+    if (typeof __guestVMStandaloneRunGuestRunner === "function" &&
+        guestRunnerRequestsSnapshot(arguments)) {
+        /* The loaded implementation is the bootstrap compiler, not the build
+         * input. Reload the implementation from disk so source changes are
+         * reflected in the newly compiled image. */
+        GuestVM = undefined;
+        GuestNodeEnvironment = undefined;
+        print("loading guest VM build sources");
+        if (typeof read !== "function") {
+            read = function (filename) {
+                return require("fs").readFileSync(filename).toString("utf8");
+            };
+        }
+    }
     if (typeof GuestVM === "undefined") load("guest_vm/guest_vm.js");
     if (typeof GuestNodeEnvironment === "undefined") {
         load("guest_vm/node_environment.js");
+    }
+    if (typeof __guestVMStandaloneRunGuestRunner === "function" &&
+        guestRunnerRequestsSnapshot(arguments)) {
+        print("loaded guest VM build sources");
     }
     GuestRunnerVM = GuestVM;
     GuestRunnerNodeEnvironment = GuestNodeEnvironment;
@@ -194,7 +228,9 @@ try {
          * application is opened or represented in the guest heap.  The
          * temporary environment deliberately has fixed arguments, so the
          * emitted bytes cannot depend on the program run after this point. */
+        print("preparing standalone runtime");
         guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
+        print("prepared standalone runtime");
         var guestSnapshotExecution = guestProgramVM.start(
             read("guest_vm/standalone_source_runner.js"),
             "guest_vm/standalone_source_runner.js");

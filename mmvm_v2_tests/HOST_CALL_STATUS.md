@@ -323,6 +323,16 @@ standalone or performance work.
 
 ## Completion criteria
 
+Snapshot rebuild correction (2026-10-07): previous "regenerated snapshots"
+and byte-identical fixed-point checks exercised an input-image copy writer,
+not an independent compiler/bootstrap/serializer run. Those checks do not
+establish self-hosting. The copy writer has now been removed and standalone
+snapshot requests reload the implementation sources and enter the ordinary
+build pipeline. Bring-up has reached native kernel lowering and assembly
+under the standalone guest. A completed independently rebuilt image and
+byte-identical comparison are still required; the previous application
+execution results above remain separate evidence, not rebuild evidence.
+
 This ledger can be closed only when all of the following are true:
 
 - the hosted audit of the existing tests, integrations, demos, and supported
@@ -335,3 +345,6 @@ This ledger can be closed only when all of the following are true:
   performance gates do not regress;
 - ordinary standalone runs require neither generated checked-in files nor
   program-specific snapshot state.
+- the standalone guest rebuilds its native interpreter and startup image
+  from VM sources and independently serializes a byte-identical snapshot,
+  without exporting the input image.

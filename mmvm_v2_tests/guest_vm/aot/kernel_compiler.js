@@ -593,6 +593,22 @@
             if (statement.type === "ExpressionStatement" &&
                 (statement.expression.type === "AssignmentExpression" ||
                  statement.expression.type === "UpdateExpression")) return true;
+            if (statement.type === "ReturnStatement" &&
+                containsShortCircuit(statement.argument)) return true;
+            if (statement.type === "ExpressionStatement" &&
+                containsShortCircuit(statement.expression)) return true;
+        }
+        return false;
+    }
+
+    function containsShortCircuit(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "BinaryExpression" &&
+            (node.operator === "&&" || node.operator === "||")) return true;
+        var key;
+        for (key in node) {
+            if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key) &&
+                containsShortCircuit(node[key])) return true;
         }
         return false;
     }
@@ -1255,6 +1271,13 @@
                     value: lowerKernelExpression(node.argument, symbols), type: "i32"};
         }
         if (node.type === "BinaryExpression") {
+            if (node.operator === "&&" || node.operator === "||") {
+                return {op: node.operator === "&&" ?
+                    "logical_and_i32" : "logical_or_i32",
+                    left: lowerKernelExpression(node.left, symbols),
+                    right: lowerKernelExpression(node.right, symbols),
+                    type: "i32"};
+            }
             var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
                 "%": "rem_i32",
                 "&": "and_i32", "|": "or_i32", "^": "xor_i32",

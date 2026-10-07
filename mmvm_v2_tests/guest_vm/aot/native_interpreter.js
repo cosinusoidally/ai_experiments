@@ -3359,7 +3359,8 @@
                         callArgumentsCell, callOperation, callTargetIndex,
                         currentContext, stringSupport, arrayPrototype,
                         bytecodeWords, registerCells, pc, opcode, instructions,
-                        platformServices);
+                        platformServices, load32(heapBase + bytecodeWords +
+                            (pc + THIRD_OPERAND) * WORD_BYTES));
                     if (intrinsicDispatchResult === EXIT_UNSUPPORTED) {
                         return EXIT_UNSUPPORTED;
                     }
@@ -6030,7 +6031,7 @@
             heapBase, state, frame, callFunctionCell, callArgumentsCell,
             callOperation, callTargetIndex, currentContext, stringSupport,
             arrayPrototype, bytecodeWords, registerCells, pc, opcode,
-            instructions, platformServices) {
+            instructions, platformServices, callReceiverIndex) {
         var receiverIndex = -1;
         var intrinsicCallValid = 1;
         if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
@@ -6128,6 +6129,69 @@
                 intrinsicArgumentCount = load32(
                     heapBase + intrinsicArgumentsVector + VECTOR_LENGTH);
             }
+        }
+        /* Bytecode targets are handled by bytecodeCallKernel. Forward native
+         * targets through the same intrinsic dispatcher, with an explicit
+         * receiver and an argument descriptor vector that omits thisArg.
+         * Never rewrite the caller's immutable bytecode or argument list. */
+        while (intrinsicCallValid === 1 &&
+               intrinsicId === INTRINSIC_FUNCTION_CALL) {
+            if (callReceiverIndex < 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            var forwardedFunctionCell = frameRegisterCellAddress(
+                heapBase, frame, callReceiverIndex);
+            if (valueCellTag(0, forwardedFunctionCell) !==
+                    VALUE_TAG_REFERENCE) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            intrinsicFunction = valueCellReference(0, forwardedFunctionCell);
+            if (recordType(heapBase, intrinsicFunction) !==
+                    HEAP_TYPE_NATIVE_FUNCTION) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            intrinsicId = nativeFunctionMetadata(heapBase, intrinsicFunction);
+            if (intrinsicId < INTRINSIC_PEEK8 ||
+                intrinsicId > INTRINSIC_LAST_ID) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+            callReceiverIndex = -1;
+            if (intrinsicArgumentCount > 0) {
+                var forwardedThisDescriptor = vectorCellAddress(
+                    heapBase, intrinsicArgumentsVector, 0);
+                if (valueCellTag(0, forwardedThisDescriptor) !==
+                        VALUE_TAG_INT32) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                callReceiverIndex = valueCellInt32(0, forwardedThisDescriptor);
+                var forwardedArguments = argumentRegisterTailKernel(
+                    heapBase, state, intrinsicArgumentsVector);
+                if (forwardedArguments === 0) {
+                    setEngineCallRejectReason(
+                        heapBase, state, CALL_REJECT_HEAP_SPACE);
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                intrinsicArgumentsVector = forwardedArguments;
+                intrinsicArgumentCount = intrinsicArgumentCount - 1;
+            }
+            setEngineCallRejectReason(heapBase, state,
+                CALL_DIAGNOSTIC_INTRINSIC_BASE + intrinsicId);
+        }
+        isErrorConstructor = 0;
+        if (intrinsicId >= INTRINSIC_FIRST_ERROR_CONSTRUCTOR &&
+            intrinsicId <= INTRINSIC_LAST_ERROR_CONSTRUCTOR) {
+            isErrorConstructor = 1;
+        }
+        if (callOperation === 1 && intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
+            intrinsicCallValid = 0;
+            setEngineCallRejectReason(
+                heapBase, state, CALL_REJECT_INTRINSIC_CALL_FORM);
         }
         var requiredIntrinsicArguments = 1;
         if (isErrorConstructor === 1) {
@@ -6419,9 +6483,7 @@
                 heapBase, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount);
             if (intrinsicHandled === 2) {
-                var evalReceiverIndex = load32(
-                    heapBase + bytecodeWords +
-                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                var evalReceiverIndex = callReceiverIndex;
                 if (evalReceiverIndex === -2) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
@@ -6486,12 +6548,6 @@
                 heapBase, state, frame, pc, opcode, instructions);
         }
         }
-        }
-        if (intrinsicId === INTRINSIC_FUNCTION_CALL) {
-            /* Bytecode callees were forwarded above. Native and host
-             * callees retain the ordinary semantic call boundary. */
-            return unsupportedExitKernel(
-                heapBase, state, frame, pc, opcode, instructions);
         }
         if (intrinsicId === INTRINSIC_FUNCTION_CONSTRUCTOR) {
             intrinsicHandled = functionConstructorKernel(
@@ -6558,8 +6614,7 @@
             receiverIndex = -1;
             if (intrinsicId !== INTRINSIC_NUMBER_CONSTRUCTOR) {
             if (intrinsicId !== INTRINSIC_DATE_CONSTRUCTOR) {
-                receiverIndex = load32(heapBase + bytecodeWords +
-                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                receiverIndex = callReceiverIndex;
             }
             }
             intrinsicHandled = dateIntrinsicKernel(
@@ -6594,9 +6649,7 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_FUNCTION_TO_STRING) {
-            var functionStringReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var functionStringReceiverIndex = callReceiverIndex;
             var functionStringReceiverCell = 0;
             if (functionStringReceiverIndex >= 0) {
                 functionStringReceiverCell = frameRegisterCellAddress(
@@ -6628,7 +6681,7 @@
             intrinsicHandled = objectHasOwnPropertyKernel(
                 heapBase, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, bytecodeWords, pc,
-                intrinsicId);
+                intrinsicId, callReceiverIndex, stringSupport);
         }
         }
         if (intrinsicHandled === 0) {
@@ -6682,7 +6735,8 @@
             var numberStringResult = numberToStringKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
-                bytecodeWords, pc, stringSupport, platformServices);
+                bytecodeWords, pc, stringSupport, platformServices,
+                callReceiverIndex);
             if (numberStringResult === 1) intrinsicHandled = 1;
             else if (numberStringResult === 2) {
                 setEngineCallRejectReason(
@@ -6707,7 +6761,7 @@
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 bytecodeWords, pc, intrinsicId,
-                platformServices);
+                platformServices, callReceiverIndex);
             if (precisionResult === 1) intrinsicHandled = 1;
             else if (precisionResult === 2) {
                 setEngineCallRejectReason(
@@ -6777,7 +6831,7 @@
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 arrayPrototype, bytecodeWords, pc, opcode, intrinsicId,
-                instructions, frame);
+                instructions, frame, callReceiverIndex);
             if (arrayIntrinsicResult === EXIT_UNSUPPORTED) {
                 return EXIT_UNSUPPORTED;
             }
@@ -6818,7 +6872,7 @@
             intrinsicHandled = typedArraySetKernel(
                 heapBase, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
-                bytecodeWords, pc);
+                bytecodeWords, pc, callReceiverIndex);
             if (intrinsicHandled === 0) {
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
@@ -6827,9 +6881,7 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_BUFFER_COPY) {
-            var copyReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var copyReceiverIndex = callReceiverIndex;
             var copyReceiverCell = 0;
             if (copyReceiverIndex >= 0) {
                 copyReceiverCell = frameRegisterCellAddress(
@@ -6871,9 +6923,7 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_STRING_REPLACE) {
-            var replaceReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var replaceReceiverIndex = callReceiverIndex;
             var replaceReceiverCell = 0;
             if (replaceReceiverIndex >= 0) {
                 replaceReceiverCell = frameRegisterCellAddress(
@@ -6896,7 +6946,7 @@
             intrinsicHandled = regexpTestKernel(
                 heapBase, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, stringSupport,
-                bytecodeWords, pc);
+                bytecodeWords, pc, callReceiverIndex);
             if (intrinsicHandled === 0) {
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
@@ -6931,7 +6981,7 @@
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 stringSupport, arrayPrototype, bytecodeWords, pc,
-                intrinsicId, platformServices);
+                intrinsicId, platformServices, callReceiverIndex);
             if (intrinsicHandled === 0) {
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
@@ -6941,13 +6991,35 @@
             intrinsicHandled = bufferIntrinsicKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
-                stringSupport, bytecodeWords, pc, intrinsicId);
+                stringSupport, bytecodeWords, pc, intrinsicId,
+                callReceiverIndex);
             if (intrinsicHandled === 0) {
                 return unsupportedExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
         }
         return intrinsicHandled;
+    }
+
+    function argumentRegisterTailKernel(heapBase, state, sourceVector) {
+        var length = vectorLength(heapBase, sourceVector) - 1;
+        var bytes = VECTOR_CELLS + length * VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        var targetVector = engineHeapBump(heapBase, state);
+        setRecordType(heapBase, targetVector, HEAP_TYPE_VALUE_VECTOR);
+        setRecordSize(heapBase, targetVector, bytes);
+        setRecordMark(heapBase, targetVector, 0);
+        setRecordFlags(heapBase, targetVector, 0);
+        setVectorLength(heapBase, targetVector, length);
+        setVectorCapacity(heapBase, targetVector, length);
+        var index = 0;
+        while (index < length) {
+            copyValueCell(vectorCellAddress(heapBase, targetVector, index),
+                vectorCellAddress(heapBase, sourceVector, index + 1));
+            index = index + 1;
+        }
+        setEngineHeapBump(heapBase, state, targetVector + bytes);
+        return targetVector;
     }
 
     function functionToStringKernel(heapBase, targetCell, receiverCell) {
@@ -7562,13 +7634,12 @@
 
     function objectHasOwnPropertyKernel(
             heapBase, intrinsicTarget, registerCells,
-            intrinsicArgumentsVector, bytecodeWords, pc, intrinsicId) {
+            intrinsicArgumentsVector, bytecodeWords, pc, intrinsicId,
+            callReceiverIndex, stringSupport) {
         var intrinsicHandled = 0;
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
-            var ownReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var ownReceiverIndex = callReceiverIndex;
             var ownValid = 1;
             if (ownReceiverIndex < 0) ownValid = 0;
             var ownReceiverCell = heapBase + registerCells +
@@ -7578,11 +7649,6 @@
             var ownObject = valueCellReference(0, ownReceiverCell);
             var ownObjectType = recordType(heapBase, ownObject);
             var ownProperty = 0;
-            /* Indexed Array properties live in the value vector rather than
-             * the named-property chain.  Leave Array receivers to the shared
-             * semantic implementation until the native intrinsic performs
-             * canonical string-index decoding itself. */
-            if (ownObjectType === HEAP_TYPE_ARRAY) ownValid = 0;
             if (ownObjectType >= HEAP_TYPE_OBJECT) {
                 if (ownObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
                     ownProperty = objectPropertyHead(
@@ -7611,6 +7677,25 @@
                 }
             }
             var ownFound = 0;
+            if (ownValid === 1 && ownObjectType === HEAP_TYPE_ARRAY) {
+                var ownArrayIndex = propertyKeyIndexKernel(heapBase, ownKey);
+                var ownElements = arrayElements(heapBase, ownObject);
+                if (ownArrayIndex >= 0 &&
+                    ownArrayIndex < vectorLength(heapBase, ownElements)) {
+                    if (valueCellTag(0, vectorCellAddress(
+                            heapBase, ownElements, ownArrayIndex)) !== 0) {
+                        ownFound = 1;
+                    }
+                }
+                if (arrayReserved(heapBase, ownObject) === 0) {
+                    var ownLengthKey = valueCellReference(0, vectorCellAddress(
+                        heapBase, stringSupport,
+                        RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY));
+                    if (stringKeysEqualKernel(
+                            heapBase, ownKey, ownLengthKey) === 1) ownFound = 1;
+                }
+                if (ownFound === 1) ownValid = 2;
+            }
             while (ownValid === 1) {
                 if (ownProperty === 0) {
                     ownValid = 2;
@@ -7716,11 +7801,10 @@
 
     function typedArraySetKernel(
             heapBase, intrinsicTarget, registerCells, argumentsVector,
-            argumentCount, bytecodeWords, pc) {
+            argumentCount, bytecodeWords, pc, callReceiverIndex) {
         if (argumentCount < 1) return 0;
         if (argumentCount > 2) return 0;
-        var receiverIndex = load32(
-            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        var receiverIndex = callReceiverIndex;
         if (receiverIndex < 0) return 0;
         var receiverCell = heapBase + registerCells +
             receiverIndex * VALUE_CELL_BYTES;
@@ -7795,12 +7879,10 @@
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
             arrayPrototype, bytecodeWords, pc, opcode, intrinsicId, instructions,
-            frame) {
+            frame, callReceiverIndex) {
         var intrinsicHandled = 0;
         if (intrinsicId === INTRINSIC_ARRAY_REVERSE) {
-            var reverseReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var reverseReceiverIndex = callReceiverIndex;
             if (reverseReceiverIndex < 0) return 0;
             var reverseReceiverCell = heapBase + registerCells +
                 reverseReceiverIndex * VALUE_CELL_BYTES;
@@ -7829,9 +7911,7 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_SPLICE) {
-            var spliceReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var spliceReceiverIndex = callReceiverIndex;
             if (spliceReceiverIndex < 0) return 0;
             var spliceReceiverCell = heapBase + registerCells +
                 spliceReceiverIndex * VALUE_CELL_BYTES;
@@ -7943,9 +8023,7 @@
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_INDEX_OF) {
             var indexOfValid = 1;
-            var indexOfReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var indexOfReceiverIndex = callReceiverIndex;
             if (indexOfReceiverIndex < 0) indexOfValid = 0;
             var indexOfReceiverCell = heapBase + registerCells +
                 indexOfReceiverIndex * VALUE_CELL_BYTES;
@@ -8063,9 +8141,7 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
-            var concatReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var concatReceiverIndex = callReceiverIndex;
             var concatHelperResult = arrayConcatKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 concatReceiverIndex, intrinsicArgumentsVector,
@@ -8085,9 +8161,7 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
-            var sliceReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var sliceReceiverIndex = callReceiverIndex;
             var sliceHelperResult = arraySliceKernel(
                 heapBase, state, intrinsicTarget, registerCells,
                 sliceReceiverIndex, intrinsicArgumentsVector,
@@ -8108,9 +8182,7 @@
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_POP) {
             var popValid = 1;
-            var popReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var popReceiverIndex = callReceiverIndex;
             if (popReceiverIndex < 0) popValid = 0;
             var popReceiverCell = heapBase + registerCells +
                 popReceiverIndex * VALUE_CELL_BYTES;
@@ -8173,9 +8245,7 @@
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
             var shiftValid = 1;
-            var shiftReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var shiftReceiverIndex = callReceiverIndex;
             if (shiftReceiverIndex < 0) shiftValid = 0;
             var shiftReceiverCell = heapBase + registerCells +
                 shiftReceiverIndex * VALUE_CELL_BYTES;
@@ -8249,9 +8319,7 @@
             var joinValid = 1;
             var joinAllocationFailed = 0;
             if (intrinsicArgumentCount !== 1) joinValid = 0;
-            var joinReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var joinReceiverIndex = callReceiverIndex;
             if (joinReceiverIndex < 0) joinValid = 0;
             var joinReceiverCell = heapBase + registerCells +
                 joinReceiverIndex * VALUE_CELL_BYTES;
@@ -8447,9 +8515,7 @@
         }
         }
         if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
-            var pushReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var pushReceiverIndex = callReceiverIndex;
             var pushValid = 1;
             if (pushReceiverIndex < 0) pushValid = 0;
             var pushReceiverCell = heapBase + registerCells +
@@ -8522,9 +8588,7 @@
             intrinsicHandled = 1;
         }
         if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
-            var unshiftReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var unshiftReceiverIndex = callReceiverIndex;
             var unshiftValid = 1;
             if (unshiftReceiverIndex < 0) unshiftValid = 0;
             var unshiftReceiverCell = heapBase + registerCells +
@@ -9228,7 +9292,8 @@
     function bufferIntrinsicKernel(heapBase, state, intrinsicTarget,
                                    registerCells, intrinsicArgumentsVector,
                                    intrinsicArgumentCount, stringSupport,
-                                   bytecodeWords, pc, intrinsicId) {
+                                   bytecodeWords, pc, intrinsicId,
+                                   callReceiverIndex) {
         var intrinsicHandled = 0;
         var isRawMemoryIntrinsic = 0;
         var isBufferAccessIntrinsic = 0;
@@ -9265,9 +9330,7 @@
         }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
-        var sliceReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var sliceReceiverIndex = callReceiverIndex;
         var sliceValid = 1;
         if (sliceReceiverIndex < 0) sliceValid = 0;
         var sliceReceiverCell = heapBase + registerCells +
@@ -9356,9 +9419,7 @@
     }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_BUFFER_TO_STRING) {
-        var toStringReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var toStringReceiverIndex = callReceiverIndex;
         var toStringValid = 1;
         if (toStringReceiverIndex < 0) toStringValid = 0;
         var toStringReceiverCell = heapBase + registerCells +
@@ -9616,9 +9677,7 @@
     }
     if (intrinsicHandled === 0) {
     if (isBufferAccessIntrinsic === 1) {
-        var bufferReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var bufferReceiverIndex = callReceiverIndex;
         var bufferReceiverValid = 1;
         if (bufferReceiverIndex < 0) bufferReceiverValid = 0;
         var bufferReceiverCell = heapBase + registerCells +
@@ -10506,7 +10565,8 @@
     function numberToStringKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
-            bytecodeWords, pc, stringSupport, platformServices) {
+            bytecodeWords, pc, stringSupport, platformServices,
+            callReceiverIndex) {
         var MINIMUM_NUMBER_RADIX = 2;
         var MAXIMUM_NUMBER_RADIX = 36;
         var radix = 10;
@@ -10537,8 +10597,7 @@
                 if (radix > MAXIMUM_NUMBER_RADIX) return 0;
             }
         }
-        var receiverIndex = load32(
-            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        var receiverIndex = callReceiverIndex;
         if (receiverIndex < 0) return 0;
         var receiverCell = heapBase + registerCells +
             receiverIndex * VALUE_CELL_BYTES;
@@ -10574,7 +10633,8 @@
     function numberFormatKernel(
             heapBase, state, intrinsicTarget, registerCells,
             intrinsicArgumentsVector, intrinsicArgumentCount,
-            bytecodeWords, pc, intrinsicId, platformServices) {
+            bytecodeWords, pc, intrinsicId, platformServices,
+            callReceiverIndex) {
         if (intrinsicId !== INTRINSIC_NUMBER_TO_PRECISION) {
             if (intrinsicId !== INTRINSIC_NUMBER_TO_FIXED) return 0;
         }
@@ -10595,9 +10655,7 @@
                 heapBase, state, CALL_REJECT_INTRINSIC_ARGUMENT);
             return 0;
         }
-        var receiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var receiverIndex = callReceiverIndex;
         if (receiverIndex < 0) {
             setEngineCallRejectReason(
                 heapBase, state, CALL_REJECT_INTRINSIC_RECEIVER);
@@ -11163,13 +11221,28 @@
         if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
         var object = valueCellReference(0, sourceCell);
         var type = recordType(heapBase, object);
-        /* Array enumeration must include populated vector elements.  The
-         * ordinary-object kernel below only walks named property records. */
-        if (type === HEAP_TYPE_ARRAY) return 0;
         if (type < HEAP_TYPE_OBJECT) return 0;
         if (type > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
-        var property = objectPropertyHead(heapBase, object);
-        var count = 0;
+        var property = 0;
+        if (type === HEAP_TYPE_ARRAY) {
+            property = arrayPropertyHead(heapBase, object);
+        } else property = objectPropertyHead(heapBase, object);
+        var sourceElements = 0;
+        var sourceLength = 0;
+        var indexedCount = 0;
+        if (type === HEAP_TYPE_ARRAY) {
+            sourceElements = arrayElements(heapBase, object);
+            sourceLength = vectorLength(heapBase, sourceElements);
+            var sourceIndex = 0;
+            while (sourceIndex < sourceLength) {
+                if (valueCellTag(0, vectorCellAddress(
+                        heapBase, sourceElements, sourceIndex)) !== 0) {
+                    indexedCount = indexedCount + 1;
+                }
+                sourceIndex = sourceIndex + 1;
+            }
+        }
+        var count = indexedCount;
         var countedProperty = property;
         while (countedProperty !== 0) {
             if ((propertyAttributes(heapBase, countedProperty) &
@@ -11195,6 +11268,8 @@
         setRecordFlags(heapBase, vector, 0);
         setVectorLength(heapBase, vector, count);
         setVectorCapacity(heapBase, vector, count);
+        var clearedKeyCells = clearAbsentValueCellsKernel(
+            heapBase, vector, 0, indexedCount);
         var index = count - 1;
         while (property !== 0) {
             if ((propertyAttributes(heapBase, property) &
@@ -11215,6 +11290,21 @@
         setArrayReserved(heapBase, array, 0);
         setValueCellReference(targetCell, array);
         setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
+        /* Publish the result before allocating index strings. The ordinary
+         * frame register is then a GC root even if allocation needs a retry.
+         * Holes are absent properties, unlike present undefined elements. */
+        var keyIndex = 0;
+        var elementIndex = 0;
+        while (elementIndex < sourceLength) {
+            if (valueCellTag(0, vectorCellAddress(
+                    heapBase, sourceElements, elementIndex)) !== 0) {
+                if (integerRadixStringKernel(heapBase, state,
+                        vectorCellAddress(heapBase, vector, keyIndex),
+                        elementIndex, 10) !== 1) return 0;
+                keyIndex = keyIndex + 1;
+            }
+            elementIndex = elementIndex + 1;
+        }
         return 1;
     }
 
@@ -11268,10 +11358,8 @@
 
     function regexpTestKernel(heapBase, intrinsicTarget, registerCells,
                               intrinsicArgumentsVector, stringSupport,
-                              bytecodeWords, pc) {
-        var compactRegexpReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+                              bytecodeWords, pc, callReceiverIndex) {
+        var compactRegexpReceiverIndex = callReceiverIndex;
         var compactRegexpValid = 1;
         if (compactRegexpReceiverIndex < 0) {
             compactRegexpValid = 0;
@@ -11455,9 +11543,7 @@
             return 1;
         }
         if (ENABLE_NATIVE_REGEXP_TEST === 1) {
-            var regexpTestReceiverIndex = load32(
-                heapBase + bytecodeWords +
-                (pc + THIRD_OPERAND) * WORD_BYTES);
+            var regexpTestReceiverIndex = callReceiverIndex;
             var regexpTestValid = 1;
             if (regexpTestReceiverIndex < 0) regexpTestValid = 0;
             var regexpTestReceiverCell = heapBase + registerCells +
@@ -11826,14 +11912,14 @@
                                    registerCells, intrinsicArgumentsVector,
                                    intrinsicArgumentCount, stringSupport,
                                    arrayPrototype, bytecodeWords, pc,
-                                   intrinsicId, platformServices) {
+                                   intrinsicId, platformServices,
+                                   callReceiverIndex) {
         var intrinsicHandled = 0;
     var isCaseConversion = 0;
     if (intrinsicId === INTRINSIC_STRING_TO_UPPER_CASE) isCaseConversion = 1;
     else if (intrinsicId === INTRINSIC_STRING_TO_LOWER_CASE) isCaseConversion = 1;
     if (isCaseConversion === 1) {
-        var caseReceiverIndex = load32(
-            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        var caseReceiverIndex = callReceiverIndex;
         if (caseReceiverIndex < 0) return 0;
         var caseReceiverCell = heapBase + registerCells +
             caseReceiverIndex * VALUE_CELL_BYTES;
@@ -11900,8 +11986,7 @@
         return 1;
     }
     if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
-        var valueReceiverIndex = load32(
-            heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
+        var valueReceiverIndex = callReceiverIndex;
         if (valueReceiverIndex < 0) return 0;
         var valueReceiverCell = heapBase + registerCells +
             valueReceiverIndex * VALUE_CELL_BYTES;
@@ -11924,9 +12009,7 @@
     }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
-        var indexOfReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var indexOfReceiverIndex = callReceiverIndex;
         var indexOfValid = 1;
         if (indexOfReceiverIndex < 0) indexOfValid = 0;
         var indexOfReceiverCell = heapBase + registerCells +
@@ -12028,9 +12111,7 @@
     }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_STRING_LAST_INDEX_OF) {
-        var lastIndexReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var lastIndexReceiverIndex = callReceiverIndex;
         var lastIndexValid = 1;
         if (lastIndexReceiverIndex < 0) lastIndexValid = 0;
         var lastIndexReceiverCell = heapBase + registerCells +
@@ -12125,9 +12206,7 @@
     }
     if (intrinsicHandled === 0) {
     if (intrinsicId === INTRINSIC_STRING_SPLIT) {
-        var splitReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var splitReceiverIndex = callReceiverIndex;
         var splitValid = 1;
         if (splitReceiverIndex < 0) splitValid = 0;
         var splitReceiverCell = heapBase + registerCells +
@@ -12492,9 +12571,7 @@
         isSubstringIntrinsic = 1;
     }
     if (isSubstringIntrinsic === 1) {
-        var substrReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var substrReceiverIndex = callReceiverIndex;
         var substrValid = 1;
         if (substrReceiverIndex < 0) substrValid = 0;
         var substrReceiverCell = heapBase + registerCells +
@@ -12659,9 +12736,7 @@
         isCharacterIntrinsic = 1;
     }
     if (isCharacterIntrinsic === 1) {
-        var charAtReceiverIndex = load32(
-            heapBase + bytecodeWords +
-            (pc + THIRD_OPERAND) * WORD_BYTES);
+        var charAtReceiverIndex = callReceiverIndex;
         var charAtValid = 1;
         if (charAtReceiverIndex < 0) charAtValid = 0;
         var charAtReceiverCell = heapBase + registerCells +
@@ -14341,11 +14416,16 @@
 
     function propertyKeyMatchesIndexKernel(heapBase, key, index) {
         if (index < 0) return 0;
+        if (propertyKeyIndexKernel(heapBase, key) === index) return 1;
+        return 0;
+    }
+
+    function propertyKeyIndexKernel(heapBase, key) {
         var length = stringLength(heapBase, key);
-        if (length === 0) return 0;
+        if (length === 0) return -1;
         if (length > 1) {
             if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 48) {
-                return 0;
+                return -1;
             }
         }
         var parsed = 0;
@@ -14353,15 +14433,14 @@
         while (characterIndex < length) {
             var character = stringCharacterCodeUnit(
                 heapBase, key, characterIndex) & 65535;
-            if (character < 48) return 0;
-            if (character > 57) return 0;
-            if (parsed > 214748364) return 0;
+            if (character < 48) return -1;
+            if (character > 57) return -1;
+            if (parsed > divideI32(MAX_SIGNED_INT32, 10)) return -1;
             parsed = parsed * 10 + character - 48;
-            if (parsed < 0) return 0;
+            if (parsed < 0) return -1;
             characterIndex = characterIndex + 1;
         }
-        if (parsed === index) return 1;
-        return 0;
+        return parsed;
     }
 
     /* Implement the ES5 `in` lookup entirely against guest records.  The
@@ -16833,6 +16912,7 @@
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
         var kernelDependencies = {
+            argumentRegisterTailKernel: argumentRegisterTailKernel,
             allocateArrayBufferKernel: allocateArrayBufferKernel,
             allocateArrayKernel: allocateArrayKernel,
             allocateErrorKernel: allocateErrorKernel,
@@ -16915,6 +16995,7 @@
             isNaNIntrinsicKernel: isNaNIntrinsicKernel,
             parseIntIntrinsicKernel: parseIntIntrinsicKernel,
             propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
+            propertyKeyIndexKernel: propertyKeyIndexKernel,
             primitiveWrapperValueCellKernel: primitiveWrapperValueCellKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,

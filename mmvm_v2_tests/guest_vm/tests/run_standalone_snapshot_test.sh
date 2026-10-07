@@ -57,11 +57,12 @@ fi
 fixed_point_output=$("$temporary_directory/js_runner.exe" \
     "$temporary_directory/snap-a" guest_runner.js --vm-native \
     --snapshot "$temporary_directory/snap2")
-if [ -n "$fixed_point_output" ]; then
-    echo "fixed-point runner emitted unexpected stdout:" >&2
-    echo "$fixed_point_output" >&2
-    exit 1
-fi
+printf '%s\n' "$fixed_point_output" | grep -F \
+    'lowering native interpreter kernel' >/dev/null
+printf '%s\n' "$fixed_point_output" | grep -F \
+    'assembled native interpreter kernel' >/dev/null
+printf '%s\n' "$fixed_point_output" | grep -F \
+    "wrote standalone snapshot: $temporary_directory/snap2" >/dev/null
 cmp "$temporary_directory/snap-a" "$temporary_directory/snap2"
 
 echo "program-independent standalone snapshots and byte-identical fixed point passed"

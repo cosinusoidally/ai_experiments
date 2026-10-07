@@ -578,31 +578,40 @@
     }
 
     function HeapSweeper(heap) {
-        if (!sharedJS) {
+        var nativeMemory = !!heap.memory.nativeAddress(0);
+        if (nativeMemory ? !sharedX86 : !sharedJS) {
+            var backend = nativeMemory ? new X86Backend() : new JSBackend();
             var ir = new KernelCompiler().compile(heapSweepKernel, {
                 legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "heapBump", "address"]
             });
-            sharedJS = new JSBackend().compile(ir);
-            sharedX86 = new X86Backend().compile(ir);
+            var sweeper = backend.compile(ir);
             var markIR = new KernelCompiler().compile(heapMarkKernel, {
                 legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "address", "stackCount"]
             });
-            sharedMarkJS = new JSBackend().compile(markIR);
-            sharedMarkX86 = new X86Backend().compile(markIR);
+            var marker = backend.compile(markIR);
             var indexIR = new KernelCompiler().compile(indexFreeBlocksKernel, {
                 legacyConstantLocals: true,
                 registerPreferences: ["heapBase", "address", "count"]
             });
-            sharedIndexJS = new JSBackend().compile(indexIR);
-            sharedIndexX86 = new X86Backend().compile(indexIR);
+            var indexer = backend.compile(indexIR);
             var clearLinksIR = new KernelCompiler().compile(
                 clearFreeRegionLinksKernel, {
                     constantBindings: freeRegionLayoutBindings
                 });
-            sharedClearLinksJS = new JSBackend().compile(clearLinksIR);
-            sharedClearLinksX86 = new X86Backend().compile(clearLinksIR);
+            var linkReleaser = backend.compile(clearLinksIR);
+            if (nativeMemory) {
+                sharedX86 = sweeper;
+                sharedMarkX86 = marker;
+                sharedIndexX86 = indexer;
+                sharedClearLinksX86 = linkReleaser;
+            } else {
+                sharedJS = sweeper;
+                sharedMarkJS = marker;
+                sharedIndexJS = indexer;
+                sharedClearLinksJS = linkReleaser;
+            }
         }
         this.heap = heap;
         this.compiled = heap.memory.nativeAddress(0) && sharedX86.fn ?

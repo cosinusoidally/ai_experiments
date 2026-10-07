@@ -51,6 +51,48 @@ must not be produced by merely copying the input image.
 
 ## Current checkpoint
 
+### Self-hosted rebuild correction — 2026-10-07
+
+The former standalone `--snapshot` path copied the immutable input image.
+Matching hashes from that path were not evidence of an independent rebuild
+or a self-hosting fixed point. That copying path has been removed.
+
+Snapshot requests now bypass the application-runner shortcut and enter the
+ordinary `guest_runner.js` constructor/compiler/serializer pipeline. When
+the bootstrap host is itself a standalone guest VM, that pipeline reloads
+the VM implementation from disk before creating the new runtime. The loaded
+image remains the execution engine, not the source of the output bytes.
+Heap helper kernels compile only the backend required by their memory host;
+native rebuilding must not depend on generating unused JavaScript functions.
+
+Bring-up has exposed general native language gaps used by the build itself:
+`Function.prototype.call` forwarding to intrinsic functions, populated-array
+enumeration, and array own-property checks. These are implemented in the
+ordinary native dispatch/record kernels, not by rewriting build sources.
+Intrinsic dispatch takes an explicit receiver so forwarded calls do not
+modify the caller's bytecode. The kernel front/middle end and both backends
+also support short-circuit `&&` and `||` for integer operands, preserving the
+selected operand value and skipping evaluation of the unused operand.
+
+The from-source guest build has completed, and its newly serialized image
+executes hello, the alternate workload, and the demo8 and HTTP command line
+paths. A subsequent fixed-source build completed in 222.29 seconds, including
+lowering, assembly, runtime construction, and serialization. Its image also
+executes hello. This is not yet a verified self-hosted fixed point: the native
+code has the same length (390514 bytes), but differs in local stack layout;
+the startup heap is 384 bytes larger and the source fingerprint differs.
+Acceptance requires a byte-identical comparison and
+execution of the resulting image. A VM source change must affect the
+rebuilt image where applicable: copying an input template cannot satisfy
+this check. Existing application execution must remain independent of this
+build path.
+
+The full portable regression driver passed on both Node and js_min at this
+checkpoint: 12 guest programs and 269 assertions per host, plus the heap,
+collector, embedding, kernel compiler, native interpreter, CLI, and context
+multiplexing checks. Application help checks are smoke tests, not substitutes
+for the longer interactive demo stability runs.
+
 The version-2 image now contains a position-independent macro-assembled
 bootstrap, relocatable native interpreter text, initialized runtime, generic
 guest command runner, and canonical guest heap template. It contains no
@@ -81,11 +123,11 @@ Repeated generation of this code-only image is already deterministic. Two
 The hash is evidence for deterministic code emission, not a permanent golden
 file and not a substitute for the full fixed-point test.
 
-The stage-2 bootstrap currently accepts the single completed native return
-needed by `hello.js`; it does not yet implement allocation-exit recovery, GC,
-heap growth beyond the reserved mapping, exceptions, budget resumption, or
-general source loading. Those lifecycle items, followed by self-hosted image
-generation, are the principal remaining work.
+The standalone bootstrap now supports general source loading and the native
+allocation/collection/growth and bytecode exception paths used by the demos.
+Unsupported semantic operations still terminate with status 70. The current
+remaining snapshot milestone is independent, deterministic self-hosted
+rebuilding, followed by regression testing of the independently built image.
 
 ## External launcher ABI
 

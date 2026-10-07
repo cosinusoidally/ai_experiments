@@ -263,9 +263,8 @@ rally demos. Demo2 rendered about 1.9--2.1 FPS, versus about 5--6 FPS through
 the ordinary js_min-hosted guest path. Unsupported native semantic exits still
 terminate with status 70.
 
-A runner image can also reproduce itself without SpiderMonkey. Generate the
-generic runner boundary while the outer invocation subsequently runs
-`hello.js`:
+The self-hosted rebuild target is to reconstruct this image from the VM
+sources without SpiderMonkey. The commands for that fixed-point test are:
 
 ```sh
 LD_LIBRARY_PATH="$MOZJS_LIB" \
@@ -277,16 +276,19 @@ LD_LIBRARY_PATH="$MOZJS_LIB" \
 cmp artifacts/snap artifacts/snap2
 ```
 
-The snapshot-hosted runner recognizes its `--snapshot FILE` request,
-resolves `open`, `write`, and `close` from its sole `dlsym` capability, and
-serializes the untouched mapped image with a short-write loop before entering
-the requested `hello.js` program. Consequently `snap2` is a genuine non-sparse,
-byte-identical copy of the relocatable image; neither the C loader nor the
-bootstrap contains the hello output.
+The previous implementation copied the untouched mapped input image. That
+was not a rebuild and its byte equality did not establish a self-hosting
+fixed point. The copy writer has been removed. Snapshot requests now execute
+the ordinary constructor/compiler/serializer pipeline, reloading the VM
+implementation from disk when running under a standalone bootstrap image.
+This path is being brought up; a completed independently rebuilt,
+byte-identical image is not yet verified. See
+[the standalone snapshot plan](guest_vm/STANDALONE_SNAPSHOT_PLAN.md).
 
 The high-level regression test builds its runner in a temporary ignored
-directory, generates the image twice, requires byte identity, executes hello,
-verifies filename rejection, and exercises the runner-image fixed point:
+directory, generates the image twice, requires byte identity, executes hello
+and an alternate program, checks the launch environment, and requires a real
+compiler invocation during the runner-image fixed-point rebuild:
 
 ```sh
 guest_vm/tests/run_standalone_snapshot_test.sh

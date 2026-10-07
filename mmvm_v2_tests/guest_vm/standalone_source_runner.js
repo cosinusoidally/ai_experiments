@@ -170,25 +170,6 @@ function guestStandaloneRequire(request, parentFilename) {
     return module.exports;
 }
 
-function guestStandaloneWriteSnapshot(path) {
-    var descriptor = NodeLibc.open(String(path), 577, 384);
-    if (descriptor < 0) throw new Error("could not create snapshot: " + path);
-    var offset = 0;
-    while (offset < __guestVMStandaloneImageLength) {
-        var count = NodeLibc.write(descriptor,
-            __guestVMStandaloneImageBase + offset,
-            __guestVMStandaloneImageLength - offset);
-        if (count <= 0) {
-            NodeLibc.close(descriptor);
-            throw new Error("could not write snapshot: " + path);
-        }
-        offset += count;
-    }
-    if (NodeLibc.close(descriptor) !== 0) {
-        throw new Error("could not close snapshot: " + path);
-    }
-}
-
 function guestStandaloneExecute(path, programArguments) {
     NodeProcess.install([path].concat(programArguments));
     GuestStandaloneGlobal.arguments = programArguments;
@@ -220,6 +201,7 @@ function guestStandaloneExecute(path, programArguments) {
         guestStandaloneProfileEnd("execute " + filename, loadedPhaseStarted);
     };
     GuestStandaloneGlobal.print = console.log;
+    GuestStandaloneGlobal.read = guestStandaloneReadSource;
     GuestStandaloneGlobal.quit = guestStandaloneQuit;
     var phaseStarted = guestStandaloneProfileStart();
     var source = guestStandaloneReadSource(path);
@@ -256,7 +238,9 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
         } else if (!programPath) programPath = option;
         else programArguments.push(option);
     }
-    if (snapshotPath) guestStandaloneWriteSnapshot(snapshotPath);
+    if (snapshotPath) {
+        throw new Error("snapshot rebuild must use the full guest_runner.js build pipeline");
+    }
     if (!programPath) {
         if (snapshotPath) return;
         throw new Error("guest_runner.js requires a program");

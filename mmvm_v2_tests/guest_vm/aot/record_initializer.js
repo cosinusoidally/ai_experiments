@@ -75,14 +75,21 @@
 
     function RecordInitializer(heap) {
         this.heap = heap;
-        if (!sharedJS) {
+        var nativeMemory = !!heap.memory.nativeAddress(0);
+        if (nativeMemory ? !sharedX86 : !sharedJS) {
+            var backend = nativeMemory ? new X86Backend() : new JSBackend();
             var ir = new Compiler().compile(initializerKernel);
-            sharedJS = new JSBackend().compile(ir);
-            sharedX86 = new X86Backend().compile(ir);
+            var initializer = backend.compile(ir);
             var cloneIR = new Compiler().compile(propertyCloneKernel,
                 {constantBindings: Records.KernelConstants});
-            sharedPropertyCloneJS = new JSBackend().compile(cloneIR);
-            sharedPropertyCloneX86 = new X86Backend().compile(cloneIR);
+            var clone = backend.compile(cloneIR);
+            if (nativeMemory) {
+                sharedX86 = initializer;
+                sharedPropertyCloneX86 = clone;
+            } else {
+                sharedJS = initializer;
+                sharedPropertyCloneJS = clone;
+            }
         }
         this.compiled = heap.memory.nativeAddress(0) && sharedX86.fn ?
                         sharedX86 : sharedJS;

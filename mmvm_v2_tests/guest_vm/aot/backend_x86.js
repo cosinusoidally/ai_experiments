@@ -1592,6 +1592,15 @@
             if (localRegister) moveRegisterToEax(assembler, localRegister);
             else assembler.movEaxLocal(node.index);
         }
+        else if (node.op === "logical_and_i32" || node.op === "logical_or_i32") {
+            var logicalEnd = "kernel_logical_end_" + state.nextLabel++;
+            emitControlExpression(assembler, node.left, state);
+            assembler.testEaxEax();
+            if (node.op === "logical_and_i32") assembler.jumpEqual(logicalEnd);
+            else assembler.jumpNotZero(logicalEnd);
+            emitControlExpression(assembler, node.right, state);
+            assembler.label(logicalEnd);
+        }
         else if ((node.op === "eq_i32" || node.op === "ne_i32" ||
                   node.op === "lt_i32" || node.op === "le_i32" ||
                   node.op === "gt_i32" || node.op === "ge_i32") &&
