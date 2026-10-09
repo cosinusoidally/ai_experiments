@@ -3,19 +3,13 @@ set -eu
 cd "$(dirname "$0")"
 
 tcc_root=${LIN32_TCC_ROOT:-/tmp/tcc-cross}
-tcc_lib=$tcc_root/lib/tcc
 mkdir -p build/share
 
-"$tcc_root/bin/i386-win32-tcc" "-B$tcc_lib" \
-    "-I$tcc_lib/win32/include" "-I$tcc_lib/win32/include/winapi" \
-    "-L$tcc_lib/win32/lib" -nostdlib -Wall lin32.c entry.S \
-    -lkernel32 -o build/share/lin32.exe
+"$tcc_root/bin/i386-win32-tcc" -Wall lin32.c entry.S -o build/share/lin32.exe
 
-case_number=0
 for name in hello checks badmem illegal readonly stack; do
-    case_number=$((case_number + 1))
-    "$tcc_root/bin/i386-tcc" "-B$tcc_lib" -nostdlib -static \
-        "-DCASE=$case_number" -Wl,-Ttext=0x08048000 fixtures.S \
+    "$tcc_root/bin/i386-tcc" -nostdlib -static \
+        -Wl,-Ttext=0x08048000 "tests/$name.c" \
         -o "build/share/$name.elf"
 done
 

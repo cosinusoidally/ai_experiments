@@ -9,9 +9,13 @@ from pathlib import Path
 import struct
 
 ROOT = Path(__file__).resolve().parent
-ALLOWED = {"WriteFile", "ExitProcess", "GetCommandLineA", "VirtualAlloc",
-           "CreateFileA", "GetFileSize", "ReadFile", "CloseHandle", "VirtualProtect",
-           "GetCurrentProcess", "FlushInstructionCache", "GetStdHandle", "SetErrorMode"}
+ALLOWED = {
+    "kernel32.dll": {"WriteFile", "ExitProcess", "VirtualAlloc", "CreateFileA",
+                     "GetFileSize", "ReadFile", "CloseHandle", "VirtualProtect",
+                     "GetCurrentProcess", "FlushInstructionCache", "GetStdHandle", "SetErrorMode"},
+    "msvcrt.dll": {"__set_app_type", "_controlfp", "__argc", "__argv", "_environ",
+                   "__getmainargs", "exit", "_XcptFilter", "_exit", "_except_handler3"},
+}
 
 
 def audit(path):
@@ -64,8 +68,9 @@ def audit(path):
             imports[library].append(string(value + 2))
             thunk += 4
         descriptor += 20
-    assert set(imports) == {"kernel32.dll"}, "unexpected DLL dependency"
-    assert set(imports["kernel32.dll"]) == ALLOWED, "unexpected imported functions"
+    assert set(imports) == set(ALLOWED), "unexpected DLL dependency"
+    for library, functions in imports.items():
+        assert set(functions) == ALLOWED[library], "unexpected imported functions in " + library
     return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
             "machine": "i386", "format": "PE32", "subsystem": "console",
             "os_version": list(os_version), "subsystem_version": list(subsystem_version),

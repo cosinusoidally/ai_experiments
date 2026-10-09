@@ -25,7 +25,12 @@ def main():
     with (BUILD / "qemu.log").open("ab") as log:
         process = subprocess.Popen([
             "qemu-system-i386", "-m", "256",
-            "-drive", f"file={overlay},format=qcow2,if=ide,index=0",
+            # Explicit block graph: only the overlay is writable.
+            "-blockdev", f"driver=file,node-name=xp-base-file,filename={args.base.resolve()},read-only=on",
+            "-blockdev", "driver=raw,node-name=xp-base,file=xp-base-file,read-only=on",
+            "-blockdev", f"driver=file,node-name=xp-overlay-file,filename={overlay}",
+            "-blockdev", "driver=qcow2,node-name=xp-overlay,file=xp-overlay-file,backing=xp-base",
+            "-device", "ide-hd,drive=xp-overlay,bus=ide.0,unit=0",
             "-drive", f"file={BUILD / 'transfer.img'},format=raw,if=ide,index=1,snapshot=on",
             "-display", "none", "-monitor", f"unix:{BUILD / 'monitor.sock'},server=on,wait=off",
             "-serial", f"file:{BUILD / 'xp-serial.txt'}", "-nic", "none",

@@ -111,39 +111,6 @@ int seh_dispatch(EXCEPTION_RECORD *record, void *frame, CONTEXT *ctx, void *disp
     return 1;
 }
 
-/* Windows double-quote/backslash command-line rules, capped at MAX_ARGS. */
-static int arguments(char **argv) {
-    const char *p = GetCommandLineA();
-    char *q = VirtualAlloc(0, length(p) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    int argc = 0, quoted; u32 slashes;
-    if (!q) fail("cannot allocate command line");
-    while (*p) {
-        while (*p == ' ' || *p == '\t') ++p;
-        if (!*p) break;
-        if (argc == MAX_ARGS) fail("too many arguments (maximum 32 including launcher)");
-        argv[argc++] = q; quoted = 0;
-        while (*p && (quoted || (*p != ' ' && *p != '\t'))) {
-            slashes = 0;
-            while (*p == '\\') { ++slashes; ++p; }
-            if (*p == '"') {
-                while (slashes >= 2) { *q++ = '\\'; slashes -= 2; }
-                if (slashes) { *q++ = '"'; ++p; }
-                else {
-                    ++p;
-                    if (quoted && *p == '"') { *q++ = '"'; ++p; }
-                    else quoted = !quoted;
-                }
-            } else {
-                while (slashes--) *q++ = '\\';
-                if (!*p || (!quoted && (*p == ' ' || *p == '\t'))) break;
-                *q++ = *p++;
-            }
-        }
-        *q++ = 0;
-    }
-    return argc;
-}
-
 static u8 *read_image(const char *path, u32 *size) {
     HANDLE file; DWORD hi, n; u8 *data;
     file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
@@ -266,18 +233,19 @@ static void launch(u32 entry, ElfHeader *e, u32 phdr, int argc, char **argv) {
     fail("Linux entry unexpectedly returned");
 }
 
-void _start(void) {
-    char *argv[MAX_ARGS]; int argc, first = 1;
+int main(int argc, char **argv) {
+    int first = 1;
     u8 *data; u32 size, entry, phdr;
     output = GetStdHandle(STD_OUTPUT_HANDLE); errors = GetStdHandle(STD_ERROR_HANDLE);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
-    argc = arguments(argv);
+    if (argc > MAX_ARGS) fail("too many arguments (maximum 32 including launcher)");
     if (argc > 1 && equal(argv[1], "--trace")) { tracing = 1; ++first; }
     if (argc <= first) {
         text(errors, "usage: lin32.exe [--trace] program.elf [arguments...]\r\n");
-        ExitProcess(2);
+        return 2;
     }
     data = read_image(argv[first], &size);
     entry = load_image(data, size, &phdr);
     launch(entry, (ElfHeader *)data, phdr, argc - first, argv + first);
+    return 125;
 }

@@ -228,3 +228,37 @@ Timestamp source: local system clock at the start of this update.
   preserving the root file's existing rules for other projects.
 - Verified that representative lin32 binaries, test disks, logs, screenshots,
   cache directories, and standalone bytecode files are still ignored.
+
+## 2026-10-09T15:12:34+01:00 — Normal Windows main, C fixtures, and protected XP testing
+
+Timestamp source: local system clock after base-image hash verification.
+
+- Replaced the Windows `_start` function with normal `main(argc, argv)` and
+  removed the custom command-line parser. TCC's normal startup supplies argv.
+  The build now uses the installed cross-compilers' default search paths, with
+  no explicit `-B`, `-I`, or `-L` settings and no Windows `-nostdlib` option.
+- Replaced the assembly test-program source with six C programs under `tests/`.
+  Their common header provides only minimal freestanding Linux entry/syscall
+  support. Each program's behavior is written in C and enters through `main`.
+  Linux `-nostdlib -static` avoids an external libc dependency for the fixtures.
+- The C hello fixture runs directly on Linux and exits 37. The C ABI checks also
+  pass directly on Linux with an empty environment and return 0.
+- Rebuilt with `/tmp/tcc-cross` and audited the new 9,728-byte PE32 executable.
+  Normal startup imports `msvcrt.dll` in addition to `kernel32.dll`; updated
+  the import audit accordingly. OS/subsystem versions remain 4.0. Runtime SHA-256:
+  `0c007ca0395816af2c266644af3468d5024fa48875a3d7936b93eb8e8382796a`.
+- Changed the QEMU launcher to an explicit block graph with both the base file
+  and its raw backing node marked `read-only=on`. The QCOW2 overlay is the only
+  writable XP disk. Attached the separate FAT16 transfer disk using a temporary
+  snapshot. This configuration assigned the transfer volume to D:.
+- Used monitor keyboard input to open XP's command prompt, created `C:\lin32`,
+  copied `D:*.*` there, and ran `run.cmd`. These guest C: writes go into the QCOW2
+  overlay. All 12 tests passed under XP 5.1.2600, captured through COM1 and checked
+  by the host verifier. Updated `TEST_RESULTS.md` with this run's evidence.
+- Shut down XP cleanly. `sha256sum -c build/xp-base-before.sha256` returned `OK`,
+  confirming the 4 GiB base image's contents were unchanged. Base SHA-256:
+  `ceb0f4f85a63679ecd6943091e40db0331886c663ce29e8dfb43e21ec3c778bb`.
+- Added the complete host build, FAT transfer, overlay boot, guest copy/run,
+  serial capture, and shutdown/hash-verification procedure to the README.
+  Shell syntax, optional Python in-memory syntax, and whitespace checks pass;
+  no Python cache directory was created. Other Windows hosts remain untested.

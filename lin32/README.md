@@ -29,14 +29,29 @@ From this directory, build with the supplied local toolchain:
 
 This produces `build/share/lin32.exe`, static Linux test fixtures, and `run.cmd`.
 The toolchain is the user's selected installation at `/tmp/tcc-cross`.
-Set `LIN32_TCC_ROOT` to override that installation prefix (with `bin/` and
-`lib/tcc/` beneath it). The Windows launcher uses custom startup and imports only `kernel32.dll`;
-it does not need an installed C runtime or compiler on the Windows machine.
+Set `LIN32_TCC_ROOT` to override that installation prefix. The installed compiler
+finds its own headers, libraries, and startup objects; the build supplies no
+`-B`, `-I`, or `-L` paths. The Windows launcher uses normal
+`int main(int argc, char **argv)` and TCC's standard Windows startup, importing
+`kernel32.dll` and `msvcrt.dll`. The target Windows machine needs those DLLs;
+it does not need a compiler.
 The build uses `i386-win32-tcc` for the Windows runtime and `i386-tcc` for the
 original Linux fixtures, including assembly and linking. No GNU assembler or
 linker is used. Building the runtime and all test fixtures requires only a POSIX
 shell, TCC, and standard file utilities (`dirname`, `mkdir`, `cp`, and `dd`); Python is not
 required. All generated artifacts are ignored under `build/`.
+
+The six executable Linux fixtures are C programs in `tests/`, each with a normal
+`main`. `tests/linux.h` supplies a minimal freestanding Linux/i386 entry stub
+and inline syscall wrappers, so they can be linked statically without a Linux
+libc. The program logic is C; there is no standalone assembly test program.
+The six malformed ELF inputs are produced by altering the C hello program's ELF.
+The two representative compiler commands are:
+
+```sh
+/tmp/tcc-cross/bin/i386-win32-tcc -Wall lin32.c entry.S -o build/share/lin32.exe
+/tmp/tcc-cross/bin/i386-tcc -nostdlib -static -Wl,-Ttext=0x08048000 tests/hello.c -o build/share/hello.elf
+```
 
 To clean from this directory:
 
@@ -81,52 +96,102 @@ only descriptors 1 and 2, with buffer checks and basic `EBADF`, `EFAULT`, and
 are future work. On hosts without hardware-enforced execute permissions, page
 protection cannot enforce non-executable data pages.
 
-## Reproduce XP tests
+## Transfer programs into XP and run them
 
-Prepare the transfer disk and start the supplied XP image through an overlay:
+All commands below start from the host's `lin32/` directory unless identified as
+guest commands. The base image is `/home/foo/src/gpt/xp/winxp.img`. No files are
+inserted into that image and it is never attached as a writable guest disk.
 
-```sh
-python3 transfer.py
-python3 start_vm.py
-python3 vm.py screen
-```
+1. **Build on the host.** Run `./build.sh`. This creates the Windows launcher,
+   C-built Linux ELF files, malformed inputs, and `run.cmd` in `build/share/`.
+   Record the base disk's contents before testing:
 
-The launcher retains the base image unchanged, creates/reuses
-`build/xp-overlay.qcow2`, and attaches a FAT16 transfer disk using a temporary
-snapshot. QEMU runs without networking or a visible display. The helper's `screen`
-action saves `build/screen.png`; `key` and `type` send keyboard input through
-the local monitor. Typing assumes the supplied XP image's UK keyboard layout.
-Allow desktop/dialog transitions to finish before sending the next input.
+   ```sh
+   sha256sum /home/foo/src/gpt/xp/winxp.img > build/xp-base-before.sha256
+   ```
 
-Open a command prompt in XP. In the supplied image, the transfer disk appears as
-E: (D: is the empty optical drive). Copy the test files into a writable directory
-and run the batch there, for example:
+2. **Create a separate transfer disk.** Run `python3 -B transfer.py`. The helper
+   formats its own 16 MiB temporary volume with `mkfs.vfat`, copies every file
+   from `build/share/` into FAT16 clusters/root-directory entries, and writes an
+   MBR containing one partition beginning at sector 2048. The result is
+   `build/transfer.img`, with volume label `LIN32TEST`. It does not open the XP
+   base disk.
 
-```bat
-mkdir lin32
-cd lin32
-copy E:*.* .
-run.cmd
-```
+3. **Create and boot the writable overlay.** Run `python3 -B start_vm.py`. If
+   absent, it creates the overlay with the equivalent of:
 
-The batch writes individual `.out`/`.err` files and `result.txt` in that guest
-directory. It sends the complete report through COM1 to `build/xp-serial.txt`.
-After completion, validate captured statuses and diagnostics on the host:
+   ```sh
+   qemu-img create -f qcow2 -F raw -b /home/foo/src/gpt/xp/winxp.img build/xp-overlay.qcow2
+   ```
 
-```sh
-python3 verify.py
-```
+   QEMU's block graph opens the base file and raw backing node explicitly with
+   `read-only=on`. Only the QCOW2 overlay is writable. XP reads unchanged sectors
+   from the backing image and writes changed sectors to the overlay. The overlay
+   is the primary IDE disk; the FAT16 transfer disk is a second IDE disk attached
+   with `snapshot=on`, so its guest writes also go to a temporary overlay.
+   Networking is disabled. No host mount or direct write to the XP base is used.
 
-Shut down XP cleanly from its command prompt with `shutdown -s -t 0`; QEMU exits
-on guest shutdown. `python3 vm.py command quit` is an emergency VM stop and can
-leave the disposable guest filesystem dirty. Do not rebuild an attached transfer
-disk while its VM is running. Preserve serial logs before starting another test
-session because QEMU replaces the serial capture file on startup.
+4. **Open a guest command prompt.** QEMU runs headlessly. Run
+   `python3 -B vm.py screen` to save a screenshot at `build/screen.png`. I open
+   the Run dialog using `python3 -B vm.py key meta_l-r`, wait for it, type `cmd`
+   with `python3 -B vm.py type cmd`, and press Enter with
+   `python3 -B vm.py key ret`. The monitor helper sends ordinary keyboard events;
+   it does not install a guest agent. Its typing mapping matches the image's UK
+   keyboard. Wait for each dialog or command to finish before the next input.
+
+5. **Copy the files within XP.** Find the disk labeled `LIN32TEST` using `dir D:`
+   (or another letter if the guest assigned one). In the current explicit-block
+   configuration it is D:; earlier runs with QEMU's default devices assigned E:.
+   Type these commands in the XP command prompt:
+
+   ```bat
+   mkdir C:\lin32
+   cd /d C:\lin32
+   copy /y D:*.* .
+   ```
+
+   This copies the launcher and fixtures from the separate transfer disk into
+   XP's C: filesystem. That C: filesystem is backed by the QCOW2 overlay, so the
+   copied files change only `build/xp-overlay.qcow2`, never `winxp.img`.
+
+6. **Run through the Windows launcher.** In that same guest directory, run
+   `run.cmd` for the suite, or run an individual program:
+
+   ```bat
+   lin32.exe --trace hello.elf
+   echo %ERRORLEVEL%
+   ```
+
+   XP starts the PE executable `lin32.exe`. The runtime opens `hello.elf`, maps
+   its Linux segments, creates its Linux stack, and enters its native x86 code.
+   Its Linux syscalls enter the SEH compatibility bridge. XP does not launch the
+   ELF directly. The hello program should print its message and return status 37.
+
+7. **Collect results.** The batch redirects each program's stdout/stderr into
+   `.out`/`.err` files, records `%ERRORLEVEL%`, and assembles `C:\lin32\result.txt`.
+   It configures COM1 at 115200 baud and sends that report with
+   `type result.txt > com1`. QEMU's serial-file backend captures the bytes in
+   host file `build/xp-serial.txt`. Run `python3 -B verify.py` on the host to check
+   every status and expected diagnostic, including the completion marker.
+
+8. **Shut down and confirm preservation.** In XP run `shutdown -s -t 0`; QEMU
+   exits on guest shutdown. Then on the host run:
+
+   ```sh
+   sha256sum -c build/xp-base-before.sha256
+   ```
+
+   An `OK` result verifies the base image's contents are unchanged. The overlay
+   can be reused or discarded with `./clean.sh`. Preserve raw logs first if
+   needed. Starting another VM session replaces the serial capture file.
+
+`python3 -B vm.py command quit` is an emergency stop and can leave the disposable
+guest filesystem dirty. Do not rebuild the transfer disk while its VM is running.
 
 ## Compatibility contract
 
 Build a single PE32 console executable against the Windows 98 API baseline.
-Use a minimal custom startup and avoid a dependency on an installed C runtime.
+Use normal Windows C startup and audit its system DLL dependencies.
 Audit every imported function, PE header, and compiler helper. Where host behavior
 needs different handling, select the path at runtime inside the same executable;
 do not produce separate Windows 9x and NT builds. Test the exact same artifact,
@@ -160,9 +225,8 @@ linking, TLS, signals, threads, and process creation follow in later milestones.
   address, read syscall arguments from the saved registers, dispatch the call,
   store its return value in EAX, advance EIP by two bytes, and resume execution.
   Do not depend on vectored exception handling, which is unsuitable as a required
-  Windows 98 baseline API. The trap mechanism is a feasibility gate to test,
-   validated on the supplied XP image, but still a feasibility gate for other
-   target Windows releases.
+  Windows 98 baseline API. The trap mechanism is validated on the supplied XP
+  image, but remains a feasibility gate for other target Windows releases.
 - **Host transition:** keep Windows FS/TEB and SEH requirements intact in the
   initial fixtures. Later Linux TLS and segment-register use need an explicit
   transition design so exceptions and host calls still work. Provide sufficient
@@ -228,16 +292,14 @@ ABI. It executes trusted fixtures and provides no security isolation.
 
 ## Local readiness
 
-The initial `tinycc/i386-win32-tcc` and `tinycc/i386-tcc` report version 0.9.27.
-Windows headers, import definitions, and compiler support libraries are present.
-A temporary probe successfully built a PE32 console executable with custom
-startup and only `kernel32.dll` imports (`GetStdHandle`, `WriteFile`, and
-`ExitProcess`); its subsystem version is 4.0. The probe was removed after inspection
-and has not been executed in Windows.
+Both installed cross-compilers in `/tmp/tcc-cross/bin` report version 0.9.27.
+Their default search paths find the necessary Windows headers, import
+definitions, startup objects, and compiler support libraries. No explicit
+include/library path configuration is needed in `build.sh`.
 
 The current build uses the user-selected `/tmp/tcc-cross` installation exclusively,
-including its integrated
-assembler and linker. Test support uses QEMU for i386/x86-64, `qemu-img`, Python 3,
+including its integrated assembler and linker. Test support uses QEMU for
+i386/x86-64, `qemu-img`, Python 3,
 gzip, `mkfs.vfat`, and Pillow for screenshots. The XP resource is
 `~/src/gpt/xp/winxp.img.gz`; it has been unpacked in that directory as
 `winxp.img`, a 4 GiB raw disk image, with the compressed original retained. QEMU is a
