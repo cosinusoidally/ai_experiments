@@ -205,3 +205,14 @@ Timestamp source: local system clock after clean/rebuild verification.
   was needed because every test artifact and the runtime are unchanged in bytes.
 - Python remains limited to optional PE inspection and XP test support. All
   project changes remain confined to `lin32/`.
+
+## 2026-10-09T14:54:39+01:00 — Update generated-file ignore rules
+
+Timestamp source: local system clock at the start of this update.
+
+- Updated `lin32/.gitignore` to explain that `/build/` covers shell build outputs
+  and optional XP disks, logs, and screenshots. Retained the recursive Python
+  cache-directory ignore and added `*.py[cod]` for standalone bytecode files.
+- Confirmed the ignore rules match representative build artifacts, cache
+  directories, and standalone bytecode paths. Bytecode creation remains disabled
+  in the optional Python helpers; ignoring it does not replace that requirement.

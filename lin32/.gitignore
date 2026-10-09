@@ -1,2 +1,6 @@
+# Shell build outputs and optional XP test disks, logs, and screenshots.
 /build/
+
+# Defensive ignores; support scripts disable bytecode writes.
 __pycache__/
+*.py[cod]
