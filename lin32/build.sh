@@ -7,11 +7,15 @@ mkdir -p build/share
 
 "$tcc_root/bin/i386-win32-tcc" -Wall lin32.c entry.S -o build/share/lin32.exe
 
-for name in hello checks badmem illegal readonly stack; do
+for name in hello checks badmem illegal readonly stack fileio heap; do
     "$tcc_root/bin/i386-tcc" -nostdlib -static \
         -Wl,-Ttext=0x08048000 "tests/$name.c" \
         -o "build/share/$name.elf"
 done
+
+"$tcc_root/bin/i386-tcc" -nostdlib -static -Wl,-Ttext=0x08048000 \
+    cc_min.c -o build/share/cc0.elf
+cp cc_min.c cc_demo.c build/share/
 
 # Malformed loader fixtures: TCC 0.9.27's ELF32 program headers start at byte 52.
 patch_fixture() {
@@ -29,4 +33,7 @@ patch_fixture interp 52 '\0003\0000\0000\0000'
 while IFS= read -r line; do
     printf '%s\r\n' "$line"
 done < run.cmd > build/share/run.cmd
+while IFS= read -r line; do
+    printf '%s\r\n' "$line"
+done < stages.cmd > build/share/stages.cmd
 printf '%s\n' 'Built lin32.exe and all test fixtures in build/share/.'

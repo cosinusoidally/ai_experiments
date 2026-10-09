@@ -1,5 +1,9 @@
 # Windows XP test results: normal main and C fixtures
 
+This is the earlier 12-case acceptance run. The updated runtime, 14-case suite,
+and dynamic compiler self-hosting verification are recorded in
+[SELFHOST_RESULTS.md](SELFHOST_RESULTS.md).
+
 Verified at **2026-10-09T15:12:34+01:00** using the supplied Windows XP disk image
 through a disposable QCOW2 overlay. Tests ran in Microsoft Windows XP
 **5.1.2600** under installed QEMU 6.2.0. The Windows executable and every Linux

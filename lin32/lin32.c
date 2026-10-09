@@ -24,14 +24,18 @@ typedef struct {
 } ProgramHeader;
 typedef struct { u32 lo, hi, flags; } Region;
 typedef struct { void *previous; void *handler; } SehFrame;
+typedef struct { HANDLE handle; int used, readable, writable; } GuestFile;
 
 extern void native_enter(u32 entry, u32 sp, u32 base, u32 limit, SehFrame *frame);
 extern int seh_adapter(EXCEPTION_RECORD *, void *, CONTEXT *, void *);
 
-static Region regions[MAX_PH + 1];
+static Region regions[MAX_PH + 2];
 static unsigned region_count;
+static u32 heap_start, heap_break, heap_reserved;
+static int heap_region = -1;
 static HANDLE output, errors;
 static int tracing;
+static GuestFile files[32];
 
 static u32 length(const char *s) { u32 n = 0; while (s[n]) ++n; return n; }
 static void copy_bytes(void *dst, const void *src, u32 n) {
@@ -71,11 +75,103 @@ static int accessible(u32 ptr, u32 size, u32 required) {
     return 1;
 }
 
+static u32 host_errno(void) {
+    DWORD e = GetLastError();
+    if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) return (u32)-2;
+    if (e == ERROR_ACCESS_DENIED || e == ERROR_SHARING_VIOLATION) return (u32)-13;
+    if (e == ERROR_INVALID_HANDLE) return (u32)-9;
+    if (e == ERROR_FILE_EXISTS || e == ERROR_ALREADY_EXISTS) return (u32)-17;
+    if (e == ERROR_DISK_FULL || e == ERROR_HANDLE_DISK_FULL) return (u32)-28;
+    if (e == ERROR_WRITE_PROTECT) return (u32)-30;
+    if (e == ERROR_TOO_MANY_OPEN_FILES) return (u32)-24;
+    if (e == ERROR_NOT_ENOUGH_MEMORY || e == ERROR_OUTOFMEMORY) return (u32)-12;
+    if (e == ERROR_INVALID_PARAMETER || e == ERROR_INVALID_NAME) return (u32)-22;
+    if (e == ERROR_BROKEN_PIPE) return (u32)-32;
+    return (u32)-5;
+}
+
+static u32 guest_open(u32 path, u32 flags) {
+    char name[MAX_PATH];
+    u32 i, fd, mode = flags & 3;
+    DWORD access, creation;
+    HANDLE handle;
+    /* Initial filesystem view: relative paths in the launcher's working directory. */
+    if (mode == 3 || (flags & ~(3UL | 64 | 128 | 512 | 32768))) return (u32)-22;
+    if (mode == 0 && (flags & 512)) return (u32)-22;
+    for (i = 0; i < MAX_PATH; ++i) {
+        if (path + i < path || !accessible(path + i, 1, PF_R)) return (u32)-14;
+        name[i] = *(char *)(path + i);
+        if (!name[i]) break;
+        if (name[i] == ':') return (u32)-22;
+        if (name[i] == '/') name[i] = '\\';
+    }
+    if (i == MAX_PATH) return (u32)-36;
+    if (!i) return (u32)-2;
+    if (name[0] == '\\') return (u32)-22;
+    for (fd = 0; fd < 32 && files[fd].used; ++fd) {}
+    if (fd == 32) return (u32)-24;
+    access = mode == 0 ? GENERIC_READ : mode == 1 ? GENERIC_WRITE : GENERIC_READ | GENERIC_WRITE;
+    if (flags & 64) creation = flags & 128 ? CREATE_NEW : flags & 512 ? CREATE_ALWAYS : OPEN_ALWAYS;
+    else creation = flags & 512 ? TRUNCATE_EXISTING : OPEN_EXISTING;
+    handle = CreateFileA(name, access, FILE_SHARE_READ | FILE_SHARE_WRITE, 0,
+                         creation, FILE_ATTRIBUTE_NORMAL, 0);
+    if (handle == INVALID_HANDLE_VALUE) return host_errno();
+    files[fd].handle = handle; files[fd].used = 1;
+    files[fd].readable = mode != 1; files[fd].writable = mode != 0;
+    /* Linux creation modes are not Windows ACLs; no permission-bit emulation yet. */
+    return fd;
+}
+
+/* Extend the native heap in Windows allocation-granularity blocks.
+ * Failed brk requests return the previous break, as on Linux.
+ * Shrinking changes the logical break; committed backing is retained.
+ */
+static u32 guest_brk(u32 requested) {
+    u32 rounded;
+    if (!requested) return heap_break;
+    if (requested < heap_start || requested >= 0x7fff0000UL) return heap_break;
+    rounded = (requested + 65535UL) & ~65535UL;
+    if (rounded > heap_reserved) {
+        if (VirtualAlloc((void *)heap_reserved, rounded - heap_reserved,
+                         MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) != (void *)heap_reserved)
+            return heap_break;
+        heap_reserved = rounded;
+    }
+    heap_break = requested;
+    if (heap_region < 0) heap_region = region_count++;
+    regions[heap_region].lo = heap_start;
+    regions[heap_region].hi = heap_break;
+    regions[heap_region].flags = PF_R | PF_W;
+    return heap_break;
+}
+
+static u32 guest_syscall(u32 number, u32 a, u32 b, u32 c) {
+    DWORD transferred;
+    if (number == 1) ExitProcess(a & 255);
+    if (number == 5) return guest_open(a, b);
+    if (number == 45) return guest_brk(a);
+    if (number == 3 || number == 4 || number == 6) {
+        if (a >= 32 || !files[a].used) return (u32)-9;
+        if (number == 6) {
+            files[a].used = 0;
+            return CloseHandle(files[a].handle) ? 0 : host_errno();
+        }
+        if (number == 3 && !files[a].readable) return (u32)-9;
+        if (number == 4 && !files[a].writable) return (u32)-9;
+        if (!accessible(b, c, number == 3 ? PF_W : PF_R)) return (u32)-14;
+        if (!c) return 0;
+        if (number == 3) {
+            if (ReadFile(files[a].handle, (void *)b, c, &transferred, 0)) return transferred;
+            if (GetLastError() == ERROR_BROKEN_PIPE) return 0;
+        } else if (WriteFile(files[a].handle, (void *)b, c, &transferred, 0)) return transferred;
+        return host_errno();
+    }
+    return (u32)-38;
+}
+
 /* Raw x86 SEH disposition: 0 = continue execution, 1 = continue search. */
 int seh_dispatch(EXCEPTION_RECORD *record, void *frame, CONTEXT *ctx, void *dispatcher) {
     u32 syscall, result;
-    DWORD written;
-    HANDLE h;
     (void)frame; (void)dispatcher;
     if (!(record->ExceptionFlags & EXCEPTION_NONCONTINUABLE) &&
         (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
@@ -89,18 +185,7 @@ int seh_dispatch(EXCEPTION_RECORD *record, void *frame, CONTEXT *ctx, void *disp
             text(errors, " eip="); hex(errors, ctx->Eip);
             text(errors, " syscall="); hex(errors, syscall); text(errors, "\r\n");
         }
-        if (syscall == 1) ExitProcess(ctx->Ebx & 255);
-        result = (u32)-38; /* ENOSYS */
-        if (syscall == 4) {
-            if (ctx->Ebx != 1 && ctx->Ebx != 2) result = (u32)-9; /* EBADF */
-            else if (!accessible(ctx->Ecx, ctx->Edx, PF_R)) result = (u32)-14;
-            else if (ctx->Edx == 0) result = 0;
-            else {
-                h = ctx->Ebx == 1 ? output : errors;
-                if (WriteFile(h, (void *)ctx->Ecx, ctx->Edx, &written, 0)) result = written;
-                else result = (u32)-5; /* EIO: richer host error mapping follows */
-            }
-        }
+        result = guest_syscall(syscall, ctx->Ebx, ctx->Ecx, ctx->Edx);
         ctx->Eax = result;
         ctx->Eip += 2;
         return 0;
@@ -170,6 +255,7 @@ static u32 load_image(u8 *data, u32 size, u32 *phdr) {
     if (VirtualAlloc((void *)start, end - start, MEM_RESERVE | MEM_COMMIT,
                      PAGE_READWRITE) != (void *)start)
         fail("ELF virtual address range is unavailable");
+    heap_start = heap_break = heap_reserved = (end + 65535UL) & ~65535UL;
     *phdr = 0;
     for (i = 0; i < e->phnum; ++i) if (p[i].type == 1 && p[i].memsz) {
         copy_bytes((void *)p[i].vaddr, data + p[i].offset, p[i].filesz);
@@ -237,6 +323,9 @@ int main(int argc, char **argv) {
     int first = 1;
     u8 *data; u32 size, entry, phdr;
     output = GetStdHandle(STD_OUTPUT_HANDLE); errors = GetStdHandle(STD_ERROR_HANDLE);
+    files[0].handle = GetStdHandle(STD_INPUT_HANDLE); files[0].used = 1; files[0].readable = 1;
+    files[1].handle = output; files[1].used = 1; files[1].writable = 1;
+    files[2].handle = errors; files[2].used = 1; files[2].writable = 1;
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     if (argc > MAX_ARGS) fail("too many arguments (maximum 32 including launcher)");
     if (argc > 1 && equal(argv[1], "--trace")) { tracing = 1; ++first; }

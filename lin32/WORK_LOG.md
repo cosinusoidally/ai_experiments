@@ -262,3 +262,65 @@ Timestamp source: local system clock after base-image hash verification.
   serial capture, and shutdown/hash-verification procedure to the README.
   Shell syntax, optional Python in-memory syntax, and whitespace checks pass;
   no Python cache directory was created. Other Windows hosts remain untested.
+
+## 2026-10-09T15:56:22+01:00 — Dynamic self-hosting compiler, Linux verification
+
+Timestamp source: local system clock during development. The earlier fixed-buffer
+prototype was preliminary and was replaced following the user's dynamic-memory
+instruction; its hashes are not acceptance results.
+
+- Added original `cc_min.c`, a freestanding C-subset compiler which directly emits
+  static Linux/i386 ELF machine code. TCC creates stage 0; generated compilers
+  compile the same source without invoking another compiler or using an embedded
+  compiler image. Added independent `cc_demo.c`, shell staging and XP staging.
+- Replaced every compiler buffer and symbol/local table with dynamically allocated
+  vectors backed by Linux `brk`. Removed fixed source, code, name, string, symbol,
+  local and call-argument ceilings. Added data relocations and adjacent ELF
+  code/data placement instead of a fixed strings reservation/data-address gap.
+  Vector allocation retains old storage until process exit. Integer/address
+  representability, allocation success and the process stack remain constraints.
+- Extended lin32 with Windows-backed relative-path open/read/write/close, errno
+  mapping and growable native `brk` mappings. Added C file-I/O and heap-growth
+  regressions. Heap shrinking retains committed backing, documented explicitly.
+- Linux stages 1/2/3 are byte-identical (34,015 bytes), SHA-256
+  `115dc285a2629de8ff7accb656cfa40db999d07a510f0bd9f42516053ca5bdc2`.
+  Stage 3's independent demo executes and exits 42. Both new syscall fixtures
+  also pass directly on Linux.
+- Growth regression exceeds all former compiler buffer/table/argument ceilings:
+  294,034-byte source, 557,425-byte ELF, 2,600 globals, 300 locals, 5,000-character
+  identifier, 70,000-byte string, 12 arguments. Bootstrap/self-built output matches
+  and native Linux execution exits 42.
+- PE audit passes for the 11,776-byte runtime, SHA-256
+  `f01e6bc7c2e16cb81830aaaaaf36218d9a6841d69bc2eb180c21555ceb32bbcb`.
+  Imports remain kernel32/msvcrt; GetLastError is added for errno translation.
+- Stopped the preliminary VM, regenerated the separate transfer disk, and started
+  a fresh disposable XP overlay with the base explicitly read-only. Copied the
+  files from D: into C:\lin32 using guest keyboard input. XP acceptance testing
+  is still running at this entry; no XP stage result is claimed yet.
+
+## 2026-10-09T16:06:32+01:00 — XP self-hosting acceptance and unchanged base image
+
+Timestamp source: local system clock after all verifiers and base hash completed.
+
+- Ran `run.cmd` and `stages.cmd` in XP 5.1.2600. The host verifier accepted all
+  14 runtime cases, including file I/O and heap growth. The staging verifier
+  accepted all 14 stage/status records and seven successful `fc /b` comparisons.
+- Windows stages 1/2/3 are byte-identical to one another and the three Linux
+  stages, so all six compiler files share SHA-256
+  `115dc285a2629de8ff7accb656cfa40db999d07a510f0bd9f42516053ca5bdc2`.
+  Stage 0 remains the distinct TCC bootstrap. No other compiler is invoked by
+  any self-built stage, and no guest instruction emulation is added to lin32.
+- XP stage 3 compiled and executed the independent demo and large dynamic-growth
+  source. Both guest programs exited 42; each generated ELF matched its Linux
+  reference byte-for-byte. The growth case takes longer in QEMU because the
+  minimal compiler uses linear symbol lookup; it completed successfully.
+- Shut down XP normally and confirmed QEMU exited. Post-shutdown base-image hash
+  check returned `OK`, preserving SHA-256
+  `ceb0f4f85a63679ecd6943091e40db0331886c663ce29e8dfb43e21ec3c778bb`.
+- Updated README with compiler subset, allocation behavior, shell-only staging,
+  limitations and exact XP commands; recorded normalized COM1 stage evidence in
+  SELFHOST_RESULTS.md. Marked TEST_RESULTS.md as the historical 12-case report.
+- Shell/helper syntax and git whitespace checks pass. No fixed compiler arrays,
+  Python caches or bytecode files remain. Parent ignore rules continue to cover
+  build outputs. Only lin32 source/scripts/Markdown reports are checked in.
+  Windows 98 and other hosts remain to be validated with the identical runtime.

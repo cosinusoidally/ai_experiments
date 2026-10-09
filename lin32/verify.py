@@ -11,6 +11,8 @@ EXPECTED = {
     "hello": (37, "Hello from native Linux i386 on Windows!", "int80 exception=0xc0000005"),
     "checks": (0, "ABI checks passed"),
     "stack": (0, "stack"),
+    "heap": (0, "Heap growth checks passed"),
+    "fileio": (0, "File I/O checks passed"),
     "badmem": (125, "guest fault exception=0xc0000005"),
     "illegal": (125, "guest fault exception=0xc000001d"),
     "readonly": (125, "guest fault exception=0xc0000005"),

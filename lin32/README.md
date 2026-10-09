@@ -7,9 +7,12 @@ no x86 interpreter, instruction emulation, or dynamic binary translation.
 Only 32-bit x86 Linux binaries are in scope.
 
 This directory contains the initial runtime implementation and its staged plan.
-The first version targets static ELF32/i386 programs using `write` and `exit` via
-`int 0x80`. All 12 initial tests pass on the supplied Windows XP 5.1.2600 image
-using the runtime and fixtures built exclusively with `/tmp/tcc-cross`.
+The runtime targets static ELF32/i386 programs using `int 0x80`. It now supports
+`exit`, `read`, `write`, `open`, `close`, and a growing `brk` heap, sufficient
+for the included dynamically allocated, self-hosting C-subset compiler.
+The extended 14-case regression suite passes on the supplied Windows XP image.
+The original 12-test XP acceptance run is retained in TEST_RESULTS.md; current
+self-hosting and extended regression evidence is in SELFHOST_RESULTS.md.
 See [TEST_RESULTS.md](TEST_RESULTS.md) for the captured evidence and executable
 hash. Validation on other Windows releases remains required.
 
@@ -41,7 +44,7 @@ linker is used. Building the runtime and all test fixtures requires only a POSIX
 shell, TCC, and standard file utilities (`dirname`, `mkdir`, `cp`, and `dd`); Python is not
 required. All generated artifacts are ignored under `build/`.
 
-The six executable Linux fixtures are C programs in `tests/`, each with a normal
+The eight executable Linux fixtures are C programs in `tests/`, each with a normal
 `main`. `tests/linux.h` supplies a minimal freestanding Linux/i386 entry stub
 and inline syscall wrappers, so they can be linked statically without a Linux
 libc. The program logic is C; there is no standalone assembly test program.
@@ -90,9 +93,15 @@ The initial version supports a single thread, `ET_EXEC`, an empty guest
 environment, up to 32 command-line tokens including the launcher, a 16 MiB input
 file, a 64 MiB mapped image span, and a fixed 1 MiB guest stack. Segment addresses
 must fit below 2 GiB and be available in the Windows process. ELF `PT_INTERP`
-and `PT_TLS` are rejected. Unknown syscalls return `-ENOSYS`; `write` supports
-only descriptors 1 and 2, with buffer checks and basic `EBADF`, `EFAULT`, and
-`EIO` results. TLS, alternate syscall-entry mechanisms, and dynamic executables
+and `PT_TLS` are rejected. Unknown syscalls return `-ENOSYS`. File I/O supports 32 descriptor slots
+(including stdin/stdout/stderr), relative ANSI paths, access modes and basic
+create/exclusive/truncate flags, with guest-buffer validation and errno mapping.
+Absolute paths, drive prefixes and unsupported flags are rejected. This is a
+minimal Windows-backed filesystem view; Windows path/case/permission semantics
+apply, and traversal is not confined to a guest root. `brk` grows contiguous
+native mappings in Windows allocation-granularity blocks as needed, returning
+the previous break on allocation failure. Shrinking updates the logical break
+but retains committed backing; this is sufficient for cc_min’s growing allocator. TLS, alternate syscall-entry mechanisms, and dynamic executables
 are future work. On hosts without hardware-enforced execute permissions, page
 protection cannot enforce non-executable data pages.
 
@@ -234,7 +243,7 @@ linking, TLS, signals, threads, and process creation follow in later milestones.
   work. Do not treat a Linux stack as automatically safe for every Windows API.
 - **Linux syscall layer:** implement the i386 syscall ABI, validate pointers
   against known guest mappings, translate structures and flags, and return Linux
-  negative errno values. Initially support `write` to stdout/stderr and `exit`;
+  negative errno values. Currently support file `open`, `read`, `write`, `close`, heap `brk`, and `exit`;
   unsupported calls return `-ENOSYS`. Treat unrelated faults as execution errors.
 - **Windows backend:** wrap console/file I/O, allocation, and later time,
   process/thread, and networking facilities behind a Windows 98-compatible base.
@@ -330,3 +339,80 @@ x86 instructions but makes those ABI and host integration constraints central.
 The static ELF message-and-exit milestone is complete on XP. Next work is to
 validate the identical executable on Windows 98 and other available hosts, then
 expand supported Linux syscalls and binary forms in tested increments.
+
+## Self-hosting C compiler and dynamic storage
+
+[cc_min.c](cc_min.c) is an original freestanding C-subset compiler which writes
+static Linux/i386 ELF executables directly. It generates native instructions,
+ELF headers, code, strings and BSS mappings itself. It invokes no assembler,
+linker, other compiler or subprocess. There is no embedded compiler executable.
+The `__TINYC__` bootstrap block supplies Linux entry and five primitive functions
+when TCC compiles stage 0; cc_min emits equivalent entry/primitives itself.
+
+All compiler buffers and symbol/local/relocation tables allocate at runtime via
+Linux `brk`, using growable vectors. There are no fixed maximum source, code,
+string, identifier, symbol, local or argument counts. Vector capacity starts
+small and grows geometrically; allocation failure and i386 address/integer
+representability bound actual sizes. The allocator retains old vector storage
+until process exit rather than implementing a general-purpose free/realloc.
+Generated strings and globals use relocation records, so they have no fixed
+reserved areas or artificial spacing limits. Parser recursion uses the process
+stack; lin32’s existing guest stack and loader limits still apply to execution.
+
+The supported language is deliberately small: int-returning functions with int
+parameters; int/char globals, constant-size global arrays and scalar locals;
+blocks, if/else, while and return; arithmetic, comparisons, bitwise operations,
+short-circuit logical operators, assignment, calls, global array indexing,
+address-of, int casts, strings/chars and comments. Memory addresses are represented
+as 32-bit integers. `load8`, `load32`, `store8`, `store32`, and `syscall3` are
+compiler-provided intrinsics. Locals require a single uninitialized scalar per
+declaration and have function-wide scope. There are no general pointer types,
+structs, typedefs, for loops, general preprocessor or libc. This is a real
+self-hosting compiler for that subset, not a general ISO C compiler.
+
+Build and verify on Linux, with no Python dependency:
+
+```sh
+./stages.sh
+./test_growth.sh
+```
+
+`stages.sh` first invokes `build.sh` to create `cc0.elf` using TCC. Then:
+
+1. `cc0.elf cc_min.c lc1.elf` creates stage 1.
+2. `lc1.elf cc_min.c lc2.elf` creates stage 2 under itself.
+3. `lc2.elf cc_min.c lc3.elf` creates stage 3 under itself.
+
+The script compares stages 1/2 and 2/3 byte-for-byte, then uses stage 3 to compile
+[cc_demo.c](cc_demo.c) and checks the generated program’s output/exit status 42.
+The demo exercises recursion, arrays, argument order, arithmetic and short-circuit
+side effects. `test_growth.sh` uses awk to generate a source exceeding the old
+buffer/table sizes, compares bootstrap and self-built output, and checks exit 42.
+Its awk/cmp/wc utilities are optional test support; build.sh remains shell/TCC.
+All files produced by these scripts remain in the ignored build directory.
+
+For XP, run both host scripts before creating the transfer disk in the eight-step
+procedure above. This includes `cc0.elf`, both C sources, `lc1/2/3.elf`, the Linux
+demo/growth reference executables, and `stages.cmd` in the files copied to C:\lin32.
+After `run.cmd`, execute `stages.cmd` in that guest command prompt. It runs:
+
+```bat
+lin32.exe cc0.elf cc_min.c wc1.elf
+lin32.exe wc1.elf cc_min.c wc2.elf
+lin32.exe wc2.elf cc_min.c wc3.elf
+```
+
+XP’s `fc /b` compares all Windows stages with each other and with the matching
+Linux stages. Stage 3 also compiles/runs the independent demo and growth test,
+and compares their ELF outputs with Linux reference outputs. The batch records
+all statuses and comparisons in `stages.txt` and sends it through COM1 into the
+same host serial capture as the regression suite. Verify both on the host:
+
+```sh
+python3 -B verify.py
+python3 -B verify_stages.py
+```
+
+The Linux ELF compiler is identical across both environments, and the Windows
+launcher remains the same single native PE executable. Only XP has been tested;
+the other Windows releases still need validation with that executable.

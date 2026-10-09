@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 ALLOWED = {
     "kernel32.dll": {"WriteFile", "ExitProcess", "VirtualAlloc", "CreateFileA",
                      "GetFileSize", "ReadFile", "CloseHandle", "VirtualProtect",
-                     "GetCurrentProcess", "FlushInstructionCache", "GetStdHandle", "SetErrorMode"},
+                     "GetCurrentProcess", "FlushInstructionCache", "GetStdHandle", "SetErrorMode", "GetLastError"},
     "msvcrt.dll": {"__set_app_type", "_controlfp", "__argc", "__argv", "_environ",
                    "__getmainargs", "exit", "_XcptFilter", "_exit", "_except_handler3"},
 }

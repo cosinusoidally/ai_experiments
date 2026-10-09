@@ -61,6 +61,15 @@ echo TEST interp EXIT %errorlevel% EXPECT 125 >> result.txt
 type interp.out >> result.txt
 type interp.err >> result.txt
 echo. >> result.txt
+lin32.exe fileio.elf > fileio.out 2> fileio.err
+echo TEST fileio EXIT %errorlevel% EXPECT 0 >> result.txt
+type fileio.out >> result.txt
+type fileio.err >> result.txt
+echo. >> result.txt
+lin32.exe heap.elf >heap.out 2>heap.err
+echo TEST heap EXIT %errorlevel% EXPECT 0 >>result.txt
+type heap.out >>result.txt
+type heap.err >>result.txt
 echo LIN32_TESTS_COMPLETE >> result.txt
 mode com1: baud=115200 parity=n data=8 stop=1 > nul
 type result.txt > com1
