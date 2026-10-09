@@ -1,156 +1,149 @@
 # lin32
 
-lin32 is a proposed user-space Linux compatibility runtime for Windows. Its
-long-term goal is to run Linux executables on Windows releases from Windows 98
-onward, using a small runtime that can be built with the local Tiny C Compiler
-0.9.27 toolchain.
+lin32 is a proposed Linux i386 compatibility runtime for Windows 98 onward.
+The required deliverable is one identical 32-bit `lin32.exe` for every supported
+Windows release. Linux instructions execute directly on the CPU: there will be
+no x86 interpreter, instruction emulation, or dynamic binary translation.
+Only 32-bit x86 Linux binaries are in scope.
 
-This directory currently contains the design and implementation plan only.
-There is no working runtime yet. Compatibility with every Windows release is a
-goal to validate, not a claim about the current project.
+This directory currently contains the plan only. No runtime has been implemented
+or validated across Windows versions yet.
 
-## Initial scope
+## Compatibility contract
 
-Start with little-endian, 32-bit x86 Linux ELF executables and the Linux i386
-system-call ABI. The first supported programs will be small, statically linked,
-single-threaded test executables that use a documented subset of Linux system
-calls. The first demonstration will write a message and exit with a requested
-status under Windows XP.
+Build a single PE32 console executable against the Windows 98 API baseline.
+Use a minimal custom startup and avoid a dependency on an installed C runtime.
+Audit every imported function, PE header, and compiler helper. Where host behavior
+needs different handling, select the path at runtime inside the same executable;
+do not produce separate Windows 9x and NT builds. Test the exact same artifact,
+identified by its hash, on every host in the validation matrix.
 
-Support will grow through explicit, tested compatibility milestones. Arbitrary
-Linux distributions, x86-64 binaries, kernel modules, containers, and Linux GUI
-applications are outside the initial scope. On later Windows systems, the host
-must be able to run the 32-bit Windows launcher; systems without that facility
-will require a separate host port or emulator. The Windows 98 baseline refers
-to x86 installations. Windows 98, 98 SE, Me, 2000, XP, and subsequent Windows
-families need separate validation rather than an assumption that XP results
-apply everywhere.
+The Windows target must support execution of 32-bit x86 Windows applications.
+Windows systems without that capability cannot run this PE32 executable under
+these constraints. Available CPU instruction sets also bound which Linux binaries
+can execute. Neither condition is solved by adding instruction emulation.
+
+Begin with static ELF32/i386 `ET_EXEC` programs, a single thread, and direct
+`int 0x80` Linux syscalls. The first fixture writes a message and exits. Dynamic
+linking, TLS, signals, threads, and process creation follow in later milestones.
 
 ## Proposed architecture
 
-Build a 32-bit Windows PE launcher with an ELF loader, an x86 execution engine,
-and a Linux system-call compatibility layer. Keep the Windows host interface
-separate from guest Linux behavior.
+- **ELF loader and real address mappings:** validate ELF headers and segment
+  bounds, reserve and commit segments at their Linux virtual addresses, copy
+  contents, zero BSS, and apply appropriate page protections. Place the Windows
+  launcher away from the initial fixture address range. Reject address conflicts
+  explicitly; arbitrary fixed-address ELF executables cannot simply be moved
+  without relocation information. Account for allocation granularity, shared
+  pages between segments, host DLLs, and host address-space limits.
+- **Native entry:** construct a Linux stack with `argc`, `argv`, environment,
+  and auxiliary vector, then use a small assembly entry stub to set the guest
+  stack and registers and jump to the ELF entry point. Preserve Windows thread
+  state needed to call host APIs and handle exceptions.
+- **Syscall interception:** first prototype a thread-local x86 structured
+  exception handling (SEH) frame around native execution. Determine how each host
+  reports an attempted `int 0x80`, recognize it only at a verified guest code
+  address, read syscall arguments from the saved registers, dispatch the call,
+  store its return value in EAX, advance EIP by two bytes, and resume execution.
+  Do not depend on vectored exception handling, which is unsuitable as a required
+  Windows 98 baseline API. The trap mechanism is a feasibility gate to test,
+  not an already validated property of all target Windows releases.
+- **Host transition:** keep Windows FS/TEB and SEH requirements intact in the
+  initial fixtures. Later Linux TLS and segment-register use need an explicit
+  transition design so exceptions and host calls still work. Provide sufficient
+  stack space for exception delivery; investigate a host stack switch for syscall
+  work. Do not treat a Linux stack as automatically safe for every Windows API.
+- **Linux syscall layer:** implement the i386 syscall ABI, validate pointers
+  against known guest mappings, translate structures and flags, and return Linux
+  negative errno values. Initially support `write` to stdout/stderr and `exit`;
+  unsupported calls return `-ENOSYS`. Treat unrelated faults as execution errors.
+- **Windows backend:** wrap console/file I/O, allocation, and later time,
+  process/thread, and networking facilities behind a Windows 98-compatible base.
+  Optional newer APIs may be resolved dynamically within the shared executable.
+- **Filesystem view:** later add an explicit guest root, working directory,
+  path translation, descriptors, and documented Linux/Windows semantic differences.
 
-Use an interpreter for guest x86 instructions initially. It makes Linux syscall
-entry, guest memory permissions, faults, and guest address-space layout explicit
-without depending on newer Windows exception mechanisms or executable-memory
-facilities. It also avoids assuming that a Linux program can execute directly
-in the launcher's Windows address space. This is slower than native execution,
-but gives a controllable foundation for compatibility. A translator or native
-fast path can be considered after correctness is established.
-
-The principal components will be:
-
-- **ELF loader:** validate ELF32/i386 headers and bounds, load `PT_LOAD`
-  segments, zero BSS, set up the entry point, and reject unsupported formats
-  with useful diagnostics.
-- **Guest memory:** maintain a 32-bit virtual address space backed by host
-  allocations, with checked access, segment permissions, and defined handling
-  of unmapped addresses. Do not allocate an entire 4 GiB host buffer; use sparse
-  regions and account for the limited address space of a 32-bit host.
-- **CPU engine:** implement the instruction, register, flag, and fault behavior
-  needed by the initial fixtures, then expand coverage. Route `int 0x80` into
-  the syscall layer; add other Linux entry mechanisms when tests require them.
-- **Process startup:** construct the Linux stack containing `argc`, `argv`,
-  environment strings, and an appropriate auxiliary vector. Keep guest
-  pointers and structures independent of Windows layouts.
-- **Syscall layer:** decode i386 syscall numbers and guest data structures,
-  validate guest buffers, and translate results into Linux return values and
-  negative errno values. Unsupported calls return an explicit error, normally
-  `-ENOSYS`, rather than silently succeeding.
-- **Windows backend:** wrap file handles, console I/O, time, memory allocation,
-  and later process/thread facilities. Use the Windows 98 API subset for the
-  base launcher; resolve optional newer APIs at runtime. Audit PE imports and
-  compiler runtime dependencies before claiming Windows 98 support.
-- **Filesystem view:** provide a configurable guest root and explicit path
-  translation, including absolute paths, relative paths, and a guest working
-  directory. Define case sensitivity, permissions, links, and special files
-  as compatibility work rather than pretending Windows semantics match Linux.
-
-The runtime is a compatibility tool, not a security sandbox. The initial
-fixtures are trusted programs; running hostile binaries would require a
-separate security design and audit.
+Later syscall entry forms such as `sysenter` and vDSO calls need separate
+handling. Do not assume that they fault safely or can use the `int 0x80` bridge.
+The first version rejects unsupported binary forms and documents its supported
+ABI. It executes trusted fixtures and provides no security isolation.
 
 ## Implementation plan
 
-1. **Establish the local build and test loop.** Inspect only the supplied
-   `~/src/gpt/tinycc` toolchain and `~/src/gpt/xp` image as needed. Determine the
-   available cross-compilation commands, headers, libraries, QEMU invocation,
-   and a reproducible way to transfer test files into a disposable XP image
-   overlay. Build a minimal Windows console executable and verify its output
-   and exit status in XP. Keep the original filesystem image unchanged.
+1. **Prove the native syscall bridge.** Build one minimal PE32 executable with
+   the local TCC. Execute a locally written x86 snippet containing `int 0x80`
+   under XP, record exception code and saved registers, and verify continuation
+   after the instruction. Verify SEH registration, native entry, and stack
+   behavior before implementing the full loader. Windows 98 verification is
+   also required before claiming the bridge works across the full target range.
+2. **Establish repeatable XP testing.** Unpack the supplied image in its own
+   directory, retain the compressed original, inspect the disk format, and use
+   disposable QEMU overlays for boot testing. Transfer fixtures using an attached
+   FAT disk or another locally available mechanism. Capture output and exit
+   status through a guest test script or test harness. Determine the image's boot
+   and login behavior without modifying the base disk.
+3. **Load and execute a static ELF.** Generate original ELF32/i386 fixtures
+   locally, map their segments at the specified addresses, create their initial
+   stack, and jump to their entry point. Support `write` and `exit` through the
+   proven bridge. Acceptance: `lin32.exe hello.elf` executes native Linux code,
+   prints the expected bytes, and exits with the requested status under XP.
+4. **Harden the first version.** Test truncated/malformed ELF files, overflow,
+   mapping conflicts, permissions, invalid syscall buffers, unknown syscalls,
+   argument passing, and unrelated faults. Unsupported cases must give useful
+   diagnostics rather than silently execute with incorrect behavior.
+5. **Validate the same artifact across Windows.** Audit imports and PE startup,
+   then test the same executable hash on Windows 98, 98 SE, Me, 2000, XP, and
+   later available releases. Add runtime-selected compatibility paths only where
+   necessary. Additional OS images are needed for tests beyond the supplied XP
+   image; XP success alone does not establish Windows 98 compatibility.
+6. **Expand static-program syscalls.** Add `read`, file open/close/seek, metadata,
+   `brk`, and memory mapping in tested increments. Preserve native address
+   semantics and handle structures, offsets, flags, and errno explicitly.
+7. **Support dynamic ELF binaries.** Add `PT_INTERP` and a locally available
+   Linux dynamic linker, appropriate startup data, mappings, relocations as
+   required, and TLS. Assess actual local libc requirements without downloading
+   dependencies. Design supported syscall-entry mechanisms before running them.
+8. **Add complex Linux process behavior.** Develop signals, threads, futexes,
+   process creation, pipes, polling, and sockets as separate milestones. Resolve
+   Windows 9x limitations within the single executable architecture.
+9. **Maintain compatibility evidence.** Publish supported binary forms,
+   syscalls, host releases, and reproducible test commands. Optimize host
+   transitions and syscall handling only after correctness is established;
+   guest CPU instructions continue to execute natively.
 
-2. **Create deterministic Linux fixtures.** Write small, original i386 test
-   programs locally, using the available compiler/assembler where supported
-   or a small local ELF fixture generator. Start with direct syscalls so the
-   first tests do not depend on a Linux libc. Record the build commands and
-   expected output and status alongside the fixtures.
+## Local readiness
 
-3. **Implement loading and guest memory.** Add strict ELF validation, sparse
-   memory regions, segment loading, BSS initialization, and stack construction.
-   Test malformed and truncated files, integer overflow, overlapping segments,
-   and invalid guest addresses before executing guest instructions.
+The installed `tinycc/i386-win32-tcc` and `tinycc/i386-tcc` report version 0.9.27.
+Windows headers, import definitions, and compiler support libraries are present.
+A temporary probe successfully built a PE32 console executable with custom
+startup and only `kernel32.dll` imports (`GetStdHandle`, `WriteFile`, and
+`ExitProcess`); its subsystem version is 4.0. The probe was removed after inspection
+and has not been executed in Windows.
 
-4. **Deliver the first end-to-end runtime.** Implement enough x86 execution
-   for the small fixtures, including `int 0x80`, and support Linux `write` and
-   `exit`. Acceptance: the PE launcher runs a static Linux ELF in QEMU/XP,
-   prints the expected bytes, returns the expected status, and diagnoses
-   unsupported instructions and invalid memory access without crashing the
-   launcher. This milestone proves only the instructions and syscalls tested.
+Installed tools include QEMU for i386/x86-64, `qemu-img`, Python 3, gzip, GNU
+assembler/linker, `objdump`, `make`, `mkfs.vfat`, and Wine. The XP resource is
+`~/src/gpt/xp/winxp.img.gz`, which can be unpacked in that directory. QEMU is a
+Windows test environment; it is not part of lin32's execution architecture.
 
-5. **Expand static-program compatibility.** Add tested instruction coverage
-   and file descriptor management, then `read`, `open`, `close`, seeking,
-   metadata queries, `brk`, and memory mapping as required by fixtures. Define
-   guest structure packing, 64-bit offsets, Linux flags, and errno translation
-   explicitly. Compare guest behavior with Linux reference runs where a local
-   Linux execution environment supports the fixtures.
+There is enough information and local tooling to write and build the minimal
+native prototype and static ELF demonstration without fetching code. XP boot,
+file transfer, and exception continuation still need practical validation.
+Dedicated ISO creation and guest-filesystem editing tools were not found in the
+checked command paths; an attached FAT disk can be prepared with the tools above
+and, if necessary, a small original local image-writing script. No additional
+compiler or downloaded runtime is required for the first fixtures.
 
-6. **Validate the oldest Windows baseline.** Check PE machine type, subsystem
-   version, imported DLLs/functions, startup code, and toolchain dependencies.
-   Exercise the launcher on Windows 98 and 98 SE when suitable test images are
-   provided, then Me and NT-family releases. The supplied XP image alone cannot
-   validate those systems. Record exact versions tested and observed limits in
-   a compatibility table.
+## Development constraints and risks
 
-7. **Add dynamic executables.** Support `PT_INTERP`, load a locally available
-   Linux dynamic linker into guest memory, and implement the startup, mapping,
-   TLS, and syscall behavior it needs. Preserve the distinction between loading
-   the interpreter and implementing a linker ourselves. Assess locally
-   available libc binaries and their requirements before choosing a target;
-   do not download dependencies.
+All project files and commits belong under `ai_experiments/lin32/`. Inspect only
+that directory, necessary repository metadata, and the supplied `tinycc` and
+`xp` resources. Do not fetch code or inspect unrelated project directories.
+Keep executables and disposable guest disks out of commits. Preserve the XP base
+image during VM tests.
 
-8. **Add harder process semantics.** Address signals, TLS and segment behavior,
-   threads, futexes, process creation, pipes, polling, and sockets in separate
-   milestones. Specify limitations imposed by Windows 98 and define how Linux
-   operations will be emulated. Extend tests before advertising each feature.
-
-9. **Optimize and broaden validation.** Profile representative supported
-   programs, then consider instruction caching or translation. Run regression
-   fixtures across the available Windows matrix and publish supported syscall,
-   instruction, binary, and host-version coverage with reproducible commands.
-
-## Development constraints
-
-- All project source, documentation, test definitions, and committed changes
-  belong under `ai_experiments/lin32/`.
-- Use the local `~/src/gpt/tinycc` toolchain and installed QEMU. Use the supplied
-  `~/src/gpt/xp` filesystem image for XP testing through disposable overlays.
-- Do not fetch code from the internet or inspect unrelated directories under
-  `~/src/gpt` or elsewhere in `ai_experiments`.
-- Keep generated executables, guest images, overlays, and other large build
-  artifacts out of commits. Add local ignore rules when those outputs exist.
-- Keep build instructions reproducible and avoid requiring modern Windows APIs
-  or an installed compiler on the target Windows machine.
-
-## Main feasibility risks
-
-The largest effort is implementing enough x86 and Linux behavior for real
-programs, especially libc startup, signals, TLS, threads, and process creation.
-Windows 98 adds tighter memory limits and different OS behavior from the NT
-family. The compiler's ability to emit a Windows executable does not by itself
-prove that its imports and startup code work on Windows 98.
-
-The proposed sequence makes these assumptions testable early. The immediate
-next deliverable after this plan is the minimal PE build and XP test loop,
-followed by the static ELF message-and-exit demonstration.
+The key risks are syscall trap delivery across Windows families, Linux/Windows
+address-space conflicts, guest-stack exception delivery, TLS/SEH interactions,
+and later Linux process semantics. Native execution removes the need to implement
+x86 instructions but makes those ABI and host integration constraints central.
+The immediate deliverable is the native syscall bridge prototype, followed by
+the static ELF message-and-exit runtime.
