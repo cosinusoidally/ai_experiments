@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Create a partitioned FAT16 transfer disk using mkfs.vfat and original code."""
+import sys
+sys.dont_write_bytecode = True
+
 from pathlib import Path
 import struct
 import subprocess

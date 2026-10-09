@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Verify the real XP batch output captured through QEMU's serial port."""
+import sys
+sys.dont_write_bytecode = True
+
 import re
 from pathlib import Path
 

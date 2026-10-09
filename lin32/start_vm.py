@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Start isolated XP testing; use vm.py command quit to stop this VM."""
+import sys
+sys.dont_write_bytecode = True
+
 import argparse
 from pathlib import Path
 import subprocess

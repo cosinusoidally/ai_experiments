@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Inspect the built PE using Python; no external assembler/linker/binutils."""
+import sys
+sys.dont_write_bytecode = True
+
 import hashlib
 import json
 from pathlib import Path

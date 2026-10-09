@@ -166,3 +166,19 @@ Timestamp source: local system clock during final review.
   remain ignored under `build/`.
 - Prepared the initial implementation, original fixtures, reproducible build/test
   support, README, test report, and work log for a commit confined to `lin32/`.
+
+## 2026-10-09T14:49:47+01:00 — Build cleaning and bytecode cache prevention
+
+Timestamp source: local system clock at the start of this update.
+
+- Added `python3 -B build.py --clean` to remove all generated build artifacts,
+  including the disposable XP overlay and raw logs, plus local Python caches.
+  The command refuses to clean while the VM monitor socket exists.
+- Removed the existing `lin32/__pycache__` directory. Every support script now
+  disables bytecode writes for its imports; documented `python3 -B` invocation.
+- Replaced syntax verification through `py_compile` with in-memory `compile`
+  checks, which do not create `.pyc` files. All support scripts pass these checks,
+  the clean option appears in command help, and whitespace checks pass.
+- Retained the existing tested build artifacts; the documented clean command
+  removes them when requested. The runtime source and XP acceptance results are
+  unchanged.

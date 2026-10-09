@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Build the single PE32 runtime and original Linux fixtures without downloads."""
+import sys
+sys.dont_write_bytecode = True
+
 import hashlib
+import argparse
 import os
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 
@@ -20,6 +25,22 @@ def run(*args):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--clean", action="store_true",
+                        help="remove all generated build artifacts and local Python caches")
+    args = parser.parse_args()
+    if args.clean:
+        if (BUILD / "monitor.sock").exists():
+            raise SystemExit("Stop the XP test VM before cleaning its disks and logs.")
+        if BUILD.exists():
+            shutil.rmtree(BUILD)
+        for cache in ROOT.rglob("__pycache__"):
+            if cache.is_symlink():
+                cache.unlink()
+            else:
+                shutil.rmtree(cache)
+        print("Cleaned build artifacts and Python caches.")
+        return
     SHARE.mkdir(parents=True, exist_ok=True)
     run(TCC_BIN / "i386-win32-tcc", f"-B{TCC_LIB}",
         f"-I{TCC_WIN / 'include'}", f"-I{TCC_WIN / 'include/winapi'}",

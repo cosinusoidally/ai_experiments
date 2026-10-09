@@ -37,6 +37,23 @@ The build uses `i386-win32-tcc` for the Windows runtime and `i386-tcc` for the
 original Linux fixtures, including assembly and linking. No GNU assembler or
 linker is used. All generated artifacts are ignored under `build/`.
 
+To clean from this directory:
+
+```sh
+python3 -B build.py --clean
+```
+
+This removes the entire `build/` directory, including executables, fixtures,
+transfer disks, the disposable XP overlay, screenshots, and raw test logs, plus
+any local `__pycache__` directories. Stop the XP test VM first; cleaning refuses
+while its monitor socket exists. The source, Markdown reports, and original XP
+image are retained. Run `python3 -B build.py` to rebuild afterward.
+
+Use `python3 -B` when running the support scripts to prevent bytecode caches.
+The scripts also disable bytecode writes for their own imports. For syntax
+verification, compile source in memory rather than using `py_compile`, which
+explicitly writes `.pyc` files even with `-B`.
+
 On Windows:
 
 ```bat

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Small local QEMU monitor helper. Screenshots/input only; no guest agent."""
+import sys
+sys.dont_write_bytecode = True
+
 import argparse
 from pathlib import Path
 import socket
