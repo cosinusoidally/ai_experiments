@@ -9,6 +9,12 @@ Only 32-bit x86 Linux binaries are in scope.
 This directory currently contains the plan only. No runtime has been implemented
 or validated across Windows versions yet.
 
+See [WORK_LOG.md](WORK_LOG.md) for the timestamped development record. Maintain
+both this README and the work log in Markdown. Append log entries for substantive
+work, decisions, verification results, and outstanding issues, using ISO 8601
+timestamps with an explicit timezone offset. Retrospective entries must identify
+their timestamp source and must not imply tests were performed when they were not.
+
 ## Compatibility contract
 
 Build a single PE32 console executable against the Windows 98 API baseline.
@@ -122,7 +128,8 @@ and has not been executed in Windows.
 
 Installed tools include QEMU for i386/x86-64, `qemu-img`, Python 3, gzip, GNU
 assembler/linker, `objdump`, `make`, `mkfs.vfat`, and Wine. The XP resource is
-`~/src/gpt/xp/winxp.img.gz`, which can be unpacked in that directory. QEMU is a
+`~/src/gpt/xp/winxp.img.gz`; it has been unpacked in that directory as
+`winxp.img`, a 4 GiB raw disk image, with the compressed original retained. QEMU is a
 Windows test environment; it is not part of lin32's execution architecture.
 
 There is enough information and local tooling to write and build the minimal
