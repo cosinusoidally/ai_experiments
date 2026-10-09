@@ -324,3 +324,15 @@ Timestamp source: local system clock after all verifiers and base hash completed
   Python caches or bytecode files remain. Parent ignore rules continue to cover
   build outputs. Only lin32 source/scripts/Markdown reports are checked in.
   Windows 98 and other hosts remain to be validated with the identical runtime.
+
+## 2026-10-09T16:14:28+01:00 — Graphical XP Bash launcher
+
+Timestamp source: local system clock.
+
+- Added executable boot_xp.sh to launch the supplied XP image in a GTK QEMU
+  window, creating/reusing its own writable interactive overlay and explicitly
+  opening the original base read-only. Attaches the existing transfer disk when
+  available. No Python dependency.
+- Bash syntax passes; installed QEMU lists GTK as a display backend. The GUI
+  session is left for the user to start from their desktop. README documents
+  persistence, capture release, shutdown and clean behavior.

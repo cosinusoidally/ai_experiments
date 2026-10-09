@@ -416,3 +416,12 @@ python3 -B verify_stages.py
 The Linux ELF compiler is identical across both environments, and the Windows
 launcher remains the same single native PE executable. Only XP has been tested;
 the other Windows releases still need validation with that executable.
+
+## Boot XP interactively
+
+Run `./boot_xp.sh` from this directory to open XP in a GTK QEMU window. The Bash
+launcher creates `build/xp-interactive.qcow2` on its first run and reuses it on
+later runs, with the original XP base explicitly read-only. If `build/transfer.img`
+exists, it also attaches that disk with temporary guest writes. Ctrl+Alt+G releases
+mouse/keyboard capture. Shut down from XP's Start menu. `clean.sh` removes this
+interactive overlay along with the other build artifacts.
