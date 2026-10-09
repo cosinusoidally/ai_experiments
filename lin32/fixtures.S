@@ -1,4 +1,4 @@
-/* Original static Linux/i386 fixtures. CASE is supplied by build.py. */
+/* Original static Linux/i386 fixtures. CASE is supplied by build.sh. */
 .section .rodata
 message: .ascii "Hello from native Linux i386 on Windows!\n"
 message_end:

@@ -182,3 +182,26 @@ Timestamp source: local system clock at the start of this update.
 - Retained the existing tested build artifacts; the documented clean command
   removes them when requested. The runtime source and XP acceptance results are
   unchanged.
+
+## 2026-10-09T14:53:11+01:00 — Shell-only build and clean entry points
+
+Timestamp source: local system clock after clean/rebuild verification.
+
+- Replaced `build.py` with executable POSIX `build.sh`. It directly invokes
+  `/tmp/tcc-cross/bin/i386-win32-tcc` for the runtime and `i386-tcc` for the six
+  executable Linux fixtures. TCC handles compilation, assembly, and linking.
+- Recreated the six malformed ELF inputs using shell `printf`, `cp`, and `dd`.
+  Added the XP batch as source-controlled `run.cmd`; the shell build copies it
+  with Windows CRLF line endings. No Python is needed to build any test input.
+- Added executable `clean.sh`, which removes generated build files and the local
+  Python cache directory and refuses to run while the VM monitor socket exists.
+  Updated the README and fixture comments to use the shell entry points.
+- Shell syntax checks pass. Compared every shell-generated binary, malformed ELF
+  input, and batch file against the previously XP-tested artifacts: all match
+  byte for byte. Then ran `clean.sh` and rebuilt using `build.sh` without invoking
+  Python; all artifact hashes matched again and no cache directory was created.
+- Cleaning removed the disposable VM disks, screenshots, and raw captures;
+  source-controlled `TEST_RESULTS.md` retains the XP evidence. No further XP run
+  was needed because every test artifact and the runtime are unchanged in bytes.
+- Python remains limited to optional PE inspection and XP test support. All
+  project changes remain confined to `lin32/`.

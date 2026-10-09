@@ -24,8 +24,7 @@ their timestamp source and must not imply tests were performed when they were no
 From this directory, build with the supplied local toolchain:
 
 ```sh
-python3 build.py
-python3 audit_pe.py
+./build.sh
 ```
 
 This produces `build/share/lin32.exe`, static Linux test fixtures, and `run.cmd`.
@@ -35,21 +34,26 @@ Set `LIN32_TCC_ROOT` to override that installation prefix (with `bin/` and
 it does not need an installed C runtime or compiler on the Windows machine.
 The build uses `i386-win32-tcc` for the Windows runtime and `i386-tcc` for the
 original Linux fixtures, including assembly and linking. No GNU assembler or
-linker is used. All generated artifacts are ignored under `build/`.
+linker is used. Building the runtime and all test fixtures requires only a POSIX
+shell, TCC, and standard file utilities (`dirname`, `mkdir`, `cp`, and `dd`); Python is not
+required. All generated artifacts are ignored under `build/`.
 
 To clean from this directory:
 
 ```sh
-python3 -B build.py --clean
+./clean.sh
 ```
 
 This removes the entire `build/` directory, including executables, fixtures,
 transfer disks, the disposable XP overlay, screenshots, and raw test logs, plus
 any local `__pycache__` directories. Stop the XP test VM first; cleaning refuses
 while its monitor socket exists. The source, Markdown reports, and original XP
-image are retained. Run `python3 -B build.py` to rebuild afterward.
+image are retained. Run `./build.sh` to rebuild afterward. Cleaning requires only
+the shell, `dirname`, and `rm`.
 
-Use `python3 -B` when running the support scripts to prevent bytecode caches.
+Python is used only by the optional PE audit and XP test helpers, not by build
+or clean. To inspect the built executable, run `python3 -B audit_pe.py`.
+Use `python3 -B` when running those support scripts to prevent bytecode caches.
 The scripts also disable bytecode writes for their own imports. For syntax
 verification, compile source in memory rather than using `py_compile`, which
 explicitly writes `.pyc` files even with `-B`.
