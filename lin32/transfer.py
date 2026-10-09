@@ -7,7 +7,7 @@ from pathlib import Path
 import struct
 import subprocess
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 BUILD = ROOT / "build"
 
 

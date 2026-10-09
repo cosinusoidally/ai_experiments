@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-cd "$(dirname "$0")"
 ./build.sh
 
 build/share/cc0.elf cc_min.c build/share/lc1.elf

@@ -6,7 +6,7 @@ sys.dont_write_bytecode = True
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 EXPECTED = {
     "hello": (37, "Hello from native Linux i386 on Windows!", "int80 exception=0xc0000005"),
     "checks": (0, "ABI checks passed"),

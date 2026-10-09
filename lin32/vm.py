@@ -8,7 +8,7 @@ from pathlib import Path
 import socket
 import time
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 
 
 def command(s, text):

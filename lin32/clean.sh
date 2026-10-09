@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-cd "$(dirname "$0")"
 
 if [ -e build/monitor.sock ]; then
     printf '%s\n' 'Stop the XP test VM before cleaning its disks and logs.' >&2

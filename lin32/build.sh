@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-cd "$(dirname "$0")"
 
 tcc_root=${LIN32_TCC_ROOT:-/tmp/tcc-cross}
 mkdir -p build/share

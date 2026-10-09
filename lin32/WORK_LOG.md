@@ -336,3 +336,16 @@ Timestamp source: local system clock.
 - Bash syntax passes; installed QEMU lists GTK as a display backend. The GUI
   session is left for the user to start from their desktop. README documents
   persistence, capture release, shutdown and clean behavior.
+
+## 2026-10-09T16:16:11+01:00 — Working-directory-relative script paths
+
+Timestamp source: local system clock.
+
+- Removed hard-coded home-directory paths from both XP launchers. Scripts now
+  assume execution from lin32; the XP base is ../../xp/winxp.img. The graphical
+  launcher resolves that location at runtime for a valid QCOW2 backing path.
+- Removed shell script-directory changes and made optional Python helper roots
+  use the current working directory. Updated README commands and requirements.
+- Bash/POSIX shell and in-memory Python syntax checks pass. Regression/staging
+  verifiers and PE audit pass when invoked from lin32. No home-directory literals
+  remain in scripts; historical test evidence is retained in Markdown reports.

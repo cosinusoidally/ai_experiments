@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-base=/home/foo/src/gpt/xp/winxp.img
+# Resolve from lin32 so QCOW2 backing paths also work from build/.
+base="$(cd ../../xp && pwd -P)/winxp.img"
 overlay=build/xp-interactive.qcow2
 mkdir -p build
 if [[ ! -f "$overlay" ]]; then

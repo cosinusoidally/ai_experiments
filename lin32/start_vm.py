@@ -7,13 +7,13 @@ import argparse
 from pathlib import Path
 import subprocess
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 BUILD = ROOT / "build"
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=Path, default=Path("/home/foo/src/gpt/xp/winxp.img"))
+    parser.add_argument("--base", type=Path, default=Path("../../xp/winxp.img"))
     args = parser.parse_args()
     BUILD.mkdir(exist_ok=True)
     overlay = BUILD / "xp-overlay.qcow2"

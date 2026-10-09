@@ -1,7 +1,6 @@
 #!/bin/sh
 # Optional growth regression; run after stages.sh. Builds use TCC/cc_min only.
 set -eu
-cd "$(dirname "$0")"
 awk 'BEGIN {
     for (i=0;i<2600;i++) printf "int long_global_identifier_%05d;\n", i;
     printf "int "; for(i=0;i<5000;i++) printf "z"; print ";";

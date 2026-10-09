@@ -24,7 +24,8 @@ their timestamp source and must not imply tests were performed when they were no
 
 ## Build and run the initial version
 
-From this directory, build with the supplied local toolchain:
+Run all scripts from the `lin32/` directory. Paths are relative to that working
+directory; the XP base is `../../xp/winxp.img`. Build with the supplied local toolchain:
 
 ```sh
 ./build.sh
@@ -41,7 +42,7 @@ it does not need a compiler.
 The build uses `i386-win32-tcc` for the Windows runtime and `i386-tcc` for the
 original Linux fixtures, including assembly and linking. No GNU assembler or
 linker is used. Building the runtime and all test fixtures requires only a POSIX
-shell, TCC, and standard file utilities (`dirname`, `mkdir`, `cp`, and `dd`); Python is not
+shell, TCC, and standard file utilities (`mkdir`, `cp`, and `dd`); Python is not
 required. All generated artifacts are ignored under `build/`.
 
 The eight executable Linux fixtures are C programs in `tests/`, each with a normal
@@ -67,7 +68,7 @@ transfer disks, the disposable XP overlay, screenshots, and raw test logs, plus
 any local `__pycache__` directories. Stop the XP test VM first; cleaning refuses
 while its monitor socket exists. The source, Markdown reports, and original XP
 image are retained. Run `./build.sh` to rebuild afterward. Cleaning requires only
-the shell, `dirname`, and `rm`.
+the shell and `rm`.
 
 Python is used only by the optional PE audit and XP test helpers, not by build
 or clean. To inspect the built executable, run `python3 -B audit_pe.py`.
@@ -108,7 +109,7 @@ protection cannot enforce non-executable data pages.
 ## Transfer programs into XP and run them
 
 All commands below start from the host's `lin32/` directory unless identified as
-guest commands. The base image is `/home/foo/src/gpt/xp/winxp.img`. No files are
+guest commands. The base image is `../../xp/winxp.img`. No files are
 inserted into that image and it is never attached as a writable guest disk.
 
 1. **Build on the host.** Run `./build.sh`. This creates the Windows launcher,
@@ -116,7 +117,7 @@ inserted into that image and it is never attached as a writable guest disk.
    Record the base disk's contents before testing:
 
    ```sh
-   sha256sum /home/foo/src/gpt/xp/winxp.img > build/xp-base-before.sha256
+   sha256sum ../../xp/winxp.img > build/xp-base-before.sha256
    ```
 
 2. **Create a separate transfer disk.** Run `python3 -B transfer.py`. The helper
@@ -130,7 +131,7 @@ inserted into that image and it is never attached as a writable guest disk.
    absent, it creates the overlay with the equivalent of:
 
    ```sh
-   qemu-img create -f qcow2 -F raw -b /home/foo/src/gpt/xp/winxp.img build/xp-overlay.qcow2
+   qemu-img create -f qcow2 -F raw -b "$(cd ../../xp && pwd -P)/winxp.img" build/xp-overlay.qcow2
    ```
 
    QEMU's block graph opens the base file and raw backing node explicitly with

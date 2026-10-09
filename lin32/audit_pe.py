@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import struct
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 ALLOWED = {
     "kernel32.dll": {"WriteFile", "ExitProcess", "VirtualAlloc", "CreateFileA",
                      "GetFileSize", "ReadFile", "CloseHandle", "VirtualProtect",

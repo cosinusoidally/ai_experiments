@@ -6,7 +6,7 @@ sys.dont_write_bytecode = True
 from pathlib import Path
 import re
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 EXPECTED = {
     "growth_compile": 0, "growth_run": 42, "growth_cross": 0,"win1": 0, "win2": 0, "win3": 0, "win12": 0, "win23": 0,
             "cross1": 0, "cross2": 0, "cross3": 0, "demo_compile": 0,
