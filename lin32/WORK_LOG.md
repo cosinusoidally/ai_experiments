@@ -216,3 +216,15 @@ Timestamp source: local system clock at the start of this update.
 - Confirmed the ignore rules match representative build artifacts, cache
   directories, and standalone bytecode paths. Bytecode creation remains disabled
   in the optional Python helpers; ignoring it does not replace that requirement.
+
+## 2026-10-09T14:57:25+01:00 — Move ignore rules to the repository root
+
+Timestamp source: local system clock at the start of this update.
+
+- At the user's explicit request, moved the lin32 ignore rules into the parent
+  repository `.gitignore` and removed `lin32/.gitignore`. This root-file change is
+  authorized by the latest instruction despite the earlier lin32-only scope.
+- Scoped build and recursive Python bytecode/cache patterns to `/lin32/`,
+  preserving the root file's existing rules for other projects.
+- Verified that representative lin32 binaries, test disks, logs, screenshots,
+  cache directories, and standalone bytecode files are still ignored.

@@ -16,3 +16,10 @@
 !/postscript_cc/artifacts/placeholder
 /cpp_test/artifacts/*
 !/cpp_test/artifacts/placeholder
+
+# lin32 shell build outputs and optional XP test artifacts.
+/lin32/build/
+
+# Defensive ignores; lin32 support scripts disable bytecode writes.
+/lin32/**/__pycache__/
+/lin32/**/*.py[cod]
