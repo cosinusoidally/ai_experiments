@@ -456,3 +456,31 @@ Every native operation must pass:
 The acceptance target is at least parity with direct `js_min.exe`. A migration
 exit, demo-specific shortcut, larger heap used to conceal a leak, or native
 path that calls back into SpiderMonkey does not satisfy the endpoint.
+## Register bytecode dataflow
+
+`bytecode.js` owns instruction widths and destination-operand metadata. The
+verifier, interpreter fallback synchronizer, and bytecode optimizer share this
+layout rather than keeping independent opcode lists.
+
+`bytecode_optimizer.js` performs a forward must-analysis before a compiled
+program is published. Each basic block receives facts about register values:
+unknown, signed int32, or positive zero. Constant registers seed the entry
+state. Moves propagate facts; signed bitwise operations produce int32 values;
+other destinations invalidate their previous facts. At control-flow joins a
+fact survives only if every incoming path supports it. The worklist reaches a
+fixed point before any instructions are rewritten, including loop backedges.
+
+The first transformation replaces `int32Value | positiveZero` with a move,
+or removes it when source and destination are identical. It does not remove
+coercions of unknown values, fractional numbers, objects, or negative zero.
+Rebuilding instruction storage relocates branch targets and source locations;
+register numbering, binding layouts, and constants remain unchanged. The
+descriptor's `optimizationStats.redundantInt32Conversions` exposes the number
+of proven redundant conversions for diagnostics.
+
+Functions with exception-handler or `with` instructions are currently left
+unchanged: their extra control-flow edges require explicit modelling. A named
+analysis-state limit bounds compiler memory; exceeding it leaves the function
+unoptimized, never rejects an otherwise valid program. Neither limitation
+changes guest semantics. This pass is shared by both host execution paths and
+the standalone frontend; it contains no benchmark-specific recognition.

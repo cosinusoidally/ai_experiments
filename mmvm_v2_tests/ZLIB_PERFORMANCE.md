@@ -137,6 +137,21 @@ non-int32 value exactly; do not infer benchmark-specific integer types.
 
 ## Architectural performance target
 
+- 2026-10-22: resumed with general register-bytecode must-analysis. Shared
+  opcode layout metadata now drives verification and fallback destinations.
+  The forward dataflow pass proves int32 facts across branches and loops before
+  replacing redundant `| 0` conversions. It conservatively leaves exception and
+  `with` functions unchanged and bounds analysis memory. Inspection of the
+  unchanged decoded zlib source found 253 statically redundant conversions in
+  198 compiled functions. This is not a dynamic operation count or a speedup
+  claim. Both existing host test runs passed (12 programs, 269 assertions each,
+  plus embedding, GC, numeric/kernel, networking CLI, and context checks).
+  The first fresh standalone image passed full-buffer checks in 49,640 and
+  49,435 ms per batch, with initialization 16,541 ms. This is only a small
+  throughput change and adds frontend work. A cheap candidate scan now avoids
+  CFG construction when there are no literal-zero OR conversions; its startup
+  impact is being checked separately. No 10x claim is justified.
+
 The requested target is at least **10 times faster** than the initial standalone
 baseline, not a succession of small percentage improvements. For this diagnostic
 that means roughly 6.5 seconds or less per 60-round batch, with the full-buffer

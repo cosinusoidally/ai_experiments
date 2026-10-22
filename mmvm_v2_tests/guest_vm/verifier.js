@@ -18,39 +18,8 @@
         while (pc < code.length) {
             boundaries[pc] = true;
             var opcode = code[pc];
-            var width;
-            if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
-                opcode === op.SET_GLOBAL || opcode === op.MOVE ||
-                opcode === op.NOT || opcode === op.NEGATE ||
-                opcode === op.POSITIVE || opcode === op.MAKE_FUNCTION ||
-                opcode === op.MAKE_ARRAY ||
-                opcode === op.BIT_NOT || opcode === op.TYPEOF ||
-                opcode === op.TYPEOF_GLOBAL ||
-                opcode === op.GET_KEYS || opcode === op.GET_NAME ||
-                opcode === op.SET_NAME || opcode === op.TYPEOF_NAME ||
-                opcode === op.DELETE_NAME) width = 3;
-            else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
-                     opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
-                     opcode === op.GET_PROPERTY_CONST ||
-                     opcode === op.SET_PROPERTY_CONST ||
-                     opcode === op.DELETE_PROPERTY_CONST ||
-                     opcode === op.IN || opcode === op.INSTANCEOF ||
-                     opcode === op.DEFINE_GETTER ||
-                     opcode === op.DEFINE_SETTER ||
-                     (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
-                     (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
-                     opcode === op.MAKE_REGEXP || opcode === op.DELETE_PROPERTY) width = 4;
-            else if (opcode === op.JUMP || opcode === op.RETURN ||
-                     opcode === op.MAKE_OBJECT ||
-                     opcode === op.THROW || opcode === op.GET_THIS ||
-                     opcode === op.ENTER_WITH) width = 2;
-            else if (opcode === op.PUSH_CATCH) width = 3;
-            else if (opcode === op.POP_CATCH || opcode === op.LEAVE_WITH ||
-                     opcode === op.INVALID_ASSIGNMENT) width = 1;
-            else if (opcode === op.JUMP_IF_FALSE) width = 3;
-            else if (opcode === op.CALL) width = 5;
-            else if (opcode === op.CONSTRUCT) width = 4;
-            else throw new Error("invalid opcode " + opcode + " at bytecode " + pc);
+            var width = op.WIDTHS[opcode];
+            if (!width) throw new Error("invalid opcode " + opcode + " at bytecode " + pc);
             if (pc + width > code.length) throw new Error("truncated bytecode at " + pc);
 
             if (opcode === op.CONST || opcode === op.GET_GLOBAL ||

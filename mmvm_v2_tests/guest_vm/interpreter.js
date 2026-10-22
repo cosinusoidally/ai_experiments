@@ -211,21 +211,7 @@
     };
 
     Execution.prototype.fallbackHasDestination = function (opcode) {
-        return opcode === op.CONST || opcode === op.GET_GLOBAL ||
-            opcode === op.MOVE || opcode === op.GET_PROPERTY ||
-            (opcode >= op.ADD && opcode <= op.POSITIVE) ||
-            opcode === op.CALL || opcode === op.CONSTRUCT ||
-            opcode === op.MAKE_FUNCTION || opcode === op.MAKE_OBJECT ||
-            opcode === op.MAKE_ARRAY || opcode === op.MAKE_REGEXP ||
-            (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
-            opcode === op.BIT_NOT || opcode === op.TYPEOF ||
-            opcode === op.TYPEOF_GLOBAL ||
-            opcode === op.DELETE_PROPERTY || opcode === op.GET_KEYS ||
-            opcode === op.GET_LOCAL || opcode === op.GET_PROPERTY_CONST ||
-            opcode === op.DELETE_PROPERTY_CONST || opcode === op.IN ||
-            opcode === op.INSTANCEOF || opcode === op.GET_THIS ||
-            opcode === op.GET_NAME || opcode === op.TYPEOF_NAME ||
-            opcode === op.DELETE_NAME;
+        return op.DESTINATION_OPERANDS[opcode] === 1;
     };
 
     Execution.prototype.synchronizeFallbackStep = function (frame, pc, opcode) {

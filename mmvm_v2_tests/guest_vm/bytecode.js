@@ -70,6 +70,34 @@
         }
     }
 
+    /* Shared instruction layout: consumers must not maintain their own opcode
+     * width or destination lists. Operand zero is always the opcode itself. */
+    op.WIDTHS = [];
+    op.DESTINATION_OPERANDS = [];
+    function layout(width, destination, instructions) {
+        var index;
+        for (index = 0; index < instructions.length; index++) {
+            op.WIDTHS[instructions[index]] = width;
+            op.DESTINATION_OPERANDS[instructions[index]] = destination;
+        }
+    }
+    layout(1, 0, [op.POP_CATCH, op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
+    layout(2, 0, [op.JUMP, op.RETURN, op.THROW, op.ENTER_WITH]);
+    layout(2, 1, [op.MAKE_OBJECT, op.GET_THIS]);
+    layout(3, 0, [op.SET_GLOBAL, op.SET_NAME, op.JUMP_IF_FALSE, op.PUSH_CATCH]);
+    layout(3, 1, [op.CONST, op.GET_GLOBAL, op.MOVE, op.NOT, op.NEGATE,
+        op.POSITIVE, op.MAKE_FUNCTION, op.MAKE_ARRAY, op.BIT_NOT, op.TYPEOF,
+        op.TYPEOF_GLOBAL, op.GET_KEYS, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME]);
+    layout(4, 0, [op.SET_PROPERTY, op.SET_LOCAL, op.SET_PROPERTY_CONST,
+        op.DEFINE_GETTER, op.DEFINE_SETTER]);
+    layout(4, 1, [op.GET_PROPERTY, op.GET_LOCAL, op.GET_PROPERTY_CONST,
+        op.DELETE_PROPERTY_CONST, op.IN, op.INSTANCEOF, op.ADD, op.SUBTRACT,
+        op.MULTIPLY, op.DIVIDE, op.REMAINDER, op.STRICT_EQUAL, op.EQUAL,
+        op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL, op.BIT_AND,
+        op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
+        op.SHIFT_UNSIGNED_RIGHT, op.MAKE_REGEXP, op.DELETE_PROPERTY, op.CONSTRUCT]);
+    layout(5, 1, [op.CALL]);
+
     root.GuestVMBytecode = op;
     if (typeof module !== "undefined" && module.exports) module.exports = op;
 }(this));

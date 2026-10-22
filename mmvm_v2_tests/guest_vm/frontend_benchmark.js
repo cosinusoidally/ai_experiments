@@ -22,6 +22,7 @@
         load("guest_vm/tokenizer.js");
         load("guest_vm/parser.js");
         load("guest_vm/bytecode.js");
+        load("guest_vm/bytecode_optimizer.js");
         load("guest_vm/compiler.js");
         load("guest_vm/verifier.js");
         Parser = GuestVMParser;

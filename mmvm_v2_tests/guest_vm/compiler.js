@@ -1,7 +1,9 @@
 (function (root) {
     var op = root.GuestVMBytecode;
+    var optimizer = root.GuestVMBytecodeOptimizer;
     if (typeof module !== "undefined" && module.exports) {
         op = require("./bytecode.js");
+        optimizer = require("./bytecode_optimizer.js");
     }
 
     function Compiler(scopeBindings, outerScopes, registerBindings) {
@@ -168,7 +170,7 @@
             completionRegister = this.emitConstant(undefined);
         }
         this.emit(op.RETURN, completionRegister);
-        return {code: this.code, constants: this.constants,
+        return optimizer.optimize({code: this.code, constants: this.constants,
                 constantRegisters: this.constantRegisters,
                 registerHints: this.registerHints,
                 registerCount: this.registerCount, parameters: [], locals: [],
@@ -177,7 +179,7 @@
                                                 line: 1, column: 1},
                 sourceLocations: this.sourceLocations,
                 globalDeclarations: globalDeclarations,
-                strict: !!program.strict};
+                strict: !!program.strict});
     };
 
     Compiler.prototype.compileFunction = function (expression) {
