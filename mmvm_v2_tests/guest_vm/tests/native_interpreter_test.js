@@ -133,6 +133,15 @@
                     integratedReturn.instructions !== 1) {
                     throw new Error("native Execution return integration mismatch");
                 }
+                var counterFallbacks = integratedVM.runtime.nativeInterpreter.
+                    unsupportedExitCount;
+                if (context.run("__guestVMOpcodeCounterWord(0)") !== undefined ||
+                    context.run("__guestVMOpcodeCounterWord(-1)") !== undefined ||
+                    context.run("__guestVMOpcodeCounterWord()") !== undefined ||
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                        counterFallbacks) {
+                    throw new Error("disabled opcode counters must stay native and undefined");
+                }
 
                 var regexpContext = integratedVM.jsRuntime.createContext();
                 var regexpProgram = {

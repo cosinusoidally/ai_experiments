@@ -82,7 +82,9 @@
                       STRING_TO_LOWER_CASE: 110,
                       BUFFER_IS_BUFFER: 111,
                       FIRST_ERROR_CONSTRUCTOR: 112,
-                      LAST_ERROR_CONSTRUCTOR: 118};
+                      LAST_ERROR_CONSTRUCTOR: 118,
+                      OPCODE_COUNTER_WORD: 119};
+    Intrinsics.LAST_ID = Intrinsics.OPCODE_COUNTER_WORD;
     /* This order is the shared mapping from constructor names to IDs and
      * native runtime-support slots. Do not repeat it in either backend. */
     Intrinsics.ERROR_CONSTRUCTOR_NAMES = ["Error", "EvalError", "RangeError",

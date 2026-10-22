@@ -40,6 +40,7 @@
     var INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
     var INTRINSIC_FIRST_ERROR_CONSTRUCTOR = NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR;
     var INTRINSIC_LAST_ERROR_CONSTRUCTOR = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
+    var INTRINSIC_OPCODE_COUNTER_WORD = NativeIntrinsics.OPCODE_COUNTER_WORD;
     var RuntimeSupportLayout = {
         CHAR_AT_KEY: 0,
         CHAR_AT_FUNCTION: 1,
@@ -142,7 +143,7 @@
         overrides.INTRINSIC_BUFFER_READ_I16_LE =
             NativeIntrinsics.BUFFER_READ_I16_LE;
         overrides.INTRINSIC_GC_STRESS_CONTROL = NativeIntrinsics.GC_STRESS_CONTROL;
-        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
+        overrides.INTRINSIC_LAST_ID = NativeIntrinsics.LAST_ID;
         overrides.INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
         overrides.INTRINSIC_STRING_TO_LOWER_CASE =
             NativeIntrinsics.STRING_TO_LOWER_CASE;
@@ -6245,6 +6246,8 @@
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_GC_STRESS_CONTROL) {
             requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_OPCODE_COUNTER_WORD) {
+            requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
             requiredIntrinsicArguments = 3;
         } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
@@ -6344,6 +6347,44 @@
         var intrinsicTarget = heapBase + registerCells +
             callTargetIndex * VALUE_CELL_BYTES;
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_OPCODE_COUNTER_WORD) {
+            /* A raw signed counter word; callers use >>> 0 and modulo-2^32
+             * deltas. Disabled profiling and invalid indices yield undefined.
+             * No counter allocation, reset, or host transition is needed. */
+            var sampledCounterIndex = -1;
+            if (PROFILE_OPCODES !== 0) {
+                if (intrinsicArgumentCount > 0) {
+                    var counterIndexCell = programArgumentCellKernel(
+                        heapBase, intrinsicArgumentsVector, registerCells, 0);
+                    if (counterIndexCell !== 0) {
+                        var counterIndexTag = valueCellTag(0, counterIndexCell);
+                        if ((counterIndexTag === VALUE_TAG_INT32) |
+                            (counterIndexTag === VALUE_TAG_DOUBLE)) {
+                            var counterIndex = toInt32F64(loadNumberF64(
+                                counterIndexCell + VALUE_CELL_LOW, counterIndexTag));
+                            store32(engineScratchLeftAddress(heapBase, state), counterIndex);
+                            if (equalF64(loadNumberF64(
+                                counterIndexCell + VALUE_CELL_LOW, counterIndexTag),
+                                loadI32F64(engineScratchLeftAddress(heapBase, state))) === 0) {
+                                counterIndex = -1;
+                            }
+                            if (counterIndex >= 0) {
+                                if (counterIndex < ENGINE_OPCODE_COUNT) {
+                                    sampledCounterIndex = counterIndex;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            /* CALL's destination may alias an argument register. Read and
+             * validate the argument before writing the result cell. */
+            if (sampledCounterIndex >= 0) {
+                setValueCellInt32(intrinsicTarget, opcodeExecutionCount(
+                    heapBase, state, sampledCounterIndex));
+            } else setValueCellUndefined(intrinsicTarget);
+            intrinsicHandled = 1;
+        }
         if (intrinsicId === INTRINSIC_GC_STRESS_CONTROL) {
             if (intrinsicArgumentCount > 0) {
                 var stressCell = programArgumentCellKernel(
@@ -17170,6 +17211,9 @@
             }
             var compilerOptions = {
                 constantBindings: {
+                    PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0,
+                    ENGINE_OPCODE_COUNT: kernelConstantOverrides.ENGINE_OPCODE_COUNT,
+                    INTRINSIC_OPCODE_COUNTER_WORD: INTRINSIC_OPCODE_COUNTER_WORD,
                     INTRINSIC_DECODE_URI_COMPONENT: INTRINSIC_DECODE_URI_COMPONENT,
                     INTRINSIC_DECODE_URI: INTRINSIC_DECODE_URI,
                     INTRINSIC_STRING_TO_LOWER_CASE: INTRINSIC_STRING_TO_LOWER_CASE,

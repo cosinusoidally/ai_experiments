@@ -3262,6 +3262,17 @@
         var runtime = this;
         /* Private embedder diagnostic; not part of ECMAScript's API. Native
          * execution handles this directly and never calls this host fallback. */
+        this.setGlobal("__guestVMOpcodeCounterWord", this.makeNativeFunction(
+            "__guestVMOpcodeCounterWord", function (receiver, args) {
+                var index = args[0];
+                if (!runtime.profileOpcodeCounts || !runtime.nativeInterpreter ||
+                    typeof index !== "number" || index !== (index | 0) ||
+                    index < 0 || index >= HeapRecords.KernelConstants.ENGINE_OPCODE_COUNT) {
+                    return undefined;
+                }
+                return runtime.heapRecords.engineOpcodeCount(
+                    runtime.nativeInterpreter.stateAddress, index) | 0;
+            }, "intrinsic", NativeIntrinsics.OPCODE_COUNTER_WORD));
         this.setGlobal("__guestVMGCStress", this.makeNativeFunction(
             "__guestVMGCStress", function (receiver, args) {
                 if (args.length) {

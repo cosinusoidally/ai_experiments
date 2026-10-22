@@ -212,6 +212,7 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        ENGINE_OPCODE_COUNT: ENGINE_OPCODE_COUNT,
         RECORD_TYPE: Heap.HeaderFields.TYPE,
         RECORD_SIZE: Heap.HeaderFields.SIZE,
         RECORD_MARK: Heap.HeaderFields.MARK,

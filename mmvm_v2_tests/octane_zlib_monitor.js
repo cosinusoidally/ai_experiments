@@ -86,8 +86,11 @@
         }
     }
     var opcodeNames = null;
+    print("zlib: opcode counter query " + typeof root.__guestVMOpcodeCounterWord +
+        (typeof root.__guestVMOpcodeCounterWord === "function" ?
+            "; initial word=" + root.__guestVMOpcodeCounterWord(0 | 0) : ""));
     if (typeof root.__guestVMOpcodeCounterWord === "function" &&
-        typeof root.__guestVMOpcodeCounterWord(0) === "number") {
+        typeof root.__guestVMOpcodeCounterWord(0 | 0) === "number") {
         load("guest_vm/bytecode.js");
         opcodeNames = root.GuestVMBytecode.NAMES;
     }
@@ -95,7 +98,7 @@
         var result = [], j;
         if (opcodeNames) {
             for (j = 0; j < opcodeNames.length; j++) {
-                result[j] = root.__guestVMOpcodeCounterWord(j) >>> 0;
+                result[j] = root.__guestVMOpcodeCounterWord(j | 0) >>> 0;
             }
         }
         return result;
