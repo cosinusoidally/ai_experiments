@@ -139,6 +139,17 @@
     LinearMemory.prototype.writeU32Trusted = function (address, value) {
         this.host.write32LETrusted(this.allocation, address, value);
     };
+    /* Forward word copy, matching successive read/store operations (not
+     * memmove for partial overlap). Used by shared kernel block-copy IR. */
+    LinearMemory.prototype.copyWordsTrusted = function (target, source, count) {
+        var WORD_BYTES = 4;
+        var host = this.host, allocation = this.allocation, index = 0;
+        while (index < count) {
+            var offset = index++ * WORD_BYTES;
+            host.write32LETrusted(allocation, target + offset,
+                host.read32LETrusted(allocation, source + offset));
+        }
+    };
 
     LinearMemory.prototype.readF64 = function (address) {
         this.checkRange(address, 8);

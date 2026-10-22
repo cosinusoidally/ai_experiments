@@ -26,7 +26,7 @@
         else if (args[i] === "--iterations") { iterations = Number(args[++i]); }
         else { throw new Error("Unknown option: " + args[i]); }
     }
-    if (!directory || !isFinite(iterations) || !(iterations >= 1) ||
+    if (!directory || iterations === Infinity || !(iterations >= 1) ||
         iterations !== Math.floor(iterations)) {
         throw new Error("Use --record DIR (Node only) or --reference DIR [--iterations N]");
     }

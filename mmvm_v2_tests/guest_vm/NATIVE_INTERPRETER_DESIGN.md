@@ -1,5 +1,62 @@
 # Native kernel interpreter design
 
+## Kernel memory lowering and dispatch experiments (2026-10-22)
+
+The shared typed IR preserves `copyValueCell` as `copy_words`: source and
+destination expressions are evaluated once, in call argument order, followed
+by forward word copies. This is not memmove for partially overlapping ranges.
+The four authoritative value-cell fields must be contiguous words; lowering
+validates that requirement instead of silently assuming a different layout.
+The x86 backend holds destination/source pointers in scratch ECX/EDX and emits
+named load/store instructions. The JS backend uses
+`LinearMemory.copyWordsTrusted`, which performs the same ordered accesses
+through the host-memory adapter; native execution does not call that adapter.
+
+The frontend also combines adjacent `store_u32` operations through the same
+local/argument pointer into `store_fields`. Only literal/local/argument values
+qualify. It never combines across a control-flow boundary or through a load,
+call, or conversion. Offsets and store order are retained, including repeated
+offsets. The native backend can therefore calculate the pointer once and use
+direct immediate stores without changing observable memory effects. The JS
+backend emits the original ordered trusted writes. Native scratch-register
+use is safe because those value expressions cannot call code or use ECX/EDX.
+
+Balanced comparison-tree opcode dispatch remains the default. The x86 backend
+constructor accepts `dispatchStrategy: "indexed"` for explicit experiments;
+this is not a guest language feature or a runner flag. Indexed tables contain
+label differences, not process addresses. A backend-owned frame slot holds the
+relocated code base, discovered once at function entry. Both table addressing
+and table entries use assembler label-difference fixups, so whole-image
+relocation does not change their contents. Bounds checks retain the ordinary
+default handler. Experiments so far passed correctness but were slower, so
+they must not silently become the normal execution path.
+
+The snapshot compiler contract version changes with backend lowering changes.
+Build a fresh image when measuring; an older snapshot embeds its older kernel
+and frontend. See `../ZLIB_PERFORMANCE.md` for measurements and the outstanding
+10x target. These IR improvements add no benchmark recognition, host language
+fallbacks, handwritten rasterizer shortcuts, or special integer semantics in
+the kernel source.
+
+Small leaf calls can now carry an `inline_call_i32` body in the shared IR.
+Eligibility depends on a bounded structural node count and absence of kernel
+or native calls, never on a helper name. Only literal/local/argument actuals
+qualify. Read-only parameters can alias those immutable caller operands;
+parameters assigned by the callee receive private binding slots. Every callee
+local receives a fresh caller-local index. Returns branch to a private inline
+return label, not the enclosing function's return. Scope-free block wrappers
+do not affect eligibility, since different host decompilers insert braces.
+Unchanged IR subtrees are shared rather than cloned during the search.
+
+The native backend lowers the inline body without a cdecl boundary. The JS
+backend retains its canonical original call, allowing its host optimizer to
+inline it; the callee remains in the graph. Both forms obey the same parameter,
+local, return, and memory semantics. This is kernel compilation, not JIT
+compilation or recognition of guest benchmark functions. `graph.inlining`
+records eligible helper names/node counts and the number of expanded sites for
+compiler introspection. The structural cutoff is a code-size heuristic, not an
+ECMAScript language restriction.
+
 The compiled entry's third argument is the guest-heap address of the
 platform-service record, not the global object. It contains process-local libc
 capabilities such as `snprintf` and is referenced from the engine-state record.

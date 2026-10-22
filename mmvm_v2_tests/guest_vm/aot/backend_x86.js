@@ -1,6 +1,7 @@
 /* i386 backend for shared kernel IR. It emits only macro-assembler calls and
  * optionally installs the result in executable memory on an MMVM host. */
 (function (root) {
+    var WORD_BYTES = 4;
     var Assembler = root.GuestVMX86Assembler;
     var HostFFI = root.GuestVMHostFFI;
     if (typeof module !== "undefined" && module.exports) {
@@ -11,6 +12,12 @@
     function X86Backend(options) {
         options = options || {};
         this.captureAssembly = options.captureAssembly !== false;
+        /* Indexed dispatch is an explicit experiment, not the default: the
+         * measured comparison tree is faster on the current interpreter. */
+        this.dispatchStrategy = options.dispatchStrategy || "balanced";
+        if (this.dispatchStrategy !== "balanced" && this.dispatchStrategy !== "indexed") {
+            throw new Error("unknown x86 dispatch strategy: " + this.dispatchStrategy);
+        }
         this.timings = options.timings || null;
         this.ffi = new HostFFI();
         this.mmap = this.ffi.isMMVM ? this.ffi.resolve("mmap") : 0;
@@ -76,15 +83,16 @@
         return result;
     };
 
-    function emitControlFlowFunction(assembler, ir, functionIndex) {
+    function emitControlFlowFunction(assembler, ir, functionIndex, dispatchStrategy) {
         var prefix = "kernel_function_" + ir.name;
         var state = {nextLabel: (functionIndex + 1) * 1000000,
                      returnLabel: prefix + "_return",
-                     registerMap: allocateKernelRegisters(ir)};
+                     registerMap: allocateKernelRegisters(ir),
+                     dispatchStrategy: dispatchStrategy};
         assembler.label(prefix);
         assembler.pushEbp();
         assembler.movEbpEsp();
-        if (ir.locals.length) assembler.subEspImmediate(ir.locals.length * 4);
+        reserveKernelLocals(assembler, ir, state);
         saveKernelRegisters(assembler);
         initializeKernelArgumentRegisters(assembler, state.registerMap);
         emitStatements(assembler, ir.body, state);
@@ -118,7 +126,8 @@
         index = 0;
         while (index < ordered.length) {
             var ir = ordered[index];
-            var registerMap = emitControlFlowFunction(assembler, ir, index);
+            var registerMap = emitControlFlowFunction(assembler, ir, index,
+                                                     backend.dispatchStrategy);
             registerAllocations[ir.name] = describeRegisterAllocation(
                 ir, registerMap);
             index++;
@@ -226,12 +235,13 @@
         var started = timings ? new Date().getTime() : 0;
         var assembler = new Assembler(backend.captureAssembly);
         var state = {nextLabel: 0, returnLabel: "kernel_return",
-                     registerMap: allocateKernelRegisters(ir)};
+                     registerMap: allocateKernelRegisters(ir),
+                     dispatchStrategy: backend.dispatchStrategy};
         if (timings) timings.analysis = new Date().getTime() - started;
         var emitStarted = timings ? new Date().getTime() : 0;
         assembler.pushEbp();
         assembler.movEbpEsp();
-        if (ir.locals.length) assembler.subEspImmediate(ir.locals.length * 4);
+        reserveKernelLocals(assembler, ir, state);
         saveKernelRegisters(assembler);
         initializeKernelArgumentRegisters(assembler, state.registerMap);
         emitStatements(assembler, ir.body, state);
@@ -1169,6 +1179,36 @@
         }
     }
 
+    function containsOpcodeDispatch(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.op === "opcode_dispatch") return true;
+        var key;
+        for (key in node) {
+            if (Object.prototype.hasOwnProperty.call(node, key) &&
+                containsOpcodeDispatch(node[key])) return true;
+        }
+        return false;
+    }
+
+    function reserveKernelLocals(assembler, ir, state) {
+        var localWords = ir.locals.length;
+        if (state.dispatchStrategy === "indexed" && containsOpcodeDispatch(ir.body)) {
+            state.dispatchBaseLocal = localWords++;
+            state.dispatchBaseLabel = state.returnLabel + "_dispatch_base";
+        }
+        if (localWords) assembler.subEspImmediate(localWords * WORD_BYTES);
+        if (state.dispatchBaseLabel) {
+            /* Discover the relocated address once per invocation, not once
+             * per interpreted opcode. The hidden slot is backend-owned and
+             * cannot collide with the kernel's declared locals. */
+            assembler.callLabel(state.dispatchBaseLabel);
+            assembler.label(state.dispatchBaseLabel);
+            assembler.popInstructionPointerEcx();
+            assembler.movEaxEcx();
+            assembler.movLocalEax(state.dispatchBaseLocal);
+        }
+    }
+
     function emitStatements(assembler, statements, state) {
         var index = 0;
         while (index < statements.length) {
@@ -1177,6 +1217,37 @@
     }
 
     function emitStatement(assembler, node, state) {
+        if (node.op === "store_fields") {
+            emitControlExpression(assembler, node.base, state);
+            assembler.movEdxEax();
+            var fieldIndex = 0;
+            while (fieldIndex < node.values.length) {
+                var fieldValue = node.values[fieldIndex];
+                if (fieldValue.op === "const_i32") {
+                    assembler.movDwordPtrEdxDisplacementImmediate(
+                        node.offsets[fieldIndex], fieldValue.value);
+                } else {
+                    emitControlExpression(assembler, fieldValue, state);
+                    assembler.movDwordPtrEdxDisplacementEax(node.offsets[fieldIndex]);
+                }
+                fieldIndex++;
+            }
+            return;
+        }
+        if (node.op === "copy_words") {
+            emitControlExpression(assembler, node.target, state);
+            assembler.pushEax();
+            emitControlExpression(assembler, node.source, state);
+            assembler.movEdxEax();
+            assembler.popEcx();
+            var wordIndex = 0;
+            while (wordIndex < node.wordCount) {
+                var wordOffset = wordIndex++ * WORD_BYTES;
+                assembler.movEaxDwordPtrEdxDisplacement(wordOffset);
+                assembler.movDwordPtrEcxDisplacementEax(wordOffset);
+            }
+            return;
+        }
         if (node.op === "block") {
             emitStatements(assembler, node.body, state);
             return;
@@ -1304,8 +1375,12 @@
         var defaultLabel = "kernel_dispatch_default_" + dispatchId;
         var endLabel = "kernel_dispatch_end_" + dispatchId;
         emitControlExpression(assembler, node.value, state);
-        emitBalancedDispatch(assembler, node.minimum, node.maximum,
-                             dispatchId, defaultLabel);
+        if (state.dispatchStrategy === "indexed") {
+            emitIndexedDispatch(assembler, node, state, dispatchId, defaultLabel);
+        } else {
+            emitBalancedDispatch(assembler, node.minimum, node.maximum,
+                                 dispatchId, defaultLabel);
+        }
         var opcode = node.minimum;
         while (opcode <= node.maximum) {
             assembler.label(dispatchCaseLabel(dispatchId, opcode));
@@ -1319,12 +1394,33 @@
         assembler.label(endLabel);
     }
 
-    function emitBalancedDispatch(assembler, minimum, maximum, id,
-                                  defaultLabel) {
-        if (minimum > maximum) {
-            assembler.jump(defaultLabel);
-            return;
+    function emitIndexedDispatch(assembler, node, state, dispatchId, defaultLabel) {
+        /* Table words and addressing displacement are label differences.
+         * Moving the complete code image requires no pointer rebasing. ECX is
+         * scratch; EAX holds the selector, then the selected handler address. */
+        var positionLabel = state.dispatchBaseLabel;
+        var tableLabel = "kernel_dispatch_table_" + dispatchId;
+        assembler.compareEaxImmediate(node.minimum);
+        assembler.jumpLess(defaultLabel);
+        assembler.compareEaxImmediate(node.maximum);
+        assembler.jumpGreater(defaultLabel);
+        assembler.subtractEaxImmediate(node.minimum);
+        assembler.movEcxEbpDisplacement(
+            -(state.dispatchBaseLocal + 1) * WORD_BYTES);
+        assembler.movEaxDwordPtrEcxPlusEaxTimes4LabelOffset(tableLabel, positionLabel);
+        assembler.addEaxEcx();
+        assembler.jumpEax();
+        assembler.label(tableLabel);
+        var tableOpcode = node.minimum;
+        while (tableOpcode <= node.maximum) {
+            assembler.labelDifference32(dispatchCaseLabel(dispatchId, tableOpcode),
+                                        positionLabel);
+            tableOpcode++;
         }
+    }
+
+    function emitBalancedDispatch(assembler, minimum, maximum, id, defaultLabel) {
+        if (minimum > maximum) { assembler.jump(defaultLabel); return; }
         if (minimum === maximum) {
             assembler.compareEaxImmediate(minimum);
             assembler.jumpEqual(dispatchCaseLabel(id, minimum));
@@ -1332,8 +1428,7 @@
             return;
         }
         var pivot = (minimum + maximum) >> 1;
-        var leftLabel = "kernel_dispatch_left_" + id + "_" + minimum +
-                        "_" + maximum;
+        var leftLabel = "kernel_dispatch_left_" + id + "_" + minimum + "_" + maximum;
         assembler.compareEaxImmediate(pivot);
         assembler.jumpLess(leftLabel);
         assembler.jumpEqual(dispatchCaseLabel(id, pivot));
@@ -1466,6 +1561,8 @@
         else if (operation === "add_i32") value = (left + right) | 0;
         else if (operation === "sub_i32") value = (left - right) | 0;
         else if (operation === "mul_i32") value = (left * right) | 0;
+        else if (operation === "logical_and_i32") value = left && right;
+        else if (operation === "logical_or_i32") value = left || right;
         else return {op: operation,
             left: {op: "const_i32", value: left, type: "i32"},
             right: {op: "const_i32", value: right, type: "i32"}, type: "i32"};
@@ -1525,6 +1622,16 @@
 
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
+        else if (node.op === "inline_call_i32") {
+            emitStatements(assembler, node.bindings, state);
+            var outerReturn = state.returnLabel;
+            var inlineReturn = "kernel_inline_return_" + state.nextLabel++;
+            state.returnLabel = inlineReturn;
+            emitStatements(assembler, node.body, state);
+            assembler.movEaxImmediate(0);
+            assembler.label(inlineReturn);
+            state.returnLabel = outerReturn;
+        }
         else if (node.op === "call_kernel_i32") {
             var kernelArgumentIndex = node.arguments.length;
             while (kernelArgumentIndex > 0) {

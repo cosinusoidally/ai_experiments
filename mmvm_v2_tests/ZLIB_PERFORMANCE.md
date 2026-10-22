@@ -82,6 +82,26 @@ No source evaluation is skipped or cached.
   Existing tests passed under Node and js_min after this change and single
   stack-adjustment kernel-call cleanup (269 guest assertions, native kernel,
   heap/GC, compiler, CLI, and multiplexing checks).
+- 2026-10-22: comparison-tree dispatch with single-adjustment call cleanup passed
+  full-buffer verification at 64,998 ms (initialization 15,178 ms). No material
+  speedup established.
+- 2026-10-22: per-opcode position-discovery indexed dispatch passed verification
+  at 77,526 ms. Rejected as a default because it regressed performance.
+- 2026-10-22: cached-base indexed dispatch plus block-copy/store lowering passed
+  two byte-verified batches at 82,350 and 81,493 ms. Also rejected as the default.
+  Keep balanced dispatch while measuring the memory improvements independently.
+  Hardware instruction/cycle profiling was unavailable (`perf_event_paranoid=4`);
+  no system security settings were changed.
+- 2026-10-22: default balanced dispatch with block-copy/store lowering passed
+  two batches at 67,563 and 67,856 ms; unchanged baseline repeated at 62,687 ms.
+  This candidate has not demonstrated a performance gain and is not a completed
+  optimization checkpoint. Further compiler work is being measured before
+  accepting this as the normal implementation.
+- 2026-10-22: small-leaf inlining plus proven redundant-int32-coercion removal
+  passed full-buffer verification at 60,857 ms (initialization 13,197 ms).
+  This is modest progress, not the requested 10x. Subsequent inspection found
+  call/accessor classification outside the dispatch specialization region;
+  moving those conditions into the opcode handlers is the next measured step.
 
 ## Architectural performance target
 

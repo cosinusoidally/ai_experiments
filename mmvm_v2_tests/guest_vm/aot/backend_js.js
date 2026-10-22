@@ -74,6 +74,23 @@
     }
 
     function emitStatement(node, parameters, locals) {
+        if (node.op === "store_fields") {
+            var stores = "", fieldIndex = 0;
+            while (fieldIndex < node.values.length) {
+                stores += "memory.writeU32Trusted((" +
+                    emitControlExpression(node.base, parameters, locals) + "+(" +
+                    node.offsets[fieldIndex] + "))," +
+                    emitControlExpression(node.values[fieldIndex], parameters, locals) + ");";
+                fieldIndex++;
+            }
+            return stores;
+        }
+        if (node.op === "copy_words") {
+            return "memory.copyWordsTrusted(" +
+                emitControlExpression(node.target, parameters, locals) + "," +
+                emitControlExpression(node.source, parameters, locals) + "," +
+                node.wordCount + ");";
+        }
         if (node.op === "block") {
             return "{" + emitStatements(node.body, parameters, locals) + "}";
         }
@@ -133,7 +150,7 @@
 
     function emitControlExpression(node, parameters, locals) {
         if (node.op === "local_i32") return "(" + locals[node.index] + "|0)";
-        if (node.op === "call_kernel_i32") {
+        if (node.op === "call_kernel_i32" || node.op === "inline_call_i32") {
             var kernelArguments = [];
             var kernelArgumentIndex = 0;
             while (kernelArgumentIndex < node.arguments.length) {

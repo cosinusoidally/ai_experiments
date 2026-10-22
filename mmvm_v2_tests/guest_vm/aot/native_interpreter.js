@@ -684,12 +684,6 @@
             }
             setEngineCallRejectReason(
                 heapBase, state, CALL_REJECT_NONE);
-            var callOperation = 0;
-            if (opcode === OP_CALL) callOperation = 1;
-            else if (opcode === OP_CONSTRUCT) callOperation = 2;
-            var accessorDefinition = 0;
-            if (opcode === OP_DEFINE_GETTER) accessorDefinition = 1;
-            else if (opcode === OP_DEFINE_SETTER) accessorDefinition = 1;
             if (PROFILE_OPCODES !== 0) {
                 setOpcodeExecutionCount(heapBase, state, opcode,
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
@@ -3261,7 +3255,9 @@
                 registerCells = frame + FRAME_REGISTERS;
                 environment = frameEnvironment(heapBase, frame);
                 pc = frameSavedPC(heapBase, frame);
-            } else if (callOperation > 0) {
+            } else if (opcode === OP_CALL || opcode === OP_CONSTRUCT) {
+                var callOperation = 1;
+                if (opcode === OP_CONSTRUCT) callOperation = 2;
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_NONE);
                 var callTargetIndex = load32(
@@ -4571,7 +4567,7 @@
                             load32(setPropertySource + VALUE_CELL_AUX));
                     pc = pc + FOUR_WORD_INSTRUCTION;
                 }
-            } else if (accessorDefinition === 1) {
+            } else if (opcode === OP_DEFINE_GETTER || opcode === OP_DEFINE_SETTER) {
                 var accessorObjectIndex = load32(
                     heapBase + bytecodeWords +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -17182,7 +17178,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 12,
+                compilerVersion: 18,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     new KernelCompiler().sourceFingerprint(kernelSource) : 0,
@@ -17251,6 +17247,16 @@
         }
         var loweringFinished = constructionStarted ?
             new Date().getTime() : 0;
+        if (runtime.profileOpcodeCounts && this.ir && this.ir.inlining) {
+            var inlineCandidates = this.ir.inlining.eligibleFunctions;
+            var inlineNames = [], inlineIndex = 0;
+            while (inlineIndex < inlineCandidates.length) {
+                var inlineCandidate = inlineCandidates[inlineIndex++];
+                inlineNames.push(inlineCandidate.name + ":" + inlineCandidate.nodes);
+            }
+            reportSnapshot("native kernel leaf inlining: " +
+                this.ir.inlining.callSites + " sites; eligible " + inlineNames.join(" "));
+        }
         /* The MMVM host executes the i386 backend directly.  Building the
          * enormous JavaScript reference function there wastes startup time,
          * and Firefox 1's emitter cannot safely compile the growing function

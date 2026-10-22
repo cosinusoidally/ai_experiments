@@ -41,6 +41,30 @@
             expression.value : expression;
     }
 
+    /* These operators produce an int32 Number regardless of operand types.
+     * Their operand conversions must still execute, but another |0 cannot
+     * change their result or introduce observable conversion side effects. */
+    function producesInt32(expression) {
+        if (!expression || typeof expression !== "object") return false;
+        if (expression.type === "UnaryExpression") return expression.operator === "~";
+        if (expression.type !== "BinaryExpression") return false;
+        var operator = expression.operator;
+        if (operator === "&" || operator === "|" || operator === "^" ||
+            operator === "<<" || operator === ">>") return true;
+        if (operator === ">>>" && isLiteralExpression(expression.right)) {
+            var count = literalExpressionValue(expression.right);
+            return typeof count === "number" && (count & 31) !== 0;
+        }
+        return false;
+    }
+
+    function redundantInt32Coercion(expression) {
+        return expression && expression.type === "BinaryExpression" &&
+            expression.operator === "|" && isLiteralExpression(expression.right) &&
+            literalExpressionValue(expression.right) === 0 &&
+            producesInt32(expression.left);
+    }
+
     Compiler.prototype.allocate = function () {
         var register = this.registerCount;
         this.registerCount++;
@@ -709,6 +733,9 @@
      * produce a value followed by a MOVE. */
     Compiler.prototype.compileExpressionInto = function (expression, target) {
         if (isLiteralExpression(expression)) return false;
+        if (redundantInt32Coercion(expression)) {
+            return this.compileExpressionInto(expression.left, target);
+        }
         if (expression.type === "BinaryExpression" &&
             expression.operator !== "&&" && expression.operator !== "||") {
             var left = this.compileExpression(expression.left, expression.right);
@@ -751,6 +778,9 @@
     Compiler.prototype.compileExpression = function (expression, future) {
         if (isLiteralExpression(expression)) {
             return this.emitConstant(literalExpressionValue(expression));
+        }
+        if (redundantInt32Coercion(expression)) {
+            return this.compileExpression(expression.left, future);
         }
         if (expression.type === "FunctionExpression") {
             var functionRegister = this.allocate();

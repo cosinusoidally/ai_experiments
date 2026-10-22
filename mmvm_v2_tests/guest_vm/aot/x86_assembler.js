@@ -1,6 +1,8 @@
 /* Small i386 macro assembler. Callers use named instructions; raw instruction
  * arrays never appear in kernels or backend code. */
 (function (root) {
+    var MAX_SIGNED_BYTE_IMMEDIATE = 127;
+    var STACK_WORD_BYTES = 4;
     function Assembler(captureMacros) {
         this.bytes = [];
         this.macros = captureMacros === false ? null : [];
@@ -61,6 +63,11 @@
         if (this.macros) this.macros.push("mov_eax_local(" + index + ")");
         this.emitBytes2(0x8b, 0x85); this.word32(displacement);
     };
+    Assembler.prototype.movEcxEbpDisplacement = function (displacement) {
+        if (this.macros) this.macros.push("mov_ecx_ebp(" + displacement + ")");
+        this.emitBytes2(0x8b, 0x8d);
+        this.word32(displacement);
+    };
     Assembler.prototype.movLocalEax = function (index) {
         var displacement = -(index + 1) * 4;
         if (this.macros) this.macros.push("mov_local_eax(" + index + ")");
@@ -74,6 +81,43 @@
     Assembler.prototype.movEaxDwordPtrEax = function () {
         if (this.macros) this.macros.push("mov_eax_dword_ptr_eax()");
         this.emitBytes2(0x8b, 0x00);
+    };
+    Assembler.prototype.movEaxDwordPtrEdxDisplacement = function (offset) {
+        if (this.macros) this.macros.push("mov_eax_ptr_edx(" + offset + ")");
+        if (offset >= 0 && offset <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x8b, 0x42, offset);
+        } else {
+            this.emitBytes2(0x8b, 0x82);
+            this.word32(offset);
+        }
+    };
+    Assembler.prototype.movDwordPtrEdxDisplacementEax = function (offset) {
+        if (this.macros) this.macros.push("mov_ptr_edx_eax(" + offset + ")");
+        if (offset >= 0 && offset <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x89, 0x42, offset);
+        } else {
+            this.emitBytes2(0x89, 0x82);
+            this.word32(offset);
+        }
+    };
+    Assembler.prototype.movDwordPtrEdxDisplacementImmediate = function (offset, value) {
+        if (this.macros) this.macros.push("mov_ptr_edx_i32(" + offset + "," + value + ")");
+        if (offset >= 0 && offset <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0xc7, 0x42, offset);
+        } else {
+            this.emitBytes2(0xc7, 0x82);
+            this.word32(offset);
+        }
+        this.word32(value);
+    };
+    Assembler.prototype.movDwordPtrEcxDisplacementEax = function (offset) {
+        if (this.macros) this.macros.push("mov_ptr_ecx_eax(" + offset + ")");
+        if (offset >= 0 && offset <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x89, 0x41, offset);
+        } else {
+            this.emitBytes2(0x89, 0x81);
+            this.word32(offset);
+        }
     };
     Assembler.prototype.movEaxDwordPtrRegisterPlusEax = function (
             register, displacement) {
@@ -161,6 +205,17 @@
     Assembler.prototype.callEax = function () {
         if (this.macros) this.macros.push("call_eax()");
         this.emitBytes2(0xff, 0xd0);
+    };
+    Assembler.prototype.jumpEax = function () {
+        if (this.macros) this.macros.push("jmp_eax()");
+        this.emitBytes2(0xff, 0xe0);
+    };
+    Assembler.prototype.movEaxDwordPtrEcxPlusEaxTimes4LabelOffset = function (
+            targetLabel, baseLabel) {
+        if (this.macros) this.macros.push(
+            "mov_eax_ptr_ecx_plus_eax_times_4(" + targetLabel + "-" + baseLabel + ")");
+        this.emitBytes3(0x8b, 0x84, 0x81);
+        this.labelDifference32(targetLabel, baseLabel);
     };
 
     Assembler.prototype.callLabel = function (name) {
@@ -287,7 +342,6 @@
         if (this.macros) this.macros.push("add_esp_bytes(" + count + ")");
         /* ADD r/m32, imm8 sign-extends its immediate. Larger argument areas
          * require the imm32 form rather than silently wrapping the adjustment. */
-        var MAX_SIGNED_BYTE_IMMEDIATE = 127;
         if (count <= MAX_SIGNED_BYTE_IMMEDIATE) {
             this.emitBytes3(0x83, 0xc4, count);
         } else {
@@ -297,7 +351,6 @@
     };
     /* Unlike temporary x87 storage, these words were tracked by pushEax. */
     Assembler.prototype.discardStackWords = function (count) {
-        var STACK_WORD_BYTES = 4;
         this.releaseStackBytes(count * STACK_WORD_BYTES);
         this.stackWords -= count;
     };
@@ -525,6 +578,13 @@
                           end: this.bytes.length + 4});
         this.word32(0);
     };
+    /* Position-independent data: unlike relativeFixup, the base need not be
+     * the end of an instruction. Used for indexed dispatch table entries. */
+    Assembler.prototype.labelDifference32 = function (name, baseLabel) {
+        this.fixups.push({name: name, baseLabel: baseLabel,
+                          displacement: this.bytes.length});
+        this.word32(0);
+    };
 
     Assembler.prototype.resolveLabels = function () {
         var index = 0;
@@ -532,7 +592,11 @@
             var fixup = this.fixups[index++];
             var target = this.labels[fixup.name];
             if (target === undefined) throw new Error("undefined x86 label " + fixup.name);
-            var value = (target - fixup.end) >>> 0;
+            var base = fixup.baseLabel === undefined ? fixup.end :
+                this.labels[fixup.baseLabel];
+            if (base === undefined) throw new Error("undefined x86 base label " +
+                                                    fixup.baseLabel);
+            var value = (target - base) >>> 0;
             this.bytes[fixup.displacement] = value & 255;
             this.bytes[fixup.displacement + 1] = (value >>> 8) & 255;
             this.bytes[fixup.displacement + 2] = (value >>> 16) & 255;

@@ -228,9 +228,144 @@
                 aggregateTimings.lower += memberTimings.lower || 0;
             }
         }
-        return {kernelGraph: true, entry: entryName, functions: compiled,
-                signatures: signatures};
+        var graph = {kernelGraph: true, entry: entryName, functions: compiled,
+                     signatures: signatures};
+        inlineLeafCalls(graph);
+        return graph;
     };
+
+    /* Keep the optimization in the shared middle end. The JS backend retains
+     * ordinary calls (its host can inline them); native code uses the equivalent
+     * inline body. Eligibility is deliberately structural, never name-based. */
+    function inlineLeafCalls(graph) {
+        var MAX_INLINE_LEAF_NODES = 96;
+        var candidates = {}, functionIndex = 0;
+        var statistics = {eligibleFunctions: [], callSites: 0};
+        graph.inlining = statistics;
+        function inspect(node, assigned) {
+            if (!node || typeof node !== "object") return 0;
+            if (node.op === "call_kernel_i32" || node.op === "call_native_i32" ||
+                node.op === "call_native_f64") return MAX_INLINE_LEAF_NODES + 1;
+            if (node.op === "set_argument") assigned[node.index] = true;
+            /* Decompilers can add braces around a single statement. Such
+             * scope-free blocks must not change eligibility or snapshots. */
+            var count = node instanceof Array || node.op === "block" ? 0 : 1, key;
+            for (key in node) {
+                if (Object.prototype.hasOwnProperty.call(node, key)) {
+                    count += inspect(node[key], assigned);
+                }
+            }
+            return count;
+        }
+        while (functionIndex < graph.functions.length) {
+            var candidate = graph.functions[functionIndex++];
+            var assigned = [];
+            var nodeCount = inspect(candidate.body, assigned);
+            if (nodeCount <= MAX_INLINE_LEAF_NODES) {
+                candidates["$" + candidate.name] = {fn: candidate, assigned: assigned};
+                statistics.eligibleFunctions.push({name: candidate.name, nodes: nodeCount});
+            }
+        }
+        functionIndex = 0;
+        while (functionIndex < graph.functions.length) {
+            var caller = graph.functions[functionIndex++];
+            var site = 0;
+            var rewrite = function (node) {
+                if (!node || typeof node !== "object") return node;
+                if (node instanceof Array) {
+                    var array = null, arrayIndex = 0;
+                    while (arrayIndex < node.length) {
+                        var element = rewrite(node[arrayIndex]);
+                        if (element !== node[arrayIndex]) {
+                            if (!array) array = node.slice(0);
+                            array[arrayIndex] = element;
+                        }
+                        arrayIndex++;
+                    }
+                    return array || node;
+                }
+                var leaf = node.op === "call_kernel_i32" ?
+                    candidates["$" + node.name] : null;
+                if (leaf) {
+                    var pureArguments = true, argumentIndex = 0;
+                    while (argumentIndex < node.arguments.length) {
+                        if (!simpleStoreOperand(node.arguments[argumentIndex++])) {
+                            pureArguments = false;
+                        }
+                    }
+                    if (pureArguments) {
+                        statistics.callSites++;
+                        var parameterMap = [], localMap = [], bindings = [];
+                        var prefix = "$inline" + site++ + "$";
+                        argumentIndex = 0;
+                        while (argumentIndex < node.arguments.length) {
+                            var argument = node.arguments[argumentIndex];
+                            if (leaf.assigned[argumentIndex]) {
+                                var parameterIndex = caller.locals.length;
+                                caller.locals.push(prefix + "arg" + argumentIndex);
+                                parameterMap[argumentIndex] = {op: "local_i32",
+                                    index: parameterIndex, type: "i32"};
+                                bindings.push({op: "set_local", index: parameterIndex,
+                                    value: argument});
+                            } else parameterMap[argumentIndex] = argument;
+                            argumentIndex++;
+                        }
+                        var localIndex = 0;
+                        while (localIndex < leaf.fn.locals.length) {
+                            localMap[localIndex] = caller.locals.length;
+                            caller.locals.push(prefix + leaf.fn.locals[localIndex++]);
+                        }
+                        return {op: "inline_call_i32", name: node.name,
+                            arguments: node.arguments, type: "i32", bindings: bindings,
+                            body: cloneInlineBody(leaf.fn.body, parameterMap, localMap)};
+                    }
+                }
+                var result = null, key;
+                for (key in node) {
+                    if (Object.prototype.hasOwnProperty.call(node, key)) {
+                        var child = rewrite(node[key]);
+                        if (child !== node[key]) {
+                            if (!result) {
+                                result = {};
+                                var copyKey;
+                                for (copyKey in node) {
+                                    if (Object.prototype.hasOwnProperty.call(node, copyKey)) {
+                                        result[copyKey] = node[copyKey];
+                                    }
+                                }
+                            }
+                            result[key] = child;
+                        }
+                    }
+                }
+                return result || node;
+            };
+            caller.body = rewrite(caller.body);
+        }
+    }
+
+    function cloneInlineBody(node, parameters, locals) {
+        if (!node || typeof node !== "object") return node;
+        if (node instanceof Array) {
+            var array = [], index = 0;
+            while (index < node.length) array.push(cloneInlineBody(node[index++], parameters, locals));
+            return array;
+        }
+        if (node.op === "arg_i32") return parameters[node.index];
+        var result = {}, key;
+        for (key in node) {
+            if (Object.prototype.hasOwnProperty.call(node, key)) {
+                result[key] = cloneInlineBody(node[key], parameters, locals);
+            }
+        }
+        if (node.op === "local_i32" || node.op === "set_local") {
+            result.index = locals[node.index];
+        } else if (node.op === "set_argument") {
+            result.op = "set_local";
+            result.index = parameters[node.index].index;
+        }
+        return result;
+    }
 
     function parseKernelFunctionSource(source, filename) {
         var parsed = new Parser("var __kernel = " + source + ";",
@@ -724,7 +859,7 @@
         symbols.$kernelFunctionName = fn.name || "kernel";
         if (timings) timings.collect = new Date().getTime() - collectStarted;
         var lowerStarted = timings ? new Date().getTime() : 0;
-        var body = lowerStatements(fn.body.body, symbols);
+        var body = combineStoreRuns(lowerStatements(fn.body.body, symbols));
         if (timings) timings.lower = new Date().getTime() - lowerStarted;
         var registerPreferences = resolveRegisterPreferences(
             options.registerPreferences || [], symbols);
@@ -740,6 +875,72 @@
          * Object.prototype member. Direct lookup is both sufficient and
          * available while the guest compiler is running without host calls. */
         return symbols[key];
+    }
+
+    function simpleStoreOperand(node) {
+        return node.op === "const_i32" || node.op === "local_i32" ||
+            node.op === "arg_i32";
+    }
+
+    function storeAddressParts(node) {
+        var offset = 0;
+        while (node.op === "add_i32" && node.right.op === "const_i32") {
+            offset = (offset + node.right.value) | 0;
+            node = node.left;
+        }
+        if (node.op !== "local_i32" && node.op !== "arg_i32") return null;
+        return {base: node, offset: offset};
+    }
+
+    /* A basic-block optimization, independent of value-cell layouts. Adjacent
+     * writes through one unchanged pointer can share its address calculation.
+     * Only literal/local/argument values qualify: no loads, calls, conversions,
+     * or other side effects can be reordered or observe intermediate writes. */
+    function combineStoreRuns(body) {
+        var result = [], index = 0;
+        while (index < body.length) {
+            var statement = body[index];
+            if (statement.op === "block" || statement.op === "while" ||
+                statement.op === "opcode_dispatch") {
+                if (statement.body instanceof Array) {
+                    statement.body = combineStoreRuns(statement.body);
+                } else if (statement.body && statement.body.op === "block") {
+                    statement.body.body = combineStoreRuns(statement.body.body);
+                }
+            } else if (statement.op === "if") {
+                if (statement.consequent) statement.consequent =
+                    combineStoreRuns([statement.consequent])[0];
+                if (statement.alternate) statement.alternate =
+                    combineStoreRuns([statement.alternate])[0];
+            }
+            var first = statement.op === "store_u32" &&
+                simpleStoreOperand(statement.value) ?
+                storeAddressParts(statement.address) : null;
+            if (first) {
+                var offsets = [first.offset], values = [statement.value];
+                var next = index + 1;
+                while (next < body.length) {
+                    var candidate = body[next];
+                    if (candidate.op !== "store_u32" ||
+                        !simpleStoreOperand(candidate.value)) break;
+                    var address = storeAddressParts(candidate.address);
+                    if (!address || address.base.op !== first.base.op ||
+                        address.base.index !== first.base.index) break;
+                    offsets.push(address.offset);
+                    values.push(candidate.value);
+                    next++;
+                }
+                if (values.length > 1) {
+                    result.push({op: "store_fields", base: first.base,
+                        offsets: offsets, values: values});
+                    index = next;
+                    continue;
+                }
+            }
+            result.push(statement);
+            index++;
+        }
+        return result;
     }
 
     function resolveRegisterPreferences(names, symbols) {
@@ -942,7 +1143,7 @@
                 expression.callee.type === "Identifier" &&
                 expression.callee.name === "copyValueCell" &&
                 expression.arguments.length === 2) {
-                return copyValueCellBlock(expression.arguments[0],
+                return lowerValueCellCopy(expression.arguments[0],
                                           expression.arguments[1], symbols);
             }
             if (expression.type === "CallExpression" &&
@@ -1137,20 +1338,23 @@
                 type: "i32"};
     }
 
-    function copyValueCellBlock(target, source, symbols) {
+    function lowerValueCellCopy(target, source, symbols) {
         var fields = ["VALUE_CELL_TAG", "VALUE_CELL_LOW",
                       "VALUE_CELL_HIGH", "VALUE_CELL_AUX"];
-        var body = [];
+        var WORD_BYTES = 4;
         var index = 0;
         while (index < fields.length) {
-            var field = fields[index++];
-            body.push({op: "store_u32",
-                address: valueCellFieldAddress(target, field, symbols),
-                value: {op: "load_u32",
-                    address: valueCellFieldAddress(source, field, symbols),
-                    type: "i32"}});
+            var field = symbolAt(symbols, fields[index]);
+            if (!field || field.kind !== "constant" ||
+                field.value !== index * WORD_BYTES) {
+                throw new SyntaxError("copyValueCell requires contiguous word fields");
+            }
+            index++;
         }
-        return {op: "block", body: body};
+        /* Preserve a block copy in the shared IR. Both pointer expressions
+         * are evaluated once, in argument order, like an ordinary JS call. */
+        return {op: "copy_words", target: lowerKernelExpression(target, symbols),
+            source: lowerKernelExpression(source, symbols), wordCount: fields.length};
     }
 
     function setValueCellBlock(name, argumentsList, symbols) {
