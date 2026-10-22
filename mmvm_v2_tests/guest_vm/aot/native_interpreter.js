@@ -17313,7 +17313,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 22,
+                compilerVersion: 23,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,
@@ -17321,7 +17321,8 @@
             };
         }
         this.snapshotMetadata = snapshotMetadata;
-        var x86Backend = new X86Backend({captureAssembly: false});
+        var x86Backend = new X86Backend({captureAssembly: false,
+                                       dispatchStrategy: "balanced"});
         var loadedSnapshot = false;
         if (runtime.nativeSnapshotRead) {
             this.ir = null;

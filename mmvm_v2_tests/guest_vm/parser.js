@@ -882,6 +882,16 @@
         this.error("expected expression");
     };
 
+    /* Shared AST accessors for consumers of either literal representation. */
+    Parser.isLiteralExpression = function (expression) {
+        return expression === null || typeof expression !== "object" ||
+               expression.type === "Literal";
+    };
+    Parser.literalExpressionValue = function (expression) {
+        return expression !== null && typeof expression === "object" ?
+            expression.value : expression;
+    };
+
     root.GuestVMParser = Parser;
     if (typeof module !== "undefined" && module.exports) module.exports = Parser;
 }(this));

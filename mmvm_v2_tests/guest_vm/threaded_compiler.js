@@ -2,7 +2,13 @@
  * backend for the future kernel compiler; it never evaluates guest source. */
 (function (root) {
     var op = root.GuestVMBytecode;
-    if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
+    var Parser = root.GuestVMParser;
+    if (typeof module !== "undefined" && module.exports) {
+        op = require("./bytecode.js");
+        Parser = require("./parser.js");
+    }
+    var isLiteralExpression = Parser.isLiteralExpression;
+    var literalExpressionValue = Parser.literalExpressionValue;
 
     function ThreadedCompiler(runtime) {
         this.runtime = runtime;
@@ -1235,7 +1241,7 @@
             index = 0;
             while (index < node.declarations.length) {
                 var declaration = node.declarations[index++];
-                if (declaration.initial) {
+                if (declaration.initial !== null) {
                     result.push(this.local(declaration.name) + "=" +
                                 this.expression(declaration.initial) + ";");
                     if (this.fastPlan && this.fastPlan.memberAliases[
@@ -1260,13 +1266,13 @@
                         this.expression(node.test) + ");");
         } else if (node.type === "ForStatement") {
             var initial = "";
-            if (node.initial) {
+            if (node.initial !== null) {
                 if (node.initial.type === "VariableStatement") {
                     var initialParts = [];
                     index = 0;
                     while (index < node.initial.declarations.length) {
                         declaration = node.initial.declarations[index++];
-                        if (declaration.initial) {
+                        if (declaration.initial !== null) {
                             initialParts.push(this.local(declaration.name) + "=" +
                                               this.expression(declaration.initial));
                         }
@@ -1275,8 +1281,8 @@
                 } else initial = this.expression(node.initial);
             }
             result.push("for(" + initial + ";" +
-                        (node.test ? this.expression(node.test) : "") + ";" +
-                        (node.update ? this.expression(node.update) : "") + ")" +
+                        (node.test !== null ? this.expression(node.test) : "") + ";" +
+                        (node.update !== null ? this.expression(node.update) : "") + ")" +
                         this.statement(node.body));
         } else if (node.type === "ForInStatement") {
             var left;
@@ -1290,7 +1296,7 @@
             index = 0;
             while (index < node.cases.length) {
                 var switchCase = node.cases[index++];
-                result.push(switchCase.test ?
+                result.push(switchCase.test !== null ?
                     "case " + this.expression(switchCase.test) + ":" :
                     "default:");
                 var consequentIndex = 0;
@@ -1313,7 +1319,7 @@
             }
         }
         else if (node.type === "ReturnStatement") {
-            result.push("return " + (node.argument ? this.expression(node.argument) :
+            result.push("return " + (node.argument !== null ? this.expression(node.argument) :
                                      "undefined") + ";");
         } else if (node.type === "ThrowStatement") result.push("throw " + this.expression(node.argument) + ";");
         else throw new Error("unsupported structured statement " + node.type);
@@ -1321,7 +1327,7 @@
     };
 
     StructuredEmitter.prototype.expression = function (node) {
-        if (node.type === "Literal") return literal(node.value);
+        if (isLiteralExpression(node)) return literal(literalExpressionValue(node));
         if (node.type === "Identifier") return this.identifier(node.name);
         if (node.type === "ThisExpression") return this.slot(this.program.thisSlot);
         if (node.type === "BinaryExpression") {
@@ -1537,7 +1543,7 @@
             if (node.callee.object.type === "Identifier" &&
                 node.callee.object.name === "NodeLibc" &&
                 !node.callee.computed &&
-                node.callee.property.value === "memmove" &&
+                literalExpressionValue(node.callee.property) === "memmove" &&
                 node.arguments.length === 3) {
                 return "hc.nativeMemmove(" + args + ")";
             }
@@ -1546,10 +1552,10 @@
                  node.callee.object.name === "String" ||
                  node.callee.object.name === "Number") && !node.callee.computed) {
                 return node.callee.object.name + "." +
-                       node.callee.property.value + "(" + args + ")";
+                       literalExpressionValue(node.callee.property) + "(" + args + ")";
             }
             var member = this.reference(node.callee);
-            if (!node.callee.computed && node.callee.property.value === "push" &&
+            if (!node.callee.computed && literalExpressionValue(node.callee.property) === "push" &&
                 node.callee.object.type === "Identifier" && this.fastPlan &&
                 this.fastPlan.kinds["$" + node.callee.object.name] === "array") {
                 var arrayAlias = this.fastPlan.memberAliases[
@@ -1595,7 +1601,7 @@
         if (node.type === "MemberExpression") {
             return {kind: "member", object: this.expression(node.object),
                     key: node.computed ? this.expression(node.property) :
-                                         quote(node.property.value)};
+                                         quote(literalExpressionValue(node.property))};
         }
         throw new Error("invalid structured reference");
     };
@@ -1611,14 +1617,14 @@
             node.object.computed && node.object.object.type === "Identifier" &&
             !node.computed && this.fastPlan.arrayElementKinds[
                 "$" + node.object.object.name] === "properties") {
-            return object + ".properties[" + quote("$" + node.property.value) + "]";
+            return object + ".properties[" + quote("$" + literalExpressionValue(node.property)) + "]";
         }
         if (this.fastPlan && node.object.type === "MemberExpression" &&
             !node.object.computed && node.object.object.type === "Identifier") {
             var nestedKey = "$" + node.object.object.name + ":$" +
-                            node.object.property.value;
+                            literalExpressionValue(node.object.property);
             if (this.fastPlan.nestedArrays[nestedKey]) {
-                if (!node.computed && node.property.value === "length") {
+                if (!node.computed && literalExpressionValue(node.property) === "length") {
                     return object + ".elements.length";
                 }
                 if (node.computed) return object + ".elements[" + key + "]";
@@ -1627,14 +1633,14 @@
         var fastKind = this.fastMemberKind(node);
         var alias = this.fastMemberAlias(node);
         if (fastKind === "array") {
-            if (!node.computed && node.property.value === "length") {
+            if (!node.computed && literalExpressionValue(node.property) === "length") {
                 return (alias || object + ".elements") + ".length";
             }
             if (node.computed) return (alias || object + ".elements") + "[" + key + "]";
         }
         if (fastKind && !node.computed) {
             return (alias || object + ".properties") + "[" +
-                   quote("$" + node.property.value) + "]";
+                   quote("$" + literalExpressionValue(node.property)) + "]";
         }
         var memberNumber = this.memberIndex++;
         if (node.object.type !== "Identifier") {
@@ -1649,15 +1655,15 @@
                                                                 memberNumber) {
         var keyPrefix = "";
         var keySuffix = "";
-        if (node.computed && node.property.type !== "Identifier" &&
-            node.property.type !== "Literal") {
+        if (node.computed && !isLiteralExpression(node.property) &&
+            node.property.type !== "Identifier") {
             var keyTemporary = "k" + memberNumber;
             keyPrefix = "((" + keyTemporary + "=" + key + "),";
             keySuffix = ")";
             key = keyTemporary;
         }
         if (!node.computed) {
-            var propertyName = node.property.value;
+            var propertyName = literalExpressionValue(node.property);
             if (propertyName === "length") {
                 return keyPrefix + "(" + object + "&&" + object + ".guestType==='array'?" +
                        object + ".elements.length:(" + object + "&&" + object +
@@ -1694,10 +1700,10 @@
         }
         if (fastKind && !node.computed) {
             return "(" + (alias || object + ".properties") + "[" +
-                   quote("$" + node.property.value) + "]=" + value + ")";
+                   quote("$" + literalExpressionValue(node.property)) + "]=" + value + ")";
         }
         if (!node.computed) {
-            var propertyName = node.property.value;
+            var propertyName = literalExpressionValue(node.property);
             return "(" + object + "&&" + object + ".properties?" +
                    object + ".properties[" + quote("$" + propertyName) + "]=" +
                    value + ":hc.assignMember(" + object + "," + key + "," +
@@ -1730,7 +1736,7 @@
         }
         if (kind && !node.computed) {
             return (alias || object + ".properties") + "[" +
-                   quote("$" + node.property.value) + "]";
+                   quote("$" + literalExpressionValue(node.property)) + "]";
         }
         return null;
     };
@@ -1822,7 +1828,7 @@
             if (node.type === "CallExpression" &&
                 node.callee && node.callee.type === "MemberExpression") {
                 if (!node.callee.computed &&
-                    node.callee.property.value === "push" &&
+                    literalExpressionValue(node.callee.property) === "push" &&
                     node.callee.object.type === "Identifier") {
                     markMember(node.callee.object.name, "array");
                     if (node.arguments.length === 1 &&
@@ -1846,18 +1852,18 @@
             }
             if (node.type === "MemberExpression" &&
                 node.object && node.object.type === "Identifier") {
-                var needed = node.computed || node.property.value === "length" ?
+                var needed = node.computed || literalExpressionValue(node.property) === "length" ?
                              "array" : "properties";
                 markMember(node.object.name, needed);
             } else if (node.type === "MemberExpression" &&
                        node.object && node.object.type === "MemberExpression" &&
                        !node.object.computed &&
                        node.object.object.type === "Identifier" &&
-                       (node.computed || node.property.value === "length")) {
+                       (node.computed || literalExpressionValue(node.property) === "length")) {
                 var baseName = node.object.object.name;
                 if (elementSources["$" + baseName]) {
                     nestedArrays["$" + baseName + ":$" +
-                                 node.object.property.value] = true;
+                                 literalExpressionValue(node.object.property)] = true;
                     markMember(baseName, "properties");
                 }
             }
@@ -2026,8 +2032,8 @@
     }
 
     function isPure(node) {
-        if (!node) return true;
-        if (node.type === "Literal" || node.type === "Identifier" ||
+        if (isLiteralExpression(node)) return true;
+        if (node.type === "Identifier" ||
             node.type === "ThisExpression") return true;
         if (node.type === "MemberExpression") return isPure(node.object) && isPure(node.property);
         if (node.type === "BinaryExpression") return isPure(node.left) && isPure(node.right);
@@ -2105,7 +2111,7 @@
             if (!value || typeof value !== "object") return;
             if (value.type === "CallExpression" && value.callee &&
                 value.callee.type === "MemberExpression" &&
-                !value.callee.computed && value.callee.property.value === "setPixel" &&
+                !value.callee.computed && literalExpressionValue(value.callee.property) === "setPixel" &&
                 value.arguments.length === 5) count++;
             visitChildren(value, visit, false);
         }

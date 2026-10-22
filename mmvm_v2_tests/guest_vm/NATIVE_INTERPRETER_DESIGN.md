@@ -557,3 +557,38 @@ number-only fast path in threaded JS avoids introducing host helper overhead.
 The operation drops an otherwise unnecessary register operand and second
 conversion from the instruction stream. Profiling identifies it by its shared
 opcode name; heap-layout counter sizing remains automatic.
+
+### Per-handler successor dispatch
+
+The i386 backend accepts `dispatchStrategy: "replicated"` for structured loops
+whose body contains a single direct `opcode_dispatch` operation. It emits each
+handler once, but duplicates the loop continuation at each handler's end. That
+continuation performs the original suffix (instruction/budget accounting), loop
+condition, prefix (including GC safepoints), and an indexed successor jump in
+that order. This provides a separate indirect branch site for each preceding
+opcode. It is ordinary single-threaded execution, not OS threading.
+
+There is one shared read-only handler table. Its entries are label differences
+relative to the function's position-independent code anchor, so neither code
+nor the guest heap acquires a new fixed-address requirement. Selector bounds
+are checked before indexing. Out-of-range selectors execute the original
+dispatch body; loops with unsupported shapes retain structured dispatch.
+Only control-flow layout changes: guest semantics and the JS reference IR are
+unchanged. Ordinary integer while conditions also use direct comparison
+branches rather than materializing and retesting a temporary boolean.
+
+This strategy remains explicit, not the VM default: its first two zlib batches
+were slower than balanced dispatch. The VM retains the comparison tree while
+keeping the general direct-comparison loop lowering.
+
+### Compact literals at compilation entry points
+
+Normal script compilation, eval, and Function-constructor compilation use the
+same compact-literal parser representation as the self-hosted frontend.
+Unescaped number/string/boolean literals need no individual AST wrapper object;
+null retains an explicit node to distinguish it from an absent expression.
+Escaped string nodes preserve directive-prologue flags, including the fact that
+an escaped spelling is not a strict-mode directive. Source locations and raw
+function text remain enabled. The parser's public default AST format is not
+changed; this is an internal compiler allocation policy, not different language
+semantics or a source-specific parse cache.

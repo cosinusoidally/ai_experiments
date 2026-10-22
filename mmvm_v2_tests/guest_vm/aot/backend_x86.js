@@ -15,7 +15,9 @@
         /* Indexed dispatch is an explicit experiment, not the default: the
          * measured comparison tree is faster on the current interpreter. */
         this.dispatchStrategy = options.dispatchStrategy || "balanced";
-        if (this.dispatchStrategy !== "balanced" && this.dispatchStrategy !== "indexed") {
+        if (this.dispatchStrategy !== "balanced" &&
+            this.dispatchStrategy !== "indexed" &&
+            this.dispatchStrategy !== "replicated") {
             throw new Error("unknown x86 dispatch strategy: " + this.dispatchStrategy);
         }
         this.timings = options.timings || null;
@@ -1196,7 +1198,8 @@
 
     function reserveKernelLocals(assembler, ir, state) {
         var localWords = ir.locals.length;
-        if (state.dispatchStrategy === "indexed" && containsOpcodeDispatch(ir.body)) {
+        if ((state.dispatchStrategy === "indexed" ||
+             state.dispatchStrategy === "replicated") && containsOpcodeDispatch(ir.body)) {
             state.dispatchBaseLocal = localWords++;
             state.dispatchBaseLabel = state.returnLabel + "_dispatch_base";
         }
@@ -1341,12 +1344,16 @@
             return;
         }
         if (node.op === "while") {
+            if (state.dispatchStrategy === "replicated" &&
+                emitReplicatedDispatchLoop(assembler, node, state)) return;
             var loopLabel = "kernel_loop_" + state.nextLabel;
             var exitLabel = "kernel_loop_exit_" + state.nextLabel++;
             assembler.label(loopLabel);
-            emitControlExpression(assembler, node.test, state);
-            assembler.testEaxEax();
-            assembler.jumpEqual(exitLabel);
+            if (!emitIntegerComparisonFalseJump(assembler, node.test, exitLabel, state)) {
+                emitControlExpression(assembler, node.test, state);
+                assembler.testEaxEax();
+                assembler.jumpEqual(exitLabel);
+            }
             emitStatement(assembler, node.body, state);
             assembler.jump(loopLabel);
             assembler.label(exitLabel);
@@ -1421,6 +1428,11 @@
     }
 
     function emitIndexedDispatch(assembler, node, state, dispatchId, defaultLabel) {
+        emitIndexedDispatchJump(assembler, node, state, dispatchId, defaultLabel);
+        emitIndexedDispatchTable(assembler, node, state, dispatchId);
+    }
+
+    function emitIndexedDispatchJump(assembler, node, state, dispatchId, defaultLabel) {
         /* Table words and addressing displacement are label differences.
          * Moving the complete code image requires no pointer rebasing. ECX is
          * scratch; EAX holds the selector, then the selected handler address. */
@@ -1436,6 +1448,11 @@
         assembler.movEaxDwordPtrEcxPlusEaxTimes4LabelOffset(tableLabel, positionLabel);
         assembler.addEaxEcx();
         assembler.jumpEax();
+    }
+
+    function emitIndexedDispatchTable(assembler, node, state, dispatchId) {
+        var positionLabel = state.dispatchBaseLabel;
+        var tableLabel = "kernel_dispatch_table_" + dispatchId;
         assembler.label(tableLabel);
         var tableOpcode = node.minimum;
         while (tableOpcode <= node.maximum) {
@@ -1443,6 +1460,55 @@
                                         positionLabel);
             tableOpcode++;
         }
+    }
+
+    /* Tail-duplicate a structured dispatch loop, not the handlers themselves.
+     * Each handler then has its own indirect successor branch, allowing the
+     * processor to learn opcode transitions rather than one mixed target set.
+     * Prefix (safepoints), suffix (accounting), and loop test retain their order.
+     * Ineligible loop shapes keep the ordinary structured implementation. */
+    function emitReplicatedDispatchLoop(assembler, loop, state) {
+        if (!loop.body || loop.body.op !== "block") return false;
+        var body = loop.body.body, dispatchIndex = -1, index;
+        for (index = 0; index < body.length; index++) {
+            if (body[index].op === "opcode_dispatch") {
+                if (dispatchIndex >= 0) return false;
+                dispatchIndex = index;
+            } else if (containsOpcodeDispatch(body[index])) return false;
+        }
+        if (dispatchIndex < 0) return false;
+        var dispatch = body[dispatchIndex];
+        if (dispatch.value.op !== "local_i32") return false;
+        var id = state.nextLabel++;
+        var exitLabel = "kernel_replicated_exit_" + id;
+        var defaultLabel = "kernel_replicated_default_" + id;
+        var prefix = body.slice(0, dispatchIndex);
+        var suffix = body.slice(dispatchIndex + 1);
+        function nextIteration(afterHandler) {
+            if (afterHandler) emitStatements(assembler, suffix, state);
+            if (!emitIntegerComparisonFalseJump(
+                    assembler, loop.test, exitLabel, state)) {
+                emitControlExpression(assembler, loop.test, state);
+                assembler.testEaxEax();
+                assembler.jumpEqual(exitLabel);
+            }
+            emitStatements(assembler, prefix, state);
+            emitControlExpression(assembler, dispatch.value, state);
+            emitIndexedDispatchJump(assembler, dispatch, state, id, defaultLabel);
+        }
+        nextIteration(false);
+        for (index = dispatch.minimum; index <= dispatch.maximum; index++) {
+            assembler.label(dispatchCaseLabel(id, index));
+            emitSpecializedDispatchStatement(assembler, dispatch.body,
+                dispatch.value.index, index, state);
+            nextIteration(true);
+        }
+        assembler.label(defaultLabel);
+        emitStatement(assembler, dispatch.body, state);
+        nextIteration(true);
+        emitIndexedDispatchTable(assembler, dispatch, state, id);
+        assembler.label(exitLabel);
+        return true;
     }
 
     function emitBalancedDispatch(assembler, minimum, maximum, id, defaultLabel) {

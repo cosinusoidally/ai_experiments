@@ -1,10 +1,14 @@
 (function (root) {
     var op = root.GuestVMBytecode;
     var optimizer = root.GuestVMBytecodeOptimizer;
+    var Parser = root.GuestVMParser;
     if (typeof module !== "undefined" && module.exports) {
         op = require("./bytecode.js");
         optimizer = require("./bytecode_optimizer.js");
+        Parser = require("./parser.js");
     }
+    var isLiteralExpression = Parser.isLiteralExpression;
+    var literalExpressionValue = Parser.literalExpressionValue;
 
     function Compiler(scopeBindings, outerScopes, registerBindings) {
         this.code = [];
@@ -31,16 +35,6 @@
         while (outerScopes && scopeIndex < outerScopes.length) {
             this.scopes.push(outerScopes[scopeIndex++]);
         }
-    }
-
-    function isLiteralExpression(expression) {
-        return expression === null || typeof expression !== "object" ||
-               expression.type === "Literal";
-    }
-
-    function literalExpressionValue(expression) {
-        return expression !== null && typeof expression === "object" ?
-            expression.value : expression;
     }
 
     /* These operators produce an int32 Number regardless of operand types.

@@ -646,6 +646,27 @@ performance are separate mandatory regression gates.
   The existing corpus was not modified. Raw output remains an ignored
   artifact in `artifacts/gc-test262-contexts.log`.
 
+### 2026-10-22, approximately 14:40 UTC — compiler/performance differential check
+
+- Focused selection only: `ch09/9.5 ch11/11.6 ch11/11.7`, authored variants,
+  native interpreter under js_min. Executed 165 of 165 files/variants:
+  153 passed, 12 failed, 0 not run, 0 timed out.
+- An isolated checkout of baseline `9ff16dd` ran the identical selection:
+  153 passed, 12 failed, 0 not run/timeouts. The failing test IDs are identical.
+  The working changes use compact literal ASTs at script/eval/Function entry
+  points and retain balanced dispatch. Failures include existing boolean/null
+  arithmetic and boxed-string conversion gaps. This comparison establishes no
+  new failures in this selection, not complete ES5.1 conformance.
+- Full dual-host project regression suite also passed: 12 guest programs,
+  269 guest assertions per host, plus the existing GC, embedding, compiler,
+  networking CLI and context checks. No corpus files were modified.
+- Elapsed time and peak RSS were not captured for this focused check. Raw
+  diagnostics remain ignored artifacts `zlib-compact-test262-details.log` and
+  `zlib-baseline-test262-details.log` under `artifacts/`. The temporary baseline
+  checkout was removed; logs were retained.
+- No whole-suite rerun was performed here. The latest whole-suite totals above
+  remain unchanged; these 165 tests are not substituted for those totals.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

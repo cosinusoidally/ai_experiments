@@ -100,7 +100,8 @@
                                   cacheKey) ?
                     jsRuntime.functionConstructorPrograms[cacheKey] : null;
                 if (!program) {
-                    var parsed = new Parser(source, "<Function>").parseProgram();
+                    var parsed = new Parser(source, "<Function>",
+                        {compactLiterals: true}).parseProgram();
                     if (!parsed.body.length ||
                         parsed.body[0].type !== "FunctionDeclaration") {
                         throw new SyntaxError(
@@ -217,7 +218,8 @@
 
     JSContext.prototype.compile = function (source, filename) {
         if (this.destroyed) throw new Error("context has been destroyed");
-        var ast = new Parser(source, filename).parseProgram();
+        var ast = new Parser(source, filename,
+            {compactLiterals: true}).parseProgram();
         var program = verify(new Compiler().compile(ast));
         this.runtime.registerProgram(program);
         return program;
@@ -227,7 +229,8 @@
                                                 callerProgram,
                                                 callerEnvironment) {
         if (this.destroyed) throw new Error("context has been destroyed");
-        var ast = new Parser(source, filename, {strict: !!strict}).parseProgram();
+        var ast = new Parser(source, filename,
+            {strict: !!strict, compactLiterals: true}).parseProgram();
         /* Comment-only and otherwise empty eval sources are common in lexer
          * conformance workloads. Parsing must still happen for lexical errors,
          * but the resulting no-op program is immutable and independent of the

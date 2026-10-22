@@ -4,6 +4,12 @@ The purpose is to improve the general guest interpreter, not to recognize or
 replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
+Latest measured results (2026-10-22): complete cold snapshot generation
+88.76 seconds versus 117.89 seconds; verified zlib diagnostic batches
+45.29–45.45 seconds versus the initial 63–65 seconds. The requested 10x
+execution speedup is not achieved. Whole-suite Test262 was not rerun; focused
+baseline comparisons and known limitations are recorded below.
+
 ## Repeatable progress and correctness monitoring
 
 From this directory, first generate an independent reference using Node's
@@ -16,7 +22,7 @@ node octane_zlib_monitor.js --record artifacts/zlib-reference
 Then run exactly the same benchmark work in the standalone VM:
 
 ```
-./artifacts/js_runner.exe artifacts/octane-comparison.snap \
+./artifacts/js_runner.exe artifacts/snap \
   octane_zlib_monitor.js --reference artifacts/zlib-reference --iterations 10
 ```
 
@@ -111,11 +117,11 @@ No source evaluation is skipped or cached.
   js_min-hosted native guest execution: 13 passed, 0 failed, 0 not run/timeouts.
   This validates the targeted section, not the entire Test262 suite.
 
-Current architectural investigation: the standalone builder copied parsed numeric
+An earlier architectural investigation found that the standalone builder copied parsed numeric
 constants as DOUBLE cells, unlike the canonicalizing host writer. This can turn
 small literal operands in integer loops into repeated floating-point operations.
-The new constant-installation canonicalizer and integer-only IEEE-754 ToInt32
-kernel are being validated in a fresh standalone image. Preserve -0 and every
+The constant-installation canonicalizer and integer-only IEEE-754 ToInt32
+kernel were validated in the fresh images recorded below. They preserve -0 and every
 non-int32 value exactly; do not infer benchmark-specific integer types.
 
 - 2026-10-22: fresh standalone image with numeric canonicalization, direct
@@ -199,6 +205,43 @@ non-int32 value exactly; do not infer benchmark-specific integer types.
   standalone buffer comparisons at 45,716 and 47,178 ms, startup 16,140 ms.
   Cold build remained 96.50 s (runtime preparation 65,402 ms). Throughput is
   modestly better, still roughly 1.4x baseline rather than the requested 10x.
+- 2026-10-22: per-handler replicated successor dispatch passed the dual-host
+  suite and both complete-buffer checks, but measured 53,321 and 53,197 ms per
+  batch (startup 18,131 ms). Cold build 97.62 s. Native code grew from 389,300
+  to 416,479 bytes. It is retained as an explicit backend strategy, **not** the
+  default. Balanced dispatch is retained; direct comparison branches for while
+  conditions remain a general backend improvement.
+- 2026-10-22: compact literals at normal compilation entry points passed the
+  dual-host suite after updating the structured emitter to share the parser's
+  literal accessors and distinguish absent expressions from false/zero/empty
+  literals. Focused Test262 selection (`ch09/9.5`, `ch11/11.6`, `ch11/11.7`):
+  165 executed, 153 passed, 12 failed, 0 not run/timeouts. An isolated checkout
+  of `9ff16dd` produced the same counts and identical failing IDs. These are
+  existing coercion/conversion gaps, not a fully passing Test262 claim. No
+  external test sources were changed. Logs remain in ignored artifacts.
+- 2026-10-22: compact-literal frontend plus balanced dispatch/direct integer
+  loop comparisons produced a cold image in 88.76 s (88.06 user, 0.50 system),
+  versus 117.89 s at the earlier measured checkpoint: about 25% less elapsed
+  time for the complete build. Runtime construction 25,922 ms; environment
+  installation 1,367 ms; standalone preparation 59,900 ms; serialization
+  710 ms. This is a new uncached compilation, not loading a previous image.
+- 2026-10-22: the compact/balanced image passed both full-buffer zlib batches
+  at 45,453 and 45,288 ms, initialization 16,324 ms. This is about 1.4x the
+  original 63–65 second batch baseline, **not the requested 10x**. These remain
+  diagnostic durations; no new stock Octane score has yet been measured.
+- 2026-10-22: latest image ran demo8 for approximately 4.5 minutes at 320x240,
+  20 FPS requested, through rolling, garage, and free-drive autopilot, then
+  exited normally. Rolling samples approximately 15–20 FPS, garage/free-drive
+  approximately 19 FPS. RSS rose to about 532 MiB. The preceding image also
+  exhibits rising RSS (about 459 MiB after 4.5 minutes before free-drive).
+  Mode timing was not identical, so this is not a precise memory comparison
+  and does not establish bounded long-run memory usage. Keep this issue visible
+  rather than treating an FPS/stability smoke pass as proof of GC health.
+- 2026-10-22: preceding image then completed free-drive autopilot and exited
+  normally after approximately 5.7 minutes; RSS about 503 MiB before exit,
+  free-drive near 19 FPS. Rising RSS is present in that baseline too. These
+  approximate, differently timed mode sequences do not isolate a small memory
+  difference; a matched long-run GC/memory comparison remains outstanding.
 
 The requested target is at least **10 times faster** than the initial standalone
 baseline, not a succession of small percentage improvements. For this diagnostic
