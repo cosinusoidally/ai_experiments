@@ -57,6 +57,36 @@ records eligible helper names/node counts and the number of expanded sites for
 compiler introspection. The structural cutoff is a code-size heuristic, not an
 ECMAScript language restriction.
 
+Tail-position kernel calls are not expanded by the leaf inliner. The native
+backend reuses the caller's cdecl frame when the callee's arguments fit in the
+existing argument area. It evaluates all arguments first, then replaces the
+argument words, restores callee-saved registers and the frame, and jumps to the
+callee. Overlapping/swapped argument references therefore retain their values.
+Calls needing a larger argument area keep the ordinary call/return path.
+This is a kernel optimization, not a change to guest JS recursion semantics.
+
+### Numeric canonicalization and ToInt32
+
+Host-side `ValueCells.writePrimitiveAt` already chooses INT32 for exactly
+representable signed 32-bit integers, except negative zero. The standalone
+program builder must apply the same rule when copying parsed numeric constants.
+Otherwise a literal `1` can force floating-point arithmetic and conversion in
+every iteration of an otherwise integer loop. `canonicalizeNumberCellKernel`
+checks IEEE-754 exponent/fraction words once at constant installation; it does
+not round values or change -0, fractions, out-of-range integers, NaNs or infinities.
+There is no source-pattern recognition or specialization of benchmark data.
+
+`doubleCellToInt32Kernel` implements ES5.1 truncation/modulo from the explicit
+double payload using shared binary64 layout constants and field accessors. Below
+exponent zero the result is zero. At exponents 0..20 the high significand gives
+the integer; at 21..51 both words contribute; at 52..83 only the shifted low word
+can contribute modulo 2^32. From exponent 84 onward all finite representable
+integers are multiples of 2^32, and exceptional exponents also map to zero. Sign
+is applied after extracting the magnitude. This avoids x87 rounding-control
+changes and handles values beyond int64 range correctly. Integer operands of
+typed-array writes use their existing payload directly instead of passing through
+an unnecessary floating-point conversion. Neither path calls a host VM.
+
 The compiled entry's third argument is the guest-heap address of the
 platform-service record, not the global object. It contains process-local libc
 capabilities such as `snprintf` and is referenced from the engine-state record.

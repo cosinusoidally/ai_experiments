@@ -102,6 +102,38 @@ No source evaluation is skipped or cached.
   This is modest progress, not the requested 10x. Subsequent inspection found
   call/accessor classification outside the dispatch specialization region;
   moving those conditions into the opcode handlers is the next measured step.
+- 2026-10-22: direct opcode classification/constant logical folding passed
+  byte verification at 55,427 ms with profiling enabled; initialization 12,978 ms.
+  BIT_OR count fell only from 388,762,825 to 388,234,324, so the narrow redundant
+  coercion rewrite is not a major contributor. The other leading counts stayed
+  unchanged. The structural inliner expanded 374 sites before tail-call lowering.
+- 2026-10-22: the existing Test262 ToInt32 section (`ch09/9.5`) completed under
+  js_min-hosted native guest execution: 13 passed, 0 failed, 0 not run/timeouts.
+  This validates the targeted section, not the entire Test262 suite.
+
+Current architectural investigation: the standalone builder copied parsed numeric
+constants as DOUBLE cells, unlike the canonicalizing host writer. This can turn
+small literal operands in integer loops into repeated floating-point operations.
+The new constant-installation canonicalizer and integer-only IEEE-754 ToInt32
+kernel are being validated in a fresh standalone image. Preserve -0 and every
+non-int32 value exactly; do not infer benchmark-specific integer types.
+
+- 2026-10-22: fresh standalone image with numeric canonicalization, direct
+  double conversion and kernel tail calls passed two fully byte-verified batches
+  at 50,149 and 50,747 ms, initialization 14,102 ms. About 1.25–1.30x versus the
+  baseline measurements, **not 10x**. The complete existing dual-host suite passed.
+- 2026-10-22: standalone demo8 ran at 320x240/20 FPS requested in rolling, garage,
+  and free-drive autopilot modes, then quit normally through its menu. No crash
+  or semantic exit; observed rolling rates roughly 13–20 FPS and garage/autopilot
+  roughly 18–20 FPS. This is a stability smoke run, not a matched demo benchmark.
+- 2026-10-22: compared all 12 existing guest language/buffer scripts directly
+  under old and new standalone images. Both passed the same seven language
+  scripts and failed the same five scripts with identical diagnostic locations:
+  functions_objects, standard_library, closure_fallback, typed_arrays, and
+  buffer_guest. The typed-array failure is missing `Uint8Array.byteLength`;
+  the other four exit at unsupported CALL with detail 20. These pre-existing
+  standalone gaps remain; do not confuse the passing dual-host suite with full
+  standalone feature coverage. No new failures in this comparison.
 
 ## Architectural performance target
 

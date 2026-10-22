@@ -270,7 +270,7 @@
         while (functionIndex < graph.functions.length) {
             var caller = graph.functions[functionIndex++];
             var site = 0;
-            var rewrite = function (node) {
+            var rewrite = function (node, tailPosition) {
                 if (!node || typeof node !== "object") return node;
                 if (node instanceof Array) {
                     var array = null, arrayIndex = 0;
@@ -284,7 +284,10 @@
                     }
                     return array || node;
                 }
-                var leaf = node.op === "call_kernel_i32" ?
+                /* Tail calls can reuse the native frame instead. Expanding
+                 * their bodies bloats error/exit paths without helping their
+                 * callers retain a result for subsequent computation. */
+                var leaf = node.op === "call_kernel_i32" && !tailPosition ?
                     candidates["$" + node.name] : null;
                 if (leaf) {
                     var pureArguments = true, argumentIndex = 0;
@@ -323,7 +326,7 @@
                 var result = null, key;
                 for (key in node) {
                     if (Object.prototype.hasOwnProperty.call(node, key)) {
-                        var child = rewrite(node[key]);
+                        var child = rewrite(node[key], node.op === "return" && key === "value");
                         if (child !== node[key]) {
                             if (!result) {
                                 result = {};
@@ -515,6 +518,7 @@
         valueCellReference: "VALUE_CELL_REFERENCE",
         valueCellInt32: "VALUE_CELL_INT32",
         valueCellDoubleHigh: "VALUE_CELL_HIGH",
+        valueCellDoubleLow: "VALUE_CELL_LOW",
         stringLength: "STRING_LENGTH",
         stringHash: "STRING_HASH",
         stringRopeLeft: "STRING_ROPE_LEFT",
@@ -715,6 +719,7 @@
     };
 
     var FIELD_ADDRESS_ACCESSORS = {
+        valueCellPayloadAddress: "VALUE_CELL_LOW",
         engineScratchLeftAddress: "ENGINE_SCRATCH_LEFT",
         engineScratchRightAddress: "ENGINE_SCRATCH_RIGHT",
         propertyValueCellAddress: "PROPERTY_VALUE"

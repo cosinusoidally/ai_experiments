@@ -50,6 +50,17 @@
     }
 
     var Binary64 = {encode: encode, decode: decode};
+    /* Shared with integer-only numeric kernels. These describe the payload,
+     * not a NaN-boxed value representation. */
+    Binary64.KernelConstants = {
+        IEEE754_EXPONENT_SHIFT: 20,
+        IEEE754_EXPONENT_BIAS: 1023,
+        IEEE754_EXPONENT_VALUE_MASK: 2047,
+        IEEE754_FRACTION_BITS: 52,
+        IEEE754_FRACTION_HIGH_MASK: 1048575,
+        IEEE754_SIGNIFICAND_HIGH_BIT: 1048576,
+        IEEE754_WORD_BITS: 32
+    };
     root.GuestVMBinary64 = Binary64;
     if (typeof module !== "undefined" && module.exports) module.exports = Binary64;
 }(this));

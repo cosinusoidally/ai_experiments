@@ -87,6 +87,8 @@
         var prefix = "kernel_function_" + ir.name;
         var state = {nextLabel: (functionIndex + 1) * 1000000,
                      returnLabel: prefix + "_return",
+                     functionReturnLabel: prefix + "_return",
+                     parameterCount: ir.parameters.length,
                      registerMap: allocateKernelRegisters(ir),
                      dispatchStrategy: dispatchStrategy};
         assembler.label(prefix);
@@ -235,6 +237,8 @@
         var started = timings ? new Date().getTime() : 0;
         var assembler = new Assembler(backend.captureAssembly);
         var state = {nextLabel: 0, returnLabel: "kernel_return",
+                     functionReturnLabel: "kernel_return",
+                     parameterCount: ir.parameters.length,
                      registerMap: allocateKernelRegisters(ir),
                      dispatchStrategy: backend.dispatchStrategy};
         if (timings) timings.analysis = new Date().getTime() - started;
@@ -1289,6 +1293,28 @@
             return;
         }
         if (node.op === "return") {
+            if (node.value.op === "call_kernel_i32" &&
+                state.returnLabel === state.functionReturnLabel &&
+                node.value.arguments.length <= state.parameterCount) {
+                /* Reuse only argument space already owned by this cdecl
+                 * frame. Evaluate everything before overwriting any argument,
+                 * so swaps and repeated argument references remain correct. */
+                var tailArguments = node.value.arguments;
+                var tailIndex = tailArguments.length;
+                while (tailIndex > 0) {
+                    emitControlExpression(assembler, tailArguments[--tailIndex], state);
+                    assembler.pushEax();
+                }
+                tailIndex = 0;
+                while (tailIndex < tailArguments.length) {
+                    assembler.popEax();
+                    assembler.movEbpArgumentEax(tailIndex++);
+                }
+                restoreKernelRegisters(assembler);
+                assembler.leave();
+                assembler.jump("kernel_function_" + node.value.name);
+                return;
+            }
             emitControlExpression(assembler, node.value, state);
             assembler.jump(state.returnLabel);
             return;

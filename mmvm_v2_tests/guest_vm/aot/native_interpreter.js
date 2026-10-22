@@ -7,6 +7,7 @@
     var Bytecode = root.GuestVMBytecode;
     var HeapSweeper = root.GuestVMHeapSweeper;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var Binary64 = root.GuestVMBinary64;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -14,6 +15,7 @@
         Bytecode = require("../bytecode.js");
         HeapSweeper = require("./heap_sweeper.js");
         NativeIntrinsics = require("../native_intrinsics.js");
+        Binary64 = require("../binary64.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -41,6 +43,13 @@
     var INTRINSIC_FIRST_ERROR_CONSTRUCTOR = NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR;
     var INTRINSIC_LAST_ERROR_CONSTRUCTOR = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
     var INTRINSIC_OPCODE_COUNTER_WORD = NativeIntrinsics.OPCODE_COUNTER_WORD;
+    var IEEE754_EXPONENT_SHIFT = Binary64.KernelConstants.IEEE754_EXPONENT_SHIFT;
+    var IEEE754_EXPONENT_BIAS = Binary64.KernelConstants.IEEE754_EXPONENT_BIAS;
+    var IEEE754_EXPONENT_VALUE_MASK = Binary64.KernelConstants.IEEE754_EXPONENT_VALUE_MASK;
+    var IEEE754_FRACTION_BITS = Binary64.KernelConstants.IEEE754_FRACTION_BITS;
+    var IEEE754_FRACTION_HIGH_MASK = Binary64.KernelConstants.IEEE754_FRACTION_HIGH_MASK;
+    var IEEE754_SIGNIFICAND_HIGH_BIT = Binary64.KernelConstants.IEEE754_SIGNIFICAND_HIGH_BIT;
+    var IEEE754_WORD_BITS = Binary64.KernelConstants.IEEE754_WORD_BITS;
     var RuntimeSupportLayout = {
         CHAR_AT_KEY: 0,
         CHAR_AT_FUNCTION: 1,
@@ -124,6 +133,11 @@
         for (name in recordConstants) {
             if (Object.prototype.hasOwnProperty.call(recordConstants, name)) {
                 overrides[name] = recordConstants[name];
+            }
+        }
+        for (name in Binary64.KernelConstants) {
+            if (Object.prototype.hasOwnProperty.call(Binary64.KernelConstants, name)) {
+                overrides[name] = Binary64.KernelConstants[name];
             }
         }
         for (name in RuntimeSupportLayout) {
@@ -1598,9 +1612,10 @@
                     if (indexedSetBufferValid === 1) {
                         var indexedSetViewKind = bufferViewKind(
                             heapBase, arraySetObject);
-                        var indexedSetValue = toInt32F64(loadNumberF64(
-                            arraySetSource + VALUE_CELL_LOW,
-                            indexedSetBufferTag));
+                        var indexedSetValue = 0;
+                        if (indexedSetBufferTag === VALUE_TAG_INT32) {
+                            indexedSetValue = valueCellInt32(0, arraySetSource);
+                        } else indexedSetValue = doubleCellToInt32Kernel(arraySetSource);
                         var indexedSetAddress = indexedSetBufferPointer +
                             bufferViewOffset(heapBase, arraySetObject);
                         var indexedSetByteView = 0;
@@ -3660,16 +3675,14 @@
                     else if (bitLeftTag === VALUE_TAG_INT32) {
                         bitLeftValue = load32(bitLeft + VALUE_CELL_LOW);
                     } else if (bitLeftTag === VALUE_TAG_DOUBLE) {
-                        bitLeftValue = toInt32F64(loadF64(
-                            bitLeft + VALUE_CELL_LOW));
+                        bitLeftValue = doubleCellToInt32Kernel(bitLeft);
                     }
                     var bitRightValue = 0;
                     if (bitRightTag === VALUE_TAG_TRUE) bitRightValue = 1;
                     else if (bitRightTag === VALUE_TAG_INT32) {
                         bitRightValue = load32(bitRight + VALUE_CELL_LOW);
                     } else if (bitRightTag === VALUE_TAG_DOUBLE) {
-                        bitRightValue = toInt32F64(loadF64(
-                            bitRight + VALUE_CELL_LOW));
+                        bitRightValue = doubleCellToInt32Kernel(bitRight);
                     }
                     var bitResult = 0;
                     if (opcode === OP_BIT_AND) {
@@ -3748,8 +3761,7 @@
                     else if (bitNotTag === VALUE_TAG_INT32) {
                         bitNotValue = load32(bitNotSource + VALUE_CELL_LOW);
                     } else if (bitNotTag === VALUE_TAG_DOUBLE) {
-                        bitNotValue = toInt32F64(loadF64(
-                            bitNotSource + VALUE_CELL_LOW));
+                        bitNotValue = doubleCellToInt32Kernel(bitNotSource);
                     }
                     store32(bitNotTarget, VALUE_TAG_INT32);
                     store32(bitNotTarget + VALUE_CELL_LOW, ~bitNotValue);
@@ -7114,8 +7126,7 @@
                 if (ffiValueTag === VALUE_TAG_INT32) {
                     ffiValue = load32(ffiValueCell + VALUE_CELL_LOW);
                 } else if (ffiValueTag === VALUE_TAG_DOUBLE) {
-                    ffiValue = toInt32F64(loadF64(
-                        ffiValueCell + VALUE_CELL_LOW));
+                    ffiValue = doubleCellToInt32Kernel(ffiValueCell);
                 } else if (ffiValueTag === VALUE_TAG_NULL) {
                     ffiValue = 0;
                 } else if (ffiValueTag === VALUE_TAG_UNDEFINED) {
@@ -8822,8 +8833,7 @@
                 return 1;
             }
             if (kind === BUFFER_KIND_FLOAT32) return 0;
-            integerValue = toInt32F64(loadNumberF64(
-                elementCell + VALUE_CELL_LOW, tag));
+            integerValue = valueCellInt32(0, elementCell);
         } else if (tag === VALUE_TAG_DOUBLE) {
             if (kind === BUFFER_KIND_FLOAT64) {
                 storeF64(pointer, loadNumberF64(
@@ -8831,8 +8841,7 @@
                 return 1;
             }
             if (kind === BUFFER_KIND_FLOAT32) return 0;
-            integerValue = toInt32F64(loadNumberF64(
-                elementCell + VALUE_CELL_LOW, tag));
+            integerValue = doubleCellToInt32Kernel(elementCell);
         } else if (tag === VALUE_TAG_TRUE) {
             integerValue = 1;
         } else if (tag !== VALUE_TAG_FALSE) {
@@ -11413,6 +11422,68 @@
         if (slot < 0) return 0;
         if (slot >= environmentCount(heapBase, resolvedEnvironment)) return 0;
         return environmentCellAddress(heapBase, resolvedEnvironment, slot);
+    }
+
+    /* ES5.1 ToInt32 for a DOUBLE cell, directly from its IEEE-754 words.
+     * Truncation/modulo require no x87 rounding-mode changes or int64 store.
+     * Large exponents are significant: FISTP alone gives the wrong low word
+     * for representable values between 2^63 and 2^84. */
+    function doubleCellToInt32Kernel(cell) {
+        var high = valueCellDoubleHigh(0, cell);
+        var exponent = ((high >>> IEEE754_EXPONENT_SHIFT) &
+            IEEE754_EXPONENT_VALUE_MASK) - IEEE754_EXPONENT_BIAS;
+        if (exponent < 0) return 0;
+        if (exponent >= IEEE754_FRACTION_BITS + IEEE754_WORD_BITS) return 0;
+        var magnitude = 0;
+        if (exponent <= IEEE754_EXPONENT_SHIFT) {
+            magnitude = ((high & IEEE754_FRACTION_HIGH_MASK) |
+                IEEE754_SIGNIFICAND_HIGH_BIT) >>> (IEEE754_EXPONENT_SHIFT - exponent);
+        } else if (exponent < IEEE754_FRACTION_BITS) {
+            magnitude = (((high & IEEE754_FRACTION_HIGH_MASK) |
+                IEEE754_SIGNIFICAND_HIGH_BIT) << (exponent - IEEE754_EXPONENT_SHIFT)) |
+                (valueCellDoubleLow(0, cell) >>> (IEEE754_FRACTION_BITS - exponent));
+        } else {
+            magnitude = valueCellDoubleLow(0, cell) << (exponent - IEEE754_FRACTION_BITS);
+        }
+        if (high < 0) return (0 - magnitude) | 0;
+        return magnitude | 0;
+    }
+
+    /* Match ValueCells.writePrimitiveAt at the standalone builder boundary.
+     * Keep -0 and every non-integral/out-of-range/exceptional double intact.
+     * Do this once per constant, not on every execution of its users. */
+    function canonicalizeNumberCellKernel(cell) {
+        if (valueCellTag(0, cell) !== VALUE_TAG_DOUBLE) return 0;
+        var high = valueCellDoubleHigh(0, cell);
+        var low = valueCellDoubleLow(0, cell);
+        var exponent = ((high >>> IEEE754_EXPONENT_SHIFT) &
+            IEEE754_EXPONENT_VALUE_MASK) - IEEE754_EXPONENT_BIAS;
+        if (exponent < 0) {
+            if (high === 0) {
+                if (low === 0) {
+                    setValueCellInt32(cell, 0);
+                    return 1;
+                }
+            }
+            return 0;
+        }
+        if (exponent >= IEEE754_WORD_BITS) return 0;
+        if (exponent === IEEE754_WORD_BITS - 1) {
+            if (high >= 0) return 0;
+            if ((high & IEEE754_FRACTION_HIGH_MASK) !== 0) return 0;
+            if (low !== 0) return 0;
+        } else if (exponent <= IEEE754_EXPONENT_SHIFT) {
+            if (low !== 0) return 0;
+            var fractionalHighMask =
+                (1 << (IEEE754_EXPONENT_SHIFT - exponent)) - 1;
+            if ((high & fractionalHighMask) !== 0) return 0;
+        } else {
+            var fractionalLowMask = -1 >>> (exponent - IEEE754_EXPONENT_SHIFT);
+            if ((low & fractionalLowMask) !== 0) return 0;
+        }
+        var integer = doubleCellToInt32Kernel(cell);
+        setValueCellInt32(cell, integer);
+        return 1;
     }
 
     function argumentsMappedCellKernel(heapBase, array, index) {
@@ -15046,6 +15117,7 @@
         if (index >= vectorLength(heapBase, constants)) return 0;
         var target = vectorCellAddress(heapBase, constants, index);
         copyValueCell(target, source);
+        var canonicalized = canonicalizeNumberCellKernel(target);
         if (valueCellTag(0, target) === VALUE_TAG_REFERENCE) {
             var reference = valueCellReference(0, target);
             if (recordType(heapBase, reference) === HEAP_TYPE_BYTECODE_FUNCTION) {
@@ -17064,6 +17136,8 @@
             instanceofKernel: instanceofKernel,
             argumentsMappedCellKernel: argumentsMappedCellKernel,
             resolveLocalBindingCellKernel: resolveLocalBindingCellKernel,
+            doubleCellToInt32Kernel: doubleCellToInt32Kernel,
+            canonicalizeNumberCellKernel: canonicalizeNumberCellKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
             roundLargeNumberKernel: roundLargeNumberKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
@@ -17178,7 +17252,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 18,
+                compilerVersion: 20,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     new KernelCompiler().sourceFingerprint(kernelSource) : 0,
@@ -17239,6 +17313,14 @@
                 timings: loweringTimings,
                 constantOverrides: kernelConstantOverrides
             };
+            var binaryConstantName;
+            for (binaryConstantName in Binary64.KernelConstants) {
+                if (Object.prototype.hasOwnProperty.call(
+                        Binary64.KernelConstants, binaryConstantName)) {
+                    compilerOptions.constantBindings[binaryConstantName] =
+                        Binary64.KernelConstants[binaryConstantName];
+                }
+            }
             this.ir = new KernelCompiler().compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
             if (runtime.nativeSnapshotWrite) {

@@ -441,8 +441,10 @@
                 }
                 if (graphX86.assembly.indexOf(
                         "call(kernel_function_graphMiddle)") < 0 ||
-                    graphX86.assembly.indexOf(
-                        "call(kernel_function_graphLeaf)") < 0) {
+                    (graphX86.assembly.indexOf(
+                        "call(kernel_function_graphLeaf)") < 0 &&
+                     graphX86.assembly.indexOf(
+                        "jmp(kernel_function_graphLeaf)") < 0)) {
                     throw new Error("kernel graph calls bypassed macro assembly");
                 }
             } finally {

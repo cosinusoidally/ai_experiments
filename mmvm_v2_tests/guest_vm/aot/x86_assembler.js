@@ -227,6 +227,11 @@
     Assembler.prototype.popEcx = function () {
         if (this.macros) this.macros.push("pop_ecx()"); this.emitByte(0x59); this.stackWords--;
     };
+    Assembler.prototype.popEax = function () {
+        if (this.macros) this.macros.push("pop_eax()");
+        this.emitByte(0x58);
+        this.stackWords--;
+    };
 
     /* Used after a position-discovery call.  The return address was pushed by
      * the processor rather than by pushEax(), so it is deliberately absent
