@@ -19,7 +19,8 @@ the standalone guest then runs them in the same order, one at a time.
   This matches the verified self-hosting image. Its fresh build took 111.96 s,
   excluded from benchmark process times.
 - Limit: 900 wall-clock seconds per suite, then TERM with a five-second KILL
-  grace period. Core dumps disabled. No suite is silently skipped.
+  grace period. Core dumps disabled. RegExp was explicitly excluded during
+  the run at the user's request; the other 14 suites remain in scope.
 - Start: 2026-10-22 07:55 UTC. One stock measurement per engine/suite; these
   are single-run baselines, not statistical confidence intervals.
 
@@ -41,16 +42,23 @@ The sweep is in progress. Pending rows are not passes or failures.
 | Crypto | 26,717 | 98.5 | 271.2x |
 | RayTrace | 43,351 | 201 | 215.7x |
 | EarleyBoyer | 40,534 | 91.6 | 442.5x |
-| RegExp | 4,941 | Pending | -- |
-| Splay | 5,288 | Pending | -- |
-| NavierStokes | 31,102 | Pending | -- |
-| PdfJS | 22,631 | Pending | -- |
-| Mandreel | 27,144 | Pending | -- |
-| Gameboy | 35,219 | Pending | -- |
-| CodeLoad | 19,285 | Pending | -- |
-| Box2D | 38,960 | Pending | -- |
+| RegExp | 4,941 | Excluded at user request | -- |
+| Splay | 5,288 | 586 | 9.0x |
+| NavierStokes | 31,102 | 179 | 173.8x |
+| PdfJS | 22,631 | Native semantic exit | -- |
+| Mandreel | 27,144 | Native semantic exit | -- |
+| Gameboy | 35,219 | Native semantic exit | -- |
+| CodeLoad | 19,285 | Native semantic exit | -- |
+| Box2D | 38,960 | Native semantic exit | -- |
 | zlib | 67,054 | Pending | -- |
 | Typescript | 34,111 | Pending | -- |
+
+The Node RegExp measurement had already finished before the exclusion. Its
+guest process was manually terminated after 888.76 seconds. The raw
+supervisor result therefore says `signal` (exit 143); that is the requested
+cancellation, not a native crash, a completed timeout, or a correctness result.
+There is no RegExp paired performance result, and no additional RegExp work
+is included in this comparison.
 
 ## Reproduction and raw measurements
 

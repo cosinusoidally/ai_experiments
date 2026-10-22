@@ -17,12 +17,13 @@
         "EarleyBoyer", "RegExp", "Splay", "NavierStokes", "PdfJS",
         "Mandreel", "Gameboy", "CodeLoad", "Box2D", "zlib", "Typescript"];
     var options = {snapshot: "artifacts/snap", runner: "artifacts/js_runner.exe",
-        output: null, timeout: 900};
+        output: null, timeout: 900, exclude: ""};
     var argumentIndex = 2;
     while (argumentIndex < process.argv.length) {
         var argument = process.argv[argumentIndex++];
         if (argument !== "--snapshot" && argument !== "--runner" &&
-                argument !== "--output" && argument !== "--timeout") {
+                argument !== "--output" && argument !== "--timeout" &&
+                argument !== "--exclude") {
             throw new Error("unknown option: " + argument);
         }
         if (argumentIndex >= process.argv.length) {
@@ -36,6 +37,13 @@
         throw new Error("--timeout must be an integer from 1 to 3600 seconds");
     }
     if (!options.output) throw new Error("--output is required");
+    var excluded = options.exclude ? options.exclude.split(",") : [];
+    var exclusionIndex = 0;
+    while (exclusionIndex < excluded.length) {
+        if (suites.indexOf(excluded[exclusionIndex++]) === -1) {
+            throw new Error("unknown excluded suite: " + options.exclude);
+        }
+    }
     process.chdir(__dirname);
     var outputDirectory = path.resolve(options.output);
     var artifactDirectory = path.resolve("artifacts") + path.sep;
@@ -57,17 +65,21 @@
         nodeVersion: process.version, nodeArchitecture: process.arch,
         platform: os.type() + " " + os.release(), cpu: os.cpus()[0].model,
         timeoutSeconds: options.timeout, mode: "stock", snapshotBytes: snapshotBytes,
-        snapshotSHA256: snapshotHash, results: []};
+        snapshotSHA256: snapshotHash, excludedSuites: excluded, results: []};
     var jobs = [];
     var hostIndex = 0;
     var hosts = ["node", "js_runner"];
     while (hostIndex < hosts.length) {
         var suiteIndex = 0;
         while (suiteIndex < suites.length) {
-            jobs.push({host: hosts[hostIndex], suite: suites[suiteIndex++]});
+            var suite = suites[suiteIndex++];
+            if (excluded.indexOf(suite) === -1) {
+                jobs.push({host: hosts[hostIndex], suite: suite});
+            }
         }
         hostIndex++;
     }
+    var totalJobs = jobs.length;
     function save() {
         fs.writeFileSync(path.join(outputDirectory, "results.json"),
             JSON.stringify(report, null, 2) + "\n");
@@ -76,7 +88,7 @@
         if (!jobs.length) {
             report.finished = new Date().toISOString();
             save();
-            console.log("All 30 stock runs completed; results: " + options.output);
+            console.log("All " + totalJobs + " stock runs completed; results: " + options.output);
             return;
         }
         var job = jobs.shift();

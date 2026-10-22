@@ -74,6 +74,10 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
 node octane_compare.js --snapshot artifacts/octane-comparison.snap \
   --output artifacts/octane-comparison-run --timeout 900
 
+# Deliberately omit a suite on both engines when requested.
+node octane_compare.js --snapshot artifacts/octane-comparison.snap \
+  --output artifacts/octane-comparison-without-regexp --exclude RegExp
+
 # An individual direct reference run uses exactly the same wrapper.
 node octane_node_runner.js zlib
 ```
@@ -92,6 +96,8 @@ for performance: adaptive stock suites can execute different repetition
 counts, so total process wall-time ratios are not normalized throughput ratios.
 Splay's suite score includes its latency component. Single runs are useful
 baselines, not statistically stable cross-machine performance claims.
+Explicit `--exclude` names are retained in the result metadata and are never
+silently counted as passes, failures, or completed benchmark measurements.
 
 Suites are brought up individually in their original order. For each failure:
 
