@@ -26,7 +26,8 @@
         else if (args[i] === "--iterations") { iterations = Number(args[++i]); }
         else { throw new Error("Unknown option: " + args[i]); }
     }
-    if (!directory || !(iterations >= 1) || iterations !== Math.floor(iterations)) {
+    if (!directory || !isFinite(iterations) || !(iterations >= 1) ||
+        iterations !== Math.floor(iterations)) {
         throw new Error("Use --record DIR (Node only) or --reference DIR [--iterations N]");
     }
     if (record && !node) { throw new Error("Reference generation requires Node"); }
@@ -67,6 +68,12 @@
         layout = reference.layout;
         expectedInput = fs.readFileSync(directory + "/input.bin");
         expectedCompressed = fs.readFileSync(directory + "/compressed.bin");
+        if (expectedInput.length !== layout.inputLength ||
+            expectedCompressed.length !== reference.compressedLength ||
+            !(expectedCompressed.length > 0) ||
+            expectedCompressed.length > layout.compressedCapacity) {
+            throw new Error("Incomplete or inconsistent reference buffers");
+        }
     }
     function pointer(slot, length) {
         var address = Module.HEAP32[slot] >>> 0;

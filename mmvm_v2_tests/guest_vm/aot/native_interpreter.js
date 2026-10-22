@@ -3985,11 +3985,13 @@
                     heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
                 var localDestination = frameRegisterCellAddress(
                     heapBase, frame, localTargetIndex);
-                if (localBindingKernel(heapBase, localDestination, 0,
-                    environment, localDepth, localSlot, 0) === 0) {
+                var localBinding = resolveLocalBindingCellKernel(
+                    heapBase, environment, localDepth, localSlot);
+                if (localBinding === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
                 }
+                copyValueCell(localDestination, localBinding);
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_LOCAL) {
                 var setLocalDepth = load32(
@@ -4000,11 +4002,13 @@
                     heapBase + bytecodeWords + (pc + THIRD_OPERAND) * WORD_BYTES);
                 var setLocalSource = frameRegisterCellAddress(
                     heapBase, frame, setLocalSourceIndex);
-                if (localBindingKernel(heapBase, 0, setLocalSource,
-                    environment, setLocalDepth, setLocalSlot, 1) === 0) {
+                var setLocalBinding = resolveLocalBindingCellKernel(
+                    heapBase, environment, setLocalDepth, setLocalSlot);
+                if (setLocalBinding === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
                 }
+                copyValueCell(setLocalBinding, setLocalSource);
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_PROPERTY_CONST) {
                 var propertyTargetIndex = load32(
@@ -11397,8 +11401,11 @@
         return 1;
     }
 
-    function localBindingKernel(heapBase, destinationCell, sourceCell,
-                                environment, depth, slot, write) {
+    /* Resolve only: the opcode owns the copy direction. This keeps the shared
+     * bounds/ancestor checks while avoiding three unused call arguments and a
+     * read/write branch on every local access. Accessors lower inline in both
+     * backends, and the returned cell remains owned by its environment. */
+    function resolveLocalBindingCellKernel(heapBase, environment, depth, slot) {
         var resolvedEnvironment = environment;
         while (depth > 0) {
             if (resolvedEnvironment === 0) return 0;
@@ -11409,11 +11416,7 @@
         if (resolvedEnvironment === 0) return 0;
         if (slot < 0) return 0;
         if (slot >= environmentCount(heapBase, resolvedEnvironment)) return 0;
-        var bindingCell = environmentCellAddress(
-            heapBase, resolvedEnvironment, slot);
-        if (write === 0) copyValueCell(destinationCell, bindingCell);
-        else copyValueCell(bindingCell, sourceCell);
-        return 1;
+        return environmentCellAddress(heapBase, resolvedEnvironment, slot);
     }
 
     function argumentsMappedCellKernel(heapBase, array, index) {
@@ -17064,7 +17067,7 @@
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
             argumentsMappedCellKernel: argumentsMappedCellKernel,
-            localBindingKernel: localBindingKernel,
+            resolveLocalBindingCellKernel: resolveLocalBindingCellKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
             roundLargeNumberKernel: roundLargeNumberKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
@@ -17179,7 +17182,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 11,
+                compilerVersion: 12,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     new KernelCompiler().sourceFingerprint(kernelSource) : 0,

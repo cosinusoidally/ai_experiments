@@ -76,6 +76,41 @@ No source evaluation is skipped or cached.
   SET_PROPERTY 70,573,077. CALL only 551,474. These are frequency counts,
   not a CPU attribution: the next controlled optimization targets the avoidable
   seven-argument helper boundary on local reads, not benchmark function calls.
+- 2026-10-22: lexical lookup/copy separation passed two complete-buffer batches
+  at 63,869 and 63,737 ms; initialization 15,870 ms. The difference from the
+  65,295 ms baseline is small and not a demonstrated architectural speedup.
+  Existing tests passed under Node and js_min after this change and single
+  stack-adjustment kernel-call cleanup (269 guest assertions, native kernel,
+  heap/GC, compiler, CLI, and multiplexing checks).
+
+## Architectural performance target
+
+The requested target is at least **10 times faster** than the initial standalone
+baseline, not a succession of small percentage improvements. For this diagnostic
+that means roughly 6.5 seconds or less per 60-round batch, with the full-buffer
+checks still passing. Report stock Octane separately; do not equate a diagnostic
+batch duration with its normalized score.
+
+The opcode profile is evidence that dispatch and value movement/coercion need
+architectural work. Merely accelerating native CALL cannot address hundreds of
+millions of other instructions. Investigate these general mechanisms:
+
+1. Replace the backend's comparison-tree opcode dispatch with relocatable,
+   indexed dispatch. Keep image relocation and reproducible snapshot constraints.
+2. Add general bytecode dataflow/peephole optimization and carefully selected
+   superinstructions to avoid dispatching intermediate moves and repeated integer
+   coercions. Preserve evaluation order, observable conversions, precise errors,
+   instruction-budget resumability, and GC roots. No source/function recognition.
+3. Improve primitive numeric/register handling and lexical access. Specialize
+   only when compiler proof or runtime guards justify it; retain a fully correct
+   general path for objects, accessors, eval, arguments aliasing, and exceptions.
+4. Improve the kernel compiler's ordinary optimization/inlining rather than
+   manually duplicating helper code or adding non-JavaScript constant semantics.
+
+Measure each stage against unprofiled zlib and other existing workloads. Opcode
+frequency alone is not enough to claim a CPU bottleneck or a 10x improvement.
+The monitoring work establishes a correctness oracle and an initial profile;
+the architectural target has **not yet been reached**.
 
 Optimization procedure: establish the same full-buffer check under standalone,
 profile general interpreter operations, change the dominant implementation costs,

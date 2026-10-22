@@ -1533,8 +1533,9 @@
                 assembler.pushEax();
             }
             assembler.callLabel("kernel_function_" + node.name);
-            kernelArgumentIndex = node.arguments.length;
-            while (kernelArgumentIndex-- > 0) assembler.popEcx();
+            /* cdecl argument values are dead after the call. Discard them
+             * without reloading every word into a scratch register. */
+            assembler.discardStackWords(node.arguments.length);
         }
         else if (node.op === "call_native_i32") {
             /* Keep the target below the cdecl arguments. Every operand can

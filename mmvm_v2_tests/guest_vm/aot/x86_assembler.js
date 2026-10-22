@@ -283,8 +283,23 @@
         this.emitBytes3(0x83, 0xec, count);
     };
     Assembler.prototype.releaseStackBytes = function (count) {
+        if (count === 0) return;
         if (this.macros) this.macros.push("add_esp_bytes(" + count + ")");
-        this.emitBytes3(0x83, 0xc4, count);
+        /* ADD r/m32, imm8 sign-extends its immediate. Larger argument areas
+         * require the imm32 form rather than silently wrapping the adjustment. */
+        var MAX_SIGNED_BYTE_IMMEDIATE = 127;
+        if (count <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x83, 0xc4, count);
+        } else {
+            this.emitBytes2(0x81, 0xc4);
+            this.word32(count);
+        }
+    };
+    /* Unlike temporary x87 storage, these words were tracked by pushEax. */
+    Assembler.prototype.discardStackWords = function (count) {
+        var STACK_WORD_BYTES = 4;
+        this.releaseStackBytes(count * STACK_WORD_BYTES);
+        this.stackWords -= count;
     };
     Assembler.prototype.storeX87ControlWordAtStack = function (offset) {
         if (this.macros) this.macros.push("fnstcw_stack(" + offset + ")");
