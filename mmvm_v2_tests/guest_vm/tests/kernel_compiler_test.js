@@ -394,7 +394,8 @@
                      dispatchX86.assembly.indexOf(
                         "mov_eax_ptr_esi_plus_eax(") < 0 &&
                      dispatchX86.assembly.indexOf(
-                        "mov_eax_ptr_edi_plus_eax(") < 0)) {
+                        "mov_eax_ptr_edi_plus_eax(") < 0 &&
+                     dispatchX86.assembly.indexOf("mov_eax_ptr_scaled(") < 0)) {
                     throw new Error("control-flow backend bypassed macro assembly");
                 }
             } finally {

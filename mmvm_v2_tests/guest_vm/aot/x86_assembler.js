@@ -140,6 +140,26 @@
             this.word32(displacement);
         }
     };
+    Assembler.prototype.movEaxDwordPtrScaledRegisters = function (
+            base, index, scale, displacement) {
+        var registers = {ebx: 3, esi: 6, edi: 7};
+        var scales = {1: 0, 2: 1, 4: 2, 8: 3};
+        if (registers[base] === undefined || registers[index] === undefined ||
+            scales[scale] === undefined) {
+            throw new Error("invalid scaled-register load");
+        }
+        if (this.macros) this.macros.push("mov_eax_ptr_scaled(" + base + ", " +
+            index + ", " + scale + ", " + (displacement | 0) + ")");
+        var sib = (scales[scale] << 6) | (registers[index] << 3) | registers[base];
+        if (displacement === 0) this.emitBytes3(0x8b, 0x04, sib);
+        else if (displacement >= -128 && displacement <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x8b, 0x44, sib);
+            this.emitByte(displacement);
+        } else {
+            this.emitBytes3(0x8b, 0x84, sib);
+            this.word32(displacement);
+        }
+    };
     Assembler.prototype.testEaxEax = function () {
         if (this.macros) this.macros.push("test_eax()");
         this.emitBytes2(0x85, 0xc0);
@@ -337,6 +357,26 @@
     };
     Assembler.prototype.shiftUnsignedRightEaxCl = function () {
         if (this.macros) this.macros.push("shr_eax_cl()"); this.emitBytes2(0xd3, 0xe8);
+    };
+    Assembler.prototype.shiftLeftEaxImmediate = function (count) {
+        if (this.macros) this.macros.push("shl_eax_i8(" + (count & 31) + ")");
+        this.emitBytes3(0xc1, 0xe0, count & 31);
+    };
+    Assembler.prototype.shiftRightEaxImmediate = function (count) {
+        if (this.macros) this.macros.push("sar_eax_i8(" + (count & 31) + ")");
+        this.emitBytes3(0xc1, 0xf8, count & 31);
+    };
+    Assembler.prototype.shiftUnsignedRightEaxImmediate = function (count) {
+        if (this.macros) this.macros.push("shr_eax_i8(" + (count & 31) + ")");
+        this.emitBytes3(0xc1, 0xe8, count & 31);
+    };
+    Assembler.prototype.andEaxImmediate = function (value) {
+        if (this.macros) this.macros.push("and_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x25); this.word32(value);
+    };
+    Assembler.prototype.xorEaxImmediate = function (value) {
+        if (this.macros) this.macros.push("xor_eax_i32(" + (value | 0) + ")");
+        this.emitByte(0x35); this.word32(value);
     };
     Assembler.prototype.reserveStackBytes = function (count) {
         if (this.macros) this.macros.push("sub_esp_bytes(" + count + ")");

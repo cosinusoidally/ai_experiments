@@ -4,12 +4,45 @@ The purpose is to improve the general guest interpreter, not to recognize or
 replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
-Latest measured results (2026-10-22): complete cold snapshot generation
-90.85 seconds (best preceding checkpoint 88.76) versus 117.89 seconds;
-verified zlib diagnostic batches 44.65–45.04 seconds versus the initial
-63–65 seconds. The requested 10x
+Latest measured results (2026-10-22, evening): verified zlib diagnostic
+batches 33.57–33.75 seconds, versus 44.65–45.04 seconds at the start of the
+latest optimization pass and the initial 63–65 seconds. This is about 1.34x
+faster than that latest starting point; the additional 2x target is about
+22.4 seconds per batch and has not yet been reached. Complete cold snapshot
+generation remains about 93 seconds (best preceding checkpoint 88.76),
+versus the original 117.89 seconds. The requested overall 10x
 execution speedup is not achieved. Whole-suite Test262 was not rerun; focused
 baseline comparisons and known limitations are recorded below.
+
+## 2026-10-22 evening optimization measurements
+
+- Typed-view early classification alone: 44.600 and 46.134 seconds. No
+  convincing gain; the duplicate classification path was removed.
+- Early integer ADD/SUBTRACT and bitwise-pair handling: 39.855 seconds.
+- Direct signed integer comparisons as well: 37.780 seconds.
+- Execution-local bytecode address, immediate masks/shifts and short-circuit
+  condition branching: 36.380 seconds.
+- Execution-local register-bank address and scaled register loads: 33.754 and
+  33.570 seconds, initialization 15.166 seconds. Both batches verified every
+  one of the 100,000 decompressed and 25,906 compressed bytes against the Node
+  reference. Image: ignored `artifacts/zlib-register-fixed.snap`; logs use that
+  same prefix. The final power-of-two multiplication lowering was exercised by
+  the normal backend tests but is not included in those two batch measurements.
+- Cold build at this checkpoint: runtime construction 27.493 seconds,
+  environment installation 1.838, standalone preparation 62.474, image writing
+  0.722. This pass improves execution, not yet cold generation time.
+- Both-host regression script passed: 12 guest programs and 269 assertions per
+  host, plus heap, GC, embedding, native/kernel backends, command-line and
+  three-context checks. Full Test262 and a new stock Octane score have not been
+  rerun at this point. The known standalone language limitations documented
+  below are not being claimed fixed by the bootstrap-host suite.
+
+No benchmark source or demo was modified. Hardware performance counters are
+unavailable under the system's current perf permissions; no system permissions
+were changed. An intermediate register-address experiment crashed during
+snapshot preparation because multiline address expressions still added the heap
+base twice. Those expressions were fixed, as was the persistent return-state
+offset conversion, before the successful image and measurements above.
 
 ## Repeatable progress and correctness monitoring
 

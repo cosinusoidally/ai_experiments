@@ -1,5 +1,33 @@
 # Native kernel interpreter design
 
+## Execution-local addresses and integer paths (2026-10-22)
+
+The dispatch engine keeps absolute addresses of its current bytecode payload
+and register bank in execution-local variables. Every frame transition refreshes
+both. Helpers receiving these addresses use the same absolute-address contract;
+heap records still contain relative references. In particular, an engine return
+result converts its register-cell address back to a heap-relative offset before
+storing it in persistent engine state. No new absolute pointer is serialized.
+The native register preferences are register-bank address, PC and bytecode
+address. The JS backend uses the same code with its ordinary memory adapter.
+
+Integer ADD/SUBTRACT attempt their checked word operation before allocating
+temporary state for concatenation or primitive conversion. Overflow does not
+write the destination: aliased operands remain intact for the Number path.
+Integer pairs also bypass general primitive classification for bitwise
+operations and use signed word comparisons rather than x87 comparisons.
+Mixed tags, doubles, strings and objects keep the existing semantic paths.
+
+The x86 backend recognizes pure affine register addressing and emits scaled
+loads through named assembler operations. Constant bit masks/shifts and
+power-of-two word multiplication use immediate instructions. Condition contexts
+branch directly through short-circuit AND/OR/NOT expressions; expression
+contexts still materialize the original values. These optimizations neither
+reorder effectful operands nor change guest bytecode, budgets or GC boundaries.
+
+`guest_vm/tools/inspect_kernel_build.js --inlining` reports the structural
+inlining candidates and expanded call-site count on either bootstrap host.
+
 ## Kernel memory lowering and dispatch experiments (2026-10-22)
 
 The shared typed IR preserves `copyValueCell` as `copy_words`: source and

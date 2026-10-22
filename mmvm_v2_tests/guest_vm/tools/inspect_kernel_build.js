@@ -62,6 +62,16 @@
             return;
         }
         var engine = vm.runtime.nativeInterpreter;
+        if (args[0] === "--inlining") {
+            var inlining = engine.ir.inlining;
+            report("inlined call sites: " + inlining.callSites);
+            var candidateIndex = 0;
+            while (candidateIndex < inlining.eligibleFunctions.length) {
+                var candidate = inlining.eligibleFunctions[candidateIndex++];
+                report(candidate.name + ": " + candidate.nodes + " IR nodes");
+            }
+            return;
+        }
         var functions = engine.ir.functions;
         var labels = engine.nativeResult.symbols;
         var index = 0;

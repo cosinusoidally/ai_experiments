@@ -1367,6 +1367,25 @@
     }
 
     function emitIntegerComparisonFalseJump(assembler, node, label, state) {
+        /* Conditions need control flow, not a materialized boolean. Preserve
+         * JavaScript short-circuit order while branching directly from each
+         * comparison's flags. Expression contexts still produce their value. */
+        if (node.op === "logical_and_i32") {
+            emitConditionJump(assembler, node.left, label, false, state);
+            emitConditionJump(assembler, node.right, label, false, state);
+            return true;
+        }
+        if (node.op === "logical_or_i32") {
+            var success = "kernel_condition_true_" + state.nextLabel++;
+            emitConditionJump(assembler, node.left, success, true, state);
+            emitConditionJump(assembler, node.right, label, false, state);
+            assembler.label(success);
+            return true;
+        }
+        if (node.op === "logical_not_i32") {
+            emitConditionJump(assembler, node.value, label, true, state);
+            return true;
+        }
         if (node.op !== "eq_i32" && node.op !== "ne_i32" &&
             node.op !== "lt_i32" && node.op !== "le_i32" &&
             node.op !== "gt_i32" && node.op !== "ge_i32") return false;
@@ -1390,6 +1409,23 @@
         else if (operation === "gt_i32") assembler.jumpLessOrEqual(label);
         else assembler.jumpLess(label);
         return true;
+    }
+
+    function emitConditionJump(assembler, node, label, whenTrue, state) {
+        if (whenTrue) {
+            var falseLabel = "kernel_condition_false_" + state.nextLabel++;
+            if (emitIntegerComparisonFalseJump(assembler, node, falseLabel, state)) {
+                assembler.jump(label);
+                assembler.label(falseLabel);
+                return;
+            }
+        } else if (emitIntegerComparisonFalseJump(assembler, node, label, state)) {
+            return;
+        }
+        emitControlExpression(assembler, node, state);
+        assembler.testEaxEax();
+        if (whenTrue) assembler.jumpNotZero(label);
+        else assembler.jumpEqual(label);
     }
 
     function reverseIntegerComparison(operation) {
@@ -1712,6 +1748,40 @@
                 displacement: displacement};
     }
 
+    /* Recognize only pure affine register expressions. Distributing a word
+     * multiply over a constant offset preserves the kernel's modulo-2^32
+     * address arithmetic; no load or call is moved across another operand. */
+    function scaledRegisterIndex(node, state) {
+        var scale = 1, displacement = 0;
+        if (node.op === "mul_i32" && node.right.op === "const_i32") {
+            scale = node.right.value;
+            node = node.left;
+        } else if (node.op === "shl_i32" && node.right.op === "const_i32") {
+            scale = 1 << (node.right.value & 31);
+            node = node.left;
+        }
+        if (scale !== 1 && scale !== 2 && scale !== 4 && scale !== 8) return null;
+        if (node.op === "add_i32" && node.right.op === "const_i32") {
+            displacement = (node.right.value * scale) | 0;
+            node = node.left;
+        }
+        if (node.op !== "local_i32" && node.op !== "arg_i32") return null;
+        var register = state.registerMap[
+            (node.op === "local_i32" ? "local:" : "argument:") + node.index];
+        if (!register) return null;
+        return {register: register, scale: scale, displacement: displacement};
+    }
+
+    function multiplyEaxByConstant(assembler, value) {
+        /* Addresses commonly scale an index by a word or value-cell size.
+         * A shift has the same low-word result as IMUL for powers of two. */
+        if (value > 0 && (value & (value - 1)) === 0) {
+            var shift = 0;
+            while (value > 1) { value = value >>> 1; shift++; }
+            if (shift) assembler.shiftLeftEaxImmediate(shift);
+        } else assembler.multiplyEaxImmediate(value);
+    }
+
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
         else if (node.op === "inline_call_i32") {
@@ -1856,9 +1926,16 @@
         else if (node.op === "load_u32") {
             var indexedAddress = indexedLoadAddress(node.address, state);
             if (indexedAddress) {
-                emitControlExpression(assembler, indexedAddress.index, state);
-                assembler.movEaxDwordPtrRegisterPlusEax(
-                    indexedAddress.register, indexedAddress.displacement);
+                var scaledIndex = scaledRegisterIndex(indexedAddress.index, state);
+                if (scaledIndex) {
+                    assembler.movEaxDwordPtrScaledRegisters(indexedAddress.register,
+                        scaledIndex.register, scaledIndex.scale,
+                        (indexedAddress.displacement + scaledIndex.displacement) | 0);
+                } else {
+                    emitControlExpression(assembler, indexedAddress.index, state);
+                    assembler.movEaxDwordPtrRegisterPlusEax(
+                        indexedAddress.register, indexedAddress.displacement);
+                }
             } else {
                 emitControlExpression(assembler, node.address, state);
                 assembler.movEaxDwordPtrEax();
@@ -1886,12 +1963,23 @@
         } else if (node.op === "sub_i32" && node.right.op === "const_i32") {
             emitControlExpression(assembler, node.left, state);
             assembler.subtractEaxImmediate(node.right.value);
+        } else if ((node.op === "shl_i32" || node.op === "shr_i32" ||
+                    node.op === "ushr_i32" || node.op === "and_i32" ||
+                    node.op === "or_i32" || node.op === "xor_i32") &&
+                   node.right.op === "const_i32") {
+            emitControlExpression(assembler, node.left, state);
+            if (node.op === "shl_i32") assembler.shiftLeftEaxImmediate(node.right.value);
+            else if (node.op === "shr_i32") assembler.shiftRightEaxImmediate(node.right.value);
+            else if (node.op === "ushr_i32") assembler.shiftUnsignedRightEaxImmediate(node.right.value);
+            else if (node.op === "and_i32") assembler.andEaxImmediate(node.right.value);
+            else if (node.op === "or_i32") assembler.orEaxImmediate(node.right.value);
+            else assembler.xorEaxImmediate(node.right.value);
         } else if (node.op === "mul_i32" && node.right.op === "const_i32") {
             emitControlExpression(assembler, node.left, state);
-            assembler.multiplyEaxImmediate(node.right.value);
+            multiplyEaxByConstant(assembler, node.right.value);
         } else if (node.op === "mul_i32" && node.left.op === "const_i32") {
             emitControlExpression(assembler, node.right, state);
-            assembler.multiplyEaxImmediate(node.left.value);
+            multiplyEaxByConstant(assembler, node.left.value);
         } else {
             emitControlExpression(assembler, node.left, state);
             assembler.pushEax();
