@@ -48,6 +48,14 @@ standalone image cannot service.
 
 ## Audit baseline: 2026-09-28
 
+For the newer complete requested stock Octane sweep, see
+[the 2026-10-22 Node/standalone comparison](OCTANE_COMPARISON_2026-10-22.md).
+It records eight standalone stock passes, six semantic exits, and the
+user-requested RegExp exclusion. In particular, full stock zlib now passes
+with score 229; RayTrace and EarleyBoyer also pass stock runs, and Box2D exits
+with a defined semantic diagnostic rather than the previously observed crash.
+The dated quick-audit results below remain historical observations.
+
 Baseline revision before the audit changes: `2e52849`.  The audit used a fresh
 generic standalone image generated from the working tree and a 32-bit
 `js_runner.exe`.  No program source or environment was embedded in the image.

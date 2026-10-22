@@ -2,6 +2,13 @@
 
 ## Objective
 
+Latest stock comparison: [2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
+The standalone guest passes eight of the 14 requested suites, including full
+stock zlib (229), RayTrace (201), and EarleyBoyer (91.6). Six suites return
+native semantic exits. RegExp was excluded explicitly by the user. Node
+24.14.1 passes all 14. These results supersede the older stock sweep below;
+there is still no complete guest Octane score.
+
 The external Octane 2.0 checkout is a demanding integration workload for the
 ES5.1 guest VM. The immediate goal is to execute every suite correctly. Once
 that is true, its stock score will help guide improvements to general-purpose
