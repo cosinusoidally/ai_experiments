@@ -57,6 +57,7 @@
                 requireRegister(program, code[pc + 2], pc);
                 if (opcode === op.MAKE_FUNCTION) verify(program.constants[code[pc + 2]]);
             } else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
+                       opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
                        (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                        (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
                        opcode === op.DELETE_PROPERTY || opcode === op.IN ||

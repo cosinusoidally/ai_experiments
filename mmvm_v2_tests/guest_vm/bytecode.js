@@ -59,7 +59,9 @@
         SET_NAME: 57,
         TYPEOF_NAME: 58,
         DELETE_NAME: 59,
-        INVALID_ASSIGNMENT: 60
+        INVALID_ASSIGNMENT: 60,
+        ADD_INT32: 61,
+        SUBTRACT_INT32: 62
     };
 
     op.NAMES = [];
@@ -95,7 +97,8 @@
         op.MULTIPLY, op.DIVIDE, op.REMAINDER, op.STRICT_EQUAL, op.EQUAL,
         op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL, op.BIT_AND,
         op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
-        op.SHIFT_UNSIGNED_RIGHT, op.MAKE_REGEXP, op.DELETE_PROPERTY, op.CONSTRUCT]);
+        op.SHIFT_UNSIGNED_RIGHT, op.MAKE_REGEXP, op.DELETE_PROPERTY, op.CONSTRUCT,
+        op.ADD_INT32, op.SUBTRACT_INT32]);
     layout(5, 1, [op.CALL]);
 
     root.GuestVMBytecode = op;

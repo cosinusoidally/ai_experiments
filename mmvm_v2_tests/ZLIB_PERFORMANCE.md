@@ -151,6 +151,41 @@ non-int32 value exactly; do not infer benchmark-specific integer types.
   throughput change and adds frontend work. A cheap candidate scan now avoids
   CFG construction when there are no literal-zero OR conversions; its startup
   impact is being checked separately. No 10x claim is justified.
+- 2026-10-22: general single-use integer arithmetic fusion found 531 sites in
+  the unchanged decoded source. Both host suites passed. A fresh standalone
+  image passed full-buffer verification at 47,733 and 47,646 ms per batch,
+  initialization 16,733 ms. The preceding filtered-analysis image measured
+  49,500 ms / 16,627 ms initialization: the early candidate filter did not
+  recover the initialization cost on this program. Fusion is a measurable but
+  modest throughput improvement; total gain remains roughly 1.3–1.4x, not 10x.
+- 2026-10-22: the fused standalone image ran demo8 at 320x240 with a 20 FPS
+  requested limit through rolling, garage, and free-drive autopilot, then
+  closed normally via its menu. Observed frame rates remained in the prior
+  broad ranges (roughly 15–20 rolling, 18–20 garage/autopilot). This checks
+  stability and catches gross slowdowns; it is not a matched timing study.
+- 2026-10-22: named bytecode payload accessors passed the dual-host suite and
+  standalone full-buffer verification (48,246 ms batch, 17,055 ms startup).
+  An intermediate accessor experiment retained a second bytecode pointer that
+  was not refreshed on frame transitions; the standalone check caught it before
+  commit. The fixed accessor reads through the interpreter's existing payload
+  pointer, avoiding duplicated frame-dependent state.
+- 2026-10-22: cold snapshot generation with this checkpoint took 117.89 seconds
+  elapsed (117.08 user, 0.62 system), including compilation and runtime setup.
+  A transaction-owned parsed-source preparation API now allows fingerprinting
+  and lowering to share syntax trees, while still validating every build.
+  Phase timings and actual reused/reparsed function counts are reported by
+  snapshot generation. Cold-build improvement is being measured, not assumed.
+- 2026-10-22: parsed-source reuse saved a modest amount: cold build 114.73 s
+  versus 117.89 s, with 126 function trees reused and none reparsed. Its native
+  machine-code segment and semantic fingerprint are byte-identical to the
+  preceding image (387,385 code bytes; semantic fingerprint 2004592276).
+  The zlib diagnostic passed at 52,452 ms; a following old-image repeat passed
+  at 49,534 ms, so this does not establish a throughput improvement.
+- 2026-10-22: expanded cold-build timing measured 115.45 s total: runtime
+  construction 27,984 ms, environment installation 1,939 ms, standalone runtime
+  preparation 83,882 ms, and serialization 795 ms. Kernel work is inside runtime
+  construction. The final image is byte-identical with/without the additional
+  runner progress timing. Runtime preparation, not writing the file, dominates.
 
 The requested target is at least **10 times faster** than the initial standalone
 baseline, not a succession of small percentage improvements. For this diagnostic

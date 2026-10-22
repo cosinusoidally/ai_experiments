@@ -13,10 +13,18 @@
      * This is equally usable by the bootstrap shell and a standalone guest;
      * it does not require compiling machine code merely to validate an image. */
     KernelCompiler.prototype.sourceFingerprint = function (source) {
+        return this.prepareSource(source).fingerprint;
+    };
+
+    /* A compilation transaction owns this result. Reuse its syntax for
+     * lowering, not across builds: validation still parses all source. */
+    KernelCompiler.prototype.prepareSource = function (source) {
+        var parseStarted = new Date().getTime();
         var tree = new Parser(source, "<kernel-fingerprint>", {
             captureRaw: false, captureLocations: false,
-            captureFunctionSource: false, compactLiterals: true
+            captureFunctionSource: true, compactLiterals: true
         }).parseProgram();
+        var parsedAt = new Date().getTime();
         var FNV1A_OFFSET_BASIS = -2128831035;
         var FNV1A_PRIME = 16777619;
         var hash = FNV1A_OFFSET_BASIS;
@@ -70,8 +78,37 @@
             append("}");
         }
         visit(tree);
-        return hash >>> 0;
+        var fingerprintedAt = new Date().getTime();
+        var functions = {}, entry = null, statementIndex = 0;
+        while (statementIndex < tree.body.length) {
+            var statement = tree.body[statementIndex++];
+            if (statement.type === "FunctionDeclaration") {
+                /* A declaration and its function expression share these
+                 * semantic fields. Do not mutate the fingerprinted tree. */
+                var expression = {type: "FunctionExpression",
+                    name: statement.name, parameters: statement.parameters,
+                    body: statement.body, strict: statement.strict,
+                    source: statement.source};
+                functions["$" + statement.name] = expression;
+                if (!entry) entry = expression;
+            }
+        }
+        return {fingerprint: hash >>> 0, functions: functions, entry: entry,
+                timings: {parse: parsedAt - parseStarted,
+                          fingerprint: fingerprintedAt - parsedAt}};
     };
+
+    function sameFunctionSource(left, right) {
+        /* Decompilers may surround a function with ASCII whitespace. Anything
+         * else must match exactly; a mismatch takes the normal parser path. */
+        function trim(source) {
+            var start = 0, end = source.length;
+            while (start < end && source.charCodeAt(start) <= 32) start++;
+            while (end > start && source.charCodeAt(end - 1) <= 32) end--;
+            return source.substring(start, end);
+        }
+        return typeof right === "string" && trim(left) === trim(right);
+    }
 
     KernelCompiler.prototype.compileGraph = function (entry, dependencies,
                                                        options) {
@@ -80,6 +117,7 @@
         validateConstantOptions(options);
         var functions = [];
         var signatures = {};
+        var preparation = {reusedFunctions: 0, parsedFunctions: 0};
         var aggregateTimings = options.timings || null;
         if (aggregateTimings) {
             aggregateTimings.source = 0;
@@ -99,8 +137,14 @@
                     new Date().getTime() - sourceStarted;
             }
             var parseStarted = aggregateTimings ? new Date().getTime() : 0;
-            var expression = parseKernelFunctionSource(
-                source, "<kernel-graph>");
+            var prepared = options.preparedSource;
+            var expectedName = fn.name || name;
+            var expression = prepared ? (expectedName ?
+                prepared.functions["$" + expectedName] : prepared.entry) : null;
+            if (!expression || !sameFunctionSource(source, expression.source)) {
+                expression = parseKernelFunctionSource(source, "<kernel-graph>");
+                preparation.parsedFunctions++;
+            } else preparation.reusedFunctions++;
             if (aggregateTimings) {
                 aggregateTimings.parse +=
                     new Date().getTime() - parseStarted;
@@ -195,6 +239,7 @@
             var optionName;
             for (optionName in options) {
                 if (optionName !== "source" && optionName !== "timings" &&
+                    optionName !== "preparedSource" &&
                     optionName !== "registerPreferencesByFunction" &&
                     Object.prototype.hasOwnProperty.call(options, optionName)) {
                     memberOptions[optionName] = options[optionName];
@@ -229,7 +274,7 @@
             }
         }
         var graph = {kernelGraph: true, entry: entryName, functions: compiled,
-                     signatures: signatures};
+                     signatures: signatures, preparation: preparation};
         inlineLeafCalls(graph);
         return graph;
     };
@@ -693,6 +738,8 @@
     };
 
     var READ_INDEXED_FIELD_ACCESSORS = {
+        /* The interpreter caches the payload offset, not its record header. */
+        bytecodePayloadWord: {fieldValue: 0, strideValue: 4},
         propertyCacheObject: {field: "ENGINE_PROPERTY_CACHE_OBJECT",
                               stride: "PROPERTY_CACHE_ENTRY_BYTES"},
         propertyCacheKey: {field: "ENGINE_PROPERTY_CACHE_KEY",

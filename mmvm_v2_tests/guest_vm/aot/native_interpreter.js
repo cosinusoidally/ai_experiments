@@ -20,6 +20,8 @@
 
     var heapMarkKernel = HeapSweeper.markKernel;
     var heapSweepKernel = HeapSweeper.sweepKernel;
+    var OP_ADD_INT32 = Bytecode.ADD_INT32;
+    var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
@@ -127,7 +129,9 @@
     function runtimeSupportConstantOverrides(profileOpcodes,
                                              recordConstants) {
         var overrides = {
-            PROFILE_OPCODES: profileOpcodes ? 1 : 0
+            PROFILE_OPCODES: profileOpcodes ? 1 : 0,
+            OP_ADD_INT32: OP_ADD_INT32,
+            OP_SUBTRACT_INT32: OP_SUBTRACT_INT32
         };
         var name;
         for (name in recordConstants) {
@@ -668,8 +672,7 @@
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
-        var bytecodeWords = load32(
-            heapBase + currentProgram + PROGRAM_BYTECODE) + BYTECODE_WORDS;
+        var bytecodeWords = programBytecode(heapBase, currentProgram) + BYTECODE_WORDS;
         var constantCells = load32(
             heapBase + currentProgram + PROGRAM_CONSTANTS) + VECTOR_CELLS;
         var globalObject = contextGlobal(heapBase, currentContext);
@@ -703,13 +706,36 @@
                     opcodeExecutionCount(heapBase, state, opcode) + 1);
             }
             if (opcode >= OP_ENTER_WITH) {
-                if (opcode !== OP_DELETE_NAME) {
+                if (opcode !== OP_DELETE_NAME && opcode !== OP_ADD_INT32 &&
+                    opcode !== OP_SUBTRACT_INT32) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
                 }
             }
-            beginOpcodeDispatch(opcode, OP_CONST, OP_DELETE_NAME);
-            if (opcode === OP_CONST) {
+            beginOpcodeDispatch(opcode, OP_CONST, OP_SUBTRACT_INT32);
+            if (opcode === OP_ADD_INT32 || opcode === OP_SUBTRACT_INT32) {
+                var integerTarget = frameRegisterCellAddress(heapBase, frame,
+                    bytecodePayloadWord(heapBase, bytecodeWords, pc + FIRST_OPERAND));
+                var integerLeft = frameRegisterCellAddress(heapBase, frame,
+                    bytecodePayloadWord(heapBase, bytecodeWords, pc + SECOND_OPERAND));
+                var integerRight = frameRegisterCellAddress(heapBase, frame,
+                    bytecodePayloadWord(heapBase, bytecodeWords, pc + THIRD_OPERAND));
+                if (valueCellTag(0, integerLeft) !== VALUE_TAG_INT32 ||
+                    valueCellTag(0, integerRight) !== VALUE_TAG_INT32) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                var integerResult = 0;
+                if (opcode === OP_ADD_INT32) {
+                    integerResult = (valueCellInt32(0, integerLeft) +
+                        valueCellInt32(0, integerRight)) | 0;
+                } else {
+                    integerResult = (valueCellInt32(0, integerLeft) -
+                        valueCellInt32(0, integerRight)) | 0;
+                }
+                setValueCellInt32(integerTarget, integerResult);
+                pc = pc + FOUR_WORD_INSTRUCTION;
+            } else if (opcode === OP_CONST) {
                 var constantTarget = load32(heapBase + bytecodeWords +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);
                 var constantIndex = load32(heapBase + bytecodeWords +
@@ -17248,14 +17274,26 @@
             }
         }
         var snapshotMetadata = null;
+        var kernelCompiler = new KernelCompiler();
+        var preparedKernelSource = null;
         if (snapshotRequested) {
+            if (snapshotNeedsSource) {
+                var preparationStarted = new Date().getTime();
+                preparedKernelSource = kernelCompiler.prepareSource(kernelSource);
+                if (runtime.nativeSnapshotWrite) {
+                    reportSnapshot("parsed and fingerprinted native kernel in " +
+                        (new Date().getTime() - preparationStarted) + " ms" +
+                        " (parse " + preparedKernelSource.timings.parse +
+                        ", fingerprint " + preparedKernelSource.timings.fingerprint + ")");
+                }
+            }
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 20,
+                compilerVersion: 21,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
-                    new KernelCompiler().sourceFingerprint(kernelSource) : 0,
+                    preparedKernelSource.fingerprint : 0,
                 skipSourceHash: !snapshotNeedsSource
             };
         }
@@ -17283,7 +17321,10 @@
                 reportSnapshot("lowering native interpreter kernel");
             }
             var compilerOptions = {
+                preparedSource: preparedKernelSource,
                 constantBindings: {
+                    OP_ADD_INT32: OP_ADD_INT32,
+                    OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0,
                     ENGINE_OPCODE_COUNT: kernelConstantOverrides.ENGINE_OPCODE_COUNT,
                     INTRINSIC_OPCODE_COUNTER_WORD: INTRINSIC_OPCODE_COUNTER_WORD,
@@ -17321,10 +17362,15 @@
                         Binary64.KernelConstants[binaryConstantName];
                 }
             }
-            this.ir = new KernelCompiler().compileGraph(
+            var graphLoweringStarted = runtime.nativeSnapshotWrite ?
+                new Date().getTime() : 0;
+            this.ir = kernelCompiler.compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
             if (runtime.nativeSnapshotWrite) {
-                reportSnapshot("lowered native interpreter kernel");
+                reportSnapshot("lowered native interpreter kernel in " +
+                    (new Date().getTime() - graphLoweringStarted) + " ms" +
+                    " (reused " + this.ir.preparation.reusedFunctions +
+                    ", reparsed " + this.ir.preparation.parsedFunctions + " functions)");
             }
         }
         var loweringFinished = constructionStarted ?
@@ -17355,9 +17401,12 @@
                 reportSnapshot("assembling native interpreter kernel");
             }
             x86Backend.timings = backendTimings;
+            var assemblyStarted = runtime.nativeSnapshotWrite ?
+                new Date().getTime() : 0;
             this.nativeResult = x86Backend.compile(this.ir);
             if (runtime.nativeSnapshotWrite) {
-                reportSnapshot("assembled native interpreter kernel");
+                reportSnapshot("assembled native interpreter kernel in " +
+                    (new Date().getTime() - assemblyStarted) + " ms");
             }
             if (runtime.nativeSnapshotWrite &&
                 !runtime.deferNativeSnapshotWrite) {

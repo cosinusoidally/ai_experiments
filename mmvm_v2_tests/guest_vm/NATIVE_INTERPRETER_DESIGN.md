@@ -484,3 +484,45 @@ analysis-state limit bounds compiler memory; exceeding it leaves the function
 unoptimized, never rejects an otherwise valid program. Neither limitation
 changes guest semantics. This pass is shared by both host execution paths and
 the standalone frontend; it contains no benchmark-specific recognition.
+
+### Fused wrapping arithmetic
+
+`ADD_INT32` and `SUBTRACT_INT32` represent addition/subtraction followed by
+ToInt32. The optimizer emits them only when both inputs are proven signed
+int32 values, the immediately following instruction is a positive-zero OR,
+the intermediate register has exactly one use, and the pair is inside one
+basic block. Int32 sums and differences are exactly representable as binary64,
+so wrapping word arithmetic gives the same observable result, including
+overflow. Multiplication is deliberately not included: an int32 product can
+exceed binary64's exact-integer range.
+
+Use counting conservatively includes every numeric bytecode operand and the
+register vectors referenced by CALL/CONSTRUCT. Non-register operands can only
+cause false uses (missed optimizations), never hide a use. Rewrites preserve
+the final destination and relocate branches as for coercion elimination.
+
+The native interpreter checks the input tags before using word arithmetic;
+unexpected types yield to the ordinary semantic path rather than being
+misinterpreted. The reference interpreter and threaded JS backend implement
+addition/subtraction followed by ToInt32 through their normal runtime numeric
+semantics. These instructions are general VM operations, not recognizers for
+particular programs. Profiling-vector capacity follows the authoritative
+opcode-name vector, so adding an instruction cannot overlap allocator fields.
+
+### Cold snapshot compilation
+
+`KernelCompiler.prepareSource(source)` performs the semantic fingerprint's full
+parse and tree traversal and returns the fingerprint together with function
+syntax trees and phase timings. `compileGraph` accepts this transaction-owned
+result as `preparedSource`. It reuses a function tree only when the captured
+function text matches the function being compiled (apart from surrounding ASCII
+whitespace). A mismatch uses the normal parser. Declarations are adapted to
+expression descriptors without modifying the fingerprinted tree.
+
+This removes duplicate parsing within one cold build; it is not a disk cache,
+does not reuse machine code, and does not omit fingerprint validation. The
+fingerprint still ignores source formatting metadata and includes all semantic
+fields. Prepared trees are not retained in the resulting IR or snapshot.
+Diagnostics report parse/fingerprint, graph lowering, and assembly durations;
+total process elapsed time also includes runtime preparation and serialization.
+Timing values are diagnostic only and are not part of the fingerprint.

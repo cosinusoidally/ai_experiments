@@ -4,9 +4,11 @@
 (function (root) {
     var Heap = root.GuestVMHeap;
     var ValueCells = root.GuestVMValueCells;
+    var Bytecode = root.GuestVMBytecode;
     if (typeof module !== "undefined" && module.exports) {
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
+        Bytecode = require("./bytecode.js");
     }
 
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
@@ -112,10 +114,8 @@
     var ENGINE_SCRATCH_RIGHT = 40;
     var ENGINE_PLATFORM_SERVICES = 44;
     var ENGINE_OPCODE_COUNTS = 48;
-    /* bytecode.js currently defines opcodes 1..60. Keep slot zero as well so
-     * profile counters cannot overlap allocator state when newer ES5 opcodes
-     * execute. */
-    var ENGINE_OPCODE_COUNT = 61;
+    /* Include reserved slot zero; allocator fields follow this vector. */
+    var ENGINE_OPCODE_COUNT = Bytecode.NAMES.length;
     var ENGINE_NATIVE_REGION_END =
         ENGINE_OPCODE_COUNTS + ENGINE_OPCODE_COUNT * 4;
     var ENGINE_NATIVE_FREE_REGION = ENGINE_NATIVE_REGION_END + 4;

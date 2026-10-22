@@ -158,6 +158,8 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
 
 var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource;
+var guestRuntimeConstructionStarted = guestRunnerSnapshot ?
+    new Date().getTime() : 0;
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
@@ -178,10 +180,20 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         threadedCompile: !guestRunnerNative &&
                                             (!guestRunnerIsNode ||
                                              guestRunnerThreaded)});
+if (guestRunnerSnapshot) {
+    print("constructed guest runtime in " +
+        (new Date().getTime() - guestRuntimeConstructionStarted) + " ms");
+}
+var guestEnvironmentConstructionStarted = guestRunnerSnapshot ?
+    new Date().getTime() : 0;
 var guestNodeEnvironment = new GuestRunnerNodeEnvironment(
     guestProgramVM, guestRunnerSnapshot ? ["guest_runner.js"] :
                                           guestRunnerArguments,
     !!guestRunnerSnapshot);
+if (guestRunnerSnapshot) {
+    print("installed guest environment in " +
+        (new Date().getTime() - guestEnvironmentConstructionStarted) + " ms");
+}
 var guestRunnerDeferredCleanup = false;
 var guestRunnerCleaned = false;
 var guestRunnerFailure = null;
@@ -229,8 +241,11 @@ try {
          * temporary environment deliberately has fixed arguments, so the
          * emitted bytes cannot depend on the program run after this point. */
         print("preparing standalone runtime");
+        var guestStandalonePreparationStarted = new Date().getTime();
         guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
-        print("prepared standalone runtime");
+        print("prepared standalone runtime in " +
+            (new Date().getTime() - guestStandalonePreparationStarted) + " ms");
+        var guestSnapshotSerializationStarted = new Date().getTime();
         var guestSnapshotExecution = guestProgramVM.start(
             read("guest_vm/standalone_source_runner.js"),
             "guest_vm/standalone_source_runner.js");
@@ -241,7 +256,9 @@ try {
         }
         guestSnapshotExecution.abort();
         if (typeof print === "function") {
-            print("wrote standalone snapshot: " + guestRunnerSnapshot);
+            print("wrote standalone snapshot: " + guestRunnerSnapshot +
+                " in " + (new Date().getTime() -
+                    guestSnapshotSerializationStarted) + " ms");
         } else if (typeof console !== "undefined" && console.log) {
             console.log("wrote standalone snapshot: " + guestRunnerSnapshot);
         }

@@ -417,10 +417,13 @@
                 store32(vectorCellAddress(base, address, 1), result);
                 return result;
             }
+            var preparedGraphSource = compiler.prepareSource(
+                graphEntry.toString() + "\n" + graphMiddle.toString() + "\n" +
+                graphLeaf.toString());
             var graphIR = compiler.compileGraph(graphEntry, {
                 graphMiddle: graphMiddle,
                 graphLeaf: graphLeaf
-            }, {constantBindings: {
+            }, {preparedSource: preparedGraphSource, constantBindings: {
                 VECTOR_CELLS: VECTOR_CELLS,
                 VALUE_CELL_BYTES: VALUE_CELL_BYTES
             }});

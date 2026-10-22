@@ -162,6 +162,7 @@
             this.reloadNativeOperand(frame, code[pc + 2]);
             this.reloadNativeOperand(frame, code[pc + 3]);
         } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
+                   opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
                    (opcode >= op.BIT_AND &&
                     opcode <= op.SHIFT_UNSIGNED_RIGHT) || opcode === op.IN ||
                    opcode === op.INSTANCEOF) {
@@ -726,11 +727,20 @@
                         registers[code[pc + 2]], registers[code[pc + 3]]);
                     frame.pc = pc + 4;
                 } else if ((opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
+                       opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
                        (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT)) {
                     target = code[pc + 1];
                     left = registers[code[pc + 2]];
                     right = registers[code[pc + 3]];
-                    if (opcode === op.ADD) registers[target] = this.runtime.add(left, right);
+                    if (opcode === op.ADD_INT32) registers[target] =
+                        (typeof left === "number" && typeof right === "number" ?
+                            left + right : this.runtime.toNumber(
+                                this.runtime.add(left, right))) | 0;
+                    else if (opcode === op.SUBTRACT_INT32) registers[target] =
+                        (typeof left === "number" && typeof right === "number" ?
+                            left - right : this.runtime.toNumber(left) -
+                            this.runtime.toNumber(right)) | 0;
+                    else if (opcode === op.ADD) registers[target] = this.runtime.add(left, right);
                     else if (opcode === op.SUBTRACT) registers[target] =
                         this.runtime.toNumber(left) - this.runtime.toNumber(right);
                     else if (opcode === op.MULTIPLY) registers[target] =

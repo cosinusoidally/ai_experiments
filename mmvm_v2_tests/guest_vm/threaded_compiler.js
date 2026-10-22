@@ -769,6 +769,15 @@
         } else if (opcode === op.SET_PROPERTY_CONST) {
             lines.push("runtime.setProperty(" + rr(1) + "," + constant(2) +
                        "," + rr(3) + ");");
+        } else if (opcode === op.ADD_INT32) {
+            lines.push(rr(1) + "=((typeof " + rr(2) + "==='number'&&typeof " +
+                rr(3) + "==='number')?" + rr(2) + "+" + rr(3) +
+                ":runtime.toNumber(runtime.add(" + rr(2) + "," + rr(3) + ")))|0;");
+        } else if (opcode === op.SUBTRACT_INT32) {
+            lines.push(rr(1) + "=((typeof " + rr(2) + "==='number'&&typeof " +
+                rr(3) + "==='number')?" + rr(2) + "-" + rr(3) +
+                ":runtime.toNumber(" + rr(2) + ")-runtime.toNumber(" +
+                rr(3) + "))|0;");
         } else if (opcode === op.ADD) {
             lines.push(rr(1) + "=(typeof " + rr(2) + "==='number'&&typeof " + rr(3) +
                        "==='number')?" + rr(2) + "+" + rr(3) + ":runtime.add(" +
@@ -2169,29 +2178,7 @@
     }
 
     function width(opcode) {
-        if (opcode === op.CONST || opcode === op.GET_GLOBAL ||
-            opcode === op.SET_GLOBAL || opcode === op.MOVE || opcode === op.NOT ||
-            opcode === op.NEGATE || opcode === op.POSITIVE ||
-            opcode === op.MAKE_FUNCTION || opcode === op.MAKE_ARRAY ||
-            opcode === op.BIT_NOT ||
-            opcode === op.TYPEOF || opcode === op.TYPEOF_GLOBAL ||
-            opcode === op.GET_KEYS ||
-            opcode === op.PUSH_CATCH || opcode === op.DELETE_NAME) return 3;
-        if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
-            opcode === op.GET_LOCAL || opcode === op.SET_LOCAL ||
-            opcode === op.GET_PROPERTY_CONST || opcode === op.SET_PROPERTY_CONST ||
-            opcode === op.DELETE_PROPERTY_CONST || opcode === op.DELETE_PROPERTY ||
-            opcode === op.IN || opcode === op.INSTANCEOF ||
-            opcode === op.DEFINE_GETTER || opcode === op.DEFINE_SETTER ||
-            (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
-            (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
-            opcode === op.MAKE_REGEXP || opcode === op.CONSTRUCT) return 4;
-        if (opcode === op.JUMP || opcode === op.RETURN ||
-            opcode === op.MAKE_OBJECT ||
-            opcode === op.THROW || opcode === op.GET_THIS) return 2;
-        if (opcode === op.POP_CATCH || opcode === op.INVALID_ASSIGNMENT) return 1;
-        if (opcode === op.JUMP_IF_FALSE) return 3;
-        if (opcode === op.CALL) return 5;
+        if (op.WIDTHS[opcode]) return op.WIDTHS[opcode];
         throw new Error("invalid threaded opcode " + opcode);
     }
 
