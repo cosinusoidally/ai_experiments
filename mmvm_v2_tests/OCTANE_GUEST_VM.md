@@ -50,6 +50,49 @@ all of its own validation checks enabled.
 
 ## Correctness sequence
 
+### Reproducible standalone / Node comparison
+
+`octane_node_runner.js` supplies only the shell-style `load`, `print`, and
+argument globals needed to run the existing wrapper directly on Node. It
+uses builtin `fs`/`vm` APIs, no npm packages and no guest interpreter.
+
+`octane_compare.js` supervises separate processes sequentially: first all 15
+Node reference suites, then all 15 standalone guest suites. Node is needed
+for this comparison harness, not as an implementation dependency of the
+standalone guest. Both engines execute the same external sources via the
+same stock wrapper. The guest command is simply
+`js_runner.exe snapshot octane_runner.js SUITE`.
+
+```sh
+# Build the small existing launcher and a generic image from current sources.
+gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native \
+  --snapshot artifacts/octane-comparison.snap
+
+# Select the Node binary to compare by using it to start the supervisor.
+node octane_compare.js --snapshot artifacts/octane-comparison.snap \
+  --output artifacts/octane-comparison-run --timeout 900
+
+# An individual direct reference run uses exactly the same wrapper.
+node octane_node_runner.js zlib
+```
+
+The output directory must be new and below ignored `artifacts/`. Incremental
+`results.json` and per-process logs retain status, score, exit code, wall and
+CPU times, peak RSS, timestamps, platform, and the snapshot hash. GNU `time`
+and `timeout` are required. Core dumps are disabled for benchmark children.
+One child benchmark runs at a time; a failed suite does not stop later suites.
+An i386 execution/sandbox failure stops the sweep instead of invoking an
+emulation workaround.
+
+Only exit-zero runs that emit a stock score count as passes. Timeouts and
+semantic exits do not receive scores. Compare Node/guest stock score ratios
+for performance: adaptive stock suites can execute different repetition
+counts, so total process wall-time ratios are not normalized throughput ratios.
+Splay's suite score includes its latency component. Single runs are useful
+baselines, not statistically stable cross-machine performance claims.
+
 Suites are brought up individually in their original order. For each failure:
 
 1. Reproduce the smallest relevant language-level behaviour without modifying
