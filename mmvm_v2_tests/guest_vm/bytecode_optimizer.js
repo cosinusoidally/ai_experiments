@@ -20,7 +20,8 @@
         if (opcode === op.CONST) kind = numberKind(program.constants[code[pc + 2]]);
         else if (opcode === op.MOVE || opcode === op.POSITIVE) {
             kind = state[code[pc + 2]];
-        } else if (opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
+        } else if (opcode === op.TO_INT32 ||
+                   opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
                    opcode === op.BIT_NOT || opcode === op.BIT_AND ||
                    opcode === op.BIT_OR || opcode === op.BIT_XOR ||
                    opcode === op.SHIFT_LEFT || opcode === op.SHIFT_RIGHT) {
@@ -148,7 +149,8 @@
                 }
             }
         }
-        var replacements = {}, removed = 0, fused = 0, next, temporary;
+        var replacements = {}, removed = 0, fused = 0, conversions = 0;
+        var next, temporary;
         for (index = 0; index < blocks.length; index++) {
             block = blocks[index];
             if (!block.input) continue;
@@ -170,16 +172,21 @@
                     replacements[next] = [];
                     fused++;
                 } else if (replacements[pc] === undefined &&
-                    code[pc] === op.BIT_OR && state[code[pc + 2]] &&
-                    state[code[pc + 3]] === ZERO) {
-                    replacements[pc] = code[pc + 1] === code[pc + 2] ? [] :
-                        [op.MOVE, code[pc + 1], code[pc + 2]];
-                    removed++;
+                    code[pc] === op.BIT_OR && state[code[pc + 3]] === ZERO) {
+                    if (state[code[pc + 2]]) {
+                        replacements[pc] = code[pc + 1] === code[pc + 2] ? [] :
+                            [op.MOVE, code[pc + 1], code[pc + 2]];
+                        removed++;
+                    } else {
+                        replacements[pc] = [op.TO_INT32,
+                            code[pc + 1], code[pc + 2]];
+                        conversions++;
+                    }
                 }
                 transfer(program, pc, state);
             }
         }
-        if (!removed && !fused) return program;
+        if (!removed && !fused && !conversions) return program;
         var output = [], locations = [], relocated = {}, replacement;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
             relocated[pc] = output.length;
@@ -205,7 +212,8 @@
         program.code = output;
         program.sourceLocations = locations;
         program.optimizationStats = {redundantInt32Conversions: removed,
-                                    fusedInt32Arithmetic: fused};
+                                    fusedInt32Arithmetic: fused,
+                                    unaryInt32Conversions: conversions};
         return program;
     }
     root.GuestVMBytecodeOptimizer = {optimize: optimize};

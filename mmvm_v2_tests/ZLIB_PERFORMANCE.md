@@ -194,6 +194,11 @@ non-int32 value exactly; do not infer benchmark-specific integer types.
   record test. The first standalone batch passed full-buffer verification in
   49,498 ms (startup 18,115 ms); the second batch is still running. This does not
   show a zlib startup/throughput gain: the demonstrated benefit is cold build.
+- 2026-10-22: bulk-string image's second batch also passed, 49,178 ms.
+- 2026-10-22: explicit ToInt32 lowering passed both host suites and two complete
+  standalone buffer comparisons at 45,716 and 47,178 ms, startup 16,140 ms.
+  Cold build remained 96.50 s (runtime preparation 65,402 ms). Throughput is
+  modestly better, still roughly 1.4x baseline rather than the requested 10x.
 
 The requested target is at least **10 times faster** than the initial standalone
 baseline, not a succession of small percentage improvements. For this diagnostic

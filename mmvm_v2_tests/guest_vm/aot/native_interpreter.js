@@ -22,6 +22,7 @@
     var heapSweepKernel = HeapSweeper.sweepKernel;
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
+    var OP_TO_INT32 = Bytecode.TO_INT32;
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
@@ -131,7 +132,8 @@
         var overrides = {
             PROFILE_OPCODES: profileOpcodes ? 1 : 0,
             OP_ADD_INT32: OP_ADD_INT32,
-            OP_SUBTRACT_INT32: OP_SUBTRACT_INT32
+            OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
+            OP_TO_INT32: OP_TO_INT32
         };
         var name;
         for (name in recordConstants) {
@@ -707,13 +709,34 @@
             }
             if (opcode >= OP_ENTER_WITH) {
                 if (opcode !== OP_DELETE_NAME && opcode !== OP_ADD_INT32 &&
-                    opcode !== OP_SUBTRACT_INT32) {
+                    opcode !== OP_SUBTRACT_INT32 && opcode !== OP_TO_INT32) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
                 }
             }
-            beginOpcodeDispatch(opcode, OP_CONST, OP_SUBTRACT_INT32);
-            if (opcode === OP_ADD_INT32 || opcode === OP_SUBTRACT_INT32) {
+            beginOpcodeDispatch(opcode, OP_CONST, OP_TO_INT32);
+            if (opcode === OP_TO_INT32) {
+                var conversionTarget = frameRegisterCellAddress(heapBase, frame,
+                    bytecodePayloadWord(heapBase, bytecodeWords, pc + FIRST_OPERAND));
+                var conversionSource = frameRegisterCellAddress(heapBase, frame,
+                    bytecodePayloadWord(heapBase, bytecodeWords, pc + SECOND_OPERAND));
+                var conversionTag = valueCellTag(0, conversionSource);
+                var conversionResult = 0;
+                if (conversionTag === VALUE_TAG_INT32) {
+                    conversionResult = valueCellInt32(0, conversionSource);
+                } else if (conversionTag === VALUE_TAG_DOUBLE) {
+                    conversionResult = doubleCellToInt32Kernel(conversionSource);
+                } else if (conversionTag === VALUE_TAG_TRUE) {
+                    conversionResult = 1;
+                } else if (conversionTag !== VALUE_TAG_FALSE &&
+                           conversionTag !== VALUE_TAG_NULL &&
+                           conversionTag !== VALUE_TAG_UNDEFINED) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                setValueCellInt32(conversionTarget, conversionResult);
+                pc = pc + THREE_WORD_INSTRUCTION;
+            } else if (opcode === OP_ADD_INT32 || opcode === OP_SUBTRACT_INT32) {
                 var integerTarget = frameRegisterCellAddress(heapBase, frame,
                     bytecodePayloadWord(heapBase, bytecodeWords, pc + FIRST_OPERAND));
                 var integerLeft = frameRegisterCellAddress(heapBase, frame,
@@ -17290,7 +17313,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 21,
+                compilerVersion: 22,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,
@@ -17325,6 +17348,7 @@
                 constantBindings: {
                     OP_ADD_INT32: OP_ADD_INT32,
                     OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
+                    OP_TO_INT32: OP_TO_INT32,
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0,
                     ENGINE_OPCODE_COUNT: kernelConstantOverrides.ENGINE_OPCODE_COUNT,
                     INTRINSIC_OPCODE_COUNTER_WORD: INTRINSIC_OPCODE_COUNTER_WORD,

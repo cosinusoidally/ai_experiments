@@ -536,3 +536,24 @@ Empty strings, embedded NULs, and lone surrogates retain their code units.
 String hashing still follows the existing per-code-unit algorithm unchanged.
 This is an ingestion operation, not an alternative host-backed guest string
 representation: the resulting strings remain owned by the independent heap.
+
+### Explicit ToInt32 bytecode
+
+`TO_INT32 destination, source` implements ES5.1 numeric conversion followed by
+signed 32-bit truncation/modulo. The optimizer emits it for binary OR only when
+the right input is proven positive zero and the left input is not already
+proven int32. It keeps the two-instruction arithmetic fusion and redundant
+conversion elimination ahead of this rewrite. No result is inferred from an
+unproven source type.
+
+The native interpreter handles int32, binary64, booleans, null and undefined
+directly. Binary64 conversion uses the shared IEEE-754 word algorithm, including
+NaN, infinities, large exponents and negative zero. Other source types take the
+ordinary semantic fallback, just as the original binary bitwise instruction
+did. Both reference execution paths perform runtime ToNumber before truncation,
+preserving object conversion side effects and ES5 string-number rules. A
+number-only fast path in threaded JS avoids introducing host helper overhead.
+
+The operation drops an otherwise unnecessary register operand and second
+conversion from the instruction stream. Profiling identifies it by its shared
+opcode name; heap-layout counter sizing remains automatic.

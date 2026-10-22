@@ -805,6 +805,10 @@
         else if (opcode === op.NEGATE) lines.push(rr(1) + "=-runtime.toNumber(" + rr(2) + ");");
         else if (opcode === op.POSITIVE) lines.push(rr(1) + "=runtime.toNumber(" + rr(2) + ");");
         else if (opcode === op.BIT_NOT) lines.push(rr(1) + "=~runtime.toNumber(" + rr(2) + ");");
+        else if (opcode === op.TO_INT32) {
+            lines.push(rr(1) + "=(typeof " + rr(2) + "==='number'?" + rr(2) +
+                ":runtime.toNumber(" + rr(2) + "))|0;");
+        }
         else if (opcode === op.TYPEOF) lines.push(rr(1) + "=runtime.typeOf(" + rr(2) + ");");
         else if (opcode === op.TYPEOF_GLOBAL) {
             lines.push(rr(1) + "=runtime.typeOfGlobal(context," +

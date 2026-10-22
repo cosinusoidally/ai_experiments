@@ -50,6 +50,7 @@
             } else if (opcode === op.ENTER_WITH) {
                 requireRegister(program, code[pc + 1], pc);
             } else if (opcode === op.MOVE || opcode === op.NOT ||
+                       opcode === op.TO_INT32 ||
                        opcode === op.NEGATE || opcode === op.POSITIVE ||
                        opcode === op.BIT_NOT || opcode === op.TYPEOF ||
                        opcode === op.GET_KEYS) {

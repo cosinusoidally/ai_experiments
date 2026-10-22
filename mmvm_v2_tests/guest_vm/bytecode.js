@@ -61,7 +61,8 @@
         DELETE_NAME: 59,
         INVALID_ASSIGNMENT: 60,
         ADD_INT32: 61,
-        SUBTRACT_INT32: 62
+        SUBTRACT_INT32: 62,
+        TO_INT32: 63
     };
 
     op.NAMES = [];
@@ -89,7 +90,8 @@
     layout(3, 0, [op.SET_GLOBAL, op.SET_NAME, op.JUMP_IF_FALSE, op.PUSH_CATCH]);
     layout(3, 1, [op.CONST, op.GET_GLOBAL, op.MOVE, op.NOT, op.NEGATE,
         op.POSITIVE, op.MAKE_FUNCTION, op.MAKE_ARRAY, op.BIT_NOT, op.TYPEOF,
-        op.TYPEOF_GLOBAL, op.GET_KEYS, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME]);
+        op.TYPEOF_GLOBAL, op.GET_KEYS, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME,
+        op.TO_INT32]);
     layout(4, 0, [op.SET_PROPERTY, op.SET_LOCAL, op.SET_PROPERTY_CONST,
         op.DEFINE_GETTER, op.DEFINE_SETTER]);
     layout(4, 1, [op.GET_PROPERTY, op.GET_LOCAL, op.GET_PROPERTY_CONST,

@@ -169,6 +169,7 @@
             this.reloadNativeOperand(frame, code[pc + 2]);
             this.reloadNativeOperand(frame, code[pc + 3]);
         } else if (opcode === op.NOT || opcode === op.NEGATE ||
+                   opcode === op.TO_INT32 ||
                    opcode === op.POSITIVE || opcode === op.BIT_NOT ||
                    opcode === op.TYPEOF || opcode === op.GET_KEYS) {
             this.reloadNativeOperand(frame, code[pc + 2]);
@@ -772,6 +773,10 @@
                     else registers[target] = this.runtime.toNumber(left) >>>
                         this.runtime.toNumber(right);
                     frame.pc = pc + 4;
+                } else if (opcode === op.TO_INT32) {
+                    registers[code[pc + 1]] = this.runtime.toNumber(
+                        registers[code[pc + 2]]) | 0;
+                    frame.pc = pc + op.WIDTHS[op.TO_INT32];
                 } else if (opcode === op.NOT) {
                     registers[code[pc + 1]] = !this.runtime.truthy(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
