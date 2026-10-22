@@ -637,6 +637,13 @@
         this.memory.writeU32(this.checkPayload(address, offset, 4, expectedType), value);
     };
 
+    Heap.prototype.writeStringFieldUTF16LE = function (address, offset, text,
+                                                       expectedType) {
+        var payload = this.checkPayload(address, offset, text.length * 2,
+                                        expectedType);
+        this.memory.writeStringUTF16LE(payload, text);
+    };
+
     /* Fixed-layout record accessors use these only after their public method
      * has established the record/index invariant. Keeping the unchecked
      * address arithmetic here preserves the layering boundary while avoiding

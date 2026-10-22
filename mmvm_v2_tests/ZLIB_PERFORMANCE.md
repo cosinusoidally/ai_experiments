@@ -186,6 +186,14 @@ non-int32 value exactly; do not infer benchmark-specific integer types.
   preparation 83,882 ms, and serialization 795 ms. Kernel work is inside runtime
   construction. The final image is byte-identical with/without the additional
   runner progress timing. Runtime preparation, not writing the file, dominates.
+- 2026-10-22: bounded bulk UTF-16 ingestion reduced the measured cold build
+  from 115.45 to 96.63 seconds (95.62 user, 0.57 system). Standalone runtime
+  preparation fell from 83,882 to 65,572 ms; kernel construction stayed near
+  28 seconds. This is a whole-build improvement, not faster file writing.
+  Both host suites passed, with extra code-unit roundtrips in the existing heap
+  record test. The first standalone batch passed full-buffer verification in
+  49,498 ms (startup 18,115 ms); the second batch is still running. This does not
+  show a zlib startup/throughput gain: the demonstrated benefit is cold build.
 
 The requested target is at least **10 times faster** than the initial standalone
 baseline, not a succession of small percentage improvements. For this diagnostic

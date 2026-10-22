@@ -5,6 +5,15 @@
         var records = new Records(heap, cells);
         try {
             var key = records.allocateString("answer");
+            var stringSamples = ["", "a", "abc",
+                "\u0000\u00ff\u0100\ud800\udfff\uffff"];
+            var sampleIndex = 0;
+            while (sampleIndex < stringSamples.length) {
+                var sample = stringSamples[sampleIndex++];
+                if (records.readString(records.allocateString(sample)) !== sample) {
+                    throw new Error("heap string code-unit roundtrip failed");
+                }
+            }
             if (records.readString(key) !== "answer" ||
                 records.stringLength(key) !== 6 || !records.stringHash(key)) {
                 throw new Error("heap string layout failed");

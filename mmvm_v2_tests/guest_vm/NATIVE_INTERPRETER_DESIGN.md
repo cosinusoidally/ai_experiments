@@ -526,3 +526,13 @@ fields. Prepared trees are not retained in the resulting IR or snapshot.
 Diagnostics report parse/fingerprint, graph lowering, and assembly durations;
 total process elapsed time also includes runtime preparation and serialization.
 Timing values are diagnostic only and are not part of the fingerprint.
+
+Host-string ingestion uses `Heap.writeStringFieldUTF16LE`, which validates the
+complete destination record field and delegates to a bounded linear-memory
+writer. The native memory layer packs two UTF-16 code units per word store;
+the paged reference layer writes the same little-endian words. Odd trailing
+code units use exactly two byte stores, never an overwrite of adjacent data.
+Empty strings, embedded NULs, and lone surrogates retain their code units.
+String hashing still follows the existing per-code-unit algorithm unchanged.
+This is an ingestion operation, not an alternative host-backed guest string
+representation: the resulting strings remain owned by the independent heap.

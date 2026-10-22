@@ -290,14 +290,12 @@
             Heap.Types.STRING, STRING_CHARS + value.length * 2);
         this.heap.writeTrustedFieldU32(address, STRING_LENGTH, value.length,
                                 Heap.Types.STRING);
+        this.heap.writeStringFieldUTF16LE(address, STRING_CHARS, value,
+                                         Heap.Types.STRING);
         var hash = 2166136261;
         var index = 0;
         while (index < value.length) {
             var code = value.charCodeAt(index);
-            this.heap.writeTrustedFieldU8(address, STRING_CHARS + index * 2,
-                                   code & 255, Heap.Types.STRING);
-            this.heap.writeTrustedFieldU8(address, STRING_CHARS + index * 2 + 1,
-                                   code >>> 8, Heap.Types.STRING);
             hash ^= code;
             hash = (hash * 16777619) >>> 0;
             index++;

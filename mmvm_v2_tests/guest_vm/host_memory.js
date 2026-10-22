@@ -135,6 +135,56 @@
         else writePagedByte(allocation, offset, value);
     };
 
+    /* Bulk host-string ingress. UTF-16 code units (including lone surrogates)
+     * are preserved verbatim. Check the complete range before the first write.
+     * Pair stores never overwrite a trailing field or record padding. */
+    HostMemory.prototype.writeStringUTF16LE = function (allocation, offset, text) {
+        if (!allocation || allocation.freed) throw new Error("backing store is freed");
+        if (typeof text !== "string") throw new TypeError("expected a string");
+        var CODE_UNIT_BYTES = 2, PAIR_BYTES = 4, HIGH_CODE_UNIT_SHIFT = 16;
+        var length = text.length, index = 0, code, word;
+        if (offset < 0 || offset !== Math.floor(offset) ||
+            offset + length * CODE_UNIT_BYTES > allocation.length) {
+            throw new RangeError("UTF-16 write is out of bounds");
+        }
+        if (allocation.isNative && ((allocation.pointer + offset) & 3) === 0) {
+            var pointer = allocation.pointer + offset;
+            while (index + 1 < length) {
+                word = text.charCodeAt(index) |
+                    (text.charCodeAt(index + 1) << HIGH_CODE_UNIT_SHIFT);
+                poke32(pointer, word);
+                pointer += PAIR_BYTES;
+                index += 2;
+            }
+            if (index < length) {
+                code = text.charCodeAt(index);
+                poke8(pointer, code & 255);
+                poke8(pointer + 1, code >>> 8);
+            }
+        } else if (!allocation.isNative) {
+            while (index + 1 < length) {
+                word = text.charCodeAt(index) |
+                    (text.charCodeAt(index + 1) << HIGH_CODE_UNIT_SHIFT);
+                writePagedWordLE(allocation, offset, word >>> 0);
+                offset += PAIR_BYTES;
+                index += 2;
+            }
+            if (index < length) {
+                code = text.charCodeAt(index);
+                writePagedByte(allocation, offset, code & 255);
+                writePagedByte(allocation, offset + 1, code >>> 8);
+            }
+        } else {
+            /* Keep the general API valid for unaligned payloads too. */
+            while (index < length) {
+                code = text.charCodeAt(index++);
+                poke8(allocation.pointer + offset, code & 255);
+                poke8(allocation.pointer + offset + 1, code >>> 8);
+                offset += CODE_UNIT_BYTES;
+            }
+        }
+    };
+
     HostMemory.prototype.read32LE = function (allocation, offset) {
         if (offset < 0 || offset + 4 > allocation.length) {
             throw new RangeError("32-bit read is out of bounds");
