@@ -592,3 +592,27 @@ an escaped spelling is not a strict-mode directive. Source locations and raw
 function text remain enabled. The parser's public default AST format is not
 changed; this is an internal compiler allocation policy, not different language
 semantics or a source-specific parse cache.
+
+### Small helpers and adjacent typed-read conversions
+
+Shared middle-end inlining accepts bounded small bodies that call other kernel
+functions, not just leaf functions. It inserts a body at most once at a call
+site; inserted bodies are not recursively expanded, so recursive dependency
+graphs remain finite. Native-ABI calls remain excluded from eligibility, pure
+actual-argument restrictions and private parameter/local bindings remain, and
+tail-position calls keep their separate frame-reuse lowering. The JS backend
+retains ordinary calls to the same functions.
+
+Primitive ToInt32 conversion is factored into named kernel helpers, with the
+int32 case separated from colder binary64/boolean/null/undefined handling.
+Their tag constants come from `ValueCells.Tags`, not duplicated numeric tags.
+
+After completing a typed-array indexed read, the interpreter may consume an
+immediately following ToInt32 instruction using those helpers. It checks the
+remaining budget, full lookahead instruction bounds, opcode and source-register
+match, and disables the combination in GC-stress mode. The original read result
+is preserved if the conversion has a different destination. The instruction
+counter, budget and optional opcode counters account for both instructions.
+Unsupported types leave the conversion for ordinary execution. This is an
+interpreter operation-pair optimization, not source recognition or alternate
+benchmark code; no guest bytecode format or JS reference semantics change.

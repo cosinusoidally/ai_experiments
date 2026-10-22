@@ -275,22 +275,24 @@
         }
         var graph = {kernelGraph: true, entry: entryName, functions: compiled,
                      signatures: signatures, preparation: preparation};
-        inlineLeafCalls(graph);
+        inlineSmallCalls(graph);
         return graph;
     };
 
     /* Keep the optimization in the shared middle end. The JS backend retains
-     * ordinary calls (its host can inline them); native code uses the equivalent
-     * inline body. Eligibility is deliberately structural, never name-based. */
-    function inlineLeafCalls(graph) {
-        var MAX_INLINE_LEAF_NODES = 96;
+     * ordinary calls; native code uses the equivalent inline body. Eligibility
+     * is structural, never name-based. Bodies may call other kernel functions,
+     * but inserted bodies are not expanded again: recursive graphs stay finite.
+     * Unknown native ABI calls remain outside this policy. */
+    function inlineSmallCalls(graph) {
+        var MAX_INLINE_NODES = 96;
         var candidates = {}, functionIndex = 0;
         var statistics = {eligibleFunctions: [], callSites: 0};
         graph.inlining = statistics;
         function inspect(node, assigned) {
             if (!node || typeof node !== "object") return 0;
-            if (node.op === "call_kernel_i32" || node.op === "call_native_i32" ||
-                node.op === "call_native_f64") return MAX_INLINE_LEAF_NODES + 1;
+            if (node.op === "call_native_i32" ||
+                node.op === "call_native_f64") return MAX_INLINE_NODES + 1;
             if (node.op === "set_argument") assigned[node.index] = true;
             /* Decompilers can add braces around a single statement. Such
              * scope-free blocks must not change eligibility or snapshots. */
@@ -306,7 +308,7 @@
             var candidate = graph.functions[functionIndex++];
             var assigned = [];
             var nodeCount = inspect(candidate.body, assigned);
-            if (nodeCount <= MAX_INLINE_LEAF_NODES) {
+            if (nodeCount <= MAX_INLINE_NODES) {
                 candidates["$" + candidate.name] = {fn: candidate, assigned: assigned};
                 statistics.eligibleFunctions.push({name: candidate.name, nodes: nodeCount});
             }
@@ -332,9 +334,9 @@
                 /* Tail calls can reuse the native frame instead. Expanding
                  * their bodies bloats error/exit paths without helping their
                  * callers retain a result for subsequent computation. */
-                var leaf = node.op === "call_kernel_i32" && !tailPosition ?
+                var inlineCandidate = node.op === "call_kernel_i32" && !tailPosition ?
                     candidates["$" + node.name] : null;
-                if (leaf) {
+                if (inlineCandidate) {
                     var pureArguments = true, argumentIndex = 0;
                     while (argumentIndex < node.arguments.length) {
                         if (!simpleStoreOperand(node.arguments[argumentIndex++])) {
@@ -348,7 +350,7 @@
                         argumentIndex = 0;
                         while (argumentIndex < node.arguments.length) {
                             var argument = node.arguments[argumentIndex];
-                            if (leaf.assigned[argumentIndex]) {
+                            if (inlineCandidate.assigned[argumentIndex]) {
                                 var parameterIndex = caller.locals.length;
                                 caller.locals.push(prefix + "arg" + argumentIndex);
                                 parameterMap[argumentIndex] = {op: "local_i32",
@@ -359,13 +361,14 @@
                             argumentIndex++;
                         }
                         var localIndex = 0;
-                        while (localIndex < leaf.fn.locals.length) {
+                        while (localIndex < inlineCandidate.fn.locals.length) {
                             localMap[localIndex] = caller.locals.length;
-                            caller.locals.push(prefix + leaf.fn.locals[localIndex++]);
+                            caller.locals.push(prefix + inlineCandidate.fn.locals[localIndex++]);
                         }
                         return {op: "inline_call_i32", name: node.name,
                             arguments: node.arguments, type: "i32", bindings: bindings,
-                            body: cloneInlineBody(leaf.fn.body, parameterMap, localMap)};
+                            body: cloneInlineBody(inlineCandidate.fn.body,
+                                parameterMap, localMap)};
                     }
                 }
                 var result = null, key;

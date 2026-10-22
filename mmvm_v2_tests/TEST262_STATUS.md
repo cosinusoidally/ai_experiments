@@ -666,6 +666,11 @@ performance are separate mandatory regression gates.
   checkout was removed; logs were retained.
 - No whole-suite rerun was performed here. The latest whole-suite totals above
   remain unchanged; these 165 tests are not substituted for those totals.
+- Follow-up after bounded non-leaf inlining and typed-read/ToInt32 combination:
+  the identical selection again executed all 165 variants, 153 passed,
+  12 failed, 0 not run/timeouts; failing IDs still exactly match `9ff16dd`.
+  Raw log: `artifacts/zlib-read-conversion-test262.log`. Elapsed/RSS were not
+  captured. This remains a focused regression check, not a whole-suite run.
 
 ## Rules for subsequent entries
 

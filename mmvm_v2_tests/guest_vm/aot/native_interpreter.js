@@ -8,6 +8,7 @@
     var HeapSweeper = root.GuestVMHeapSweeper;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     var Binary64 = root.GuestVMBinary64;
+    var ValueCells = root.GuestVMValueCells;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -16,6 +17,7 @@
         HeapSweeper = require("./heap_sweeper.js");
         NativeIntrinsics = require("../native_intrinsics.js");
         Binary64 = require("../binary64.js");
+        ValueCells = require("../value_cell.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -23,6 +25,12 @@
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
+    var CELL_INT32 = ValueCells.Tags.INT32;
+    var CELL_DOUBLE = ValueCells.Tags.DOUBLE;
+    var CELL_TRUE = ValueCells.Tags.TRUE;
+    var CELL_FALSE = ValueCells.Tags.FALSE;
+    var CELL_NULL = ValueCells.Tags.NULL;
+    var CELL_UNDEFINED = ValueCells.Tags.UNDEFINED;
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
@@ -135,6 +143,12 @@
             OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
             OP_TO_INT32: OP_TO_INT32
         };
+        overrides.CELL_INT32 = CELL_INT32;
+        overrides.CELL_DOUBLE = CELL_DOUBLE;
+        overrides.CELL_TRUE = CELL_TRUE;
+        overrides.CELL_FALSE = CELL_FALSE;
+        overrides.CELL_NULL = CELL_NULL;
+        overrides.CELL_UNDEFINED = CELL_UNDEFINED;
         var name;
         for (name in recordConstants) {
             if (Object.prototype.hasOwnProperty.call(recordConstants, name)) {
@@ -720,21 +734,11 @@
                     bytecodePayloadWord(heapBase, bytecodeWords, pc + FIRST_OPERAND));
                 var conversionSource = frameRegisterCellAddress(heapBase, frame,
                     bytecodePayloadWord(heapBase, bytecodeWords, pc + SECOND_OPERAND));
-                var conversionTag = valueCellTag(0, conversionSource);
-                var conversionResult = 0;
-                if (conversionTag === VALUE_TAG_INT32) {
-                    conversionResult = valueCellInt32(0, conversionSource);
-                } else if (conversionTag === VALUE_TAG_DOUBLE) {
-                    conversionResult = doubleCellToInt32Kernel(conversionSource);
-                } else if (conversionTag === VALUE_TAG_TRUE) {
-                    conversionResult = 1;
-                } else if (conversionTag !== VALUE_TAG_FALSE &&
-                           conversionTag !== VALUE_TAG_NULL &&
-                           conversionTag !== VALUE_TAG_UNDEFINED) {
+                if (primitiveCellToInt32Kernel(
+                        conversionTarget, conversionSource) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
                 }
-                setValueCellInt32(conversionTarget, conversionResult);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_ADD_INT32 || opcode === OP_SUBTRACT_INT32) {
                 var integerTarget = frameRegisterCellAddress(heapBase, frame,
@@ -1428,6 +1432,36 @@
                             }
                         }
                         store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                    }
+                    /* Consume a following conversion only after the original
+                     * read has completed. Keep that result cell intact unless
+                     * the next instruction itself overwrites it. */
+                    var indexedConversionPC = pc + FOUR_WORD_INSTRUCTION;
+                    if (budget > 1 && engineGCStressInterval(heapBase, state) === 0 &&
+                        indexedConversionPC + THREE_WORD_INSTRUCTION <=
+                            bytecodeLength(heapBase,
+                                programBytecode(heapBase, currentProgram))) {
+                        if (bytecodePayloadWord(heapBase, bytecodeWords,
+                                indexedConversionPC) === OP_TO_INT32 &&
+                            bytecodePayloadWord(heapBase, bytecodeWords,
+                                indexedConversionPC + SECOND_OPERAND) ===
+                                    arrayGetTargetIndex) {
+                            var indexedConversionTarget = frameRegisterCellAddress(
+                                heapBase, frame, bytecodePayloadWord(
+                                    heapBase, bytecodeWords,
+                                    indexedConversionPC + FIRST_OPERAND));
+                            if (primitiveCellToInt32Kernel(indexedConversionTarget,
+                                    arrayGetTarget) === 1) {
+                                pc = pc + THREE_WORD_INSTRUCTION;
+                                budget = budget - 1;
+                                instructions = instructions + 1;
+                                if (PROFILE_OPCODES !== 0) {
+                                    setOpcodeExecutionCount(heapBase, state, OP_TO_INT32,
+                                        opcodeExecutionCount(heapBase, state,
+                                            OP_TO_INT32) + 1);
+                                }
+                            }
+                        }
                     }
                 } else {
                 var arrayGetVector = arrayElements(heapBase, arrayGetObject);
@@ -11473,10 +11507,29 @@
         return environmentCellAddress(heapBase, resolvedEnvironment, slot);
     }
 
-    /* ES5.1 ToInt32 for a DOUBLE cell, directly from its IEEE-754 words.
-     * Truncation/modulo require no x87 rounding-mode changes or int64 store.
-     * Large exponents are significant: FISTP alone gives the wrong low word
-     * for representable values between 2^63 and 2^84. */
+    /* Primitive conversion has no guest callbacks or allocation. Preserve
+     * destination contents when a reference needs ordinary ToPrimitive. */
+    function primitiveCellToInt32Kernel(target, source) {
+        var tag = valueCellTag(0, source);
+        if (tag === CELL_INT32) {
+            setValueCellInt32(target, valueCellInt32(0, source));
+            return 1;
+        }
+        return nonIntegerCellToInt32Kernel(target, source, tag);
+    }
+
+    function nonIntegerCellToInt32Kernel(target, source, tag) {
+        var result = 0;
+        if (tag === CELL_DOUBLE) result = doubleCellToInt32Kernel(source);
+        else if (tag === CELL_TRUE) result = 1;
+        else if (tag !== CELL_FALSE && tag !== CELL_NULL &&
+                 tag !== CELL_UNDEFINED) return 0;
+        setValueCellInt32(target, result);
+        return 1;
+    }
+
+    /* ES5.1 ToInt32 directly from IEEE-754 words. No x87 rounding-mode change
+     * or int64 store: FISTP gives the wrong low word for some values above 2^63. */
     function doubleCellToInt32Kernel(cell) {
         var high = valueCellDoubleHigh(0, cell);
         var exponent = ((high >>> IEEE754_EXPONENT_SHIFT) &
@@ -17252,7 +17305,9 @@
             setURIStringCodeUnitKernel: setURIStringCodeUnitKernel,
             appendURIPercentByteKernel: appendURIPercentByteKernel,
             writeTypedArrayElementKernel: writeTypedArrayElementKernel,
-            unsupportedExitKernel: unsupportedExitKernel
+            unsupportedExitKernel: unsupportedExitKernel,
+            primitiveCellToInt32Kernel: primitiveCellToInt32Kernel,
+            nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
@@ -17313,7 +17368,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 23,
+                compilerVersion: 24,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,
@@ -17347,6 +17402,12 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    CELL_INT32: CELL_INT32,
+                    CELL_DOUBLE: CELL_DOUBLE,
+                    CELL_TRUE: CELL_TRUE,
+                    CELL_FALSE: CELL_FALSE,
+                    CELL_NULL: CELL_NULL,
+                    CELL_UNDEFINED: CELL_UNDEFINED,
                     OP_ADD_INT32: OP_ADD_INT32,
                     OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
                     OP_TO_INT32: OP_TO_INT32,
@@ -17407,7 +17468,7 @@
                 var inlineCandidate = inlineCandidates[inlineIndex++];
                 inlineNames.push(inlineCandidate.name + ":" + inlineCandidate.nodes);
             }
-            reportSnapshot("native kernel leaf inlining: " +
+            reportSnapshot("native kernel small-body inlining: " +
                 this.ir.inlining.callSites + " sites; eligible " + inlineNames.join(" "));
         }
         /* The MMVM host executes the i386 backend directly.  Building the

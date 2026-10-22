@@ -5,8 +5,9 @@ replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
 Latest measured results (2026-10-22): complete cold snapshot generation
-88.76 seconds versus 117.89 seconds; verified zlib diagnostic batches
-45.29–45.45 seconds versus the initial 63–65 seconds. The requested 10x
+90.85 seconds (best preceding checkpoint 88.76) versus 117.89 seconds;
+verified zlib diagnostic batches 44.65–45.04 seconds versus the initial
+63–65 seconds. The requested 10x
 execution speedup is not achieved. Whole-suite Test262 was not rerun; focused
 baseline comparisons and known limitations are recorded below.
 
@@ -242,6 +243,22 @@ non-int32 value exactly; do not infer benchmark-specific integer types.
   free-drive near 19 FPS. Rising RSS is present in that baseline too. These
   approximate, differently timed mode sequences do not isolate a small memory
   difference; a matched long-run GC/memory comparison remains outstanding.
+- 2026-10-22: bounded non-leaf kernel inlining and adjacent typed-read ToInt32
+  consumption passed both host suites and full-buffer checks at 45,040 and
+  44,651 ms, initialization 16,319 ms. Native code grew from 385,812 to
+  408,748 bytes; cold build 90.85 s versus the preceding 88.76 s. The small
+  throughput difference is not a major architectural win or evidence for 10x;
+  compare these numbers with the observed run-to-run variation. The shared
+  primitive-conversion helpers avoid duplicating coercion code and preserve
+  read results, budgets, profiler counts, and GC-stress opportunities.
+- 2026-10-22: the same 165-file Test262 selection after non-leaf inlining/read
+  conversion again reported 153 passed, 12 failed, 0 not run/timeouts. Failing
+  IDs exactly match `9ff16dd`; full-suite conformance was not rerun.
+- 2026-10-22: the latest image completed approximately 6.3 minutes of demo8
+  rolling, garage and free-drive autopilot at 320x240/20 FPS requested, then
+  exited normally through the menu. Free-drive samples stayed around 18–19 FPS;
+  RSS was about 507 MiB at 5.2 minutes and 507 MiB at 6.3 minutes. This is
+  reassuring for that interval, not a proof of long-run memory bounds.
 
 The requested target is at least **10 times faster** than the initial standalone
 baseline, not a succession of small percentage improvements. For this diagnostic
