@@ -65,6 +65,12 @@
         if (args[0] === "--inlining") {
             var inlining = engine.ir.inlining;
             report("inlined call sites: " + inlining.callSites);
+            var forwarded = 0, functionIndex = 0;
+            while (functionIndex < engine.ir.functions.length) {
+                var forwarding = engine.ir.functions[functionIndex++].localForwarding;
+                if (forwarding) forwarded += forwarding.eliminatedAssignments;
+            }
+            report("forwarded single-use local assignments: " + forwarded);
             var candidateIndex = 0;
             while (candidateIndex < inlining.eligibleFunctions.length) {
                 var candidate = inlining.eligibleFunctions[candidateIndex++];

@@ -28,6 +28,61 @@ reorder effectful operands nor change guest bytecode, budgets or GC boundaries.
 `guest_vm/tools/inspect_kernel_build.js --inlining` reports the structural
 inlining candidates and expanded call-site count on either bootstrap host.
 
+### Kernel compiler data movement
+
+The compiler forwards single-definition, single-use locals through runs of
+integer assignments without calls, writes or control-flow boundaries. It
+invalidates a candidate when an input local is assigned. Loads may move only
+within such a write-free region with valid kernel addresses. The first writing
+statement can consume an address/value before its effect, but forwarding never
+continues through that effect. This is an IR optimization, not altered semantics
+for source-level variable declarations. Introspection reports the number of
+eliminated assignments. Named `copyValueCell` operations let both backends see
+an entire copy instead of unrelated field-access statements.
+
+Standalone calls with discarded results are supported as ordinary expression
+statements. They retain their effects and do not require dummy result variables.
+Both backends lower the same expression-statement IR.
+
+The native backend supports an optional fourth register (`registerCount: 4`),
+used by the interpreter for its heap base. EDX is write-through: assignments
+also update its normal argument/local stack slot. While code generation borrows
+EDX as scratch, references use that slot; afterwards EDX is reloaded without
+clobbering the result in EAX or the x87 stack. Generated four-register callees
+preserve EDX, and external native calls use the same borrowing protocol. Copies,
+grouped field stores and signed division/remainder explicitly borrow EDX.
+Variable shifts exchange EAX/ECX directly and no longer need EDX as a temporary.
+No SSE, new processor feature, OS thread or newer Linux interface is required.
+
+Constant byte/word stores use immediate memory instructions. Simple value
+stores avoid argument-stack traffic, and pure affine sums use LEA. Complex
+operands keep the evaluation-order-preserving general emitter.
+
+The loop derives completed instruction counts from its initial and remaining
+budget, rather than incrementing a redundant counter. Both fusion paths consume
+the extra budget unit explicitly, so budget exits, host exits and returns retain
+their original accounting. The GC-stress interval is cached for an invocation
+and refreshed after CALL: only its control intrinsic can mutate it while this
+kernel is executing. Embedder changes enter through a new invocation. The
+remaining-stress count remains in shared engine state and is not cached.
+
+Callable diagnostic state is meaningful on an unsupported exit, not on every
+successful instruction. Generic exits clear that state on their cold path;
+call entry and accessor-call entry initialize it before invoking helpers.
+Explicit numeric failures and call failures use a detail-preserving exit.
+This avoids a diagnostic write per ordinary opcode without attributing a stale
+call rejection to a later unrelated failure.
+
+### Fingerprint construction
+
+Every build still parses and visits the complete canonical syntax tree.
+Repeated canonical tokens (field names, node types, punctuation and scalar
+representations) have per-build memoized digests. The ordered structural stream
+mixes these token digests using exact binary64 integer arithmetic. This changes
+the non-cryptographic fingerprint format and invalidates old image contracts;
+it is not a persistent source, parser or compiled-program cache. The temporary
+dictionary is discarded with the compilation transaction.
+
 ## Kernel memory lowering and dispatch experiments (2026-10-22)
 
 The shared typed IR preserves `copyValueCell` as `copy_words`: source and

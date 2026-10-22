@@ -3,6 +3,9 @@
 (function (root) {
     var MAX_SIGNED_BYTE_IMMEDIATE = 127;
     var STACK_WORD_BYTES = 4;
+    var REGISTER_CODES = {eax: 0, ecx: 1, edx: 2, ebx: 3,
+                          esp: 4, ebp: 5, esi: 6, edi: 7};
+    var ADDRESS_SCALES = {1: 0, 2: 1, 4: 2, 8: 3};
     function Assembler(captureMacros) {
         this.bytes = [];
         this.macros = captureMacros === false ? null : [];
@@ -40,6 +43,60 @@
     Assembler.prototype.movEaxImmediate = function (value) {
         if (this.macros) this.macros.push("mov_eax_i32(" + (value | 0) + ")");
         this.emitByte(0xb8); this.word32(value);
+    };
+    Assembler.prototype.movDwordPtrEaxImmediate = function (value) {
+        if (this.macros) this.macros.push("mov_ptr_eax_i32(" + (value | 0) + ")");
+        this.emitBytes2(0xc7, 0x00); this.word32(value);
+    };
+    Assembler.prototype.movBytePtrEaxImmediate = function (value) {
+        if (this.macros) this.macros.push("mov_byte_ptr_eax_i8(" + (value & 255) + ")");
+        this.emitBytes3(0xc6, 0x00, value);
+    };
+    Assembler.prototype.movEaxEdx = function () {
+        if (this.macros) this.macros.push("mov_eax_edx()");
+        this.emitBytes2(0x89, 0xd0);
+    };
+    Assembler.prototype.movEdxEbpDisplacement = function (displacement) {
+        if (this.macros) this.macros.push("mov_edx_ptr_ebp(" + displacement + ")");
+        this.emitBytes2(0x8b, 0x95); this.word32(displacement);
+    };
+    Assembler.prototype.pushEdx = function () {
+        if (this.macros) this.macros.push("push_edx()");
+        /* Callee-save area, like pushEbx, not temporary cdecl arguments. */
+        this.emitByte(0x52);
+    };
+    Assembler.prototype.popEdx = function () {
+        if (this.macros) this.macros.push("pop_edx()");
+        this.emitByte(0x5a);
+    };
+    Assembler.prototype.addEaxEdx = function () {
+        if (this.macros) this.macros.push("add_eax_edx()");
+        this.emitBytes2(0x01, 0xd0);
+    };
+    Assembler.prototype.compareEaxEdx = function () {
+        if (this.macros) this.macros.push("cmp_eax_edx()");
+        this.emitBytes2(0x39, 0xd0);
+    };
+    Assembler.prototype.compareRegisterImmediate = function (register, value) {
+        var code = REGISTER_CODES[register];
+        if (code === undefined) throw new Error("invalid comparison register");
+        if (this.macros) this.macros.push("cmp_" + register + "_i32(" + (value | 0) + ")");
+        if (value >= -128 && value <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x83, 0xf8 | code, value);
+        } else {
+            this.emitBytes2(0x81, 0xf8 | code); this.word32(value);
+        }
+    };
+    Assembler.prototype.compareEbpDisplacementImmediate = function (displacement, value) {
+        if (this.macros) this.macros.push("cmp_ptr_ebp_i32(" + displacement + ", " +
+            (value | 0) + ")");
+        var smallOffset = displacement >= -128 && displacement <= MAX_SIGNED_BYTE_IMMEDIATE;
+        var smallValue = value >= -128 && value <= MAX_SIGNED_BYTE_IMMEDIATE;
+        this.emitBytes2(smallValue ? 0x83 : 0x81, smallOffset ? 0x7d : 0xbd);
+        if (smallOffset) this.emitByte(displacement);
+        else this.word32(displacement);
+        if (smallValue) this.emitByte(value);
+        else this.word32(value);
     };
 
     Assembler.prototype.movEaxArgument = function (index) {
@@ -123,7 +180,8 @@
             register, displacement) {
         var baseBits = register === "ebx" ? 3 :
                        register === "esi" ? 6 :
-                       register === "edi" ? 7 : -1;
+                       register === "edi" ? 7 :
+                       register === "edx" ? 2 : -1;
         if (baseBits < 0) {
             throw new Error("unsupported indexed-load base register " +
                             register);
@@ -142,22 +200,37 @@
     };
     Assembler.prototype.movEaxDwordPtrScaledRegisters = function (
             base, index, scale, displacement) {
-        var registers = {ebx: 3, esi: 6, edi: 7};
-        var scales = {1: 0, 2: 1, 4: 2, 8: 3};
-        if (registers[base] === undefined || registers[index] === undefined ||
+        var registers = REGISTER_CODES;
+        var scales = ADDRESS_SCALES;
+        if (registers[base] === undefined || registers[index] === undefined || index === "esp" ||
             scales[scale] === undefined) {
             throw new Error("invalid scaled-register load");
         }
         if (this.macros) this.macros.push("mov_eax_ptr_scaled(" + base + ", " +
             index + ", " + scale + ", " + (displacement | 0) + ")");
         var sib = (scales[scale] << 6) | (registers[index] << 3) | registers[base];
-        if (displacement === 0) this.emitBytes3(0x8b, 0x04, sib);
+        if (displacement === 0 && base !== "ebp") this.emitBytes3(0x8b, 0x04, sib);
         else if (displacement >= -128 && displacement <= MAX_SIGNED_BYTE_IMMEDIATE) {
             this.emitBytes3(0x8b, 0x44, sib);
             this.emitByte(displacement);
         } else {
             this.emitBytes3(0x8b, 0x84, sib);
             this.word32(displacement);
+        }
+    };
+    Assembler.prototype.leaEaxScaledRegisters = function (base, index, scale, displacement) {
+        var registers = REGISTER_CODES;
+        var scales = ADDRESS_SCALES;
+        if (registers[base] === undefined || registers[index] === undefined || index === "esp" ||
+            scales[scale] === undefined) throw new Error("invalid scaled address");
+        if (this.macros) this.macros.push("lea_eax_scaled(" + base + ", " +
+            index + ", " + scale + ", " + (displacement | 0) + ")");
+        var sib = (scales[scale] << 6) | (registers[index] << 3) | registers[base];
+        if (displacement === 0 && base !== "ebp") this.emitBytes3(0x8d, 0x04, sib);
+        else if (displacement >= -128 && displacement <= MAX_SIGNED_BYTE_IMMEDIATE) {
+            this.emitBytes3(0x8d, 0x44, sib); this.emitByte(displacement);
+        } else {
+            this.emitBytes3(0x8d, 0x84, sib); this.word32(displacement);
         }
     };
     Assembler.prototype.testEaxEax = function () {

@@ -92,19 +92,32 @@
             }
         }
     }
-    var opcodeNames = null;
+    var opcodeNames = null, tagNames = [], counterWordCount = 0;
     print("zlib: opcode counter query " + typeof root.__guestVMOpcodeCounterWord +
         (typeof root.__guestVMOpcodeCounterWord === "function" ?
             "; initial word=" + root.__guestVMOpcodeCounterWord(0 | 0) : ""));
     if (typeof root.__guestVMOpcodeCounterWord === "function" &&
         typeof root.__guestVMOpcodeCounterWord(0 | 0) === "number") {
         load("guest_vm/bytecode.js");
+        load("guest_vm/value_cell.js");
         opcodeNames = root.GuestVMBytecode.NAMES;
+        var tags = root.GuestVMValueCells.Tags, tagName;
+        tagNames[0] = "EMPTY";
+        for (tagName in tags) {
+            if (Object.prototype.hasOwnProperty.call(tags, tagName)) {
+                tagNames[tags[tagName]] = tagName;
+            }
+        }
+        var maximumCounterWords = opcodeNames.length * (1 + tagNames.length * 2);
+        while (counterWordCount < maximumCounterWords &&
+               typeof root.__guestVMOpcodeCounterWord(counterWordCount | 0) === "number") {
+            counterWordCount++;
+        }
     }
     function counters() {
         var result = [], j;
         if (opcodeNames) {
-            for (j = 0; j < opcodeNames.length; j++) {
+            for (j = 0; j < counterWordCount; j++) {
                 result[j] = root.__guestVMOpcodeCounterWord(j | 0) >>> 0;
             }
         }
@@ -119,8 +132,16 @@
         var after = counters();
         if (opcodeNames) {
             var counts = [], opcode;
-            for (opcode = 1; opcode < opcodeNames.length; opcode++) {
-                counts.push({name: opcodeNames[opcode],
+            for (opcode = 1; opcode < counterWordCount; opcode++) {
+                var plane = Math.floor(opcode / opcodeNames.length);
+                var name = opcodeNames[opcode % opcodeNames.length];
+                if (!name) continue;
+                if (plane) {
+                    var rightOperand = plane > tagNames.length;
+                    var tag = rightOperand ? plane - tagNames.length - 1 : plane - 1;
+                    name += (rightOperand ? ".right." : ".left.") + tagNames[tag];
+                }
+                counts.push({name: name,
                     count: (after[opcode] - before[opcode]) >>> 0});
             }
             counts.sort(function (a, b) { return b.count - a.count; });

@@ -74,6 +74,9 @@
     }
 
     function emitStatement(node, parameters, locals) {
+        if (node.op === "expression") {
+            return emitControlExpression(node.value, parameters, locals) + ";";
+        }
         if (node.op === "store_fields") {
             var stores = "", fieldIndex = 0;
             while (fieldIndex < node.values.length) {

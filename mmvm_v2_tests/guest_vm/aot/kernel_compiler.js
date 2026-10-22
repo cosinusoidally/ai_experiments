@@ -28,13 +28,29 @@
         var FNV1A_OFFSET_BASIS = -2128831035;
         var FNV1A_PRIME = 16777619;
         var hash = FNV1A_OFFSET_BASIS;
+        var textHashes = {};
+        var STRUCTURAL_HASH_MULTIPLIER = 65599;
         function append(text) {
-            var index = 0;
-            while (index < text.length) {
-                var code = text.charCodeAt(index++);
-                hash = ((hash ^ (code & 255)) * FNV1A_PRIME) | 0;
-                hash = ((hash ^ (code >>> 8)) * FNV1A_PRIME) | 0;
+            /* The canonical traversal repeatedly emits the same field names,
+             * node types and punctuation. Hash each distinct token once per
+             * build, then mix its digest into the ordered structural stream.
+             * This is not a source/parse cache: every AST field is still
+             * visited and every build parses and validates all source. */
+            var key = "$" + text;
+            var digest = textHashes[key];
+            if (digest === undefined) {
+                digest = FNV1A_OFFSET_BASIS;
+                var index = 0;
+                while (index < text.length) {
+                    var code = text.charCodeAt(index++);
+                    digest = ((digest ^ (code & 255)) * FNV1A_PRIME) | 0;
+                    digest = ((digest ^ (code >>> 8)) * FNV1A_PRIME) | 0;
+                }
+                textHashes[key] = digest;
             }
+            /* A signed word times 65599 plus a signed word is exactly
+             * representable in binary64, on both bootstrap hosts. */
+            hash = (hash * STRUCTURAL_HASH_MULTIPLIER + digest) | 0;
         }
         function visit(value) {
             if (value === null) { append("null;"); return; }
@@ -918,10 +934,146 @@
         if (timings) timings.lower = new Date().getTime() - lowerStarted;
         var registerPreferences = resolveRegisterPreferences(
             options.registerPreferences || [], symbols);
-        return {name: fn.name || "kernel", parameters: fn.parameters.slice(0),
+        var ir = {name: fn.name || "kernel", parameters: fn.parameters.slice(0),
                 locals: localNames, resultType: "i32", body: body,
                 controlFlow: true, source: source,
                 registerPreferences: registerPreferences};
+        forwardSingleUseLocals(ir);
+        return ir;
+    }
+
+    /* Forward single-definition/single-use temporaries through straight-line
+     * runs of side-effect-free assignments. This removes stack traffic for
+     * decoded operand indices without changing the kernel source dialect.
+     * Memory writes, calls and control-flow boundaries stop forwarding. */
+    function forwardSingleUseLocals(ir) {
+        var definitions = [], uses = [], eliminated = 0;
+        function count(node) {
+            if (!node || typeof node !== "object") return;
+            if (node.op === "local_i32") {
+                uses[node.index] = (uses[node.index] || 0) + 1;
+                return;
+            }
+            if (node.op === "set_local") {
+                definitions[node.index] = (definitions[node.index] || 0) + 1;
+            }
+            var key;
+            for (key in node) {
+                if (Object.prototype.hasOwnProperty.call(node, key)) count(node[key]);
+            }
+        }
+        function movable(node) {
+            if (!node) return false;
+            if (node.op === "const_i32" || node.op === "local_i32" ||
+                node.op === "arg_i32") return true;
+            if (node.op === "load_u32") return movable(node.address);
+            if (node.op === "neg_i32" || node.op === "not_i32" ||
+                node.op === "as_i32") return movable(node.value);
+            if (node.op === "add_i32" || node.op === "sub_i32" ||
+                node.op === "mul_i32" || node.op === "and_i32" ||
+                node.op === "or_i32" || node.op === "xor_i32" ||
+                node.op === "shl_i32" || node.op === "shr_i32" ||
+                node.op === "ushr_i32") {
+                return movable(node.left) && movable(node.right);
+            }
+            return false;
+        }
+        function dependencies(node, result) {
+            if (!node || typeof node !== "object") return;
+            if (node.op === "local_i32") result[node.index] = true;
+            var key;
+            for (key in node) {
+                if (Object.prototype.hasOwnProperty.call(node, key)) {
+                    dependencies(node[key], result);
+                }
+            }
+        }
+        function list(body) {
+            var result = [], pending = {}, index = 0;
+            function substitute(node) {
+                if (!node || typeof node !== "object") return node;
+                if (node.op === "local_i32" && pending[node.index]) {
+                    var definition = pending[node.index];
+                    delete pending[node.index];
+                    result[definition.position] = null;
+                    eliminated++;
+                    return definition.value;
+                }
+                var changed = null, key;
+                for (key in node) {
+                    if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+                    var child = substitute(node[key]);
+                    if (child !== node[key]) {
+                        if (!changed) {
+                            changed = {};
+                            var field;
+                            for (field in node) {
+                                if (Object.prototype.hasOwnProperty.call(node, field)) {
+                                    changed[field] = node[field];
+                                }
+                            }
+                        }
+                        changed[key] = child;
+                    }
+                }
+                return changed || node;
+            }
+            while (index < body.length) {
+                var statement = body[index++];
+                visit(statement);
+                if (statement.op !== "set_local" || !movable(statement.value)) {
+                    /* Consume an address/value before the boundary's first
+                     * effect, but never forward through the effect itself.
+                     * store_fields values must remain simple operands: its
+                     * emitter reserves scratch registers while writing them. */
+                    if ((statement.op === "copy_words" &&
+                         movable(statement.target) && movable(statement.source)) ||
+                        ((statement.op === "store_u32" || statement.op === "store_u8" ||
+                          statement.op === "store_raw_u32" || statement.op === "store_raw_u8") &&
+                         movable(statement.address) && movable(statement.value)) ||
+                        (statement.op === "return" && movable(statement.value))) {
+                        statement = substitute(statement);
+                    } else if (statement.op === "store_fields" && movable(statement.base)) {
+                        statement = {op: statement.op, base: substitute(statement.base),
+                            offsets: statement.offsets, values: statement.values};
+                    }
+                    pending = {};
+                    result.push(statement);
+                    continue;
+                }
+                var value = substitute(statement.value);
+                var key;
+                for (key in pending) {
+                    if (pending[key].dependencies[statement.index]) delete pending[key];
+                }
+                var position = result.length;
+                result.push({op: "set_local", index: statement.index, value: value});
+                if (definitions[statement.index] === 1 && uses[statement.index] === 1) {
+                    var inputs = {};
+                    dependencies(value, inputs);
+                    pending[statement.index] = {position: position, value: value,
+                        dependencies: inputs};
+                }
+            }
+            var compact = [];
+            for (index = 0; index < result.length; index++) {
+                if (result[index]) compact.push(result[index]);
+            }
+            return compact;
+        }
+        function visit(node) {
+            if (!node) return;
+            if (node.op === "block") node.body = list(node.body);
+            else if (node.op === "if") {
+                visit(node.consequent);
+                visit(node.alternate);
+            } else if (node.op === "while" || node.op === "opcode_dispatch") {
+                visit(node.body);
+            }
+        }
+        count(ir.body);
+        ir.body = list(ir.body);
+        ir.localForwarding = {eliminatedAssignments: eliminated};
     }
 
     function symbolAt(symbols, name) {
@@ -1306,6 +1458,9 @@
                         expression.arguments[0], symbols),
                     value: lowerKernelExpression(
                         expression.arguments[1], symbols)};
+            }
+            if (expression.type === "CallExpression") {
+                return {op: "expression", value: lowerKernelExpression(expression, symbols)};
             }
             throw new SyntaxError("unsupported kernel expression statement");
         }

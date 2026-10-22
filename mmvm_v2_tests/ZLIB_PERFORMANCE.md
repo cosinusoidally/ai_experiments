@@ -5,16 +5,45 @@ replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
 Latest measured results (2026-10-22, evening): verified zlib diagnostic
-batches 33.57–33.75 seconds, versus 44.65–45.04 seconds at the start of the
-latest optimization pass and the initial 63–65 seconds. This is about 1.34x
+batches 27.46–27.72 seconds, versus 44.65–45.04 seconds at the start of the
+latest optimization pass and the initial 63–65 seconds. This is about 1.63x
 faster than that latest starting point; the additional 2x target is about
 22.4 seconds per batch and has not yet been reached. Complete cold snapshot
-generation remains about 93 seconds (best preceding checkpoint 88.76),
+generation is about 85 seconds (best preceding checkpoint 88.76),
 versus the original 117.89 seconds. The requested overall 10x
 execution speedup is not achieved. Whole-suite Test262 was not rerun; focused
 baseline comparisons and known limitations are recorded below.
 
 ## 2026-10-22 evening optimization measurements
+
+- Follow-up compiler work: both direct-tree replication and extra opcode
+  classification were slower or inconclusive and were removed. Replicated
+  trees measured 35.956/36.082 seconds; the balanced tree remains the default.
+- Four-register native backend and improved store/address instruction selection:
+  30.132/30.129 seconds; initialization 13.792 seconds.
+- Failure-only diagnostic clearing: 29.242/28.815 seconds, with full-buffer
+  verification. Ordinary failures clear details on exit; callable and explicit
+  numeric failures retain their details.
+- GC configuration caching with CALL/re-entry invalidation, plus direct
+  stack/register comparisons: 27.463/27.724 seconds; initialization 13.704
+  seconds. Image: ignored `artifacts/zlib-loop-state.snap`. A subsequent removal
+  of a redundant opcode range filter is not included in those measurements.
+- Token-digest memoization reduced kernel fingerprinting from roughly 15.7 to
+  3.3 seconds while retaining complete parse and semantic traversal. Latest
+  build stages: runtime construction 16.681 seconds, environment 1.420,
+  standalone preparation 65.765, writing 0.730. Preparation remains a major
+  cold-build cost; it has not become a fast self-hosted rebuild.
+- A profiled batch confirmed predominantly integer operands: signed right
+  shift had 226,513,803 int32 left operands and one double; ToInt32 had
+  202,117,026 int32 inputs and 92,622 doubles. Its 43.438-second instrumented
+  duration is not an unprofiled performance result. The operand profile adds
+  no work to ordinary images.
+- The updated both-host regression script passed again after the compiler,
+  four-register, budget/diagnostic and GC-configuration changes: 12 programs,
+  269 assertions per host, plus the existing native/kernel, heap, automatic-GC,
+  error-location, embedding and command-line checks. Discarded helper-call
+  behavior is checked through the existing multi-function kernel integration
+  test, not a separate language micro-test file.
 
 - Typed-view early classification alone: 44.600 and 46.134 seconds. No
   convincing gain; the duplicate classification path was removed.
@@ -36,6 +65,11 @@ baseline comparisons and known limitations are recorded below.
   three-context checks. Full Test262 and a new stock Octane score have not been
   rerun at this point. The known standalone language limitations documented
   below are not being claimed fixed by the bootstrap-host suite.
+- The register-address image then completed a five-minute demo8 soak at
+  320x240/20 FPS requested, exercising rolling, garage and free-drive autopilot,
+  and exited through Escape/Q. Garage settled around 19 FPS; free-drive samples
+  were mostly 18–19.6 FPS. RSS was about 545 MiB near the end. This bounded run
+  does not establish long-run memory bounds.
 
 No benchmark source or demo was modified. Hardware performance counters are
 unavailable under the system's current perf permissions; no system permissions
@@ -346,6 +380,15 @@ one wrap of a given counter. Reading counters neither resets nor allocates them.
 Sampling itself executes a small amount of guest code, so counts include that
 small sampling overhead, but not the full-buffer verification after each batch.
 This reports operation frequency, not attributed CPU time.
+Following the ordinary opcode-count plane, the vector now contains left-operand
+tag planes and then right-operand tag planes. Each plane has
+`GuestVMBytecode.NAMES.length` words, indexed by opcode. Tag numbers come from
+`GuestVMValueCells.Tags`, including the unused/empty zero tag. The monitor
+derives the layout from those definitions, detects older shorter vectors, and
+prints labels such as `SHIFT_RIGHT.left.INT32`. Numeric handlers and fused
+typed-read conversions record their operands only in explicitly profiled
+images. This distinguishes integer traffic from conversion traffic; it still
+does not measure CPU time attributed to an opcode.
 
 Native execution serves the query entirely inside the kernel. It does not
 transition to the host or expose a raw heap pointer. Ordinary snapshots retain

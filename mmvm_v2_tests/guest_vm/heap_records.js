@@ -115,7 +115,13 @@
     var ENGINE_PLATFORM_SERVICES = 44;
     var ENGINE_OPCODE_COUNTS = 48;
     /* Include reserved slot zero; allocator fields follow this vector. */
-    var ENGINE_OPCODE_COUNT = Bytecode.NAMES.length;
+    var ENGINE_OPCODE_TAG_STRIDE = Bytecode.NAMES.length;
+    var ENGINE_OPCODE_TAG_COUNT = ValueCells.Tags.REFERENCE + 1;
+    var ENGINE_OPCODE_LEFT_TAG_BASE = ENGINE_OPCODE_TAG_STRIDE;
+    var ENGINE_OPCODE_RIGHT_TAG_BASE = ENGINE_OPCODE_TAG_STRIDE *
+        (1 + ENGINE_OPCODE_TAG_COUNT);
+    var ENGINE_OPCODE_COUNT = ENGINE_OPCODE_TAG_STRIDE *
+        (1 + ENGINE_OPCODE_TAG_COUNT * 2);
     var ENGINE_NATIVE_REGION_END =
         ENGINE_OPCODE_COUNTS + ENGINE_OPCODE_COUNT * 4;
     var ENGINE_NATIVE_FREE_REGION = ENGINE_NATIVE_REGION_END + 4;
@@ -213,6 +219,10 @@
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
         ENGINE_OPCODE_COUNT: ENGINE_OPCODE_COUNT,
+        ENGINE_OPCODE_TAG_STRIDE: ENGINE_OPCODE_TAG_STRIDE,
+        ENGINE_OPCODE_TAG_COUNT: ENGINE_OPCODE_TAG_COUNT,
+        ENGINE_OPCODE_LEFT_TAG_BASE: ENGINE_OPCODE_LEFT_TAG_BASE,
+        ENGINE_OPCODE_RIGHT_TAG_BASE: ENGINE_OPCODE_RIGHT_TAG_BASE,
         RECORD_TYPE: Heap.HeaderFields.TYPE,
         RECORD_SIZE: Heap.HeaderFields.SIZE,
         RECORD_MARK: Heap.HeaderFields.MARK,
