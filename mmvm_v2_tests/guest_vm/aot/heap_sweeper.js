@@ -5,11 +5,13 @@
     var JSBackend = root.GuestVMKernelJSBackend;
     var X86Backend = root.GuestVMKernelX86Backend;
     var Heap = root.GuestVMHeap;
+    var HeapRecords = root.GuestVMHeapRecords;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
         Heap = require("../heap.js");
+        HeapRecords = require("../heap_records.js");
     }
 
     var sharedJS = null;
@@ -20,6 +22,10 @@
     var sharedIndexX86 = null;
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
+    var markLayoutBindings = {
+        HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
+        BYTECODE_EXECUTION_CACHE: HeapRecords.KernelConstants.BYTECODE_EXECUTION_CACHE
+    };
 
     /* Ordinary closure bindings, taken from the authoritative heap layout.
      * The compiler receives these same values as its external environment;
@@ -379,6 +385,9 @@
                                       itemIndex * VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
                     } else referenceIndex = -2;
+                } else if (type === HEAP_TYPE_BYTECODE) {
+                    if (referenceIndex === 0) target = bytecodeExecutionCache(heapBase, address);
+                    else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_PROGRAM) {
                     if (referenceIndex === 0) target = programBytecode(heapBase, address);
                     else if (referenceIndex === 1) target = programConstants(heapBase, address);
@@ -588,6 +597,7 @@
             var sweeper = backend.compile(ir);
             var markIR = new KernelCompiler().compile(heapMarkKernel, {
                 legacyConstantLocals: true,
+                constantBindings: markLayoutBindings,
                 registerPreferences: ["heapBase", "address", "stackCount"]
             });
             var marker = backend.compile(markIR);

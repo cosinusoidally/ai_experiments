@@ -552,6 +552,56 @@ exit, demo-specific shortcut, larger heap used to conceal a leak, or native
 path that calls back into SpiderMonkey does not satisfy the endpoint.
 ## Register bytecode dataflow
 
+### Experimental native operand preparation
+
+`--vm-predecode` selects an opt-in execution representation when constructing
+the native kernel. It implies `--vm-native`; embedders use
+`nativeOperandPredecode: true`. It is not the default. For example:
+
+```
+js_min.exe guest_runner.js --vm-native --vm-predecode --snapshot artifacts/predecoded
+./artifacts/js_runner.exe artifacts/predecoded hello.js
+```
+
+An existing standalone image already contains its selected kernel; do not add
+`--vm-predecode` to its application arguments. Code-only snapshot loading checks
+the operand mode as well as the compiler/source/profile contract. The mode is
+an explicit header field, not an overloaded compiler version or profile bit.
+
+Canonical bytecode remains unchanged. Verification, debugging, source positions,
+program adoption and the ordinary reference interpreter continue to use it.
+The execution view has the same instruction widths and word-indexed PCs, but
+selected value/storage instructions carry register byte offsets rather than
+logical register numbers. Constants, lexical depths/slots, jump targets, call
+argument vectors, and unconverted instruction families retain their canonical
+representation. `bytecode.js` derives the register-position masks from its
+shared source/destination metadata; it is the single authority for preparation.
+`bytecodeRegisterCellAddress` expresses the selected scale without manual
+address arithmetic. No source names or object shapes select this optimization.
+
+The complete layout table lives in the guest heap and is rooted by the runtime
+support vector. `prepareExecutionBytecodeKernel` lazily creates a guest BYTECODE
+record, validates instruction boundaries and offset overflow, then publishes
+it through the canonical record's `bytecodeExecutionCache` field. That field
+uses an existing reserved word; record sizes and canonical word positions do
+not move. Both collectors trace the link. The prepared record holds only
+relative offsets, never the heap base or fixed native addresses. It therefore
+survives logical heap growth without rebasing and is freed with its owner.
+This is in-memory operand decoding, not a disk/source/parser cache.
+
+Preparation runs in the kernel on either backend. Allocation failure publishes
+the frame/PC and completed-instruction count and uses the existing collection
+and retry boundary; it does not execute a partially prepared record. Frame
+entry/return/exception transitions obtain the appropriate view. ProgramSetCode
+invalidates it on both embedding and native paths; a normal intrinsic CALL
+also refreshes an invalidated active program before the next instruction.
+Callbacks and unsupported operations still have canonical bytecode available.
+
+The existing native integration scenarios run in both modes, including a
+collection between budget suspension and resume. Performance and sustained
+demo validation of the opt-in mode are tracked in `ZLIB_PERFORMANCE.md`; passing
+small integration scenarios alone is not sufficient to make it the default.
+
 `bytecode.js` owns instruction widths, destination and source-operand metadata. The
 verifier, interpreter fallback synchronizer, and bytecode optimizer share this
 layout rather than keeping independent opcode lists.

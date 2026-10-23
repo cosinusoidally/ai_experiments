@@ -131,6 +131,29 @@
     inputs([1, 3], [op.SET_PROPERTY_CONST]);
     inputs([3], [op.SET_LOCAL]);
 
+    /* Private execution-view layout. Canonical bytecode and public register
+     * numbering remain unchanged. Initially predecode the value/storage
+     * families; calls and their argument vectors keep canonical indices. */
+    op.NATIVE_LAYOUT = {WIDTH: 0, REGISTER_MASK: 1, STRIDE: 2};
+    op.NATIVE_REGISTER_MASKS = [];
+    var offsetInstructions = [op.CONST, op.MOVE, op.GET_LOCAL, op.SET_LOCAL, op.GET_PROPERTY,
+        op.TO_INT32, op.ADD_INT32, op.SUBTRACT_INT32,
+        op.BIT_AND, op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
+        op.SHIFT_UNSIGNED_RIGHT, op.BIT_NOT];
+    var offsetInstructionIndex, offsetOperandIndex;
+    for (offsetInstructionIndex = 0; offsetInstructionIndex < offsetInstructions.length;
+         offsetInstructionIndex++) {
+        var offsetOpcode = offsetInstructions[offsetInstructionIndex];
+        var registerMask = 0;
+        var offsetSources = op.SOURCE_OPERANDS[offsetOpcode];
+        for (offsetOperandIndex = 0; offsetOperandIndex < offsetSources.length;
+             offsetOperandIndex++) registerMask |= 1 << offsetSources[offsetOperandIndex];
+        if (op.DESTINATION_OPERANDS[offsetOpcode]) {
+            registerMask |= 1 << op.DESTINATION_OPERANDS[offsetOpcode];
+        }
+        op.NATIVE_REGISTER_MASKS[offsetOpcode] = registerMask;
+    }
+
     root.GuestVMBytecode = op;
     if (typeof module !== "undefined" && module.exports) module.exports = op;
 }(this));

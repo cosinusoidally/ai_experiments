@@ -74,6 +74,7 @@
     var HANDLER_BYTES = 16;
 
     var BYTECODE_LENGTH = 0;
+    var BYTECODE_EXECUTION_CACHE = 4;
     var BYTECODE_WORDS = 8;
 
     var PROGRAM_BYTECODE = 0;
@@ -218,6 +219,8 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
+        BYTECODE_EXECUTION_CACHE: Heap.HEADER_SIZE + BYTECODE_EXECUTION_CACHE,
         ENGINE_OPCODE_COUNT: ENGINE_OPCODE_COUNT,
         ENGINE_OPCODE_TAG_STRIDE: ENGINE_OPCODE_TAG_STRIDE,
         ENGINE_OPCODE_TAG_COUNT: ENGINE_OPCODE_TAG_COUNT,
@@ -1093,6 +1096,16 @@
                                       Heap.Types.BYTECODE);
     };
 
+    Records.prototype.bytecodeExecutionCache = function (bytecode) {
+        return this.heap.readTrustedFieldU32(bytecode,
+            BYTECODE_EXECUTION_CACHE, Heap.Types.BYTECODE);
+    };
+
+    Records.prototype.setBytecodeExecutionCache = function (bytecode, decoded) {
+        this.heap.writeTrustedFieldU32(bytecode,
+            BYTECODE_EXECUTION_CACHE, decoded, Heap.Types.BYTECODE);
+    };
+
     Records.prototype.bytecodeWord = function (bytecode, index) {
         if (index < 0 || index >= this.bytecodeLength(bytecode) ||
             index !== Math.floor(index)) throw new RangeError("invalid bytecode index");
@@ -1106,6 +1119,7 @@
             index !== Math.floor(index)) throw new RangeError("invalid bytecode index");
         this.heap.writeTrustedFieldU32(bytecode,
             BYTECODE_WORDS + index * 4, value >>> 0, Heap.Types.BYTECODE);
+        this.setBytecodeExecutionCache(bytecode, 0);
     };
 
     Records.prototype.bytecodeWordsAddress = function (bytecode) {
@@ -1888,6 +1902,8 @@
             while (registerIndex < records.frameRegisterCount(address)) {
                 cell(records.frameRegisterCell(address, registerIndex++));
             }
+        } else if (type === Heap.Types.BYTECODE) {
+            reference(records.bytecodeExecutionCache(address));
         } else if (type === Heap.Types.PROGRAM) {
             reference(records.programBytecode(address));
             reference(records.programConstants(address));

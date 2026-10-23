@@ -149,6 +149,10 @@
         VM, NativeInterpreter, bytecode);
     if (typeof print === "function") print(nativeInterpreterResult);
     else console.log(nativeInterpreterResult);
+    var predecodedInterpreterResult = runNativeInterpreterTest(
+        VM, NativeInterpreter, bytecode, true) + " (predecoded operands)";
+    if (typeof print === "function") print(predecodedInterpreterResult);
+    else console.log(predecodedInterpreterResult);
 
     var netCompileVM = new VM();
     netCompileVM.compile(readSource("../../net.js"), "net.js");

@@ -566,6 +566,7 @@
         programFunctionNameSlot: "PROGRAM_FUNCTION_NAME_SLOT",
         programFlags: "PROGRAM_FLAGS",
         bytecodeLength: "BYTECODE_LENGTH",
+        bytecodeExecutionCache: "BYTECODE_EXECUTION_CACHE",
         contextGlobal: "CONTEXT_GLOBAL",
         contextActiveFrame: "CONTEXT_ACTIVE_FRAME",
         contextNext: "CONTEXT_NEXT",
@@ -702,6 +703,7 @@
         setContextActiveFrame: "CONTEXT_ACTIVE_FRAME",
         setVectorCapacity: "VECTOR_CAPACITY",
         setBytecodeLength: "BYTECODE_LENGTH",
+        setBytecodeExecutionCache: "BYTECODE_EXECUTION_CACHE",
         setProgramBytecode: "PROGRAM_BYTECODE",
         setProgramConstants: "PROGRAM_CONSTANTS",
         setProgramConstantRegisters: "PROGRAM_CONSTANT_REGISTERS",
@@ -747,6 +749,7 @@
 
     var INDEXED_ADDRESS_ACCESSORS = {
         valueCellAddress: {fieldValue: 0, stride: "VALUE_CELL_BYTES"},
+        bytecodeRegisterCellAddress: {fieldValue: 0, stride: "BYTECODE_REGISTER_SCALE"},
         vectorCellAddress: {field: "VECTOR_CELLS",
                             stride: "VALUE_CELL_BYTES"},
         frameRegisterCellAddress: {field: "FRAME_REGISTERS",

@@ -353,6 +353,7 @@
             (options.heapBytes === undefined ? 512 * 1024 * 1024 :
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
+        this.nativeOperandPredecode = !!options.nativeOperandPredecode;
         this.traceExceptions = !!options.traceExceptions;
         this.forbidHostCalls = !!options.forbidHostCalls;
         this.logHostCalls = !!options.logHostCalls;

@@ -28,6 +28,7 @@ var guestRunnerTraceExceptions = false;
 var guestRunnerVerifyHeap = false;
 var guestRunnerThreaded = false;
 var guestRunnerNative = false;
+var guestRunnerPredecode = false;
 var guestRunnerSnapshot = null;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
@@ -94,6 +95,9 @@ for (var guestRunnerOptionIndex = 0;
         guestRunnerThreaded = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
         guestRunnerNative = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-predecode") {
+        guestRunnerPredecode = true;
+        guestRunnerNative = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-no-host-calls") {
         guestRunnerForbidHostCalls = true;
@@ -147,7 +151,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-no-host-calls] " +
                      "[--vm-log-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
-                     "[--vm-native] [--snapshot file | " +
+                     "[--vm-native] [--vm-predecode] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] " +
                      "[program.js]";
     if (typeof print === "function") print(guestUsage);
@@ -171,6 +175,7 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         verifyNativeHeap: guestRunnerVerifyHeap,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,
+                                        nativeOperandPredecode: guestRunnerPredecode,
                                         snapshot: guestRunnerSnapshot,
                                         deferSnapshotWrite:
                                             !!guestRunnerSnapshot,

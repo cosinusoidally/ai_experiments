@@ -327,6 +327,8 @@
     var SNAPSHOT_MAGIC = 0x31535647;
     var SNAPSHOT_FORMAT_VERSION = 1;
     var SNAPSHOT_HEADER_BYTES = 32;
+    var SNAPSHOT_OPERAND_MODE_OFFSET = 24;
+    var STANDALONE_OPERAND_MODE_OFFSET = 92;
     var STANDALONE_SNAPSHOT_MAGIC = 0x32535647;
     var STANDALONE_SNAPSHOT_VERSION = 2;
     var STANDALONE_HEADER_BYTES = 128;
@@ -370,6 +372,8 @@
         var compilerVersion = peek32(header + (standalone ? 80 : 8)) >>> 0;
         var profileMode = peek32(header + (standalone ? 84 : 12)) >>> 0;
         var sourceHash = peek32(header + (standalone ? 88 : 16)) >>> 0;
+        var operandMode = peek32(header + (standalone ?
+            STANDALONE_OPERAND_MODE_OFFSET : SNAPSHOT_OPERAND_MODE_OFFSET)) >>> 0;
         var codeOffset = standalone ? peek32(header + 20) >>> 0 :
                                       SNAPSHOT_HEADER_BYTES;
         var length = peek32(header + (standalone ? 24 : 20)) >>> 0;
@@ -379,6 +383,7 @@
             (formatVersion !== SNAPSHOT_FORMAT_VERSION && !standalone) ||
             compilerVersion !== (expected.compilerVersion >>> 0) ||
             profileMode !== (expected.profileMode >>> 0) ||
+            operandMode !== (expected.operandMode >>> 0) ||
             (!expected.skipSourceHash &&
              sourceHash !== (expected.sourceHash >>> 0)) ||
             length <= 0 || length > 16 * 1024 * 1024) {
@@ -441,6 +446,7 @@
         poke32(header + 8, metadata.compilerVersion | 0);
         poke32(header + 12, metadata.profileMode | 0);
         poke32(header + 16, metadata.sourceHash | 0);
+        poke32(header + SNAPSHOT_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
         poke32(header + 20, result.length | 0);
         var complete = writeExact(this.ffi, writePointer, descriptor, header,
                                   SNAPSHOT_HEADER_BYTES) &&
@@ -942,6 +948,7 @@
             poke32(staging + 80, metadata.compilerVersion | 0);
             poke32(staging + 84, metadata.profileMode | 0);
             poke32(staging + 88, metadata.sourceHash | 0);
+            poke32(staging + STANDALONE_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
             copyBytesToNative(staging + layout.entryOffset, bootstrap.bytes);
             copyBytesToNative(staging + layout.mmapNameOffset,
                               mmapNameBytes);

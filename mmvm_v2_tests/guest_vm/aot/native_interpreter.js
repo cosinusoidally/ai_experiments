@@ -25,6 +25,10 @@
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
+    var BYTECODE_REGISTER_SCALE = ValueCells.PAYLOAD_BYTES;
+    var BYTECODE_LAYOUT_WIDTH = Bytecode.NATIVE_LAYOUT.WIDTH;
+    var BYTECODE_LAYOUT_REGISTER_MASK = Bytecode.NATIVE_LAYOUT.REGISTER_MASK;
+    var BYTECODE_LAYOUT_STRIDE = Bytecode.NATIVE_LAYOUT.STRIDE;
     var CELL_INT32 = ValueCells.Tags.INT32;
     var CELL_DOUBLE = ValueCells.Tags.DOUBLE;
     var CELL_TRUE = ValueCells.Tags.TRUE;
@@ -125,6 +129,8 @@
     };
     var RUNTIME_SUPPORT_URI_ERROR_PROTOTYPE =
         RuntimeSupportLayout.URI_ERROR_PROTOTYPE;
+    RuntimeSupportLayout.BYTECODE_LAYOUT = RuntimeSupportLayout.COUNT++;
+    var RUNTIME_SUPPORT_BYTECODE_LAYOUT = RuntimeSupportLayout.BYTECODE_LAYOUT;
     var RUNTIME_SUPPORT_URI_ERROR_NAME = RuntimeSupportLayout.URI_ERROR_NAME;
     var RUNTIME_SUPPORT_MALFORMED_URI_MESSAGE =
         RuntimeSupportLayout.MALFORMED_URI_MESSAGE;
@@ -185,6 +191,73 @@
             NativeIntrinsics.DECODE_URI_COMPONENT;
         overrides.INTRINSIC_DECODE_URI = NativeIntrinsics.DECODE_URI;
         return overrides;
+    }
+
+    /* One relative-offset execution view per canonical bytecode record. No
+     * source parsing, host object, persistent cache or absolute heap address
+     * participates. The record is published only after complete preparation. */
+    function prepareExecutionBytecodeKernel(heapBase, state, bytecode, stringSupport) {
+        var cached = bytecodeExecutionCache(heapBase, bytecode);
+        if (cached !== 0) return cached;
+        var layout = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_BYTECODE_LAYOUT));
+        var layoutLength = vectorLength(heapBase, layout);
+        var length = bytecodeLength(heapBase, bytecode);
+        var bytes = recordSize(heapBase, bytecode);
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        var decoded = engineHeapBump(heapBase, state);
+        setRecordType(heapBase, decoded, HEAP_TYPE_BYTECODE);
+        setRecordSize(heapBase, decoded, bytes);
+        setRecordMark(heapBase, decoded, 0);
+        setRecordFlags(heapBase, decoded, 0);
+        setBytecodeLength(heapBase, decoded, length);
+        setBytecodeExecutionCache(heapBase, decoded, 0);
+        var pc = 0;
+        while (pc < length) {
+            var opcode = bytecodePayloadWord(heapBase,
+                bytecode + BYTECODE_WORDS, pc);
+            if (opcode < 0) return 0;
+            var layoutIndex = opcode * BYTECODE_LAYOUT_STRIDE;
+            if (layoutIndex < 0 || layoutIndex > layoutLength - BYTECODE_LAYOUT_STRIDE) return 0;
+            var width = valueCellInt32(0, vectorCellAddress(heapBase,
+                layout, layoutIndex + BYTECODE_LAYOUT_WIDTH));
+            var mask = valueCellInt32(0, vectorCellAddress(heapBase,
+                layout, layoutIndex + BYTECODE_LAYOUT_REGISTER_MASK));
+            if (width <= 0 || width > length - pc) return 0;
+            var operand = 0;
+            while (operand < width) {
+                var word = bytecodePayloadWord(heapBase,
+                    bytecode + BYTECODE_WORDS, pc + operand);
+                if ((mask & (1 << operand)) !== 0) {
+                    if (word < 0) return 0;
+                    var offset = (word * VALUE_CELL_BYTES) | 0;
+                    if (offset < 0 || divideI32(offset, VALUE_CELL_BYTES) !== word) return 0;
+                    word = offset;
+                }
+                store32(bytecodeWordAddress(heapBase, decoded, pc + operand), word);
+                operand = operand + 1;
+            }
+            pc = pc + width;
+        }
+        setEngineHeapBump(heapBase, state, decoded + bytes);
+        setBytecodeExecutionCache(heapBase, bytecode, decoded);
+        return decoded;
+    }
+
+    function executionBytecodeAddressKernel(heapBase, state, program, stringSupport) {
+        var bytecode = programBytecode(heapBase, program);
+        if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES) {
+            bytecode = prepareExecutionBytecodeKernel(heapBase, state, bytecode, stringSupport);
+            if (bytecode === 0) return 0;
+        }
+        return bytecodeWordAddress(heapBase, bytecode, 0);
+    }
+
+    function bytecodePreparationExitKernel(heapBase, state, frame, instructions) {
+        var pc = frameSavedPC(heapBase, frame);
+        var bytecode = programBytecode(heapBase, frameProgram(heapBase, frame));
+        var opcode = bytecodePayloadWord(heapBase, bytecode + BYTECODE_WORDS, pc);
+        return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
     }
 
     function interpreterKernel(heapBase, frame, platformServices,
@@ -688,10 +761,15 @@
 
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
+        setEngineAllocationFailed(heapBase, state, 0);
+        setEngineCurrentFrame(heapBase, state, frame);
+        setContextActiveFrame(heapBase, currentContext, frame);
         /* Execution-local native address, refreshed whenever the frame changes.
          * No absolute code/heap pointer is stored in a guest program record. */
-        var bytecodeAddress = bytecodeWordAddress(
-            heapBase, programBytecode(heapBase, currentProgram), 0);
+        var bytecodeAddress = executionBytecodeAddressKernel(
+            heapBase, state, currentProgram, stringSupport);
+        if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+            heapBase, state, frame, 0);
         var constantCells = load32(
             heapBase + currentProgram + PROGRAM_CONSTANTS) + VECTOR_CELLS;
         var globalObject = contextGlobal(heapBase, currentContext);
@@ -707,10 +785,6 @@
          * configuration. Refresh after CALL; embedder changes resume through
          * a fresh kernel invocation. Remaining stress work stays in state. */
         var gcStressInterval = engineGCStressInterval(heapBase, state);
-        setEngineAllocationFailed(heapBase, state, 0);
-        setEngineCurrentFrame(heapBase, state, frame);
-        setContextActiveFrame(
-            heapBase, frameContext(heapBase, frame), frame);
         while (budget > 0) {
             var opcode = load32(bytecodeAddress + pc * WORD_BYTES);
             /* Stress only at an opcode boundary, before temporary allocation
@@ -733,9 +807,9 @@
              * they do not need a second range filter on every iteration. */
             beginOpcodeDispatch(opcode, OP_CONST, OP_TO_INT32);
             if (opcode === OP_TO_INT32) {
-                var conversionTarget = valueCellAddress(0, registerAddress,
+                var conversionTarget = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
-                var conversionSource = valueCellAddress(0, registerAddress,
+                var conversionSource = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND));
                 if (PROFILE_OPCODES !== 0) {
                     recordOpcodeOperandTagsKernel(heapBase, state, opcode,
@@ -748,11 +822,11 @@
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_ADD_INT32 || opcode === OP_SUBTRACT_INT32) {
-                var integerTarget = valueCellAddress(0, registerAddress,
+                var integerTarget = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
-                var integerLeft = valueCellAddress(0, registerAddress,
+                var integerLeft = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND));
-                var integerRight = valueCellAddress(0, registerAddress,
+                var integerRight = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + THIRD_OPERAND));
                 if (valueCellTag(0, integerLeft) !== VALUE_TAG_INT32 ||
                     valueCellTag(0, integerRight) !== VALUE_TAG_INT32) {
@@ -770,14 +844,14 @@
                 setValueCellInt32(integerTarget, integerResult);
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_CONST) {
-                var constantTarget = load32(bytecodeAddress +
+                var constantTargetOperand = load32(bytecodeAddress +
                                             (pc + FIRST_OPERAND) * WORD_BYTES);
                 var constantIndex = load32(bytecodeAddress +
                                            (pc + SECOND_OPERAND) * WORD_BYTES);
                 var constantSource = heapBase + constantCells +
                                      constantIndex * VALUE_CELL_BYTES;
-                var constantDestination = registerAddress +
-                                          constantTarget * VALUE_CELL_BYTES;
+                var constantDestination = bytecodeRegisterCellAddress(
+                    0, registerAddress, constantTargetOperand);
                 copyValueCell(constantDestination, constantSource);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_THIS) {
@@ -850,8 +924,10 @@
                     frame = engineCurrentFrame(heapBase, state);
                     currentContext = frameContext(heapBase, frame);
                     currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = bytecodeWordAddress(
-                        heapBase, programBytecode(heapBase, currentProgram), 0);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
                     constantCells = programConstants(
                         heapBase, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(
@@ -940,30 +1016,30 @@
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_MOVE) {
-                var moveTarget = load32(bytecodeAddress +
+                var moveTargetOperand = load32(bytecodeAddress +
                                         (pc + FIRST_OPERAND) * WORD_BYTES);
-                var moveSourceIndex = load32(bytecodeAddress +
+                var moveSourceOperand = load32(bytecodeAddress +
                                              (pc + SECOND_OPERAND) * WORD_BYTES);
-                var moveSource = registerAddress +
-                                 moveSourceIndex * VALUE_CELL_BYTES;
-                var moveDestination = registerAddress +
-                                      moveTarget * VALUE_CELL_BYTES;
+                var moveSource = bytecodeRegisterCellAddress(
+                    0, registerAddress, moveSourceOperand);
+                var moveDestination = bytecodeRegisterCellAddress(
+                    0, registerAddress, moveTargetOperand);
                 copyValueCell(moveDestination, moveSource);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_PROPERTY) {
-                var arrayGetTargetIndex = load32(
+                var arrayGetTargetOperand = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var arrayGetObjectIndex = load32(
+                var arrayGetObjectOperand = load32(
                     bytecodeAddress +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var arrayGetKeyIndex = load32(
+                var arrayGetKeyOperand = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var arrayGetObjectCell = registerAddress +
-                    arrayGetObjectIndex * VALUE_CELL_BYTES;
-                var arrayGetKeyCell = registerAddress +
-                    arrayGetKeyIndex * VALUE_CELL_BYTES;
+                var arrayGetObjectCell = bytecodeRegisterCellAddress(
+                    0, registerAddress, arrayGetObjectOperand);
+                var arrayGetKeyCell = bytecodeRegisterCellAddress(
+                    0, registerAddress, arrayGetKeyOperand);
                 var arrayGetSupported = 1;
                 var arrayGetObjectTag = load32(arrayGetObjectCell);
                 if (arrayGetObjectTag !== VALUE_TAG_REFERENCE) {
@@ -1019,8 +1095,8 @@
                     var arrayGetObjectType = recordType(
                         heapBase, arrayGetObject);
                     if (arrayGetObjectType === HEAP_TYPE_STRING) {
-                        var indexedStringTarget = registerAddress +
-                            arrayGetTargetIndex * VALUE_CELL_BYTES;
+                        var indexedStringTarget = bytecodeRegisterCellAddress(
+                            0, registerAddress, arrayGetTargetOperand);
                         var indexedStringLength = stringLength(
                             heapBase, arrayGetObject);
                         if (arrayGetIndex >= indexedStringLength) {
@@ -1100,8 +1176,8 @@
                 if (arrayGetSupported <= 2) {
                     if (arrayGetIndex < 0) arrayGetSupported = 0;
                 }
-                var arrayGetTarget = registerAddress +
-                    arrayGetTargetIndex * VALUE_CELL_BYTES;
+                var arrayGetTarget = bytecodeRegisterCellAddress(
+                    0, registerAddress, arrayGetTargetOperand);
                 if (arrayGetSupported === 5) {
                     arrayGetSupported = numericPropertyGetKernel(
                         heapBase, state, arrayGetTarget, arrayGetObject,
@@ -1427,8 +1503,8 @@
                                 indexedConversionPC) === OP_TO_INT32 &&
                             bytecodePayloadWord(0, bytecodeAddress,
                                 indexedConversionPC + SECOND_OPERAND) ===
-                                    arrayGetTargetIndex) {
-                            var indexedConversionTarget = valueCellAddress(
+                                    arrayGetTargetOperand) {
+                            var indexedConversionTarget = bytecodeRegisterCellAddress(
                                 0, registerAddress, bytecodePayloadWord(
                                     0, bytecodeAddress,
                                     indexedConversionPC + FIRST_OPERAND));
@@ -3306,8 +3382,10 @@
                 frame = engineCurrentFrame(heapBase, state);
                 currentContext = frameContext(heapBase, frame);
                 currentProgram = frameProgram(heapBase, frame);
-                bytecodeAddress = bytecodeWordAddress(
-                    heapBase, programBytecode(heapBase, currentProgram), 0);
+                bytecodeAddress = executionBytecodeAddressKernel(
+                    heapBase, state, currentProgram, stringSupport);
+                if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                    heapBase, state, frame, initialBudget - budget + 1);
                 constantCells = programConstants(
                     heapBase, currentProgram) + VECTOR_CELLS;
                 globalObject = contextGlobal(heapBase, currentContext);
@@ -3390,8 +3468,10 @@
                     frame = engineCurrentFrame(heapBase, state);
                     currentContext = frameContext(heapBase, frame);
                     currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = bytecodeWordAddress(
-                        heapBase, programBytecode(heapBase, currentProgram), 0);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
                     constantCells = programConstants(
                         heapBase, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(
@@ -3439,8 +3519,10 @@
                     frame = engineCurrentFrame(heapBase, state);
                     currentContext = frameContext(heapBase, frame);
                     currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = bytecodeWordAddress(
-                        heapBase, programBytecode(heapBase, currentProgram), 0);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
                     constantCells = programConstants(
                         heapBase, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(heapBase, currentContext);
@@ -3451,6 +3533,18 @@
                             INTRINSIC_RESULT_EXCEPTION_HANDLED) {
                         pc = frameSavedPC(heapBase, frame);
                     } else pc = 0;
+                }
+                /* ProgramSetCode can edit the active program from a normal
+                 * intrinsic call. Rebuild only after such invalidation, not
+                 * on every instruction or every ordinary call. */
+                if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES &&
+                    bytecodeExecutionCache(heapBase,
+                        programBytecode(heapBase, currentProgram)) === 0) {
+                    setFramePC(heapBase, frame, pc);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
                 }
                 gcStressInterval = engineGCStressInterval(heapBase, state);
             } else if (opcode === OP_PUSH_CATCH) {
@@ -3502,8 +3596,10 @@
                 frame = engineCurrentFrame(heapBase, state);
                 currentContext = frameContext(heapBase, frame);
                 currentProgram = frameProgram(heapBase, frame);
-                bytecodeAddress = bytecodeWordAddress(
-                    heapBase, programBytecode(heapBase, currentProgram), 0);
+                bytecodeAddress = executionBytecodeAddressKernel(
+                    heapBase, state, currentProgram, stringSupport);
+                if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                    heapBase, state, frame, initialBudget - budget + 1);
                 constantCells = programConstants(
                     heapBase, currentProgram) + VECTOR_CELLS;
                 globalObject = contextGlobal(heapBase, currentContext);
@@ -3679,21 +3775,18 @@
             } else if (opcode <= OP_BIT_NOT) {
                 if (opcode >= OP_BIT_AND) {
                     if (opcode <= OP_SHIFT_UNSIGNED_RIGHT) {
-                    var bitTargetIndex = load32(
+                    var bitTargetOperand = load32(
                         bytecodeAddress +
                         (pc + FIRST_OPERAND) * WORD_BYTES);
-                    var bitLeftIndex = load32(
+                    var bitLeftOperand = load32(
                         bytecodeAddress +
                         (pc + SECOND_OPERAND) * WORD_BYTES);
-                    var bitRightIndex = load32(
+                    var bitRightOperand = load32(
                         bytecodeAddress +
                         (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var bitTarget = registerAddress +
-                                    bitTargetIndex * VALUE_CELL_BYTES;
-                    var bitLeft = registerAddress +
-                                  bitLeftIndex * VALUE_CELL_BYTES;
-                    var bitRight = registerAddress +
-                                   bitRightIndex * VALUE_CELL_BYTES;
+                    var bitTarget = bytecodeRegisterCellAddress(0, registerAddress, bitTargetOperand);
+                    var bitLeft = bytecodeRegisterCellAddress(0, registerAddress, bitLeftOperand);
+                    var bitRight = bytecodeRegisterCellAddress(0, registerAddress, bitRightOperand);
                     var bitLeftTag = load32(bitLeft);
                     var bitRightTag = load32(bitRight);
                     if (PROFILE_OPCODES !== 0) {
@@ -3787,14 +3880,14 @@
                     }
                     pc = pc + FOUR_WORD_INSTRUCTION;
                     } else if (opcode === OP_BIT_NOT) {
-                    var bitNotTargetIndex = load32(
+                    var bitNotTargetOperand = load32(
                         bytecodeAddress +
                         (pc + FIRST_OPERAND) * WORD_BYTES);
-                    var bitNotSourceIndex = load32(
+                    var bitNotSourceOperand = load32(
                         bytecodeAddress +
                         (pc + SECOND_OPERAND) * WORD_BYTES);
-                    var bitNotSource = registerAddress +
-                        bitNotSourceIndex * VALUE_CELL_BYTES;
+                    var bitNotSource = bytecodeRegisterCellAddress(
+                        0, registerAddress, bitNotSourceOperand);
                     var bitNotTag = load32(bitNotSource);
                     var bitNotValid = 0;
                     if (bitNotTag === VALUE_TAG_INT32) bitNotValid = 1;
@@ -3807,8 +3900,8 @@
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                    var bitNotTarget = registerAddress +
-                        bitNotTargetIndex * VALUE_CELL_BYTES;
+                    var bitNotTarget = bytecodeRegisterCellAddress(
+                        0, registerAddress, bitNotTargetOperand);
                     var bitNotValue = 0;
                     if (bitNotTag === VALUE_TAG_TRUE) bitNotValue = 1;
                     else if (bitNotTag === VALUE_TAG_INT32) {
@@ -4035,14 +4128,14 @@
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_LOCAL) {
-                var localTargetIndex = load32(
+                var localTargetOperand = load32(
                     bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
                 var localDepth = load32(
                     bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES);
                 var localSlot = load32(
                     bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES);
-                var localDestination = valueCellAddress(
-                    0, registerAddress, localTargetIndex);
+                var localDestination = bytecodeRegisterCellAddress(
+                    0, registerAddress, localTargetOperand);
                 var localBinding = resolveLocalBindingCellKernel(
                     heapBase, environment, localDepth, localSlot);
                 if (localBinding === 0) {
@@ -4056,10 +4149,10 @@
                     bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
                 var setLocalSlot = load32(
                     bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES);
-                var setLocalSourceIndex = load32(
+                var setLocalSourceOperand = load32(
                     bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES);
-                var setLocalSource = valueCellAddress(
-                    0, registerAddress, setLocalSourceIndex);
+                var setLocalSource = bytecodeRegisterCellAddress(
+                    0, registerAddress, setLocalSourceOperand);
                 var setLocalBinding = resolveLocalBindingCellKernel(
                     heapBase, environment, setLocalDepth, setLocalSlot);
                 if (setLocalBinding === 0) {
@@ -4378,8 +4471,10 @@
                     frame = engineCurrentFrame(heapBase, state);
                     currentContext = frameContext(heapBase, frame);
                     currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = bytecodeWordAddress(
-                        heapBase, programBytecode(heapBase, currentProgram), 0);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
                     constantCells = programConstants(
                         heapBase, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(heapBase, currentContext);
@@ -4604,8 +4699,10 @@
                     frame = engineCurrentFrame(heapBase, state);
                     currentContext = frameContext(heapBase, frame);
                     currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = bytecodeWordAddress(
-                        heapBase, programBytecode(heapBase, currentProgram), 0);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
                     constantCells = programConstants(
                         heapBase, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(heapBase, currentContext);
@@ -15063,6 +15160,7 @@
         setRecordMark(heapBase, bytecode, 0);
         setRecordFlags(heapBase, bytecode, 0);
         setBytecodeLength(heapBase, bytecode, codeLength);
+        setBytecodeExecutionCache(heapBase, bytecode, 0);
         var index = 0;
         while (index < codeLength) {
             store32(bytecodeWordAddress(heapBase, bytecode, index), 0);
@@ -15130,6 +15228,7 @@
         var bytecode = programBytecode(heapBase, program);
         if (index >= bytecodeLength(heapBase, bytecode)) return 0;
         store32(bytecodeWordAddress(heapBase, bytecode, index), value);
+        setBytecodeExecutionCache(heapBase, bytecode, 0);
         setValueCellReference(targetCell, callable);
         return 1;
     }
@@ -17128,6 +17227,9 @@
                 instantiateGlobalDeclarationsKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             interpreterKernel: interpreterKernel,
+            prepareExecutionBytecodeKernel: prepareExecutionBytecodeKernel,
+            executionBytecodeAddressKernel: executionBytecodeAddressKernel,
+            bytecodePreparationExitKernel: bytecodePreparationExitKernel,
             intrinsicCallKernel: intrinsicCallKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
@@ -17266,7 +17368,8 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 37,
+                compilerVersion: 38,
+                operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,
@@ -17300,6 +17403,12 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    BYTECODE_REGISTER_SCALE: runtime.nativeOperandPredecode ? 1 : BYTECODE_REGISTER_SCALE,
+                    BYTECODE_LAYOUT_WIDTH: BYTECODE_LAYOUT_WIDTH,
+                    BYTECODE_LAYOUT_REGISTER_MASK: BYTECODE_LAYOUT_REGISTER_MASK,
+                    BYTECODE_LAYOUT_STRIDE: BYTECODE_LAYOUT_STRIDE,
+                    RUNTIME_SUPPORT_BYTECODE_LAYOUT: RUNTIME_SUPPORT_BYTECODE_LAYOUT,
+                    BYTECODE_EXECUTION_CACHE: kernelConstantOverrides.BYTECODE_EXECUTION_CACHE,
                     CELL_INT32: CELL_INT32,
                     CELL_DOUBLE: CELL_DOUBLE,
                     CELL_TRUE: CELL_TRUE,
@@ -17502,6 +17611,23 @@
         }
         this.stringSupportAddress = runtime.heapRecords.allocateValueVector(
             RuntimeSupportLayout.COUNT);
+        var bytecodeLayout = runtime.heapRecords.allocateValueVector(
+            Bytecode.NAMES.length * BYTECODE_LAYOUT_STRIDE);
+        var bytecodeOpcode = 0;
+        while (bytecodeOpcode < Bytecode.NAMES.length) {
+            var bytecodeLayoutIndex = bytecodeOpcode * BYTECODE_LAYOUT_STRIDE;
+            runtime.valueCells.writePrimitiveAt(runtime.heapRecords.vectorCell(
+                bytecodeLayout, bytecodeLayoutIndex + BYTECODE_LAYOUT_WIDTH),
+                Bytecode.WIDTHS[bytecodeOpcode] || 0);
+            runtime.valueCells.writePrimitiveAt(runtime.heapRecords.vectorCell(
+                bytecodeLayout, bytecodeLayoutIndex + BYTECODE_LAYOUT_REGISTER_MASK),
+                Bytecode.NATIVE_REGISTER_MASKS[bytecodeOpcode] || 0);
+            bytecodeOpcode++;
+        }
+        runtime.heapRecords.setVectorLength(bytecodeLayout,
+            Bytecode.NAMES.length * BYTECODE_LAYOUT_STRIDE);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.BYTECODE_LAYOUT), bytecodeLayout);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_KEY),
             runtime.internStringAddress("charAt"));

@@ -229,6 +229,9 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
             snapshotPath = runnerArguments[index++];
         } else if (!programPath && option === "--vm-native") {
             /* The standalone interpreter is already native. */
+        } else if (!programPath && option === "--vm-predecode") {
+            throw new Error("--vm-predecode is selected when building the snapshot; " +
+                "omit it when running an existing snapshot");
         } else if (!programPath && option === "--vm-profile") {
             GuestStandaloneProfile = true;
         } else if (!programPath && option === "--vm-gc-stress") {

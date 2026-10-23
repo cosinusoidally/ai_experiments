@@ -16,6 +16,26 @@ baseline comparisons and known limitations are recorded below.
 
 ## 2026-10-23 temporary/register analysis
 
+### Opt-in native operand preparation
+
+The first `--vm-predecode` image verified two full-buffer batches at
+24.965/24.890 seconds, initialization 16.168 seconds. Cold build stages were
+runtime 16.523 seconds, environment 1.413, standalone preparation 62.807,
+writing 0.775 (about 81.5 seconds total). This is a modest initial gain over
+the default 25.4-second checkpoint, not completion of the 22.4-second target.
+It is not enabled by default. Image/log prefix: ignored
+`artifacts/zlib-predecoded`. A sustained demo8 validation is in progress.
+
+Canonical bytecode stays intact; a guest-owned, GC-traced execution view
+prepares register byte offsets for selected value/storage operations. This
+removes repeated scaling from those handlers without source recognition or
+fixed native addresses. Both-host regression scripts passed, reusing the
+existing native integration scenarios in canonical and prepared modes rather
+than adding language micro-test files. A collection between budget suspension
+and resume was then added to that scenario and passed on Node; its i386 rerun
+is pending. The ownership, mutation invalidation and snapshot-mode contract
+are documented in `guest_vm/NATIVE_INTERPRETER_DESIGN.md`.
+
 - Canonical bytecode metadata now describes actual register reads, not just
   widths and destinations. Both integer fusion and temporary coalescing use
   it, including registers in CALL/CONSTRUCT argument vectors. Constant indices,

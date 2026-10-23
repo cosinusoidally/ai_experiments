@@ -1,6 +1,7 @@
 (function (root) {
-    function runNativeInterpreterTest(VM, NativeInterpreter, bytecode) {
-        var vm = new VM({heapBytes: 256 * 1024});
+    function runNativeInterpreterTest(VM, NativeInterpreter, bytecode, predecode) {
+        var vm = new VM({heapBytes: 256 * 1024,
+                         nativeOperandPredecode: !!predecode});
         var engine = new NativeInterpreter(vm.runtime);
         try {
             var program = {code: [bytecode.CONST, 0, 0,
@@ -13,7 +14,8 @@
             var first = engine.run(frame, program, 2);
             if (first.reason !== NativeInterpreter.Exit.BUDGET ||
                 first.pc !== 6 || first.instructions !== 2) {
-                throw new Error("native interpreter budget continuation mismatch");
+                throw new Error("native interpreter budget continuation mismatch: reason=" +
+                    first.reason + ", pc=" + first.pc + ", instructions=" + first.instructions);
             }
             var second = engine.run(frame, program, 2);
             if (second.reason !== NativeInterpreter.Exit.RETURN ||
@@ -112,7 +114,8 @@
             vm.runtime.linearHeap.freeRecord(regexpFrame);
 
             var integratedVM = new VM({heapBytes: 256 * 1024,
-                                       nativeInterpreter: true});
+                                       nativeInterpreter: true,
+                                       nativeOperandPredecode: !!predecode});
             try {
                 var context = integratedVM.context;
                 var integratedProgram = {
@@ -127,6 +130,9 @@
                     integratedBudget.instructions !== 2) {
                     throw new Error("native Execution budget integration mismatch");
                 }
+                /* A suspended execution must keep all of its executable
+                 * storage alive, regardless of the selected operand view. */
+                integratedVM.collect();
                 var integratedReturn = execution.resume(2);
                 if (integratedReturn.status !== "completed" ||
                     integratedReturn.value !== 23 ||
@@ -468,7 +474,8 @@
             }
             if (typeof get_dlsym === "function") {
                 var rawVM = new VM({heapBytes: 256 * 1024,
-                                    nativeInterpreter: true, rawFFI: true});
+                                    nativeInterpreter: true, rawFFI: true,
+                                    nativeOperandPredecode: !!predecode});
                 var rawPointer = 0;
                 try {
                     var callocPointer = rawVM.runtime.hostFFI.resolve("calloc");
