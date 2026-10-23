@@ -109,6 +109,66 @@ heap/GC/embedding checks and CLI/context demos). This is not a claim that all
 Test262 or all interactive demos were rerun at this checkpoint. The expanded
 operand view is still opt-in; there is no default dispatch change.
 
+### Conservative frame-register compaction
+
+The next general change reuses storage for block-local scratch registers,
+without changing instruction count or PCs. Across the unchanged generated zlib
+program's 198 functions, 127 shrink: summed register counts fall from 40,284 to
+21,570 (18,714 removed). This is a reduction in register-bank requirements,
+not a claim of the same reduction in process RSS. Named bindings, constants,
+cross-block values and code-generation hints retain exclusive storage; exception
+and with functions are left unchanged. The existing direct-eval embedding test
+caught an initial receiver-sentinel remapping mistake, fixed before committing.
+The Node suite then passed.
+
+A first js_min native run verified three full-buffer batches at
+25.617/25.820/27.207 seconds, initialization 15.508 seconds. This is not a
+demonstrated execution speedup, and it is not a same-invocation comparison
+against js_runner. Both-host regressions passed, but cold snapshot generation
+regressed to 18.347 + 1.740 + 80.880 + 0.939 seconds (about 101.9 seconds),
+versus 88.5 seconds for the preceding image. The pass was removed: a smaller
+register bank does not justify this compilation/startup regression without
+an execution win. Its register-wide hints and conservative ownership model
+were correct in the existing scenarios, but the extra compiler analysis is
+not free. No compaction flag or unused implementation is retained. Ignored
+prefix: `artifacts/zlib-register-compaction`.
+
+The focused Test262 wrapper invocation through js_runner failed with
+`unsupported opcode 35 at bytecode pc 285 (detail 0, allocation 0)` and
+`TypeError: value is not callable` on both the reduced frame-init image and the
+previous predecoded control image. This is an existing standalone wrapper
+limitation, not a passing Test262 result or evidence of a new regression.
+The prior 153-pass/12-fail focused comparison used js_min's native runner.
+
+### Retained checkpoint validation
+
+Revision `45fd599` passed both-host project regressions and a fresh js_min
+native focused Test262 selection: 165 executed, 153 passed, the same 12 failed,
+0 not run/timeouts. Failure IDs were compared exactly with the prior log.
+See `TEST262_STATUS.md`; this is not a whole-suite conformance claim.
+
+The retained standalone frame-init image ran demo8 for just over five minutes
+at 320x240/20 FPS, moving from rolling to garage to free-drive autopilot, then
+exited normally through Escape/Q. Settled garage samples were about 19–20 FPS;
+free-drive samples were mostly about 19–20 FPS with some lower samples. Part
+of this stability run overlapped demo1, so it is not an isolated performance
+benchmark. Log: ignored `artifacts/zlib-frame-init-final-demo8.log`.
+
+Demo1 ran over five minutes at 320x240, accepted keyboard and mouse dragging,
+and exited normally through Escape. Late RSS samples held at about 530 MiB.
+Its roughly 1.2–1.3 FPS is poor, but a subsequent serial run of the preceding
+predecoded image also settled around 1.3 FPS at this size. Neither result is
+claimed as good performance or a comprehensive GC proof. Logs: ignored
+`artifacts/zlib-frame-init-final-demo1.log` and
+`artifacts/zlib-frame-init-control-demo1.log`.
+
+Both unchanged `net.js` and `node_web.js` ran through the retained standalone
+image on temporary loopback ports. Each served hello.js and the js_runner ELF
+binary; downloaded contents matched the originals with cmp. Servers were
+bounded by timeout and no corpus/demo sources were changed. A standalone
+hello.js invocation also printed the expected greeting. Other Octane tests and
+all other interactive demos were not rerun in this validation pass.
+
 - Canonical bytecode metadata now describes actual register reads, not just
   widths and destinations. Both integer fusion and temporary coalescing use
   it, including registers in CALL/CONSTRUCT argument vectors. Constant indices,

@@ -690,6 +690,23 @@ performance are separate mandatory regression gates.
   Raw log: `artifacts/zlib-read-conversion-test262.log`. Elapsed/RSS were not
   captured. This remains a focused regression check, not a whole-suite run.
 
+### 2026-10-23, approximately 15:55 BST — register initialization checkpoint
+
+- Revision `45fd599`, focused selection `ch09/9.5 ch11/11.6 ch11/11.7`,
+  authored variants under `js_min.exe guest_runner.js --vm-native`.
+- Executed 165 of 165 variants: 153 passed, 12 failed, 0 not run,
+  0 timed out. Failure IDs exactly match the preceding focused log
+  `artifacts/zlib-final-test262.log`; no newly failing test in this selection.
+- Raw log: ignored `artifacts/zlib-frame-init-js-min-test262.log`.
+  Elapsed time and peak RSS were not captured. This was a correctness check,
+  not a timed suite comparison; demo1 was also running for a stability check.
+- Both-host project regressions passed. No corpus files were changed.
+  No whole-suite run was performed; whole-suite totals above remain unchanged.
+- Running this wrapper selection through standalone js_runner failed before
+  test execution with unsupported opcode 35 / a non-callable value. The
+  previous predecoded image reproduces the same failure. This standalone
+  wrapper limitation remains outstanding; it is not counted as 165 passes.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure
