@@ -733,9 +733,9 @@
              * they do not need a second range filter on every iteration. */
             beginOpcodeDispatch(opcode, OP_CONST, OP_TO_INT32);
             if (opcode === OP_TO_INT32) {
-                var conversionTarget = frameRegisterCellAddress(heapBase, frame,
+                var conversionTarget = valueCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
-                var conversionSource = frameRegisterCellAddress(heapBase, frame,
+                var conversionSource = valueCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND));
                 if (PROFILE_OPCODES !== 0) {
                     recordOpcodeOperandTagsKernel(heapBase, state, opcode,
@@ -748,11 +748,11 @@
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_ADD_INT32 || opcode === OP_SUBTRACT_INT32) {
-                var integerTarget = frameRegisterCellAddress(heapBase, frame,
+                var integerTarget = valueCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
-                var integerLeft = frameRegisterCellAddress(heapBase, frame,
+                var integerLeft = valueCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND));
-                var integerRight = frameRegisterCellAddress(heapBase, frame,
+                var integerRight = valueCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + THIRD_OPERAND));
                 if (valueCellTag(0, integerLeft) !== VALUE_TAG_INT32 ||
                     valueCellTag(0, integerRight) !== VALUE_TAG_INT32) {
@@ -1428,8 +1428,8 @@
                             bytecodePayloadWord(0, bytecodeAddress,
                                 indexedConversionPC + SECOND_OPERAND) ===
                                     arrayGetTargetIndex) {
-                            var indexedConversionTarget = frameRegisterCellAddress(
-                                heapBase, frame, bytecodePayloadWord(
+                            var indexedConversionTarget = valueCellAddress(
+                                0, registerAddress, bytecodePayloadWord(
                                     0, bytecodeAddress,
                                     indexedConversionPC + FIRST_OPERAND));
                             if (PROFILE_OPCODES !== 0) {
@@ -4051,8 +4051,8 @@
                     bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES);
                 var localSlot = load32(
                     bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES);
-                var localDestination = frameRegisterCellAddress(
-                    heapBase, frame, localTargetIndex);
+                var localDestination = valueCellAddress(
+                    0, registerAddress, localTargetIndex);
                 var localBinding = resolveLocalBindingCellKernel(
                     heapBase, environment, localDepth, localSlot);
                 if (localBinding === 0) {
@@ -4068,8 +4068,8 @@
                     bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES);
                 var setLocalSourceIndex = load32(
                     bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES);
-                var setLocalSource = frameRegisterCellAddress(
-                    heapBase, frame, setLocalSourceIndex);
+                var setLocalSource = valueCellAddress(
+                    0, registerAddress, setLocalSourceIndex);
                 var setLocalBinding = resolveLocalBindingCellKernel(
                     heapBase, environment, setLocalDepth, setLocalSlot);
                 if (setLocalBinding === 0) {
@@ -11444,7 +11444,7 @@
     function primitiveCellToInt32Kernel(target, source) {
         var tag = valueCellTag(0, source);
         if (tag === CELL_INT32) {
-            setValueCellInt32(target, valueCellInt32(0, source));
+            if (target !== source) setValueCellInt32(target, valueCellInt32(0, source));
             return 1;
         }
         return nonIntegerCellToInt32Kernel(target, source, tag);
@@ -17276,7 +17276,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 30,
+                compilerVersion: 31,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,

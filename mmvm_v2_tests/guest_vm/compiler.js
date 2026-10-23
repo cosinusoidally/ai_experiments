@@ -31,6 +31,7 @@
             this.scopes.push(makeCompileScope(this, scopeBindings,
                                               !!registerBindings));
         }
+        this.bindingRegisterCount = this.registerCount;
         var scopeIndex = 0;
         while (outerScopes && scopeIndex < outerScopes.length) {
             this.scopes.push(outerScopes[scopeIndex++]);
@@ -173,7 +174,7 @@
                                                 line: 1, column: 1},
                 sourceLocations: this.sourceLocations,
                 globalDeclarations: globalDeclarations,
-                strict: !!program.strict});
+                strict: !!program.strict}, this.bindingRegisterCount);
     };
 
     Compiler.prototype.compileFunction = function (expression) {

@@ -541,7 +541,7 @@ exit, demo-specific shortcut, larger heap used to conceal a leak, or native
 path that calls back into SpiderMonkey does not satisfy the endpoint.
 ## Register bytecode dataflow
 
-`bytecode.js` owns instruction widths and destination-operand metadata. The
+`bytecode.js` owns instruction widths, destination and source-operand metadata. The
 verifier, interpreter fallback synchronizer, and bytecode optimizer share this
 layout rather than keeping independent opcode lists.
 
@@ -579,10 +579,29 @@ so wrapping word arithmetic gives the same observable result, including
 overflow. Multiplication is deliberately not included: an int32 product can
 exceed binary64's exact-integer range.
 
-Use counting conservatively includes every numeric bytecode operand and the
-register vectors referenced by CALL/CONSTRUCT. Non-register operands can only
-cause false uses (missed optimizations), never hide a use. Rewrites preserve
+Use counting follows the shared source/destination operand descriptions and the
+register vectors referenced by CALL/CONSTRUCT. Constant indices, lexical slots
+and jump targets are not register uses. Rewrites preserve
 the final destination and relocate branches as for coercion elimination.
+
+### Adjacent temporary coalescing
+
+A second pass retargets an eligible producer directly into the destination of
+an immediately following MOVE or ToInt32. The old temporary must have one
+definition and one read, must not be a named binding or preloaded constant,
+and no branch may enter between producer and consumer. Producers which do not
+snapshot their operands cannot overwrite an input. CALL, construction and
+allocation are not eligible producers. A ToInt32 consumer is retained, with
+identical source/destination, and cannot move its intermediate result into a
+named binding: conversion may call user code or throw before assignment.
+Self-copies are removed. Exception/with functions are left unchanged, as in
+the integer analysis. `optimizationStats.coalescedCopies` reports the count.
+
+This changes register destinations, not the bytecode register-bank layout or
+constant storage. Neither pass changes the guest program or recognizes
+benchmark names. The diagnostic monitor's optional `--bytecode-summary` reports
+these statistics using an additional ordinary compilation; its initialization
+timing must not be compared with an uninstrumented benchmark.
 
 The native interpreter checks the input tags before using word arithmetic;
 unexpected types yield to the ordinary semantic path rather than being

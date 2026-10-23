@@ -21,6 +21,14 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-22 evening, zlib/interpreter optimization checkpoint `c73aa0a`:
+  focused authored selection `ch09/9.5 ch11/11.6 ch11/11.7` completed all
+  165 tests: 153 passed, 12 failed, 0 not run, 0 timed out. These are the
+  same counts as the earlier baseline for this selection; no full-suite
+  conformance improvement is claimed. Run log is the ignored artifact
+  `artifacts/zlib-loop-state-test262.log`. Both-host regression suites also
+  passed (12 guest programs, 269 assertions per host).
+
 Results are grouped by identical selection so that movement in the pass and
 failure counts is directly comparable. The intended progression within each
 group is toward zero failures; a smaller selection is never presented as an

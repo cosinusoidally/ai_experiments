@@ -30,7 +30,7 @@
         state[code[pc + destination]] = kind;
     }
 
-    function optimize(program) {
+    function optimizeInt32(program) {
         var code = program.code, boundaries = {}, blocks = [], byPC = {};
         var pc, opcode, index, block, target, candidate = false;
         var constantRegisters = program.constantRegisters || [], zeroRegisters = {};
@@ -84,30 +84,6 @@
         blocks[0].input = initial;
         blocks[0].queued = true;
         var queue = [0], head = 0;
-        function propagate(next, state) {
-            if (next === undefined) return;
-            var successor = blocks[next], changed = false, register, old, value;
-            if (!successor.input) {
-                successor.input = state.slice(0);
-                changed = true;
-            } else {
-                for (register = 0; register < state.length; register++) {
-                    old = successor.input[register];
-                    value = state[register];
-                    /* ZERO is a subtype of INT32. Other disagreements lose
-                     * the fact; joins never invent new information. */
-                    value = old && value ? (old === value ? old : INT32) : UNKNOWN;
-                    if (old !== value) {
-                        successor.input[register] = value;
-                        changed = true;
-                    }
-                }
-            }
-            if (changed && !successor.queued) {
-                successor.queued = true;
-                queue.push(next);
-            }
-        }
         var state, last;
         while (head < queue.length) {
             index = queue[head++];
@@ -119,36 +95,18 @@
                 transfer(program, pc, state);
             }
             opcode = code[last];
-            if (opcode === op.JUMP) propagate(byPC[code[last + 1]], state);
+            if (opcode === op.JUMP) propagateRegisterState(blocks, queue, byPC[code[last + 1]], state);
             else if (opcode === op.JUMP_IF_FALSE) {
-                propagate(byPC[code[last + 2]], state);
-                propagate(byPC[block.end], state);
+                propagateRegisterState(blocks, queue, byPC[code[last + 2]], state);
+                propagateRegisterState(blocks, queue, byPC[block.end], state);
             } else if (opcode !== op.RETURN && opcode !== op.THROW &&
-                       opcode !== op.INVALID_ASSIGNMENT) propagate(byPC[block.end], state);
+                       opcode !== op.INVALID_ASSIGNMENT) {
+                propagateRegisterState(blocks, queue, byPC[block.end], state);
+            }
         }
 
-        /* Count every numeric operand conservatively, including non-register
-         * operands. False uses merely prevent fusion. CALL argument vectors
-         * hold register uses outside the instruction words. */
-        var occurrences = [], operand, vector;
-        function countUse(register) {
-            if (typeof register === "number" && register >= 0 &&
-                register < program.registerCount && register === (register | 0)) {
-                occurrences[register] = (occurrences[register] || 0) + 1;
-            }
-        }
-        for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
-            for (operand = 1; operand < op.WIDTHS[code[pc]]; operand++) {
-                countUse(code[pc + operand]);
-            }
-            if (code[pc] === op.CALL || code[pc] === op.CONSTRUCT) {
-                vector = program.constants[
-                    code[pc + (code[pc] === op.CALL ? 4 : 3)]];
-                for (operand = 0; operand < vector.length; operand++) {
-                    countUse(vector[operand]);
-                }
-            }
-        }
+        var occurrences = [], definitions = [];
+        if (!countRegisterUses(program, occurrences, definitions)) return program;
         var replacements = {}, removed = 0, fused = 0, conversions = 0;
         var next, temporary;
         for (index = 0; index < blocks.length; index++) {
@@ -187,6 +145,75 @@
             }
         }
         if (!removed && !fused && !conversions) return program;
+        rewriteInstructions(program, replacements);
+        program.optimizationStats = {redundantInt32Conversions: removed,
+                                    fusedInt32Arithmetic: fused,
+                                    unaryInt32Conversions: conversions};
+        return program;
+    }
+
+    function propagateRegisterState(blocks, queue, next, state) {
+        if (next === undefined) return;
+        var successor = blocks[next], changed = false, register, old, value;
+        if (!successor.input) {
+            successor.input = state.slice(0);
+            changed = true;
+        } else {
+            for (register = 0; register < state.length; register++) {
+                old = successor.input[register];
+                value = state[register];
+                /* ZERO is a subtype of INT32. Other disagreements lose
+                 * the fact; joins never invent new information. */
+                value = old && value ? (old === value ? old : INT32) : UNKNOWN;
+                if (old !== value) {
+                    successor.input[register] = value;
+                    changed = true;
+                }
+            }
+        }
+        if (changed && !successor.queued) {
+            successor.queued = true;
+            queue.push(next);
+        }
+    }
+
+    function countRegisterOccurrence(occurrences, register, registerCount) {
+        if (typeof register === "number" && register >= 0 &&
+            register < registerCount && register === (register | 0)) {
+            occurrences[register] = (occurrences[register] || 0) + 1;
+        }
+    }
+
+    /* Count actual storage accesses, not integers which happen to have the
+     * same value as a register index (constant indices, slots and targets).
+     * Both analyses use the canonical bytecode operand description. */
+    function countRegisterUses(program, occurrences, definitions) {
+        var code = program.code, pc, opcode, reads, operand, index, vector;
+        var registerCount = program.registerCount;
+        for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
+            opcode = code[pc];
+            reads = op.SOURCE_OPERANDS[opcode];
+            if (!reads) return false;
+            for (operand = 0; operand < reads.length; operand++) {
+                countRegisterOccurrence(occurrences, code[pc + reads[operand]], registerCount);
+            }
+            if (op.DESTINATION_OPERANDS[opcode]) {
+                index = code[pc + op.DESTINATION_OPERANDS[opcode]];
+                countRegisterOccurrence(occurrences, index, registerCount);
+                definitions[index] = (definitions[index] || 0) + 1;
+            }
+            if (opcode === op.CALL || opcode === op.CONSTRUCT) {
+                vector = program.constants[code[pc + (opcode === op.CALL ? 4 : 3)]];
+                for (index = 0; index < vector.length; index++) {
+                    countRegisterOccurrence(occurrences, vector[index], registerCount);
+                }
+            }
+        }
+        return true;
+    }
+
+    function rewriteInstructions(program, replacements) {
+        var code = program.code, pc, opcode, operand;
         var output = [], locations = [], relocated = {}, replacement;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
             relocated[pc] = output.length;
@@ -204,17 +231,107 @@
         relocated[code.length] = output.length;
         for (pc = 0; pc < output.length; pc += op.WIDTHS[output[pc]]) {
             opcode = output[pc];
-            if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE) {
-                operand = pc + (opcode === op.JUMP ? 1 : 2);
+            if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE ||
+                opcode === op.PUSH_CATCH) {
+                operand = pc + (opcode === op.JUMP_IF_FALSE ? 2 : 1);
                 output[operand] = relocated[output[operand]];
             }
         }
         program.code = output;
         program.sourceLocations = locations;
-        program.optimizationStats = {redundantInt32Conversions: removed,
-                                    fusedInt32Arithmetic: fused,
-                                    unaryInt32Conversions: conversions};
+    }
+
+    /* Named bindings and preloaded constants retain their storage. A fresh
+     * single-use temporary can share the following copy/coercion destination
+     * if no branch can enter between the two instructions. This is ordinary
+     * register coalescing, independent of source names or object shapes. */
+    function coalesceCopies(program, bindingRegisterCount) {
+        var code = program.code, targets = {}, occurrences = [], definitions = [];
+        var constantRegisters = {}, replacements = {}, previous = -1;
+        var pc, opcode, index, candidate = false, merged = 0;
+        for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
+            opcode = code[pc];
+            if (opcode === op.MOVE && code[pc + 1] === code[pc + 2]) candidate = true;
+            else if (previous >= 0 && (opcode === op.MOVE || opcode === op.TO_INT32) &&
+                     code[pc + 2] >= bindingRegisterCount &&
+                     code[previous + 1] === code[pc + 2] &&
+                     coalescibleProducer(code[previous])) candidate = true;
+            if (opcode === op.PUSH_CATCH || opcode === op.POP_CATCH ||
+                opcode === op.ENTER_WITH || opcode === op.LEAVE_WITH) return program;
+            if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE) {
+                targets[code[pc + (opcode === op.JUMP ? 1 : 2)]] = true;
+            }
+            previous = pc;
+        }
+        if (!candidate) return program;
+        var preloadedRegisters = program.constantRegisters || [];
+        for (index = 0; index < preloadedRegisters.length; index++) {
+            var constantRegister = preloadedRegisters[index];
+            if (typeof constantRegister === "number") constantRegisters[constantRegister] = true;
+        }
+        if (!countRegisterUses(program, occurrences, definitions)) return program;
+        previous = -1;
+        for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
+            opcode = code[pc];
+            if (targets[pc]) previous = -1;
+            if (opcode === op.MOVE && code[pc + 1] === code[pc + 2]) {
+                replacements[pc] = [];
+                merged++;
+                continue;
+            }
+            if (previous >= 0 && (opcode === op.MOVE || opcode === op.TO_INT32)) {
+                var producer = code[previous], temporary = code[pc + 2];
+                var destination = code[pc + 1];
+                if (coalescibleProducer(producer) && code[previous + 1] === temporary &&
+                    replacements[previous] === undefined &&
+                    temporary >= bindingRegisterCount && !constantRegisters[temporary] &&
+                    definitions[temporary] === 1 && occurrences[temporary] === 2 &&
+                    /* ToInt32 can invoke user code or throw. Its intermediate
+                     * value must not overwrite an observable named binding. */
+                    (opcode !== op.TO_INT32 || destination >= bindingRegisterCount) &&
+                    (producerSnapshotsInputs(producer) ||
+                     (destination !== code[previous + 2] && destination !== code[previous + 3]))) {
+                    var rewritten = replacements[previous] ||
+                        code.slice(previous, previous + op.WIDTHS[producer]);
+                    rewritten[1] = destination;
+                    replacements[previous] = rewritten;
+                    if (opcode === op.MOVE) replacements[pc] = [];
+                    else replacements[pc] = [op.TO_INT32, destination, destination];
+                    merged++;
+                    if (opcode === op.MOVE) {
+                        previous = -1;
+                        continue;
+                    }
+                }
+            }
+            previous = pc;
+        }
+        if (merged) {
+            rewriteInstructions(program, replacements);
+            if (!program.optimizationStats) program.optimizationStats = {};
+            program.optimizationStats.coalescedCopies = merged;
+        }
         return program;
+    }
+
+    function optimize(program, bindingRegisterCount) {
+        return coalesceCopies(optimizeInt32(program), bindingRegisterCount || 0);
+    }
+
+    function coalescibleProducer(opcode) {
+        return opcode === op.CONST || opcode === op.MOVE || opcode === op.GET_LOCAL ||
+            opcode === op.GET_THIS || opcode === op.GET_PROPERTY ||
+            opcode === op.GET_PROPERTY_CONST ||
+            (opcode >= op.ADD && opcode <= op.POSITIVE) ||
+            (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
+            opcode === op.BIT_NOT || opcode === op.TYPEOF ||
+            opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 || opcode === op.TO_INT32;
+    }
+
+    function producerSnapshotsInputs(opcode) {
+        return opcode === op.MOVE || opcode === op.CONST || opcode === op.GET_LOCAL ||
+            (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
+            opcode === op.BIT_NOT || opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32;
     }
     root.GuestVMBytecodeOptimizer = {optimize: optimize};
     if (typeof module !== "undefined" && module.exports) {

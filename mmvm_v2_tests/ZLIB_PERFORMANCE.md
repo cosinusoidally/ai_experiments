@@ -4,15 +4,45 @@ The purpose is to improve the general guest interpreter, not to recognize or
 replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
-Latest measured results (2026-10-22, evening): verified zlib diagnostic
-batches 27.46–27.72 seconds, versus 44.65–45.04 seconds at the start of the
-latest optimization pass and the initial 63–65 seconds. This is about 1.63x
+Latest measured results (2026-10-23): verified zlib diagnostic
+batches 25.39–25.45 seconds, versus 44.65–45.04 seconds at the start of the
+latest optimization pass and the initial 63–65 seconds. This is about 1.76x
 faster than that latest starting point; the additional 2x target is about
 22.4 seconds per batch and has not yet been reached. Complete cold snapshot
-generation is about 85 seconds (best preceding checkpoint 88.76),
+generation is about 82 seconds (preceding checkpoint about 85),
 versus the original 117.89 seconds. The requested overall 10x
 execution speedup is not achieved. Whole-suite Test262 was not rerun; focused
 baseline comparisons and known limitations are recorded below.
+
+## 2026-10-23 temporary/register analysis
+
+- Canonical bytecode metadata now describes actual register reads, not just
+  widths and destinations. Both integer fusion and temporary coalescing use
+  it, including registers in CALL/CONSTRUCT argument vectors. Constant indices,
+  lexical slots and jump targets no longer create false register uses.
+- Adjacent single-use temporary coalescing initially regressed execution to
+  28.89/29.37 seconds. After precise use counting, the intermediate image
+  verified at 25.878/25.627 seconds. The final shared-analysis/cached-address
+  image verified at 25.448/25.390 seconds, initialization 16.308 seconds.
+  Full comparison checks all 100,000 decompressed and 25,906 compressed bytes
+  against the independent Node reference. These are diagnostic batch timings,
+  not newly measured Octane scores.
+- The transformation protects named bindings and constant registers, checks
+  single-definition/single-read ownership and branch entry points, excludes
+  exception/with functions, and retains ToInt32. A coercion cannot expose its
+  intermediate result by overwriting a named binding before conversion.
+- Hot local/coercion handlers use the already cached register-bank address
+  through the ordinary value-cell accessor, rather than reloading that address
+  from the frame. No changes to guest language semantics or benchmark code.
+- Final image: ignored `artifacts/zlib-shared-analysis.snap`. Build stages:
+  runtime 16.372 seconds, environment 1.429, standalone preparation 63.068,
+  writing 0.707 (about 82 seconds total). This is a cold build, not a cache hit.
+  Benchmark logs use the same prefix. The additional 2x target remains unmet;
+  it requires roughly 22.4 seconds per verified batch.
+- Both-host regression suites passed again: 12 programs and 269 assertions per
+  host, plus existing kernel, heap/GC, embedding, error-location and CLI checks.
+  Log: ignored `artifacts/zlib-shared-analysis-final-tests.log`. A sustained
+  demo8 run is in progress; whole-suite Test262 was not rerun for this pass.
 
 ## 2026-10-22 evening optimization measurements
 

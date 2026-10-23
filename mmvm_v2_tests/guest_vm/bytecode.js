@@ -103,6 +103,34 @@
         op.ADD_INT32, op.SUBTRACT_INT32]);
     layout(5, 1, [op.CALL]);
 
+    /* Explicit register reads. Constant indices, lexical slots, jump targets
+     * and CALL argument-vector indices are not register operands. CALL and
+     * CONSTRUCT also read the registers listed in their constant vector. */
+    op.SOURCE_OPERANDS = [];
+    function inputs(positions, instructions) {
+        var index;
+        for (index = 0; index < instructions.length; index++) {
+            op.SOURCE_OPERANDS[instructions[index]] = positions;
+        }
+    }
+    inputs([], [op.CONST, op.GET_GLOBAL, op.GET_THIS, op.MAKE_FUNCTION,
+        op.MAKE_OBJECT, op.MAKE_ARRAY, op.MAKE_REGEXP, op.GET_LOCAL,
+        op.TYPEOF_GLOBAL, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME,
+        op.JUMP, op.PUSH_CATCH, op.POP_CATCH, op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
+    inputs([1], [op.RETURN, op.THROW, op.ENTER_WITH, op.JUMP_IF_FALSE]);
+    inputs([2], [op.MOVE, op.NOT, op.NEGATE, op.POSITIVE, op.BIT_NOT,
+        op.TYPEOF, op.GET_KEYS, op.TO_INT32, op.GET_PROPERTY_CONST,
+        op.DELETE_PROPERTY_CONST, op.SET_GLOBAL, op.SET_NAME, op.CONSTRUCT]);
+    inputs([2, 3], [op.GET_PROPERTY, op.DELETE_PROPERTY, op.ADD, op.SUBTRACT,
+        op.MULTIPLY, op.DIVIDE, op.REMAINDER, op.STRICT_EQUAL, op.EQUAL,
+        op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL,
+        op.BIT_AND, op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
+        op.SHIFT_UNSIGNED_RIGHT, op.IN, op.INSTANCEOF, op.ADD_INT32,
+        op.SUBTRACT_INT32, op.CALL]);
+    inputs([1, 2, 3], [op.SET_PROPERTY, op.DEFINE_GETTER, op.DEFINE_SETTER]);
+    inputs([1, 3], [op.SET_PROPERTY_CONST]);
+    inputs([3], [op.SET_LOCAL]);
+
     root.GuestVMBytecode = op;
     if (typeof module !== "undefined" && module.exports) module.exports = op;
 }(this));

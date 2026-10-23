@@ -1,6 +1,7 @@
 /* ES3 diagnostic adapter. Does not modify the external benchmark or VM.
  * Node: node octane_zlib_monitor.js --record artifacts/zlib-reference
  * Guest: js_runner.exe snap octane_zlib_monitor.js --reference DIR [--iterations N]
+ * Optional --bytecode-summary adds a separate diagnostic compilation.
  */
 (function (root) {
     var node = typeof process !== "undefined" && process.versions &&
@@ -19,16 +20,17 @@
     } else {
         args = root.arguments;
     }
-    var directory = "", record = false, iterations = 1, i;
+    var directory = "", record = false, iterations = 1, bytecodeSummary = false, i;
     for (i = 0; i < args.length; i++) {
         if (args[i] === "--record") { record = true; directory = args[++i]; }
         else if (args[i] === "--reference") { directory = args[++i]; }
         else if (args[i] === "--iterations") { iterations = Number(args[++i]); }
+        else if (args[i] === "--bytecode-summary") { bytecodeSummary = true; }
         else { throw new Error("Unknown option: " + args[i]); }
     }
     if (!directory || iterations === Infinity || !(iterations >= 1) ||
         iterations !== Math.floor(iterations)) {
-        throw new Error("Use --record DIR (Node only) or --reference DIR [--iterations N]");
+        throw new Error("Use --record DIR (Node only) or --reference DIR [--iterations N] [--bytecode-summary]");
     }
     if (record && !node) { throw new Error("Reference generation requires Node"); }
     load("../../js_tests/octane/base.js");
@@ -37,6 +39,39 @@
     /* Capture, but do not change or cache, the source evaluated by the benchmark.
      * FNV-1a uses shift/add arithmetic to retain exact uint32 semantics on ES3. */
     var originalEval = root.zlibEval, sourceHash = 0, sourceLength = 0;
+    function summarizeBytecode(source) {
+        var Parser = require("./guest_vm/parser.js");
+        var Compiler = require("./guest_vm/compiler.js");
+        var op = require("./guest_vm/bytecode.js");
+        var program = new Compiler().compile(new Parser(source, "<zlib-diagnostic>", {
+            captureRaw: false, captureLocations: false,
+            captureFunctionSource: false, compactLiterals: true
+        }).parseProgram());
+        var queue = [program], cursor = 0, merged = 0;
+        print("zlib: extra diagnostic compilation (initialization time is not comparable)");
+        while (cursor < queue.length) {
+            var current = queue[cursor++], pc, gets = 0, sets = 0, j;
+            for (pc = 0; pc < current.code.length; pc += op.WIDTHS[current.code[pc]]) {
+                if (current.code[pc] === op.GET_LOCAL) gets++;
+                else if (current.code[pc] === op.SET_LOCAL) sets++;
+            }
+            var copies = current.optimizationStats ?
+                current.optimizationStats.coalescedCopies || 0 : 0;
+            merged += copies;
+            if (gets || copies) {
+                print("zlib: bytecode " + (current.name || "<program>") +
+                    " words=" + current.code.length +
+                    " registerBindings=" + !!current.bindingRegisters +
+                    " GET_LOCAL=" + gets + " SET_LOCAL=" + sets +
+                    " coalesced=" + copies);
+            }
+            for (j = 0; j < current.constants.length; j++) {
+                var child = current.constants[j];
+                if (child && typeof child === "object" && child.code) queue.push(child);
+            }
+        }
+        print("zlib: bytecode summary functions=" + queue.length + " coalesced=" + merged);
+    }
     root.zlibEval = function (source) {
         var hash = -2128831035, j;
         sourceLength = source.length;
@@ -46,6 +81,7 @@
                 (hash << 8) + (hash << 24)) | 0;
         }
         sourceHash = hash >>> 0;
+        if (bytecodeSummary) summarizeBytecode(source);
         return originalEval(source);
     };
     print("zlib: initializing unchanged benchmark");
