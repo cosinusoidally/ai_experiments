@@ -202,6 +202,7 @@
         var layout = valueCellReference(0, vectorCellAddress(heapBase,
             stringSupport, RUNTIME_SUPPORT_BYTECODE_LAYOUT));
         var layoutLength = vectorLength(heapBase, layout);
+        var opcodeLimit = divideI32(layoutLength, BYTECODE_LAYOUT_STRIDE);
         var length = bytecodeLength(heapBase, bytecode);
         var bytes = recordSize(heapBase, bytecode);
         if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
@@ -216,7 +217,7 @@
         while (pc < length) {
             var opcode = bytecodePayloadWord(heapBase,
                 bytecode + BYTECODE_WORDS, pc);
-            if (opcode < 0) return 0;
+            if (opcode < 0 || opcode >= opcodeLimit) return 0;
             var layoutIndex = opcode * BYTECODE_LAYOUT_STRIDE;
             if (layoutIndex < 0 || layoutIndex > layoutLength - BYTECODE_LAYOUT_STRIDE) return 0;
             var width = valueCellInt32(0, vectorCellAddress(heapBase,
@@ -1903,19 +1904,19 @@
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_REMAINDER) {
-                var remainderTargetIndex = load32(
+                var remainderTargetOperand = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var remainderLeftIndex = load32(
+                var remainderLeftOperand = load32(
                     bytecodeAddress +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var remainderRightIndex = load32(
+                var remainderRightOperand = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var remainderLeft = registerAddress +
-                    remainderLeftIndex * VALUE_CELL_BYTES;
-                var remainderRight = registerAddress +
-                    remainderRightIndex * VALUE_CELL_BYTES;
+                var remainderLeft = bytecodeRegisterCellAddress(
+                    0, registerAddress, remainderLeftOperand);
+                var remainderRight = bytecodeRegisterCellAddress(
+                    0, registerAddress, remainderRightOperand);
                 var remainderLeftTag = load32(remainderLeft);
                 var remainderRightTag = load32(remainderRight);
                 var remainderNumeric = 1;
@@ -1933,8 +1934,8 @@
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
-                var remainderTarget = registerAddress +
-                    remainderTargetIndex * VALUE_CELL_BYTES;
+                var remainderTarget = bytecodeRegisterCellAddress(
+                    0, registerAddress, remainderTargetOperand);
                 var remainderIntegerFast = 0;
                 var remainderLeftValue = 0;
                 var remainderRightValue = 0;
@@ -1978,18 +1979,18 @@
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode < OP_REMAINDER) {
                 if (opcode >= OP_ADD) {
-                    var arithmeticTargetIndex = load32(
+                    var arithmeticTargetOperand = load32(
                         bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
-                    var arithmeticLeftIndex = load32(
+                    var arithmeticLeftOperand = load32(
                         bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES);
-                    var arithmeticRightIndex = load32(
+                    var arithmeticRightOperand = load32(
                         bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var arithmeticTarget = registerAddress +
-                                           arithmeticTargetIndex * VALUE_CELL_BYTES;
-                    var arithmeticLeft = registerAddress +
-                                         arithmeticLeftIndex * VALUE_CELL_BYTES;
-                    var arithmeticRight = registerAddress +
-                                          arithmeticRightIndex * VALUE_CELL_BYTES;
+                    var arithmeticTarget = bytecodeRegisterCellAddress(
+                        0, registerAddress, arithmeticTargetOperand);
+                    var arithmeticLeft = bytecodeRegisterCellAddress(
+                        0, registerAddress, arithmeticLeftOperand);
+                    var arithmeticRight = bytecodeRegisterCellAddress(
+                        0, registerAddress, arithmeticRightOperand);
                     var arithmeticLeftTag = load32(arithmeticLeft);
                     var arithmeticRightTag = load32(arithmeticRight);
                     if (PROFILE_OPCODES !== 0) {
@@ -2626,18 +2627,18 @@
                 }
             } else if (opcode <= OP_GREATER_EQUAL) {
                 if (opcode >= OP_STRICT_EQUAL) {
-                    var comparisonTargetIndex = load32(
+                    var comparisonTargetOperand = load32(
                         bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
-                    var comparisonLeftIndex = load32(
+                    var comparisonLeftOperand = load32(
                         bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES);
-                    var comparisonRightIndex = load32(
+                    var comparisonRightOperand = load32(
                         bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES);
-                    var comparisonTarget = registerAddress +
-                                           comparisonTargetIndex * VALUE_CELL_BYTES;
-                    var comparisonLeft = registerAddress +
-                                         comparisonLeftIndex * VALUE_CELL_BYTES;
-                    var comparisonRight = registerAddress +
-                                          comparisonRightIndex * VALUE_CELL_BYTES;
+                    var comparisonTarget = bytecodeRegisterCellAddress(
+                        0, registerAddress, comparisonTargetOperand);
+                    var comparisonLeft = bytecodeRegisterCellAddress(
+                        0, registerAddress, comparisonLeftOperand);
+                    var comparisonRight = bytecodeRegisterCellAddress(
+                        0, registerAddress, comparisonRightOperand);
                     var comparisonLeftTag = load32(comparisonLeft);
                     var comparisonRightTag = load32(comparisonRight);
                     if (PROFILE_OPCODES !== 0) {
@@ -3205,7 +3206,7 @@
                             var comparisonConditionIndex = load32(
                                 bytecodeAddress +
                                 (comparisonNextPC + FIRST_OPERAND) * WORD_BYTES);
-                            if (comparisonConditionIndex === comparisonTargetIndex) {
+                            if (comparisonConditionIndex === comparisonTargetOperand) {
                                 if (comparisonValue === 0) {
                                     pc = load32(bytecodeAddress +
                                         (comparisonNextPC + SECOND_OPERAND) *
@@ -3223,16 +3224,16 @@
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
             } else if (opcode === OP_NOT) {
-                var notTargetIndex = load32(
+                var notTargetOperand = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var notSourceIndex = load32(
+                var notSourceOperand = load32(
                     bytecodeAddress +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var notSource = registerAddress +
-                                notSourceIndex * VALUE_CELL_BYTES;
-                var notTarget = registerAddress +
-                                notTargetIndex * VALUE_CELL_BYTES;
+                var notSource = bytecodeRegisterCellAddress(
+                    0, registerAddress, notSourceOperand);
+                var notTarget = bytecodeRegisterCellAddress(
+                    0, registerAddress, notTargetOperand);
                 var notTag = load32(notSource);
                 var notValue = 0;
                 if (notTag === VALUE_TAG_UNDEFINED) notValue = 1;
@@ -3269,16 +3270,16 @@
                 store32(notTarget + VALUE_CELL_AUX, 0);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_NEGATE) {
-                var negateTargetIndex = load32(
+                var negateTargetOperand = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var negateSourceIndex = load32(
+                var negateSourceOperand = load32(
                     bytecodeAddress +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var negateSource = registerAddress +
-                                   negateSourceIndex * VALUE_CELL_BYTES;
-                var negateTarget = registerAddress +
-                                   negateTargetIndex * VALUE_CELL_BYTES;
+                var negateSource = bytecodeRegisterCellAddress(
+                    0, registerAddress, negateSourceOperand);
+                var negateTarget = bytecodeRegisterCellAddress(
+                    0, registerAddress, negateTargetOperand);
                 var negateTag = load32(negateSource);
                 if (negateTag === VALUE_TAG_INT32) {
                     var negateInteger = load32(negateSource + VALUE_CELL_LOW);
@@ -3312,14 +3313,14 @@
                 }
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_POSITIVE) {
-                var positiveTargetIndex = load32(
+                var positiveTargetOperand = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
-                var positiveSourceIndex = load32(
+                var positiveSourceOperand = load32(
                     bytecodeAddress +
                     (pc + SECOND_OPERAND) * WORD_BYTES);
-                var positiveSource = registerAddress +
-                                     positiveSourceIndex * VALUE_CELL_BYTES;
+                var positiveSource = bytecodeRegisterCellAddress(
+                    0, registerAddress, positiveSourceOperand);
                 var positiveTag = load32(positiveSource);
                 if (positiveTag !== VALUE_TAG_INT32) {
                     if (positiveTag !== VALUE_TAG_DOUBLE) {
@@ -3327,15 +3328,15 @@
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
                 }
-                var positiveTarget = registerAddress +
-                                     positiveTargetIndex * VALUE_CELL_BYTES;
+                var positiveTarget = bytecodeRegisterCellAddress(
+                    0, registerAddress, positiveTargetOperand);
                 copyValueCell(positiveTarget, positiveSource);
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === OP_JUMP) {
                 pc = load32(bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
             } else if (opcode === OP_JUMP_IF_FALSE) {
-                var conditionIndex = load32(bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
-                var condition = registerAddress + conditionIndex * VALUE_CELL_BYTES;
+                var conditionOperand = load32(bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
+                var condition = bytecodeRegisterCellAddress(0, registerAddress, conditionOperand);
                 var conditionTag = load32(condition);
                 var falseCondition = 0;
                 if (conditionTag === VALUE_TAG_UNDEFINED) falseCondition = 1;
@@ -5799,42 +5800,11 @@
                     setFrameContext(heapBase, calleeFrame, calleeContext);
                     setContextActiveFrame(
                         heapBase, calleeContext, calleeFrame);
-                    var clearCalleeRegister = 0;
-                    while (clearCalleeRegister < calleeRegisterCount) {
-                        var clearCalleeCell = heapBase + calleeFrame +
-                            FRAME_REGISTERS + clearCalleeRegister *
-                            VALUE_CELL_BYTES;
-                        store32(clearCalleeCell, VALUE_TAG_UNDEFINED);
-                        store32(clearCalleeCell + VALUE_CELL_LOW, 0);
-                        store32(clearCalleeCell + VALUE_CELL_HIGH, 0);
-                        store32(clearCalleeCell + VALUE_CELL_AUX, 0);
-                        clearCalleeRegister = clearCalleeRegister + 1;
-                    }
-                    var calleeConstants = programConstants(
-                        heapBase, calleeProgram);
-                    var calleeConstantRegisters =
-                        programConstantRegisters(
-                            heapBase, calleeProgram);
-                    var calleeConstantCount = load32(
-                        heapBase + calleeConstantRegisters + VECTOR_LENGTH);
-                    var initializeConstant = 0;
-                    while (initializeConstant < calleeConstantCount) {
-                        var constantRegisterCell = heapBase +
-                            calleeConstantRegisters + VECTOR_CELLS +
-                            initializeConstant * VALUE_CELL_BYTES;
-                        var constantRegister = load32(
-                            constantRegisterCell + VALUE_CELL_LOW);
-                        if (constantRegister >= 0) {
-                            var initializedConstantSource = heapBase +
-                                calleeConstants + VECTOR_CELLS +
-                                initializeConstant * VALUE_CELL_BYTES;
-                            var initializedConstantTarget = heapBase +
-                                calleeFrame + FRAME_REGISTERS +
-                                constantRegister * VALUE_CELL_BYTES;
-                            copyValueCell(initializedConstantTarget, initializedConstantSource);
-                        }
-                        initializeConstant = initializeConstant + 1;
-                    }
+                    initializeRegisterBankKernel(heapBase, state,
+                        frameRegisterCellAddress(heapBase, calleeFrame, 0),
+                        calleeRegisterCount);
+                    copyProgramRegisterConstantsKernel(heapBase, calleeProgram,
+                        frameRegisterCellAddress(heapBase, calleeFrame, 0));
                     var calleeParameterSlots = programParameterSlots(
                         heapBase, calleeProgram);
                     var calleeParameterCount = load32(
@@ -15213,6 +15183,44 @@
         return callable;
     }
 
+    /* All payload words remain zero. The platform bulk operation is ordinary
+     * libc through the guest engine's own FFI, never a host-VM callback. The
+     * JS memory-adapter backend retains the direct field-writing algorithm. */
+    function initializeRegisterBankKernel(heapBase, state, registers, count) {
+        var services = enginePlatformServices(heapBase, state);
+        var memsetPointer = platformMemsetPointer(heapBase, services);
+        var index = 0;
+        if (memsetPointer !== 0) {
+            callNativeI32(memsetPointer, registers, 0, count * VALUE_CELL_BYTES);
+            while (index < count) {
+                setValueCellTag(0, valueCellAddress(0, registers, index), VALUE_TAG_UNDEFINED);
+                index = index + 1;
+            }
+        } else {
+            while (index < count) {
+                setValueCellUndefined(valueCellAddress(0, registers, index));
+                index = index + 1;
+            }
+        }
+        return 0;
+    }
+
+    function copyProgramRegisterConstantsKernel(heapBase, program, registers) {
+        var constants = programConstants(heapBase, program);
+        var mapping = programConstantRegisters(heapBase, program);
+        var count = vectorLength(heapBase, mapping);
+        var index = 0;
+        while (index < count) {
+            var target = valueCellInt32(0, vectorCellAddress(heapBase, mapping, index));
+            if (target >= 0) {
+                copyValueCell(valueCellAddress(0, registers, target),
+                    vectorCellAddress(heapBase, constants, index));
+            }
+            index = index + 1;
+        }
+        return 0;
+    }
+
     function programSetCodeKernel(heapBase, state, targetCell, registerAddress,
                                   argumentsVector) {
         var callable = programCallableKernel(
@@ -17222,6 +17230,8 @@
             heapMarkKernel: heapMarkKernel,
             heapSweepKernel: heapSweepKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
+            initializeRegisterBankKernel: initializeRegisterBankKernel,
+            copyProgramRegisterConstantsKernel: copyProgramRegisterConstantsKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
             instantiateGlobalDeclarationsKernel:
                 instantiateGlobalDeclarationsKernel,
@@ -17368,7 +17378,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 38,
+                compilerVersion: 45,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17403,6 +17413,7 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    PLATFORM_MEMSET_POINTER: kernelConstantOverrides.PLATFORM_MEMSET_POINTER,
                     BYTECODE_REGISTER_SCALE: runtime.nativeOperandPredecode ? 1 : BYTECODE_REGISTER_SCALE,
                     BYTECODE_LAYOUT_WIDTH: BYTECODE_LAYOUT_WIDTH,
                     BYTECODE_LAYOUT_REGISTER_MASK: BYTECODE_LAYOUT_REGISTER_MASK,
@@ -17608,6 +17619,8 @@
             runtime.heapRecords.setPlatformSnprintfPointer(
                 this.platformServicesAddress,
                 x86Backend.ffi.resolve("snprintf"));
+            runtime.heapRecords.setPlatformMemsetPointer(
+                this.platformServicesAddress, x86Backend.ffi.resolve("memset"));
         }
         this.stringSupportAddress = runtime.heapRecords.allocateValueVector(
             RuntimeSupportLayout.COUNT);

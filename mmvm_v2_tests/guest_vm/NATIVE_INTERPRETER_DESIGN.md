@@ -611,6 +611,21 @@ collection between budget suspension and resume. Performance and sustained
 demo validation of the opt-in mode are tracked in `ZLIB_PERFORMANCE.md`; passing
 small integration scenarios alone is not sufficient to make it the default.
 
+### Register initialization and compiler analysis
+
+Call setup uses named initialization and constant-mapping helpers. On native
+memory it can zero registers through libc memset and then write undefined tags;
+all payload and auxiliary words remain zero. The Node memory-adapter path keeps
+the ordinary field-writing algorithm. Memset is a process-local FFI capability
+cleared during serialization and rebound through dlsym at startup, not a
+host-language callback or a C support API. A program-owned initialization-vector
+experiment was slower in repeat measurements and was removed.
+
+Constant-branch pruning runs after source validation/lowering but before use
+counting and inlining. Disabled diagnostic/configuration paths therefore do
+not inhibit ordinary dataflow optimization. Both source branches are validated,
+and flattening blocks preserves the kernel's function-scoped var bindings.
+
 `bytecode.js` owns instruction widths, destination and source-operand metadata. The
 verifier, interpreter fallback synchronizer, and bytecode optimizer share this
 layout rather than keeping independent opcode lists.

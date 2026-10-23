@@ -641,10 +641,12 @@
         platformStrtodPointer: "PLATFORM_STRTOD_POINTER",
         platformMallocPointer: "PLATFORM_MALLOC_POINTER",
         platformFreePointer: "PLATFORM_FREE_POINTER",
-        platformSnprintfPointer: "PLATFORM_SNPRINTF_POINTER"
+        platformSnprintfPointer: "PLATFORM_SNPRINTF_POINTER",
+        platformMemsetPointer: "PLATFORM_MEMSET_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {
+        setValueCellTag: "VALUE_CELL_TAG",
         setVectorLength: "VECTOR_LENGTH",
         setRecordType: "RECORD_TYPE",
         setRecordSize: "RECORD_SIZE",
@@ -933,7 +935,10 @@
         symbols.$kernelFunctionName = fn.name || "kernel";
         if (timings) timings.collect = new Date().getTime() - collectStarted;
         var lowerStarted = timings ? new Date().getTime() : 0;
-        var body = combineStoreRuns(lowerStatements(fn.body.body, symbols));
+        /* Validate/lower both branches first. Configuration constants must
+         * not make unsupported source syntax disappear from validation. */
+        var body = combineStoreRuns(pruneConstantBranches(
+            lowerStatements(fn.body.body, symbols)));
         if (timings) timings.lower = new Date().getTime() - lowerStarted;
         var registerPreferences = resolveRegisterPreferences(
             options.registerPreferences || [], symbols);
@@ -943,6 +948,39 @@
                 registerPreferences: registerPreferences};
         forwardSingleUseLocals(ir);
         return ir;
+    }
+
+    /* Kernel blocks have function-scoped var bindings, already collected
+     * above. Flattening their statement lists does not change scope. Prune
+     * before use counting/inlining, rather than waiting for native emission,
+     * so disabled diagnostics do not inhibit ordinary dataflow analysis. */
+    function pruneConstantBranches(body) {
+        var output = [], index = 0;
+        while (index < body.length) {
+            var statement = body[index++];
+            if (statement.op === "if") {
+                if (statement.test.op === "const_i32") {
+                    var selected = statement.test.value ?
+                        statement.consequent : statement.alternate;
+                    statement = {op: "block", body: selected ? [selected] : []};
+                } else {
+                    statement.consequent = {op: "block", body:
+                        pruneConstantBranches([statement.consequent])};
+                    statement.alternate = {op: "block", body:
+                        statement.alternate ? pruneConstantBranches([statement.alternate]) : []};
+                }
+            }
+            if (statement.op === "block") {
+                var nested = pruneConstantBranches(statement.body), nestedIndex = 0;
+                while (nestedIndex < nested.length) output.push(nested[nestedIndex++]);
+            } else {
+                if (statement.op === "while" || statement.op === "opcode_dispatch") {
+                    statement.body = {op: "block", body: pruneConstantBranches([statement.body])};
+                }
+                output.push(statement);
+            }
+        }
+        return output;
     }
 
     /* Forward single-definition/single-use temporaries through straight-line

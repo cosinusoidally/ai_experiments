@@ -3605,6 +3605,8 @@
                         "free");
         platformBinding(records.platformSnprintfPointerCellAddress(services),
                         "snprintf");
+        platformBinding(records.platformMemsetPointerCellAddress(services),
+                        "memset");
         var names;
         var pointers;
         try {

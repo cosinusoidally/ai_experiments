@@ -139,7 +139,10 @@
     var offsetInstructions = [op.CONST, op.MOVE, op.GET_LOCAL, op.SET_LOCAL, op.GET_PROPERTY,
         op.TO_INT32, op.ADD_INT32, op.SUBTRACT_INT32,
         op.BIT_AND, op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
-        op.SHIFT_UNSIGNED_RIGHT, op.BIT_NOT];
+        op.SHIFT_UNSIGNED_RIGHT, op.BIT_NOT,
+        op.ADD, op.SUBTRACT, op.MULTIPLY, op.DIVIDE, op.REMAINDER,
+        op.STRICT_EQUAL, op.EQUAL, op.LESS, op.LESS_EQUAL, op.GREATER,
+        op.GREATER_EQUAL, op.NOT, op.NEGATE, op.POSITIVE, op.JUMP_IF_FALSE];
     var offsetInstructionIndex, offsetOperandIndex;
     for (offsetInstructionIndex = 0; offsetInstructionIndex < offsetInstructions.length;
          offsetInstructionIndex++) {

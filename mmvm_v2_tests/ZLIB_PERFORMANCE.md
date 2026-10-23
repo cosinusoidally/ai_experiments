@@ -24,7 +24,12 @@ runtime 16.523 seconds, environment 1.413, standalone preparation 62.807,
 writing 0.775 (about 81.5 seconds total). This is a modest initial gain over
 the default 25.4-second checkpoint, not completion of the 22.4-second target.
 It is not enabled by default. Image/log prefix: ignored
-`artifacts/zlib-predecoded`. A sustained demo8 validation is in progress.
+`artifacts/zlib-predecoded`. It subsequently completed over five minutes of
+demo8 across rolling, garage and free-drive autopilot, with a normal Escape/Q
+exit. Garage/free-drive samples were generally 19–20 FPS and late RSS about
+533 MiB. Log: ignored `artifacts/zlib-predecoded-demo8.log`. A temporary net.js
+server on loopback also served hello.js and the js_runner binary with
+byte-for-byte matching downloads; ignored log `artifacts/zlib-predecoded-net.log`.
 
 Canonical bytecode stays intact; a guest-owned, GC-traced execution view
 prepares register byte offsets for selected value/storage operations. This
@@ -32,9 +37,77 @@ removes repeated scaling from those handlers without source recognition or
 fixed native addresses. Both-host regression scripts passed, reusing the
 existing native integration scenarios in canonical and prepared modes rather
 than adding language micro-test files. A collection between budget suspension
-and resume was then added to that scenario and passed on Node; its i386 rerun
-is pending. The ownership, mutation invalidation and snapshot-mode contract
+and resume was then added to that scenario and passed on both Node and i386.
+The ownership, mutation invalidation and snapshot-mode contract
 are documented in `guest_vm/NATIVE_INTERPRETER_DESIGN.md`.
+
+The expanded arithmetic/comparison/unary/conditional-branch view verified at
+26.009/25.730 seconds (cold build about 86.5 seconds). Constant-branch pruning
+before IR use counting/inlining then verified at 25.179/25.095 seconds, with
+a cold build about 85.5 seconds. These do not establish the requested 2x gain;
+the first narrower view remains the fastest measured opt-in image. Defaults
+are unchanged. The disabled branches are still lowered/validated before being
+pruned, so configuration does not bypass dialect validation.
+
+An interrupted GDB sampling session captured 20 PCs, mostly in interpreter
+dispatch/value movement/arithmetic, with two in bytecode-call setup (one in
+register clearing, one in constant copying). The debugged process went on to
+complete ten full-buffer-verified batches. Stop/resume intervals contaminate
+its timings; none are treated as uninstrumented benchmark results. The small
+sample is directional evidence, not a CPU-time percentage. Ignored log:
+`artifacts/zlib-pc-profile.log`. `inspect_kernel_build.js --predecode --symbols`
+exports sorted code-relative labels for attribution; the map must match the
+exact image build, not a later source revision.
+
+### Call-frame initialization work
+
+Bulk clearing through the guest's libc FFI passed both-host regressions and
+verified at 24.805/24.607 seconds. Cold build stages were 16.574 seconds for
+the runtime, 1.410 for the environment, 63.273 for standalone preparation,
+0.761 for writing (about 82 seconds total). Ignored prefix:
+`artifacts/zlib-bulk-frame`. Payload words remain zero, the Node adapter retains
+its ordinary algorithm, and the libc capability is rebound at snapshot start.
+This is not a host-language callback.
+
+A program-owned initialization-vector experiment passed both-host regressions
+and output verification but measured 27.084/25.552 seconds. A repeat measured
+26.007/25.809/26.178, versus the bulk-clearing control's
+25.383/25.276/25.446. It was removed: the repeated comparison did not justify
+its extra state or complexity. Ignored prefix: `artifacts/zlib-frame-template`.
+The stronger edit/collection scenario exposed an independent stale engine-frame
+root on the Node path, where the vector was not used. That lifetime fix is
+checked in separately as `ca64ffb`; the integration scenario is retained.
+
+The opt-in direct-threaded experiment uses relative handler offsets instead of
+searching the opcode tree on every step. A single shared indirect dispatch
+site passed both-host regressions and all output checks, but measured
+29.938/29.884/29.953 seconds: slower than the roughly 25.3-second control.
+It is not promoted. The next version replicates the successor dispatch at
+each handler, retaining the same budget, safepoint and fetch ordering. This
+also passed the full both-host regression script, including canonical,
+register-offset and direct-threaded native scenarios. Its cold build took
+17.950 seconds for runtime construction, 1.477 for environment installation,
+66.421 for standalone preparation and 0.783 for writing (about 86.6 seconds).
+It verified all bytes at 28.712/29.211/27.576 seconds, also slower. Both forms
+were removed rather than retaining unused dispatch/metadata machinery. The
+potential branch-prediction benefit was a hypothesis, not a hardware-counter
+measurement. No fixed heap/code address, OS threads or benchmark recognition
+was involved. The balanced dispatcher remains unchanged. Ignored prefixes:
+`artifacts/zlib-direct-threaded` and `artifacts/zlib-direct-tail`.
+
+After removing direct dispatch, the reduced register-initialization/compiler
+image verified three batches at 26.331/26.180/26.053 seconds. Its cold build
+took 18.072 + 1.556 + 68.136 + 0.751 seconds (about 88.5 seconds), so this run
+does not establish either an execution or compilation speedup. The existing
+predecoded image remeasured serially at 25.772/25.824/26.215 seconds: the new
+image is about 1% slower by the three-batch means, within the variation seen
+across these runs, not evidence of an improvement.
+Ignored prefix: `artifacts/zlib-frame-init-final`.
+The reduced source passed the complete existing both-host regression script
+(12 guest programs / 269 assertions per host, shared kernel/native integration,
+heap/GC/embedding checks and CLI/context demos). This is not a claim that all
+Test262 or all interactive demos were rerun at this checkpoint. The expanded
+operand view is still opt-in; there is no default dispatch change.
 
 - Canonical bytecode metadata now describes actual register reads, not just
   widths and destinations. Both integer fusion and temporary coalescing use

@@ -193,7 +193,8 @@
     var PLATFORM_MALLOC_POINTER = 44;
     var PLATFORM_FREE_POINTER = 48;
     var PLATFORM_SNPRINTF_POINTER = 52;
-    var PLATFORM_SERVICES_BYTES = 56;
+    var PLATFORM_MEMSET_POINTER = 56;
+    var PLATFORM_SERVICES_BYTES = 64;
 
     var ATTR_WRITABLE = 1;
     var ATTR_ENUMERABLE = 2;
@@ -219,6 +220,7 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        PLATFORM_MEMSET_POINTER: Heap.HEADER_SIZE + PLATFORM_MEMSET_POINTER,
         HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
         BYTECODE_EXECUTION_CACHE: Heap.HEADER_SIZE + BYTECODE_EXECUTION_CACHE,
         ENGINE_OPCODE_COUNT: ENGINE_OPCODE_COUNT,
@@ -1610,6 +1612,21 @@
         this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
         return this.heap.trustedPayloadAddress(services,
                                                PLATFORM_SNPRINTF_POINTER);
+    };
+
+    Records.prototype.setPlatformMemsetPointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(services, PLATFORM_MEMSET_POINTER,
+            pointer, Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformMemsetPointer = function (services) {
+        return this.heap.readTrustedFieldU32(services,
+            PLATFORM_MEMSET_POINTER, Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformMemsetPointerCellAddress = function (services) {
+        this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
+        return this.heap.trustedPayloadAddress(services, PLATFORM_MEMSET_POINTER);
     };
 
     /* Native service addresses are process-local capabilities and must never

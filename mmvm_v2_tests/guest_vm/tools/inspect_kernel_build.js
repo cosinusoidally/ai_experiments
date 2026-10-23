@@ -5,6 +5,8 @@
  * js_min.exe guest_vm/tools/inspect_kernel_build.js [function-name]
  * js_runner.exe artifacts/snap guest_vm/tools/inspect_kernel_build.js [function-name]
  * node guest_vm/tools/inspect_kernel_build.js [function-name]
+ * Add --predecode first to inspect the opt-in operand view. --symbols reports
+ * sorted code-relative labels for native debugger/profiler attribution.
  */
 (function (shellArguments) {
     var nodeHost = typeof module !== "undefined" && module.exports;
@@ -23,6 +25,8 @@
         args = shellArguments;
         report = print;
     }
+    var predecode = args[0] === "--predecode";
+    if (predecode) args = args.slice(1);
     if (args[0] === "--numbers") {
         var conversion = nodeHost ? require("../binary64.js") : GuestVMBinary64;
         var samples = [1.7976931348623157e308, 5e-324, 16777619,
@@ -41,7 +45,8 @@
         return;
     }
     var builtinsOnly = args[0] === "--builtins";
-    var vm = new VM({nativeInterpreter: !builtinsOnly, retainNativeBuildIR: true});
+    var vm = new VM({nativeInterpreter: !builtinsOnly, retainNativeBuildIR: true,
+                     nativeOperandPredecode: predecode});
     try {
         if (builtinsOnly) {
             var metadata = vm.runtime.functionMetadata;
@@ -80,6 +85,19 @@
         }
         var functions = engine.ir.functions;
         var labels = engine.nativeResult.symbols;
+        if (args[0] === "--symbols") {
+            var symbols = [], symbol;
+            for (symbol in labels) {
+                if (Object.prototype.hasOwnProperty.call(labels, symbol)) {
+                    symbols.push({name: symbol, offset: labels[symbol]});
+                }
+            }
+            symbols.sort(function (left, right) { return left.offset - right.offset; });
+            for (var symbolIndex = 0; symbolIndex < symbols.length; symbolIndex++) {
+                report(symbols[symbolIndex].offset + " " + symbols[symbolIndex].name);
+            }
+            return;
+        }
         var index = 0;
         while (index < functions.length) {
             var fn = functions[index++];
