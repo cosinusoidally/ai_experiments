@@ -113,6 +113,27 @@ the independent Node reference. These are diagnostic timings, not Octane
 scores or statistically isolated repeated trials. Logs: ignored
 `artifacts/latin1-zlib.log` and `artifacts/latin1-zlib-control.log`.
 
+The focused native Test262 selection `ch09/9.5 ch11/11.6 ch11/11.7` executed
+165 variants: 153 passed, the same 12 failed, 0 not run/timeouts. Failure IDs
+were compared with the pre-change log. This is not a whole-suite claim.
+
+The compact self-built image also passed these integration checks:
+
+- js_min loaded it through `--with-snapshot` and ran hello.js.
+- net.js and node_web.js served text and the js_runner ELF binary on temporary
+  loopback ports; all downloads matched the originals with cmp.
+- Demo1 ran for over five minutes at 320x240, accepted typing/mouse dragging,
+  and exited normally. Its roughly 1.1–1.3 FPS remains poor; this was not an
+  isolated speed comparison.
+- Demo8 ran for over six minutes at 320x240/20 FPS across rolling, garage and
+  free-drive autopilot, and exited normally through Escape/Q. The demos
+  overlapped for part of the stability check. After demo1 exited, late
+  free-drive samples with demo8 alone were about 20 FPS. Late RSS was about
+  528 MiB. These runs do not constitute an exhaustive visual or GC proof.
+
+Raw integration logs remain ignored `artifacts/latin1-*.log` files. No demo,
+C, external corpus, or generated snapshot files were checked in.
+
 ## Remaining opportunities
 
 This phase does not remove overlapping source copies. The prior audit found

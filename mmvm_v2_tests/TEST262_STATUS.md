@@ -729,6 +729,22 @@ performance are separate mandatory regression gates.
   limitation, not a passing Test262 result. No whole-suite run was performed;
   whole-suite totals above remain unchanged. No external corpus files changed.
 
+### 2026-10-23, approximately 23:15 BST — compact string storage
+
+- Revision `9c591d8`, focused selection `ch09/9.5 ch11/11.6 ch11/11.7`,
+  authored variants under `js_min.exe guest_runner.js --vm-native`.
+- Executed 165 of 165 variants: 153 passed, 12 failed, 0 not run and
+  0 timed out. The failing test IDs exactly match the pre-change log
+  `artifacts/self-build-bounded-test262.log`; no new failure in this selection.
+- Raw log: ignored `artifacts/latin1-test262.log`. Elapsed time and peak RSS
+  were not captured for this correctness check. No whole-suite run was
+  performed; the whole-suite totals above remain unchanged.
+- Flat Latin-1 strings use one byte per code unit; wider strings retain exact
+  UTF-16 storage. Source text and inspection metadata are retained. Both-host
+  project regressions pass (12 programs / 270 assertions per host), including
+  native execution, heap/GC and the string round-trip samples. A genuine
+  self-hosted rebuild is byte-identical. No corpus files were changed.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure
