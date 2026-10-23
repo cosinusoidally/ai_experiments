@@ -409,6 +409,15 @@ The migration remains runnable at each checkpoint:
 
 ## Heap independence
 
+Execution consumes a native return value before reclaiming its frame. At that
+lifetime boundary, `Execution.releaseFrame` unpublishes both the context's
+active-frame root and the engine's current-frame root before freeing storage.
+The engine root moves to the caller (which may belong to another context), or
+to zero at the end of the chain. Otherwise a collection between completed
+executions can follow an engine root into a freed frame. Raw NativeInterpreter
+embedders which manage frame storage themselves must call `releaseFrameRoot`
+before reclaiming the frame; a returned frame remains rooted until consumed.
+
 The linear heap is authoritative. Engine registers may cache decoded words,
 but every value that survives a safepoint is in a 16-byte tagged heap cell.
 Object identity, properties, array vectors, lexical environments, frames,

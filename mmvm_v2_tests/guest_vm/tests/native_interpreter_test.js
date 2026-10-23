@@ -149,6 +149,37 @@
                     throw new Error("disabled opcode counters must stay native and undefined");
                 }
 
+                /* Cached initialization must reflect program edits, and
+                 * collection must not resurrect the previous constant bank. */
+                var constantContext = integratedVM.jsRuntime.createContext();
+                constantContext.run(
+                    "function frameInit(v) { return v + 17; } var frameInitResult = frameInit(1);");
+                if (integratedVM.runtime.getGlobal(constantContext, "frameInitResult") !== 18) {
+                    throw new Error("native frame initializer first call mismatch");
+                }
+                var constantCallable = integratedVM.runtime.getGlobal(
+                    constantContext, "frameInit");
+                var editableConstants = constantCallable.program.constants;
+                var editableIndex = 0;
+                while (editableIndex < editableConstants.length &&
+                       editableConstants[editableIndex] !== 17) editableIndex++;
+                if (editableIndex === editableConstants.length) {
+                    throw new Error("native frame initializer fixture constant missing");
+                }
+                var constantFallbacks = integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                constantContext.run("__guestVMProgramSetConstant(frameInit," +
+                    editableIndex + ",23);");
+                integratedVM.collect();
+                constantContext.run("frameInitResult = frameInit(1);");
+                if (integratedVM.runtime.getGlobal(constantContext, "frameInitResult") !== 24) {
+                    throw new Error("native frame initializer retained an edited constant");
+                }
+                if (typeof get_dlsym === "function" &&
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount !== constantFallbacks) {
+                    throw new Error("native frame initializer edit used semantic fallback");
+                }
+                constantContext.destroy();
+
                 var regexpContext = integratedVM.jsRuntime.createContext();
                 var regexpProgram = {
                     code: [bytecode.MAKE_REGEXP, 0, 0, 1,

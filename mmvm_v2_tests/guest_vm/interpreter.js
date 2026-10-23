@@ -318,6 +318,9 @@
             this.runtime.heapRecords.setContextActiveFrame(frameContext,
                                                             caller);
         }
+        if (this.runtime.nativeInterpreter) {
+            this.runtime.nativeInterpreter.releaseFrameRoot(frame.heapAddress);
+        }
         this.runtime.linearHeap.freeRecord(frame.heapAddress,
                                            "execution frame");
     };

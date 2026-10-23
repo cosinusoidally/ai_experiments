@@ -18221,6 +18221,16 @@
         return true;
     };
 
+    /* Execution owns the returned frame until its result has been consumed.
+     * Unpublish that ownership before storage is reclaimed; another context
+     * may collect before the next native invocation replaces this root. */
+    NativeInterpreter.prototype.releaseFrameRoot = function (frame) {
+        var records = this.runtime.heapRecords;
+        if (records.engineCurrentFrame(this.stateAddress) === frame) {
+            records.setEngineCurrentFrame(this.stateAddress, records.frameCaller(frame));
+        }
+    };
+
     NativeInterpreter.prototype.releaseCachedFramesForCollection = function (
             deferIndexRebuild) {
         var records = this.runtime.heapRecords;
