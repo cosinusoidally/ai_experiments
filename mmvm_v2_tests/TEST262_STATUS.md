@@ -707,6 +707,28 @@ performance are separate mandatory regression gates.
   previous predecoded image reproduces the same failure. This standalone
   wrapper limitation remains outstanding; it is not counted as 165 passes.
 
+### 2026-10-23, approximately 21:20 BST — self-hosted rebuild repair
+
+- Revision `1d6bcd2`, focused selection `ch09/9.5 ch11/11.6 ch11/11.7`,
+  authored variants under `js_min.exe guest_runner.js --vm-native`.
+- Executed 165 of 165 variants: 153 passed, 12 failed, 0 not run,
+  0 timed out. Totals match the previously recorded focused baseline. The
+  existing boolean/null arithmetic and boxed-string failures remain. Exact
+  failure-ID comparison was not repeated because the earlier raw log was no
+  longer present; this entry does not claim such a comparison.
+- Raw log: ignored `artifacts/self-build-bounded-test262.log`. Elapsed time
+  and peak RSS were not captured for this correctness run.
+- Native numeric-string array reads, primitive own-key enumeration and numeric
+  string header initialization were repaired. An existing higher-level
+  object/array traversal case now guards the compiler failure. Both-host
+  project regressions pass (12 programs / 270 guest assertions per host), and
+  a genuine self-hosted snapshot rebuild produces a byte-identical image.
+- The standalone js_runner Test262 wrapper still exits before executing the
+  selection with a non-callable value / unsupported opcode 35. Raw log:
+  `artifacts/self-build-bounded-raw-test262.log`. That is an outstanding wrapper
+  limitation, not a passing Test262 result. No whole-suite run was performed;
+  whole-suite totals above remain unchanged. No external corpus files changed.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

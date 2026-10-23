@@ -545,3 +545,24 @@ assertions per host, including both native operand modes). Use the bounded
 stage1/stage2 artifacts for this final checkpoint, or regenerate a seed from
 the current sources using the commands above; earlier prefixes are retained
 only as investigation evidence.
+
+Additional final-image checks:
+
+- js_min loaded the rebuilt image through `--with-snapshot` and ran hello.js.
+- Both net.js and node_web.js served hello.js and the js_runner ELF binary on
+  temporary loopback ports; downloaded text and binary files matched with cmp.
+- Demo8 ran for over five minutes at 320x240/20 FPS across rolling, garage and
+  free-drive autopilot, then exited normally through Escape/Q. Settled garage
+  and late free-drive samples were about 20 FPS; late RSS was about 532 MiB.
+  Brief HTTP/snapshot-load checks overlapped part of the run, so this is a
+  sustained stability check, not an isolated frame-time benchmark. No rendering
+  screenshots or exhaustive visual comparison are claimed.
+- Demo1 ran for over five minutes at 320x240, accepted typing and mouse
+  dragging, and exited normally through Escape. It still ran at roughly
+  1.2–1.3 FPS; this is a stability check, not a performance win. Observed late
+  RSS samples were roughly 186–250 MiB, not an exhaustive GC/lifetime proof.
+  Raw log: ignored `artifacts/self-build-bounded-demo1.log`.
+- The focused js_min-native Test262 selection stayed at 153 passed / 12 failed
+  out of 165, with 0 not run/timeouts. The standalone Test262 wrapper still
+  fails before running the selection; see `../TEST262_STATUS.md`. This is not
+  a claim that the entire corpus or every interactive demo was rerun.
