@@ -456,3 +456,64 @@ in any previously passing gate is fixed before the next checkpoint is committed.
 - `hello.js` is executed as guest bytecode; the output is not hard-coded in
   the C runner or native bootstrap.
 - Existing Node and js_min guest execution, tests, and demos do not regress.
+
+## 2026-10-23: self-hosted rebuild regression
+
+The reported `GET_PROPERTY` exit at PC 208 during lowering was a real guest
+semantic bug, not an unsupported requirement of the compiler. Named array
+lookup did not read dense elements for dynamic string keys such as `"0"`.
+Consequently `for-in` traversal skipped IR children stored in arrays, the
+inliner's size/mutation analysis was wrong, and it attempted to inline the
+entire interpreter with invalid local mappings. Numeric-string array reads
+now use the guest array storage, respecting explicit descriptors, holes,
+prototype lookup and mapped argument cells.
+
+Investigation also exposed two further blockers:
+
+- The integer/radix string builder read its new record through a layout-aware
+  hashing routine before initializing its header. Dirty allocation storage
+  could look like a rope and cause a crash while generating enumeration keys.
+  The flat header is now initialized before any such read.
+- The assembler walks numbers in IR arrays with `for-in`. Native key
+  enumeration rejected these primitives instead of returning no own keys.
+  Null/undefined and number/boolean primitives now produce an empty own-key
+  enumeration without a host callback. This is not a claim that all inherited
+  or string/typed-view enumeration semantics are complete.
+
+The existing object/control-flow test now includes one recursive traversal of
+mixed object/array/primitive data. The unpatched standalone image returns an
+incorrect count or exits on primitive enumeration; the repaired image passes.
+Temporary inliner diagnostics used to identify the cause were removed.
+
+An existing snapshot embeds the old engine. Rebuild the seed with js_min once;
+merely loading changed build sources through an old image cannot repair the
+engine that is executing those sources. For example, from this directory:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native \
+  --snapshot artifacts/snap-fixed
+./artifacts/js_runner.exe artifacts/snap-fixed guest_runner.js --vm-native \
+  --snapshot artifacts/snap-rebuilt
+cmp artifacts/snap-fixed artifacts/snap-rebuilt
+./artifacts/js_runner.exe artifacts/snap-rebuilt hello.js
+```
+
+The repaired self-hosted build performed real parsing, lowering, assembly,
+runtime preparation and serialization. It completed with a byte-identical
+image; both tested images had SHA-256
+`3fb97cb0f3eeac3cb2957b2f56a264fc059b0249a0174e8ce4b03a63782974df`.
+The rebuilt image ran hello.js and the object/control-flow regression.
+The complete existing Node/js_min regression script passed: 12 guest programs,
+270 guest assertions per host, shared kernel/native integration (canonical and
+predecoded), heap/GC/embedding checks, CLI demos and context multiplexing.
+Measured self-hosted stages were 52.801 seconds for runtime construction
+(including parsing/fingerprinting, lowering and assembly), 1.410 for
+environment installation, 88.215 for standalone preparation and 1.593 for
+writing: about 144 seconds, not a cached/copy-only snapshot export. The seed
+build was about 83 seconds. These results establish correctness of this build,
+not completion of the startup-performance target.
+
+Validation artifacts remain ignored under the `self-build-fixed-stage1c` /
+`self-build-fixed-stage2c` prefixes. The user's original snapshot was not
+overwritten, no C or demo sources changed, and no generated image is checked in.

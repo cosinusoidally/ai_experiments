@@ -22,6 +22,21 @@ assertEqual(names, "firstthird", "for-in and continue");
 delete values.second;
 assertEqual(values.hasOwnProperty("second"), false, "delete property");
 
+/* A recursive traversal must see array elements through the string keys
+ * supplied by for-in, not just through integer bracket expressions. */
+function countNestedObjects(value) {
+    if (!value || typeof value === "string") return 0;
+    var count = typeof value === "object" ? 1 : 0, key;
+    for (key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+            count += countNestedObjects(value[key]);
+        }
+    }
+    return count;
+}
+assertEqual(countNestedObjects({items: [{value: 1}, {value: 2}],
+    metadata: {active: true}}), 5, "recursive traversal of objects and arrays");
+
 var turns = 0;
 do {
     turns++;

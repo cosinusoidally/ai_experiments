@@ -1328,51 +1328,66 @@
                             namedGetPrototype = bufferViewPrototype(
                                 heapBase, namedGetObject);
                         }
-                        if (namedGetHead === 0) {
-                            if (namedGetPrototype === 0) namedGetObject = 0;
-                            else namedGetObject = namedGetPrototype;
-                        } else {
-                            while (namedGetHead !== 0) {
-                                var namedGetStoredKey = propertyKey(
-                                    heapBase, namedGetHead);
-                                var namedGetKeyMatches = 0;
-                                if (namedGetStoredKey === namedGetKey) {
-                                    namedGetKeyMatches = 1;
-                                } else if (stringLength(heapBase,
-                                    namedGetStoredKey) === stringLength(
-                                    heapBase, namedGetKey)) {
-                                    namedGetKeyMatches = 1;
-                                    var namedGetCharacterIndex = 0;
-                                    var namedGetCharacterLength = stringLength(
-                                        heapBase, namedGetKey);
-                                    while (namedGetCharacterIndex <
-                                           namedGetCharacterLength) {
-                                        if ((stringCharacterCodeUnit(heapBase,
-                                            namedGetStoredKey,
-                                            namedGetCharacterIndex) & 65535) !==
-                                            (stringCharacterCodeUnit(heapBase,
-                                            namedGetKey,
-                                            namedGetCharacterIndex) & 65535)) {
-                                            namedGetKeyMatches = 0;
-                                            namedGetCharacterIndex =
-                                                namedGetCharacterLength;
-                                        } else namedGetCharacterIndex =
-                                            namedGetCharacterIndex + 1;
-                                    }
-                                }
-                                if (namedGetKeyMatches === 1) {
-                                    namedGetProperty = namedGetHead;
-                                    namedGetHead = 0;
-                                    namedGetObject = 0;
-                                } else {
-                                    namedGetHead = propertyNext(
-                                        heapBase, namedGetHead);
+                        while (namedGetHead !== 0) {
+                            var namedGetStoredKey = propertyKey(
+                                heapBase, namedGetHead);
+                            var namedGetKeyMatches = 0;
+                            if (namedGetStoredKey === namedGetKey) {
+                                namedGetKeyMatches = 1;
+                            } else if (stringLength(heapBase,
+                                namedGetStoredKey) === stringLength(
+                                heapBase, namedGetKey)) {
+                                namedGetKeyMatches = 1;
+                                var namedGetCharacterIndex = 0;
+                                var namedGetCharacterLength = stringLength(
+                                    heapBase, namedGetKey);
+                                while (namedGetCharacterIndex <
+                                       namedGetCharacterLength) {
+                                    if ((stringCharacterCodeUnit(heapBase,
+                                        namedGetStoredKey,
+                                        namedGetCharacterIndex) & 65535) !==
+                                        (stringCharacterCodeUnit(heapBase,
+                                        namedGetKey,
+                                        namedGetCharacterIndex) & 65535)) {
+                                        namedGetKeyMatches = 0;
+                                        namedGetCharacterIndex =
+                                            namedGetCharacterLength;
+                                    } else namedGetCharacterIndex =
+                                        namedGetCharacterIndex + 1;
                                 }
                             }
-                            if (namedGetObject !== 0) {
-                                namedGetObject = namedGetPrototype;
+                            if (namedGetKeyMatches === 1) {
+                                namedGetProperty = namedGetHead;
+                                namedGetHead = 0;
+                                namedGetObject = 0;
+                            } else {
+                                namedGetHead = propertyNext(
+                                    heapBase, namedGetHead);
                             }
                         }
+                        /* for-in produces string keys. Dense array cells
+                         * are own properties too, even though they are not
+                         * linked property records. Check explicit descriptors
+                         * first, then a present indexed cell, then the parent.
+                         * Holes must still allow inherited properties. */
+                        if (namedGetObject !== 0 && namedGetType === HEAP_TYPE_ARRAY) {
+                            var namedGetIndex = propertyKeyIndexKernel(heapBase, namedGetKey);
+                            var namedGetElements = arrayElements(heapBase, namedGetObject);
+                            if (namedGetIndex >= 0 &&
+                                namedGetIndex < vectorLength(heapBase, namedGetElements)) {
+                                var namedGetIndexedCell = vectorCellAddress(
+                                    heapBase, namedGetElements, namedGetIndex);
+                                if (valueCellTag(0, namedGetIndexedCell) !== 0) {
+                                    var namedGetMappedCell = argumentsMappedCellKernel(
+                                        heapBase, namedGetObject, namedGetIndex);
+                                    if (namedGetMappedCell !== 0) namedGetIndexedCell = namedGetMappedCell;
+                                    copyValueCell(arrayGetTarget, namedGetIndexedCell);
+                                    namedGetProperty = PROPERTY_FOUND_SENTINEL;
+                                    namedGetObject = 0;
+                                }
+                            }
+                        }
+                        if (namedGetObject !== 0) namedGetObject = namedGetPrototype;
                     }
                     if (namedGetProperty === 0) {
                         if (arrayGetOriginalObjectType === HEAP_TYPE_OBJECT) {
@@ -10665,6 +10680,15 @@
             return 2;
         }
         var result = engineHeapBump(heapBase, state);
+        /* Allocation can reuse a rope record. Initialize the flat-string
+         * header before any layout-aware reader (including hashing) sees
+         * it; stale flags would otherwise interpret digits as child links.
+         * The record is still private until the bump/target are published. */
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, bytes);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, 0);
+        setStringLength(heapBase, result, length);
         var index = length;
         remaining = magnitude;
         while (index > 0) {
@@ -10686,11 +10710,6 @@
                 heapBase, result, index) & 65535)) * 16777619;
             index = index + 1;
         }
-        setRecordType(heapBase, result, HEAP_TYPE_STRING);
-        setRecordSize(heapBase, result, bytes);
-        setRecordMark(heapBase, result, 0);
-        setRecordFlags(heapBase, result, 0);
-        setStringLength(heapBase, result, length);
         setStringHash(heapBase, result, hash);
         setEngineHeapBump(heapBase, state, result + bytes);
         setValueCellReference(target, result);
@@ -11353,15 +11372,21 @@
 
     function getKeysKernel(heapBase, state, targetCell, sourceCell,
                            arrayPrototype) {
-        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
-        var object = valueCellReference(0, sourceCell);
-        var type = recordType(heapBase, object);
-        if (type < HEAP_TYPE_OBJECT) return 0;
-        if (type > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        var object = 0;
+        var type = 0;
         var property = 0;
-        if (type === HEAP_TYPE_ARRAY) {
-            property = arrayPropertyHead(heapBase, object);
-        } else property = objectPropertyHead(heapBase, object);
+        /* Null/undefined skip enumeration; number/boolean primitives have
+         * no own enumerable properties. Produce an empty key vector rather
+         * than exiting to the host merely because the value is primitive. */
+        if (valueCellTag(0, sourceCell) === VALUE_TAG_REFERENCE) {
+            object = valueCellReference(0, sourceCell);
+            type = recordType(heapBase, object);
+            if (type < HEAP_TYPE_OBJECT) return 0;
+            if (type > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+            if (type === HEAP_TYPE_ARRAY) {
+                property = arrayPropertyHead(heapBase, object);
+            } else property = objectPropertyHead(heapBase, object);
+        }
         var sourceElements = 0;
         var sourceLength = 0;
         var indexedCount = 0;

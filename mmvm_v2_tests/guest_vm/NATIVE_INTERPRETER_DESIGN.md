@@ -613,6 +613,28 @@ small integration scenarios alone is not sufficient to make it the default.
 
 ### Register initialization and compiler analysis
 
+String construction has the same initialize-before-read requirement as other
+heap records. A reserved allocation is private but not necessarily zeroed;
+its previous flag word may select a rope layout. Builders must initialize the
+flat header (including flags and length) before calling layout-aware character
+readers to compute a hash, and publish the allocation only after construction.
+The integer/radix builder follows this order as well. Array enumeration uses
+that builder for numeric keys, so a violation can surface during self-hosted
+compiler traversal rather than an explicit Number.toString call.
+
+Named property lookup must also account for dense array cells: the string key
+`"0"` produced by enumeration denotes the same element as integer `0`. For
+each object in the prototype chain, lookup checks explicit descriptors, then
+a present indexed cell when the object is an array, before following its
+prototype. Holes do not shadow inherited properties, and mapped arguments
+cells retain their parameter alias. This lookup executes in the kernel; a
+recursive compiler traversal must not silently lose children stored in arrays.
+Enumeration also accepts null/undefined (no iterations) and the own-property
+view of number/boolean primitives (no own enumerable keys), without a host
+callback. Reference kinds not yet handled by this kernel still take an
+explicit unsupported exit; this does not claim complete prototype enumeration
+or all string/typed-view enumeration semantics.
+
 Call setup uses named initialization and constant-mapping helpers. On native
 memory it can zero registers through libc memset and then write undefined tags;
 all payload and auxiliary words remain zero. The Node memory-adapter path keeps
