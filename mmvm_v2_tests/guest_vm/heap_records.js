@@ -32,6 +32,7 @@
     var STRING_ROPE_RIGHT = 12;
     var STRING_ROPE_DEPTH = 16;
     var STRING_ROPE_FLAG = 1;
+    var STRING_LATIN1_FLAG = 2;
 
     var VECTOR_LENGTH = 0;
     var VECTOR_CAPACITY = 4;
@@ -280,6 +281,7 @@
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
+        STRING_LATIN1_FLAG: STRING_LATIN1_FLAG,
         STRING_ROPE_RECORD_BYTES:
             Heap.HEADER_SIZE + ((STRING_ROPE_DEPTH + 4 + 7) & -8),
         STRING_ROPE_LEFT: 16 + STRING_ROPE_LEFT,
@@ -301,19 +303,31 @@
 
     Records.prototype.allocateString = function (value) {
         value = String(value);
-        var address = this.heap.allocateRecord(
-            Heap.Types.STRING, STRING_CHARS + value.length * 2);
-        this.heap.writeTrustedFieldU32(address, STRING_LENGTH, value.length,
-                                Heap.Types.STRING);
-        this.heap.writeStringFieldUTF16LE(address, STRING_CHARS, value,
-                                         Heap.Types.STRING);
+        /* Select a lossless storage width while computing the existing hash.
+         * Code-unit indexing/length never change. Wide strings, including
+         * unpaired surrogates, retain their exact UTF-16 representation. */
         var hash = 2166136261;
         var index = 0;
+        var latin1 = true;
         while (index < value.length) {
             var code = value.charCodeAt(index);
+            if (code > 255) latin1 = false;
             hash ^= code;
             hash = (hash * 16777619) >>> 0;
             index++;
+        }
+        var unitBytes = latin1 ? 1 : 2;
+        var address = this.heap.allocateRecord(
+            Heap.Types.STRING, STRING_CHARS + value.length * unitBytes);
+        this.heap.writeTrustedFieldU32(address, STRING_LENGTH, value.length,
+                                      Heap.Types.STRING);
+        if (latin1) {
+            this.heap.setFlags(address, STRING_LATIN1_FLAG);
+            this.heap.writeStringFieldLatin1(address, STRING_CHARS, value,
+                                             Heap.Types.STRING);
+        } else {
+            this.heap.writeStringFieldUTF16LE(address, STRING_CHARS, value,
+                                             Heap.Types.STRING);
         }
         this.heap.writeTrustedFieldU32(address, STRING_HASH, hash, Heap.Types.STRING);
         return address;
@@ -330,6 +344,11 @@
     Records.prototype.stringIsRope = function (address) {
         this.heap.requireRecord(address, Heap.Types.STRING);
         return !!(this.heap.flags(address) & STRING_ROPE_FLAG);
+    };
+
+    Records.prototype.stringIsLatin1 = function (address) {
+        this.heap.requireRecord(address, Heap.Types.STRING);
+        return !!(this.heap.flags(address) & STRING_LATIN1_FLAG);
     };
 
     Records.prototype.stringRopeLeft = function (address) {
@@ -353,7 +372,8 @@
         if (index < 0 || index >= length || index !== Math.floor(index)) {
             throw new RangeError("string character index is out of bounds");
         }
-        while (this.stringIsRope(address)) {
+        var flags = this.heap.flags(address);
+        while (flags & STRING_ROPE_FLAG) {
             var left = this.stringRopeLeft(address);
             var leftLength = this.stringLength(left);
             if (index < leftLength) address = left;
@@ -361,6 +381,11 @@
                 index -= leftLength;
                 address = this.stringRopeRight(address);
             }
+            flags = this.heap.flags(address);
+        }
+        if (flags & STRING_LATIN1_FLAG) {
+            return this.heap.readTrustedFieldU8(
+                address, STRING_CHARS + index, Heap.Types.STRING);
         }
         var low = this.heap.readTrustedFieldU8(
             address, STRING_CHARS + index * 2, Heap.Types.STRING);

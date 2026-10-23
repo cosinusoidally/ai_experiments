@@ -2025,9 +2025,9 @@
                 emitControlExpression(assembler, node.address, state);
                 assembler.movEaxDwordPtrEax();
             }
-        } else if (node.op === "load_raw_u8" || node.op === "load_raw_u32") {
+        } else if (node.op === "load_u8" || node.op === "load_raw_u8" || node.op === "load_raw_u32") {
             emitControlExpression(assembler, node.address, state);
-            if (node.op === "load_raw_u8") assembler.movzxEaxBytePtrEax();
+            if (node.op !== "load_raw_u32") assembler.movzxEaxBytePtrEax();
             else assembler.movEaxDwordPtrEax();
         } else if (node.op === "neg_i32" || node.op === "not_i32" ||
                    node.op === "as_i32" || node.op === "logical_not_i32") {

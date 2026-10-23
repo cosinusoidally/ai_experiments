@@ -124,6 +124,11 @@
         this.host.write32LE(this.allocation, address, value);
     };
 
+    LinearMemory.prototype.writeStringLatin1 = function (address, text) {
+        this.checkRange(address, text.length);
+        this.host.writeStringLatin1(this.allocation, address, text);
+    };
+
     LinearMemory.prototype.writeStringUTF16LE = function (address, text) {
         this.checkRange(address, text.length * 2);
         this.host.writeStringUTF16LE(this.allocation, address, text);

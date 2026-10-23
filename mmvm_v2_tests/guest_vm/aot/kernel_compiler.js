@@ -1014,7 +1014,7 @@
             if (!node) return false;
             if (node.op === "const_i32" || node.op === "local_i32" ||
                 node.op === "arg_i32") return true;
-            if (node.op === "load_u32") return movable(node.address);
+            if (node.op === "load_u32" || node.op === "load_u8") return movable(node.address);
             if (node.op === "neg_i32" || node.op === "not_i32" ||
                 node.op === "as_i32") return movable(node.value);
             if (node.op === "add_i32" || node.op === "sub_i32" ||
@@ -1711,6 +1711,13 @@
             node.callee.name === "opcodeExecutionCount" &&
             node.arguments.length === 3) {
             return {op: "load_u32", address: opcodeCounterAddress(
+                node.arguments, symbols), type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "latin1StringCharacterCodeUnit" &&
+            node.arguments.length === 3) {
+            return {op: "load_u8", address: stringCharacterByteAddress(
                 node.arguments, symbols), type: "i32"};
         }
         if (node.type === "CallExpression" &&

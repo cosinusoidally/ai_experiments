@@ -138,6 +138,42 @@
     /* Bulk host-string ingress. UTF-16 code units (including lone surrogates)
      * are preserved verbatim. Check the complete range before the first write.
      * Pair stores never overwrite a trailing field or record padding. */
+    HostMemory.prototype.writeStringLatin1 = function (allocation, offset, text) {
+        if (!allocation || allocation.freed) throw new Error("backing store is freed");
+        if (typeof text !== "string") throw new TypeError("expected a string");
+        var WORD_BYTES = 4, BYTE_BITS = 8, LATIN1_MAX = 255;
+        var length = text.length, index = 0, first, second, third, fourth, word;
+        if (offset < 0 || offset !== Math.floor(offset) || offset + length > allocation.length) {
+            throw new RangeError("Latin-1 write is out of bounds");
+        }
+        var nativeBacking = allocation.isNative;
+        var pointer = nativeBacking ? allocation.pointer + offset : 0;
+        var packed = !nativeBacking || (pointer & (WORD_BYTES - 1)) === 0;
+        /* Write only complete words. The tail never overwrites record padding
+         * or an adjacent field. Node and native memory use the same LE packing. */
+        while (packed && index + WORD_BYTES <= length) {
+            first = text.charCodeAt(index);
+            second = text.charCodeAt(index + 1);
+            third = text.charCodeAt(index + 2);
+            fourth = text.charCodeAt(index + 3);
+            if ((first | second | third | fourth) > LATIN1_MAX) {
+                throw new RangeError("Latin-1 write contains a wide code unit");
+            }
+            word = first | (second << BYTE_BITS) | (third << (BYTE_BITS * 2)) |
+                (fourth << (BYTE_BITS * 3));
+            if (nativeBacking) poke32(pointer + index, word);
+            else writePagedWordLE(allocation, offset + index, word >>> 0);
+            index += WORD_BYTES;
+        }
+        while (index < length) {
+            first = text.charCodeAt(index);
+            if (first > LATIN1_MAX) throw new RangeError("Latin-1 write contains a wide code unit");
+            if (nativeBacking) poke8(pointer + index, first);
+            else writePagedByte(allocation, offset + index, first);
+            index++;
+        }
+    };
+
     HostMemory.prototype.writeStringUTF16LE = function (allocation, offset, text) {
         if (!allocation || allocation.freed) throw new Error("backing store is freed");
         if (typeof text !== "string") throw new TypeError("expected a string");

@@ -637,6 +637,12 @@
         this.memory.writeU32(this.checkPayload(address, offset, 4, expectedType), value);
     };
 
+    Heap.prototype.writeStringFieldLatin1 = function (address, offset, text,
+                                                      expectedType) {
+        var payload = this.checkPayload(address, offset, text.length, expectedType);
+        this.memory.writeStringLatin1(payload, text);
+    };
+
     Heap.prototype.writeStringFieldUTF16LE = function (address, offset, text,
                                                        expectedType) {
         var payload = this.checkPayload(address, offset, text.length * 2,

@@ -1,4 +1,4 @@
-/* Compare the snapshot's reachable heap with the kernel collector.
+/* Inspect snapshots or compare their reachable heap with the kernel collector.
  * Run from mmvm_v2_tests with Node or js_min, passing a standalone snapshot.
  * This is diagnostic tooling, not a language-feature test. */
 (function (shellArguments) {
@@ -26,11 +26,21 @@
         args = shellArguments;
         output = print;
     }
+    var inspectString = args[0] === "--string";
+    var inspectSources = args[0] === "--sources";
+    var stringAddress = inspectString ? Number(args[1]) : 0;
+    if (inspectString) args = args.slice(2);
+    else if (inspectSources) args = args.slice(1);
     var propertiesOnly = args[0] === "--heap-properties";
-    var statisticsOnly = args[0] === "--heap-stats" || propertiesOnly;
+    var snapshotStatistics = args[0] === "--snapshot-stats";
+    var statisticsOnly = args[0] === "--heap-stats" || propertiesOnly || snapshotStatistics;
+    var rawHeap = statisticsOnly && !snapshotStatistics;
     if (statisticsOnly) args = args.slice(1);
+    var inspectionOnly = statisticsOnly || inspectString || inspectSources;
     if (!args.length) {
         throw new Error("usage: audit_snapshot_heap.js snapshot | " +
+                        "--snapshot-stats snapshot | " +
+                        "--sources snapshot | --string ADDRESS snapshot | " +
                         "--heap-stats raw-heap-dump | " +
                         "--heap-properties raw-heap-dump");
     }
@@ -51,27 +61,28 @@
             return ffi.peek32(headerPointer + offset) >>> 0;
         };
     }
-    var heapOffset = statisticsOnly ? 0 : header(28);
-    var heapLength = statisticsOnly ? (nodeHost ? file.length :
+    var heapOffset = rawHeap ? 0 : header(28);
+    var heapLength = rawHeap ? (nodeHost ? file.length :
         ffi.call(ffi.resolve("lseek"), [descriptor, 0, 2])) : header(32);
-    if (statisticsOnly && nodeHost) {
+    if (inspectionOnly && nodeHost) {
         /* Inspect a debugger dump without expanding its bytes into the Node
          * emulated heap. Header interpretation still belongs to Heap. */
         var inspectionHeap = new Heap({heapBytes: 4096});
         inspectionHeap.memory.destroy();
         function inspectionWord(offset) {
-            return file.readUInt32LE(offset);
+            return file.readUInt32LE(heapOffset + offset);
         }
         inspectionHeap.memory = {
             readU32: inspectionWord,
             readU32Trusted: inspectionWord,
-            readU8: function (offset) { return file[offset]; },
-            readU8Trusted: function (offset) { return file[offset]; },
+            readU8: function (offset) { return file[heapOffset + offset]; },
+            readU8Trusted: function (offset) { return file[heapOffset + offset]; },
             byteLength: heapLength,
             destroy: function () {}
         };
         inspectionHeap.bump = heapLength;
-        if (propertiesOnly) reportProperties(inspectionHeap);
+        if (inspectString || inspectSources) reportSource(inspectionHeap);
+        else if (propertiesOnly) reportProperties(inspectionHeap);
         else reportStatistics(inspectionHeap);
         inspectionHeap.destroy();
         return;
@@ -99,12 +110,38 @@
         ffi.call(ffi.resolve("free"), [headerPointer]);
     }
     heap.bump = heapLength;
-    if (statisticsOnly) {
-        if (propertiesOnly) reportProperties(heap);
+    if (inspectionOnly) {
+        if (inspectString || inspectSources) reportSource(heap);
+        else if (propertiesOnly) reportProperties(heap);
         else reportStatistics(heap);
         heap.destroy();
         return;
     }
+    function reportSource(inspectedHeap) {
+        var sourceRecords = new Records(inspectedHeap, new Cells(inspectedHeap));
+        function describeString(address) {
+            inspectedHeap.requireRecord(address, Heap.Types.STRING);
+            return "string " + address + " encoding=" +
+                (sourceRecords.stringIsRope(address) ? "rope" :
+                    sourceRecords.stringIsLatin1(address) ? "latin1" : "utf16") +
+                " codeUnits=" + sourceRecords.stringLength(address);
+        }
+        if (inspectString) {
+            output(describeString(stringAddress));
+            output(sourceRecords.readString(stringAddress));
+            return;
+        }
+        var position = Heap.FIRST_RECORD;
+        while (position < inspectedHeap.bump) {
+            var record = inspectedHeap.inspectRecordHeader(position);
+            if (record.type === Heap.Types.PROGRAM) {
+                var source = sourceRecords.programSource(position);
+                if (source) output("program " + position + " " + describeString(source));
+            }
+            position += record.size;
+        }
+    }
+
     function reportProperties(inspectedHeap) {
         var inspectionRecords = new Records(
             inspectedHeap, new Cells(inspectedHeap));
@@ -136,6 +173,9 @@
         var largestFree = 0;
         var engineRecord = 0;
         var typeBytes = {}, typeCounts = {};
+        var stringRecords = new Records(inspectedHeap, new Cells(inspectedHeap));
+        var encodings = {latin1: {count: 0, bytes: 0},
+            utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0}};
         while (position < inspectedHeap.bump) {
             var record = inspectedHeap.inspectRecordHeader(position);
             if (record.type === Heap.Types.ENGINE_STATE &&
@@ -150,6 +190,12 @@
             } else totalLiveBytes += record.size;
             typeBytes[record.type] = (typeBytes[record.type] || 0) + record.size;
             typeCounts[record.type] = (typeCounts[record.type] || 0) + 1;
+            if (record.type === Heap.Types.STRING) {
+                var encoding = stringRecords.stringIsRope(position) ? "rope" :
+                    stringRecords.stringIsLatin1(position) ? "latin1" : "utf16";
+                encodings[encoding].count++;
+                encodings[encoding].bytes += record.size;
+            }
             position += record.size;
         }
         output("heap bytes: " + inspectedHeap.bump + "; occupied: " +
@@ -181,6 +227,12 @@
                 if (typeCounts[type]) output(name + ": " +
                     typeCounts[type] + " records, " + typeBytes[type] +
                     " bytes");
+            }
+        }
+        for (name in encodings) {
+            if (Object.prototype.hasOwnProperty.call(encodings, name)) {
+                output("STRING " + name + ": " + encodings[name].count +
+                    " records, " + encodings[name].bytes + " bytes");
             }
         }
     }
@@ -226,6 +278,7 @@
     var compiled = new Backend().compile(
         new Compiler().compileGraph(Sweeper.markKernel, {},
             {legacyConstantLocals: true,
+             constantBindings: Records.KernelConstants,
              constantOverrides: Records.KernelConstants}));
     var parameters = [nodeHost ? 0 : heap.memory.nativeAddress(0),
         heapLength, heap.collectorStackBase, heap.byteLength, generation,

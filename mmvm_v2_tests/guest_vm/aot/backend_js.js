@@ -177,6 +177,8 @@
         }
         if (node.op === "load_u32") return "(memory.readU32Trusted(" +
             emitControlExpression(node.address, parameters, locals) + ")|0)";
+        if (node.op === "load_u8") return "(memory.readU8Trusted(" +
+            emitControlExpression(node.address, parameters, locals) + ")|0)";
         if (node.op === "load_raw_u8" || node.op === "load_raw_u32") {
             return "(memory." + (node.op === "load_raw_u8" ?
                 "readRawU8Trusted" : "readRawU32Trusted") + "(" +

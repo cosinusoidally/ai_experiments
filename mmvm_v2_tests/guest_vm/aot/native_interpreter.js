@@ -13442,7 +13442,8 @@
      * child references in place of inline UTF-16 data. Keeping traversal in a
      * kernel function gives the Node and i386 backends identical semantics. */
     function stringCharacterCodeUnit(heapBase, string, index) {
-        while ((recordFlags(heapBase, string) & STRING_ROPE_FLAG) !== 0) {
+        var flags = recordFlags(heapBase, string);
+        while ((flags & STRING_ROPE_FLAG) !== 0) {
             var left = stringRopeLeft(heapBase, string);
             var leftLength = stringLength(heapBase, left);
             if (index < leftLength) string = left;
@@ -13450,6 +13451,10 @@
                 index = index - leftLength;
                 string = stringRopeRight(heapBase, string);
             }
+            flags = recordFlags(heapBase, string);
+        }
+        if ((flags & STRING_LATIN1_FLAG) !== 0) {
+            return latin1StringCharacterCodeUnit(heapBase, string, index);
         }
         return flatStringCharacterCodeUnit(heapBase, string, index);
     }
@@ -17411,7 +17416,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 46,
+                compilerVersion: 47,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17446,6 +17451,7 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    STRING_LATIN1_FLAG: kernelConstantOverrides.STRING_LATIN1_FLAG,
                     PLATFORM_MEMSET_POINTER: kernelConstantOverrides.PLATFORM_MEMSET_POINTER,
                     BYTECODE_REGISTER_SCALE: runtime.nativeOperandPredecode ? 1 : BYTECODE_REGISTER_SCALE,
                     BYTECODE_LAYOUT_WIDTH: BYTECODE_LAYOUT_WIDTH,
