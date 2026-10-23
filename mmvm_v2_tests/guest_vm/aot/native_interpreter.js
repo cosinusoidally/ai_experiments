@@ -1371,20 +1371,12 @@
                          * first, then a present indexed cell, then the parent.
                          * Holes must still allow inherited properties. */
                         if (namedGetObject !== 0 && namedGetType === HEAP_TYPE_ARRAY) {
-                            var namedGetIndex = propertyKeyIndexKernel(heapBase, namedGetKey);
-                            var namedGetElements = arrayElements(heapBase, namedGetObject);
-                            if (namedGetIndex >= 0 &&
-                                namedGetIndex < vectorLength(heapBase, namedGetElements)) {
-                                var namedGetIndexedCell = vectorCellAddress(
-                                    heapBase, namedGetElements, namedGetIndex);
-                                if (valueCellTag(0, namedGetIndexedCell) !== 0) {
-                                    var namedGetMappedCell = argumentsMappedCellKernel(
-                                        heapBase, namedGetObject, namedGetIndex);
-                                    if (namedGetMappedCell !== 0) namedGetIndexedCell = namedGetMappedCell;
-                                    copyValueCell(arrayGetTarget, namedGetIndexedCell);
-                                    namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                                    namedGetObject = 0;
-                                }
+                            var namedGetIndexedCell = namedArrayIndexCellKernel(
+                                heapBase, namedGetObject, namedGetKey);
+                            if (namedGetIndexedCell !== 0) {
+                                copyValueCell(arrayGetTarget, namedGetIndexedCell);
+                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
+                                namedGetObject = 0;
                             }
                         }
                         if (namedGetObject !== 0) namedGetObject = namedGetPrototype;
@@ -14698,6 +14690,21 @@
         return 1;
     }
 
+    /* Resolve present own storage only. The caller handles explicit property
+     * descriptors and prototype traversal; zero means there is no dense cell.
+     * Keep decimal parsing out of the dispatch entry's local working set. */
+    function namedArrayIndexCellKernel(heapBase, array, key) {
+        var index = propertyKeyIndexKernel(heapBase, key);
+        if (index < 0) return 0;
+        var elements = arrayElements(heapBase, array);
+        if (index >= vectorLength(heapBase, elements)) return 0;
+        var cell = vectorCellAddress(heapBase, elements, index);
+        if (valueCellTag(0, cell) === 0) return 0;
+        var mapped = argumentsMappedCellKernel(heapBase, array, index);
+        if (mapped !== 0) return mapped;
+        return cell;
+    }
+
     function propertyKeyMatchesIndexKernel(heapBase, key, index) {
         if (index < 0) return 0;
         if (propertyKeyIndexKernel(heapBase, key) === index) return 1;
@@ -17292,6 +17299,7 @@
             isNaNIntrinsicKernel: isNaNIntrinsicKernel,
             parseIntIntrinsicKernel: parseIntIntrinsicKernel,
             propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
+            namedArrayIndexCellKernel: namedArrayIndexCellKernel,
             propertyKeyIndexKernel: propertyKeyIndexKernel,
             primitiveWrapperValueCellKernel: primitiveWrapperValueCellKernel,
             programArgumentCellKernel: programArgumentCellKernel,
@@ -17403,7 +17411,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 45,
+                compilerVersion: 46,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?

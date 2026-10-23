@@ -325,7 +325,14 @@
             var assigned = [];
             var nodeCount = inspect(candidate.body, assigned);
             if (nodeCount <= MAX_INLINE_NODES) {
-                candidates["$" + candidate.name] = {fn: candidate, assigned: assigned};
+                /* Rewriting a preceding graph member can append locals and
+                 * inline its callees. Keep the original eligible body and
+                 * local map: otherwise the advertised one-level/node budget
+                 * depends on function order and can grow transitively. */
+                candidates["$" + candidate.name] = {fn: {
+                    name: candidate.name, body: candidate.body,
+                    locals: candidate.locals.slice(0)
+                }, assigned: assigned};
                 statistics.eligibleFunctions.push({name: candidate.name, nodes: nodeCount});
             }
         }

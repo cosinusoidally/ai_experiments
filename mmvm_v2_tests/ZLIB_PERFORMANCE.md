@@ -4,17 +4,47 @@ The purpose is to improve the general guest interpreter, not to recognize or
 replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
-Latest measured results (2026-10-23): verified zlib diagnostic
-batches 25.39–25.45 seconds, versus 44.65–45.04 seconds at the start of the
-latest optimization pass and the initial 63–65 seconds. This is about 1.76x
-faster than that latest starting point; the additional 2x target is about
-22.4 seconds per batch and has not yet been reached. Complete cold snapshot
-generation is about 82 seconds (preceding checkpoint about 85),
-versus the original 117.89 seconds. The requested overall 10x
-execution speedup is not achieved. Whole-suite Test262 was not rerun; focused
-baseline comparisons and known limitations are recorded below.
+Latest serial comparison (2026-10-23, self-hosted-build repair): verified zlib
+diagnostic batches 28.148/27.498 seconds, versus the original image's repeated
+27.391/27.529-second control (about 1.3% longer by the two-batch means, not a
+speedup). Earlier optimization checkpoints measured 25.39–25.45 seconds,
+against 44.65–45.04 at the start of that pass and the initial 63–65 seconds;
+those older measurements should not replace the current serial comparison.
+The additional 2x target is about 22.4 seconds per batch and remains unmet,
+as does the requested overall 10x speedup. The latest cold seed build took
+about 88.3 seconds; its genuine byte-identical self-hosted rebuild reported
+about 162.6 seconds across construction/preparation/serialization stages.
+The original cold build was 117.89 seconds. Whole-suite Test262 was not rerun;
+focused baseline comparisons and known limitations are recorded below.
 
 ## 2026-10-23 temporary/register analysis
+
+### Self-hosted rebuild repair and inlining bound
+
+The later self-hosted build investigation repaired numeric-string array
+reads, primitive own-key enumeration, and initialization of flat numeric
+strings before hashing. See `guest_vm/STANDALONE_SNAPSHOT_PLAN.md` for the
+failure, byte-identical rebuild and bootstrap instructions. The first repair
+image verified two zlib batches at 28.609/28.783 seconds, versus the original
+image's serial 26.708/26.697 seconds. That roughly 7% loss was not accepted as
+a no-regression result.
+
+The follow-up factors named array-index storage resolution into a helper and
+captures original inlining candidates before rewriting any graph member. This
+enforces the existing one-level expansion contract independently of function
+order, rather than allowing an already-expanded callee to exceed its original
+node budget. Native code shrank from 365,116 to 362,365 bytes (the original
+image was 363,832 bytes). No benchmark recognition or special operations were
+added.
+
+The bounded image verified at 28.148/27.498 seconds. Its serial original-image
+control repeated at 27.391/27.529 seconds: about 1.3% slower by the two-batch
+means, not the earlier 7% gap, and not a demonstrated execution speedup. Every
+batch checked all 100,000 decompressed and 25,906 compressed bytes against a
+fresh independent Node reference. The bounded image's cold build was
+17.419 + 1.538 + 68.538 + 0.755 seconds (about 88.3 seconds). These results do
+not meet the 22.4-second target. Ignored prefixes: `artifacts/self-build-fix-zlib`,
+`artifacts/self-build-bounded-zlib`, `artifacts/self-build-bounded-control`.
 
 ### Opt-in native operand preparation
 

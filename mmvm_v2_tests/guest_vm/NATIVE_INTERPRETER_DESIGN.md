@@ -812,6 +812,13 @@ actual-argument restrictions and private parameter/local bindings remain, and
 tail-position calls keep their separate frame-reuse lowering. The JS backend
 retains ordinary calls to the same functions.
 
+Eligibility captures the original body and a copy of its local-name map before
+any graph member is rewritten. Later expansion of a preceding function cannot
+silently enlarge a candidate, change its local indices, or make the one-level
+budget depend on function order. Named array-index resolution is a separate
+helper, so decimal-key parsing need not enlarge the dispatch entry's working
+set simply to support ordinary string-key access.
+
 Primitive ToInt32 conversion is factored into named kernel helpers, with the
 int32 case separated from colder binary64/boolean/null/undefined handling.
 Their tag constants come from `ValueCells.Tags`, not duplicated numeric tags.

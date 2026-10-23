@@ -517,3 +517,31 @@ not completion of the startup-performance target.
 Validation artifacts remain ignored under the `self-build-fixed-stage1c` /
 `self-build-fixed-stage2c` prefixes. The user's original snapshot was not
 overwritten, no C or demo sources changed, and no generated image is checked in.
+
+### Bounded-inlining follow-up
+
+Serial zlib checks found an execution loss in the initial repair image. The
+follow-up keeps named array-index resolution in a helper and makes the shared
+inliner capture original bodies/local maps before rewriting graph members.
+This preserves its one-level budget independently of function order. Compiler
+contract version 46 invalidates earlier code caches rather than silently mixing
+different generated-code policies. See `ZLIB_PERFORMANCE.md` for all measured
+timings, including the remaining roughly 1.3% batch-mean difference in the
+latest serial comparison; this is not a claimed execution speedup.
+
+The final follow-up was also rebuilt under itself and compared with cmp.
+`artifacts/self-build-bounded-stage1.snap` and
+`artifacts/self-build-bounded-stage2.snap` are byte-identical, both SHA-256
+`65e129a84e313a33fdd3daeebda097294dff9c2c36fe943416667be6629a40a0`.
+The rebuilt image runs hello.js. Its reported build stages were 59.522 seconds
+for runtime construction, 1.534 for environment installation, 99.562 for
+standalone preparation and 2.010 for serialization (about 162.6 seconds total
+for these stages). This validates a real rebuild, not a copy or cache export.
+Hashes across different compiler revisions are expected to differ; the fixed
+point is seed versus rebuilt output for the same source revision.
+Both final images are non-sparse 16,995,576-byte files. The complete Node/js_min
+regression script passed again with this follow-up (12 programs / 270 guest
+assertions per host, including both native operand modes). Use the bounded
+stage1/stage2 artifacts for this final checkpoint, or regenerate a seed from
+the current sources using the commands above; earlier prefixes are retained
+only as investigation evidence.
