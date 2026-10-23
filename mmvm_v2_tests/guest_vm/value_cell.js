@@ -8,6 +8,11 @@
         Binary64 = require("./binary64.js");
     }
 
+    /* Tagged-union storage contract: INT32/REFERENCE use LOW, DOUBLE uses
+     * LOW/HIGH, and tag-only primitives use no payload. Inactive payload words
+     * (including reserved AUX) are unspecified. Consumers and GC must inspect
+     * the tag before interpreting a payload; overwrites need not zero unused
+     * words. clearPayload remains available for explicit initialization. */
     var TAG_OFFSET = 0;
     var LOW_OFFSET = 4;
     var HIGH_OFFSET = 8;

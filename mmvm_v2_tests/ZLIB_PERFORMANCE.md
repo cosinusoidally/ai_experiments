@@ -41,8 +41,32 @@ baseline comparisons and known limitations are recorded below.
   it requires roughly 22.4 seconds per verified batch.
 - Both-host regression suites passed again: 12 programs and 269 assertions per
   host, plus existing kernel, heap/GC, embedding, error-location and CLI checks.
-  Log: ignored `artifacts/zlib-shared-analysis-final-tests.log`. A sustained
-  demo8 run is in progress; whole-suite Test262 was not rerun for this pass.
+  Log: ignored `artifacts/zlib-shared-analysis-final-tests.log`. The image
+  subsequently completed just over five minutes of demo8 at 320x240/20 FPS
+  requested, across rolling, garage and free-drive autopilot. It exited through
+  Escape/Q, with garage and free-drive samples generally 19–20 FPS after
+  transitions, and RSS about 530 MiB late in the run. This is not a long-run
+  memory bound. Log: ignored `artifacts/zlib-shared-analysis-demo8.log`.
+  Whole-suite Test262 was not rerun for this pass.
+- Rejected follow-ups: chained conversion/copy retargeting verified at
+  25.970/25.610 seconds, without an established gain. Conditional-temporary
+  forwarding plus ECX grouped-store selection verified at 26.072/27.318;
+  the control rerun was 25.492/25.266. Both experiments were removed.
+- An inactive-payload/padding experiment passed the both-host suite and full
+  output verification. Active-only writes measured 26.675/25.783 seconds;
+  omitting the padding word from value copies as well measured 25.316/25.266.
+  This did not establish a gain over control, so the existing full-field
+  setters and four-word copying were retained. Bitwise handlers now express
+  their writes with named value-cell setters rather than manual field stores.
+- Loop rotation and final-return fallthrough also passed both-host regressions
+  and full output verification, but measured 25.914/25.831 seconds. They did
+  not beat the control and were removed rather than expanding backend policy
+  without an established benefit.
+- Final focused Test262 comparison (`ch09/9.5 ch11/11.6 ch11/11.7`): all 165
+  variants executed, 153 passed, the same 12 failed, 0 not run/timeouts.
+  Elapsed 42.81 seconds, peak RSS 209,780 KiB. The failure IDs match the
+  preceding checkpoint exactly. See `TEST262_STATUS.md`; this is not a
+  full-suite conformance result.
 
 ## 2026-10-22 evening optimization measurements
 

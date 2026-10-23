@@ -95,6 +95,17 @@ named load/store instructions. The JS backend uses
 `LinearMemory.copyWordsTrusted`, which performs the same ordered accesses
 through the host-memory adapter; native execution does not call that adapter.
 
+Value cells are tagged unions, not four independently meaningful words.
+INT32 and REFERENCE use the low payload word; DOUBLE uses both payload words;
+undefined, null and booleans need only their tag. Inactive payload words and
+the reserved auxiliary word are unspecified. Consumers, including GC, must
+check the tag before interpreting payload. This was already the contract of
+`ValueCells.writePrimitiveAt` and `writeReferenceAt`. Native setters currently
+clear the inactive fields, and value copying copies all four words: experiments
+which omitted those writes/copies did not establish a performance gain.
+Allocation/explicit clearing still zeroes storage. No cell size,
+field offset, tag, bytecode layout or snapshot relocation rule changes.
+
 The frontend also combines adjacent `store_u32` operations through the same
 local/argument pointer into `store_fields`. Only literal/local/argument values
 qualify. It never combines across a control-flow boundary or through a load,

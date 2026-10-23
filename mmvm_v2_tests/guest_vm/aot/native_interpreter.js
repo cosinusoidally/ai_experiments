@@ -3773,25 +3773,18 @@
                         if (unsignedNeedsDouble === 1) {
                             var unsignedMantissa = bitResult &
                                                    IEEE754_ABSOLUTE_MASK;
-                            store32(bitTarget, VALUE_TAG_DOUBLE);
-                            store32(bitTarget + VALUE_CELL_LOW,
+                            setValueCellDoubleBits(bitTarget,
                                     unsignedMantissa <<
-                                    UINT32_MANTISSA_LOW_SHIFT);
-                            store32(bitTarget + VALUE_CELL_HIGH,
+                                    UINT32_MANTISSA_LOW_SHIFT,
                                     POSITIVE_2147483648_HIGH |
                                     (unsignedMantissa >>>
                                      UINT32_MANTISSA_HIGH_SHIFT));
                         } else {
-                            store32(bitTarget, VALUE_TAG_INT32);
-                            store32(bitTarget + VALUE_CELL_LOW, bitResult);
-                            store32(bitTarget + VALUE_CELL_HIGH, 0);
+                            setValueCellInt32(bitTarget, bitResult);
                         }
                     } else {
-                        store32(bitTarget, VALUE_TAG_INT32);
-                        store32(bitTarget + VALUE_CELL_LOW, bitResult);
-                        store32(bitTarget + VALUE_CELL_HIGH, 0);
+                        setValueCellInt32(bitTarget, bitResult);
                     }
-                    store32(bitTarget + VALUE_CELL_AUX, 0);
                     pc = pc + FOUR_WORD_INSTRUCTION;
                     } else if (opcode === OP_BIT_NOT) {
                     var bitNotTargetIndex = load32(
@@ -3823,10 +3816,7 @@
                     } else if (bitNotTag === VALUE_TAG_DOUBLE) {
                         bitNotValue = doubleCellToInt32Kernel(bitNotSource);
                     }
-                    store32(bitNotTarget, VALUE_TAG_INT32);
-                    store32(bitNotTarget + VALUE_CELL_LOW, ~bitNotValue);
-                    store32(bitNotTarget + VALUE_CELL_HIGH, 0);
-                    store32(bitNotTarget + VALUE_CELL_AUX, 0);
+                    setValueCellInt32(bitNotTarget, ~bitNotValue);
                     pc = pc + THREE_WORD_INSTRUCTION;
                     } else {
                         return unsupportedExitKernel(
@@ -17276,7 +17266,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 31,
+                compilerVersion: 37,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,

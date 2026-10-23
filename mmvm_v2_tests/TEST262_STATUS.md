@@ -21,6 +21,16 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-23, after precise register-use analysis/temporary coalescing
+  (`b723791` plus named value-cell writer cleanup): focused selection
+  `ch09/9.5 ch11/11.6 ch11/11.7`, 165 files/variants executed, 153 passed,
+  12 failed, 0 not run, 0 timed out. Failure IDs and variants exactly match
+  the preceding checkpoint. Elapsed 42.81 seconds; peak RSS 209,780 KiB.
+  Run: `js_min.exe guest_runner.js --vm-native test262_runner.js --quiet
+  ch09/9.5 ch11/11.6 ch11/11.7`, with the documented library path exported.
+  Raw log: ignored `artifacts/zlib-final-test262.log`. This is a focused
+  regression comparison, not a replacement for the whole-suite totals.
+
 - 2026-10-22 evening, zlib/interpreter optimization checkpoint `c73aa0a`:
   focused authored selection `ch09/9.5 ch11/11.6 ch11/11.7` completed all
   165 tests: 153 passed, 12 failed, 0 not run, 0 timed out. These are the
