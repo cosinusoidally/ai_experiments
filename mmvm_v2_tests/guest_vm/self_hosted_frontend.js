@@ -4,16 +4,28 @@
  * still compiles these implementation modules before entering the context;
  * adopting the returned program record without materializing host objects is
  * the next integration boundary. */
-var SelfHostedParser = require("./parser.js");
-var SelfHostedCompiler = require("./compiler.js");
-var selfHostedVerify = require("./verifier.js");
+var SelfHostedParser, SelfHostedCompiler, selfHostedVerify;
+
+function ensureFrontend(frontend) {
+    if (frontend) {
+        SelfHostedParser = frontend.Parser;
+        SelfHostedCompiler = frontend.Compiler;
+        selfHostedVerify = frontend.verify;
+    } else if (!SelfHostedParser) {
+        SelfHostedParser = require("./parser.js");
+        SelfHostedCompiler = require("./compiler.js");
+        selfHostedVerify = require("./verifier.js");
+    }
+}
 
 exports.parse = function (source, filename) {
+    ensureFrontend();
     return new SelfHostedParser(source, filename,
         {compactLiterals: true}).parseProgram();
 };
 
 exports.compileAst = function (ast) {
+    ensureFrontend();
     return selfHostedVerify(new SelfHostedCompiler().compile(ast));
 };
 
@@ -140,6 +152,7 @@ exports.compileExecutable = function (source, filename, contextAnchor,
 };
 
 exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
+    ensureFrontend();
     var ast = new SelfHostedParser(source, filename,
         {strict: !!inheritedStrict, compactLiterals: true}).parseProgram();
     var dynamicOuter = [
@@ -167,7 +180,8 @@ exports.compileIndirectEvalExecutable = function (source) {
     return callable;
 };
 
-exports.installEvalCompiler = function () {
+exports.installEvalCompiler = function (frontend) {
+    ensureFrontend(frontend);
     if (typeof __guestVMInstallEvalCompiler !== "function") {
         throw new Error("self-hosted eval installation is unavailable");
     }

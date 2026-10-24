@@ -9,6 +9,7 @@
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     var Binary64 = root.GuestVMBinary64;
     var ValueCells = root.GuestVMValueCells;
+    var HeapRecords = root.GuestVMHeapRecords;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -18,6 +19,7 @@
         NativeIntrinsics = require("../native_intrinsics.js");
         Binary64 = require("../binary64.js");
         ValueCells = require("../value_cell.js");
+        HeapRecords = require("../heap_records.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -467,7 +469,6 @@
         var ENGINE_PROPERTY_CACHE_HEAD = 0;
         var ENGINE_PROPERTY_CACHE_PROPERTY = 0;
         var PROPERTY_CACHE_ENTRY_BYTES = 0;
-        var PROPERTY_CACHE_ENTRY_MASK = 255;
         var PLATFORM_DLSYM_POINTER = 16;
         var PLATFORM_ARRAY_SLICE_POINTER = 36;
         var PLATFORM_ARRAY_CONCAT_POINTER = 40;
@@ -1330,34 +1331,17 @@
                             namedGetPrototype = bufferViewPrototype(
                                 heapBase, namedGetObject);
                         }
+                        if (namedGetType === HEAP_TYPE_OBJECT) {
+                            namedGetProperty = findCachedOwnObjectPropertyKernel(
+                                heapBase, state, namedGetObject, namedGetKey);
+                            namedGetHead = 0;
+                            if (namedGetProperty !== 0) namedGetObject = 0;
+                        }
                         while (namedGetHead !== 0) {
                             var namedGetStoredKey = propertyKey(
                                 heapBase, namedGetHead);
-                            var namedGetKeyMatches = 0;
-                            if (namedGetStoredKey === namedGetKey) {
-                                namedGetKeyMatches = 1;
-                            } else if (stringLength(heapBase,
-                                namedGetStoredKey) === stringLength(
-                                heapBase, namedGetKey)) {
-                                namedGetKeyMatches = 1;
-                                var namedGetCharacterIndex = 0;
-                                var namedGetCharacterLength = stringLength(
-                                    heapBase, namedGetKey);
-                                while (namedGetCharacterIndex <
-                                       namedGetCharacterLength) {
-                                    if ((stringCharacterCodeUnit(heapBase,
-                                        namedGetStoredKey,
-                                        namedGetCharacterIndex) & 65535) !==
-                                        (stringCharacterCodeUnit(heapBase,
-                                        namedGetKey,
-                                        namedGetCharacterIndex) & 65535)) {
-                                        namedGetKeyMatches = 0;
-                                        namedGetCharacterIndex =
-                                            namedGetCharacterLength;
-                                    } else namedGetCharacterIndex =
-                                        namedGetCharacterIndex + 1;
-                                }
-                            }
+                            var namedGetKeyMatches = stringKeysEqualKernel(
+                                heapBase, namedGetStoredKey, namedGetKey);
                             if (namedGetKeyMatches === 1) {
                                 namedGetProperty = namedGetHead;
                                 namedGetHead = 0;
@@ -1839,6 +1823,11 @@
                     }
                     var dynamicPropertyFirst = dynamicPropertyHead;
                     var dynamicPropertyRecord = 0;
+                    if (dynamicPropertyObjectType === HEAP_TYPE_OBJECT) {
+                        dynamicPropertyRecord = findCachedOwnObjectPropertyKernel(
+                            heapBase, state, arraySetObject, dynamicPropertyKey);
+                        dynamicPropertyHead = 0;
+                    }
                     while (dynamicPropertyHead !== 0) {
                         var dynamicStoredKey = propertyKey(
                             heapBase, dynamicPropertyHead);
@@ -4231,8 +4220,8 @@
                 var propertyFoundOnReceiver = 0;
                 var propertyCacheIndex =
                     ((propertyReceiver >>> 3) ^
-                     (propertyConstantKey >>> 3)) &
-                    PROPERTY_CACHE_ENTRY_MASK;
+                     stringKeyHashKernel(heapBase, propertyConstantKey)) &
+                    (PROPERTY_CACHE_ENTRY_COUNT - 1);
                 if (virtualPropertyObjectType === HEAP_TYPE_OBJECT) {
                     if (propertyCacheObject(
                             heapBase, state, propertyCacheIndex) ===
@@ -4373,6 +4362,17 @@
                     if (propertyPrototypeOffset === 0) {
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
+                    }
+                    /* Cache the prototype's own lookup, not an unguarded
+                     * receiver-to-inherited-property shortcut. Every get
+                     * still walks the current chain and checks shadowing. */
+                    if (propertyObjectType === HEAP_TYPE_OBJECT) {
+                        propertyRecord = findCachedOwnObjectPropertyKernel(
+                            heapBase, state, propertyObject, propertyConstantKey);
+                        if (propertyRecord !== 0 && propertyObject === propertyReceiver) {
+                            propertyFoundOnReceiver = 1;
+                        }
+                        propertyHead = 0;
                     }
                     while (propertyHead !== 0) {
                         var propertyStoredKey = propertyKey(
@@ -4545,6 +4545,11 @@
                 var setPropertyRecord = 0;
                 var setPropertyAccessorEntered = 0;
                 var setPropertyFirst = setPropertyHead;
+                if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
+                    setPropertyRecord = findCachedOwnObjectPropertyKernel(
+                        heapBase, state, setPropertyObject, setPropertyConstantKey);
+                    setPropertyHead = 0;
+                }
                 while (setPropertyHead !== 0) {
                     var setPropertyStoredKey = propertyKey(
                         heapBase, setPropertyHead);
@@ -13446,7 +13451,70 @@
         if (left === right) return 1;
         var length = stringLength(heapBase, left);
         if (length !== stringLength(heapBase, right)) return 0;
+        if (length === 0) return 1;
+        if (stringKeyHashKernel(heapBase, left) !==
+                stringKeyHashKernel(heapBase, right)) return 0;
+        /* Views are immutable. Resolve their storage once, not once per code
+         * unit. A rope still uses the general traversal below. Offsets stay
+         * relative to the backing; no absolute pointer is retained. */
+        var leftBacking = left;
+        var rightBacking = right;
+        var leftStart = 0;
+        var rightStart = 0;
+        var leftFlags = recordFlags(heapBase, leftBacking);
+        var rightFlags = recordFlags(heapBase, rightBacking);
+        while ((leftFlags & STRING_SLICE_FLAG) !== 0) {
+            leftStart = leftStart + stringSliceStart(heapBase, leftBacking);
+            leftBacking = stringSliceBacking(heapBase, leftBacking);
+            leftFlags = recordFlags(heapBase, leftBacking);
+        }
+        while ((rightFlags & STRING_SLICE_FLAG) !== 0) {
+            rightStart = rightStart + stringSliceStart(heapBase, rightBacking);
+            rightBacking = stringSliceBacking(heapBase, rightBacking);
+            rightFlags = recordFlags(heapBase, rightBacking);
+        }
+        if (leftBacking === rightBacking && leftStart === rightStart) return 1;
         var index = 0;
+        if (((leftFlags | rightFlags) & STRING_ROPE_FLAG) === 0) {
+            var leftLatin1 = leftFlags & STRING_LATIN1_FLAG;
+            var rightLatin1 = rightFlags & STRING_LATIN1_FLAG;
+            if (leftLatin1 === rightLatin1) {
+                var byteLength = length;
+                if (leftLatin1 === 0) {
+                    byteLength = byteLength * 2;
+                    leftStart = leftStart * 2;
+                    rightStart = rightStart * 2;
+                }
+                /* Both encodings are little-endian. Complete words are
+                 * bounded by the view length; tail bytes never overread it. */
+                while (index + 4 <= byteLength) {
+                    if (flatStringStorageWord(heapBase, leftBacking, leftStart + index) !==
+                            flatStringStorageWord(heapBase, rightBacking, rightStart + index)) return 0;
+                    index = index + 4;
+                }
+                while (index < byteLength) {
+                    if (flatStringStorageByte(heapBase, leftBacking, leftStart + index) !==
+                            flatStringStorageByte(heapBase, rightBacking, rightStart + index)) return 0;
+                    index = index + 1;
+                }
+            } else {
+                while (index < length) {
+                    var leftUnit = 0;
+                    var rightUnit = 0;
+                    if (leftLatin1 !== 0) leftUnit = latin1StringCharacterCodeUnit(
+                        heapBase, leftBacking, leftStart + index);
+                    else leftUnit = flatStringCharacterCodeUnit(
+                        heapBase, leftBacking, leftStart + index) & 65535;
+                    if (rightLatin1 !== 0) rightUnit = latin1StringCharacterCodeUnit(
+                        heapBase, rightBacking, rightStart + index);
+                    else rightUnit = flatStringCharacterCodeUnit(
+                        heapBase, rightBacking, rightStart + index) & 65535;
+                    if (leftUnit !== rightUnit) return 0;
+                    index = index + 1;
+                }
+            }
+            return 1;
+        }
         while (index < length) {
             if ((stringCharacterCodeUnit(heapBase, left, index) & 65535) !==
                 (stringCharacterCodeUnit(heapBase, right, index) & 65535)) {
@@ -13455,6 +13523,32 @@
             index = index + 1;
         }
         return 1;
+    }
+
+    /* Hashes produced by other string constructors are not assumed canonical.
+     * A separate validity flag distinguishes a cached zero hash from unknown
+     * and guarantees identical key hashes under both kernel backends. Hash
+     * collisions still take the exact code-unit comparison above. */
+    function stringKeyHashKernel(heapBase, string) {
+        if ((recordFlags(heapBase, string) & STRING_KEY_HASH_FLAG) === 0) {
+            return computeStringKeyHashKernel(heapBase, string);
+        }
+        return stringHash(heapBase, string) | 0;
+    }
+
+    function computeStringKeyHashKernel(heapBase, string) {
+        var hash = STRING_HASH_OFFSET_BASIS;
+        var length = stringLength(heapBase, string);
+        var index = 0;
+        while (index < length) {
+            hash = stringHashStep(hash,
+                stringCharacterCodeUnit(heapBase, string, index) & 65535);
+            index = index + 1;
+        }
+        setStringHash(heapBase, string, hash);
+        setRecordFlags(heapBase, string,
+            recordFlags(heapBase, string) | STRING_KEY_HASH_FLAG);
+        return hash;
     }
 
     /* Flat and rope strings share the ordinary STRING record type and length
@@ -14160,11 +14254,46 @@
      * through an unrelated record.  Clearing the receiver field invalidates
      * the complete entry without coupling this code to its byte layout. */
     function clearNativePropertyCacheKernel(heapBase, state) {
-        var PROPERTY_CACHE_ENTRY_COUNT = 256;
         var cacheIndex = 0;
         while (cacheIndex < PROPERTY_CACHE_ENTRY_COUNT) {
             setPropertyCacheObject(heapBase, state, cacheIndex, 0);
             cacheIndex = cacheIndex + 1;
+        }
+        return 0;
+    }
+
+    /* Positive own-property entries are guarded by record identity, mutation
+     * version, GC generation and property-list head, just like the inlined
+     * receiver fast path. Never cache a missing property or an entire chain:
+     * adding a shadow, replacing a prototype or changing a descriptor must be
+     * visible on the next lookup. GC clears these weak entries before reuse. */
+    function findCachedOwnObjectPropertyKernel(heapBase, state, object, key) {
+        /* Content addressing lets freshly constructed but equal computed
+         * keys reuse entries. A collision is verified by exact equality. */
+        var index = ((object >>> 3) ^ stringKeyHashKernel(heapBase, key)) &
+            (PROPERTY_CACHE_ENTRY_COUNT - 1);
+        var head = objectPropertyHead(heapBase, object);
+        if (propertyCacheObject(heapBase, state, index) === object &&
+                propertyCacheVersion(heapBase, state, index) === recordFlags(heapBase, object) &&
+                propertyCacheGeneration(heapBase, state, index) === recordMark(heapBase, object) &&
+                propertyCacheHead(heapBase, state, index) === head) {
+            var cachedKey = propertyCacheKey(heapBase, state, index);
+            if (cachedKey === key || stringKeysEqualKernel(heapBase, cachedKey, key) === 1) {
+                return propertyCacheProperty(heapBase, state, index);
+            }
+        }
+        var property = head;
+        while (property !== 0) {
+            if (stringKeysEqualKernel(heapBase, propertyKey(heapBase, property), key) === 1) {
+                setPropertyCacheKey(heapBase, state, index, key);
+                setPropertyCacheVersion(heapBase, state, index, recordFlags(heapBase, object));
+                setPropertyCacheGeneration(heapBase, state, index, recordMark(heapBase, object));
+                setPropertyCacheHead(heapBase, state, index, head);
+                setPropertyCacheProperty(heapBase, state, index, property);
+                setPropertyCacheObject(heapBase, state, index, object);
+                return property;
+            }
+            property = propertyNext(heapBase, property);
         }
         return 0;
     }
@@ -17343,6 +17472,10 @@
             growNativeHeapLimitKernel: growNativeHeapLimitKernel,
             hasPropertyKernel: hasPropertyKernel,
             clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
+            findCachedOwnObjectPropertyKernel: findCachedOwnObjectPropertyKernel,
+            stringKeyHashKernel: stringKeyHashKernel,
+            computeStringKeyHashKernel: computeStringKeyHashKernel,
+            stringHashStep: HeapRecords.stringHashStep,
             clearAbsentValueCellsKernel: clearAbsentValueCellsKernel,
             concatenateStringsKernel: concatenateStringsKernel,
             heapMarkKernel: heapMarkKernel,
@@ -17537,6 +17670,10 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    STRING_KEY_HASH_FLAG: kernelConstantOverrides.STRING_KEY_HASH_FLAG,
+                    STRING_HASH_OFFSET_BASIS: kernelConstantOverrides.STRING_HASH_OFFSET_BASIS,
+                    STRING_HASH_PRIME: kernelConstantOverrides.STRING_HASH_PRIME,
+                    PROPERTY_CACHE_ENTRY_COUNT: kernelConstantOverrides.PROPERTY_CACHE_ENTRY_COUNT,
                     ENGINE_SCRATCH_LEFT: kernelConstantOverrides.ENGINE_SCRATCH_LEFT,
                     ENGINE_SCRATCH_RIGHT: kernelConstantOverrides.ENGINE_SCRATCH_RIGHT,
                     ENGINE_PLATFORM_SERVICES: kernelConstantOverrides.ENGINE_PLATFORM_SERVICES,

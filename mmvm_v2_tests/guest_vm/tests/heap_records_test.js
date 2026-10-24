@@ -32,6 +32,10 @@
                             sample.substring(0, sample.length ? sample.length - 1 : 0)) {
                     throw new Error("heap string slice roundtrip failed");
                 }
+                if (records.stringHash(slice) !==
+                        records.stringHash(records.allocateString(sample))) {
+                    throw new Error("string hash depends on backing representation");
+                }
             }
             if (records.readString(key) !== "answer" ||
                 records.stringLength(key) !== 6 || !records.stringHash(key)) {

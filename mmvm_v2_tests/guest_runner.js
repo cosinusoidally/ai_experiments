@@ -38,6 +38,7 @@ var guestRunnerForbidHostCalls = false;
 var guestRunnerLogHostCalls = false;
 var guestRunnerProfileDuration = 0;
 var guestRunnerGCStress = false;
+var guestRunnerBuildSourcesStarted = new Date().getTime();
 
 if (guestRunnerIsNode) {
     GuestRunnerVM = require("./guest_vm/vm.js");
@@ -74,6 +75,8 @@ if (guestRunnerIsNode) {
     }
 }
 
+var guestRunnerBuildSourcesElapsed = new Date().getTime() -
+    guestRunnerBuildSourcesStarted;
 var guestRunnerProgramArguments = [];
 var guestRunnerFoundProgram = false;
 for (var guestRunnerOptionIndex = 0;
@@ -167,6 +170,12 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
 
 var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource;
+if (guestRunnerSnapshot) {
+    var guestRunnerSourceTiming = "guest VM source loading: " +
+        guestRunnerBuildSourcesElapsed + " ms";
+    if (typeof print === "function") print(guestRunnerSourceTiming);
+    else console.log(guestRunnerSourceTiming);
+}
 var guestRuntimeConstructionStarted = guestRunnerSnapshot ?
     new Date().getTime() : 0;
 if (guestRunnerNativeSamples) {

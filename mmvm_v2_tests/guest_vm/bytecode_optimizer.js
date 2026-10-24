@@ -1,7 +1,11 @@
 /* Forward must-analysis over register bytecode. No source-name assumptions. */
 (function (root) {
     var op = root.GuestVMBytecode;
-    if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
+    var registerAllocator = root.GuestVMRegisterAllocator;
+    if (typeof module !== "undefined" && module.exports) {
+        op = require("./bytecode.js");
+        registerAllocator = require("./register_allocator.js");
+    }
     var UNKNOWN = 0, INT32 = 1, ZERO = 2;
     /* Bound analysis memory, not the size of programs accepted by the VM. */
     var MAX_STATE_ENTRIES = 262144;
@@ -315,7 +319,10 @@
     }
 
     function optimize(program, bindingRegisterCount) {
-        return coalesceCopies(optimizeInt32(program), bindingRegisterCount || 0);
+        bindingRegisterCount = bindingRegisterCount || 0;
+        return registerAllocator.pack(
+            coalesceCopies(optimizeInt32(program), bindingRegisterCount),
+            bindingRegisterCount);
     }
 
     function coalescibleProducer(opcode) {

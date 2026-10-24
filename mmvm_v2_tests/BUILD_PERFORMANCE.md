@@ -198,3 +198,55 @@ is being evaluated next. Raw profiles stay in ignored artifacts.
 All tests and benchmarks are now run **serially**. An overlapping profiling
 build was explicitly interrupted when the memory/concurrency requirement was
 clarified; its partial timings are not used as performance measurements.
+
+## Frontend, register and key-lookup work
+
+The current candidate also contains these general changes:
+
+- The standalone bootstrap passes `GuestVM.Frontend` explicitly to
+  `installEvalCompiler(frontend)`. This bundle contains the already-loaded
+  Parser, Compiler and verifier. CommonJS modules have fresh contexts, so
+  looking for shell globals inside the module does not accomplish reuse.
+  Dependency loading is lazy, with the existing require path retained when
+  no bundle is supplied. This is same-runtime implementation reuse, not a
+  source/parse cache or a snapshot-copy rebuild.
+- A conservative bytecode register-packing pass reduces frame/register storage;
+  see `guest_vm/REGISTER_ALLOCATION.md`. An initial backend compilation reduced
+  7,046 register cells to 4,257, but that count alone did not improve total
+  build time. Its compilation cost remains a target for refinement.
+- Kernel inline-eligibility analysis stops once a function exceeds its budget,
+  rather than traversing the remainder of a body that cannot be eligible.
+- String equality resolves views once and compares complete bounded words
+  where encodings match. Mixed widths and ropes retain exact code-unit checks.
+- Canonical key hashes are lazy. One exact `HeapRecords.stringHashStep`
+  implementation runs as ordinary JS and as a compiled kernel dependency.
+  Partial-word multiplication avoids binary64 low-bit rounding differences.
+  A validity flag distinguishes canonical hashes, including a valid zero,
+  from constructor hashes not safe for rejection. Equal hashes are never
+  accepted without exact comparison.
+- The existing weak property cache is content-keyed, so newly constructed but
+  equal computed keys can hit it. Constant/computed get and set paths share
+  positive own-property lookup; prototype traversal and descriptor checks
+  remain explicit. Record identity/version/head and GC invalidation guards
+  are retained. No missing-property result or complete chain is cached.
+
+The content-key cache seed builds in 75.72 seconds under js_min; its genuine
+self-build is byte-identical and took 118.04 seconds with optional sampling
+enabled. Assembly was 1.459 versus 6.370 seconds. These are progress figures,
+not parity: unreported initial source-loading time accounts for much of the
+remaining gap. Snapshot builds now log that phase explicitly.
+
+Before canonical hashing/content-cache changes, the complete bounded authored
+Test262 run again executed 3,292 variants: 3,139 passed, 153 failed, zero not
+run, six timeouts included in failures (344.49 seconds, 270,516 KiB peak RSS).
+The later key changes require their own regression inventory; do not present
+that earlier full run as validation of those later changes. Logs are ignored
+`artifacts/packed-registers-*` and `artifacts/content-key-cache-*`.
+
+The content-key checkpoint passes both-host project suites (12 programs / 270
+guest assertions each), all eight previously working Octane quick suites and
+the standalone 35-collection GC workload, run serially. Demo8 also starts,
+switches to garage and free-drive auto pilot, renders and exits normally in a
+short controlled check at 320x240 with a 10 FPS cap. That is a correctness
+smoke check, not evidence of a 20 FPS performance target or a long GC soak.
+Its snapshot is 7,954,320 bytes, byte-identical to the genuine self-build.

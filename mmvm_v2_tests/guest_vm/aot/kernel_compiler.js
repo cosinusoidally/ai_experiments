@@ -356,6 +356,11 @@
             for (key in node) {
                 if (Object.prototype.hasOwnProperty.call(node, key)) {
                     count += inspect(node[key], assigned);
+                    /* Once over budget neither the exact count nor the
+                     * remaining assignment set can affect eligibility.
+                     * Do not traverse a giant interpreter body just to
+                     * prove again that it is not a small inline candidate. */
+                    if (count > MAX_INLINE_NODES) return MAX_INLINE_NODES + 1;
                 }
             }
             return count;
@@ -1761,9 +1766,17 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
-            node.callee.name === "latin1StringCharacterCodeUnit" &&
+            (node.callee.name === "latin1StringCharacterCodeUnit" ||
+             node.callee.name === "flatStringStorageByte") &&
             node.arguments.length === 3) {
             return {op: "load_u8", address: stringCharacterByteAddress(
+                node.arguments, symbols), type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "flatStringStorageWord" &&
+            node.arguments.length === 3) {
+            return {op: "load_u32", address: stringCharacterByteAddress(
                 node.arguments, symbols), type: "i32"};
         }
         if (node.type === "CallExpression" &&

@@ -453,6 +453,11 @@
     VM.JSRuntime = JSRuntime;
     VM.JSContext = JSContext;
     VM.Execution = Execution;
+    /* The shell bootstrap and an embedded frontend must use the same loaded
+     * implementation, rather than evaluating a second CommonJS copy of the
+     * parser/compiler dependency graph. This is module reuse, not cached
+     * syntax or compilation: each input program is still parsed normally. */
+    VM.Frontend = {Parser: Parser, Compiler: Compiler, verify: verify};
     root.GuestVM = VM;
     root.GuestVMJSRuntime = JSRuntime;
     root.GuestVMJSContext = JSContext;

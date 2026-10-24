@@ -804,6 +804,22 @@ performance are separate mandatory regression gates.
   and standalone bounded GC stress pass. Genuine self-build is byte-identical;
   no corpus or demo source was modified. See `BUILD_PERFORMANCE.md`.
 
+### 2026-10-24, late afternoon BST — register packing and frontend reuse
+
+- Complete authored suite, native js_min execution with the fresh
+  `packed-registers.snap`, `--quiet --instruction-limit 20000`.
+- **3,292 executed: 3,139 passed, 153 failed, 0 not run, 6 timed out**
+  (timeouts included in failures). Elapsed 344.49 seconds; peak RSS
+  270,516 KiB. Counts match the earlier scratch-fixed bounded full baseline.
+  Raw log: ignored `artifacts/packed-registers-test262-full.log`.
+- This validates the register-packing/frontend/prototype-lookup candidate,
+  not the later canonical-hash/content-cache changes. Those later changes
+  pass both-host project suites, eight previously working Octane quick suites
+  and standalone bounded GC stress; their full-suite comparison remains due.
+- Test/benchmark execution is now strictly serial to limit host memory.
+  An overlapping profiling build was interrupted; no partial timing from it
+  is treated as a benchmark result. No external corpus files were changed.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

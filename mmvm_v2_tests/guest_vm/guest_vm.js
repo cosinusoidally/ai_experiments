@@ -11,6 +11,7 @@
         load("guest_vm/tokenizer.js");
         load("guest_vm/parser.js");
         load("guest_vm/bytecode.js");
+        load("guest_vm/register_allocator.js");
         load("guest_vm/bytecode_optimizer.js");
         load("guest_vm/native_intrinsics.js");
         load("guest_vm/compiler.js");

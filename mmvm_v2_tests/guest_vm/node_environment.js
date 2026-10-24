@@ -147,7 +147,7 @@
             "load(\"node_compat/http.js\");",
             "var GuestStandaloneFrontend = require(" +
                 "\"./guest_vm/self_hosted_frontend.js\");",
-            "GuestStandaloneFrontend.installEvalCompiler();"
+            "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);"
         ].join("\n"), "<standalone-runtime-bootstrap>");
     };
 

@@ -35,6 +35,9 @@
     var STRING_LATIN1_FLAG = 2;
     var VECTOR_SHARED_METADATA_FLAG = 1;
     var STRING_SLICE_FLAG = 4;
+    var STRING_KEY_HASH_FLAG = 8;
+    var STRING_HASH_OFFSET_BASIS = -2128831035;
+    var STRING_HASH_PRIME = 16777619;
     var STRING_SLICE_BACKING = 8;
     var STRING_SLICE_START = 12;
 
@@ -276,6 +279,7 @@
         ENGINE_PROPERTY_CACHE_HEAD: ENGINE_PROPERTY_CACHE_HEAD,
         ENGINE_PROPERTY_CACHE_PROPERTY: ENGINE_PROPERTY_CACHE_PROPERTY,
         PROPERTY_CACHE_ENTRY_BYTES: PROPERTY_CACHE_ENTRY_BYTES,
+        PROPERTY_CACHE_ENTRY_COUNT: PROPERTY_CACHE_ENTRY_COUNT,
         ENGINE_GC_GENERATION: ENGINE_GC_GENERATION,
         ENGINE_GC_STACK_BASE: ENGINE_GC_STACK_BASE,
         ENGINE_GC_STACK_LIMIT: ENGINE_GC_STACK_LIMIT,
@@ -299,6 +303,9 @@
         STRING_LATIN1_FLAG: STRING_LATIN1_FLAG,
         VECTOR_SHARED_METADATA_FLAG: VECTOR_SHARED_METADATA_FLAG,
         STRING_SLICE_FLAG: STRING_SLICE_FLAG,
+        STRING_KEY_HASH_FLAG: STRING_KEY_HASH_FLAG,
+        STRING_HASH_OFFSET_BASIS: STRING_HASH_OFFSET_BASIS,
+        STRING_HASH_PRIME: STRING_HASH_PRIME,
         STRING_SLICE_BACKING: Heap.HEADER_SIZE + STRING_SLICE_BACKING,
         STRING_SLICE_START: Heap.HEADER_SIZE + STRING_SLICE_START,
         STRING_SLICE_RECORD_BYTES: Heap.HEADER_SIZE + STRING_SLICE_START + 4,
@@ -321,19 +328,26 @@
         return this.heap.requireRecord(handle.heapAddress);
     };
 
+    /* Exact low-word multiplication using products representable in binary64.
+     * The same source is compiled into the native kernel. Ordinary JS's
+     * direct FNV multiplication can round away low bits before truncation. */
+    function stringHashStep(hash, code) {
+        var word = (hash ^ code) | 0;
+        return ((word & 65535) * STRING_HASH_PRIME +
+            ((((word >>> 16) * STRING_HASH_PRIME) & 65535) << 16)) | 0;
+    }
+    Records.stringHashStep = stringHashStep;
+
     Records.prototype.allocateString = function (value) {
         value = String(value);
-        /* Select a lossless storage width while computing the existing hash.
+        /* Select a lossless storage width. Hashes are computed only on demand.
          * Code-unit indexing/length never change. Wide strings, including
          * unpaired surrogates, retain their exact UTF-16 representation. */
-        var hash = 2166136261;
         var index = 0;
         var latin1 = true;
         while (index < value.length) {
             var code = value.charCodeAt(index);
             if (code > 255) latin1 = false;
-            hash ^= code;
-            hash = (hash * 16777619) >>> 0;
             index++;
         }
         var unitBytes = latin1 ? 1 : 2;
@@ -349,7 +363,7 @@
             this.heap.writeStringFieldUTF16LE(address, STRING_CHARS, value,
                                              Heap.Types.STRING);
         }
-        this.heap.writeTrustedFieldU32(address, STRING_HASH, hash, Heap.Types.STRING);
+        this.heap.writeTrustedFieldU32(address, STRING_HASH, 0, Heap.Types.STRING);
         return address;
     };
 
@@ -372,7 +386,7 @@
             backing = this.stringSliceBacking(backing);
         }
         /* Like ropes, views have no precomputed hash. Equality compares code
-         * units; zero is the existing unknown-hash sentinel, not a text hash. */
+         * units. The new view starts without a canonical cached hash. */
         var address = this.heap.allocateRecordWords(Heap.Types.STRING,
             STRING_SLICE_START + 4, length, 0, backing, start);
         this.heap.setFlags(address, STRING_SLICE_FLAG);
@@ -453,10 +467,19 @@
             this.heap.memory.fill(this.heap.trustedPayloadAddress(address, offset),
                                   payloadBytes - offset, 0);
         }
-        this.heap.setFlags(address, STRING_SLICE_FLAG);
+        this.heap.setFlags(address, STRING_SLICE_FLAG |
+            (this.heap.flags(address) & STRING_KEY_HASH_FLAG));
     };
 
     Records.prototype.stringHash = function (address) {
+        var flags = this.heap.flags(address);
+        if (!(flags & STRING_KEY_HASH_FLAG)) {
+            var text = this.readString(address);
+            var hash = STRING_HASH_OFFSET_BASIS, index = 0;
+            while (index < text.length) hash = stringHashStep(hash, text.charCodeAt(index++));
+            this.heap.writeTrustedFieldU32(address, STRING_HASH, hash, Heap.Types.STRING);
+            this.heap.setFlags(address, flags | STRING_KEY_HASH_FLAG);
+        }
         return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
     };
 
