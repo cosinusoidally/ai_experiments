@@ -134,12 +134,194 @@ The compact self-built image also passed these integration checks:
 Raw integration logs remain ignored `artifacts/latin1-*.log` files. No demo,
 C, external corpus, or generated snapshot files were checked in.
 
-## Remaining opportunities
+## 2026-10-23: immutable backing views
 
-This phase does not remove overlapping source copies. The prior audit found
-1,805 program-source strings that are exact substrings of 170 larger retained
-sources. Shared source backing with explicit ranges is the next structural
-opportunity, but it must preserve exact Function.toString results, source
-inspection, GC edges, deterministic snapshots and parsing performance. Equal
-string interning alone saved little: exact duplicate records were only about
-11 KB in that image.
+Strings now also support an immutable view representation. A view stores its
+logical length, hash (zero means not precomputed, as for ropes), backing string
+reference and starting UTF-16 code-unit offset. Its minimum allocation is 32
+bytes. The slice flag and named field offsets live in HeapRecords.KernelConstants;
+both kernel backends and the collector use those same definitions. Compiler
+contract version 48 invalidates older code-only caches. No C changes are needed.
+
+There are two complementary construction paths:
+
+- Program registration passes the enclosing source to nested programs. An
+  exact contained source becomes a view immediately, before allocating a
+  redundant character buffer. Existing equal-string interning still wins
+  first, preserving atom identity.
+- The native substring implementation also creates views instead of copying
+  code units. This applies to ordinary guest programs, including guest-side
+  parsing, not just the seed builder. Empty and whole-string results retain
+  their existing canonical handling. Creating a view of another view folds
+  its offsets; a view can also reference a rope. The common character reader
+  resolves both node kinds before reading the flat storage width.
+
+The collector follows a view's backing reference in both its reference walk
+and compiled marker. It must not mistake the backing fields for characters,
+or collect backing text while any view survives. Retaining a small view can
+keep a larger backing alive; this is the usual immutable-view memory tradeoff,
+not an ownership transfer or dependence on a host string's lifetime.
+
+At the final snapshot boundary a largest-first pass also finds atoms which
+were allocated before their containing source was available. These existing
+records become views **in place**: their addresses, observable contents and
+allocation sizes do not change. Their unused payload is explicitly zeroed.
+The pass never moves an object or rewrites native pointers. Retaining allocation
+padding avoids imposing a moving-heap requirement merely to save a few small
+atom records. Sources, which account for the significant saving, already use
+minimum-sized views from the first construction path.
+
+Owners are selected by text length, with heap address as a deterministic tie
+break. An owner is always a flat record, never another newly shared view, so
+the pass cannot introduce cycles. Pre-existing views can acquire an additional
+backing edge through this finalization; the reader supports that case too.
+The pass runs before copying the heap template and before any application
+argument is opened. It is part of a genuine rebuild, not a saved-image copy.
+
+The final pass uses bounded raw-byte search for flat Latin-1 data. The memory
+layer can call libc `memmem` on native allocations, with a reference fallback
+if that symbol is unavailable or the memory is emulated. Wide strings retain
+code-unit search rather than risk an unaligned UTF-16 byte match. This is a
+bulk memory operation through the VM's FFI, not a host-language parser/string
+service. No downloaded dependency or new helper C function is involved.
+
+The following inspection command reports remaining flat strings whose text
+is already contained in another flat backing and can become a view without
+enlarging the allocation:
+
+```sh
+node guest_vm/tools/audit_snapshot_heap.js --string-sharing artifacts/snap
+```
+
+It reports addresses, ranges and avoidable bytes, without dumping source
+text into the log. `--sources` and `--string ADDRESS` now show a view's backing
+address and starting offset; the latter still prints the complete exact text.
+Inspection does not require access to the original files or a decoder for a
+compressed format. Sub-view character ranges remain directly inspectable.
+
+The first source-view image, before final atom sharing, was 10,157,064 bytes.
+It contained 1,815 minimum-sized views, occupying 58,144 bytes, and reduced
+total string storage from 4,864,656 to 2,651,688 bytes. The remaining audit
+found only 58,240 avoidable bytes of flat backing, in small names/literals;
+there were no further large overlapping source buffers. Final validation
+and measurements are recorded below when complete.
+
+The validated string-sharing checkpoint occupies 10,188,328 bytes (19,904
+allocated 512-byte blocks, not sparse). A genuine self-hosted rebuild is byte
+identical, SHA-256 `489978fd6549503e9c2491baa5924fa882f4845538e98dba45e4d4d8d6166d62`.
+The private-copy sharing audit reports zero remaining duplicated flat backing
+strings and zero avoidable backing bytes. The compiled-marker audit reports
+62,944 reachable records and zero missing marks. The Node/js_min project
+suite passes 12 programs / 270 assertions per host. The rebuilt image runs
+hello.js. Demo8 ran for just over five minutes across rally, garage and
+free-drive autopilot, exiting normally through Escape/Q; much of that run
+overlapped the self-hosted build, so its FPS is not an isolated comparison.
+
+The cold build reported 18.787 seconds runtime construction, 1.310 environment
+installation, 57.578 preparation and 24.831 serialization/final sharing.
+The concurrent self-hosted build reported 60.246 + 1.441 + 102.732 + 69.991
+seconds. Final sharing alone was 24.097/68.108 seconds: this is still excessive
+build work, not an accepted claim of faster snapshot generation. Loading an
+already-built image does not execute this pass. Pointer values passed through
+the old shell's FFI retain its signed-pointer convention; unsigned values are
+used only when calculating the returned relative offset. The diagnostic
+`--share-backings` mode performs this pass on a private image copy and then
+checks sharing and GC edges, without modifying the input image.
+
+These checks do not constitute whole-suite Test262 or an exhaustive demo/GC
+proof. Load/startup and isolated execution comparisons remain required for
+the next metadata checkpoint. Raw logs/images have the ignored
+`artifacts/fruits-` and `artifacts/shared-strings-` prefixes.
+
+## Build, run and inspect
+
+Run these commands from `mmvm_v2_tests`. Use the existing js_min binary; there
+is no need to rebuild it or add rpath. Set its Firefox library directory in
+the launch environment:
+
+```sh
+export LD_LIBRARY_PATH=../../firefox-1.0.8/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native \
+  --snapshot artifacts/snap
+```
+
+The application argument is optional. With no application the command builds
+a generic ready-to-run image and exits. Appending `hello.js` builds the same
+image and then runs hello; application contents/arguments and the producing
+process's environment do not belong in the snapshot.
+
+Use the existing standalone runner for arbitrary programs:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap hello.js
+./artifacts/js_runner.exe artifacts/snap node_web.js --bind 127.0.0.1 8000
+./artifacts/js_runner.exe artifacts/snap demo8_runner.js demo8.js --size 320x240 --fps 20
+```
+
+To genuinely rebuild the VM under itself and compare its output:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
+  --snapshot artifacts/snap2
+cmp artifacts/snap artifacts/snap2
+sha256sum artifacts/snap artifacts/snap2
+```
+
+This path loads the current build sources and runs their compiler and assembler.
+It is not a copy of `snap`. A byte-identical result requires the same source
+revision and build options. Launch environment and the program subsequently
+chosen are not build inputs.
+
+The js_min-hosted runner can also load the matching image:
+
+```sh
+../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native \
+  --with-snapshot artifacts/snap hello.js
+```
+
+For sizes and backing-sharing details:
+
+```sh
+../../mmvm_v2/artifacts/js_min.exe guest_vm/tools/audit_snapshot_heap.js \
+  --snapshot-stats artifacts/snap
+../../mmvm_v2/artifacts/js_min.exe guest_vm/tools/audit_snapshot_heap.js \
+  --string-sharing artifacts/snap
+../../mmvm_v2/artifacts/js_min.exe guest_vm/tools/audit_snapshot_heap.js \
+  --sources artifacts/snap
+```
+
+Node can run these same inspection commands as an optional convenience; it
+is not required for creating or launching the standalone image. Snapshots and
+diagnostic logs belong in the ignored `artifacts` directory, not in git.
+
+## Metadata audit and the next size checkpoint
+
+`--metadata-sharing` inspects immutable compiler metadata separately from
+ordinary mutable program values:
+
+```sh
+node guest_vm/tools/audit_snapshot_heap.js --metadata-sharing artifacts/snap
+```
+
+The first source-view image has these exact-duplicate opportunities (before
+any metadata sharing):
+
+- Argument-register descriptors: 16,167 records/pairs, 1,974,536 bytes;
+  10,244 duplicate lists account for 1,234,528 bytes.
+- Constant-register maps: 2,200 records, 882,800 bytes;
+  769 duplicates account for 150,488 bytes.
+- Binding-register maps: 1,948 records, 272,400 bytes;
+  1,894 duplicates account for 221,632 bytes.
+- Parameter-slot maps: 2,200 records, 114,032 bytes;
+  2,182 duplicates account for 111,152 bytes.
+- Bytecode: 2,200 records, 2,165,664 bytes;
+  487 duplicates account for 244,056 bytes.
+
+Sharing argument descriptors and the three maps first avoids changing the
+execution format or adding an image-load decoder. Ordinary JS arrays and
+objects must remain independently mutable. Compiler metadata setters must
+retain independent behavior too: shared maps require copy-on-write before
+an explicit construction/embedding mutation. Build-side lookup tables must
+be weak, rather than retain every program compiled by a long-lived runtime.
+Load/startup measurements are a separate acceptance check; a smaller file
+alone is not proof that launching it is faster.

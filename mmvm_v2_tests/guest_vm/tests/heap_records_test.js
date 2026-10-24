@@ -13,10 +13,30 @@
                 if (records.readString(records.allocateString(sample)) !== sample) {
                     throw new Error("heap string code-unit roundtrip failed");
                 }
+                var backing = records.allocateString("[" + sample + "]");
+                var slice = records.allocateStringSlice(backing, 1, sample.length);
+                var nestedSlice = records.allocateStringSlice(slice, 0,
+                    sample.length ? sample.length - 1 : 0);
+                if (records.readString(slice) !== sample ||
+                        records.readString(nestedSlice) !==
+                            sample.substring(0, sample.length ? sample.length - 1 : 0)) {
+                    throw new Error("heap string slice roundtrip failed");
+                }
             }
             if (records.readString(key) !== "answer" ||
                 records.stringLength(key) !== 6 || !records.stringHash(key)) {
                 throw new Error("heap string layout failed");
+            }
+            var sharedBacking = records.allocateString("[answer]");
+            if (records.flatStringIndexOf(sharedBacking, key) !== 1) {
+                throw new Error("flat string backing search failed");
+            }
+            records.shareStringBackingInPlace(key, sharedBacking, 1);
+            var sharedReference = 0;
+            records.visitReferences(key, function (target) { sharedReference = target; });
+            if (records.readString(key) !== "answer" ||
+                    sharedReference !== sharedBacking) {
+                throw new Error("shared string backing value/GC edge failed");
             }
 
             var object = records.allocateObject(0);

@@ -820,6 +820,12 @@
             bindingIndex++;
         }
         layout.codeOffset = alignStandalone(nextDataOffset, 16);
+        var sharingStarted = new Date().getTime();
+        var sharedStrings = runtime.shareSnapshotStringBackings();
+        if (typeof print === "function") {
+            print("shared " + sharedStrings + " remaining string backings in " +
+                (new Date().getTime() - sharingStarted) + " ms");
+        }
         var heapImageLength = heap.bump;
         var heapCapacity = heap.memory.byteLength;
         layout.heapOffset = alignStandalone(layout.codeOffset + result.length,

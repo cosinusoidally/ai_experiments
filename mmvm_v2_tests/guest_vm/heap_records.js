@@ -33,6 +33,9 @@
     var STRING_ROPE_DEPTH = 16;
     var STRING_ROPE_FLAG = 1;
     var STRING_LATIN1_FLAG = 2;
+    var STRING_SLICE_FLAG = 4;
+    var STRING_SLICE_BACKING = 8;
+    var STRING_SLICE_START = 12;
 
     var VECTOR_LENGTH = 0;
     var VECTOR_CAPACITY = 4;
@@ -282,6 +285,10 @@
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
         STRING_LATIN1_FLAG: STRING_LATIN1_FLAG,
+        STRING_SLICE_FLAG: STRING_SLICE_FLAG,
+        STRING_SLICE_BACKING: Heap.HEADER_SIZE + STRING_SLICE_BACKING,
+        STRING_SLICE_START: Heap.HEADER_SIZE + STRING_SLICE_START,
+        STRING_SLICE_RECORD_BYTES: Heap.HEADER_SIZE + STRING_SLICE_START + 4,
         STRING_ROPE_RECORD_BYTES:
             Heap.HEADER_SIZE + ((STRING_ROPE_DEPTH + 4 + 7) & -8),
         STRING_ROPE_LEFT: 16 + STRING_ROPE_LEFT,
@@ -337,6 +344,89 @@
         return this.heap.readTrustedFieldU32(address, STRING_LENGTH, Heap.Types.STRING);
     };
 
+    /* An immutable view retains its backing through the ordinary GC graph.
+     * Normalize nested views here so character lookup never walks a chain of
+     * source nesting levels. Offsets and lengths are UTF-16 code units. */
+    Records.prototype.allocateStringSlice = function (backing, start, length) {
+        if (start < 0 || length < 0 || start !== Math.floor(start) ||
+                length !== Math.floor(length) ||
+                start + length > this.stringLength(backing)) {
+            throw new RangeError("string slice is out of bounds");
+        }
+        if (start === 0 && length === this.stringLength(backing)) return backing;
+        while (this.stringIsSlice(backing)) {
+            start += this.stringSliceStart(backing);
+            backing = this.stringSliceBacking(backing);
+        }
+        /* Like ropes, views have no precomputed hash. Equality compares code
+         * units; zero is the existing unknown-hash sentinel, not a text hash. */
+        var address = this.heap.allocateRecordWords(Heap.Types.STRING,
+            STRING_SLICE_START + 4, length, 0, backing, start);
+        this.heap.setFlags(address, STRING_SLICE_FLAG);
+        return address;
+    };
+
+    Records.prototype.stringIsSlice = function (address) {
+        this.heap.requireRecord(address, Heap.Types.STRING);
+        return !!(this.heap.flags(address) & STRING_SLICE_FLAG);
+    };
+
+    Records.prototype.stringSliceBacking = function (address) {
+        return this.heap.readTrustedFieldU32(
+            address, STRING_SLICE_BACKING, Heap.Types.STRING);
+    };
+
+    Records.prototype.stringSliceStart = function (address) {
+        return this.heap.readTrustedFieldU32(
+            address, STRING_SLICE_START, Heap.Types.STRING);
+    };
+
+    Records.prototype.flatStringIndexOf = function (haystack, needle) {
+        if (this.stringIsRope(haystack) || this.stringIsSlice(haystack) ||
+                this.stringIsRope(needle) || this.stringIsSlice(needle)) {
+            throw new TypeError("flat string search requires flat backings");
+        }
+        if (this.stringIsLatin1(haystack) && this.stringIsLatin1(needle)) {
+            return this.heap.memory.findBytes(
+                this.heap.trustedPayloadAddress(haystack, STRING_CHARS),
+                this.stringLength(haystack),
+                this.heap.trustedPayloadAddress(needle, STRING_CHARS),
+                this.stringLength(needle));
+        }
+        if (this.stringIsLatin1(haystack)) {
+            var needleIndex = 0;
+            while (needleIndex < this.stringLength(needle)) {
+                if (this.stringCharacterCodeUnit(needle, needleIndex++) > 255) return -1;
+            }
+        }
+        return this.readString(haystack).indexOf(this.readString(needle));
+    };
+
+    /* Snapshot finalization may replace a flat backing without changing the
+     * string's address or observable value. Keep its allocation size: other
+     * heap records and native references must not move. Clear the unused
+     * payload rather than leaving an invisible copy of the old characters.
+     * The caller has matched the complete text against this backing range. */
+    Records.prototype.shareStringBackingInPlace = function (address, backing, start) {
+        var length = this.stringLength(address);
+        var payloadBytes = this.heap.recordSize(address) - Heap.HEADER_SIZE;
+        if (address === backing || this.stringIsSlice(address) ||
+                this.stringIsRope(address) || this.stringIsSlice(backing) ||
+                this.stringIsRope(backing) ||
+                payloadBytes < STRING_SLICE_START + 4 ||
+                start < 0 || start + length > this.stringLength(backing)) {
+            throw new RangeError("invalid shared string backing");
+        }
+        this.heap.writeTrustedFieldU32(address, STRING_SLICE_BACKING, backing);
+        this.heap.writeTrustedFieldU32(address, STRING_SLICE_START, start);
+        var offset = STRING_SLICE_START + 4;
+        while (offset < payloadBytes) {
+            this.heap.writeTrustedFieldU32(address, offset, 0);
+            offset += 4;
+        }
+        this.heap.setFlags(address, STRING_SLICE_FLAG);
+    };
+
     Records.prototype.stringHash = function (address) {
         return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
     };
@@ -373,7 +463,13 @@
             throw new RangeError("string character index is out of bounds");
         }
         var flags = this.heap.flags(address);
-        while (flags & STRING_ROPE_FLAG) {
+        while (flags & (STRING_ROPE_FLAG | STRING_SLICE_FLAG)) {
+            if (flags & STRING_SLICE_FLAG) {
+                index += this.stringSliceStart(address);
+                address = this.stringSliceBacking(address);
+                flags = this.heap.flags(address);
+                continue;
+            }
             var left = this.stringRopeLeft(address);
             var leftLength = this.stringLength(left);
             if (index < leftLength) address = left;
@@ -1913,6 +2009,9 @@
                    records.stringIsRope(address)) {
             reference(records.stringRopeLeft(address));
             reference(records.stringRopeRight(address));
+        } else if (type === Heap.Types.STRING &&
+                   records.stringIsSlice(address)) {
+            reference(records.stringSliceBacking(address));
         } else if (type === Heap.Types.REGEXP) {
             reference(this.heap.readTrustedFieldU32(
                 address, REGEXP_PATTERN, Heap.Types.REGEXP));

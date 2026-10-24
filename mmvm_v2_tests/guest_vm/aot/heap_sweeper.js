@@ -23,6 +23,8 @@
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
     var markLayoutBindings = {
+        STRING_SLICE_FLAG: HeapRecords.KernelConstants.STRING_SLICE_FLAG,
+        STRING_SLICE_BACKING: HeapRecords.KernelConstants.STRING_SLICE_BACKING,
         HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
         BYTECODE_EXECUTION_CACHE: HeapRecords.KernelConstants.BYTECODE_EXECUTION_CACHE
     };
@@ -345,6 +347,11 @@
                             target = stringRopeLeft(heapBase, address);
                         } else if (referenceIndex === 1) {
                             target = stringRopeRight(heapBase, address);
+                        } else referenceIndex = -2;
+                    } else if ((recordFlags(heapBase, address) &
+                                STRING_SLICE_FLAG) !== 0) {
+                        if (referenceIndex === 0) {
+                            target = stringSliceBacking(heapBase, address);
                         } else referenceIndex = -2;
                     } else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_REGEXP) {

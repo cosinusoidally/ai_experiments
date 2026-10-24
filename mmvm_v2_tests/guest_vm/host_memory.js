@@ -337,6 +337,47 @@
         }
     };
 
+    /* Bounded byte search, including embedded NULs. Native memory may use
+     * libc's memmem; missing symbols and emulated memory retain the same
+     * reference algorithm. No JS string conversion or helper C code. */
+    HostMemory.prototype.findAllocationRange = function (
+            haystack, haystackOffset, haystackLength,
+            needle, needleOffset, needleLength) {
+        if (!haystack || haystack.freed || !needle || needle.freed ||
+                haystackOffset < 0 || haystackOffset !== Math.floor(haystackOffset) ||
+                needleOffset < 0 || needleOffset !== Math.floor(needleOffset) ||
+                haystackLength < 0 || haystackLength !== Math.floor(haystackLength) ||
+                needleLength < 0 || needleLength !== Math.floor(needleLength) ||
+                haystackOffset + haystackLength > haystack.length ||
+                needleOffset + needleLength > needle.length) {
+            throw new RangeError("invalid host-memory allocation search");
+        }
+        if (needleLength === 0) return 0;
+        if (needleLength > haystackLength) return -1;
+        if (haystack.isNative && needle.isNative) {
+            if (this.memmemPointer === undefined) {
+                this.memmemPointer = this.ffi.call(this.ffi.getDlsym(), [0, "memmem"]);
+            }
+            if (this.memmemPointer) {
+                var base = haystack.pointer + haystackOffset;
+                var result = this.ffi.call(this.memmemPointer,
+                    [base, haystackLength, needle.pointer + needleOffset,
+                     needleLength]) >>> 0;
+                return result ? result - (base >>> 0) : -1;
+            }
+        }
+        var start = 0;
+        while (start <= haystackLength - needleLength) {
+            var index = 0;
+            while (index < needleLength &&
+                    this.read8(haystack, haystackOffset + start + index) ===
+                    this.read8(needle, needleOffset + index)) index++;
+            if (index === needleLength) return start;
+            start++;
+        }
+        return -1;
+    };
+
     HostMemory.prototype.hostName = function () {
         return this.isMMVM ? "mmvm-native" : "node-array-emulation";
     };

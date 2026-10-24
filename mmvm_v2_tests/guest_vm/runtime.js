@@ -1523,7 +1523,8 @@
         }
     };
 
-    Runtime.prototype.registerProgram = function (program) {
+    Runtime.prototype.registerProgram = function (program, enclosingSource,
+                                                   enclosingSourceAddress) {
         if (program && program.heapAddress) {
             this.linearHeap.requireRecord(program.heapAddress,
                                           Heap.Types.PROGRAM);
@@ -1545,8 +1546,8 @@
         var metadataIndex = this.freeProgramMetadataIndices.length ?
             this.freeProgramMetadataIndices.pop() : this.programObjects.length;
         var metadataId = metadataIndex + 1;
-        var sourceAddress = program.source ?
-            this.internStringAddress(program.source) : 0;
+        var sourceAddress = program.source ? this.internProgramSource(
+            program.source, enclosingSource, enclosingSourceAddress) : 0;
         var address = this.heapRecords.allocateProgram(
             program.heapBytecodeAddress, program.heapConstantsAddress, {
             constantRegisters: program.heapConstantRegistersAddress,
@@ -1579,7 +1580,9 @@
             var cell = this.heapRecords.vectorCell(
                 program.heapConstantsAddress, index);
             if (value && typeof value === "object" && value.code && value.constants) {
-                this.valueCells.writeReferenceAt(cell, this.registerProgram(value));
+                this.valueCells.writeReferenceAt(cell, this.registerProgram(
+                    value, program.source || enclosingSource,
+                    sourceAddress || enclosingSourceAddress));
             } else if (value && typeof value === "object" &&
                        typeof value.length === "number") {
                 this.writeHeapValue(cell, this.arrayFrom(value));
@@ -1910,6 +1913,69 @@
         var key = "$" + value;
         if (!this.internedStrings[key]) this.internString(value);
         return this.internedStrings[key];
+    };
+
+    Runtime.prototype.internProgramSource = function (
+            source, enclosingSource, enclosingAddress) {
+        var key = "$" + source;
+        var address = this.internedStrings[key];
+        if (address) return address;
+        if (enclosingAddress && enclosingSource) {
+            var start = enclosingSource.indexOf(source);
+            if (start >= 0) {
+                address = this.heapRecords.allocateStringSlice(
+                    enclosingAddress, start, source.length);
+                this.stringAddresses[key] = address;
+                this.internedStrings[key] = address;
+                this.decodedStrings["$" + address] = source;
+                delete this.transientStringAddresses[key];
+                return address;
+            }
+        }
+        return this.internStringAddress(source);
+    };
+
+    /* Finalize immutable backing sharing at the snapshot boundary. Function
+     * sources already use compact views during construction; this catches
+     * atoms allocated before their containing source became available. It
+     * does not relocate records, change atom identity, or strip source text.
+     * Largest-first ordering ensures owners never become views themselves. */
+    Runtime.prototype.shareSnapshotStringBackings = function () {
+        var records = this.heapRecords;
+        var heap = this.linearHeap;
+        var candidates = [], address = Heap.FIRST_RECORD;
+        var minimumBytes = HeapRecords.KernelConstants.STRING_SLICE_RECORD_BYTES;
+        while (address < heap.bump) {
+            var header = heap.inspectRecordHeader(address);
+            var size = header.size;
+            if (header.type === Heap.Types.STRING &&
+                    size >= minimumBytes && !records.stringIsRope(address) &&
+                    !records.stringIsSlice(address)) {
+                candidates.push({address: address,
+                    length: records.stringLength(address)});
+            }
+            address += size;
+        }
+        candidates.sort(function (a, b) {
+            return b.length - a.length || a.address - b.address;
+        });
+        var owners = [], index = 0, shared = 0;
+        while (index < candidates.length) {
+            var candidate = candidates[index++];
+            var ownerIndex = 0, matched = false;
+            while (ownerIndex < owners.length && !matched) {
+                var owner = owners[ownerIndex++];
+                var start = records.flatStringIndexOf(owner.address, candidate.address);
+                if (start >= 0) {
+                    records.shareStringBackingInPlace(
+                        candidate.address, owner.address, start);
+                    matched = true;
+                    shared++;
+                }
+            }
+            if (!matched) owners.push(candidate);
+        }
+        return shared;
     };
 
     Runtime.prototype.computedStringAddress = function (value) {

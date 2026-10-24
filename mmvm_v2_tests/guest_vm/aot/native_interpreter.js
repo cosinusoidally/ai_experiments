@@ -12949,43 +12949,9 @@
             }
         }
         if (substrResultAddress === 0) {
-            var substrBytes =
-                (STRING_CHARS + substrLength * 2 + 7) & -8;
-            if (reserveNativeAllocationKernel(
-                    heapBase, state, substrBytes) === 0) return 0;
-            substrResultAddress = engineHeapBump(heapBase, state);
-            if (substrResultAddress + substrBytes >
-                engineHeapLimit(heapBase, state)) {
-                return 0;
-            }
-            setRecordType(heapBase, substrResultAddress,
-                          HEAP_TYPE_STRING);
-            setRecordSize(heapBase, substrResultAddress,
-                          substrBytes);
-            setRecordMark(heapBase, substrResultAddress, 0);
-            setRecordFlags(heapBase, substrResultAddress, 0);
-            setStringLength(heapBase, substrResultAddress,
-                            substrLength);
-            var substrHash = -2128831035;
-            var substrCopyIndex = 0;
-            while (substrCopyIndex < substrLength) {
-                var substrCode = stringCharacterCodeUnit(
-                    heapBase, substrSource,
-                    substrStart + substrCopyIndex) & 65535;
-                setStringCharacterByte(heapBase,
-                    substrResultAddress, substrCopyIndex * 2,
-                    substrCode & 255);
-                setStringCharacterByte(heapBase,
-                    substrResultAddress,
-                    substrCopyIndex * 2 + 1,
-                    (substrCode >>> 8) & 255);
-                substrHash = (substrHash ^ substrCode) * 16777619;
-                substrCopyIndex = substrCopyIndex + 1;
-            }
-            setStringHash(heapBase, substrResultAddress,
-                          substrHash);
-            setEngineHeapBump(heapBase, state,
-                substrResultAddress + substrBytes);
+            substrResultAddress = allocateStringSliceKernel(
+                heapBase, state, substrSource, substrStart, substrLength);
+            if (substrResultAddress === 0) return 0;
         }
         store32(intrinsicTarget, VALUE_TAG_REFERENCE);
         store32(intrinsicTarget + VALUE_CELL_LOW,
@@ -13443,13 +13409,18 @@
      * kernel function gives the Node and i386 backends identical semantics. */
     function stringCharacterCodeUnit(heapBase, string, index) {
         var flags = recordFlags(heapBase, string);
-        while ((flags & STRING_ROPE_FLAG) !== 0) {
-            var left = stringRopeLeft(heapBase, string);
-            var leftLength = stringLength(heapBase, left);
-            if (index < leftLength) string = left;
-            else {
-                index = index - leftLength;
-                string = stringRopeRight(heapBase, string);
+        while ((flags & (STRING_ROPE_FLAG | STRING_SLICE_FLAG)) !== 0) {
+            if ((flags & STRING_SLICE_FLAG) !== 0) {
+                index = index + stringSliceStart(heapBase, string);
+                string = stringSliceBacking(heapBase, string);
+            } else {
+                var left = stringRopeLeft(heapBase, string);
+                var leftLength = stringLength(heapBase, left);
+                if (index < leftLength) string = left;
+                else {
+                    index = index - leftLength;
+                    string = stringRopeRight(heapBase, string);
+                }
             }
             flags = recordFlags(heapBase, string);
         }
@@ -13462,6 +13433,29 @@
     function stringTreeDepthKernel(heapBase, string) {
         if ((recordFlags(heapBase, string) & STRING_ROPE_FLAG) === 0) return 0;
         return stringRopeDepth(heapBase, string);
+    }
+
+    function allocateStringSliceKernel(heapBase, state, backing, start, length) {
+        if (start === 0) {
+            if (length === stringLength(heapBase, backing)) return backing;
+        }
+        while ((recordFlags(heapBase, backing) & STRING_SLICE_FLAG) !== 0) {
+            start = start + stringSliceStart(heapBase, backing);
+            backing = stringSliceBacking(heapBase, backing);
+        }
+        if (reserveNativeAllocationKernel(
+                heapBase, state, STRING_SLICE_RECORD_BYTES) === 0) return 0;
+        var result = engineHeapBump(heapBase, state);
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, STRING_SLICE_RECORD_BYTES);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, STRING_SLICE_FLAG);
+        setStringLength(heapBase, result, length);
+        setStringHash(heapBase, result, 0);
+        setStringSliceBacking(heapBase, result, backing);
+        setStringSliceStart(heapBase, result, start);
+        setEngineHeapBump(heapBase, state, result + STRING_SLICE_RECORD_BYTES);
+        return result;
     }
 
     function allocateStringRopeKernel(heapBase, state, left, right) {
@@ -17333,6 +17327,7 @@
             allocateStringRopeKernel: allocateStringRopeKernel,
             allocateFlatStringConcatenationKernel:
                 allocateFlatStringConcatenationKernel,
+            allocateStringSliceKernel: allocateStringSliceKernel,
             stringNumericValueKernel: stringNumericValueKernel,
             descriptorFieldKindKernel: descriptorFieldKindKernel,
             stringReplaceKernel: stringReplaceKernel,
@@ -17416,7 +17411,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 47,
+                compilerVersion: 48,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17451,6 +17446,10 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    STRING_SLICE_FLAG: kernelConstantOverrides.STRING_SLICE_FLAG,
+                    STRING_SLICE_RECORD_BYTES: kernelConstantOverrides.STRING_SLICE_RECORD_BYTES,
+                    STRING_SLICE_BACKING: kernelConstantOverrides.STRING_SLICE_BACKING,
+                    STRING_SLICE_START: kernelConstantOverrides.STRING_SLICE_START,
                     STRING_LATIN1_FLAG: kernelConstantOverrides.STRING_LATIN1_FLAG,
                     PLATFORM_MEMSET_POINTER: kernelConstantOverrides.PLATFORM_MEMSET_POINTER,
                     BYTECODE_REGISTER_SCALE: runtime.nativeOperandPredecode ? 1 : BYTECODE_REGISTER_SCALE,

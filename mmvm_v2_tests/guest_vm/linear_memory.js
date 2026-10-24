@@ -193,6 +193,13 @@
             this.allocation, address, length, value);
     };
 
+    LinearMemory.prototype.findBytes = function (haystack, length, needle, needleLength) {
+        this.checkRange(haystack, length);
+        this.checkRange(needle, needleLength);
+        return this.host.findAllocationRange(this.allocation, haystack, length,
+            this.allocation, needle, needleLength);
+    };
+
     LinearMemory.prototype.copy = function (destination, source, length) {
         this.checkRange(destination, length);
         this.checkRange(source, length);

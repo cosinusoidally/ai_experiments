@@ -3,7 +3,7 @@
  * This is diagnostic tooling, not a language-feature test. */
 (function (shellArguments) {
     var nodeHost = typeof module !== "undefined" && module.exports;
-    var Heap, Cells, Records, Sweeper, Compiler, Backend, FFI;
+    var Heap, Cells, Records, Sweeper, Compiler, Backend, FFI, Runtime;
     var args, output;
     if (nodeHost) {
         Heap = require("../heap.js");
@@ -27,20 +27,30 @@
         output = print;
     }
     var inspectString = args[0] === "--string";
+    var shareBackings = args[0] === "--share-backings";
+    if (shareBackings) {
+        args = args.slice(1);
+        Runtime = nodeHost ? require("../runtime.js") : GuestVMRuntime;
+    }
     var inspectSources = args[0] === "--sources";
+    var inspectSharing = args[0] === "--string-sharing";
+    var inspectMetadata = args[0] === "--metadata-sharing";
     var stringAddress = inspectString ? Number(args[1]) : 0;
     if (inspectString) args = args.slice(2);
-    else if (inspectSources) args = args.slice(1);
+    else if (inspectSources || inspectSharing || inspectMetadata) args = args.slice(1);
     var propertiesOnly = args[0] === "--heap-properties";
     var snapshotStatistics = args[0] === "--snapshot-stats";
     var statisticsOnly = args[0] === "--heap-stats" || propertiesOnly || snapshotStatistics;
     var rawHeap = statisticsOnly && !snapshotStatistics;
     if (statisticsOnly) args = args.slice(1);
-    var inspectionOnly = statisticsOnly || inspectString || inspectSources;
+    var inspectionOnly = statisticsOnly || inspectString || inspectSources || inspectSharing || inspectMetadata;
     if (!args.length) {
         throw new Error("usage: audit_snapshot_heap.js snapshot | " +
                         "--snapshot-stats snapshot | " +
                         "--sources snapshot | --string ADDRESS snapshot | " +
+                        "--string-sharing snapshot | " +
+                        "--share-backings snapshot | " +
+                        "--metadata-sharing snapshot | " +
                         "--heap-stats raw-heap-dump | " +
                         "--heap-properties raw-heap-dump");
     }
@@ -81,7 +91,9 @@
             destroy: function () {}
         };
         inspectionHeap.bump = heapLength;
-        if (inspectString || inspectSources) reportSource(inspectionHeap);
+        if (inspectMetadata) reportMetadataSharing(inspectionHeap);
+        else if (inspectSharing) reportStringSharing(inspectionHeap);
+        else if (inspectString || inspectSources) reportSource(inspectionHeap);
         else if (propertiesOnly) reportProperties(inspectionHeap);
         else reportStatistics(inspectionHeap);
         inspectionHeap.destroy();
@@ -110,8 +122,20 @@
         ffi.call(ffi.resolve("free"), [headerPointer]);
     }
     heap.bump = heapLength;
+    if (shareBackings) {
+        var recordsForSharing = new Records(heap, new Cells(heap));
+        var startSharing = new Date().getTime();
+        var sharedCount = Runtime.prototype.shareSnapshotStringBackings.call({
+            heapRecords: recordsForSharing, linearHeap: heap
+        });
+        output("shared backings in private inspection copy: " + sharedCount +
+            "; milliseconds=" + (new Date().getTime() - startSharing));
+        reportStringSharing(heap);
+    }
     if (inspectionOnly) {
-        if (inspectString || inspectSources) reportSource(heap);
+        if (inspectMetadata) reportMetadataSharing(heap);
+        else if (inspectSharing) reportStringSharing(heap);
+        else if (inspectString || inspectSources) reportSource(heap);
         else if (propertiesOnly) reportProperties(heap);
         else reportStatistics(heap);
         heap.destroy();
@@ -122,9 +146,13 @@
         function describeString(address) {
             inspectedHeap.requireRecord(address, Heap.Types.STRING);
             return "string " + address + " encoding=" +
-                (sourceRecords.stringIsRope(address) ? "rope" :
+                (sourceRecords.stringIsSlice(address) ? "slice" :
+                 sourceRecords.stringIsRope(address) ? "rope" :
                     sourceRecords.stringIsLatin1(address) ? "latin1" : "utf16") +
-                " codeUnits=" + sourceRecords.stringLength(address);
+                " codeUnits=" + sourceRecords.stringLength(address) +
+                (sourceRecords.stringIsSlice(address) ?
+                    " backing=" + sourceRecords.stringSliceBacking(address) +
+                    " start=" + sourceRecords.stringSliceStart(address) : "");
         }
         if (inspectString) {
             output(describeString(stringAddress));
@@ -139,6 +167,122 @@
                 if (source) output("program " + position + " " + describeString(source));
             }
             position += record.size;
+        }
+    }
+
+    /* A representation audit, not a source minifier. Empty records with no
+     * character payload are excluded. Largest-first
+     * containment finds remaining duplicated backing text without guessing
+     * from filenames, function names or source formatting. */
+    function reportStringSharing(inspectedHeap) {
+        var records = new Records(inspectedHeap, new Cells(inspectedHeap));
+        var flat = [], position = Heap.FIRST_RECORD;
+        while (position < inspectedHeap.bump) {
+            var record = inspectedHeap.inspectRecordHeader(position);
+            if (record.type === Heap.Types.STRING &&
+                    !records.stringIsRope(position) &&
+                    !records.stringIsSlice(position)) {
+                flat.push({address: position, bytes: record.size,
+                    text: records.readString(position)});
+            }
+            position += record.size;
+        }
+        flat.sort(function (a, b) {
+            return b.text.length - a.text.length || a.address - b.address;
+        });
+        var containers = [], count = 0, bytes = 0, index = 0;
+        while (index < flat.length) {
+            var candidate = flat[index++], owner = null, start = -1;
+            var containerIndex = 0;
+            if (candidate.bytes < Records.KernelConstants.STRING_SLICE_RECORD_BYTES) {
+                continue;
+            }
+            while (containerIndex < containers.length) {
+                var container = containers[containerIndex++];
+                start = container.text.indexOf(candidate.text);
+                if (start >= 0) { owner = container; break; }
+            }
+            if (owner) {
+                var saving = candidate.bytes -
+                    Records.KernelConstants.STRING_SLICE_RECORD_BYTES;
+                output("duplicated string " + candidate.address +
+                    " backing=" + owner.address + " start=" + start +
+                    " codeUnits=" + candidate.text.length +
+                    " avoidableBytes=" + saving);
+                count++;
+                bytes += saving;
+            } else containers.push(candidate);
+        }
+        output("remaining duplicated flat strings: " + count +
+            "; avoidable backing bytes: " + bytes);
+    }
+
+    function reportMetadataSharing(inspectedHeap) {
+        var cells = new Cells(inspectedHeap);
+        var records = new Records(inspectedHeap, cells);
+        var roles = {}, seen = {};
+        function integerSignature(vector) {
+            var values = [], index = 0;
+            while (index < records.vectorLength(vector)) {
+                var cell = records.vectorCell(vector, index++);
+                if (cells.tagAt(cell) !== Cells.Tags.INT32) return null;
+                values.push(cells.readPrimitiveAt(cell));
+            }
+            return "$" + values.join(",");
+        }
+        function count(role, address, signature, bytes) {
+            if (signature === null || seen[role + ":" + address]) return;
+            seen[role + ":" + address] = true;
+            var data = roles[role];
+            if (!data) data = roles[role] = {keys: {}, count: 0, bytes: 0,
+                duplicates: 0, duplicateBytes: 0};
+            data.count++;
+            data.bytes += bytes;
+            if (data.keys[signature]) {
+                data.duplicates++;
+                data.duplicateBytes += bytes;
+            } else data.keys[signature] = true;
+        }
+        function vector(role, address) {
+            if (address) count(role, address, integerSignature(address),
+                inspectedHeap.recordSize(address));
+        }
+        var position = Heap.FIRST_RECORD;
+        while (position < inspectedHeap.bump) {
+            var header = inspectedHeap.inspectRecordHeader(position);
+            if (header.type === Heap.Types.PROGRAM) {
+                vector("constant-register maps", records.programConstantRegisters(position));
+                vector("binding-register maps", records.programBindingRegisters(position));
+                vector("parameter-slot maps", records.programParameterSlots(position));
+                var constants = records.programConstants(position), index = 0;
+                while (index < records.vectorLength(constants)) {
+                    var cell = records.vectorCell(constants, index++);
+                    if (cells.tagAt(cell) === Cells.Tags.REFERENCE) {
+                        var target = cells.referenceAddressAt(cell);
+                        if (inspectedHeap.recordType(target) === Heap.Types.ARRAY) {
+                            var elements = records.arrayElements(target);
+                            count("argument-register descriptors", target,
+                                integerSignature(elements), inspectedHeap.recordSize(target) +
+                                inspectedHeap.recordSize(elements));
+                        }
+                    }
+                }
+                var bytecode = records.programBytecode(position), words = [], word = 0;
+                while (word < records.bytecodeLength(bytecode)) {
+                    words.push(records.bytecodeWord(bytecode, word++));
+                }
+                count("bytecode", bytecode, "$" + words.join(","),
+                    inspectedHeap.recordSize(bytecode));
+            }
+            position += header.size;
+        }
+        for (var name in roles) {
+            if (Object.prototype.hasOwnProperty.call(roles, name)) {
+                var role = roles[name];
+                output(name + ": " + role.count + " records, " + role.bytes +
+                    " bytes; duplicates=" + role.duplicates +
+                    ", shareableBytes=" + role.duplicateBytes);
+            }
         }
     }
 
@@ -175,7 +319,8 @@
         var typeBytes = {}, typeCounts = {};
         var stringRecords = new Records(inspectedHeap, new Cells(inspectedHeap));
         var encodings = {latin1: {count: 0, bytes: 0},
-            utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0}};
+            utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0},
+            slice: {count: 0, bytes: 0}};
         while (position < inspectedHeap.bump) {
             var record = inspectedHeap.inspectRecordHeader(position);
             if (record.type === Heap.Types.ENGINE_STATE &&
@@ -191,7 +336,8 @@
             typeBytes[record.type] = (typeBytes[record.type] || 0) + record.size;
             typeCounts[record.type] = (typeCounts[record.type] || 0) + 1;
             if (record.type === Heap.Types.STRING) {
-                var encoding = stringRecords.stringIsRope(position) ? "rope" :
+                var encoding = stringRecords.stringIsSlice(position) ? "slice" :
+                    stringRecords.stringIsRope(position) ? "rope" :
                     stringRecords.stringIsLatin1(position) ? "latin1" : "utf16";
                 encodings[encoding].count++;
                 encodings[encoding].bytes += record.size;
