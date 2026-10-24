@@ -745,6 +745,28 @@ performance are separate mandatory regression gates.
   native execution, heap/GC and the string round-trip samples. A genuine
   self-hosted rebuild is byte-identical. No corpus files were changed.
 
+### 2026-10-24, approximately midday BST — compact snapshot metadata
+
+- Revision `e217d5b`; js_min-hosted native execution using the explicit
+  `--with-snapshot artifacts/fruits-profitable1.snap` option. Focused authored
+  variants: `ch09/9.5 ch11/11.6 ch11/11.7`.
+- Executed 165 of 165 variants: 153 passed, 12 failed, 0 not run and
+  0 timed out. The 12 failing IDs exactly match the earlier compact-string
+  baseline, compared with cmp. Raw log: ignored
+  `artifacts/fruits-profitable-test262-final.log`.
+- This is a focused regression check, not a new whole-suite run. Whole-suite
+  totals above remain unchanged. The final serial run took 41.51 seconds,
+  with peak RSS 189,668 KiB (about 185 MiB). An earlier run with the same
+  counts overlapped a demo stability check.
+- Both-host project regressions pass (12 programs / 270 language assertions
+  per host, plus embedding/GC/native-engine checks). Private immutable
+  argument/register metadata is shared; explicit map edits use copy-on-write.
+  Native integer joining no longer needs host semantics for metadata keys.
+- The final dense snapshot occupies 8,326,112 bytes, and its genuine
+  self-hosted rebuild is byte-identical. Large strings retain exact source
+  text through backing views; tiny records remain inline when views would
+  not save storage. No C, demo or external corpus files were modified.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

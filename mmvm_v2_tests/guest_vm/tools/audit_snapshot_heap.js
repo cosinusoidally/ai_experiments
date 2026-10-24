@@ -170,8 +170,9 @@
         }
     }
 
-    /* A representation audit, not a source minifier. Empty records with no
-     * character payload are excluded. Largest-first
+    /* A representation audit, not a source minifier. Count tiny inline leaves
+     * separately: replacing them with views cannot shrink their allocation.
+     * Largest-first
      * containment finds remaining duplicated backing text without guessing
      * from filenames, function names or source formatting. */
     function reportStringSharing(inspectedHeap) {

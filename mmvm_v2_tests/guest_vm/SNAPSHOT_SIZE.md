@@ -1,5 +1,69 @@
 # Snapshot size and compact strings
 
+## Accepted checkpoint, 2026-10-24
+
+The current dense image is **8,326,112 bytes (7.94 MiB)**, below the 8 MiB
+target without compression, sparse storage, source stripping or C changes.
+The genuine self-hosted rebuild is byte-identical, SHA-256
+`7cd604ea1c285b90751063d3084279fffe526f9be9821c7129991c357ef53947`.
+This is about 33% smaller than the preceding 12,399,160-byte Latin-1 image,
+and about 51% smaller than the earlier 16,995,576-byte UTF-16 image.
+
+The largest low-cost reductions were shared source backing, shared private
+argument lists with exact capacity, and shared immutable register/parameter
+maps with copy-on-write editing. Tiny strings remain inline where a view
+cannot reduce their record size. The native string reader keeps flat reads
+eligible for ordinary bounded inlining. There is no new load-time decoder or
+metadata reconstruction pass. See [build/run commands](#build-run-and-inspect)
+and the chronological design/measurement notes below.
+
+Final validation:
+
+- Both-host project suite passes: 12 guest programs / 270 language assertions
+  per host, plus the embedding, GC, compiler and native-engine checks.
+- Seed and true self-build images match using cmp; both run hello.js and the
+  alternate standalone workload. Producing logs contain source loading,
+  lowering and assembly, not an image-copy shortcut.
+- The heap graph/compiled-marker audit finds 37,983 reachable records and
+  zero missing marks. The profitable-backing audit reports zero remaining
+  duplicated backing with avoidable bytes. Its 1,322 tiny inline strings are
+  counted separately because views could not shrink those records.
+- Demo8 ran for just over seven minutes across rally, garage and free-drive
+  autopilot and exited normally. Late garage/free-drive samples were roughly
+  19–20 FPS at 320x240/20 FPS. This is a stability check, not a frame-time
+  guarantee or proof against every possible GC failure.
+- An earlier metadata image also ran demo1 for nearly six minutes with typing
+  and a mouse drag. Both final and earlier metadata images load all demo1–7
+  command-line/help paths. No demo sources were changed.
+- net.js and node_web.js served hello.js and the runner ELF binary from the
+  final image; both downloads matched with cmp on each server.
+
+Paired idle-machine startup checks found no regression. Three alternating
+demo8 command-line startup trials had medians of about 3.532 seconds for the
+Latin-1 baseline and 3.508 seconds for the final image. The ranges overlap;
+this is not a claimed large parsing speedup. Warm hello trials had medians of
+about 19.9 versus 11.5 ms. These are launch-to-exit/command-line proxies, not
+cold-filesystem or first-frame measurements.
+
+The final zlib diagnostic verified both complete output buffers in two
+60-round batches: 26.069/26.848 seconds, versus 26.545/26.455 seconds for the
+older image run serially afterwards. The means are essentially unchanged
+(26.459 versus 26.500 seconds). Initialization was 17.569 versus 18.686
+seconds. This is a diagnostic, not an Octane score or evidence of the older
+unmet 2x performance target being achieved.
+
+The final cold build's reported stages were 17.214 + 1.241 + 54.136 + 15.665
+seconds, about 88.3 seconds total. The true self-build was run concurrently
+with project tests and reported 74.875 + 1.690 + 87.731 + 37.856 seconds;
+those concurrent stages are not an isolated generation-speed comparison.
+Generation remains a real compiler build, separate from image load time.
+
+Validated temporary images: `artifacts/fruits-profitable1.snap` and
+`artifacts/fruits-profitable2.snap`. Logs use the matching ignored prefix.
+Snapshots, downloads, reference data and logs are not checked in. Detailed
+Test262 scope/status remains in `TEST262_STATUS.md`; a whole-suite rerun was
+not performed for this size change.
+
 ## 2026-10-23: one-byte flat strings
 
 This is a representation change, not compression or debug stripping. All 90

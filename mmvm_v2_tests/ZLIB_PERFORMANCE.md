@@ -4,7 +4,27 @@ The purpose is to improve the general guest interpreter, not to recognize or
 replace zlib operations. External Octane sources remain untouched. RegExp is
 outside the current performance investigation.
 
-Latest serial comparison (2026-10-23, compact strings): verified zlib
+Latest serial comparison (2026-10-24, compact snapshot metadata): verified
+diagnostic batches 26.069/26.848 seconds, versus the older Latin-1 image run
+serially afterwards at 26.545/26.455 seconds. Means are 26.459 versus 26.500
+seconds, essentially unchanged. Initialization was 17.569 versus 18.686
+seconds. Every batch checked all 100,000 decompressed and 25,906 compressed
+bytes against the independent Node reference. No other demo/build ran during
+these timed batches. These are diagnostic timings, not Octane scores.
+
+The final dense image is 8,326,112 bytes, below 8 MiB, with exact source text
+and byte-identical genuine self-hosted rebuilding retained. Private argument
+metadata and register maps are shared; explicit map writes use copy-on-write.
+Tiny strings stay inline when a view cannot save space, and flat character
+reads remain eligible for the existing bounded kernel inliner. No zlib-specific
+operation, source cache or precomputed result was introduced. Raw logs:
+ignored `artifacts/fruits-profitable-zlib.log` and
+`artifacts/fruits-profitable-zlib-control.log`. The cold build's reported
+stages totaled about 88.3 seconds; its concurrent self-build is not an isolated
+generation-speed comparison. See `guest_vm/SNAPSHOT_SIZE.md` for details.
+The additional 2x target (about 22.4 seconds) and overall 10x target remain unmet.
+
+Previous serial comparison (2026-10-23, compact strings): verified zlib
 diagnostic batches 27.796/27.399 seconds, versus the pre-change image's
 26.888/27.033-second control (about 2.4% longer by the two-batch means, not a
 speedup). Snapshots are about 27% smaller without compression or debug
@@ -13,7 +33,7 @@ checkpoints measured 25.39–25.45 seconds,
 against 44.65–45.04 at the start of that pass and the initial 63–65 seconds;
 those older measurements should not replace the current serial comparison.
 The additional 2x target is about 22.4 seconds per batch and remains unmet,
-as does the requested overall 10x speedup. The latest cold seed build took
+as does the requested overall 10x speedup. That cold seed build took
 about 90.9 seconds; its genuine byte-identical self-hosted rebuild reported
 about 150.4 seconds across construction/preparation/serialization stages.
 The original cold build was 117.89 seconds. Whole-suite Test262 was not rerun;
