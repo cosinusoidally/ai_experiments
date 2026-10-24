@@ -17,6 +17,71 @@
         return propertyValueCellAddress(heapBase, entry);
     }
 
+    function ownPropertyEntryKeyKernel(heapBase, owner, entry) {
+        return propertyKey(heapBase, entry);
+    }
+
+    function ownPropertyEntrySetterKernel(heapBase, owner, entry) {
+        return propertySetter(heapBase, entry);
+    }
+
+    function setOwnPropertyEntryAttributesKernel(heapBase, owner, entry, attributes) {
+        setPropertyAttributes(heapBase, entry, attributes);
+        return 0;
+    }
+
+    function setOwnPropertyEntrySetterKernel(heapBase, owner, entry, setter) {
+        setPropertyReserved(heapBase, entry, setter);
+        return 0;
+    }
+
+    function lastOwnPropertyEntryKernel(heapBase, owner) {
+        var type = recordType(heapBase, owner);
+        if (type === HEAP_TYPE_REGEXP) return regexpPropertyHead(heapBase, owner);
+        if (type === HEAP_TYPE_BUFFER_VIEW) return bufferViewPropertyHead(heapBase, owner);
+        return objectPropertyHead(heapBase, owner);
+    }
+
+    function previousOwnPropertyEntryKernel(heapBase, owner, entry) {
+        return propertyNext(heapBase, entry);
+    }
+
+    function setOwnPropertyStorageKernel(heapBase, owner, storage) {
+        var type = recordType(heapBase, owner);
+        if (type === HEAP_TYPE_REGEXP) setRegexpPropertyHead(heapBase, owner, storage);
+        else if (type === HEAP_TYPE_BUFFER_VIEW) setBufferViewPropertyHead(heapBase, owner, storage);
+        else setObjectPropertyHead(heapBase, owner, storage);
+        return 0;
+    }
+
+    function appendOwnPropertyEntryKernel(heapBase, state, owner, key, attributes) {
+        if (reserveNativeAllocationKernel(heapBase, state, PROPERTY_RECORD_BYTES) === 0) return 0;
+        var entry = engineHeapBump(heapBase, state);
+        setRecordType(heapBase, entry, HEAP_TYPE_PROPERTY);
+        setRecordSize(heapBase, entry, PROPERTY_RECORD_BYTES);
+        setRecordMark(heapBase, entry, 0);
+        setRecordFlags(heapBase, entry, 0);
+        setPropertyNext(heapBase, entry, lastOwnPropertyEntryKernel(heapBase, owner));
+        setPropertyKey(heapBase, entry, key);
+        setPropertyAttributes(heapBase, entry, attributes);
+        setPropertyReserved(heapBase, entry, 0);
+        setValueCellUndefined(propertyValueCellAddress(heapBase, entry));
+        setOwnPropertyStorageKernel(heapBase, owner, entry);
+        setEngineHeapBump(heapBase, state, entry + PROPERTY_RECORD_BYTES);
+        return entry;
+    }
+
+    function removeOwnPropertyEntryKernel(heapBase, owner, entry, previous) {
+        var next = propertyNext(heapBase, entry);
+        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
+            setObjectPropertyIndex(heapBase, owner, 0);
+        }
+        if (previous !== 0) setPropertyNext(heapBase, previous, next);
+        else setOwnPropertyStorageKernel(heapBase, owner, next);
+        setRecordFlags(heapBase, owner, recordFlags(heapBase, owner) + 1);
+        return 1;
+    }
+
     function propertyIndexFindKernel(heapBase, index, key, hash) {
         var capacity = propertyIndexCapacity(heapBase, index);
         var slot = hash & (capacity - 1);
@@ -161,6 +226,15 @@
     }
 
     var kernels = {
+        lastOwnPropertyEntryKernel: lastOwnPropertyEntryKernel,
+        previousOwnPropertyEntryKernel: previousOwnPropertyEntryKernel,
+        ownPropertyEntryKeyKernel: ownPropertyEntryKeyKernel,
+        ownPropertyEntrySetterKernel: ownPropertyEntrySetterKernel,
+        setOwnPropertyEntryAttributesKernel: setOwnPropertyEntryAttributesKernel,
+        setOwnPropertyEntrySetterKernel: setOwnPropertyEntrySetterKernel,
+        setOwnPropertyStorageKernel: setOwnPropertyStorageKernel,
+        appendOwnPropertyEntryKernel: appendOwnPropertyEntryKernel,
+        removeOwnPropertyEntryKernel: removeOwnPropertyEntryKernel,
         ownPropertyEntryAttributesKernel: ownPropertyEntryAttributesKernel,
         ownPropertyEntryValueCellKernel: ownPropertyEntryValueCellKernel,
         propertyIndexFindKernel: propertyIndexFindKernel,
