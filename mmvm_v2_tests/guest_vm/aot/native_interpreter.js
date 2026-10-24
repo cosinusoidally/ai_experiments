@@ -17510,7 +17510,8 @@
             };
         }
         this.snapshotMetadata = snapshotMetadata;
-        var x86Backend = new X86Backend({captureAssembly: false, registerCount: 4,
+        var x86Backend = new X86Backend({captureAssembly: false, captureBytes: false,
+                                       registerCount: 4,
                                        dispatchStrategy: "balanced"});
         var loadedSnapshot = false;
         if (runtime.nativeSnapshotRead) {

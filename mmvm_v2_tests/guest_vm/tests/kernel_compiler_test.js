@@ -22,18 +22,36 @@
         var loopIR = compiler.compile(loopChecksum);
         var loopJS = new JSBackend().compile(loopIR);
         var loopX86 = new X86Backend().compile(loopIR);
+        var nativeStorageBackend = new X86Backend({captureBytes: false});
+        var nativeStorageLoop = nativeStorageBackend.compile(loopIR);
         try {
+            if (nativeStorageLoop.length !== loopX86.length ||
+                    nativeStorageLoop.assembly !== loopX86.assembly ||
+                    nativeStorageBackend.temporaryAssemblers.length !== 0) {
+                throw new Error("assembler storage changed code layout or leaked storage");
+            }
+            if (nativeStorageLoop.pointer) {
+                var byteIndex = 0;
+                while (byteIndex < loopX86.length) {
+                    if ((peek8(nativeStorageLoop.pointer + byteIndex) & 255) !==
+                            loopX86.bytes[byteIndex++]) {
+                        throw new Error("native assembler storage changed instruction bytes");
+                    }
+                }
+            }
             var loopInputs = [-3, 0, 1, 8, 100];
             for (var loopIndex = 0; loopIndex < loopInputs.length; loopIndex++) {
                 var rows = loopInputs[loopIndex];
                 var expectedLoop = loopChecksum(rows);
                 if (loopJS.fn(null, rows) !== expectedLoop ||
-                    (loopX86.fn && loopX86.fn(rows) !== expectedLoop)) {
+                    (loopX86.fn && loopX86.fn(rows) !== expectedLoop) ||
+                    (nativeStorageLoop.fn && nativeStorageLoop.fn(rows) !== expectedLoop)) {
                     throw new Error("kernel for-loop checksum differs from JS");
                 }
             }
         } finally {
             loopX86.destroy();
+            nativeStorageLoop.destroy();
         }
         var ir = compiler.compile(arithmeticKernel);
         var jsResult = new JSBackend().compile(ir);

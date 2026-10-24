@@ -3,11 +3,14 @@
 (function (root) {
     var MAX_SIGNED_BYTE_IMMEDIATE = 127;
     var STACK_WORD_BYTES = 4;
+    var INITIAL_NATIVE_BUFFER_BYTES = 64 * 1024;
+    var MAX_NATIVE_BUFFER_BYTES = 0x7fffffff;
     var REGISTER_CODES = {eax: 0, ecx: 1, edx: 2, ebx: 3,
                           esp: 4, ebp: 5, esi: 6, edi: 7};
     var ADDRESS_SCALES = {1: 0, 2: 1, 4: 2, 8: 3};
     function Assembler(captureMacros) {
         this.bytes = [];
+        this.length = 0;
         this.macros = captureMacros === false ? null : [];
         this.stackWords = 0;
         this.labels = {};
@@ -15,29 +18,97 @@
     }
 
     Assembler.prototype.emitByte = function (value) {
-        this.bytes[this.bytes.length] = value & 255;
+        this.bytes[this.length++] = value & 255;
     };
 
     Assembler.prototype.emitBytes2 = function (first, second) {
-        var index = this.bytes.length;
+        var index = this.length;
         this.bytes[index] = first & 255;
         this.bytes[index + 1] = second & 255;
+        this.length += 2;
     };
 
     Assembler.prototype.emitBytes3 = function (first, second, third) {
-        var index = this.bytes.length;
+        var index = this.length;
         this.bytes[index] = first & 255;
         this.bytes[index + 1] = second & 255;
         this.bytes[index + 2] = third & 255;
+        this.length += 3;
     };
 
     Assembler.prototype.word32 = function (value) {
         value = Number(value) >>> 0;
-        var index = this.bytes.length;
+        var index = this.length;
         this.bytes[index] = value & 255;
         this.bytes[index + 1] = (value >>> 8) & 255;
         this.bytes[index + 2] = (value >>> 16) & 255;
         this.bytes[index + 3] = (value >>> 24) & 255;
+        this.length += 4;
+    };
+
+    /* Optional storage policy, independent of instruction selection. The
+     * backend owns this temporary allocation and releases it even if emission
+     * fails. Default/debug assemblers continue exposing ordinary byte arrays. */
+    Assembler.prototype.useNativeStorage = function (ffi) {
+        if (this.length) throw new Error("cannot change assembler storage after emission");
+        this.storageFFI = ffi;
+        this.reallocPointer = ffi.resolve("realloc");
+        this.freePointer = ffi.resolve("free");
+        this.memcpyPointer = ffi.resolve("memcpy");
+        this.nativePointer = 0;
+        this.nativeCapacity = 0;
+        this.bytes = null;
+        this.emitByte = emitNativeByte;
+        this.emitBytes2 = emitNativeBytes2;
+        this.emitBytes3 = emitNativeBytes3;
+        this.word32 = emitNativeWord32;
+    };
+
+    Assembler.prototype.reserveNativeStorage = function (required) {
+        if (required < 0 || required > MAX_NATIVE_BUFFER_BYTES) {
+            throw new RangeError("assembler byte-buffer size exceeds i386 range");
+        }
+        var capacity = this.nativeCapacity || INITIAL_NATIVE_BUFFER_BYTES;
+        while (capacity < required) {
+            capacity = Math.min(capacity * 2, MAX_NATIVE_BUFFER_BYTES);
+        }
+        var pointer = this.storageFFI.call(this.reallocPointer,
+            [this.nativePointer, capacity]);
+        if (!pointer) throw new Error("assembler byte-buffer allocation failed");
+        this.nativePointer = pointer;
+        this.nativeCapacity = capacity;
+    };
+
+    function emitNativeByte(value) {
+        if (this.length + 1 > this.nativeCapacity) this.reserveNativeStorage(this.length + 1);
+        poke8(this.nativePointer + this.length, value & 255);
+        this.length++;
+    }
+    function emitNativeBytes2(first, second) {
+        /* Reserve the complete write; the extra zero bytes are outside the
+         * logical stream and are overwritten by subsequent instructions. */
+        if (this.length + 4 > this.nativeCapacity) this.reserveNativeStorage(this.length + 4);
+        poke32(this.nativePointer + this.length, (first & 255) | ((second & 255) << 8));
+        this.length += 2;
+    }
+    function emitNativeBytes3(first, second, third) {
+        if (this.length + 4 > this.nativeCapacity) this.reserveNativeStorage(this.length + 4);
+        poke32(this.nativePointer + this.length,
+            (first & 255) | ((second & 255) << 8) | ((third & 255) << 16));
+        this.length += 3;
+    }
+    function emitNativeWord32(value) {
+        if (this.length + 4 > this.nativeCapacity) this.reserveNativeStorage(this.length + 4);
+        poke32(this.nativePointer + this.length, value | 0);
+        this.length += 4;
+    }
+
+    Assembler.prototype.releaseStorage = function () {
+        if (this.nativePointer) {
+            this.storageFFI.call(this.freePointer, [this.nativePointer]);
+            this.nativePointer = 0;
+            this.nativeCapacity = 0;
+        }
     };
 
     Assembler.prototype.movEaxImmediate = function (value) {
@@ -641,7 +712,7 @@
     Assembler.prototype.label = function (name) {
         if (this.labels[name] !== undefined) throw new Error("duplicate x86 label " + name);
         if (this.macros) this.macros.push("label(" + name + ")");
-        this.labels[name] = this.bytes.length;
+        this.labels[name] = this.length;
     };
 
     Assembler.prototype.jump = function (name) {
@@ -692,15 +763,15 @@
     };
 
     Assembler.prototype.relativeFixup = function (name) {
-        this.fixups.push({name: name, displacement: this.bytes.length,
-                          end: this.bytes.length + 4});
+        this.fixups.push({name: name, displacement: this.length,
+                          end: this.length + 4});
         this.word32(0);
     };
     /* Position-independent data: unlike relativeFixup, the base need not be
      * the end of an instruction. Used for indexed dispatch table entries. */
     Assembler.prototype.labelDifference32 = function (name, baseLabel) {
         this.fixups.push({name: name, baseLabel: baseLabel,
-                          displacement: this.bytes.length});
+                          displacement: this.length});
         this.word32(0);
     };
 
@@ -715,6 +786,10 @@
             if (base === undefined) throw new Error("undefined x86 base label " +
                                                     fixup.baseLabel);
             var value = (target - base) >>> 0;
+            if (this.storageFFI) {
+                poke32(this.nativePointer + fixup.displacement, value | 0);
+                continue;
+            }
             this.bytes[fixup.displacement] = value & 255;
             this.bytes[fixup.displacement + 1] = (value >>> 8) & 255;
             this.bytes[fixup.displacement + 2] = (value >>> 16) & 255;

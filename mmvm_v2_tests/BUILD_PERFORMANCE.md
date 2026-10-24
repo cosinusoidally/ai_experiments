@@ -135,3 +135,33 @@ Validation at this working point:
   suite rerun is implied by this focused check.
 - Seed/rebuild SHA-256:
   `efca70e95bb14c987874158c7b0eeb1afa21b84cde5c0c40f8d2ba859a19943d`.
+
+## Native macro-assembler storage, 2026-10-24
+
+The x86 backend now accepts `captureBytes: false`. On an MMVM host this uses
+an explicitly owned, growing native byte buffer; the ordinary array-backed
+default remains available for inspection and Node. Instruction selection,
+macro dumps, labels and fixups are unchanged. Packed little-endian writes and
+a bulk copy install the code. Compilation's `finally` releases temporary
+buffers, including when emission fails. The public result's `bytes` is null
+only on the native opt-out path; its pointer, length and symbols remain usable.
+The interpreter build explicitly selects that path. No machine-code literals
+were added outside the existing macro instruction definitions.
+
+The existing compiler regression compares both storage policies' instruction
+bytes/macro dumps and executes both results. It caught a backward-fixup signed
+conversion bug during development: shell poke32 must receive a signed word,
+not an unsigned number outside the C int range. This was fixed before keeping
+the candidate. The full 354,150-byte interpreter stream also matches the
+preceding array-backed snapshot exactly, including buffer growth/fixups.
+
+Serial bootstrap: 74.55 seconds total, 1.494 seconds assembly; genuine
+self-build: 135.57 seconds total, 14.850 seconds assembly, byte-identical.
+The self-hosted assembly gap remains: byte storage was not its dominant cost.
+Prototype-method lookup in the guest interpreter is the next investigation,
+not a reason to claim these figures close the overall performance gap.
+Logs: ignored `artifacts/native-emission*.log`.
+Both-host project suites, all eight previously working Octane quick suites and
+the standalone bounded GC workload pass at this checkpoint. The instruction
+stream is unchanged, so this is a storage-policy change, not a new language
+implementation or a claim of new Test262 conformance.

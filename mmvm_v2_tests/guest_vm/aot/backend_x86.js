@@ -12,6 +12,8 @@
     function X86Backend(options) {
         options = options || {};
         this.captureAssembly = options.captureAssembly !== false;
+        this.captureBytes = options.captureBytes !== false;
+        this.temporaryAssemblers = [];
         this.registerCount = options.registerCount || 3;
         if (this.registerCount !== 3 && this.registerCount !== 4) {
             throw new Error("x86 kernel register count must be 3 or 4");
@@ -31,9 +33,29 @@
     }
 
     X86Backend.prototype.compile = function (ir) {
+        var firstTemporary = this.temporaryAssemblers.length;
+        try {
+            return compileKernel.call(this, ir);
+        } finally {
+            while (this.temporaryAssemblers.length > firstTemporary) {
+                this.temporaryAssemblers.pop().releaseStorage();
+            }
+        }
+    };
+
+    X86Backend.prototype.createAssembler = function () {
+        var assembler = new Assembler(this.captureAssembly);
+        if (this.ffi.isMMVM && !this.captureBytes) {
+            assembler.useNativeStorage(this.ffi);
+            this.temporaryAssemblers.push(assembler);
+        }
+        return assembler;
+    };
+
+    function compileKernel(ir) {
         if (ir.kernelGraph) return compileGraph(this, ir);
         if (ir.controlFlow) return compileControlFlow(this, ir);
-        var assembler = new Assembler(this.captureAssembly);
+        var assembler = this.createAssembler();
         var instructionIndex = 0;
         while (instructionIndex < ir.instructions.length) {
             var instruction = ir.instructions[instructionIndex++];
@@ -56,17 +78,17 @@
         emitExpression(assembler, ir.expression);
         assembler.ret();
         assembler.resolveLabels();
-        var result = {fn: null, pointer: 0, length: assembler.bytes.length,
+        var result = {fn: null, pointer: 0, length: assembler.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       symbols: assembler.labels,
                       ir: ir, backend: "i386", destroy: function () {}};
         if (!this.ffi.isMMVM) return result;
         var allocationLength = Math.max(4096,
-            Math.ceil(assembler.bytes.length / 4096) * 4096);
+            Math.ceil(assembler.length / 4096) * 4096);
         var pointer = this.ffi.call(this.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
-        copyBytesToNative(pointer, assembler.bytes);
+        copyAssemblerToNative(pointer, assembler);
         var ffi = this.ffi;
         var munmap = this.munmap;
         result.pointer = pointer;
@@ -87,7 +109,7 @@
         };
         installArgumentVectorBridge(this, result, ir.parameters.length);
         return result;
-    };
+    }
 
     function emitControlFlowFunction(assembler, ir, functionIndex, dispatchStrategy,
                                      registerCount) {
@@ -115,7 +137,7 @@
     }
 
     function compileGraph(backend, graph) {
-        var assembler = new Assembler(backend.captureAssembly);
+        var assembler = backend.createAssembler();
         var registerAllocations = {};
         var ordered = [];
         var index = 0;
@@ -143,7 +165,7 @@
             index++;
         }
         assembler.resolveLabels();
-        var result = {fn: null, pointer: 0, length: assembler.bytes.length,
+        var result = {fn: null, pointer: 0, length: assembler.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       symbols: assembler.labels,
                       ir: graph, backend: "i386",
@@ -151,11 +173,11 @@
                       destroy: function () {}};
         if (!backend.ffi.isMMVM) return result;
         var allocationLength = Math.max(4096,
-            Math.ceil(assembler.bytes.length / 4096) * 4096);
+            Math.ceil(assembler.length / 4096) * 4096);
         var pointer = backend.ffi.call(backend.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
-        copyBytesToNative(pointer, assembler.bytes);
+        copyAssemblerToNative(pointer, assembler);
         var ffi = backend.ffi;
         var munmap = backend.munmap;
         result.pointer = pointer;
@@ -183,7 +205,7 @@
      * through a vector and a cdecl macro-assembler bridge. */
     function installArgumentVectorBridge(backend, result, arity) {
         if (arity <= 8) return;
-        var assembler = new Assembler(backend.captureAssembly);
+        var assembler = backend.createAssembler();
         assembler.pushEbp();
         assembler.movEbpEsp();
         var index = arity;
@@ -204,12 +226,12 @@
         assembler.leave();
         assembler.ret();
         var bridgeBytes = Math.max(4096,
-            Math.ceil(assembler.bytes.length / 4096) * 4096);
+            Math.ceil(assembler.length / 4096) * 4096);
         var ffi = backend.ffi;
         var bridge = ffi.call(backend.mmap,
             [0, bridgeBytes, 7, 0x22, -1, 0]);
         if (!bridge || bridge === -1) throw new Error("argument bridge mmap failed");
-        copyBytesToNative(bridge, assembler.bytes);
+        copyAssemblerToNative(bridge, assembler);
         var calloc = ffi.resolve("calloc");
         var free = ffi.resolve("free");
         result.fn = function () {
@@ -243,7 +265,7 @@
     function compileControlFlow(backend, ir) {
         var timings = backend.timings;
         var started = timings ? new Date().getTime() : 0;
-        var assembler = new Assembler(backend.captureAssembly);
+        var assembler = backend.createAssembler();
         var state = {nextLabel: 0, returnLabel: "kernel_return",
                      functionReturnLabel: "kernel_return",
                      parameterCount: ir.parameters.length,
@@ -267,7 +289,7 @@
         var resolveStarted = timings ? new Date().getTime() : 0;
         assembler.resolveLabels();
         if (timings) timings.resolve = new Date().getTime() - resolveStarted;
-        var result = {fn: null, pointer: 0, length: assembler.bytes.length,
+        var result = {fn: null, pointer: 0, length: assembler.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       symbols: assembler.labels,
                       ir: ir, backend: "i386",
@@ -276,12 +298,12 @@
                       destroy: function () {}};
         if (!backend.ffi.isMMVM) return result;
         var allocationLength = Math.max(4096,
-            Math.ceil(assembler.bytes.length / 4096) * 4096);
+            Math.ceil(assembler.length / 4096) * 4096);
         var pointer = backend.ffi.call(backend.mmap,
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
         var copyStarted = timings ? new Date().getTime() : 0;
-        copyBytesToNative(pointer, assembler.bytes);
+        copyAssemblerToNative(pointer, assembler);
         if (timings) timings.install = new Date().getTime() - copyStarted;
         var ffi = backend.ffi;
         var munmap = backend.munmap;
@@ -322,6 +344,13 @@
             poke8(pointer + index, bytes[index]);
             index++;
         }
+    }
+
+    function copyAssemblerToNative(pointer, assembler) {
+        if (assembler.storageFFI) {
+            assembler.storageFFI.call(assembler.memcpyPointer,
+                [pointer, assembler.nativePointer, assembler.length]);
+        } else copyBytesToNative(pointer, assembler.bytes);
     }
 
     var SNAPSHOT_MAGIC = 0x31535647;
@@ -2367,7 +2396,7 @@
         else if (node.op === "div_f64") assembler.divideF64Pop();
         else if (node.op === "rem_f64") {
             var remainderExpressionLabel =
-                "kernel_f64_expression_remainder_" + assembler.bytes.length;
+                "kernel_f64_expression_remainder_" + assembler.length;
             assembler.exchangeF64WithSt1();
             assembler.label(remainderExpressionLabel);
             assembler.partialRemainderF64();
