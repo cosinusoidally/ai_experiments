@@ -325,3 +325,127 @@ an explicit construction/embedding mutation. Build-side lookup tables must
 be weak, rather than retain every program compiled by a long-lived runtime.
 Load/startup measurements are a separate acceptance check; a smaller file
 alone is not proof that launching it is faster.
+
+## 2026-10-24: shared compiler metadata, below 8 MiB
+
+The first metadata image was **8,225,952 bytes (7.845 MiB)**, below the 8,388,608-byte
+target. It is a dense file (16,072 allocated 512-byte blocks), not a sparse
+heap-capacity dump. It is 1,962,376 bytes smaller than the preceding
+10,188,328-byte string-sharing checkpoint and 4,173,208 bytes smaller than
+the 12,399,160-byte one-byte-string image. All source/debug text is retained.
+
+The seed and genuine self-hosted rebuild are byte-identical, SHA-256
+`8d309d34620e52eaf63d06b226e59ccfbd9068c23a30aac3969860416cce5f53`.
+Both run arbitrary programs, beginning at the generic argument boundary.
+This is still a rebuild from the current source, not an image-copy shortcut.
+
+### Construction and ownership
+
+- Identical argument-register lists share one private array/vector pair, with
+  exact capacity instead of the mutable-array allocator's default spare room.
+  Compiler.argumentListConstant canonicalizes empty lists without hashing
+  every call site's arguments. Other list contents are interned at runtime
+  registration. Generic Compiler.constant(array) is unchanged. The first
+  checkpoint also interned nonempty lists inside the compiler; this saved
+  about 73 KiB more but added front-end work to application startup, so the
+  lighter frontend policy is preferred.
+- Runtime registration classifies bytecode uses before sharing an array
+  constant. A list used by an ordinary CONST instruction is not shared, even
+  if the same slot is also used by CALL. Embedder-built ordinary array values
+  therefore keep independent mutability; this is not global array interning.
+- Identical constant-register, binding-register and parameter-slot vectors
+  share ordinary value-vector records, including sharing across roles when
+  their contents match. No packed decoding format or extra execution-time
+  accessor is introduced.
+- A shared-map flag marks private immutable maps. Explicit program-vector
+  editing clones that vector before writing, on both the reference and native
+  paths, and updates only the edited program's named field. Call frames still
+  read the same original layout. Normal execution never pays a COW check.
+- The build lookup table is weak derived state. Its addresses are not GC
+  roots. Registration checks the collector generation, including native
+  collections, and discards stale entries before reusing a table. It must not
+  reuse an address merely because the heap has since allocated something at
+  the same numeric offset.
+
+The metadata-sharing audit now reports zero duplicates in all four optimized
+roles. There are 5,940 argument-list pairs occupying 575,440 bytes, 1,441
+constant-register maps occupying 690,504 bytes, 54 binding-register maps
+occupying 50,832 bytes, and 18 parameter maps occupying 2,880 bytes. Cross-role
+sharing means these role totals are not an additive count of unique records.
+The graph/compiled-marker audit reports 37,972 reachable records and zero
+missing marks, versus 62,944 at the preceding string checkpoint.
+
+The snapshot has no new load-time reconstruction, decompression, dictionary
+expansion or fixup pass for this metadata. Relative guest references retain
+their existing meaning. Neither the C runner nor the js_min binary changed.
+
+### Native support needed by self-hosted construction
+
+Validation exposed that native Array.join accepted string elements but not
+int32 elements; host-assisted execution had hidden that gap. Integer metadata
+keys need the latter. The native implementation now measures and writes
+decimal int32 elements directly alongside strings/null/undefined. The
+negative-domain digit algorithm handles INT32_MIN without overflowing an
+absolute value. Named decimal/character constants are ordinary external
+compiler bindings, not new compile-time meanings for function-local variables.
+
+This is a general Array.join improvement, not a special metadata/benchmark
+intrinsic. It neither changes the input array nor allocates a temporary string
+for each number. It does not claim to implement every remaining generic join
+coercion case. Compiler contract version 49 includes the shared-map/COW
+contract; older code-only native caches are not silently reused.
+
+### Verification scope and remaining opportunities
+
+The Node/js_min project suite passes on both hosts: 12 guest programs / 270
+language assertions per host, plus embedding, GC, error locations, compiler
+and both native operand modes. Existing integration tests now also exercise
+independent program-vector edits and mixed signed integer joining. A focused
+Test262 run still has the same 153 passes / 12 failures / 0 not run / 0
+timeouts across 165 variants; this is not a whole-suite conformance claim.
+
+Under the standalone runner, net.js and node_web.js served both hello.js and
+the runner's ELF binary on temporary loopback ports; downloads matched using
+cmp. Demo8 ran for over six minutes across rally, garage and free-drive
+autopilot and exited normally. During part of that stability run the
+self-hosted rebuild ran concurrently; its FPS is not an isolated performance
+comparison. Standalone hello and the rebuilt image both pass.
+
+The remaining 488 identical bytecode records account for 244,528 bytes. They
+are a smaller, separate opportunity: bytecode has a mutable execution-cache
+link and an explicit code-editing API, so sharing it also needs mutation/cache
+ownership treatment. More aggressive packed integer tables would require a
+representation/ABI change. Neither is concealed by stripping source text or
+compressing the file. Raw bytecode, distinct source backing and live mutable
+objects now dominate instead of repeated compiler descriptors.
+
+Raw measurements and images use the ignored `artifacts/fruits-final*` prefix.
+
+### Startup refinements after the first metadata checkpoint
+
+The final candidate is 8,326,112 bytes (7.94 MiB), still below 8 MiB. Two
+refinements keep the representation work off ordinary startup's critical path:
+
+- The frontend only canonicalizes empty argument lists. It does not build
+  interning keys for every nonempty call site; runtime registration still
+  shares the private descriptor records themselves.
+- Flat character reads have a small 44-node kernel function, eligible for the
+  existing bounded inliner. A separate shared function traverses ropes/views.
+  No inlining threshold was increased and no application-specific fast path
+  was introduced.
+- Final backing sharing excludes flat records no larger than the minimum
+  view record. In particular character-table strings and tiny atoms stay
+  inline: a view could not make them smaller but would add indirection.
+  `--string-sharing` explicitly counts these retained inline records separately
+  from duplicated backing with avoidable storage. Large source sharing and
+  exact source inspection are unaffected.
+
+The earlier all-views image showed a small startup penalty, so it was not
+accepted merely because its file was smaller. In the latest alternating,
+otherwise-idle three-pair comparison, demo8_runner.js/demo8.js --help took
+3.532/3.497/3.546 seconds with the one-byte baseline and
+3.471/3.537/3.508 seconds with this candidate. Medians are approximately
+3.532 versus 3.508 seconds; the ranges overlap and no startup regression is
+observed. This is a command-line/front-end startup proxy, not a first-frame or
+cold-filesystem benchmark. Earlier hello comparisons also favored the smaller
+image. Final full verification is recorded in the follow-up checkpoint.

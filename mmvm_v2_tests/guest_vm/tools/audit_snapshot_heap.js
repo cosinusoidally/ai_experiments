@@ -190,11 +190,12 @@
         flat.sort(function (a, b) {
             return b.text.length - a.text.length || a.address - b.address;
         });
-        var containers = [], count = 0, bytes = 0, index = 0;
+        var containers = [], count = 0, bytes = 0, index = 0, inlineSmall = 0;
         while (index < flat.length) {
             var candidate = flat[index++], owner = null, start = -1;
             var containerIndex = 0;
-            if (candidate.bytes < Records.KernelConstants.STRING_SLICE_RECORD_BYTES) {
+            if (candidate.bytes <= Records.KernelConstants.STRING_SLICE_RECORD_BYTES) {
+                inlineSmall++;
                 continue;
             }
             while (containerIndex < containers.length) {
@@ -215,12 +216,14 @@
         }
         output("remaining duplicated flat strings: " + count +
             "; avoidable backing bytes: " + bytes);
+        output("retained inline small strings (no smaller as views): " + inlineSmall);
     }
 
     function reportMetadataSharing(inspectedHeap) {
+        var bytecodeLayout = nodeHost ? require("../bytecode.js") : GuestVMBytecode;
         var cells = new Cells(inspectedHeap);
         var records = new Records(inspectedHeap, cells);
-        var roles = {}, seen = {};
+        var roles = {}, seen = {}, reusedNonemptyArgumentEntries = 0;
         function integerSignature(vector) {
             var values = [], index = 0;
             while (index < records.vectorLength(vector)) {
@@ -271,11 +274,30 @@
                 while (word < records.bytecodeLength(bytecode)) {
                     words.push(records.bytecodeWord(bytecode, word++));
                 }
+                var pc = 0, argumentEntries = {};
+                while (pc < words.length) {
+                    var opcode = words[pc], width = bytecodeLayout.WIDTHS[opcode];
+                    if (!width) break;
+                    if (opcode === bytecodeLayout.CALL || opcode === bytecodeLayout.CONSTRUCT) {
+                        var argumentIndex = words[pc + (opcode === bytecodeLayout.CALL ? 4 : 3)];
+                        var argumentCell = records.vectorCell(constants, argumentIndex);
+                        if (cells.tagAt(argumentCell) === Cells.Tags.REFERENCE) {
+                            var argument = cells.referenceAddressAt(argumentCell);
+                            if (inspectedHeap.recordType(argument) === Heap.Types.ARRAY &&
+                                    records.arrayLength(argument) > 0) {
+                                if (argumentEntries["$" + argumentIndex]) reusedNonemptyArgumentEntries++;
+                                argumentEntries["$" + argumentIndex] = true;
+                            }
+                        }
+                    }
+                    pc += width;
+                }
                 count("bytecode", bytecode, "$" + words.join(","),
                     inspectedHeap.recordSize(bytecode));
             }
             position += header.size;
         }
+        output("reused nonempty argument constant entries: " + reusedNonemptyArgumentEntries);
         for (var name in roles) {
             if (Object.prototype.hasOwnProperty.call(roles, name)) {
                 var role = roles[name];

@@ -33,6 +33,7 @@
     var STRING_ROPE_DEPTH = 16;
     var STRING_ROPE_FLAG = 1;
     var STRING_LATIN1_FLAG = 2;
+    var VECTOR_SHARED_METADATA_FLAG = 1;
     var STRING_SLICE_FLAG = 4;
     var STRING_SLICE_BACKING = 8;
     var STRING_SLICE_START = 12;
@@ -285,6 +286,7 @@
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
         STRING_LATIN1_FLAG: STRING_LATIN1_FLAG,
+        VECTOR_SHARED_METADATA_FLAG: VECTOR_SHARED_METADATA_FLAG,
         STRING_SLICE_FLAG: STRING_SLICE_FLAG,
         STRING_SLICE_BACKING: Heap.HEADER_SIZE + STRING_SLICE_BACKING,
         STRING_SLICE_START: Heap.HEADER_SIZE + STRING_SLICE_START,
@@ -1291,6 +1293,21 @@
     Records.prototype.programConstantRegisters = function (program) {
         return this.heap.readTrustedFieldU32(
             program, PROGRAM_CONSTANT_REGISTERS, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.setProgramConstantRegisters = function (program, vector) {
+        this.heap.writeTrustedFieldU32(program, PROGRAM_CONSTANT_REGISTERS,
+            vector, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.setProgramBindingRegisters = function (program, vector) {
+        this.heap.writeTrustedFieldU32(program, PROGRAM_BINDING_REGISTERS,
+            vector, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.setProgramParameterSlots = function (program, vector) {
+        this.heap.writeTrustedFieldU32(program, PROGRAM_PARAMETER_SLOTS,
+            vector, Heap.Types.PROGRAM);
     };
 
     Records.prototype.programBindingRegisters = function (program) {

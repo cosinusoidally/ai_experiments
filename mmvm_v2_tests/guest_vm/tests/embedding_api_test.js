@@ -13,6 +13,11 @@
         if (vm.runtime.getGlobal("cached") !== 7) {
             throw new Error("compile/execute did not preserve the runtime global");
         }
+        vm.run("function metadataFirst(a) { return a; }" +
+               "function metadataSecond(a) { return a; }" +
+               "__guestVMProgramSetVector(metadataFirst, 2, 0, 1);" +
+               "assertEqual(metadataSecond(42), 42, 'metadata mutation isolation');",
+               "embedding-metadata-isolation.js");
         vm.run("var indirectEval = eval;" +
                "indirectEval('var evaluated = 6 * 7;');" +
                "assertEqual(evaluated, 42, 'indirect eval global');" +

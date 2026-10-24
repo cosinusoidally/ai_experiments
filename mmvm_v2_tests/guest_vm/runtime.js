@@ -6,6 +6,7 @@
     var Heap = root.GuestVMHeap;
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
+    var Bytecode = root.GuestVMBytecode;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     var RecordInitializer = root.GuestVMRecordInitializer;
     var HeapSweeper = root.GuestVMHeapSweeper;
@@ -22,6 +23,7 @@
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
         HeapRecords = require("./heap_records.js");
+        Bytecode = require("./bytecode.js");
         ThreadedCompiler = require("./threaded_compiler.js");
         RecordInitializer = require("./aot/record_initializer.js");
         HeapSweeper = require("./aot/heap_sweeper.js");
@@ -301,6 +303,10 @@
         /* Strings are immutable. This is a decoded representation cache keyed
          * only by the authoritative heap address, never semantic storage. */
         this.decodedStrings = {};
+        /* Derived, weak interning of private immutable compiler metadata.
+         * The ordinary heap graph, never this table, owns the records. */
+        this.programMetadataInterns = {};
+        this.programMetadataInternGeneration = -1;
         /* Transitional compiled-pattern cache for semantic regexp calls.
          * Guest-visible state never lives here: lastIndex is reset before
          * each use, matching the current guest record semantics. */
@@ -1537,11 +1543,13 @@
         program.heapConstantsAddress = this.heapRecords.allocateValueVector(
             program.constants ? program.constants.length : 0);
         program.heapConstantRegistersAddress =
-            this.heapRecords.allocateValueVector(
-            program.constants ? program.constants.length : 0);
+            this.internProgramIntegerVector(program.constantRegisters || [],
+                program.constants ? program.constants.length : 0);
         program.heapBindingRegistersAddress = program.bindingRegisters ?
-            this.heapRecords.allocateValueVector(program.bindingRegisters.length) : 0;
-        program.heapParameterSlotsAddress = this.heapRecords.allocateValueVector(
+            this.internProgramIntegerVector(program.bindingRegisters,
+                program.bindingRegisters.length) : 0;
+        program.heapParameterSlotsAddress = this.internProgramIntegerVector(
+            program.parameterSlots || [],
             program.parameterSlots ? program.parameterSlots.length : 0);
         var metadataIndex = this.freeProgramMetadataIndices.length ?
             this.freeProgramMetadataIndices.pop() : this.programObjects.length;
@@ -1574,6 +1582,7 @@
         this.programAddresses[metadataIndex] = address;
         program.heapAddress = address;
         this.programMetadata["$" + address] = program;
+        var argumentConstants = this.programArgumentConstants(program);
         index = 0;
         while (program.constants && index < program.constants.length) {
             var value = program.constants[index];
@@ -1585,40 +1594,125 @@
                     sourceAddress || enclosingSourceAddress));
             } else if (value && typeof value === "object" &&
                        typeof value.length === "number") {
-                this.writeHeapValue(cell, this.arrayFrom(value));
+                if (argumentConstants["$" + index]) {
+                    this.valueCells.writeReferenceAt(cell,
+                        this.internProgramArgumentList(value));
+                } else this.writeHeapValue(cell, this.arrayFrom(value));
             } else this.writeConstantHeapValue(cell, value);
-            this.writeHeapValue(this.heapRecords.vectorCell(
-                program.heapConstantRegistersAddress, index),
-                program.constantRegisters &&
-                program.constantRegisters[index] !== undefined ?
-                program.constantRegisters[index] : -1);
             index++;
         }
         this.heapRecords.setVectorLength(program.heapConstantsAddress,
             program.constants ? program.constants.length : 0);
-        this.heapRecords.setVectorLength(program.heapConstantRegistersAddress,
-            program.constants ? program.constants.length : 0);
-        index = 0;
-        while (program.bindingRegisters && index < program.bindingRegisters.length) {
-            this.writeHeapValue(this.heapRecords.vectorCell(
-                                program.heapBindingRegistersAddress, index),
-                                program.bindingRegisters[index]);
-            index++;
-        }
-        if (program.heapBindingRegistersAddress) {
-            this.heapRecords.setVectorLength(program.heapBindingRegistersAddress,
-                program.bindingRegisters.length);
-        }
-        index = 0;
-        while (program.parameterSlots && index < program.parameterSlots.length) {
-            this.writeHeapValue(this.heapRecords.vectorCell(
-                                program.heapParameterSlotsAddress, index),
-                                program.parameterSlots[index]);
-            index++;
-        }
-        this.heapRecords.setVectorLength(program.heapParameterSlotsAddress,
-            program.parameterSlots ? program.parameterSlots.length : 0);
         return address;
+    };
+
+    Runtime.prototype.programMetadataInternPool = function () {
+        var generation = this.nativeInterpreter ?
+            this.heapRecords.engineGCGeneration(this.nativeInterpreter.stateAddress) :
+            this.gcGeneration;
+        if (generation !== this.programMetadataInternGeneration) {
+            this.programMetadataInterns = {};
+            this.programMetadataInternGeneration = generation;
+        }
+        return this.programMetadataInterns;
+    };
+
+    /* A constant used as an ordinary value must stay mutable and independent,
+     * even if the same hand-built program also uses it as a CALL descriptor.
+     * Standard compiler products only put register lists in these slots, but
+     * registration also accepts embedder-built bytecode. */
+    Runtime.prototype.programArgumentConstants = function (program) {
+        var argumentsOnly = {}, ordinaryValues = {}, code = program.code || [];
+        var pc = 0;
+        while (pc < code.length) {
+            var opcode = code[pc], width = Bytecode.WIDTHS[opcode];
+            if (!width) return {};
+            if (opcode === Bytecode.CALL) argumentsOnly["$" + code[pc + 4]] = true;
+            else if (opcode === Bytecode.CONSTRUCT) argumentsOnly["$" + code[pc + 3]] = true;
+            else if (opcode === Bytecode.CONST) ordinaryValues["$" + code[pc + 2]] = true;
+            pc += width;
+        }
+        for (var key in ordinaryValues) {
+            if (own(ordinaryValues, key)) delete argumentsOnly[key];
+        }
+        return argumentsOnly;
+    };
+
+    Runtime.prototype.internProgramIntegerVector = function (values, length) {
+        var normalized = [], index = 0;
+        while (index < length) {
+            normalized[index] = values[index] === undefined ? -1 : values[index];
+            index++;
+        }
+        var pool = this.programMetadataInternPool();
+        var key = "$map:" + normalized.join(",");
+        var address = pool[key];
+        if (address) return address;
+        address = this.heapRecords.allocateValueVector(length);
+        index = 0;
+        while (index < length) {
+            this.valueCells.writePrimitiveAt(this.heapRecords.vectorCell(
+                address, index), normalized[index]);
+            index++;
+        }
+        this.heapRecords.setVectorLength(address, length);
+        this.linearHeap.setFlags(address,
+            HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG);
+        pool[key] = address;
+        return address;
+    };
+
+    Runtime.prototype.internProgramArgumentList = function (values) {
+        var index = 0;
+        while (index < values.length) {
+            var value = values[index++];
+            if (typeof value !== "number" || value !== (value | 0)) {
+                return this.arrayFrom(values).heapAddress;
+            }
+        }
+        var pool = this.programMetadataInternPool();
+        var key = "$arguments:" + Array.prototype.join.call(values, ",");
+        var address = pool[key];
+        if (address) return address;
+        address = this.heapRecords.allocateArray(
+            this.arrayPrototype ? this.arrayPrototype.heapAddress : 0, values.length);
+        index = 0;
+        while (index < values.length) {
+            this.valueCells.writePrimitiveAt(
+                this.heapRecords.arrayElementCell(address, index), values[index]);
+            index++;
+        }
+        this.heapRecords.setArrayLength(address, values.length);
+        pool[key] = address;
+        return address;
+    };
+
+    Runtime.prototype.writableProgramVector = function (program, kind) {
+        var records = this.heapRecords;
+        var source = kind === 0 ? records.programConstantRegisters(program.heapAddress) :
+            kind === 1 ? records.programBindingRegisters(program.heapAddress) :
+                         records.programParameterSlots(program.heapAddress);
+        if (!(this.linearHeap.flags(source) &
+                HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG)) return source;
+        var length = records.vectorLength(source);
+        var target = records.allocateValueVector(length), index = 0;
+        while (index < length) {
+            this.valueCells.copyAt(records.vectorCell(target, index),
+                records.vectorCell(source, index));
+            index++;
+        }
+        records.setVectorLength(target, length);
+        if (kind === 0) {
+            records.setProgramConstantRegisters(program.heapAddress, target);
+            program.heapConstantRegistersAddress = target;
+        } else if (kind === 1) {
+            records.setProgramBindingRegisters(program.heapAddress, target);
+            program.heapBindingRegistersAddress = target;
+        } else {
+            records.setProgramParameterSlots(program.heapAddress, target);
+            program.heapParameterSlotsAddress = target;
+        }
+        return target;
     };
 
     Runtime.prototype.retainProgram = function (program) {
@@ -1945,11 +2039,14 @@
         var heap = this.linearHeap;
         var candidates = [], address = Heap.FIRST_RECORD;
         var minimumBytes = HeapRecords.KernelConstants.STRING_SLICE_RECORD_BYTES;
+        /* A minimum-sized view cannot improve on an equally small flat
+         * record. Keep character-table entries and other tiny atoms inline;
+         * indirect access would cost time without reducing their storage. */
         while (address < heap.bump) {
             var header = heap.inspectRecordHeader(address);
             var size = header.size;
             if (header.type === Heap.Types.STRING &&
-                    size >= minimumBytes && !records.stringIsRope(address) &&
+                    size > minimumBytes && !records.stringIsRope(address) &&
                     !records.stringIsSlice(address)) {
                 candidates.push({address: address,
                     length: records.stringLength(address)});
@@ -3510,6 +3607,7 @@
                     throw new RangeError("program vector index is out of bounds");
                 }
                 values[index] = value;
+                address = runtime.writableProgramVector(program, kind);
                 runtime.writeHeapValue(
                     runtime.heapRecords.vectorCell(address, index), value);
                 return args[0];

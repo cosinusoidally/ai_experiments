@@ -35,6 +35,9 @@
     var CELL_FALSE = ValueCells.Tags.FALSE;
     var CELL_NULL = ValueCells.Tags.NULL;
     var CELL_UNDEFINED = ValueCells.Tags.UNDEFINED;
+    var DECIMAL_RADIX = 10;
+    var ASCII_MINUS = 45;
+    var ASCII_ZERO = 48;
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
@@ -155,6 +158,9 @@
         overrides.CELL_FALSE = CELL_FALSE;
         overrides.CELL_NULL = CELL_NULL;
         overrides.CELL_UNDEFINED = CELL_UNDEFINED;
+        overrides.DECIMAL_RADIX = DECIMAL_RADIX;
+        overrides.ASCII_MINUS = ASCII_MINUS;
+        overrides.ASCII_ZERO = ASCII_ZERO;
         var name;
         for (name in recordConstants) {
             if (Object.prototype.hasOwnProperty.call(recordConstants, name)) {
@@ -8523,6 +8529,13 @@
                                 joinElementCharacters;
                         }
                     }
+                } else if (joinMeasureTag === VALUE_TAG_INT32) {
+                    var integerCharacters = integerDecimalLengthKernel(
+                        valueCellInt32(0, joinMeasureCell));
+                    if (integerCharacters > joinMaximumCharacters - joinCharacterLength) {
+                        joinValid = 0;
+                        joinAllocationFailed = 1;
+                    } else joinCharacterLength = joinCharacterLength + integerCharacters;
                 } else if (joinMeasureTag !== 0) {
                     if (joinMeasureTag !== VALUE_TAG_UNDEFINED) {
                         if (joinMeasureTag !== VALUE_TAG_NULL) {
@@ -8603,6 +8616,21 @@
                             joinHash = (joinHash ^ joinCode) * 16777619;
                             joinOutputIndex = joinOutputIndex + 1;
                             joinCopyIndex = joinCopyIndex + 1;
+                        }
+                    } else if (valueCellTag(0, joinElementCell) === VALUE_TAG_INT32) {
+                        var joinInteger = valueCellInt32(0, joinElementCell);
+                        var joinIntegerLength = integerDecimalLengthKernel(joinInteger);
+                        var joinIntegerIndex = 0;
+                        while (joinIntegerIndex < joinIntegerLength) {
+                            joinCode = integerDecimalCodeUnitKernel(
+                                joinInteger, joinIntegerIndex);
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2, joinCode);
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2 + 1, 0);
+                            joinHash = (joinHash ^ joinCode) * 16777619;
+                            joinOutputIndex = joinOutputIndex + 1;
+                            joinIntegerIndex = joinIntegerIndex + 1;
                         }
                     }
                     joinElementIndex = joinElementIndex + 1;
@@ -13388,6 +13416,36 @@
         return 0;
     }
 
+    /* Work in the negative domain so INT32_MIN never needs an overflowing
+     * absolute value. Decimal digits are ASCII UTF-16 code units. */
+    function integerDecimalLengthKernel(number) {
+        var length = 1;
+        if (number < 0) length = length + 1;
+        else number = -number;
+        while (number <= -DECIMAL_RADIX) {
+            number = divideI32(number, DECIMAL_RADIX);
+            length = length + 1;
+        }
+        return length;
+    }
+
+    function integerDecimalCodeUnitKernel(number, index) {
+        if (number < 0) {
+            if (index === 0) return ASCII_MINUS;
+            index = index - 1;
+        } else number = -number;
+        var digits = integerDecimalLengthKernel(number) - 1;
+        /* Zero has no sign; every other working value is negative. */
+        if (number === 0) digits = 1;
+        var remaining = digits - index - 1;
+        while (remaining > 0) {
+            number = divideI32(number, DECIMAL_RADIX);
+            remaining = remaining - 1;
+        }
+        var quotient = divideI32(number, DECIMAL_RADIX);
+        return ASCII_ZERO + quotient * DECIMAL_RADIX - number;
+    }
+
     function stringKeysEqualKernel(heapBase, left, right) {
         if (left === right) return 1;
         var length = stringLength(heapBase, left);
@@ -13408,6 +13466,20 @@
      * child references in place of inline UTF-16 data. Keeping traversal in a
      * kernel function gives the Node and i386 backends identical semantics. */
     function stringCharacterCodeUnit(heapBase, string, index) {
+        var flags = recordFlags(heapBase, string);
+        if ((flags & (STRING_ROPE_FLAG | STRING_SLICE_FLAG)) !== 0) {
+            return indirectStringCharacterCodeUnitKernel(heapBase, string, index);
+        }
+        if ((flags & STRING_LATIN1_FLAG) !== 0) {
+            return latin1StringCharacterCodeUnit(heapBase, string, index);
+        }
+        return flatStringCharacterCodeUnit(heapBase, string, index);
+    }
+
+    /* Keep the common flat load small enough for the normal, bounded kernel
+     * inliner. Trees/views use this one shared traversal rather than copying
+     * its loops and temporary registers into every character-reading site. */
+    function indirectStringCharacterCodeUnitKernel(heapBase, string, index) {
         var flags = recordFlags(heapBase, string);
         while ((flags & (STRING_ROPE_FLAG | STRING_SLICE_FLAG)) !== 0) {
             if ((flags & STRING_SLICE_FLAG) !== 0) {
@@ -15322,6 +15394,25 @@
         else vector = programParameterSlots(heapBase, program);
         if (vector === 0) return 0;
         if (index >= vectorLength(heapBase, vector)) return 0;
+        if ((recordFlags(heapBase, vector) & VECTOR_SHARED_METADATA_FLAG) !== 0) {
+            var count = vectorLength(heapBase, vector);
+            var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+            if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+            var writable = engineHeapBump(heapBase, state);
+            initializeProgramVectorKernel(heapBase, writable, count,
+                INVALID_PROGRAM_INTEGER);
+            var element = 0;
+            while (element < count) {
+                copyValueCell(vectorCellAddress(heapBase, writable, element),
+                    vectorCellAddress(heapBase, vector, element));
+                element = element + 1;
+            }
+            setEngineHeapBump(heapBase, state, writable + bytes);
+            if (kind === 0) setProgramConstantRegisters(heapBase, program, writable);
+            else if (kind === 1) setProgramBindingRegisters(heapBase, program, writable);
+            else setProgramParameterSlots(heapBase, program, writable);
+            vector = writable;
+        }
         setValueCellInt32(vectorCellAddress(heapBase, vector, index), value);
         setValueCellReference(targetCell, callable);
         return 1;
@@ -17310,6 +17401,9 @@
             programSetCodeKernel: programSetCodeKernel,
             programSetConstantKernel: programSetConstantKernel,
             programSetVectorKernel: programSetVectorKernel,
+            integerDecimalLengthKernel: integerDecimalLengthKernel,
+            integerDecimalCodeUnitKernel: integerDecimalCodeUnitKernel,
+            indirectStringCharacterCodeUnitKernel: indirectStringCharacterCodeUnitKernel,
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
             rebuildNativeAllocatorKernel: rebuildNativeAllocatorKernel,
@@ -17411,7 +17505,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 48,
+                compilerVersion: 49,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17446,6 +17540,10 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    DECIMAL_RADIX: DECIMAL_RADIX,
+                    ASCII_MINUS: ASCII_MINUS,
+                    ASCII_ZERO: ASCII_ZERO,
+                    VECTOR_SHARED_METADATA_FLAG: kernelConstantOverrides.VECTOR_SHARED_METADATA_FLAG,
                     STRING_SLICE_FLAG: kernelConstantOverrides.STRING_SLICE_FLAG,
                     STRING_SLICE_RECORD_BYTES: kernelConstantOverrides.STRING_SLICE_RECORD_BYTES,
                     STRING_SLICE_BACKING: kernelConstantOverrides.STRING_SLICE_BACKING,

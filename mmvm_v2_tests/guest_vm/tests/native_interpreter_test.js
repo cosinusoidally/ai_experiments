@@ -118,6 +118,14 @@
                                        nativeOperandPredecode: !!predecode});
             try {
                 var context = integratedVM.context;
+                integratedVM.run(
+                    "function metadataFirst(a) { return a; }" +
+                    "function metadataSecond(a) { return a; }" +
+                    "__guestVMProgramSetVector(metadataFirst, 2, 0, 1);" +
+                    "assertEqual(metadataSecond(42), 42, 'native metadata mutation isolation');" +
+                    "assertEqual([0, 1, -1, 10, -10, 2147483647, -2147483648, 'x', null].join(',')," +
+                    " '0,1,-1,10,-10,2147483647,-2147483648,x,', 'mixed integer join');",
+                    "native-metadata-isolation.js");
                 var integratedProgram = {
                     code: [bytecode.CONST, 0, 0,
                            bytecode.MOVE, 1, 0,

@@ -14,6 +14,7 @@
         this.code = [];
         this.constants = [];
         this.primitiveConstantIndexes = {};
+        this.emptyArgumentConstant = -1;
         this.smallIntegerConstantIndexes = [];
         this.registerCount = 0;
         this.breakTargets = [];
@@ -106,11 +107,24 @@
             this.primitiveConstantIndexes[key] = primitiveIndex;
             return primitiveIndex;
         }
-        /* Program descriptors and argument-register vectors are newly built
-         * compiler structures. Identity scans cannot normally deduplicate
-         * them and make large sources quadratic, so append them directly. */
+        /* Other compiler objects are distinct: never identity-scan the full
+         * table, which is quadratic for large generated programs. */
         this.constants.push(value);
         return this.constants.length - 1;
+    };
+
+    /* Only CALL/CONSTRUCT sites use this operation. The empty list has a
+     * canonical representation without constructing/hash-looking-up a key for
+     * every call site. Other lists are shared later by runtime registration;
+     * ordinary program parsing must not pay a whole-list interning pass. */
+    Compiler.prototype.argumentListConstant = function (registers) {
+        if (registers.length === 0 && this.emptyArgumentConstant >= 0) {
+            return this.emptyArgumentConstant;
+        }
+        var index = this.constants.length;
+        this.constants.push(registers);
+        if (registers.length === 0) this.emptyArgumentConstant = index;
+        return index;
     };
 
     Compiler.prototype.emit = function () {
@@ -1027,7 +1041,7 @@
             }
             var callResult = this.allocate();
             this.emit(op.CALL, callResult, callee, receiver,
-                      this.constant(values));
+                      this.argumentListConstant(values));
             return callResult;
         }
         if (expression.type === "NewExpression") {
@@ -1043,7 +1057,7 @@
             }
             var constructed = this.allocate();
             this.emit(op.CONSTRUCT, constructed, constructor,
-                      this.constant(constructorValues));
+                      this.argumentListConstant(constructorValues));
             return constructed;
         }
         if (expression.type === "SequenceExpression") {
