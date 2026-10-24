@@ -115,11 +115,11 @@
                     jsRuntime.functionConstructorPrograms[cacheKey] = program;
                     if (args.length === 1) {
                         var cacheProperty = semanticRuntime.heapRecords.
-                            defineOwnProperty(functionProgramCache.heapAddress,
+                            defineOwnPropertyEntry(functionProgramCache.heapAddress,
                                 semanticRuntime.internStringAddress(body), 7);
                         semanticRuntime.valueCells.writeReferenceAt(
-                            semanticRuntime.heapRecords.propertyValueCell(
-                                cacheProperty), program.heapAddress);
+                            semanticRuntime.heapRecords.ownPropertyEntryValueCell(
+                                functionProgramCache.heapAddress, cacheProperty), program.heapAddress);
                     }
                 }
                 return semanticRuntime.makeGuestFunction(

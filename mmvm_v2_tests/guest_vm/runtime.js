@@ -410,18 +410,18 @@
          * deliberately performed once, after every optional runtime facility
          * has installed itself. Guest declarations and embedder-installed
          * globals created later retain their requested ordinary attributes. */
-        var property = this.heapRecords.objectPropertyHead(
-            this.globalObject.heapAddress);
+        var owner = this.globalObject.heapAddress;
+        var property = this.heapRecords.lastOwnPropertyEntry(owner);
         while (property) {
             var key = this.heapRecords.readString(
-                this.heapRecords.propertyKey(property));
-            var attributes = this.heapRecords.propertyAttributes(property) &
+                this.heapRecords.ownPropertyEntryKey(owner, property));
+            var attributes = this.heapRecords.ownPropertyEntryAttributes(owner, property) &
                 ~HeapRecords.Attributes.ENUMERABLE;
             if (key === "undefined" || key === "NaN" || key === "Infinity") {
                 attributes = 0;
             }
-            this.heapRecords.setPropertyAttributes(property, attributes);
-            property = this.heapRecords.propertyNext(property);
+            this.heapRecords.setOwnPropertyEntryAttributes(owner, property, attributes);
+            property = this.heapRecords.previousOwnPropertyEntry(owner, property);
         }
     };
 
@@ -3833,21 +3833,21 @@
         }
         if (!names || !names.heapAddress || !pointers ||
             !pointers.heapAddress) return bindings;
-        var property = this.heapRecords.objectPropertyHead(names.heapAddress);
+        var property = this.heapRecords.lastOwnPropertyEntry(names.heapAddress);
         while (property) {
-            var keyAddress = this.heapRecords.propertyKey(property);
-            var pointerProperty = this.heapRecords.findOwnProperty(
+            var keyAddress = this.heapRecords.ownPropertyEntryKey(names.heapAddress, property);
+            var pointerProperty = this.heapRecords.findOwnPropertyEntry(
                 pointers.heapAddress, keyAddress);
             if (pointerProperty) {
-                var pointerCell = this.heapRecords.propertyValueCell(
-                    pointerProperty);
+                var pointerCell = this.heapRecords.ownPropertyEntryValueCell(
+                    pointers.heapAddress, pointerProperty);
                 bindings.push({cell: pointerCell,
                     payload: this.valueCells.int32PayloadAddressAt(pointerCell),
                     suppliedDlsym: false,
                     symbol: String(this.readHeapValue(
-                        this.heapRecords.propertyValueCell(property)))});
+                        this.heapRecords.ownPropertyEntryValueCell(names.heapAddress, property)))});
             }
-            property = this.heapRecords.propertyNext(property);
+            property = this.heapRecords.previousOwnPropertyEntry(names.heapAddress, property);
         }
         bindings.sort(function (left, right) {
             if (left.suppliedDlsym !== right.suppliedDlsym) {
@@ -4115,14 +4115,15 @@
         }
         var key;
         if (object && object.heapAddress) {
-            var property = this.heapRecords.objectPropertyHead(object.heapAddress);
+            var property = this.heapRecords.lastOwnPropertyEntry(object.heapAddress);
             var heapKeys = [];
             while (property) {
-                if (this.heapRecords.propertyAttributes(property) & 2) {
+                if (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property) &
+                        HeapRecords.Attributes.ENUMERABLE) {
                     heapKeys.push(this.heapRecords.readString(
-                        this.heapRecords.propertyKey(property)));
+                        this.heapRecords.ownPropertyEntryKey(object.heapAddress, property)));
                 }
-                property = this.heapRecords.propertyNext(property);
+                property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
             }
             var heapKeyIndex = heapKeys.length - 1;
             while (heapKeyIndex >= 0) values.push(heapKeys[heapKeyIndex--]);
@@ -4147,12 +4148,12 @@
             if (!this.isArgumentsObject(object)) values.push("length");
         }
         var property = object.heapAddress ?
-            this.heapRecords.objectPropertyHead(object.heapAddress) : 0;
+            this.heapRecords.lastOwnPropertyEntry(object.heapAddress) : 0;
         var reversed = [];
         while (property) {
             reversed.push(this.heapRecords.readString(
-                this.heapRecords.propertyKey(property)));
-            property = this.heapRecords.propertyNext(property);
+                this.heapRecords.ownPropertyEntryKey(object.heapAddress, property)));
+            property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
         }
         index = reversed.length - 1;
         while (index >= 0) values.push(reversed[index--]);
@@ -4468,28 +4469,15 @@
             this.markEnvironment(this.functionClosure(value), generation);
         }
         if (value.heapAddress) {
-            var prototypeAddress = value.guestType === "buffer" ||
-                value.guestType === "typedArray" || value.guestType === "arrayBuffer" ?
-                this.heapRecords.objectPrototype(value.heapAddress) :
-                this.heapRecords.objectPrototype(value.heapAddress);
+            var prototypeAddress = this.heapRecords.objectPrototype(value.heapAddress);
             if (prototypeAddress) {
                 this.markValue(this.heapHandles["$" + prototypeAddress], generation);
             }
-            var property = this.heapRecords.objectPropertyHead(value.heapAddress);
-            while (property) {
-                this.linearHeap.setMark(property, generation);
-                this.linearHeap.setMark(this.heapRecords.propertyKey(property), generation);
-                this.markHeapCell(
-                    this.heapRecords.propertyValueCell(property), generation);
-                if (this.heapRecords.propertyAttributes(property) &
-                    HeapRecords.Attributes.ACCESSOR) {
-                    var setterAddress = this.heapRecords.propertySetter(property);
-                    if (setterAddress) {
-                        this.linearHeap.setMark(setterAddress, generation);
-                    }
-                }
-                property = this.heapRecords.propertyNext(property);
-            }
+            /* The already-marked owner is a seed for markAuthoritativeHeap.
+             * Its record visitor traces storage, keys, values and setters.
+             * Duplicating that walk here couples root discovery to property
+             * layout and assumes every entry is an independently marked
+             * record, which is not true for packed inline entries. */
         } else {
             if (value.prototype) this.markValue(value.prototype, generation);
             var properties = value.properties;
@@ -4512,12 +4500,7 @@
 
     Runtime.prototype.releaseObjectRecords = function (object) {
         var address = object.heapAddress;
-        var property = this.heapRecords.objectPropertyHead(address);
-        while (property) {
-            var next = this.heapRecords.propertyNext(property);
-            this.linearHeap.freeRecord(property);
-            property = next;
-        }
+        this.heapRecords.releaseOwnPropertyStorage(address);
         if (object.guestType === "array") {
             this.linearHeap.freeRecord(this.heapRecords.arrayElements(address));
         }

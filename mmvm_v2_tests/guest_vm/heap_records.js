@@ -698,6 +698,9 @@
     Records.prototype.ownPropertyEntryKey = function (owner, entry) {
         return this.propertyKey(entry);
     };
+    Records.prototype.setOwnPropertyEntryAttributes = function (owner, entry, attributes) {
+        this.setPropertyAttributes(entry, attributes);
+    };
     Records.prototype.ownPropertyEntrySetter = function (owner, entry) {
         return this.propertySetter(entry);
     };
@@ -716,6 +719,28 @@
         var deleted = this.deleteOwnProperty(owner, key);
         if (entry && deleted) this.heap.freeRecord(entry);
         return deleted;
+    };
+
+    /* Walk backwards in insertion order. The legacy list is newest first;
+     * packed storage will walk live slots backwards. Never expose list links
+     * or assume that an entry is a separately allocated heap record. */
+    Records.prototype.lastOwnPropertyEntry = function (owner) {
+        return this.objectPropertyHead(owner);
+    };
+    Records.prototype.previousOwnPropertyEntry = function (owner, entry) {
+        return this.propertyNext(entry);
+    };
+    Records.prototype.releaseOwnPropertyStorage = function (owner) {
+        var entry = this.lastOwnPropertyEntry(owner);
+        var index = this.heap.recordType(owner) === Heap.Types.OBJECT ?
+            this.objectPropertyIndex(owner) : 0;
+        this.setObjectPropertyHead(owner, 0);
+        while (entry) {
+            var previous = this.previousOwnPropertyEntry(owner, entry);
+            this.heap.freeRecord(entry);
+            entry = previous;
+        }
+        if (index) this.heap.freeRecord(index);
     };
 
     Records.prototype.findOwnProperty = function (object, keyString) {

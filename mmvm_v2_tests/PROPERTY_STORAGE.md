@@ -104,7 +104,7 @@ functions, not host callbacks or new dialect semantics.
 
 Remaining before the default-layout cutover: convert the other native lookup,
 allocation, descriptor, enumeration, deletion and cloning paths, together with
-the remaining reference-side traversal/collector consumers. Then change entry
+the record-layer cloning/initialization implementations. Then change entry
 resolution to packed slots and replace the transitional list index with the
 optional slot index. No partial packed-default mode is enabled in the meantime.
 
@@ -124,3 +124,26 @@ garage/free-drive auto-pilot transitions and normal exit. Demo8's brief 16.3 FPS
 sample at 320x240 / 20 FPS cap matches the preceding checkpoint's sample; this
 is not a sustained-performance guarantee. The focused Test262 selection has
 the same 164 passes / one existing failure / zero not run or timed out.
+
+### Reference traversal and GC ownership follow-up
+
+The reference runtime now uses owner/entry accessors for global-attribute
+initialization, enumeration, native-symbol snapshot binding discovery and
+storage release. Reverse traversal is explicitly named `lastOwnPropertyEntry`
+and `previousOwnPropertyEntry`: the legacy list is newest first, whereas
+packed storage will walk slots backwards, preserving observable enumeration
+order without exposing either representation's addresses or links.
+
+Root discovery no longer performs a second layout-dependent property-marking
+walk. `markAuthoritativeHeap` already traces marked owners through the record
+visitor, including their storage, keys, values and setters. A packed entry is
+not a heap record that root discovery may mark independently. The native
+collector algorithm is unchanged by this follow-up.
+
+Both-host project suites pass after this conversion. Bounded structural GC
+stress passes on both hosts: 50 embedding collections, 27 audits, 84,041
+checked edges and 142 property-index audits each. Maximum observed bumps are
+176,264 bytes on Node and 175,480 bytes on js_min, under the fixed 8 MiB cap.
+These validate the traversal follow-up; the snapshot timings and integration
+inventory above describe the preceding owner/reference checkpoint, not an
+additional build or full Test262 run of this follow-up.
