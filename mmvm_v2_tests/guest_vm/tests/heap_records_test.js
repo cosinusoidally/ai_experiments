@@ -14,6 +14,16 @@
                     throw new Error("heap string code-unit roundtrip failed");
                 }
                 var backing = records.allocateString("[" + sample + "]");
+                var preparedBacking = records.prepareFlatStringSearch(backing);
+                var preparedSample = records.prepareFlatStringSearch(
+                    records.allocateString(sample));
+                var expectedStart = sample.length ? 1 : 0;
+                if (records.findPreparedFlatString(preparedBacking, preparedSample) !==
+                        expectedStart ||
+                        records.findPreparedFlatString(preparedBacking, preparedSample) !==
+                        expectedStart) {
+                    throw new Error("prepared flat string search failed");
+                }
                 var slice = records.allocateStringSlice(backing, 1, sample.length);
                 var nestedSlice = records.allocateStringSlice(slice, 0,
                     sample.length ? sample.length - 1 : 0);
@@ -37,6 +47,21 @@
             if (records.readString(key) !== "answer" ||
                     sharedReference !== sharedBacking) {
                 throw new Error("shared string backing value/GC edge failed");
+            }
+            var sharedText = "a longer string with retired character storage";
+            var sharedFlat = records.allocateString(sharedText);
+            var sharedOwner = records.allocateString("[" + sharedText + "]");
+            var oldSize = heap.recordSize(sharedFlat);
+            records.shareStringBackingInPlace(sharedFlat, sharedOwner, 1);
+            if (records.readString(sharedFlat) !== sharedText ||
+                    heap.recordSize(sharedFlat) !== oldSize) {
+                throw new Error("large backing sharing changed value/allocation");
+            }
+            var retiredOffset = Records.KernelConstants.STRING_SLICE_RECORD_BYTES;
+            while (retiredOffset < oldSize) {
+                if (heap.memory.readU8(sharedFlat + retiredOffset++) !== 0) {
+                    throw new Error("retired string characters were not cleared");
+                }
             }
 
             var object = records.allocateObject(0);

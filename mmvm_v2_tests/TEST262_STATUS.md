@@ -788,6 +788,22 @@ performance are separate mandatory regression gates.
   under both embedding hosts and standalone automatic collection. No external
   corpus or demo sources were changed.
 
+### 2026-10-24, afternoon BST — snapshot construction optimization
+
+- Fresh native snapshot with canonical field-schema reuse and bounded backing
+  search setup. Selection: `ch09/9.5 ch11/11.6 ch11/11.7`, authored variants,
+  explicit `--instruction-limit 20000` diagnostic cap.
+- **165 executed: 164 passed, 1 failed, 0 not run, 0 timed out**.
+  Elapsed 51.38 seconds, peak RSS 191,708 KiB (overlapped project regressions;
+  not a serial performance measurement).
+- Failing ID exactly matches the same selection in the complete scratch-fixed
+  baseline: `ch11/11.6/11.6.1/S11.6.1_A3.2_T2.3.js` (boxed-string addition).
+  No focused regression. Raw log: ignored
+  `artifacts/prepared-search-test262.log`. Whole-suite totals above unchanged.
+- Both-host project suites, all eight previously working Octane quick suites
+  and standalone bounded GC stress pass. Genuine self-build is byte-identical;
+  no corpus or demo source was modified. See `BUILD_PERFORMANCE.md`.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

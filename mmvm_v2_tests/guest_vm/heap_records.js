@@ -395,24 +395,37 @@
     };
 
     Records.prototype.flatStringIndexOf = function (haystack, needle) {
-        if (this.stringIsRope(haystack) || this.stringIsSlice(haystack) ||
-                this.stringIsRope(needle) || this.stringIsSlice(needle)) {
+        return this.findPreparedFlatString(
+            this.prepareFlatStringSearch(haystack),
+            this.prepareFlatStringSearch(needle));
+    };
+
+    /* Borrowed metadata for a synchronous batch of immutable backing searches.
+     * The caller must keep records live and must discard a descriptor when
+     * converting its record into a view. Memory offsets remain relative to
+     * the heap, not absolute native pointers. Search ranges are still checked
+     * by the memory layer on every search. */
+    Records.prototype.prepareFlatStringSearch = function (address) {
+        this.heap.requireRecord(address, Heap.Types.STRING);
+        var flags = this.heap.flags(address);
+        if (flags & (STRING_ROPE_FLAG | STRING_SLICE_FLAG)) {
             throw new TypeError("flat string search requires flat backings");
         }
-        if (this.stringIsLatin1(haystack) && this.stringIsLatin1(needle)) {
+        return {address: address, length: this.stringLength(address),
+            characters: this.heap.trustedPayloadAddress(address, STRING_CHARS),
+            latin1: !!(flags & STRING_LATIN1_FLAG), text: null};
+    };
+
+    Records.prototype.findPreparedFlatString = function (haystack, needle) {
+        if (needle.length > haystack.length) return -1;
+        if (haystack.latin1 && needle.latin1) {
             return this.heap.memory.findBytes(
-                this.heap.trustedPayloadAddress(haystack, STRING_CHARS),
-                this.stringLength(haystack),
-                this.heap.trustedPayloadAddress(needle, STRING_CHARS),
-                this.stringLength(needle));
+                haystack.characters, haystack.length,
+                needle.characters, needle.length);
         }
-        if (this.stringIsLatin1(haystack)) {
-            var needleIndex = 0;
-            while (needleIndex < this.stringLength(needle)) {
-                if (this.stringCharacterCodeUnit(needle, needleIndex++) > 255) return -1;
-            }
-        }
-        return this.readString(haystack).indexOf(this.readString(needle));
+        if (haystack.text === null) haystack.text = this.readString(haystack.address);
+        if (needle.text === null) needle.text = this.readString(needle.address);
+        return haystack.text.indexOf(needle.text);
     };
 
     /* Snapshot finalization may replace a flat backing without changing the
@@ -433,9 +446,12 @@
         this.heap.writeTrustedFieldU32(address, STRING_SLICE_BACKING, backing);
         this.heap.writeTrustedFieldU32(address, STRING_SLICE_START, start);
         var offset = STRING_SLICE_START + 4;
-        while (offset < payloadBytes) {
-            this.heap.writeTrustedFieldU32(address, offset, 0);
-            offset += 4;
+        if (offset < payloadBytes) {
+            /* No references live in the retired flat character storage.
+             * Clear it as one checked memory range, not one VM operation
+             * per word. Native and emulated heaps share this operation. */
+            this.heap.memory.fill(this.heap.trustedPayloadAddress(address, offset),
+                                  payloadBytes - offset, 0);
         }
         this.heap.setFlags(address, STRING_SLICE_FLAG);
     };

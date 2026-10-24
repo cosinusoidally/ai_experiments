@@ -90,3 +90,48 @@ speedup claim: the first bootstrap overlapped regression tests, and this
 self-build took 188.32 seconds overall with other stages slower than the older
 measurement. Controlled serial measurements and remaining bottleneck work
 are still required. Logs: ignored `artifacts/fingerprint-opt*.log`.
+
+## Bounded string-search setup, 2026-10-24
+
+The snapshot finalizer now prepares each flat string's length, encoding and
+relative character offset once, rather than repeatedly validating record type
+and reading flags for every candidate/owner pair. Descriptors are borrowed
+only for the synchronous immutable-backing pass: owners remain flat, matched
+candidates are discarded after conversion, and no descriptor enters the image.
+Actual searches still pass through checked memory ranges. Wider strings use
+the existing exact code-unit search, reusing decoded text within the pass.
+Retired character payloads are cleared with the existing checked bulk fill.
+
+Serial measurements on this machine (seconds):
+
+- Fingerprint-only bootstrap: 89.80 total, 2.667 fingerprint,
+  13.815 final backing sharing. Image matches the prior fingerprint seed.
+- Bulk-clear bootstrap: 86.70 total, 13.690 sharing. Self-build: 177.56 total,
+  37.841 sharing; byte-identical to that seed. Clearing alone is a small win.
+- Prepared-search bootstrap: **74.65 total**, 2.478 fingerprint,
+  **3.747 sharing**. Genuine self-build: **142.06 total**, 7.232 fingerprint,
+  **8.853 sharing**; byte-identical to that seed. Image: **8,338,904 bytes**.
+- Relative to the immediately preceding bulk-clear builds, these totals are
+  about 14% faster under js_min and 20% faster self-hosted. They are individual
+  serial observations, not statistical benchmark averages. The older
+  user-supplied 84.043/176.013-second builds had different source revisions.
+
+The guest still trails js_min end-to-end. Runtime preparation (71.840 versus
+52.016 seconds) and assembly (15.163 versus 1.928 seconds) remain significant
+targets. This is not a claim that the overall performance objective is done.
+Logs: ignored `artifacts/fingerprint-serial.log`, `artifacts/bulk-clear*.log`
+and `artifacts/prepared-search*.log`. No C, demo or external test source changed.
+
+Validation at this working point:
+
+- Both-host project suites pass: 12 guest programs / 270 guest assertions per
+  host, plus embedding, native compilation and command-line paths.
+- All eight previously working Octane suites pass quick correctness checks;
+  these runs are not stock-score measurements. RegExp was not run.
+- Standalone bounded GC workload passes with 35 automatic collections.
+- Focused Test262 `ch09/9.5 ch11/11.6 ch11/11.7`, 20,000 instructions/test:
+  165 executed, 164 passed, one failed, zero not run/timeouts. The single
+  failing ID exactly matches the scratch-fixed full baseline. No complete
+  suite rerun is implied by this focused check.
+- Seed/rebuild SHA-256:
+  `efca70e95bb14c987874158c7b0eeb1afa21b84cde5c0c40f8d2ba859a19943d`.

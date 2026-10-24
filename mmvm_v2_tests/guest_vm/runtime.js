@@ -2048,8 +2048,7 @@
             if (header.type === Heap.Types.STRING &&
                     size > minimumBytes && !records.stringIsRope(address) &&
                     !records.stringIsSlice(address)) {
-                candidates.push({address: address,
-                    length: records.stringLength(address)});
+                candidates.push(records.prepareFlatStringSearch(address));
             }
             address += size;
         }
@@ -2062,7 +2061,7 @@
             var ownerIndex = 0, matched = false;
             while (ownerIndex < owners.length && !matched) {
                 var owner = owners[ownerIndex++];
-                var start = records.flatStringIndexOf(owner.address, candidate.address);
+                var start = records.findPreparedFlatString(owner, candidate);
                 if (start >= 0) {
                     records.shareStringBackingInPlace(
                         candidate.address, owner.address, start);
