@@ -820,6 +820,26 @@ performance are separate mandatory regression gates.
   An overlapping profiling build was interrupted; no partial timing from it
   is treated as a benchmark result. No external corpus files were changed.
 
+### 2026-10-24, about 22:10 BST — global lookup / ordered-storage foundation
+
+- Complete authored suite, native js_min execution from the current source,
+  `--quiet --instruction-limit 20000`, run serially.
+- **3,292 executed: 3,139 passed, 153 failed, 0 not run, 6 timed out**
+  (timeouts included in failures). The exact failing IDs and strict/sloppy
+  variants match `packed-registers-test262-full.log`: no additions or removals.
+- Elapsed **312.21 seconds**, versus 344.49 seconds in that baseline. Peak RSS
+  **319,440 KiB**, versus 270,516 KiB: time improved, memory did not. Raw log:
+  ignored `artifacts/ordered-storage-test262-full.log`. The explicit diagnostic
+  instruction cap and remaining failures mean this is not a conformance claim.
+- Direct standalone execution of the Test262 wrapper still fails before tests
+  (`value is not callable`, opcode 35, PC 285). The preceding `lean-compiler`
+  snapshot reproduces the same failure. This inventory uses the established
+  js_min entry point, not an assertion that standalone Test262 works.
+- Both-host project suites, all eight previously passing Octane quick suites,
+  standalone bounded GC stress and byte-identical genuine self-build pass.
+  Packed entry storage is a collector-tested component, not yet ordinary
+  objects' default representation. No demo or external corpus was modified.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

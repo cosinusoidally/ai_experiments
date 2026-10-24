@@ -570,6 +570,14 @@
         recordFlags: "RECORD_FLAGS",
         objectPrototype: "OBJECT_PROTOTYPE",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
+        objectPropertyIndex: "OBJECT_PROPERTY_INDEX",
+        propertyIndexHead: "PROPERTY_INDEX_HEAD",
+        propertyIndexVersion: "PROPERTY_INDEX_VERSION",
+        propertyIndexCount: "PROPERTY_INDEX_COUNT",
+        propertyIndexCapacity: "PROPERTY_INDEX_CAPACITY",
+        propertyStorageLength: "PROPERTY_STORAGE_LENGTH",
+        propertyStorageCapacity: "PROPERTY_STORAGE_CAPACITY",
+        propertyStorageHashIndex: "PROPERTY_STORAGE_HASH",
         objectExtensible: "OBJECT_EXTENSIBLE",
         arrayElements: "ARRAY_ELEMENTS",
         arrayPrototype: "ARRAY_PROTOTYPE",
@@ -728,6 +736,11 @@
         setArrayElements: "ARRAY_ELEMENTS",
         setArrayReserved: "ARRAY_RESERVED",
         setObjectPropertyHead: "OBJECT_PROPERTY_HEAD",
+        setObjectPropertyIndex: "OBJECT_PROPERTY_INDEX",
+        setPropertyIndexHead: "PROPERTY_INDEX_HEAD",
+        setPropertyIndexVersion: "PROPERTY_INDEX_VERSION",
+        setPropertyIndexCount: "PROPERTY_INDEX_COUNT",
+        setPropertyIndexCapacity: "PROPERTY_INDEX_CAPACITY",
         setObjectExtensible: "OBJECT_EXTENSIBLE",
         setObjectReserved: "OBJECT_RESERVED",
         setRegexpPattern: "REGEXP_PATTERN",
@@ -808,6 +821,7 @@
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {
+        propertyStorageValueCellAt: {field: "PROPERTY_STORAGE_VALUE", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         valueCellAddress: {fieldValue: 0, stride: "VALUE_CELL_BYTES"},
         bytecodeRegisterCellAddress: {fieldValue: 0, stride: "BYTECODE_REGISTER_SCALE"},
         vectorCellAddress: {field: "VECTOR_CELLS",
@@ -820,6 +834,9 @@
     };
 
     var READ_INDEXED_FIELD_ACCESSORS = {
+        propertyStorageKeyAt: {field: "PROPERTY_STORAGE_KEY", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
+        propertyStorageSetterAt: {field: "PROPERTY_STORAGE_SETTER", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
+        propertyIndexSlot: {field: "PROPERTY_INDEX_SLOTS", stride: "HEAP_WORD_BYTES"},
         /* The interpreter caches the payload offset, not its record header. */
         bytecodePayloadWord: {fieldValue: 0, strideValue: 4},
         propertyCacheObject: {field: "ENGINE_PROPERTY_CACHE_OBJECT",
@@ -837,6 +854,7 @@
     };
 
     var WRITE_INDEXED_FIELD_ACCESSORS = {
+        setPropertyIndexSlot: READ_INDEXED_FIELD_ACCESSORS.propertyIndexSlot,
         setPropertyCacheObject: READ_INDEXED_FIELD_ACCESSORS.propertyCacheObject,
         setPropertyCacheKey: READ_INDEXED_FIELD_ACCESSORS.propertyCacheKey,
         setPropertyCacheVersion: READ_INDEXED_FIELD_ACCESSORS.propertyCacheVersion,
@@ -848,6 +866,7 @@
     };
 
     var FIELD_ADDRESS_ACCESSORS = {
+        propertyIndexSlotsAddress: "PROPERTY_INDEX_SLOTS",
         valueCellPayloadAddress: "VALUE_CELL_LOW",
         engineScratchLeftAddress: "ENGINE_SCRATCH_LEFT",
         engineScratchRightAddress: "ENGINE_SCRATCH_RIGHT",

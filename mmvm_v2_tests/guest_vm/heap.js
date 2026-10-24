@@ -13,6 +13,7 @@
     var HEADER_FLAGS = 12;
     var FIRST_RECORD = 64;
     var RECORD_ALIGNMENT = 8;
+    var WORD_BYTES = 4;
 
     var Types = {
         FREE: 0,
@@ -35,7 +36,9 @@
         CONTEXT: 17,
         HANDLER: 18,
         ENGINE_STATE: 19,
-        PLATFORM_SERVICES: 20
+        PLATFORM_SERVICES: 20,
+        PROPERTY_INDEX: 21,
+        PROPERTY_STORAGE: 22
     };
 
     function align8(value) {
@@ -83,6 +86,8 @@
     }
 
     Heap.Types = Types;
+    Heap.LastRecordType = Types.PROPERTY_STORAGE;
+    Heap.WORD_BYTES = WORD_BYTES;
     Heap.HEADER_SIZE = HEADER_SIZE;
     Heap.FIRST_RECORD = FIRST_RECORD;
     Heap.RECORD_ALIGNMENT = RECORD_ALIGNMENT;
@@ -118,7 +123,7 @@
 
     Heap.prototype.allocateRecordWords = function (
             type, payloadBytes, word0, word1, word2, word3) {
-        if (!Types || type <= Types.FREE || type > Types.PLATFORM_SERVICES) {
+        if (!Types || type <= Types.FREE || type > Heap.LastRecordType) {
             throw new TypeError("invalid heap record type");
         }
         payloadBytes = Number(payloadBytes);

@@ -2,11 +2,12 @@
  * The guest heap is capped at 8 MiB; compilation uses the host's own heap. */
 (function () {
     var nodeHost = typeof module !== "undefined" && module.exports;
-    var VM, Heap, Cells, source, output;
+    var VM, Heap, Cells, RecordLayouts, source, output;
     if (nodeHost) {
         VM = require("../vm.js");
         Heap = require("../heap.js");
         Cells = require("../value_cell.js");
+        RecordLayouts = require("../heap_records.js");
         source = require("fs").readFileSync(
             require("path").join(__dirname, "gc_stress_workload.js"), "utf8");
         output = function (text) { console.log(text); };
@@ -15,13 +16,14 @@
         VM = GuestVM;
         Heap = GuestVMHeap;
         Cells = GuestVMValueCells;
+        RecordLayouts = GuestVMHeapRecords;
         source = read("guest_vm/tests/gc_stress_workload.js");
         output = print;
     }
     var heapCap = 8 * 1024 * 1024;
     var vm = new VM({nativeInterpreter: true, verifyNativeHeap: true,
         heapBytes: 512 * 1024, maxHeapBytes: heapCap, gcThreshold: 256});
-    var audits = 0, edges = 0, maximumBump = 0;
+    var audits = 0, edges = 0, indexAudits = 0, maximumBump = 0;
     var started = new Date().getTime();
 
     function checkEngineLinks() {
@@ -42,7 +44,7 @@
         var freeCount = 0, freeIndex = {}, index;
         while (position < heap.bump) {
             var header = heap.inspectRecordHeader(position);
-            if (header.type < Heap.Types.FREE || header.type > Heap.Types.PLATFORM_SERVICES) {
+            if (header.type < Heap.Types.FREE || header.type > Heap.LastRecordType) {
                 throw new Error("GC stress: invalid record type at " + position);
             }
             boundaries["$" + position] = header.type + 1;
@@ -53,6 +55,27 @@
                 if (length > capacity || records.vectorCellsAddress(position) +
                         capacity * Cells.PAYLOAD_BYTES > position + header.size) {
                     throw new Error("GC stress: corrupt vector bounds at " + position);
+                }
+            }
+            if (header.type === Heap.Types.PROPERTY_INDEX) {
+                indexAudits++;
+                var indexCapacity = records.propertyIndexCapacity(position);
+                var indexCount = records.propertyIndexCount(position);
+                if (!indexCapacity || (indexCapacity & (indexCapacity - 1)) ||
+                        indexCount * 2 > indexCapacity ||
+                        RecordLayouts.KernelConstants.PROPERTY_INDEX_RECORD_BYTES +
+                            indexCapacity * Heap.WORD_BYTES > header.size) {
+                    throw new Error("GC stress: corrupt property-index bounds at " + position);
+                }
+            }
+            if (header.type === Heap.Types.PROPERTY_STORAGE) {
+                var packedLength = records.propertyStorageLength(position);
+                var packedCapacity = records.propertyStorageCapacity(position);
+                if (packedLength > packedCapacity ||
+                        records.propertyStorageLiveCount(position) > packedLength ||
+                        Heap.HEADER_SIZE + RecordLayouts.PropertyStorageLayout.ENTRIES +
+                            packedCapacity * RecordLayouts.PropertyStorageLayout.ENTRY_BYTES > header.size) {
+                    throw new Error("GC stress: corrupt packed property storage at " + position);
                 }
             }
             position += header.size;
@@ -72,6 +95,30 @@
                     }
                     edges++;
                 });
+                if (live.type === Heap.Types.PROPERTY_INDEX) {
+                    var occupied = 0, bucket = 0;
+                    while (bucket < records.propertyIndexCapacity(position)) {
+                        var entry = records.propertyIndexSlot(position, bucket++);
+                        if (entry) {
+                            occupied++;
+                            if (boundaries["$" + entry] !== Heap.Types.PROPERTY + 1) {
+                                throw new Error("GC stress: dangling property-index slot at " + position);
+                            }
+                        }
+                    }
+                    if (occupied !== records.propertyIndexCount(position)) {
+                        throw new Error("GC stress: property-index occupancy mismatch at " + position);
+                    }
+                }
+                if (live.type === Heap.Types.PROPERTY_STORAGE) {
+                    var packedLive = 0, packedEntry = 1;
+                    while (packedEntry <= records.propertyStorageLength(position)) {
+                        if (records.propertyStorageKey(position, packedEntry++)) packedLive++;
+                    }
+                    if (packedLive !== records.propertyStorageLiveCount(position)) {
+                        throw new Error("GC stress: packed live-count mismatch at " + position);
+                    }
+                }
             }
             position += live.size;
         }
@@ -100,6 +147,7 @@
         vm.collect();
         auditHeap();
         output("GC structural checks passed: audits=" + audits + ", edges=" + edges +
+            ", property-index audits=" + indexAudits +
             ", embedding collections=" + vm.runtime.collectionCount +
             ", maximum observed bump=" + maximumBump + ", guest heap cap=" + heapCap +
             ", workload/check time=" + (new Date().getTime() - started) + " ms");

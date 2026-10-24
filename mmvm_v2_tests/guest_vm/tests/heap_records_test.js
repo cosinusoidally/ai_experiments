@@ -1,6 +1,6 @@
 (function (root) {
-    function runHeapRecordsTest(Heap, ValueCells, Records) {
-        var heap = new Heap({heapBytes: 65536});
+    function runHeapRecordsTest(Heap, ValueCells, Records, Sweeper) {
+        var heap = new Heap({heapBytes: 65536, collectorWorkspace: true});
         var cells = new ValueCells(heap);
         var records = new Records(heap, cells);
         try {
@@ -115,6 +115,59 @@
                                       Heap.Types.BYTECODE_FUNCTION) !== fn ||
                 cells.readPrimitiveAt(records.frameRegisterCell(frame, 1)) !== 1.25) {
                 throw new Error("heap frame/register layout failed");
+            }
+            /* Storage semantics, not a particular allocation/index policy:
+             * update retains position; deletion/reinsertion moves to the end;
+             * growth/compaction preserve surviving values and order. */
+            var storage = records.allocatePropertyStorage(2);
+            var thirdKey = records.allocateString("third");
+            var firstKey = records.allocateString("first");
+            var secondKey = records.allocateString("second");
+            var thirdEntry = records.definePropertyStorageEntry(storage, thirdKey);
+            var firstEntry = records.definePropertyStorageEntry(storage, firstKey);
+            var deletedChild = records.allocateObject(0);
+            cells.writePrimitiveAt(records.propertyStorageValueCell(storage, thirdEntry), 1.25);
+            cells.writeReferenceAt(records.propertyStorageValueCell(storage, firstEntry), deletedChild);
+            storage = records.growPropertyStorage(storage, 3);
+            var packedChild = records.allocateObject(0);
+            var secondEntry = records.definePropertyStorageEntry(storage, secondKey);
+            cells.writeReferenceAt(records.propertyStorageValueCell(storage, secondEntry), packedChild);
+            if (records.definePropertyStorageEntry(storage, firstKey) !== firstEntry ||
+                    records.propertyStorageLength(storage) !== 3) {
+                throw new Error("property update changed insertion position");
+            }
+            records.deletePropertyStorageEntry(storage, firstEntry);
+            storage = records.growPropertyStorage(storage, 4);
+            var recreated = records.definePropertyStorageEntry(storage, firstKey);
+            if (recreated <= secondEntry) throw new Error("recreated property did not append");
+            var packedSetter = records.allocateFunction(false, 0, 0, 0);
+            records.updatePropertyStorageDescriptor(storage, recreated,
+                Records.Attributes.ACCESSOR | Records.Attributes.CONFIGURABLE, packedSetter);
+            storage = records.compactPropertyStorage(storage);
+            storage = records.growPropertyStorage(storage, 5);
+            records.definePropertyStorageEntry(storage, records.allocateString("10"));
+            records.definePropertyStorageEntry(storage, records.allocateString("2"));
+            var keys = records.propertyStorageKeys(storage, false);
+            var enumerableKeys = records.propertyStorageKeys(storage, true);
+            if (records.vectorLength(keys) !== 5 || records.vectorLength(enumerableKeys) !== 4 ||
+                    records.readString(cells.readReferenceAt(records.vectorCell(keys, 0))) !== "third" ||
+                    records.readString(cells.readReferenceAt(records.vectorCell(keys, 1))) !== "second" ||
+                    records.readString(cells.readReferenceAt(records.vectorCell(keys, 2))) !== "first" ||
+                    records.readString(cells.readReferenceAt(records.vectorCell(keys, 3))) !== "10" ||
+                    records.readString(cells.readReferenceAt(records.vectorCell(keys, 4))) !== "2" ||
+                    cells.readPrimitiveAt(records.propertyStorageValueCell(storage, 1)) !== 1.25) {
+                throw new Error("packed property order/value/attributes changed");
+            }
+            var holder = records.allocateObject(0);
+            var storageProperty = records.defineOwnProperty(holder, records.allocateString("storage"));
+            cells.writeReferenceAt(records.propertyValueCell(storageProperty), storage);
+            records.allocateContext(holder);
+            var marker = new Sweeper(heap), markGeneration = 1;
+            if (marker.mark(markGeneration) < 0 || heap.mark(storage) !== markGeneration ||
+                    heap.mark(packedChild) !== markGeneration ||
+                    heap.mark(packedSetter) !== markGeneration ||
+                    heap.mark(deletedChild) === markGeneration) {
+                throw new Error("packed property collector retained/lost an entry incorrectly");
             }
             return "authoritative heap record layouts passed on " +
                    heap.memory.host.hostName();

@@ -18,6 +18,10 @@
             values: [seed, seed + 0.25, -seed], wide: "\u0100\ud800" + seed};
         root.self = root;
         root.child = {parent: root, shared: root.values};
+        root.dictionary = {};
+        for (index = 0; index < 48; index++) {
+            root.dictionary["field-" + index] = seed + index * 3;
+        }
         root.read = function () { return root.values[1]; };
         var orphan = Buffer.alloc(32);
         for (index = 0; index < 32; index++) orphan[index] = bytePattern(seed, index);
@@ -57,6 +61,11 @@
                 throw new Error("GC stress: orphan Buffer view lost its backing");
             }
         }
+        for (index = 0; index < 48; index++) {
+            if (root.dictionary["field-" + index] !== root.seed + index * 3) {
+                throw new Error("GC stress: corrupt indexed dictionary for seed " + root.seed);
+            }
+        }
     }
     for (var round = 0; round < rounds; round++) {
         slots[round % slotCount] = makeGraph(round);
@@ -67,7 +76,9 @@
         if (current.values.indexOf(current.seed + 0.25, 0.5) !== 1) {
             throw new Error("GC stress: numeric array search changed its input/result");
         }
+        delete current.dictionary["field-7"];
         if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(round);
+        current.dictionary["field-7"] = current.seed + 21;
         for (var slot = 0; slot < slots.length; slot++) checkGraph(slots[slot]);
     }
     slots = null;

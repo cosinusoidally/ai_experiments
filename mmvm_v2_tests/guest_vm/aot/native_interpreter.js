@@ -10,6 +10,7 @@
     var Binary64 = root.GuestVMBinary64;
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
+    var PropertyIndexKernels = root.GuestVMPropertyIndexKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -20,6 +21,7 @@
         Binary64 = require("../binary64.js");
         ValueCells = require("../value_cell.js");
         HeapRecords = require("../heap_records.js");
+        PropertyIndexKernels = require("../property_index_kernel.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -881,27 +883,20 @@
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
                 var globalKey = load32(globalKeyCell + VALUE_CELL_LOW);
-                var globalProperty = load32(
-                    heapBase + globalObject + OBJECT_PROPERTY_HEAD);
+                var globalProperty = findCachedOwnObjectPropertyKernel(
+                    heapBase, state, globalObject, globalKey);
                 var globalAccessor = 0;
-                while (globalProperty > 0) {
-                    if (stringKeysEqualKernel(heapBase,
-                        propertyKey(heapBase, globalProperty),
-                        globalKey) === 1) {
-                        if ((propertyAttributes(heapBase, globalProperty) &
-                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            globalAccessor = 1;
-                            globalProperty = 0;
-                        } else {
-                            var globalValue = heapBase + globalProperty + PROPERTY_VALUE;
-                            var globalDestination = registerAddress +
-                                globalTargetIndex * VALUE_CELL_BYTES;
-                            copyValueCell(globalDestination, globalValue);
-                            globalProperty = PROPERTY_FOUND_SENTINEL;
-                        }
+                if (globalProperty > 0) {
+                    if ((propertyAttributes(heapBase, globalProperty) &
+                         PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                        globalAccessor = 1;
+                        globalProperty = 0;
                     } else {
-                        globalProperty = load32(
-                            heapBase + globalProperty + PROPERTY_NEXT);
+                        var globalValue = propertyValueCellAddress(heapBase, globalProperty);
+                        var globalDestination = registerAddress +
+                            globalTargetIndex * VALUE_CELL_BYTES;
+                        copyValueCell(globalDestination, globalValue);
+                        globalProperty = PROPERTY_FOUND_SENTINEL;
                     }
                 }
                 if (globalProperty === 0) {
@@ -957,19 +952,8 @@
                 var setGlobalKey = load32(setGlobalKeyCell + VALUE_CELL_LOW);
                 var setGlobalFirstProperty = objectPropertyHead(
                     heapBase, globalObject);
-                var setGlobalProperty = setGlobalFirstProperty;
-                var setGlobalRecord = 0;
-                while (setGlobalProperty > 0) {
-                    if (stringKeysEqualKernel(heapBase,
-                        propertyKey(heapBase, setGlobalProperty),
-                        setGlobalKey) === 1) {
-                        setGlobalRecord = setGlobalProperty;
-                        setGlobalProperty = 0;
-                    } else {
-                        setGlobalProperty = propertyNext(
-                            heapBase, setGlobalProperty);
-                    }
-                }
+                var setGlobalRecord = findCachedOwnObjectPropertyKernel(
+                    heapBase, state, globalObject, setGlobalKey);
                 if (setGlobalRecord === 0) {
                     if ((programFlags(heapBase, currentProgram) &
                          PROGRAM_FLAG_STRICT) !== 0) {
@@ -3943,18 +3927,8 @@
                     typeofGlobalConstantIndex * VALUE_CELL_BYTES;
                 var typeofGlobalKey = valueCellReference(
                     0, typeofGlobalKeyCell);
-                var typeofGlobalProperty = objectPropertyHead(
-                    heapBase, globalObject);
-                var typeofGlobalFoundProperty = 0;
-                while (typeofGlobalProperty !== 0) {
-                    if (stringKeysEqualKernel(heapBase,
-                        propertyKey(heapBase, typeofGlobalProperty),
-                        typeofGlobalKey) === 1) {
-                        typeofGlobalFoundProperty = typeofGlobalProperty;
-                        typeofGlobalProperty = 0;
-                    } else typeofGlobalProperty = propertyNext(
-                               heapBase, typeofGlobalProperty);
-                }
+                var typeofGlobalFoundProperty = findCachedOwnObjectPropertyKernel(
+                    heapBase, state, globalObject, typeofGlobalKey);
                 var typeofGlobalValueCell = 0;
                 if (typeofGlobalFoundProperty !== 0) {
                     typeofGlobalValueCell = propertyValueCellAddress(
@@ -14270,7 +14244,8 @@
     function findCachedOwnObjectPropertyKernel(heapBase, state, object, key) {
         /* Content addressing lets freshly constructed but equal computed
          * keys reuse entries. A collision is verified by exact equality. */
-        var index = ((object >>> 3) ^ stringKeyHashKernel(heapBase, key)) &
+        var hash = stringKeyHashKernel(heapBase, key);
+        var index = ((object >>> 3) ^ hash) &
             (PROPERTY_CACHE_ENTRY_COUNT - 1);
         var head = objectPropertyHead(heapBase, object);
         if (propertyCacheObject(heapBase, state, index) === object &&
@@ -14282,18 +14257,15 @@
                 return propertyCacheProperty(heapBase, state, index);
             }
         }
-        var property = head;
-        while (property !== 0) {
-            if (stringKeysEqualKernel(heapBase, propertyKey(heapBase, property), key) === 1) {
-                setPropertyCacheKey(heapBase, state, index, key);
-                setPropertyCacheVersion(heapBase, state, index, recordFlags(heapBase, object));
-                setPropertyCacheGeneration(heapBase, state, index, recordMark(heapBase, object));
-                setPropertyCacheHead(heapBase, state, index, head);
-                setPropertyCacheProperty(heapBase, state, index, property);
-                setPropertyCacheObject(heapBase, state, index, object);
-                return property;
-            }
-            property = propertyNext(heapBase, property);
+        var property = indexedOwnObjectPropertyKernel(heapBase, state, object, key, hash);
+        if (property !== 0) {
+            setPropertyCacheKey(heapBase, state, index, key);
+            setPropertyCacheVersion(heapBase, state, index, recordFlags(heapBase, object));
+            setPropertyCacheGeneration(heapBase, state, index, recordMark(heapBase, object));
+            setPropertyCacheHead(heapBase, state, index, head);
+            setPropertyCacheProperty(heapBase, state, index, property);
+            setPropertyCacheObject(heapBase, state, index, object);
+            return property;
         }
         return 0;
     }
@@ -14869,6 +14841,9 @@
             return 1;
         }
         var next = propertyNext(heapBase, found);
+        /* Table slots are derived from this list. Drop the table before a
+         * removed property can be reclaimed; insertion is caught up lazily. */
+        if (objectType === HEAP_TYPE_OBJECT) setObjectPropertyIndex(heapBase, object, 0);
         if (previous !== 0) {
             setPropertyNext(heapBase, previous, next);
         } else if (objectType === HEAP_TYPE_ARRAY) {
@@ -17575,6 +17550,12 @@
             primitiveCellToInt32Kernel: primitiveCellToInt32Kernel,
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
+        var propertyKernelName;
+        for (propertyKernelName in PropertyIndexKernels) {
+            if (Object.prototype.hasOwnProperty.call(PropertyIndexKernels, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = PropertyIndexKernels[propertyKernelName];
+            }
+        }
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
         var kernelConstantOverrides = runtimeSupportConstantOverrides(
@@ -17670,6 +17651,27 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    HEAP_TYPE_PROPERTY_STORAGE: kernelConstantOverrides.HEAP_TYPE_PROPERTY_STORAGE,
+                    PROPERTY_STORAGE_LENGTH: kernelConstantOverrides.PROPERTY_STORAGE_LENGTH,
+                    PROPERTY_STORAGE_CAPACITY: kernelConstantOverrides.PROPERTY_STORAGE_CAPACITY,
+                    PROPERTY_STORAGE_HASH: kernelConstantOverrides.PROPERTY_STORAGE_HASH,
+                    PROPERTY_STORAGE_ENTRIES: kernelConstantOverrides.PROPERTY_STORAGE_ENTRIES,
+                    PROPERTY_STORAGE_ENTRY_BYTES: kernelConstantOverrides.PROPERTY_STORAGE_ENTRY_BYTES,
+                    PROPERTY_STORAGE_KEY: kernelConstantOverrides.PROPERTY_STORAGE_KEY,
+                    PROPERTY_STORAGE_SETTER: kernelConstantOverrides.PROPERTY_STORAGE_SETTER,
+                    PROPERTY_STORAGE_VALUE: kernelConstantOverrides.PROPERTY_STORAGE_VALUE,
+                    HEAP_WORD_BYTES: kernelConstantOverrides.HEAP_WORD_BYTES,
+                    HEAP_LAST_RECORD_TYPE: kernelConstantOverrides.HEAP_LAST_RECORD_TYPE,
+                    HEAP_TYPE_PROPERTY_INDEX: kernelConstantOverrides.HEAP_TYPE_PROPERTY_INDEX,
+                    OBJECT_PROPERTY_INDEX: kernelConstantOverrides.OBJECT_PROPERTY_INDEX,
+                    PROPERTY_INDEX_HEAD: kernelConstantOverrides.PROPERTY_INDEX_HEAD,
+                    PROPERTY_INDEX_VERSION: kernelConstantOverrides.PROPERTY_INDEX_VERSION,
+                    PROPERTY_INDEX_COUNT: kernelConstantOverrides.PROPERTY_INDEX_COUNT,
+                    PROPERTY_INDEX_CAPACITY: kernelConstantOverrides.PROPERTY_INDEX_CAPACITY,
+                    PROPERTY_INDEX_SLOTS: kernelConstantOverrides.PROPERTY_INDEX_SLOTS,
+                    PROPERTY_INDEX_RECORD_BYTES: kernelConstantOverrides.PROPERTY_INDEX_RECORD_BYTES,
+                    PROPERTY_INDEX_MINIMUM_PROPERTIES: kernelConstantOverrides.PROPERTY_INDEX_MINIMUM_PROPERTIES,
+                    PROPERTY_INDEX_UNAVAILABLE: kernelConstantOverrides.PROPERTY_INDEX_UNAVAILABLE,
                     STRING_KEY_HASH_FLAG: kernelConstantOverrides.STRING_KEY_HASH_FLAG,
                     STRING_HASH_OFFSET_BASIS: kernelConstantOverrides.STRING_HASH_OFFSET_BASIS,
                     STRING_HASH_PRIME: kernelConstantOverrides.STRING_HASH_PRIME,

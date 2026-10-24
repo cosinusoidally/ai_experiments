@@ -134,7 +134,9 @@
     var runtimeLinearHeapResult = runRuntimeLinearHeapTest(VM);
     if (typeof print === "function") print(runtimeLinearHeapResult);
     else console.log(runtimeLinearHeapResult);
-    var heapRecordsResult = runHeapRecordsTest(Heap, ValueCells, HeapRecords);
+    var heapRecordsSweeper = typeof module !== "undefined" && module.exports ?
+        require("../aot/heap_sweeper.js") : GuestVMHeapSweeper;
+    var heapRecordsResult = runHeapRecordsTest(Heap, ValueCells, HeapRecords, heapRecordsSweeper);
     if (typeof print === "function") print(heapRecordsResult);
     else console.log(heapRecordsResult);
     var kernelCompilerResult = runKernelCompilerTest(

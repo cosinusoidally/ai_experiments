@@ -212,6 +212,18 @@
         }
     };
 
+    /* Newly allocated backing stores cannot overlap their live source. Keep
+     * that contract explicit so native memory can use a checked bulk copy. */
+    LinearMemory.prototype.copyDisjointRange = function (destination, source, length) {
+        this.checkRange(destination, length);
+        this.checkRange(source, length);
+        if (length && destination < source + length && source < destination + length) {
+            throw new RangeError("disjoint memory copy overlaps");
+        }
+        this.host.copyAllocationRange(this.allocation, destination,
+            this.allocation, source, length);
+    };
+
     LinearMemory.prototype.nativeAddress = function (offset) {
         this.checkRange(offset, 0);
         return this.allocation.isNative ? this.allocation.pointer + offset : 0;

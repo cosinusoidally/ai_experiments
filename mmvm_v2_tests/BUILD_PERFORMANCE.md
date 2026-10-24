@@ -279,3 +279,38 @@ key comparisons. The next implementation is an optional compact heap-owned
 index for larger objects, preserving authoritative property-list enumeration
 and exact descriptor/prototype semantics. Logs: ignored
 `artifacts/lean-compiler*.log`.
+
+## Global lookup and ordered-storage foundation, 2026-10-24
+
+Global reads, writes and `typeof` now use the existing guarded own-property
+lookup cache instead of rescanning the global list on each access. Large
+ordinary objects can additionally own a derived, optional lookup index. The
+list remains authoritative during migration; descriptor handling, prototype
+lookup and insertion-order enumeration are unchanged. This index is a bridge,
+not the final packed-entry representation described in `PROPERTY_STORAGE.md`.
+
+A genuine **unsampled**, serial build comparison now gives **72.12 seconds
+under js_min versus 71.82 seconds self-hosted**. The two snapshots are byte
+identical, **8,076,696 bytes** each. Peak RSS was 314,468 versus 457,916 KiB.
+This closes the total wall-time gap in this run, not every individual phase:
+build-source loading still takes 0.202 versus 20.865 seconds. Self-hosted
+runtime construction takes 10.990 seconds and preparation 35.516 seconds;
+js_min takes 15.399 and 50.133 seconds respectively. These are measured builds,
+not cached parses or copies of the input snapshot. Logs are ignored
+`artifacts/ordered-storage-stage1*.log`.
+
+Packed ordered entries are implemented as a separately validated heap
+component, including growth, stable compaction, tombstones, descriptors and
+both collectors. Ordinary object storage has **not** switched to it yet.
+Owner/entry APIs and cache lifetime conversion must precede that cutover.
+
+Validation at this checkpoint, all heavy workloads serial: both-host project
+suites (12 programs / 270 assertions per host), eight previously working
+Octane quick correctness suites, and the bounded standalone GC workload
+(42 collections) pass. Complete bounded Test262 has exactly the same 153
+failing IDs/variants: 3,139 pass / 153 fail / zero not run, 312.21 seconds
+and 319,440 KiB peak RSS. See `TEST262_STATUS.md` for the cap and baseline.
+Short X11 checks of unchanged demos 1–8 render, accept input and exit normally;
+demo8 visits garage and free-drive auto pilot. These are smoke checks, not
+sustained performance tests: demo8 briefly reports 16.3 FPS at 320x240 with
+a 20 FPS cap, and no claim of a sustained 20 FPS is made.

@@ -22,6 +22,7 @@ An external `timeout -k 2s 60s` may be used to bound a diagnostic invocation.
 
 The fixed workload has 24 rounds, eight retained graph slots, and 12 discarded
 graphs per round. It covers cycles, shared children, closures, binary64 values,
+48-name dictionaries with deletion/reinsertion across collection checkpoints,
 wide/lone-surrogate strings, rope/substring backing, byte canaries and Buffer
 views whose original Buffer object has gone away. Replacing slots and dropping
 the final slot array exercises reclamation/reuse rather than monotonic retention.
@@ -32,6 +33,8 @@ At each checkpoint the driver:
 - Forces a collection with the existing native-frame/mark-graph verifier on.
 - Independently walks record boundaries and validates record types and sizes.
 - Checks value-vector lengths/capacities against their physical record bounds.
+- Checks optional property-index capacity, occupancy and live property targets,
+  and packed property-storage bounds and live-entry counts.
 - Checks every visited reference targets a real, non-free record boundary,
   not merely an aligned address which could be inside another record.
 - Checks the free-list index for missing/duplicate/invalid entries.
@@ -63,6 +66,12 @@ used about 20 MiB peak RSS, and reported 35 native collections. The instrumented
 js_min test completed in 33.80 s including compilation, reporting 48 embedding
 collections, 27 audits, 70,509 checked edges and an observed bump of 148,872
 bytes. These are initial measurements, not hard time thresholds.
+
+With dictionary/index coverage added, the instrumented js_min run reports
+50 collections, 27 audits, 84,041 checked edges and 142 property-index audits,
+with a maximum observed heap bump of 175,480 bytes (35.72 seconds including
+compilation). The packed-storage lifecycle regression separately exercises
+its collector edges on both hosts before ordinary objects migrate to it.
 
 ## Corruption found during bring-up
 

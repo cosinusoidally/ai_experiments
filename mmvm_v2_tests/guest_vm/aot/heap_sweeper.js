@@ -23,6 +23,17 @@
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
     var markLayoutBindings = {
+        HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
+        OBJECT_PROPERTY_INDEX: HeapRecords.KernelConstants.OBJECT_PROPERTY_INDEX,
+        HEAP_TYPE_PROPERTY_STORAGE: Heap.Types.PROPERTY_STORAGE,
+        PROPERTY_STORAGE_LENGTH: HeapRecords.KernelConstants.PROPERTY_STORAGE_LENGTH,
+        PROPERTY_STORAGE_CAPACITY: HeapRecords.KernelConstants.PROPERTY_STORAGE_CAPACITY,
+        PROPERTY_STORAGE_HASH: HeapRecords.KernelConstants.PROPERTY_STORAGE_HASH,
+        PROPERTY_STORAGE_ENTRIES: HeapRecords.KernelConstants.PROPERTY_STORAGE_ENTRIES,
+        PROPERTY_STORAGE_ENTRY_BYTES: HeapRecords.KernelConstants.PROPERTY_STORAGE_ENTRY_BYTES,
+        PROPERTY_STORAGE_KEY: HeapRecords.KernelConstants.PROPERTY_STORAGE_KEY,
+        PROPERTY_STORAGE_SETTER: HeapRecords.KernelConstants.PROPERTY_STORAGE_SETTER,
+        PROPERTY_STORAGE_VALUE: HeapRecords.KernelConstants.PROPERTY_STORAGE_VALUE,
         ENGINE_RECORD_PLATFORM_SERVICES: HeapRecords.KernelConstants.ENGINE_RECORD_PLATFORM_SERVICES,
         STRING_SLICE_FLAG: HeapRecords.KernelConstants.STRING_SLICE_FLAG,
         STRING_SLICE_BACKING: HeapRecords.KernelConstants.STRING_SLICE_BACKING,
@@ -153,7 +164,6 @@
         var VALUE_CELL_BYTES = 16;
         var ROOT_SLOT_NEXT = 32;
         var STRING_ROPE_FLAG = 1;
-        var HEAP_LAST_RECORD_TYPE = 20;
         var RECORD_ALIGNMENT_MASK = 7;
         var MINIMUM_RECORD_BYTES = 16;
         var MARK_INVALID_REFERENCE = -2;
@@ -248,6 +258,7 @@
             var type = recordType(heapBase, address);
             var referenceIndex = 0;
             var itemIndex = 0;
+            var itemPart = 0;
             var itemCount = 0;
             if (type === HEAP_TYPE_ENVIRONMENT) {
                 itemCount = environmentCount(heapBase, address);
@@ -255,15 +266,21 @@
                 itemCount = vectorLength(heapBase, address);
             } else if (type === HEAP_TYPE_FRAME) {
                 itemCount = frameRegisterCount(heapBase, address);
+            } else if (type === HEAP_TYPE_PROPERTY_STORAGE) {
+                itemCount = propertyStorageLength(heapBase, address);
             }
             var recordBytes = recordSize(heapBase, address);
             var cellBytes = 0;
+            var itemStride = VALUE_CELL_BYTES;
             if (type === HEAP_TYPE_ENVIRONMENT) {
                 cellBytes = ENVIRONMENT_CELLS;
             } else if (type === HEAP_TYPE_VALUE_VECTOR) {
                 cellBytes = VECTOR_CELLS;
             } else if (type === HEAP_TYPE_FRAME) {
                 cellBytes = FRAME_REGISTERS;
+            } else if (type === HEAP_TYPE_PROPERTY_STORAGE) {
+                cellBytes = PROPERTY_STORAGE_ENTRIES;
+                itemStride = PROPERTY_STORAGE_ENTRY_BYTES;
             }
             var recordLayoutValid = 1;
             if (recordBytes < MINIMUM_RECORD_BYTES) recordLayoutValid = 0;
@@ -276,9 +293,15 @@
             } else if (cellBytes !== 0) {
                 if (recordBytes < cellBytes) recordLayoutValid = 0;
                 else if (itemCount > divideI32(
-                        recordBytes - cellBytes, VALUE_CELL_BYTES)) {
+                        recordBytes - cellBytes, itemStride)) {
                     recordLayoutValid = 0;
                 }
+            }
+            if (recordLayoutValid !== 0 && type === HEAP_TYPE_PROPERTY_STORAGE) {
+                var packedCapacity = propertyStorageCapacity(heapBase, address);
+                if (itemCount < 0 || packedCapacity < itemCount ||
+                        packedCapacity > divideI32(recordBytes - PROPERTY_STORAGE_ENTRIES,
+                            PROPERTY_STORAGE_ENTRY_BYTES)) recordLayoutValid = 0;
             }
             if (recordLayoutValid === 0) {
                 store32(heapBase + stackBase, address);
@@ -294,6 +317,7 @@
                 if (type === HEAP_TYPE_OBJECT) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
+                    else if (referenceIndex === 2) target = objectPropertyIndex(heapBase, address);
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_ARRAY) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
@@ -375,6 +399,25 @@
                         target = rootSlotNext(heapBase, address);
                     }
                     else referenceIndex = -2;
+                } else if (type === HEAP_TYPE_PROPERTY_STORAGE) {
+                    if (referenceIndex === 0) target = propertyStorageHashIndex(heapBase, address);
+                    else if (itemIndex < itemCount) {
+                        var packedKey = propertyStorageKeyAt(heapBase, address, itemIndex);
+                        if (packedKey === 0) itemIndex = itemIndex + 1;
+                        else if (itemPart === 0) {
+                            target = packedKey;
+                            itemPart = 1;
+                        } else if (itemPart === 1) {
+                            target = propertyStorageSetterAt(heapBase, address, itemIndex);
+                            itemPart = 2;
+                        } else {
+                            /* Marker cells are heap-relative; the common
+                             * tagged-cell reader applies heapBase below. */
+                            cellAddress = propertyStorageValueCellAt(0, address, itemIndex);
+                            itemIndex = itemIndex + 1;
+                            itemPart = 0;
+                        }
+                    } else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_VALUE_VECTOR) {
                     if (itemIndex < itemCount) {
                         cellAddress = address + VECTOR_CELLS +
