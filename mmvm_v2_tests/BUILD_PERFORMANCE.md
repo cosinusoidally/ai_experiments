@@ -72,3 +72,21 @@ Compare serial builds under both hosts, verify a genuine byte-identical
 self-hosted rebuild, preserve the below-8-MiB image, and rerun correctness and
 bounded GC checks at working points. Improvements must not depend on skipping
 fingerprinting, caching a previous parse/build or changing demo programs.
+
+## Canonical field-schema reuse, 2026-10-24
+
+Fingerprint traversal now reuses validated sorted field schemas and field-token
+digests within one compilation transaction. Each occurrence still enumerates
+and validates every own semantic field; differing optional fields rebuild the
+schema. Primitive values and child order remain in the canonical stream.
+Nothing is retained across builds. Full interpreter/collector source hashes
+match the previous implementation, as do mixed-shape sample hashes.
+
+Both-host project regressions pass. A genuine self-hosted build is byte-identical
+to its js_min seed; the dense image is 8,336,464 bytes (below 8 MiB).
+The first self-hosted fingerprint stage took 7.718 seconds versus the earlier
+26.285-second measurement. This is a phase observation, not an end-to-end
+speedup claim: the first bootstrap overlapped regression tests, and this
+self-build took 188.32 seconds overall with other stages slower than the older
+measurement. Controlled serial measurements and remaining bottleneck work
+are still required. Logs: ignored `artifacts/fingerprint-opt*.log`.

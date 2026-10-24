@@ -29,8 +29,9 @@
         var FNV1A_PRIME = 16777619;
         var hash = FNV1A_OFFSET_BASIS;
         var textHashes = {};
+        var fieldSchemas = {};
         var STRUCTURAL_HASH_MULTIPLIER = 65599;
-        function append(text) {
+        function tokenDigest(text) {
             /* The canonical traversal repeatedly emits the same field names,
              * node types and punctuation. Hash each distinct token once per
              * build, then mix its digest into the ordered structural stream.
@@ -48,12 +49,59 @@
                 }
                 textHashes[key] = digest;
             }
+            return digest;
+        }
+        function mix(digest) {
             /* A signed word times 65599 plus a signed word is exactly
              * representable in binary64, on both bootstrap hosts. */
             hash = (hash * STRUCTURAL_HASH_MULTIPLIER + digest) | 0;
         }
+        function append(text) { mix(tokenDigest(text)); }
+        var nullDigest = tokenDigest("null;");
+        var arrayStartDigest = tokenDigest("[");
+        var arrayEndDigest = tokenDigest("]");
+        var objectStartDigest = tokenDigest("{");
+        var objectEndDigest = tokenDigest("}");
+
+        /* Cache only the ordering of fields within this traversal, not AST
+         * contents. Validate every own semantic field on every occurrence:
+         * optional fields or a different shape must rebuild the schema. */
+        function schemaFor(value) {
+            var cacheKey = "$" + value.type;
+            var schema = fieldSchemas[cacheKey];
+            var count = 0, matches = !!schema, key;
+            for (key in value) {
+                if (key !== "location" && key !== "source" &&
+                    key !== "sourceEnd" && key !== "filename" &&
+                    Object.prototype.hasOwnProperty.call(value, key)) {
+                    count++;
+                    if (matches && schema.members["$" + key] !== true) {
+                        matches = false;
+                    }
+                }
+            }
+            if (matches && count === schema.keys.length) return schema;
+            var keys = [], members = {}, digests = [];
+            for (key in value) {
+                if (key !== "location" && key !== "source" &&
+                    key !== "sourceEnd" && key !== "filename" &&
+                    Object.prototype.hasOwnProperty.call(value, key)) {
+                    keys.push(key);
+                    members["$" + key] = true;
+                }
+            }
+            keys.sort();
+            var index = 0;
+            while (index < keys.length) {
+                key = keys[index++];
+                digests.push(tokenDigest(key.length + ":" + key + ":"));
+            }
+            schema = {keys: keys, members: members, digests: digests};
+            fieldSchemas[cacheKey] = schema;
+            return schema;
+        }
         function visit(value) {
-            if (value === null) { append("null;"); return; }
+            if (value === null) { mix(nullDigest); return; }
             var type = typeof value;
             if (type !== "object") {
                 var text = String(value);
@@ -68,30 +116,22 @@
                 return;
             }
             if (value instanceof Array) {
-                append("[");
+                mix(arrayStartDigest);
                 var index = 0;
                 while (index < value.length) visit(value[index++]);
-                append("]");
+                mix(arrayEndDigest);
                 return;
             }
-            var keys = [];
-            var key;
-            for (key in value) {
-                if (key !== "location" && key !== "source" &&
-                    key !== "sourceEnd" && key !== "filename" &&
-                    Object.prototype.hasOwnProperty.call(value, key)) {
-                    keys.push(key);
-                }
-            }
-            keys.sort();
-            append("{");
+            var schema = schemaFor(value);
+            var keys = schema.keys;
+            mix(objectStartDigest);
             var keyIndex = 0;
             while (keyIndex < keys.length) {
-                key = keys[keyIndex++];
-                append(key.length + ":" + key + ":");
+                var key = keys[keyIndex];
+                mix(schema.digests[keyIndex++]);
                 visit(value[key]);
             }
-            append("}");
+            mix(objectEndDigest);
         }
         visit(tree);
         var fingerprintedAt = new Date().getTime();
