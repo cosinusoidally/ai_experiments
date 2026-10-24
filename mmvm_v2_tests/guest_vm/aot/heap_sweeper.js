@@ -23,6 +23,7 @@
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
     var markLayoutBindings = {
+        ENGINE_RECORD_PLATFORM_SERVICES: HeapRecords.KernelConstants.ENGINE_RECORD_PLATFORM_SERVICES,
         STRING_SLICE_FLAG: HeapRecords.KernelConstants.STRING_SLICE_FLAG,
         STRING_SLICE_BACKING: HeapRecords.KernelConstants.STRING_SLICE_BACKING,
         HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
@@ -147,7 +148,6 @@
         var CONTEXT_NEXT = 28;
         var HANDLER_NEXT = 16;
         var ENGINE_RECORD_CURRENT_FRAME = 40;
-        var ENGINE_RECORD_PLATFORM_SERVICES = 60;
         var VALUE_CELL_TAG = 0;
         var VALUE_CELL_REFERENCE = 4;
         var VALUE_CELL_BYTES = 16;

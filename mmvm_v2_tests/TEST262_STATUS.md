@@ -767,6 +767,27 @@ performance are separate mandatory regression gates.
   text through backing views; tiny records remain inline when views would
   not save storage. No C, demo or external corpus files were modified.
 
+### 2026-10-24, afternoon BST — scratch-layout corruption correction
+
+- Working revision: scratch-layout fix accompanying `GC_STRESS.md`. Complete
+  authored suite, native js_min execution with a fresh snapshot, using
+  `--quiet --instruction-limit 20000` (verbose inventory retained separately).
+- Executed **3,292 of 3,292 variants: 3,139 passed, 153 failed, 0 not run**.
+  Six instruction-budget timeouts are included in the failures. This is a
+  bounded diagnostic group, not an unbounded conformance result; do not merge
+  its counts with other instruction limits or synthetic strict variants.
+- Elapsed 353.26 seconds; peak RSS 249,208 KiB. Raw log:
+  `artifacts/build-scratch-test262-full.log` (ignored).
+- The pre-fix run crashed after recording 2,411 passes and 59 failures, so its
+  incomplete failure count is not comparable to a whole-suite total. Comparing
+  identifiers confirms **zero regressions among those 2,411 passing variants**.
+  Comparison: ignored `artifacts/build-scratch-test262-comparison.json`.
+- Both-host project tests pass (12 guest programs / 270 guest assertions per
+  host, plus embedding/native checks). All eight previously working Octane
+  suites pass quick correctness checks. The new bounded GC stress test passes
+  under both embedding hosts and standalone automatic collection. No external
+  corpus or demo sources were changed.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

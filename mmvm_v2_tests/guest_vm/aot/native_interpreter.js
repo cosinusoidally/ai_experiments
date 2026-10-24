@@ -458,10 +458,6 @@
         var ENGINE_CURRENT_FRAME = 24;
         var ENGINE_CALL_REJECT_REASON = 28;
         var ENGINE_FREE_FRAME = 32;
-        var ENGINE_SCRATCH_LEFT = 36;
-        var ENGINE_SCRATCH_RIGHT = 40;
-        var ENGINE_PLATFORM_SERVICES = 44;
-        var ENGINE_OPCODE_COUNTS = 48;
         /* Authoritative offsets and stride are compiler-substituted from
          * HeapRecords.KernelConstants. */
         var ENGINE_PROPERTY_CACHE_OBJECT = 0;
@@ -2399,33 +2395,33 @@
                             concatenationAddress + concatenationBytes);
                     } else {
                     if (arithmeticLeftTag === VALUE_TAG_NULL) {
-                        setEngineScratchLeft(heapBase, state, 0);
+                        setValueCellInt32(engineScratchLeftAddress(heapBase, state), 0);
                         arithmeticLeft = engineScratchLeftAddress(
                             heapBase, state);
                         arithmeticLeftTag = VALUE_TAG_INT32;
                     } else if (arithmeticLeftTag === VALUE_TAG_FALSE) {
-                        setEngineScratchLeft(heapBase, state, 0);
+                        setValueCellInt32(engineScratchLeftAddress(heapBase, state), 0);
                         arithmeticLeft = engineScratchLeftAddress(
                             heapBase, state);
                         arithmeticLeftTag = VALUE_TAG_INT32;
                     } else if (arithmeticLeftTag === VALUE_TAG_TRUE) {
-                        setEngineScratchLeft(heapBase, state, 1);
+                        setValueCellInt32(engineScratchLeftAddress(heapBase, state), 1);
                         arithmeticLeft = engineScratchLeftAddress(
                             heapBase, state);
                         arithmeticLeftTag = VALUE_TAG_INT32;
                     }
                     if (arithmeticRightTag === VALUE_TAG_NULL) {
-                        setEngineScratchRight(heapBase, state, 0);
+                        setValueCellInt32(engineScratchRightAddress(heapBase, state), 0);
                         arithmeticRight = engineScratchRightAddress(
                             heapBase, state);
                         arithmeticRightTag = VALUE_TAG_INT32;
                     } else if (arithmeticRightTag === VALUE_TAG_FALSE) {
-                        setEngineScratchRight(heapBase, state, 0);
+                        setValueCellInt32(engineScratchRightAddress(heapBase, state), 0);
                         arithmeticRight = engineScratchRightAddress(
                             heapBase, state);
                         arithmeticRightTag = VALUE_TAG_INT32;
                     } else if (arithmeticRightTag === VALUE_TAG_TRUE) {
-                        setEngineScratchRight(heapBase, state, 1);
+                        setValueCellInt32(engineScratchRightAddress(heapBase, state), 1);
                         arithmeticRight = engineScratchRightAddress(
                             heapBase, state);
                         arithmeticRightTag = VALUE_TAG_INT32;
@@ -14184,8 +14180,8 @@
         var timeval = engineScratchLeftAddress(heapBase, state);
         if (callNativeI32(clockPointer, timeval, 0) !== 0) return 0;
         var MICROSECONDS_PER_SECOND = 1000000;
-        return (engineScratchLeft(heapBase, state) *
-            MICROSECONDS_PER_SECOND + engineScratchRight(heapBase, state)) | 0;
+        return (engineClockSeconds(heapBase, state) *
+            MICROSECONDS_PER_SECOND + engineClockMicroseconds(heapBase, state)) | 0;
     }
 
     function growNativeHeapLimitKernel(heapBase, state) {
@@ -17505,7 +17501,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 49,
+                compilerVersion: 50,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17540,6 +17536,13 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    ENGINE_SCRATCH_LEFT: kernelConstantOverrides.ENGINE_SCRATCH_LEFT,
+                    ENGINE_SCRATCH_RIGHT: kernelConstantOverrides.ENGINE_SCRATCH_RIGHT,
+                    ENGINE_PLATFORM_SERVICES: kernelConstantOverrides.ENGINE_PLATFORM_SERVICES,
+                    ENGINE_RECORD_PLATFORM_SERVICES: kernelConstantOverrides.ENGINE_RECORD_PLATFORM_SERVICES,
+                    ENGINE_OPCODE_COUNTS: kernelConstantOverrides.ENGINE_OPCODE_COUNTS,
+                    ENGINE_CLOCK_SECONDS: kernelConstantOverrides.ENGINE_CLOCK_SECONDS,
+                    ENGINE_CLOCK_MICROSECONDS: kernelConstantOverrides.ENGINE_CLOCK_MICROSECONDS,
                     DECIMAL_RADIX: DECIMAL_RADIX,
                     ASCII_MINUS: ASCII_MINUS,
                     ASCII_ZERO: ASCII_ZERO,

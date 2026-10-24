@@ -640,6 +640,8 @@
         engineGCRootSlotHead: "ENGINE_GC_ROOT_SLOT_HEAD",
         rootSlotNext: "ROOT_SLOT_NEXT",
         enginePlatformServices: "ENGINE_PLATFORM_SERVICES",
+        engineClockSeconds: "ENGINE_CLOCK_SECONDS",
+        engineClockMicroseconds: "ENGINE_CLOCK_MICROSECONDS",
         engineRecordPlatformServices: "ENGINE_RECORD_PLATFORM_SERVICES",
         platformDlsymPointer: "PLATFORM_DLSYM_POINTER",
         platformArraySlicePointer: "PLATFORM_ARRAY_SLICE_POINTER",
