@@ -250,3 +250,32 @@ switches to garage and free-drive auto pilot, renders and exits normally in a
 short controlled check at 320x240 with a 10 FPS cap. That is a correctness
 smoke check, not evidence of a 20 FPS performance target or a long GC soak.
 Its snapshot is 7,954,320 bytes, byte-identical to the genuine self-build.
+
+## Lean compiler traversal, 2026-10-24
+
+Compiler syntax walkers now skip the parser's actual `location` metadata
+field, rather than an unused `loc` name. Capture-free nested functions no
+longer force every enclosing binding into an environment: a conservative
+identifier scan still pins bindings for possible captures, nested direct eval,
+try and with. Shadowing may reject an optimization, never justify one.
+
+Temporary allocation now follows single-definition instruction order. It
+creates neither interval objects nor a comparison closure, and observes
+operands directly instead of entering a capturing callback per access. This
+reduces both compiler work and transient allocation without changing the
+allocation ordering proved in `guest_vm/REGISTER_ALLOCATION.md`.
+
+Serial seed build: **70.64 seconds**, source loading 0.189 seconds and runtime
+preparation 49.276 seconds. Genuine self-build with optional sampling:
+**110.24 seconds**, source loading **24.673 seconds**, preparation 51.854
+seconds. Peak self-build RSS was **448,908 KiB**, versus 549,260 KiB in the
+preceding cache build. Sampling/report overhead is included in the sampled
+wall time, so a final unsampled comparison remains necessary. The image is
+byte-identical to its seed. Both-host project suites, all eight previously
+working Octane quick suites and standalone bounded GC stress pass, serially.
+
+The gap is not closed. Long ordinary-object property-list scans still dominate
+key comparisons. The next implementation is an optional compact heap-owned
+index for larger objects, preserving authoritative property-list enumeration
+and exact descriptor/prototype semantics. Logs: ignored
+`artifacts/lean-compiler*.log`.

@@ -194,11 +194,12 @@
     Compiler.prototype.compileFunction = function (expression) {
         var locals = collectLocals(expression.body, expression.name);
         var bindings = makeFunctionBindings(expression.parameters, locals);
+        var bindingMap = makeBindingMap(bindings);
         var usesArguments = referencesArguments(expression.body);
         /* Sloppy arguments objects alias named parameter bindings.  Keep
          * those bindings in a guest environment so the mapping remains valid
          * if the arguments object escapes its activation. */
-        var useRegisters = canUseRegisterBindings(expression.body) &&
+        var useRegisters = canUseRegisterBindings(expression.body, bindingMap) &&
             (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters);
         if (containsDirectEval(expression.body)) {
@@ -219,7 +220,7 @@
         program.parameters = expression.parameters.slice(0);
         program.locals = locals;
         program.bindings = bindings;
-        program.bindingSlots = makeBindingMap(bindings);
+        program.bindingSlots = bindingMap;
         program.bindingRegisters = useRegisters ?
             bindingRegisters(bindings, nested.scopes[0]) : null;
         program.parameterSlots = bindingSlots(expression.parameters,
@@ -1243,8 +1244,8 @@
         return result;
     }
 
-    function canUseRegisterBindings(body) {
-        return !containsNestedFunctionOrTry(body);
+    function canUseRegisterBindings(body, bindingMap) {
+        return !requiresEnvironmentBindings(body, bindingMap, false);
     }
 
     function containsDirectEval(node) {
@@ -1263,18 +1264,24 @@
         }
         var key;
         for (key in node) {
-            if (key !== "type" && containsDirectEval(node[key])) return true;
+            if (key !== "type" && key !== "location" &&
+                    containsDirectEval(node[key])) return true;
         }
         return false;
     }
 
-    function containsNestedFunctionOrTry(node) {
+    /* A capture-free callback does not make its enclosing locals observable.
+     * Be conservative about shadowing: any matching identifier in any nested
+     * function pins the enclosing bindings, even if a nested declaration may
+     * shadow it. Dynamic scopes/eval and exception handlers retain the
+     * existing environment representation. No escaping closure loses a cell. */
+    function requiresEnvironmentBindings(node, bindingMap, nestedFunction) {
         if (!node || typeof node !== "object") return false;
+        if (node.type === "TryStatement" || node.type === "WithStatement") return true;
         if (node.type === "FunctionDeclaration" ||
-            node.type === "FunctionExpression" || node.type === "TryStatement") {
-            return true;
-        }
-        if (node.type === "WithStatement") return true;
+                node.type === "FunctionExpression") nestedFunction = true;
+        if (nestedFunction && node.type === "Identifier" &&
+                bindingMap["$" + node.name] !== undefined) return true;
         /* A direct eval must be able to address the caller's bindings by
          * lexical slot. Keep those bindings in the guest environment rather
          * than in registers that dynamically compiled code cannot name. */
@@ -1284,14 +1291,16 @@
         if (typeof node.length === "number" && node.type === undefined) {
             var arrayIndex = 0;
             while (arrayIndex < node.length) {
-                if (containsNestedFunctionOrTry(node[arrayIndex++])) return true;
+                if (requiresEnvironmentBindings(node[arrayIndex++],
+                        bindingMap, nestedFunction)) return true;
             }
             return false;
         }
         var key;
         for (key in node) {
-            if (key !== "type" &&
-                containsNestedFunctionOrTry(node[key])) return true;
+            if (key !== "type" && key !== "location" &&
+                    requiresEnvironmentBindings(node[key], bindingMap,
+                        nestedFunction)) return true;
         }
         return false;
     }
@@ -1303,7 +1312,7 @@
             node.type === "FunctionExpression") return false;
         var key;
         for (key in node) {
-            if (key !== "loc") {
+            if (key !== "location") {
                 var value = node[key];
                 if (value && typeof value === "object") {
                     if (typeof value.length === "number") {
@@ -1348,7 +1357,7 @@
             }
             var property;
             for (property in node) {
-                if (property !== "loc") {
+                if (property !== "location") {
                     var value = node[property];
                     if (value && typeof value === "object") {
                         if (typeof value.length === "number") {
@@ -1379,7 +1388,7 @@
             }
             var key;
             for (key in node) {
-                if (key !== "loc") {
+                if (key !== "location") {
                     var value = node[key];
                     if (value && typeof value === "object") {
                         if (typeof value.length === "number") {

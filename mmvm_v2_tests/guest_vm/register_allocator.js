@@ -28,31 +28,40 @@
             }
         }
         var block = -1;
-        function access(register, isDefinition) {
-            /* CALL receivers also encode unqualified-call/direct-eval
-             * sentinels. They are not storage locations. */
-            if (register < 0) return;
-            if (first[register] === undefined) {
-                first[register] = pc;
-                blocks[register] = block;
-            } else if (blocks[register] !== block) blocks[register] = -1;
-            last[register] = pc;
-            if (isDefinition) {
-                definitions[register] = (definitions[register] || 0) + 1;
-                if (firstDefinition[register] === undefined) firstDefinition[register] = pc;
-            } else if (firstRead[register] === undefined) firstRead[register] = pc;
-        }
+        var register, isDefinition, callCount, accessCount;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
             opcode = code[pc];
             if (boundaries[pc]) block++;
             reads = op.SOURCE_OPERANDS[opcode];
-            for (index = 0; index < reads.length; index++) access(code[pc + reads[index]], false);
+            callCount = 0;
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
                 vector = program.constants[code[pc + (opcode === op.CALL ? 4 : 3)]];
-                for (index = 0; index < vector.length; index++) access(vector[index], false);
+                callCount = vector.length;
             }
             destination = op.DESTINATION_OPERANDS[opcode];
-            if (destination) access(code[pc + destination], true);
+            accessCount = reads.length + callCount + (destination ? 1 : 0);
+            /* One operand walk avoids allocating a capturing callback and
+             * entering a guest function for every storage access. */
+            for (index = 0; index < accessCount; index++) {
+                isDefinition = false;
+                if (index < reads.length) register = code[pc + reads[index]];
+                else if (index < reads.length + callCount) register = vector[index - reads.length];
+                else {
+                    register = code[pc + destination];
+                    isDefinition = true;
+                }
+                /* Negative CALL receiver sentinels are not storage. */
+                if (register < 0) continue;
+                if (first[register] === undefined) {
+                    first[register] = pc;
+                    blocks[register] = block;
+                } else if (blocks[register] !== block) blocks[register] = -1;
+                last[register] = pc;
+                if (isDefinition) {
+                    definitions[register] = (definitions[register] || 0) + 1;
+                    if (firstDefinition[register] === undefined) firstDefinition[register] = pc;
+                } else if (firstRead[register] === undefined) firstRead[register] = pc;
+            }
         }
         var constantRegisters = program.constantRegisters || [];
         var hints = program.registerHints || [];
@@ -61,7 +70,7 @@
             argument = constantRegisters[index];
             if (typeof argument === "number" && argument >= 0) pinned[argument] = true;
         }
-        var mapping = [], intervals = [], privateCount = 0;
+        var mapping = [], privateCount = 0;
         for (index = 0; index < count; index++) {
             /* Preserve compiler hints without assigning a hint to another
              * temporary which later reuses the same slot. */
@@ -72,26 +81,34 @@
                       firstRead[index] <= firstDefinition[index])))) {
                 mapping[index] = privateCount++;
             } else if (first[index] !== undefined) {
-                intervals.push({register: index, start: first[index], end: last[index]});
+                mapping[index] = -1;
             }
         }
-        intervals.sort(function (a, b) { return a.start - b.start || a.register - b.register; });
-        var active = [], available = [], temporaryCount = 0, interval, activeIndex;
-        for (index = 0; index < intervals.length; index++) {
-            interval = intervals[index];
-            activeIndex = 0;
-            while (activeIndex < active.length) {
-                /* Do not alias a destination with an input of the same
-                 * instruction: operations may suspend or enter an accessor. */
-                if (active[activeIndex].end < interval.start) {
-                    available.push(active[activeIndex].slot);
-                    active[activeIndex] = active[active.length - 1];
-                    active.pop();
-                } else activeIndex++;
+        /* Each eligible interval starts at its sole definition, and an
+         * instruction has at most one destination. Instruction order is
+         * therefore already the required allocation order: no interval
+         * objects, comparison closure or sorting pass is necessary. */
+        var active = [], available = [], temporaryCount = 0, activeIndex;
+        for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
+            opcode = code[pc];
+            destination = op.DESTINATION_OPERANDS[opcode];
+            if (destination) {
+                register = code[pc + destination];
+                if (mapping[register] === -1) {
+                    activeIndex = 0;
+                    while (activeIndex < active.length) {
+                        /* Strictly before, never an input/output alias. */
+                        if (last[active[activeIndex]] < pc) {
+                            available.push(mapping[active[activeIndex]]);
+                            active[activeIndex] = active[active.length - 1];
+                            active.pop();
+                        } else activeIndex++;
+                    }
+                    mapping[register] = available.length ? available.pop() :
+                        privateCount + temporaryCount++;
+                    active.push(register);
+                }
             }
-            interval.slot = available.length ? available.pop() : temporaryCount++;
-            mapping[interval.register] = privateCount + interval.slot;
-            active.push(interval);
         }
         var packedCount = privateCount + temporaryCount;
         if (packedCount >= count) return program;

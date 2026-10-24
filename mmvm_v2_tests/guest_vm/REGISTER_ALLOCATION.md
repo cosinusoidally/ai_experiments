@@ -32,9 +32,10 @@ compiler's existing binding/environment representation.
 ## Allocation and rewriting
 
 One scan collects access intervals and block ownership. Private slots are
-assigned first, in original-register order. Local intervals are sorted by
-first access with an explicit original-index tie break; expired slots go on
-a free list. The ordering is deterministic across bootstrap hosts.
+assigned first, in original-register order. Each eligible interval starts at
+its only definition, with at most one destination per instruction. Instruction
+order is therefore already allocation order; no interval objects or sort are
+needed. Expired slots go on a free list. Ordering is deterministic across hosts.
 
 Rewriting changes register operands, private CALL/CONSTRUCT argument vectors,
 constant-register maps and hint maps. It does not change PCs, lexical slots,
