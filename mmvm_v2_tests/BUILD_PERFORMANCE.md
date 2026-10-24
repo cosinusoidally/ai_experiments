@@ -165,3 +165,36 @@ Both-host project suites, all eight previously working Octane quick suites and
 the standalone bounded GC workload pass at this checkpoint. The instruction
 stream is unchanged, so this is a storage-policy change, not a new language
 implementation or a claim of new Test262 conformance.
+
+## Optional native sampling
+
+For a genuine self-build from a fresh snapshot matching the current kernel:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
+  --vm-native-samples --snapshot artifacts/profiled.snap
+```
+
+This opt-in diagnostic uses libc `profil` and its single-threaded signal
+sampling, not threads, a JS timer callback or privileged perf events. A small
+counter buffer covers only the executing interpreter's code range. Cleanup
+disables sampling, maps counts through macro-assembler function symbols and
+frees the buffer. A source-fingerprint guard rejects mismatched symbol maps.
+Code/header offsets come from the backend's shared standalone-header fields.
+It excludes time in libc and the initial source-loading setup before sampling
+starts; percentages are not percentages of total build wall time. Do not
+combine it with another SIGPROF-based profiler. Normal invocations do not load
+the sampler or enable a signal timer.
+
+An initial profile recorded 10,654 in-kernel samples: 53.2% in dispatch,
+14.6% string-key equality, 8.6% indirect character lookup and 4.6% flat
+character lookup. Register-bank initialization accounted for only 1.1%.
+This is why subsequent work targets general string/property lookup rather
+than assuming register initialization dominates. A first flat-storage
+comparison experiment reduced wall time, but string equality and character
+traversal still consumed roughly a third of samples; canonical key hashing
+is being evaluated next. Raw profiles stay in ignored artifacts.
+
+All tests and benchmarks are now run **serially**. An overlapping profiling
+build was explicitly interrupted when the memory/concurrency requirement was
+clarified; its partial timings are not used as performance measurements.

@@ -24,6 +24,8 @@ var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
 var guestRunnerProfile = false;
+var guestRunnerNativeSamples = false;
+var guestRunnerSampler = null;
 var guestRunnerTraceExceptions = false;
 var guestRunnerVerifyHeap = false;
 var guestRunnerThreaded = false;
@@ -82,6 +84,8 @@ for (var guestRunnerOptionIndex = 0;
             guestRunnerArguments[guestRunnerOptionIndex]);
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
         guestRunnerProfile = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native-samples") {
+        guestRunnerNativeSamples = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-trace-exceptions") {
         guestRunnerTraceExceptions = true;
@@ -145,6 +149,7 @@ guestRunnerArguments = guestRunnerProgramArguments;
 
 if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
     var guestUsage = "usage: guest_runner.js [--vm-profile] " +
+                     "[--vm-native-samples] " +
                      "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-gc-stress] " +
@@ -164,6 +169,14 @@ var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource;
 var guestRuntimeConstructionStarted = guestRunnerSnapshot ?
     new Date().getTime() : 0;
+if (guestRunnerNativeSamples) {
+    if (guestRunnerIsNode || typeof __guestVMStandaloneImageBase === "undefined" ||
+            !__guestVMStandaloneImageBase) {
+        throw new Error("--vm-native-samples requires a self-hosted standalone build");
+    }
+    load("guest_vm/native_sampler.js");
+    guestRunnerSampler = new GuestVMNativeSampler(__guestVMStandaloneImageBase);
+}
 var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
@@ -234,6 +247,14 @@ function guestRunnerDescribeError(error) {
 function guestRunnerCleanup() {
     if (guestRunnerCleaned) return;
     guestRunnerCleaned = true;
+    if (guestRunnerSampler) {
+        var samplerReport = guestRunnerSampler.finish(
+            guestProgramVM.runtime.nativeInterpreter.nativeResult.symbols,
+            guestProgramVM.runtime.nativeInterpreter.snapshotMetadata.sourceHash);
+        for (var samplerLine = 0; samplerLine < samplerReport.length; samplerLine++) {
+            print(samplerReport[samplerLine]);
+        }
+    }
     if (guestRunnerProfile) guestProgramVM.runtime.reportProfile();
     guestNodeEnvironment.destroy();
     guestProgramVM.destroy();
