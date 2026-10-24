@@ -840,6 +840,23 @@ performance are separate mandatory regression gates.
   Packed entry storage is a collector-tested component, not yet ordinary
   objects' default representation. No demo or external corpus was modified.
 
+### 2026-10-24, about 23:10 BST — guarded owner/entry API stage
+
+- Native js_min, authored selection `ch09/9.5 ch11/11.6 ch11/11.7`,
+  `--quiet --instruction-limit 20000`, serial execution.
+- **165 executed: 164 passed, 1 failed, 0 not run, 0 timed out**.
+  Elapsed 46.01 seconds; peak RSS 196,832 KiB. The sole failing ID is the
+  existing boxed-string addition case
+  `ch11/11.6/11.6.1/S11.6.1_A3.2_T2.3.js` (non-strict).
+- No focused regression. This is not a new whole-suite run; the most recent
+  whole-suite inventory above remains 3,139 pass / 153 fail / zero not run.
+  Raw log: ignored `artifacts/owner-entry-test262-focused.log`.
+- Both-host project suites, eight previously working Octane quick suites,
+  standalone language integration, bounded GC and short unchanged demos 1–8
+  pass. Genuine self-build is byte-identical. Ordinary objects still use the
+  legacy backing while owner/entry consumers are migrated; packed default
+  storage is not claimed to be enabled at this checkpoint.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

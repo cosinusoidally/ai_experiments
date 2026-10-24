@@ -519,7 +519,7 @@
         }
         this.heapRecords.cloneEnumerableOwnProperties(
             source.heapAddress, target.heapAddress, propertyCount);
-        target.propertyAddresses = {};
+        target.propertyEntries = {};
         target.propertyVersion++;
         target.valueVersion++;
         return target;
@@ -540,7 +540,7 @@
         }
         this.heapRecords.cloneOwnProperties(
             source.heapAddress, target.heapAddress, propertyCount, false);
-        target.propertyAddresses = {};
+        target.propertyEntries = {};
         target.propertyVersion++;
         target.valueVersion++;
         return target;
@@ -548,11 +548,12 @@
 
     Runtime.prototype.defineInternalValue = function (object, key, value) {
         var keyAddress = this.internStringAddress(key);
-        var property = this.heapRecords.defineOwnProperty(
+        var property = this.heapRecords.defineOwnPropertyEntry(
             object.heapAddress, keyAddress, 0);
-        this.heapRecords.setPropertySetter(property, 0);
-        this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
-        object.propertyAddresses["$" + keyAddress] = property;
+        this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, property, 0);
+        this.writeHeapValue(this.heapRecords.ownPropertyEntryValueCell(
+            object.heapAddress, property), value);
+        this.cacheOwnPropertyEntry(object, keyAddress, property);
         object.propertyVersion++;
         object.valueVersion++;
         return value;
@@ -1067,7 +1068,8 @@
         var handle = {guestType: guestType, ownerRuntime: this,
                       heapAddress: address, gcMark: 0, propertyVersion: 0,
                       valueVersion: 0, arrayStructureVersion: 0,
-                      propertyAddresses: {},
+                      propertyEntries: {}, propertyStorage: -1,
+                      propertyEpoch: -1, propertyGeneration: -1,
                       heapIdentity: this.nextHeapIdentity++};
         this.heapHandles[key] = handle;
         return handle;
@@ -1174,22 +1176,67 @@
 
     Runtime.prototype.heapOwnProperty = function (object, key, create) {
         var keyAddress = this.internStringAddress(key);
-        return this.heapOwnPropertyAddress(object, keyAddress, create);
+        return this.heapOwnPropertyEntry(object, keyAddress, create);
     };
 
-    Runtime.prototype.heapOwnPropertyAddress = function (
+    /* The owner is implicit in the handle; its entry IDs are valid only for
+     * this backing/epoch/GC generation. Native code can mutate the heap
+     * without changing host propertyVersion, so that counter is not a guard.
+     * No negative results are retained. */
+    Runtime.prototype.guardedOwnPropertyEntries = function (object) {
+        var records = this.heapRecords;
+        var owner = object.heapAddress;
+        var storage = records.ownPropertyStorage(owner);
+        var epoch = records.ownPropertyEpoch(owner);
+        var generation = records.ownPropertyGeneration(owner);
+        if (object.propertyStorage !== storage ||
+                object.propertyEpoch !== epoch ||
+                object.propertyGeneration !== generation) {
+            object.propertyEntries = {};
+            object.propertyStorage = storage;
+            object.propertyEpoch = epoch;
+            object.propertyGeneration = generation;
+        }
+        return object.propertyEntries;
+    };
+
+    Runtime.prototype.cacheOwnPropertyEntry = function (object, key, entry) {
+        this.guardedOwnPropertyEntries(object)["$" + key] = entry;
+        return entry;
+    };
+
+    /* Site caches retain logical references, never value-cell addresses.
+     * Identity protects against a recycled handle/address; the remaining
+     * guards protect against native edits, collection and backing movement. */
+    Runtime.prototype.captureOwnPropertyReference = function (object, key, entry) {
+        this.guardedOwnPropertyEntries(object);
+        return {owner: object, identity: object.heapIdentity, key: key,
+            storage: object.propertyStorage, epoch: object.propertyEpoch,
+            generation: object.propertyGeneration, entry: entry};
+    };
+
+    Runtime.prototype.ownPropertyReferenceIsCurrent = function (reference, object) {
+        return reference && reference.owner === object &&
+            reference.identity === object.heapIdentity &&
+            reference.storage === this.heapRecords.ownPropertyStorage(object.heapAddress) &&
+            reference.epoch === this.heapRecords.ownPropertyEpoch(object.heapAddress) &&
+            reference.generation === this.heapRecords.ownPropertyGeneration(object.heapAddress);
+    };
+
+    Runtime.prototype.heapOwnPropertyEntry = function (
             object, keyAddress, create) {
         var cacheKey = "$" + keyAddress;
-        var property = object.propertyAddresses[cacheKey] || 0;
+        var entries = this.guardedOwnPropertyEntries(object);
+        var property = entries[cacheKey] || 0;
         if (!property) {
-            property = this.heapRecords.findOwnProperty(object.heapAddress, keyAddress);
-            if (property) object.propertyAddresses[cacheKey] = property;
+            property = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
+            if (property) entries[cacheKey] = property;
         }
         if (!property && create) {
-            property = this.heapRecords.defineOwnProperty(
+            property = this.heapRecords.defineOwnPropertyEntry(
                 object.heapAddress, keyAddress,
                 HeapRecords.Attributes.DEFAULT);
-            object.propertyAddresses[cacheKey] = property;
+            this.cacheOwnPropertyEntry(object, keyAddress, property);
             object.propertyVersion++;
         }
         return property;
@@ -1213,14 +1260,14 @@
                          setter.guestType !== "bytecodeFunction"))) {
             throw new TypeError("property setter is not callable");
         }
-        var property = this.heapRecords.defineOwnProperty(
+        var property = this.heapRecords.defineOwnPropertyEntry(
             object.heapAddress, keyAddress,
             (attributes || 0) | HeapRecords.Attributes.ACCESSOR);
-        this.writeHeapValue(this.heapRecords.propertyValueCell(property),
+        this.writeHeapValue(this.heapRecords.ownPropertyEntryValueCell(object.heapAddress, property),
                             getter);
-        this.heapRecords.setPropertySetter(property,
+        this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, property,
             setter === undefined ? 0 : setter.heapAddress);
-        object.propertyAddresses["$" + keyAddress] = property;
+        this.cacheOwnPropertyEntry(object, keyAddress, property);
         object.propertyVersion++;
         object.valueVersion++;
         return property;
@@ -1234,10 +1281,10 @@
             throw new TypeError("data-property target is not an object");
         }
         var keyAddress = this.internStringAddress(this.propertyKey(key));
-        var property = this.heapRecords.defineOwnProperty(
+        var property = this.heapRecords.defineOwnPropertyEntry(
             object.heapAddress, keyAddress, attributes || 0);
-        this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
-        object.propertyAddresses["$" + keyAddress] = property;
+        this.writeHeapValue(this.heapRecords.ownPropertyEntryValueCell(object.heapAddress, property), value);
+        this.cacheOwnPropertyEntry(object, keyAddress, property);
         object.propertyVersion++;
         object.valueVersion++;
         return property;
@@ -1246,15 +1293,15 @@
     Runtime.prototype.defineLiteralAccessor = function (
             object, key, callable, setterDefinition) {
         var keyAddress = this.internStringAddress(this.propertyKey(key));
-        var property = this.heapRecords.findOwnProperty(
+        var property = this.heapRecords.findOwnPropertyEntry(
             object.heapAddress, keyAddress);
         var getter;
         var setter;
-        if (property && (this.heapRecords.propertyAttributes(property) &
+        if (property && (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property) &
                          HeapRecords.Attributes.ACCESSOR)) {
             getter = this.readHeapValue(
-                this.heapRecords.propertyValueCell(property));
-            var setterAddress = this.heapRecords.propertySetter(property);
+                this.heapRecords.ownPropertyEntryValueCell(object.heapAddress, property));
+            var setterAddress = this.heapRecords.ownPropertyEntrySetter(object.heapAddress, property);
             setter = setterAddress ? this.readHeapReference(setterAddress) :
                                      undefined;
         }
@@ -1278,23 +1325,23 @@
         return this.call(callable, receiver, args);
     };
 
-    Runtime.prototype.readPropertyRecord = function (
-            property, receiver) {
-        if (this.heapRecords.propertyAttributes(property) &
+    Runtime.prototype.readPropertyEntry = function (
+            owner, entry, receiver) {
+        if (this.heapRecords.ownPropertyEntryAttributes(owner.heapAddress, entry) &
             HeapRecords.Attributes.ACCESSOR) {
             var getter = this.readHeapValue(
-                this.heapRecords.propertyValueCell(property));
+                this.heapRecords.ownPropertyEntryValueCell(owner.heapAddress, entry));
             return getter === undefined ? undefined :
                 this.invokePropertyFunction(getter, receiver, []);
         }
-        return this.readHeapValue(this.heapRecords.propertyValueCell(property));
+        return this.readHeapValue(this.heapRecords.ownPropertyEntryValueCell(owner.heapAddress, entry));
     };
 
-    Runtime.prototype.writePropertyRecord = function (
-            property, receiver, value, strict) {
-        var attributes = this.heapRecords.propertyAttributes(property);
+    Runtime.prototype.writePropertyEntry = function (
+            owner, entry, receiver, value, strict) {
+        var attributes = this.heapRecords.ownPropertyEntryAttributes(owner.heapAddress, entry);
         if (attributes & HeapRecords.Attributes.ACCESSOR) {
-            var setterAddress = this.heapRecords.propertySetter(property);
+            var setterAddress = this.heapRecords.ownPropertyEntrySetter(owner.heapAddress, entry);
             if (!setterAddress) {
                 if (strict) throw new TypeError("property has no setter");
                 return value;
@@ -1307,24 +1354,25 @@
             if (strict) throw new TypeError("property is not writable");
             return value;
         }
-        this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
+        this.writeHeapValue(this.heapRecords.ownPropertyEntryValueCell(owner.heapAddress, entry), value);
         return value;
     };
 
     Runtime.prototype.setNamedProperty = function (object, key, value, strict) {
         var property = this.heapOwnProperty(object, key, false);
         if (property) {
-            this.writePropertyRecord(property, object, value, strict);
+            this.writePropertyEntry(object, property, object, value, strict);
             object.valueVersion++;
             return value;
         }
-        var inherited = this.findPrototypeProperty(object, key);
-        if (inherited) {
+        var inheritedOwner = this.findPrototypePropertyOwner(object, key);
+        if (inheritedOwner) {
+            var inherited = this.heapOwnProperty(inheritedOwner, key, false);
             var inheritedAttributes =
-                this.heapRecords.propertyAttributes(inherited);
+                this.heapRecords.ownPropertyEntryAttributes(inheritedOwner.heapAddress, inherited);
             if ((inheritedAttributes & HeapRecords.Attributes.ACCESSOR) ||
                 !(inheritedAttributes & HeapRecords.Attributes.WRITABLE)) {
-                this.writePropertyRecord(inherited, object, value, strict);
+                this.writePropertyEntry(inheritedOwner, inherited, object, value, strict);
                 object.valueVersion++;
                 return value;
             }
@@ -1334,19 +1382,19 @@
             return value;
         }
         property = this.heapOwnProperty(object, key, true);
-        this.writeHeapValue(this.heapRecords.propertyValueCell(property), value);
+        this.writeHeapValue(this.heapRecords.ownPropertyEntryValueCell(object.heapAddress, property), value);
         object.valueVersion++;
         return value;
     };
 
-    Runtime.prototype.findPrototypeProperty = function (object, key) {
+    Runtime.prototype.findPrototypePropertyOwner = function (object, key) {
         if (!object || !object.heapAddress) return 0;
         var prototypeAddress = this.heapRecords.objectPrototype(
             object.heapAddress);
         while (prototypeAddress) {
             var prototype = this.readHeapReference(prototypeAddress);
             var property = this.heapOwnProperty(prototype, key, false);
-            if (property) return property;
+            if (property) return prototype;
             prototypeAddress = this.heapRecords.objectPrototype(
                 prototype.heapAddress);
         }
@@ -1807,7 +1855,7 @@
         var index = 0;
         while (index < snapshot.handles.length) {
             var state = snapshot.handles[index++];
-            state.handle.propertyAddresses = {};
+            state.handle.propertyEntries = {};
             state.handle.propertyVersion = state.propertyVersion;
             state.handle.valueVersion = state.valueVersion;
             state.handle.arrayStructureVersion = state.arrayStructureVersion;
@@ -2797,13 +2845,15 @@
                         runtime.defineAccessorProperty(object, keyAddress,
                             getter, setter, attributes);
                     } else {
-                        var property = runtime.heapRecords.defineOwnProperty(
-                            object.heapAddress, keyAddress, attributes);
-                        runtime.heapRecords.setPropertySetter(property, 0);
                         var propertyValue = hasValue ?
                             runtime.getProperty(descriptor, "value") : undefined;
+                        /* Reading the descriptor can invoke guest code. Resolve
+                         * the destination entry only after that callback. */
+                        var property = runtime.heapRecords.defineOwnPropertyEntry(
+                            object.heapAddress, keyAddress, attributes);
+                        runtime.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, property, 0);
                         runtime.writeHeapValue(
-                            runtime.heapRecords.propertyValueCell(property),
+                            runtime.heapRecords.ownPropertyEntryValueCell(object.heapAddress, property),
                             propertyValue);
                     }
                     object.propertyVersion++;
@@ -2859,19 +2909,22 @@
                     }
                     var property = runtime.heapOwnProperty(object, key, false);
                     if (!property) return undefined;
-                    var attributes = runtime.heapRecords.propertyAttributes(
-                        property);
+                    var attributes = runtime.heapRecords.ownPropertyEntryAttributes(
+                        object.heapAddress, property);
                     if (attributes & HeapRecords.Attributes.ACCESSOR) {
                         runtime.setProperty(descriptor, "get",
                             runtime.readHeapValue(
-                                runtime.heapRecords.propertyValueCell(property)));
-                        var setter = runtime.heapRecords.propertySetter(property);
+                                runtime.heapRecords.ownPropertyEntryValueCell(
+                                    object.heapAddress, property)));
+                        var setter = runtime.heapRecords.ownPropertyEntrySetter(
+                            object.heapAddress, property);
                         runtime.setProperty(descriptor, "set", setter ?
                             runtime.readHeapReference(setter) : undefined);
                     } else {
                         runtime.setProperty(descriptor, "value",
                             runtime.readHeapValue(
-                                runtime.heapRecords.propertyValueCell(property)));
+                                runtime.heapRecords.ownPropertyEntryValueCell(
+                                    object.heapAddress, property)));
                         runtime.setProperty(descriptor, "writable",
                             !!(attributes & HeapRecords.Attributes.WRITABLE));
                     }
@@ -3741,7 +3794,7 @@
     Runtime.prototype.globalCellAddress = function (context, name) {
         var object = context ? context.globalObject : this.globalObject;
         var property = this.heapOwnProperty(object, this.propertyKey(name), false);
-        return property ? this.heapRecords.propertyValueCell(property) : 0;
+        return property ? this.heapRecords.ownPropertyEntryValueCell(object.heapAddress, property) : 0;
     };
 
     Runtime.prototype.standaloneNativeBindings = function (context) {
@@ -3865,7 +3918,7 @@
             if (isArrayIndex(key)) return this.arrayGet(object, Number(key));
             var arrayProperty = this.heapOwnProperty(object, key, false);
             if (arrayProperty) {
-                return this.readPropertyRecord(arrayProperty, accessReceiver);
+                return this.readPropertyEntry(object, arrayProperty, accessReceiver);
             }
             var arrayPrototypeAddress =
                 this.heapRecords.objectPrototype(object.heapAddress);
@@ -3885,7 +3938,7 @@
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             var property = this.heapOwnProperty(object, key, false);
             if (property) {
-                return this.readPropertyRecord(property, accessReceiver);
+                return this.readPropertyEntry(object, property, accessReceiver);
             }
             if ((object.guestType === "function" ||
                  object.guestType === "bytecodeFunction") && key === "length") {
@@ -4032,18 +4085,17 @@
         }
         if (object.heapAddress) {
             var keyAddress = this.internStringAddress(key);
-            var removedProperty = this.heapRecords.findOwnProperty(
+            var removedProperty = this.heapRecords.findOwnPropertyEntry(
                 object.heapAddress, keyAddress);
             if (removedProperty &&
-                !(this.heapRecords.propertyAttributes(removedProperty) &
+                !(this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, removedProperty) &
                   HeapRecords.Attributes.CONFIGURABLE)) {
                 if (strict) throw new TypeError("property is not configurable");
                 return false;
             }
-            delete object.propertyAddresses["$" + keyAddress];
-            var deleted = this.heapRecords.deleteOwnProperty(
+            delete object.propertyEntries["$" + keyAddress];
+            var deleted = this.heapRecords.deleteOwnPropertyEntry(
                 object.heapAddress, keyAddress);
-            if (removedProperty) this.linearHeap.freeRecord(removedProperty);
             if (deleted) object.propertyVersion++;
             if (deleted) object.valueVersion++;
             return deleted;

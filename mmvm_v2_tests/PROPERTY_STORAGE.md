@@ -34,8 +34,14 @@ not raw entry addresses, and must be invalidated/rebuilt when appropriate.
 
 These existing consumers prevent a safe one-step layout replacement:
 
-- `runtime.js` has persistent `propertyAddresses` maps on its heap proxies.
-  They must become owner/entry caches guarded by the storage reference/epoch.
+- `runtime.js` now has owner-scoped `propertyEntries` maps on its heap proxies.
+  Their guards are backing identity, heap structural epoch and GC generation;
+  host-side `propertyVersion` alone is insufficient for native mutations.
+- The threaded compiler's monomorphic/polymorphic caches now retain guarded
+  owner/entry references, not persistent value-cell addresses. They resolve
+  an ephemeral cell only when performing an access. Descriptor operations
+  continue through the semantic property access API, including inherited
+  getter/setter receiver handling.
 - Native interpreter property-cache entries currently contain property-record
   addresses. They must cache the owning object and entry ID instead.
 - Property traversal currently returns raw property records, including after
@@ -76,3 +82,45 @@ No C support, host-language semantic delegation, generated files, npm or
 external corpus modifications are part of this migration. Tests and benchmarks
 remain serial. A component passing does not imply the object-layout cutover
 or the snapshot performance-parity objective is complete.
+
+## Owner/entry conversion checkpoint, 2026-10-24
+
+The record layer provides named owner/entry accessors. Its legacy adapter
+currently interprets entry IDs as legacy record IDs; callers must not calculate
+addresses from them. This is deliberately not presented as packed storage.
+
+The runtime-handle cache has an implicit owner (the handle), a table of entry
+IDs and shared guards. Site caches additionally record the owner handle's
+identity to reject recycled offsets. Failed lookups are not cached. Deletion,
+reinsertion, collection, backing replacement or a structural epoch change
+invalidate references even if host `propertyVersion` did not change.
+
+The runtime's property read/write API takes the descriptor owner separately
+from the receiver. Prototype lookup returns the owner; accessors still receive
+the original receiver as `this`. The native constant-property path similarly
+retains the found owner after walking the prototype chain, and resolves its
+entry through compiled owner-aware helpers. These helpers are normal kernel
+functions, not host callbacks or new dialect semantics.
+
+Remaining before the default-layout cutover: convert the other native lookup,
+allocation, descriptor, enumeration, deletion and cloning paths, together with
+the remaining reference-side traversal/collector consumers. Then change entry
+resolution to packed slots and replace the transitional list index with the
+optional slot index. No partial packed-default mode is enabled in the meantime.
+
+The checkpoint's fresh js_min build takes 81.21 seconds versus 81.58 seconds
+for the preceding baseline in the same serial session. Genuine self-hosted
+generation takes 78.27 seconds and produces an exactly identical 8,099,232-byte
+image. These are single-run build measurements, not a claim about sustained
+demo FPS. Temporary images/logs use the ignored `artifacts/owner-entry` prefix.
+
+Validation of this API stage, serially: both-host project suites pass (12 guest
+programs / 270 assertions each), as do all eight previously working Octane
+quick suites, standalone language integration and bounded GC stress (42 native
+collections). The existing embedding regression now checks heap-side mutation
+without a host-version change, collection invalidation and cached/inherited
+accessor receivers. Short unchanged-demo checks cover demos 1–8 and demo8's
+garage/free-drive auto-pilot transitions and normal exit. Demo8's brief 16.3 FPS
+sample at 320x240 / 20 FPS cap matches the preceding checkpoint's sample; this
+is not a sustained-performance guarantee. The focused Test262 selection has
+the same 164 passes / one existing failure / zero not run or timed out.

@@ -335,7 +335,7 @@
         var index = canonicalIndex(key);
         if (index >= 0 && view.guestType === "typedArray") return this.read(view, index);
         var property = this.runtime.heapOwnProperty(view, key, false);
-        if (property) return this.runtime.readPropertyRecord(property, view);
+        if (property) return this.runtime.readPropertyEntry(view, property, view);
         var prototype = view.guestType === "arrayBuffer" ?
             this.arrayBufferPrototype : this.prototypes[this.viewKind(view)];
         return this.runtime.getProperty(prototype, key, view);

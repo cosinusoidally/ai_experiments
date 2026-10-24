@@ -339,7 +339,7 @@
         if (index >= 0) return index < this.viewLength(view) ? this.read(view, index) : undefined;
         var property = this.runtime.heapOwnProperty(view, key, false);
         if (property) return this.runtime.readHeapValue(
-            this.runtime.heapRecords.propertyValueCell(property));
+            this.runtime.heapRecords.ownPropertyEntryValueCell(view.heapAddress, property));
         return this.runtime.getProperty(this.prototype, key);
     };
 
@@ -352,7 +352,7 @@
         if (key === "length") return value;
         var property = this.runtime.heapOwnProperty(view, key, true);
         this.runtime.writeHeapValue(
-            this.runtime.heapRecords.propertyValueCell(property), value);
+            this.runtime.heapRecords.ownPropertyEntryValueCell(view.heapAddress, property), value);
         return value;
     };
 

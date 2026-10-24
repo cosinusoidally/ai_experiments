@@ -676,6 +676,48 @@
             PROPERTY_INDEX_SLOTS + slot * Heap.WORD_BYTES, Heap.Types.PROPERTY_INDEX);
     };
 
+    /* Owner/entry boundary for property consumers. During migration the
+     * legacy backing uses property-record IDs; packed backing will use slots.
+     * Consumers must not infer an address from an entry ID. Value-cell
+     * addresses are temporary and cannot survive a structural mutation. */
+    Records.prototype.ownPropertyStorage = function (owner) {
+        return this.objectPropertyHead(owner);
+    };
+    Records.prototype.ownPropertyEpoch = function (owner) {
+        return this.heap.flags(owner);
+    };
+    Records.prototype.ownPropertyGeneration = function (owner) {
+        return this.heap.mark(owner);
+    };
+    Records.prototype.ownPropertyEntryValueCell = function (owner, entry) {
+        return this.propertyValueCell(entry);
+    };
+    Records.prototype.ownPropertyEntryAttributes = function (owner, entry) {
+        return this.propertyAttributes(entry);
+    };
+    Records.prototype.ownPropertyEntryKey = function (owner, entry) {
+        return this.propertyKey(entry);
+    };
+    Records.prototype.ownPropertyEntrySetter = function (owner, entry) {
+        return this.propertySetter(entry);
+    };
+    Records.prototype.setOwnPropertyEntrySetter = function (owner, entry, setter) {
+        this.setPropertySetter(entry, setter);
+    };
+
+    Records.prototype.findOwnPropertyEntry = function (owner, key) {
+        return this.findOwnProperty(owner, key);
+    };
+    Records.prototype.defineOwnPropertyEntry = function (owner, key, attributes) {
+        return this.defineOwnProperty(owner, key, attributes);
+    };
+    Records.prototype.deleteOwnPropertyEntry = function (owner, key) {
+        var entry = this.findOwnPropertyEntry(owner, key);
+        var deleted = this.deleteOwnProperty(owner, key);
+        if (entry && deleted) this.heap.freeRecord(entry);
+        return deleted;
+    };
+
     Records.prototype.findOwnProperty = function (object, keyString) {
         var keyAddress = typeof keyString === "number" ? keyString : 0;
         var property = this.objectPropertyHead(object);

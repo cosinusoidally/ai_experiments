@@ -887,12 +887,12 @@
                     heapBase, state, globalObject, globalKey);
                 var globalAccessor = 0;
                 if (globalProperty > 0) {
-                    if ((propertyAttributes(heapBase, globalProperty) &
+                    if ((ownPropertyEntryAttributesKernel(heapBase, globalObject, globalProperty) &
                          PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
                         globalAccessor = 1;
                         globalProperty = 0;
                     } else {
-                        var globalValue = propertyValueCellAddress(heapBase, globalProperty);
+                        var globalValue = ownPropertyEntryValueCellKernel(heapBase, globalObject, globalProperty);
                         var globalDestination = registerAddress +
                             globalTargetIndex * VALUE_CELL_BYTES;
                         copyValueCell(globalDestination, globalValue);
@@ -4191,6 +4191,10 @@
                 var virtualPropertyObjectType = recordType(
                     heapBase, propertyObject);
                 var propertyReceiver = propertyObject;
+                /* Keep the descriptor owner separately from the receiver.
+                 * Accessors use receiver as `this`; entry resolution uses
+                 * owner even after the prototype walk advances/finishes. */
+                var propertyOwner = propertyReceiver;
                 var propertyFoundOnReceiver = 0;
                 var propertyCacheIndex =
                     ((propertyReceiver >>> 3) ^
@@ -4369,6 +4373,7 @@
                         }
                     }
                     if (propertyRecord !== 0) {
+                        propertyOwner = propertyObject;
                         propertyObject = 0;
                     } else {
                         propertyObject = load32(
@@ -4393,10 +4398,10 @@
                 }
                 if (propertyRecord !== 0) {
                     if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
-                        if ((propertyAttributes(heapBase, propertyRecord) &
+                        if ((ownPropertyEntryAttributesKernel(heapBase, propertyOwner, propertyRecord) &
                              PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            var getterCell = propertyValueCellAddress(
-                                heapBase, propertyRecord);
+                            var getterCell = ownPropertyEntryValueCellKernel(
+                                heapBase, propertyOwner, propertyRecord);
                             if (valueCellTag(0, getterCell) ===
                                     VALUE_TAG_UNDEFINED) {
                                 setValueCellUndefined(
@@ -4446,7 +4451,8 @@
                         setPropertyCacheObject(heapBase, state,
                             propertyCacheIndex, propertyReceiver);
                     }
-                    var propertySource = heapBase + propertyRecord + PROPERTY_VALUE;
+                    var propertySource = ownPropertyEntryValueCellKernel(
+                        heapBase, propertyOwner, propertyRecord);
                     var propertyTarget = registerAddress +
                         propertyTargetIndex * VALUE_CELL_BYTES;
                     copyValueCell(propertyTarget, propertySource);

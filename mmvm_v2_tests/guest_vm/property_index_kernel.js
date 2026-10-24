@@ -5,6 +5,18 @@
  * index before unlinking a property. Appended prefixes are caught up lazily.
  * All functions are compiled with the interpreter's shared kernel pipeline. */
 (function (root) {
+    /* An entry is interpreted with its owning object, never as a permanent
+     * value-cell pointer. The legacy adapter uses record IDs for entries;
+     * packed storage will resolve a slot here. These small functions are
+     * compiled/inlined by the same kernel pipeline as their callers. */
+    function ownPropertyEntryAttributesKernel(heapBase, owner, entry) {
+        return propertyAttributes(heapBase, entry);
+    }
+
+    function ownPropertyEntryValueCellKernel(heapBase, owner, entry) {
+        return propertyValueCellAddress(heapBase, entry);
+    }
+
     function propertyIndexFindKernel(heapBase, index, key, hash) {
         var capacity = propertyIndexCapacity(heapBase, index);
         var slot = hash & (capacity - 1);
@@ -149,6 +161,8 @@
     }
 
     var kernels = {
+        ownPropertyEntryAttributesKernel: ownPropertyEntryAttributesKernel,
+        ownPropertyEntryValueCellKernel: ownPropertyEntryValueCellKernel,
         propertyIndexFindKernel: propertyIndexFindKernel,
         propertyIndexInsertKernel: propertyIndexInsertKernel,
         buildObjectPropertyIndexKernel: buildObjectPropertyIndexKernel,

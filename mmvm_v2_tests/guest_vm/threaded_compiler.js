@@ -81,9 +81,8 @@
                                       this.generate(program);
         var factory = Function("hc", "p", "ic", source);
         var compiled = factory(this, program,
-            {objects: [], versions: [], cells: [], keyAddresses: [], arrayObjects: [],
+            {propertyReferences: [], polymorphicReferences: [], keyAddresses: [], arrayObjects: [],
              arrayVersions: [], arrayVectors: [], arrayLengths: [],
-             propertyIdentities: [], propertyVersions: [], propertyCells: [],
              propertyCounts: []});
         this.programs.push(program);
         this.compiled.push(compiled);
@@ -365,55 +364,47 @@
         return this.runtime.getProperty(object, key);
     };
 
+    ThreadedCompiler.prototype.cachedOwnPropertyReference = function (
+            cache, site, object, key) {
+        var runtime = this.runtime;
+        var reference = cache.propertyReferences[site];
+        if (runtime.ownPropertyReferenceIsCurrent(reference, object)) return reference;
+        var ownerKey = "$" + object.heapAddress;
+        var references = cache.polymorphicReferences[site];
+        reference = references && references[ownerKey];
+        if (runtime.ownPropertyReferenceIsCurrent(reference, object)) {
+            cache.propertyReferences[site] = reference;
+            return reference;
+        }
+        var keyAddress = cache.keyAddresses[site];
+        if (!keyAddress) {
+            keyAddress = runtime.internStringAddress(key);
+            cache.keyAddresses[site] = keyAddress;
+        }
+        var entry = runtime.heapOwnPropertyEntry(object, keyAddress, false);
+        if (!entry) return null;
+        reference = runtime.captureOwnPropertyReference(object, keyAddress, entry);
+        cache.propertyReferences[site] = reference;
+        if (!references) {
+            references = {};
+            cache.polymorphicReferences[site] = references;
+            cache.propertyCounts[site] = 0;
+        }
+        if (references[ownerKey] || cache.propertyCounts[site] < 256) {
+            if (!references[ownerKey]) cache.propertyCounts[site]++;
+            references[ownerKey] = reference;
+        }
+        return reference;
+    };
+
     ThreadedCompiler.prototype.getConstantCached = function (
             cache, site, object, key) {
         if (object && object.heapAddress && object.guestType !== "array" &&
             object.guestType !== "buffer") {
-            if (cache.objects[site] === object &&
-                cache.versions[site] === object.propertyVersion) {
-                return this.runtime.readHeapValue(cache.cells[site]);
-            }
-            var polymorphicKey = "$" + object.heapAddress;
-            var identities = cache.propertyIdentities[site];
-            if (identities &&
-                identities[polymorphicKey] === object.heapIdentity &&
-                cache.propertyVersions[site][polymorphicKey] ===
-                    object.propertyVersion) {
-                return this.runtime.readHeapValue(
-                    cache.propertyCells[site][polymorphicKey]);
-            }
-            var keyAddress = cache.keyAddresses[site];
-            if (!keyAddress) {
-                keyAddress = this.runtime.internStringAddress(key);
-                cache.keyAddresses[site] = keyAddress;
-            }
-            var property = this.runtime.heapOwnPropertyAddress(
-                object, keyAddress, false);
-            if (property) {
-                cache.objects[site] = object;
-                cache.versions[site] = object.propertyVersion;
-                cache.cells[site] = this.runtime.heapRecords.propertyValueCell(property);
-                if (!identities) {
-                    identities = {};
-                    cache.propertyIdentities[site] = identities;
-                    cache.propertyVersions[site] = {};
-                    cache.propertyCells[site] = {};
-                    cache.propertyCounts[site] = 0;
-                }
-                var cachePolymorphicProperty =
-                    identities[polymorphicKey] !== undefined;
-                if (!cachePolymorphicProperty &&
-                    cache.propertyCounts[site] < 256) {
-                    cache.propertyCounts[site]++;
-                    cachePolymorphicProperty = true;
-                }
-                if (cachePolymorphicProperty) {
-                    identities[polymorphicKey] = object.heapIdentity;
-                    cache.propertyVersions[site][polymorphicKey] =
-                        object.propertyVersion;
-                    cache.propertyCells[site][polymorphicKey] = cache.cells[site];
-                }
-                return this.runtime.readHeapValue(cache.cells[site]);
+            var reference = this.cachedOwnPropertyReference(cache, site, object, key);
+            if (reference) {
+                return this.runtime.readPropertyEntry(
+                    object, reference.entry, object);
             }
         }
         if (object && object.guestType === "array" && key === "length") {
@@ -453,56 +444,12 @@
         }
         if (object && object.heapAddress && object.guestType !== "array" &&
             object.guestType !== "buffer") {
-            if (cache.objects[site] === object &&
-                cache.versions[site] === object.propertyVersion) {
-                this.runtime.writeHeapValue(cache.cells[site], value);
+            var reference = this.cachedOwnPropertyReference(cache, site, object, key);
+            if (reference) {
+                this.runtime.writePropertyEntry(object, reference.entry, object, value, false);
                 object.valueVersion++;
                 return value;
             }
-            var polymorphicKey = "$" + object.heapAddress;
-            var identities = cache.propertyIdentities[site];
-            if (identities &&
-                identities[polymorphicKey] === object.heapIdentity &&
-                cache.propertyVersions[site][polymorphicKey] ===
-                    object.propertyVersion) {
-                this.runtime.writeHeapValue(
-                    cache.propertyCells[site][polymorphicKey], value);
-                object.valueVersion++;
-                return value;
-            }
-            var keyAddress = cache.keyAddresses[site];
-            if (!keyAddress) {
-                keyAddress = this.runtime.internStringAddress(key);
-                cache.keyAddresses[site] = keyAddress;
-            }
-            var property = this.runtime.heapOwnPropertyAddress(
-                object, keyAddress, true);
-            cache.objects[site] = object;
-            cache.versions[site] = object.propertyVersion;
-            cache.cells[site] = this.runtime.heapRecords.propertyValueCell(property);
-            if (!identities) {
-                identities = {};
-                cache.propertyIdentities[site] = identities;
-                cache.propertyVersions[site] = {};
-                cache.propertyCells[site] = {};
-                cache.propertyCounts[site] = 0;
-            }
-            var cachePolymorphicProperty =
-                identities[polymorphicKey] !== undefined;
-            if (!cachePolymorphicProperty &&
-                cache.propertyCounts[site] < 256) {
-                cache.propertyCounts[site]++;
-                cachePolymorphicProperty = true;
-            }
-            if (cachePolymorphicProperty) {
-                identities[polymorphicKey] = object.heapIdentity;
-                cache.propertyVersions[site][polymorphicKey] =
-                    object.propertyVersion;
-                cache.propertyCells[site][polymorphicKey] = cache.cells[site];
-            }
-            this.runtime.writeHeapValue(cache.cells[site], value);
-            object.valueVersion++;
-            return value;
         }
         this.runtime.setProperty(object, key, value);
         return value;
