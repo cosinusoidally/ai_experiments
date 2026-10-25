@@ -564,6 +564,9 @@
     }
 
     var READ_FIELD_ACCESSORS = {
+        propertyDescriptorKey: "PROPERTY_DESCRIPTOR_KEY",
+        propertyDescriptorAttributes: "PROPERTY_DESCRIPTOR_ATTRIBUTES",
+        propertyDescriptorSetter: "PROPERTY_DESCRIPTOR_SETTER",
         recordType: "RECORD_TYPE",
         recordSize: "RECORD_SIZE",
         recordMark: "RECORD_MARK",
@@ -711,6 +714,9 @@
     };
 
     var WRITE_FIELD_ACCESSORS = {
+        setPropertyDescriptorKey: "PROPERTY_DESCRIPTOR_KEY",
+        setPropertyDescriptorAttributes: "PROPERTY_DESCRIPTOR_ATTRIBUTES",
+        setPropertyDescriptorSetter: "PROPERTY_DESCRIPTOR_SETTER",
         setPropertyStorageLength: "PROPERTY_STORAGE_LENGTH",
         setPropertyStorageCapacity: "PROPERTY_STORAGE_CAPACITY",
         setPropertyStorageLiveCount: "PROPERTY_STORAGE_LIVE_COUNT",
@@ -826,6 +832,7 @@
     };
 
     var INDEXED_ADDRESS_ACCESSORS = {
+        propertyStorageDescriptorAt: {field: "PROPERTY_STORAGE_KEY", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageValueCellAt: {field: "PROPERTY_STORAGE_VALUE", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         valueCellAddress: {fieldValue: 0, stride: "VALUE_CELL_BYTES"},
         bytecodeRegisterCellAddress: {fieldValue: 0, stride: "BYTECODE_REGISTER_SCALE"},
@@ -877,6 +884,8 @@
     };
 
     var FIELD_ADDRESS_ACCESSORS = {
+        legacyPropertyDescriptorAddress: "PROPERTY_KEY",
+        propertyDescriptorValueCell: "PROPERTY_DESCRIPTOR_VALUE",
         recordPayloadAddress: "HEAP_HEADER_BYTES",
         propertyIndexSlotsAddress: "PROPERTY_INDEX_SLOTS",
         valueCellPayloadAddress: "VALUE_CELL_LOW",

@@ -12,7 +12,7 @@ Both the reference implementation and the compiled interpreter use this
 representation by default. Native constructors create packed entries directly;
 there is no linked-list construction followed by a lazy conversion. The native
 implementation is `property_storage_kernel.js`, compiled by the shared kernel
-pipeline. Compiler contract 51 invalidates incompatible code-only snapshots.
+pipeline. Compiler contract 52 invalidates incompatible code-only snapshots.
 
 ## Entries and ordering
 
@@ -22,6 +22,16 @@ key, descriptor attributes, setter reference and a 16-byte tagged value cell.
 The remaining word is alignment padding. There is no per-entry heap header or
 next pointer. Layouts are authoritative in `heap_records.js`; consumers use
 named field accessors.
+
+Packed and legacy named entries expose the same temporary descriptor view:
+key, attributes, setter and value cell. Packed alignment padding is at the end
+of the entry, so its binary64 payload remains eight-byte aligned. A semantic
+read or write resolves this view once, rather than resolving the owner again
+for each descriptor field. The view is not a cache reference: it must never
+survive a callback, storage mutation or heap relocation. Persistent caches
+still retain only guarded owners and entry IDs. The snapshot inspection tool
+recognizes the preceding contract-51 value-cell layout when inspecting older
+images; raw heap dumps are interpreted using the current layout.
 
 Entry IDs are one-based array slots, with zero meaning not found. New names
 append. Updating a value or descriptor does not move the entry. Deletion clears
@@ -85,6 +95,13 @@ This is necessary for lifetime hygiene as well as deterministic snapshots:
 obsolete copies of a libc-symbol dictionary must not retain producing-process
 addresses after the live binding cells have been normalized. No serializer-only
 copying/caching workaround or source/debug stripping is involved.
+
+When free regions pass from the embedding allocator to native execution,
+they are ordered by size and then address. ES5 does not promise stable
+`Array.sort`; sorting by size alone allowed equal-sized regions to exchange
+allocation order between hosts. An explicit tie-breaker makes that allocator
+decision deterministic without changing guest identity semantics or rewriting
+references in the serializer.
 
 Descriptor operations that can append to their own source object preserve any
 needed temporary value before regrowth. Raw cell addresses must not outlive

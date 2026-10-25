@@ -73,6 +73,16 @@ with a maximum observed heap bump of 175,480 bytes (35.72 seconds including
 compilation). The packed-storage lifecycle regression separately exercises
 its collector edges on both hosts before ordinary objects migrate to it.
 
+After the ordinary-object packed-storage cutover (2026-10-25), the same
+workload also checks exact insertion order through deletion/reinsertion and
+repeated growth/compaction, retained descriptor values and ordinary objects'
+backing types. Both hosts report 67 embedding collections, 27 structural audits,
+72,842 checked edges and 221 property-index audits. Maximum observed bumps are
+363,336 bytes under Node and 388,184 under js_min, below the unchanged 8 MiB
+cap. The contract-52 js_min workload/check phase takes 30.897 seconds; that
+phase excludes initial runtime construction. These remain corruption and
+lifetime checks, not substitutes for interactive rendering checks.
+
 ## Corruption found during bring-up
 
 The test caught an overwritten platform-services link before a later native

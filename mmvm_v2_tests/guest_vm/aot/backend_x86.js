@@ -361,7 +361,8 @@
     var STANDALONE_SNAPSHOT_MAGIC = 0x32535647;
     var STANDALONE_SNAPSHOT_VERSION = 2;
     var STANDALONE_HEADER_BYTES = 128;
-    var STANDALONE_HEADER_FIELDS = {codeOffset: 20, codeLength: 24, sourceHash: 88};
+    var STANDALONE_HEADER_FIELDS = {codeOffset: 20, codeLength: 24,
+        heapOffset: 28, heapLength: 32, compilerVersion: 80, sourceHash: 88};
     X86Backend.StandaloneHeaderFields = STANDALONE_HEADER_FIELDS;
     var STANDALONE_ENGINE_BUDGET = 2147483647;
     var ENGINE_EXIT_BUDGET = 1;
@@ -400,7 +401,7 @@
         var magic = peek32(header) >>> 0;
         var formatVersion = peek32(header + 4) >>> 0;
         var standalone = formatVersion === 2;
-        var compilerVersion = peek32(header + (standalone ? 80 : 8)) >>> 0;
+        var compilerVersion = peek32(header + (standalone ? STANDALONE_HEADER_FIELDS.compilerVersion : 8)) >>> 0;
         var profileMode = peek32(header + (standalone ? 84 : 12)) >>> 0;
         var sourceHash = peek32(header + (standalone ? STANDALONE_HEADER_FIELDS.sourceHash : 16)) >>> 0;
         var operandMode = peek32(header + (standalone ?
@@ -982,7 +983,7 @@
             poke32(staging + 40, layout.frameAddress);
             poke32(staging + 44, layout.contextAddress);
             poke32(staging + 48, layout.dlsymCellAddress);
-            poke32(staging + 80, metadata.compilerVersion | 0);
+            poke32(staging + STANDALONE_HEADER_FIELDS.compilerVersion, metadata.compilerVersion | 0);
             poke32(staging + 84, metadata.profileMode | 0);
             poke32(staging + STANDALONE_HEADER_FIELDS.sourceHash, metadata.sourceHash | 0);
             poke32(staging + STANDALONE_OPERAND_MODE_OFFSET, metadata.operandMode | 0);

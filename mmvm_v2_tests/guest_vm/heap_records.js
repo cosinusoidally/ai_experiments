@@ -29,20 +29,27 @@
     var PROPERTY_STORAGE_LIVE_COUNT = 8;
     var PROPERTY_STORAGE_HASH = 12;
     var PROPERTY_STORAGE_ENTRIES = 16;
-    var PROPERTY_ENTRY_KEY = 0;
-    var PROPERTY_ENTRY_ATTRIBUTES = 4;
-    var PROPERTY_ENTRY_SETTER = 8;
-    var PROPERTY_ENTRY_PADDING = 12;
-    var PROPERTY_ENTRY_VALUE = 16;
-    var PROPERTY_ENTRY_BYTES = PROPERTY_ENTRY_VALUE + CELL_BYTES;
-    var PROPERTY_STORAGE_INITIAL_CAPACITY = 4;
-
     var PROPERTY_NEXT = 0;
     var PROPERTY_KEY = 4;
     var PROPERTY_ATTRIBUTES = 8;
     var PROPERTY_SETTER = 12;
     var PROPERTY_VALUE = 16;
     var PROPERTY_BYTES = PROPERTY_VALUE + CELL_BYTES;
+
+    /* A transient descriptor view starts at the key in either layout. Put
+     * packed padding last: the common value cell is then at the same offset
+     * as a legacy descriptor, and its binary64 payload is 8-byte aligned. */
+    var PROPERTY_DESCRIPTOR_KEY = 0;
+    var PROPERTY_DESCRIPTOR_ATTRIBUTES = PROPERTY_ATTRIBUTES - PROPERTY_KEY;
+    var PROPERTY_DESCRIPTOR_SETTER = PROPERTY_SETTER - PROPERTY_KEY;
+    var PROPERTY_DESCRIPTOR_VALUE = PROPERTY_VALUE - PROPERTY_KEY;
+    var PROPERTY_ENTRY_KEY = PROPERTY_DESCRIPTOR_KEY;
+    var PROPERTY_ENTRY_ATTRIBUTES = PROPERTY_DESCRIPTOR_ATTRIBUTES;
+    var PROPERTY_ENTRY_SETTER = PROPERTY_DESCRIPTOR_SETTER;
+    var PROPERTY_ENTRY_VALUE = PROPERTY_DESCRIPTOR_VALUE;
+    var PROPERTY_ENTRY_PADDING = PROPERTY_ENTRY_VALUE + CELL_BYTES;
+    var PROPERTY_ENTRY_BYTES = PROPERTY_ENTRY_PADDING + Heap.WORD_BYTES;
+    var PROPERTY_STORAGE_INITIAL_CAPACITY = 4;
 
     var STRING_LENGTH = 0;
     var STRING_HASH = 4;
@@ -248,13 +255,19 @@
                           DEFAULT: DEFAULT_ATTRIBUTES};
     Records.PropertyStorageLayout = {
         ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
-        ENTRIES: PROPERTY_STORAGE_ENTRIES
+        ENTRIES: PROPERTY_STORAGE_ENTRIES,
+        VALUE: PROPERTY_ENTRY_VALUE
     };
+    Records.LegacyPackedPropertyLayout = {compilerVersion: 51, VALUE: 16};
 
     /* Kernel-dialect source declares same-named constants so it remains
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        PROPERTY_DESCRIPTOR_KEY: PROPERTY_DESCRIPTOR_KEY,
+        PROPERTY_DESCRIPTOR_ATTRIBUTES: PROPERTY_DESCRIPTOR_ATTRIBUTES,
+        PROPERTY_DESCRIPTOR_SETTER: PROPERTY_DESCRIPTOR_SETTER,
+        PROPERTY_DESCRIPTOR_VALUE: PROPERTY_DESCRIPTOR_VALUE,
         HEAP_TYPE_PROPERTY_STORAGE: Heap.Types.PROPERTY_STORAGE,
         PROPERTY_STORAGE_LENGTH: Heap.HEADER_SIZE + PROPERTY_STORAGE_LENGTH,
         PROPERTY_STORAGE_CAPACITY: Heap.HEADER_SIZE + PROPERTY_STORAGE_CAPACITY,
@@ -705,11 +718,28 @@
     Records.prototype.ownPropertyGeneration = function (owner) {
         return this.heap.mark(owner);
     };
-    Records.prototype.ownPropertyEntryValueCell = function (owner, entry) {
+    Records.prototype.ownPropertyEntryDescriptor = function (owner, entry) {
         if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
-            return this.propertyStorageValueCell(this.ownPropertyStorage(owner), entry);
+            var storage = this.ownPropertyStorage(owner);
+            var offset = this.propertyStorageEntryOffset(storage, entry);
+            if (!this.heap.readTrustedFieldU32(storage, offset + PROPERTY_ENTRY_KEY)) {
+                throw new RangeError("deleted property storage entry");
+            }
+            return this.heap.trustedPayloadAddress(storage, offset + PROPERTY_ENTRY_KEY);
         }
-        return this.propertyValueCell(entry);
+        return this.heap.trustedPayloadAddress(entry, PROPERTY_KEY);
+    };
+    Records.prototype.propertyDescriptorAttributes = function (descriptor) {
+        return this.heap.memory.readU32Trusted(descriptor + PROPERTY_DESCRIPTOR_ATTRIBUTES);
+    };
+    Records.prototype.propertyDescriptorSetter = function (descriptor) {
+        return this.heap.memory.readU32Trusted(descriptor + PROPERTY_DESCRIPTOR_SETTER);
+    };
+    Records.prototype.propertyDescriptorValueCell = function (descriptor) {
+        return descriptor + PROPERTY_DESCRIPTOR_VALUE;
+    };
+    Records.prototype.ownPropertyEntryValueCell = function (owner, entry) {
+        return this.propertyDescriptorValueCell(this.ownPropertyEntryDescriptor(owner, entry));
     };
     Records.prototype.ownPropertyEntryAttributes = function (owner, entry) {
         if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
@@ -933,6 +963,10 @@
     };
 
     Records.prototype.countOwnProperties = function (source) {
+        if (this.heap.recordType(source) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(source);
+            return storage ? this.propertyStorageLiveCount(storage) : 0;
+        }
         var property = this.lastOwnPropertyEntry(source);
         var count = 0;
         while (property) {

@@ -887,12 +887,14 @@
                     heapBase, state, globalObject, globalKey);
                 var globalAccessor = 0;
                 if (globalProperty > 0) {
-                    if ((ownPropertyEntryAttributesKernel(heapBase, globalObject, globalProperty) &
+                    var globalPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+                        heapBase, globalObject, globalProperty);
+                    if ((propertyDescriptorAttributes(0, globalPropertyDescriptor) &
                          PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
                         globalAccessor = 1;
                         globalProperty = 0;
                     } else {
-                        var globalValue = ownPropertyEntryValueCellKernel(heapBase, globalObject, globalProperty);
+                        var globalValue = propertyDescriptorValueCell(0, globalPropertyDescriptor);
                         var globalDestination = registerAddress +
                             globalTargetIndex * VALUE_CELL_BYTES;
                         copyValueCell(globalDestination, globalValue);
@@ -966,7 +968,9 @@
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
                 }
-                if ((ownPropertyEntryAttributesKernel(heapBase, globalObject, setGlobalRecord) &
+                var setGlobalDescriptor = ownPropertyEntryDescriptorKernel(
+                    heapBase, globalObject, setGlobalRecord);
+                if ((propertyDescriptorAttributes(0, setGlobalDescriptor) &
                      PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
                     if ((programFlags(heapBase, currentProgram) &
                          PROGRAM_FLAG_STRICT) !== 0) {
@@ -974,8 +978,7 @@
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
                 } else {
-                    var setGlobalValue = ownPropertyEntryValueCellKernel(
-                        heapBase, globalObject, setGlobalRecord);
+                    var setGlobalValue = propertyDescriptorValueCell(0, setGlobalDescriptor);
                     var setGlobalSource = registerAddress +
                         setGlobalSourceIndex * VALUE_CELL_BYTES;
                     copyValueCell(setGlobalValue, setGlobalSource);
@@ -1345,11 +1348,13 @@
                             namedGetProperty = PROPERTY_FOUND_SENTINEL;
                         } else arrayGetSupported = 0;
                     } else if (namedGetProperty !== PROPERTY_FOUND_SENTINEL) {
-                        if ((ownPropertyEntryAttributesKernel(heapBase, namedGetOwner, namedGetProperty) &
+                        var namedGetDescriptor = ownPropertyEntryDescriptorKernel(
+                            heapBase, namedGetOwner, namedGetProperty);
+                        if ((propertyDescriptorAttributes(0, namedGetDescriptor) &
                              PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
                             arrayGetSupported = 0;
                         } else {
-                            var namedGetSource = ownPropertyEntryValueCellKernel(heapBase, namedGetOwner, namedGetProperty);
+                            var namedGetSource = propertyDescriptorValueCell(0, namedGetDescriptor);
                             copyValueCell(arrayGetTarget, namedGetSource);
                         }
                     }
@@ -1810,7 +1815,10 @@
                                 heapBase, state, frame, pc, opcode,
                                 (initialBudget - budget));
                         }
-                    } else if ((ownPropertyEntryAttributesKernel(heapBase, arraySetObject, dynamicPropertyRecord) &
+                    }
+                    var dynamicPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+                        heapBase, arraySetObject, dynamicPropertyRecord);
+                    if ((propertyDescriptorAttributes(0, dynamicPropertyDescriptor) &
                                 PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
                         dynamicPropertyValid = 0;
                     }
@@ -1818,7 +1826,7 @@
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                    var dynamicPropertyDestination = ownPropertyEntryValueCellKernel(heapBase, arraySetObject, dynamicPropertyRecord);
+                    var dynamicPropertyDestination = propertyDescriptorValueCell(0, dynamicPropertyDescriptor);
                     copyValueCell(dynamicPropertyDestination, arraySetSource);
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
@@ -4320,10 +4328,11 @@
                 }
                 if (propertyRecord !== 0) {
                     if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
-                        if ((ownPropertyEntryAttributesKernel(heapBase, propertyOwner, propertyRecord) &
+                        var resolvedPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+                            heapBase, propertyOwner, propertyRecord);
+                        if ((propertyDescriptorAttributes(0, resolvedPropertyDescriptor) &
                              PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            var getterCell = ownPropertyEntryValueCellKernel(
-                                heapBase, propertyOwner, propertyRecord);
+                            var getterCell = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
                             if (valueCellTag(0, getterCell) ===
                                     VALUE_TAG_UNDEFINED) {
                                 setValueCellUndefined(
@@ -4374,8 +4383,7 @@
                         setPropertyCacheObject(heapBase, state,
                             propertyCacheIndex, propertyReceiver);
                     }
-                    var propertySource = ownPropertyEntryValueCellKernel(
-                        heapBase, propertyOwner, propertyRecord);
+                    var propertySource = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
                     var propertyTarget = registerAddress +
                         propertyTargetIndex * VALUE_CELL_BYTES;
                     copyValueCell(propertyTarget, propertySource);
@@ -4558,9 +4566,12 @@
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                } else if ((ownPropertyEntryAttributesKernel(heapBase, setPropertyOwner, setPropertyRecord) &
+                }
+                var setPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+                    heapBase, setPropertyOwner, setPropertyRecord);
+                if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                    var setter = ownPropertyEntrySetterKernel(heapBase, setPropertyOwner, setPropertyRecord);
+                    var setter = propertyDescriptorSetter(0, setPropertyDescriptor);
                     if (setter === 0) {
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
@@ -4580,7 +4591,7 @@
                         return unsupportedDiagnosticExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                } else if ((ownPropertyEntryAttributesKernel(heapBase, setPropertyOwner, setPropertyRecord) &
+                } else if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
                             PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
@@ -4601,7 +4612,7 @@
                     environment = frameEnvironment(heapBase, frame);
                     pc = 0;
                 } else {
-                    var setPropertyDestination = ownPropertyEntryValueCellKernel(heapBase, setPropertyOwner, setPropertyRecord);
+                    var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
                     var setPropertySource = registerAddress +
                         setPropertySourceIndex * VALUE_CELL_BYTES;
                     copyValueCell(setPropertyDestination, setPropertySource);
@@ -17351,7 +17362,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 51,
+                compilerVersion: 52,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17387,6 +17398,10 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    PROPERTY_DESCRIPTOR_KEY: kernelConstantOverrides.PROPERTY_DESCRIPTOR_KEY,
+                    PROPERTY_DESCRIPTOR_ATTRIBUTES: kernelConstantOverrides.PROPERTY_DESCRIPTOR_ATTRIBUTES,
+                    PROPERTY_DESCRIPTOR_SETTER: kernelConstantOverrides.PROPERTY_DESCRIPTOR_SETTER,
+                    PROPERTY_DESCRIPTOR_VALUE: kernelConstantOverrides.PROPERTY_DESCRIPTOR_VALUE,
                     HEAP_TYPE_PROPERTY_STORAGE: kernelConstantOverrides.HEAP_TYPE_PROPERTY_STORAGE,
                     PROPERTY_STORAGE_LENGTH: kernelConstantOverrides.PROPERTY_STORAGE_LENGTH,
                     PROPERTY_STORAGE_CAPACITY: kernelConstantOverrides.PROPERTY_STORAGE_CAPACITY,
@@ -18154,7 +18169,10 @@
          * ownership crosses into native execution; consumption thereafter is
          * entirely inside the compiled allocator. */
         nativeRegions.sort(function (left, right) {
-            return left.size - right.size;
+            /* ES5 does not require a stable sort. Equal-sized regions must
+             * have an explicit order across hosts, or logically equivalent
+             * allocations acquire different identities in rebuilt images. */
+            return left.size - right.size || left.address - right.address;
         });
         index = 0;
         while (index < nativeRegions.length) {

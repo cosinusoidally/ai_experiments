@@ -5,7 +5,9 @@
     var nodeHost = typeof module !== "undefined" && module.exports;
     var Heap, Cells, Records, Sweeper, Compiler, Backend, FFI, Runtime;
     var args, output;
+    var SnapshotBackend;
     if (nodeHost) {
+        SnapshotBackend = require("../aot/backend_x86.js");
         Heap = require("../heap.js");
         Cells = require("../value_cell.js");
         Records = require("../heap_records.js");
@@ -22,6 +24,7 @@
         Sweeper = GuestVMHeapSweeper;
         Compiler = GuestVMKernelCompiler;
         Backend = GuestVMKernelX86Backend;
+        SnapshotBackend = GuestVMKernelX86Backend;
         FFI = GuestVMHostFFI;
         args = shellArguments;
         output = print;
@@ -71,9 +74,33 @@
             return ffi.peek32(headerPointer + offset) >>> 0;
         };
     }
-    var heapOffset = rawHeap ? 0 : header(28);
+    var headerFields = SnapshotBackend.StandaloneHeaderFields;
+    var legacyPacked = !rawHeap && header(headerFields.compilerVersion) ===
+        Records.LegacyPackedPropertyLayout.compilerVersion;
+    function inspectionRecordsFor(inspectedHeap, cells) {
+        var result = new Records(inspectedHeap, cells);
+        if (legacyPacked) {
+            /* ABI 51 placed alignment padding before the value cell.
+             * Inspection must follow the image ABI, not the running VM ABI. */
+            result.propertyStorageValueCell = function (storage, entry) {
+                return this.heap.trustedPayloadAddress(storage,
+                    this.propertyStorageEntryOffset(storage, entry) +
+                    Records.LegacyPackedPropertyLayout.VALUE);
+            };
+        }
+        return result;
+    }
+    var markerConstants = {};
+    for (var constantName in Records.KernelConstants) {
+        if (Object.prototype.hasOwnProperty.call(Records.KernelConstants, constantName)) {
+            markerConstants[constantName] = Records.KernelConstants[constantName];
+        }
+    }
+    if (legacyPacked) markerConstants.PROPERTY_STORAGE_VALUE =
+        markerConstants.PROPERTY_STORAGE_KEY + Records.LegacyPackedPropertyLayout.VALUE;
+    var heapOffset = rawHeap ? 0 : header(headerFields.heapOffset);
     var heapLength = rawHeap ? (nodeHost ? file.length :
-        ffi.call(ffi.resolve("lseek"), [descriptor, 0, 2])) : header(32);
+        ffi.call(ffi.resolve("lseek"), [descriptor, 0, 2])) : header(headerFields.heapLength);
     if (inspectionOnly && nodeHost) {
         /* Inspect a debugger dump without expanding its bytes into the Node
          * emulated heap. Header interpretation still belongs to Heap. */
@@ -123,7 +150,7 @@
     }
     heap.bump = heapLength;
     if (shareBackings) {
-        var recordsForSharing = new Records(heap, new Cells(heap));
+        var recordsForSharing = inspectionRecordsFor(heap, new Cells(heap));
         var startSharing = new Date().getTime();
         var sharedCount = Runtime.prototype.shareSnapshotStringBackings.call({
             heapRecords: recordsForSharing, linearHeap: heap
@@ -142,7 +169,7 @@
         return;
     }
     function reportSource(inspectedHeap) {
-        var sourceRecords = new Records(inspectedHeap, new Cells(inspectedHeap));
+        var sourceRecords = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         function describeString(address) {
             inspectedHeap.requireRecord(address, Heap.Types.STRING);
             return "string " + address + " encoding=" +
@@ -176,7 +203,7 @@
      * containment finds remaining duplicated backing text without guessing
      * from filenames, function names or source formatting. */
     function reportStringSharing(inspectedHeap) {
-        var records = new Records(inspectedHeap, new Cells(inspectedHeap));
+        var records = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         var flat = [], position = Heap.FIRST_RECORD;
         while (position < inspectedHeap.bump) {
             var record = inspectedHeap.inspectRecordHeader(position);
@@ -223,7 +250,7 @@
     function reportMetadataSharing(inspectedHeap) {
         var bytecodeLayout = nodeHost ? require("../bytecode.js") : GuestVMBytecode;
         var cells = new Cells(inspectedHeap);
-        var records = new Records(inspectedHeap, cells);
+        var records = inspectionRecordsFor(inspectedHeap, cells);
         var roles = {}, seen = {}, reusedNonemptyArgumentEntries = 0;
         function integerSignature(vector) {
             var values = [], index = 0;
@@ -310,7 +337,7 @@
     }
 
     function reportProperties(inspectedHeap) {
-        var inspectionRecords = new Records(
+        var inspectionRecords = inspectionRecordsFor(
             inspectedHeap, new Cells(inspectedHeap));
         function propertyLine(key, attributes, owner, entry) {
             var printable = "";
@@ -355,7 +382,7 @@
         var engineRecord = 0;
         var typeBytes = {}, typeCounts = {};
         var packedLive = 0, packedCapacity = 0;
-        var stringRecords = new Records(inspectedHeap, new Cells(inspectedHeap));
+        var stringRecords = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         var encodings = {latin1: {count: 0, bytes: 0},
             utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0},
             slice: {count: 0, bytes: 0}};
@@ -394,7 +421,7 @@
             packedCapacity + "; unused/tombstone slot bytes=" +
             (packedCapacity - packedLive) * Records.PropertyStorageLayout.ENTRY_BYTES);
         if (engineRecord) {
-            var inspectionRecords = new Records(
+            var inspectionRecords = inspectionRecordsFor(
                 inspectedHeap, new Cells(inspectedHeap));
             output("native GC: collections=" +
                 inspectionRecords.engineGCCollections(engineRecord) +
@@ -427,7 +454,7 @@
             }
         }
     }
-    var records = new Records(heap, new Cells(heap));
+    var records = inspectionRecordsFor(heap, new Cells(heap));
     function recordKind(record) {
         return heap.inspectRecordHeader(record).type;
     }
@@ -469,8 +496,8 @@
     var compiled = new Backend().compile(
         new Compiler().compileGraph(Sweeper.markKernel, {},
             {legacyConstantLocals: true,
-             constantBindings: Records.KernelConstants,
-             constantOverrides: Records.KernelConstants}));
+             constantBindings: markerConstants,
+             constantOverrides: markerConstants}));
     var parameters = [nodeHost ? 0 : heap.memory.nativeAddress(0),
         heapLength, heap.collectorStackBase, heap.byteLength, generation,
         roots[0], roots[1], 0, 0, 0, roots[2], roots[3], roots[4],

@@ -1333,21 +1333,23 @@
 
     Runtime.prototype.readPropertyEntry = function (
             owner, entry, receiver) {
-        if (this.heapRecords.ownPropertyEntryAttributes(owner.heapAddress, entry) &
+        var descriptor = this.heapRecords.ownPropertyEntryDescriptor(owner.heapAddress, entry);
+        if (this.heapRecords.propertyDescriptorAttributes(descriptor) &
             HeapRecords.Attributes.ACCESSOR) {
             var getter = this.readHeapValue(
-                this.heapRecords.ownPropertyEntryValueCell(owner.heapAddress, entry));
+                this.heapRecords.propertyDescriptorValueCell(descriptor));
             return getter === undefined ? undefined :
                 this.invokePropertyFunction(getter, receiver, []);
         }
-        return this.readHeapValue(this.heapRecords.ownPropertyEntryValueCell(owner.heapAddress, entry));
+        return this.readHeapValue(this.heapRecords.propertyDescriptorValueCell(descriptor));
     };
 
     Runtime.prototype.writePropertyEntry = function (
             owner, entry, receiver, value, strict) {
-        var attributes = this.heapRecords.ownPropertyEntryAttributes(owner.heapAddress, entry);
+        var descriptor = this.heapRecords.ownPropertyEntryDescriptor(owner.heapAddress, entry);
+        var attributes = this.heapRecords.propertyDescriptorAttributes(descriptor);
         if (attributes & HeapRecords.Attributes.ACCESSOR) {
-            var setterAddress = this.heapRecords.ownPropertyEntrySetter(owner.heapAddress, entry);
+            var setterAddress = this.heapRecords.propertyDescriptorSetter(descriptor);
             if (!setterAddress) {
                 if (strict) throw new TypeError("property has no setter");
                 return value;
@@ -1360,7 +1362,7 @@
             if (strict) throw new TypeError("property is not writable");
             return value;
         }
-        this.writeHeapValue(this.heapRecords.ownPropertyEntryValueCell(owner.heapAddress, entry), value);
+        this.writeHeapValue(this.heapRecords.propertyDescriptorValueCell(descriptor), value);
         return value;
     };
 

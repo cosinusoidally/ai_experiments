@@ -12,59 +12,49 @@
         return recordFlags(heapBase, owner);
     }
 
-    function ownPropertyEntryAttributesKernel(heapBase, owner, entry) {
+    function ownPropertyEntryDescriptorKernel(heapBase, owner, entry) {
         if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            return propertyStorageAttributesAt(heapBase,
+            return propertyStorageDescriptorAt(heapBase,
                 objectPropertyHead(heapBase, owner), entry - 1);
         }
-        return propertyAttributes(heapBase, entry);
+        return legacyPropertyDescriptorAddress(heapBase, entry);
+    }
+
+    function ownPropertyEntryAttributesKernel(heapBase, owner, entry) {
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        return propertyDescriptorAttributes(0, descriptor);
     }
 
     function ownPropertyEntryValueCellKernel(heapBase, owner, entry) {
-        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            return propertyStorageValueCellAt(heapBase,
-                objectPropertyHead(heapBase, owner), entry - 1);
-        }
-        return propertyValueCellAddress(heapBase, entry);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        return propertyDescriptorValueCell(0, descriptor);
     }
 
     function ownPropertyEntryKeyKernel(heapBase, owner, entry) {
-        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            return propertyStorageKeyAt(heapBase,
-                objectPropertyHead(heapBase, owner), entry - 1);
-        }
-        return propertyKey(heapBase, entry);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        return propertyDescriptorKey(0, descriptor);
     }
 
     function ownPropertyEntrySetterKernel(heapBase, owner, entry) {
-        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            return propertyStorageSetterAt(heapBase,
-                objectPropertyHead(heapBase, owner), entry - 1);
-        }
-        return propertySetter(heapBase, entry);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        return propertyDescriptorSetter(0, descriptor);
     }
 
     function setOwnPropertyEntryKeyKernel(heapBase, owner, entry, key) {
-        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            setPropertyStorageKeyAt(heapBase,
-                objectPropertyHead(heapBase, owner), entry - 1, key);
-        } else setPropertyKey(heapBase, entry, key);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        setPropertyDescriptorKey(0, descriptor, key);
         return 0;
     }
 
     function setOwnPropertyEntryAttributesKernel(heapBase, owner, entry, attributes) {
-        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            setPropertyStorageAttributesAt(heapBase,
-                objectPropertyHead(heapBase, owner), entry - 1, attributes);
-        } else setPropertyAttributes(heapBase, entry, attributes);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        setPropertyDescriptorAttributes(0, descriptor, attributes);
         return 0;
     }
 
     function setOwnPropertyEntrySetterKernel(heapBase, owner, entry, setter) {
-        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
-            setPropertyStorageSetterAt(heapBase,
-                objectPropertyHead(heapBase, owner), entry - 1, setter);
-        } else setPropertyReserved(heapBase, entry, setter);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        setPropertyDescriptorSetter(0, descriptor, setter);
         return 0;
     }
 
@@ -135,10 +125,11 @@
 
     function initializeOwnDataEntryKernel(heapBase, owner, entry, keyCell,
                                           attributes, valueReference) {
-        setOwnPropertyEntryKeyKernel(heapBase, owner, entry, valueCellReference(0, keyCell));
-        setOwnPropertyEntryAttributesKernel(heapBase, owner, entry, attributes);
-        setOwnPropertyEntrySetterKernel(heapBase, owner, entry, 0);
-        setValueCellReference(ownPropertyEntryValueCellKernel(heapBase, owner, entry), valueReference);
+        var descriptor = ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+        setPropertyDescriptorKey(0, descriptor, valueCellReference(0, keyCell));
+        setPropertyDescriptorAttributes(0, descriptor, attributes);
+        setPropertyDescriptorSetter(0, descriptor, 0);
+        setValueCellReference(propertyDescriptorValueCell(0, descriptor), valueReference);
         return 1;
     }
 
@@ -392,6 +383,7 @@
     }
 
     var kernels = {
+        ownPropertyEntryDescriptorKernel: ownPropertyEntryDescriptorKernel,
         ownPropertyEpochKernel: ownPropertyEpochKernel,
         ownPropertyEntryAttributesKernel: ownPropertyEntryAttributesKernel,
         ownPropertyEntryValueCellKernel: ownPropertyEntryValueCellKernel,
