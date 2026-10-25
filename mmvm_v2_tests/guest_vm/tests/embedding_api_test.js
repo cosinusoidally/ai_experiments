@@ -90,7 +90,14 @@
                 "assertEqual(cachedRead(target), 42, 'cached accessor receiver');" +
                 "var child = Object.create(target); cachedWrite(child, 19);" +
                 "assertEqual(cachedRead(child), 19, 'inherited accessor receiver');" +
-                "assertEqual(cachedRead(target), 42, 'inherited owner unchanged');",
+                "assertEqual(cachedRead(target), 42, 'inherited owner unchanged');" +
+                "var descriptorSetterCalls = 0;" +
+                "Object.defineProperty(Object.prototype, 'get', {" +
+                " set: function () { descriptorSetterCalls++; }, configurable: true});" +
+                "var inspected; try { inspected = Object.getOwnPropertyDescriptor(target, 'value'); }" +
+                "finally { delete Object.prototype.get; }" +
+                "assertEqual(descriptorSetterCalls, 0, 'descriptor fields bypass inherited setters');" +
+                "assertEqual(typeof inspected.get, 'function', 'descriptor owns its getter field');",
                 "embedding-cached-properties.js");
         } finally {
             cachedVM.destroy();

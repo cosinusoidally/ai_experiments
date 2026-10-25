@@ -507,13 +507,16 @@
         this.assertOwned(target);
         var propertyCount;
         if (source === this.globalObject) {
+            var entries = this.guardedOwnPropertyEntries(source);
             if (this.contextGlobalPropertyCount === undefined ||
+                this.contextGlobalPropertyEntries !== entries ||
                 this.contextGlobalPropertyVersion !==
                     source.propertyVersion) {
                 this.contextGlobalPropertyCount =
                     this.heapRecords.countEnumerableOwnProperties(
                         source.heapAddress);
                 this.contextGlobalPropertyVersion = source.propertyVersion;
+                this.contextGlobalPropertyEntries = entries;
             }
             propertyCount = this.contextGlobalPropertyCount;
         }
@@ -530,11 +533,14 @@
         this.assertOwned(target);
         var propertyCount;
         if (source === this.globalObject) {
+            var entries = this.guardedOwnPropertyEntries(source);
             if (this.contextGlobalOwnPropertyCount === undefined ||
+                this.contextGlobalOwnPropertyEntries !== entries ||
                 this.contextGlobalOwnPropertyVersion !== source.propertyVersion) {
                 this.contextGlobalOwnPropertyCount =
                     this.heapRecords.countOwnProperties(source.heapAddress);
                 this.contextGlobalOwnPropertyVersion = source.propertyVersion;
+                this.contextGlobalOwnPropertyEntries = entries;
             }
             propertyCount = this.contextGlobalOwnPropertyCount;
         }
@@ -2888,11 +2894,11 @@
                     var descriptor = runtime.makeObject();
                     if (object.guestType === "array" && key === "length" &&
                         !runtime.isArgumentsObject(object)) {
-                        runtime.setProperty(descriptor, "value",
-                            runtime.arrayLength(object));
-                        runtime.setProperty(descriptor, "writable", true);
-                        runtime.setProperty(descriptor, "enumerable", false);
-                        runtime.setProperty(descriptor, "configurable", false);
+                        runtime.defineDataProperty(descriptor, "value",
+                            runtime.arrayLength(object), HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "writable", true, HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "enumerable", false, HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "configurable", false, HeapRecords.Attributes.DEFAULT);
                         return descriptor;
                     }
                     if ((object.guestType === "array" ||
@@ -2900,11 +2906,11 @@
                          object.guestType === "typedArray") &&
                         isArrayIndex(key) &&
                         runtime.hasOwnProperty(object, key)) {
-                        runtime.setProperty(descriptor, "value",
-                            runtime.getProperty(object, key));
-                        runtime.setProperty(descriptor, "writable", true);
-                        runtime.setProperty(descriptor, "enumerable", true);
-                        runtime.setProperty(descriptor, "configurable", true);
+                        runtime.defineDataProperty(descriptor, "value",
+                            runtime.getProperty(object, key), HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "writable", true, HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "enumerable", true, HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "configurable", true, HeapRecords.Attributes.DEFAULT);
                         return descriptor;
                     }
                     var property = runtime.heapOwnProperty(object, key, false);
@@ -2912,26 +2918,26 @@
                     var attributes = runtime.heapRecords.ownPropertyEntryAttributes(
                         object.heapAddress, property);
                     if (attributes & HeapRecords.Attributes.ACCESSOR) {
-                        runtime.setProperty(descriptor, "get",
+                        runtime.defineDataProperty(descriptor, "get",
                             runtime.readHeapValue(
                                 runtime.heapRecords.ownPropertyEntryValueCell(
-                                    object.heapAddress, property)));
+                                    object.heapAddress, property)), HeapRecords.Attributes.DEFAULT);
                         var setter = runtime.heapRecords.ownPropertyEntrySetter(
                             object.heapAddress, property);
-                        runtime.setProperty(descriptor, "set", setter ?
-                            runtime.readHeapReference(setter) : undefined);
+                        runtime.defineDataProperty(descriptor, "set", setter ?
+                            runtime.readHeapReference(setter) : undefined, HeapRecords.Attributes.DEFAULT);
                     } else {
-                        runtime.setProperty(descriptor, "value",
+                        runtime.defineDataProperty(descriptor, "value",
                             runtime.readHeapValue(
                                 runtime.heapRecords.ownPropertyEntryValueCell(
-                                    object.heapAddress, property)));
-                        runtime.setProperty(descriptor, "writable",
-                            !!(attributes & HeapRecords.Attributes.WRITABLE));
+                                    object.heapAddress, property)), HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "writable",
+                            !!(attributes & HeapRecords.Attributes.WRITABLE), HeapRecords.Attributes.DEFAULT);
                     }
-                    runtime.setProperty(descriptor, "enumerable",
-                        !!(attributes & HeapRecords.Attributes.ENUMERABLE));
-                    runtime.setProperty(descriptor, "configurable",
-                        !!(attributes & HeapRecords.Attributes.CONFIGURABLE));
+                    runtime.defineDataProperty(descriptor, "enumerable",
+                        !!(attributes & HeapRecords.Attributes.ENUMERABLE), HeapRecords.Attributes.DEFAULT);
+                    runtime.defineDataProperty(descriptor, "configurable",
+                        !!(attributes & HeapRecords.Attributes.CONFIGURABLE), HeapRecords.Attributes.DEFAULT);
                     return descriptor;
                 }));
         this.setProperty(objectConstructor, "preventExtensions",

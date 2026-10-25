@@ -15,6 +15,8 @@
     var sharedX86 = null;
     var sharedPropertyCloneJS = null;
     var sharedPropertyCloneX86 = null;
+    var sharedPackedCloneJS = null;
+    var sharedPackedCloneX86 = null;
     var HEAP_TYPE_PROPERTY = Records.KernelConstants.HEAP_TYPE_PROPERTY;
     var PROPERTY_RECORD_BYTES = Records.KernelConstants.PROPERTY_RECORD_BYTES;
     var PROPERTY_ENUMERABLE = Records.Attributes.ENUMERABLE;
@@ -73,6 +75,37 @@
         return first;
     }
 
+    /* The destination backing has already been allocated and zeroed. Copy
+     * descriptors in insertion order without materializing host values or
+     * allocating per-entry records. Do not publish a partial clone. */
+    function packedPropertyCloneKernel(base, sourceStorage, targetObject,
+                                      block, propertyCount, enumerableOnly) {
+        var length = propertyStorageLength(base, sourceStorage);
+        var source = 0;
+        var target = 0;
+        while (source < length) {
+            var key = propertyStorageKeyAt(base, sourceStorage, source);
+            var attributes = propertyStorageAttributesAt(base, sourceStorage, source);
+            if (key !== 0 && (enumerableOnly === 0 ||
+                    (attributes & PROPERTY_ENUMERABLE) !== 0)) {
+                if (target >= propertyCount) return 0;
+                setPropertyStorageKeyAt(base, block, target, key);
+                setPropertyStorageAttributesAt(base, block, target, attributes);
+                setPropertyStorageSetterAt(base, block, target,
+                    propertyStorageSetterAt(base, sourceStorage, source));
+                copyValueCell(propertyStorageValueCellAt(base, block, target),
+                    propertyStorageValueCellAt(base, sourceStorage, source));
+                target = target + 1;
+            }
+            source = source + 1;
+        }
+        if (target !== propertyCount) return 0;
+        setPropertyStorageLength(base, block, target);
+        setPropertyStorageLiveCount(base, block, target);
+        setObjectPropertyHead(base, targetObject, block);
+        return block;
+    }
+
     function RecordInitializer(heap) {
         this.heap = heap;
         var nativeMemory = !!heap.memory.nativeAddress(0);
@@ -83,12 +116,17 @@
             var cloneIR = new Compiler().compile(propertyCloneKernel,
                 {constantBindings: Records.KernelConstants});
             var clone = backend.compile(cloneIR);
+            var packedCloneIR = new Compiler().compile(packedPropertyCloneKernel,
+                {constantBindings: Records.KernelConstants});
+            var packedClone = backend.compile(packedCloneIR);
             if (nativeMemory) {
                 sharedX86 = initializer;
                 sharedPropertyCloneX86 = clone;
+                sharedPackedCloneX86 = packedClone;
             } else {
                 sharedJS = initializer;
                 sharedPropertyCloneJS = clone;
+                sharedPackedCloneJS = packedClone;
             }
         }
         this.compiled = heap.memory.nativeAddress(0) && sharedX86.fn ?
@@ -96,6 +134,7 @@
         this.propertyCloneCompiled =
             heap.memory.nativeAddress(0) && sharedPropertyCloneX86.fn ?
             sharedPropertyCloneX86 : sharedPropertyCloneJS;
+        this.packedCloneCompiled = nativeMemory ? sharedPackedCloneX86 : sharedPackedCloneJS;
     }
 
     RecordInitializer.prototype.initialize = function (
@@ -126,6 +165,16 @@
         return this.propertyCloneCompiled.fn(this.heap.memory, 0,
             sourceProperty, targetObject, block, blockBytes, propertyCount,
             enumerableOnly ? 1 : 0);
+    };
+
+    RecordInitializer.prototype.clonePackedProperties = function (
+            sourceStorage, targetObject, block, count, enumerableOnly) {
+        if (this.packedCloneCompiled.backend === "i386") {
+            return this.packedCloneCompiled.fn(this.heap.memory.nativeAddress(0),
+                sourceStorage, targetObject, block, count, enumerableOnly ? 1 : 0);
+        }
+        return this.packedCloneCompiled.fn(this.heap.memory, 0,
+            sourceStorage, targetObject, block, count, enumerableOnly ? 1 : 0);
     };
 
     root.GuestVMRecordInitializer = RecordInitializer;

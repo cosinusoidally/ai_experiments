@@ -961,6 +961,15 @@
         if (!propertyCount) return 0;
         if (this.heap.recordType(target) === Heap.Types.OBJECT) {
             var storage = this.allocatePropertyStorage(propertyCount);
+            if (this.heap.recordType(source) === Heap.Types.OBJECT &&
+                    this.heap.recordInitializer &&
+                    this.heap.recordInitializer.clonePackedProperties) {
+                var cloned = this.heap.recordInitializer.clonePackedProperties(
+                    this.ownPropertyStorage(source), target, storage,
+                    propertyCount, enumerableOnly);
+                if (cloned !== storage) throw new Error("packed property clone count changed");
+                return storage;
+            }
             this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LENGTH, propertyCount);
             this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT, propertyCount);
             var entry = propertyCount;
