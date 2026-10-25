@@ -45,6 +45,28 @@
                 throw new Error("GC stress: corrupt Buffer at seed " + root.seed + ", byte " + index);
             }
         }
+        var seen = 0, expected = 0, name;
+        for (name in root.dictionary) {
+            if (expected === 7) expected++;
+            if (seen === 47) expected = 7;
+            if (name !== "field-" + expected) throw new Error("GC stress: dictionary insertion order changed");
+            seen++;
+            expected++;
+        }
+        if (seen !== 48) throw new Error("GC stress: dictionary enumeration lost a name");
+        if (root.compacting.k20 !== root.seed + 140) {
+            throw new Error("GC stress: cached property changed after dictionary regrowth");
+        }
+        seen = 0;
+        for (name in root.compacting) {
+            expected = seen < 4 ? seen + 20 : seen - 4;
+            if (name !== "k" + expected ||
+                    root.compacting[name] !== root.seed + expected * 7) {
+                throw new Error("GC stress: sparse dictionary regrowth lost order/data");
+            }
+            seen++;
+        }
+        if (seen !== 24) throw new Error("GC stress: sparse dictionary enumeration lost a name");
         for (index = 0; index < 32; index++) {
             if (root.view[index] !== bytePattern(root.seed, index + 16)) {
                 throw new Error("GC stress: corrupt shared Buffer view");
@@ -76,8 +98,21 @@
         if (current.values.indexOf(current.seed + 0.25, 0.5) !== 1) {
             throw new Error("GC stress: numeric array search changed its input/result");
         }
+        current.compacting = {};
+        for (var compactKey = 0; compactKey < 24; compactKey++) {
+            current.compacting["k" + compactKey] = current.seed + compactKey * 7;
+        }
+        for (compactKey = 0; compactKey < 20; compactKey++) {
+            delete current.compacting["k" + compactKey];
+        }
         delete current.dictionary["field-7"];
         if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(round);
+        if (current.compacting.k20 !== current.seed + 140) {
+            throw new Error("GC stress: sparse dictionary did not survive collection");
+        }
+        for (compactKey = 0; compactKey < 20; compactKey++) {
+            current.compacting["k" + compactKey] = current.seed + compactKey * 7;
+        }
         current.dictionary["field-7"] = current.seed + 21;
         for (var slot = 0; slot < slots.length; slot++) checkGraph(slots[slot]);
     }

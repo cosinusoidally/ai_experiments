@@ -10,7 +10,7 @@
     var Binary64 = root.GuestVMBinary64;
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
-    var PropertyIndexKernels = root.GuestVMPropertyIndexKernel;
+    var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -21,7 +21,7 @@
         Binary64 = require("../binary64.js");
         ValueCells = require("../value_cell.js");
         HeapRecords = require("../heap_records.js");
-        PropertyIndexKernels = require("../property_index_kernel.js");
+        PropertyStorageKernels = require("../property_storage_kernel.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -3544,7 +3544,7 @@
                 var makeFunctionProgram = valueCellReference(
                     0, makeFunctionProgramCell);
                 var makeFunctionBytes = FUNCTION_RECORD_BYTES +
-                    OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+                    OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES + PROPERTY_STORAGE_SINGLE_BYTES;
                 if (reserveNativeAllocationKernel(
                         heapBase, state, makeFunctionBytes) === 0) {
                     return unsupportedExitKernel(
@@ -3555,10 +3555,10 @@
                     FUNCTION_RECORD_BYTES;
                 var makeFunctionPrototypeProperty = makeFunctionPrototype +
                     OBJECT_RECORD_BYTES;
-                var makeFunctionConstructorProperty =
+                var makeFunctionConstructorStorage =
                     makeFunctionPrototypeProperty + PROPERTY_RECORD_BYTES;
-                var makeFunctionEnd = makeFunctionConstructorProperty +
-                    PROPERTY_RECORD_BYTES;
+                var makeFunctionEnd = makeFunctionConstructorStorage +
+                    PROPERTY_STORAGE_SINGLE_BYTES;
                 if (makeFunctionEnd > engineHeapLimit(heapBase, state)) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
@@ -3599,8 +3599,8 @@
                 setObjectPrototype(heapBase, makeFunctionPrototype,
                     valueCellReference(0,
                                        makeFunctionObjectPrototypeCell));
-                setObjectPropertyHead(heapBase, makeFunctionPrototype,
-                                      makeFunctionConstructorProperty);
+                initializeOwnPropertyStorageKernel(heapBase, makeFunctionPrototype,
+                    makeFunctionConstructorStorage, 1);
                 setObjectExtensible(heapBase, makeFunctionPrototype, 1);
                 setObjectReserved(heapBase, makeFunctionPrototype, 0);
                 setRecordType(heapBase, makeFunctionPrototypeProperty,
@@ -3620,23 +3620,8 @@
                 setValueCellReference(propertyValueCellAddress(
                     heapBase, makeFunctionPrototypeProperty),
                     makeFunctionPrototype);
-                setRecordType(heapBase, makeFunctionConstructorProperty,
-                              HEAP_TYPE_PROPERTY);
-                setRecordSize(heapBase, makeFunctionConstructorProperty,
-                              PROPERTY_RECORD_BYTES);
-                setRecordMark(heapBase, makeFunctionConstructorProperty, 0);
-                setRecordFlags(heapBase, makeFunctionConstructorProperty, 0);
-                setPropertyNext(heapBase, makeFunctionConstructorProperty, 0);
-                setPropertyKey(heapBase, makeFunctionConstructorProperty,
-                    valueCellReference(0, makeFunctionConstructorKeyCell));
-                setPropertyAttributes(heapBase,
-                    makeFunctionConstructorProperty,
-                    DEFAULT_PROPERTY_ATTRIBUTES);
-                setPropertyReserved(heapBase,
-                    makeFunctionConstructorProperty, 0);
-                setValueCellReference(propertyValueCellAddress(
-                    heapBase, makeFunctionConstructorProperty),
-                    makeFunctionAddress);
+                initializeOwnDataEntryKernel(heapBase, makeFunctionPrototype, 1,
+                    makeFunctionConstructorKeyCell, DEFAULT_PROPERTY_ATTRIBUTES, makeFunctionAddress);
                 setValueCellReference(frameRegisterCellAddress(
                     heapBase, frame, makeFunctionTargetIndex),
                     makeFunctionAddress);
@@ -3922,7 +3907,7 @@
                     heapBase, frame, deleteNameTargetIndex);
                 setValueCellReference(deleteNameTarget, globalObject);
                 if (deletePropertyKernel(
-                        heapBase, deleteNameTarget, deleteNameTarget,
+                        heapBase, state, deleteNameTarget, deleteNameTarget,
                         deleteNameKeyCell,
                         programFlags(heapBase, currentProgram) &
                             PROGRAM_FLAG_STRICT) === 0) {
@@ -3940,7 +3925,7 @@
                 var deleteKeyIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                if (deletePropertyKernel(heapBase,
+                if (deletePropertyKernel(heapBase, state,
                         frameRegisterCellAddress(heapBase, frame,
                                                  deleteTargetIndex),
                         frameRegisterCellAddress(heapBase, frame,
@@ -3963,7 +3948,7 @@
                 var deleteConstantKeyIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                if (deletePropertyKernel(heapBase,
+                if (deletePropertyKernel(heapBase, state,
                         frameRegisterCellAddress(heapBase, frame,
                             deleteConstantTargetIndex),
                         frameRegisterCellAddress(heapBase, frame,
@@ -4133,11 +4118,17 @@
                  * owner even after the prototype walk advances/finishes. */
                 var propertyOwner = propertyReceiver;
                 var propertyFoundOnReceiver = 0;
+                var propertyReceiverStorage = 0;
+                var propertyReceiverEpoch = 0;
                 var propertyCacheIndex =
                     ((propertyReceiver >>> 3) ^
                      stringKeyHashKernel(heapBase, propertyConstantKey)) &
                     (PROPERTY_CACHE_ENTRY_COUNT - 1);
                 if (virtualPropertyObjectType === HEAP_TYPE_OBJECT) {
+                    propertyReceiverStorage = objectPropertyHead(heapBase, propertyReceiver);
+                    if (propertyReceiverStorage !== 0) {
+                        propertyReceiverEpoch = recordFlags(heapBase, propertyReceiverStorage);
+                    }
                     if (propertyCacheObject(
                             heapBase, state, propertyCacheIndex) ===
                         propertyReceiver) {
@@ -4146,7 +4137,7 @@
                             propertyConstantKey) {
                             if (propertyCacheVersion(
                                     heapBase, state, propertyCacheIndex) ===
-                                recordFlags(heapBase, propertyReceiver)) {
+                                propertyReceiverEpoch) {
                                 if (propertyCacheGeneration(
                                         heapBase, state,
                                         propertyCacheIndex) ===
@@ -4155,8 +4146,7 @@
                                     if (propertyCacheHead(
                                             heapBase, state,
                                             propertyCacheIndex) ===
-                                        objectPropertyHead(
-                                            heapBase, propertyReceiver)) {
+                                        propertyReceiverStorage) {
                                         propertyRecord = propertyCacheProperty(
                                             heapBase, state,
                                             propertyCacheIndex);
@@ -4366,18 +4356,19 @@
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
                 if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
-                    if (propertyFoundOnReceiver === 1) {
+                    if (propertyFoundOnReceiver === 1 &&
+                            virtualPropertyObjectType === HEAP_TYPE_OBJECT) {
                         setPropertyCacheKey(heapBase, state,
                             propertyCacheIndex, propertyConstantKey);
                         setPropertyCacheVersion(heapBase, state,
                             propertyCacheIndex,
-                            recordFlags(heapBase, propertyReceiver));
+                            propertyReceiverEpoch);
                         setPropertyCacheGeneration(heapBase, state,
                             propertyCacheIndex,
                             recordMark(heapBase, propertyReceiver));
                         setPropertyCacheHead(heapBase, state,
                             propertyCacheIndex,
-                            objectPropertyHead(heapBase, propertyReceiver));
+                            propertyReceiverStorage);
                         setPropertyCacheProperty(heapBase, state,
                             propertyCacheIndex, propertyRecord);
                         setPropertyCacheObject(heapBase, state,
@@ -4533,6 +4524,7 @@
                                 } else if ((inheritedSetAttributes &
                                             PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
                                     setPropertyRecord = inheritedSetHead;
+                                    setPropertyOwner = inheritedSetObject;
                                 }
                                 inheritedSetHead = 0;
                                 inheritedSetObject = 0;
@@ -5240,16 +5232,16 @@
                 var constructedObject = 0;
                 var constructedPrototype = 0;
                 var boxedReceiver = 0;
-                var boxedReceiverProperty = 0;
+                var boxedReceiverStorage = 0;
                 var boxedReceiverPrototype = 0;
                 var bytecodeAllocationEnd = engineHeapBump(heapBase, state);
                 if (bytecodeCallValid === 1) {
                 if (receiverNeedsBoxing === 1) {
                     boxedReceiver = bytecodeAllocationEnd;
-                    boxedReceiverProperty = boxedReceiver +
+                    boxedReceiverStorage = boxedReceiver +
                         OBJECT_RECORD_BYTES;
-                    bytecodeAllocationEnd = boxedReceiverProperty +
-                        PROPERTY_RECORD_BYTES;
+                    bytecodeAllocationEnd = boxedReceiverStorage +
+                        PROPERTY_STORAGE_SINGLE_BYTES;
                     var boxedPrototypeIndex =
                         RUNTIME_SUPPORT_STRING_PROTOTYPE;
                     var boxedReceiverTag = valueCellTag(
@@ -5409,7 +5401,7 @@
                     if (receiverNeedsBoxing === 1) {
                         boxedReceiver = boxedReceiver +
                             bytecodeAllocationMove;
-                        boxedReceiverProperty = boxedReceiverProperty +
+                        boxedReceiverStorage = boxedReceiverStorage +
                             bytecodeAllocationMove;
                     }
                     if (calleeFrameReused === 0) {
@@ -5449,28 +5441,14 @@
                         setRecordFlags(heapBase, boxedReceiver, 0);
                         setObjectPrototype(heapBase, boxedReceiver,
                                            boxedReceiverPrototype);
-                        setObjectPropertyHead(heapBase, boxedReceiver,
-                                              boxedReceiverProperty);
+                        initializeOwnPropertyStorageKernel(heapBase, boxedReceiver, boxedReceiverStorage, 1);
                         setObjectExtensible(heapBase, boxedReceiver, 1);
                         setObjectReserved(heapBase, boxedReceiver, 0);
-                        setRecordType(heapBase, boxedReceiverProperty,
-                                      HEAP_TYPE_PROPERTY);
-                        setRecordSize(heapBase, boxedReceiverProperty,
-                                      PROPERTY_RECORD_BYTES);
-                        setRecordMark(heapBase, boxedReceiverProperty, 0);
-                        setRecordFlags(heapBase, boxedReceiverProperty, 0);
-                        setPropertyNext(heapBase, boxedReceiverProperty, 0);
-                        setPropertyKey(heapBase, boxedReceiverProperty,
-                            valueCellReference(0, vectorCellAddress(
-                                heapBase, stringSupport,
-                                RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY)));
-                        setPropertyAttributes(
-                            heapBase, boxedReceiverProperty, 0);
-                        setPropertyReserved(
-                            heapBase, boxedReceiverProperty, 0);
-                        copyValueCell(propertyValueCellAddress(
-                            heapBase, boxedReceiverProperty),
-                            receiverToNormalize);
+                        initializeOwnDataEntryKernel(heapBase, boxedReceiver, 1,
+                            vectorCellAddress(heapBase, stringSupport,
+                                RUNTIME_SUPPORT_PRIMITIVE_VALUE_KEY), 0, 0);
+                        copyValueCell(ownPropertyEntryValueCellKernel(
+                            heapBase, boxedReceiver, 1), receiverToNormalize);
                     }
                     if (callOperation === 2) {
                         setRecordType(heapBase, constructedObject,
@@ -10884,14 +10862,13 @@
     function allocateErrorKernel(
             heapBase, state, targetCell, message, prototypeIndex,
             nameIndex, stringSupport) {
-        var errorBytes = OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+        var errorBytes = OBJECT_RECORD_BYTES + PROPERTY_STORAGE_PAIR_BYTES;
         if (reserveNativeAllocationKernel(
                 heapBase, state, errorBytes) === 0) return 0;
         var errorObject = engineHeapBump(heapBase, state);
-        var messageProperty = errorObject + OBJECT_RECORD_BYTES;
-        var nameProperty = messageProperty + PROPERTY_RECORD_BYTES;
-        if (nameProperty + PROPERTY_RECORD_BYTES >
-                engineHeapLimit(heapBase, state)) return 0;
+        var errorStorage = errorObject + OBJECT_RECORD_BYTES;
+        var errorEnd = errorStorage + PROPERTY_STORAGE_PAIR_BYTES;
+        if (errorEnd > engineHeapLimit(heapBase, state)) return 0;
         var prototypeCell = vectorCellAddress(
             heapBase, stringSupport, prototypeIndex);
         setRecordType(heapBase, errorObject, HEAP_TYPE_OBJECT);
@@ -10900,24 +10877,19 @@
         setRecordFlags(heapBase, errorObject, 0);
         setObjectPrototype(heapBase, errorObject,
             valueCellReference(0, prototypeCell));
-        setObjectPropertyHead(heapBase, errorObject, nameProperty);
+        initializeOwnPropertyStorageKernel(heapBase, errorObject, errorStorage, 2);
         setObjectExtensible(heapBase, errorObject, 1);
         setObjectReserved(heapBase, errorObject, 0);
-        var propertyInitialized = initializeDataPropertyKernel(
-            heapBase, messageProperty, 0,
-            vectorCellAddress(
-                heapBase, stringSupport, RUNTIME_SUPPORT_MESSAGE_KEY),
-            DEFAULT_PROPERTY_ATTRIBUTES, 0, message);
-        propertyInitialized = initializeDataPropertyKernel(
-            heapBase, nameProperty, messageProperty,
-            vectorCellAddress(
-                heapBase, stringSupport, RUNTIME_SUPPORT_NAME_KEY),
-            DEFAULT_PROPERTY_ATTRIBUTES, 0,
-            valueCellReference(0, vectorCellAddress(
-                heapBase, stringSupport, nameIndex)));
+        initializeOwnDataEntryKernel(heapBase, errorObject, 1,
+            vectorCellAddress(heapBase, stringSupport, RUNTIME_SUPPORT_MESSAGE_KEY),
+            DEFAULT_PROPERTY_ATTRIBUTES, message);
+        initializeOwnDataEntryKernel(heapBase, errorObject, 2,
+            vectorCellAddress(heapBase, stringSupport, RUNTIME_SUPPORT_NAME_KEY),
+            DEFAULT_PROPERTY_ATTRIBUTES, valueCellReference(0,
+                vectorCellAddress(heapBase, stringSupport, nameIndex)));
         setValueCellReference(targetCell, errorObject);
         setEngineHeapBump(
-            heapBase, state, nameProperty + PROPERTY_RECORD_BYTES);
+            heapBase, state, errorEnd);
         return 1;
     }
 
@@ -13814,6 +13786,14 @@
                 attributes = attributes + PROPERTY_ATTRIBUTE_CONFIGURABLE;
             }
         }
+        /* Descriptor and target may be the same object. Appending can move
+         * and retire its backing, so preserve the value before doing so. No
+         * collection or guest callback occurs inside the append operation. */
+        if (valueCell !== 0) {
+            var savedDescriptorValue = engineScratchLeftAddress(heapBase, state);
+            copyValueCell(savedDescriptorValue, valueCell);
+            valueCell = savedDescriptorValue;
+        }
         property = appendOwnPropertyEntryKernel(
             heapBase, state, object, key, attributes);
         if (property === 0) return 2;
@@ -14062,7 +14042,7 @@
             (PROPERTY_CACHE_ENTRY_COUNT - 1);
         var head = objectPropertyHead(heapBase, object);
         if (propertyCacheObject(heapBase, state, index) === object &&
-                propertyCacheVersion(heapBase, state, index) === recordFlags(heapBase, object) &&
+                propertyCacheVersion(heapBase, state, index) === ownPropertyEpochKernel(heapBase, object) &&
                 propertyCacheGeneration(heapBase, state, index) === recordMark(heapBase, object) &&
                 propertyCacheHead(heapBase, state, index) === head) {
             var cachedKey = propertyCacheKey(heapBase, state, index);
@@ -14073,7 +14053,7 @@
         var property = indexedOwnObjectPropertyKernel(heapBase, state, object, key, hash);
         if (property !== 0) {
             setPropertyCacheKey(heapBase, state, index, key);
-            setPropertyCacheVersion(heapBase, state, index, recordFlags(heapBase, object));
+            setPropertyCacheVersion(heapBase, state, index, ownPropertyEpochKernel(heapBase, object));
             setPropertyCacheGeneration(heapBase, state, index, recordMark(heapBase, object));
             setPropertyCacheHead(heapBase, state, index, head);
             setPropertyCacheProperty(heapBase, state, index, property);
@@ -14575,7 +14555,7 @@
         return 1;
     }
 
-    function deletePropertyKernel(heapBase, targetCell, objectCell,
+    function deletePropertyKernel(heapBase, state, targetCell, objectCell,
                                   keyCell, strictMode) {
         if (valueCellTag(0, objectCell) !== VALUE_TAG_REFERENCE) return 0;
         var object = valueCellReference(0, objectCell);
@@ -14654,7 +14634,7 @@
             return 1;
         }
         var removedEntry = removeOwnPropertyEntryKernel(
-            heapBase, object, found, previous);
+            heapBase, state, object, found, previous);
         setValueCellTrue(targetCell);
         return 1;
     }
@@ -14977,7 +14957,7 @@
          * unambiguous name in the portable dialect. */
         var callablePrototype = callable + FUNCTION_RECORD_BYTES;
         var prototypeProperty = callablePrototype + OBJECT_RECORD_BYTES;
-        var constructorProperty = prototypeProperty + PROPERTY_RECORD_BYTES;
+        var constructorStorage = prototypeProperty + PROPERTY_RECORD_BYTES;
         var functionPrototypeCell = vectorCellAddress(
             heapBase, stringSupport, RUNTIME_SUPPORT_FUNCTION_PROTOTYPE);
         var objectPrototypeCell = vectorCellAddress(
@@ -15002,7 +14982,7 @@
         setRecordFlags(heapBase, callablePrototype, 0);
         setObjectPrototype(heapBase, callablePrototype,
                            valueCellReference(0, objectPrototypeCell));
-        setObjectPropertyHead(heapBase, callablePrototype, constructorProperty);
+        initializeOwnPropertyStorageKernel(heapBase, callablePrototype, constructorStorage, 1);
         setObjectExtensible(heapBase, callablePrototype, 1);
         setObjectReserved(heapBase, callablePrototype, 0);
         setRecordType(heapBase, prototypeProperty, HEAP_TYPE_PROPERTY);
@@ -15018,19 +14998,9 @@
         setValueCellReference(
             propertyValueCellAddress(heapBase, prototypeProperty),
             callablePrototype);
-        setRecordType(heapBase, constructorProperty, HEAP_TYPE_PROPERTY);
-        setRecordSize(heapBase, constructorProperty, PROPERTY_RECORD_BYTES);
-        setRecordMark(heapBase, constructorProperty, 0);
-        setRecordFlags(heapBase, constructorProperty, 0);
-        setPropertyNext(heapBase, constructorProperty, 0);
-        setPropertyKey(heapBase, constructorProperty,
-                       valueCellReference(0, constructorKeyCell));
-        setPropertyAttributes(heapBase, constructorProperty,
-                              DEFAULT_PROPERTY_ATTRIBUTES);
-        setPropertyReserved(heapBase, constructorProperty, 0);
-        setValueCellReference(
-            propertyValueCellAddress(heapBase, constructorProperty), callable);
-        return constructorProperty + PROPERTY_RECORD_BYTES;
+        initializeOwnDataEntryKernel(heapBase, callablePrototype, 1,
+            constructorKeyCell, DEFAULT_PROPERTY_ATTRIBUTES, callable);
+        return constructorStorage + PROPERTY_STORAGE_SINGLE_BYTES;
     }
 
     function programCreateKernel(heapBase, state, targetCell, registerAddress,
@@ -15107,7 +15077,7 @@
         var programAllocationBytes = bytecodeBytes + constantBytes * 2 +
             bindingBytes + parameterBytes + PROGRAM_RECORD_BYTES +
             FUNCTION_RECORD_BYTES + OBJECT_RECORD_BYTES +
-            PROPERTY_RECORD_BYTES * 2;
+            PROPERTY_RECORD_BYTES + PROPERTY_STORAGE_SINGLE_BYTES;
         if (programAllocationBytes < bytecodeBytes) return 0;
         if (reserveNativeAllocationKernel(
                 heapBase, state, programAllocationBytes) === 0) return 2;
@@ -15119,7 +15089,7 @@
         var program = parameters + parameterBytes;
         var callable = program + PROGRAM_RECORD_BYTES;
         var end = callable + FUNCTION_RECORD_BYTES + OBJECT_RECORD_BYTES +
-            PROPERTY_RECORD_BYTES * 2;
+            PROPERTY_RECORD_BYTES + PROPERTY_STORAGE_SINGLE_BYTES;
         if (end < callable) return 0;
         if (end > engineHeapLimit(heapBase, state)) return 2;
         setRecordType(heapBase, bytecode, HEAP_TYPE_BYTECODE);
@@ -15658,12 +15628,12 @@
         if (program === 0) return 0;
         if (recordType(heapBase, program) !== HEAP_TYPE_PROGRAM) return 0;
         var functionAllocationBytes = FUNCTION_RECORD_BYTES +
-            OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+            OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES + PROPERTY_STORAGE_SINGLE_BYTES;
         if (reserveNativeAllocationKernel(
                 heapBase, state, functionAllocationBytes) === 0) return 2;
         var callable = engineHeapBump(heapBase, state);
         var allocationEnd = callable + FUNCTION_RECORD_BYTES +
-            OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES * 2;
+            OBJECT_RECORD_BYTES + PROPERTY_RECORD_BYTES + PROPERTY_STORAGE_SINGLE_BYTES;
         if (allocationEnd > engineHeapLimit(heapBase, state)) return 2;
         var initializedEnd = initializeProgramCallableKernel(
             heapBase, callable, program, context, stringSupport);
@@ -15815,12 +15785,12 @@
             var dateArgumentCount = vectorLength(heapBase, argumentsVector);
             if (dateArgumentCount > 7) dateArgumentCount = 7;
             var dateAllocationBytes = OBJECT_RECORD_BYTES +
-                PROPERTY_RECORD_BYTES;
+                PROPERTY_STORAGE_SINGLE_BYTES;
             if (reserveNativeAllocationKernel(
                     heapBase, state, dateAllocationBytes) === 0) return 2;
             var dateObject = engineHeapBump(heapBase, state);
-            var dateValueProperty = dateObject + OBJECT_RECORD_BYTES;
-            var dateAllocationEnd = dateValueProperty + PROPERTY_RECORD_BYTES;
+            var dateValueStorage = dateObject + OBJECT_RECORD_BYTES;
+            var dateAllocationEnd = dateValueStorage + PROPERTY_STORAGE_SINGLE_BYTES;
             if (dateAllocationEnd > engineHeapLimit(heapBase, state)) return 2;
             var datePrototypeCell = heapBase + stringSupport + VECTOR_CELLS +
                 RUNTIME_SUPPORT_DATE_PROTOTYPE * VALUE_CELL_BYTES;
@@ -15832,19 +15802,12 @@
             setRecordFlags(heapBase, dateObject, 0);
             setObjectPrototype(heapBase, dateObject,
                 valueCellReference(0, datePrototypeCell));
-            setObjectPropertyHead(heapBase, dateObject, dateValueProperty);
+            initializeOwnPropertyStorageKernel(heapBase, dateObject, dateValueStorage, 1);
             setObjectExtensible(heapBase, dateObject, 1);
             setObjectReserved(heapBase, dateObject, 0);
-            setRecordType(heapBase, dateValueProperty, HEAP_TYPE_PROPERTY);
-            setRecordSize(heapBase, dateValueProperty, PROPERTY_RECORD_BYTES);
-            setRecordMark(heapBase, dateValueProperty, 0);
-            setRecordFlags(heapBase, dateValueProperty, 0);
-            setPropertyNext(heapBase, dateValueProperty, 0);
-            setPropertyKey(heapBase, dateValueProperty,
-                valueCellReference(0, dateKeyCell));
-            setPropertyAttributes(heapBase, dateValueProperty, 5);
-            setPropertyReserved(heapBase, dateValueProperty, 0);
-            var dateValueCell = heapBase + dateValueProperty + PROPERTY_VALUE;
+            initializeOwnDataEntryKernel(heapBase, dateObject, 1, dateKeyCell,
+                PROPERTY_ATTRIBUTE_WRITABLE | PROPERTY_ATTRIBUTE_CONFIGURABLE, 0);
+            var dateValueCell = ownPropertyEntryValueCellKernel(heapBase, dateObject, 1);
             store32(dateValueCell, VALUE_TAG_DOUBLE);
             if (dateArgumentCount === 0) {
                 var dateNowPointer = platformGettimeofdayPointer(
@@ -17324,9 +17287,9 @@
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var propertyKernelName;
-        for (propertyKernelName in PropertyIndexKernels) {
-            if (Object.prototype.hasOwnProperty.call(PropertyIndexKernels, propertyKernelName)) {
-                kernelDependencies[propertyKernelName] = PropertyIndexKernels[propertyKernelName];
+        for (propertyKernelName in PropertyStorageKernels) {
+            if (Object.prototype.hasOwnProperty.call(PropertyStorageKernels, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = PropertyStorageKernels[propertyKernelName];
             }
         }
         var snapshotRequested = runtime.nativeSnapshotRead ||
@@ -17388,7 +17351,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 50,
+                compilerVersion: 51,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17427,13 +17390,21 @@
                     HEAP_TYPE_PROPERTY_STORAGE: kernelConstantOverrides.HEAP_TYPE_PROPERTY_STORAGE,
                     PROPERTY_STORAGE_LENGTH: kernelConstantOverrides.PROPERTY_STORAGE_LENGTH,
                     PROPERTY_STORAGE_CAPACITY: kernelConstantOverrides.PROPERTY_STORAGE_CAPACITY,
+                    PROPERTY_STORAGE_LIVE_COUNT: kernelConstantOverrides.PROPERTY_STORAGE_LIVE_COUNT,
                     PROPERTY_STORAGE_HASH: kernelConstantOverrides.PROPERTY_STORAGE_HASH,
                     PROPERTY_STORAGE_ENTRIES: kernelConstantOverrides.PROPERTY_STORAGE_ENTRIES,
                     PROPERTY_STORAGE_ENTRY_BYTES: kernelConstantOverrides.PROPERTY_STORAGE_ENTRY_BYTES,
+                    PROPERTY_STORAGE_RECORD_BYTES: kernelConstantOverrides.PROPERTY_STORAGE_RECORD_BYTES,
+                    PROPERTY_STORAGE_SINGLE_BYTES: kernelConstantOverrides.PROPERTY_STORAGE_SINGLE_BYTES,
+                    PROPERTY_STORAGE_PAIR_BYTES: kernelConstantOverrides.PROPERTY_STORAGE_PAIR_BYTES,
+                    PROPERTY_STORAGE_INITIAL_CAPACITY: kernelConstantOverrides.PROPERTY_STORAGE_INITIAL_CAPACITY,
                     PROPERTY_STORAGE_KEY: kernelConstantOverrides.PROPERTY_STORAGE_KEY,
+                    PROPERTY_STORAGE_ATTRIBUTES: kernelConstantOverrides.PROPERTY_STORAGE_ATTRIBUTES,
+                    PROPERTY_STORAGE_PADDING: kernelConstantOverrides.PROPERTY_STORAGE_PADDING,
                     PROPERTY_STORAGE_SETTER: kernelConstantOverrides.PROPERTY_STORAGE_SETTER,
                     PROPERTY_STORAGE_VALUE: kernelConstantOverrides.PROPERTY_STORAGE_VALUE,
                     HEAP_WORD_BYTES: kernelConstantOverrides.HEAP_WORD_BYTES,
+                    HEAP_HEADER_BYTES: kernelConstantOverrides.HEAP_HEADER_BYTES,
                     HEAP_LAST_RECORD_TYPE: kernelConstantOverrides.HEAP_LAST_RECORD_TYPE,
                     HEAP_TYPE_PROPERTY_INDEX: kernelConstantOverrides.HEAP_TYPE_PROPERTY_INDEX,
                     OBJECT_PROPERTY_INDEX: kernelConstantOverrides.OBJECT_PROPERTY_INDEX,

@@ -69,11 +69,11 @@
             }
 
             var object = records.allocateObject(0);
-            var property = records.defineOwnProperty(object, key);
-            cells.writePrimitiveAt(records.propertyValueCell(property), 42);
-            var found = records.findOwnProperty(object, "answer");
+            var property = records.defineOwnPropertyEntry(object, key);
+            cells.writePrimitiveAt(records.ownPropertyEntryValueCell(object, property), 42);
+            var found = records.findOwnPropertyEntry(object, "answer");
             if (found !== property ||
-                cells.readPrimitiveAt(records.propertyValueCell(found)) !== 42) {
+                cells.readPrimitiveAt(records.ownPropertyEntryValueCell(object, found)) !== 42) {
                 throw new Error("heap object/property layout failed");
             }
 
@@ -159,8 +159,8 @@
                 throw new Error("packed property order/value/attributes changed");
             }
             var holder = records.allocateObject(0);
-            var storageProperty = records.defineOwnProperty(holder, records.allocateString("storage"));
-            cells.writeReferenceAt(records.propertyValueCell(storageProperty), storage);
+            var storageProperty = records.defineOwnPropertyEntry(holder, records.allocateString("storage"));
+            cells.writeReferenceAt(records.ownPropertyEntryValueCell(holder, storageProperty), storage);
             records.allocateContext(holder);
             var marker = new Sweeper(heap), markGeneration = 1;
             if (marker.mark(markGeneration) < 0 || heap.mark(storage) !== markGeneration ||

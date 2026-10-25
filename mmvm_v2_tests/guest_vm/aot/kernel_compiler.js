@@ -577,6 +577,7 @@
         propertyIndexCapacity: "PROPERTY_INDEX_CAPACITY",
         propertyStorageLength: "PROPERTY_STORAGE_LENGTH",
         propertyStorageCapacity: "PROPERTY_STORAGE_CAPACITY",
+        propertyStorageLiveCount: "PROPERTY_STORAGE_LIVE_COUNT",
         propertyStorageHashIndex: "PROPERTY_STORAGE_HASH",
         objectExtensible: "OBJECT_EXTENSIBLE",
         arrayElements: "ARRAY_ELEMENTS",
@@ -710,6 +711,10 @@
     };
 
     var WRITE_FIELD_ACCESSORS = {
+        setPropertyStorageLength: "PROPERTY_STORAGE_LENGTH",
+        setPropertyStorageCapacity: "PROPERTY_STORAGE_CAPACITY",
+        setPropertyStorageLiveCount: "PROPERTY_STORAGE_LIVE_COUNT",
+        setPropertyStorageHashIndex: "PROPERTY_STORAGE_HASH",
         setValueCellTag: "VALUE_CELL_TAG",
         setVectorLength: "VECTOR_LENGTH",
         setRecordType: "RECORD_TYPE",
@@ -835,6 +840,7 @@
 
     var READ_INDEXED_FIELD_ACCESSORS = {
         propertyStorageKeyAt: {field: "PROPERTY_STORAGE_KEY", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
+        propertyStorageAttributesAt: {field: "PROPERTY_STORAGE_ATTRIBUTES", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageSetterAt: {field: "PROPERTY_STORAGE_SETTER", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyIndexSlot: {field: "PROPERTY_INDEX_SLOTS", stride: "HEAP_WORD_BYTES"},
         /* The interpreter caches the payload offset, not its record header. */
@@ -854,6 +860,11 @@
     };
 
     var WRITE_INDEXED_FIELD_ACCESSORS = {
+        setRecordPayloadWord: {field: "HEAP_HEADER_BYTES", stride: "HEAP_WORD_BYTES"},
+        setPropertyStorageKeyAt: READ_INDEXED_FIELD_ACCESSORS.propertyStorageKeyAt,
+        setPropertyStorageAttributesAt: READ_INDEXED_FIELD_ACCESSORS.propertyStorageAttributesAt,
+        setPropertyStorageSetterAt: READ_INDEXED_FIELD_ACCESSORS.propertyStorageSetterAt,
+        setPropertyStoragePaddingAt: {field: "PROPERTY_STORAGE_PADDING", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         setPropertyIndexSlot: READ_INDEXED_FIELD_ACCESSORS.propertyIndexSlot,
         setPropertyCacheObject: READ_INDEXED_FIELD_ACCESSORS.propertyCacheObject,
         setPropertyCacheKey: READ_INDEXED_FIELD_ACCESSORS.propertyCacheKey,
@@ -866,6 +877,7 @@
     };
 
     var FIELD_ADDRESS_ACCESSORS = {
+        recordPayloadAddress: "HEAP_HEADER_BYTES",
         propertyIndexSlotsAddress: "PROPERTY_INDEX_SLOTS",
         valueCellPayloadAddress: "VALUE_CELL_LOW",
         engineScratchLeftAddress: "ENGINE_SCRATCH_LEFT",

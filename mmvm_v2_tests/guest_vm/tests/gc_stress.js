@@ -87,6 +87,12 @@
         while (position < heap.bump) {
             var live = heap.inspectRecordHeader(position);
             if (live.type !== Heap.Types.FREE) {
+                if (live.type === Heap.Types.OBJECT) {
+                    var backing = records.ownPropertyStorage(position);
+                    if (backing && boundaries["$" + backing] !== Heap.Types.PROPERTY_STORAGE + 1) {
+                        throw new Error("GC stress: ordinary object has non-packed properties at " + position);
+                    }
+                }
                 records.visitReferences(position, function (target) {
                     var type = boundaries["$" + target];
                     if (!type || type === Heap.Types.FREE + 1) {
@@ -101,8 +107,12 @@
                         var entry = records.propertyIndexSlot(position, bucket++);
                         if (entry) {
                             occupied++;
-                            if (boundaries["$" + entry] !== Heap.Types.PROPERTY + 1) {
-                                throw new Error("GC stress: dangling property-index slot at " + position);
+                            var storage = records.propertyIndexStorage(position);
+                            if (boundaries["$" + storage] !== Heap.Types.PROPERTY_STORAGE + 1 ||
+                                    entry > records.propertyStorageLength(storage) ||
+                                    !records.propertyStorageKey(storage, entry)) {
+                                throw new Error("GC stress: invalid property-index entry ID at " +
+                                    position + " (storage " + storage + ", entry " + entry + ")");
                             }
                         }
                     }

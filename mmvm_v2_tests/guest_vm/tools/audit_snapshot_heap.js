@@ -312,24 +312,38 @@
     function reportProperties(inspectedHeap) {
         var inspectionRecords = new Records(
             inspectedHeap, new Cells(inspectedHeap));
+        function propertyLine(key, attributes, owner, entry) {
+            var printable = "";
+            for (var index = 0; index < key.length; index++) {
+                var code = key.charCodeAt(index);
+                if (code < 32 || code === 127) {
+                    printable += "\\u" + ("0000" + code.toString(16)).slice(-4);
+                } else printable += String.fromCharCode(code);
+            }
+            output("property " + printable + " attributes=" + attributes +
+                (owner ? " owner=" + owner + " entry=" + entry : ""));
+        }
         var position = Heap.FIRST_RECORD;
         while (position < inspectedHeap.bump) {
             var record = inspectedHeap.inspectRecordHeader(position);
             if (record.type === Heap.Types.PROPERTY) {
                 var key = inspectionRecords.readString(
                     inspectionRecords.propertyKey(position));
-                /* Keep records comparable when all later addresses move.
-                 * Escape control characters without relying on host JSON. */
-                var printable = "";
-                var index = 0;
-                while (index < key.length) {
-                    var code = key.charCodeAt(index++);
-                    if (code < 32 || code === 127) {
-                        printable += "\\u" + ("0000" + code.toString(16)).slice(-4);
-                    } else printable += String.fromCharCode(code);
+                propertyLine(key, inspectionRecords.propertyAttributes(position), 0, 0);
+            } else if (record.type === Heap.Types.OBJECT) {
+                var storage = inspectionRecords.ownPropertyStorage(position);
+                /* Keep older linked snapshots inspectable too: their
+                 * individual property records are printed by the case above. */
+                if (storage && inspectedHeap.recordType(storage) === Heap.Types.PROPERTY_STORAGE) {
+                    var entry = inspectionRecords.lastOwnPropertyEntry(position);
+                    while (entry) {
+                        propertyLine(inspectionRecords.readString(
+                            inspectionRecords.ownPropertyEntryKey(position, entry)),
+                            inspectionRecords.ownPropertyEntryAttributes(position, entry),
+                            position, entry);
+                        entry = inspectionRecords.previousOwnPropertyEntry(position, entry);
+                    }
                 }
-                output("property " + printable + " attributes=" +
-                    inspectionRecords.propertyAttributes(position));
             }
             position += record.size;
         }
@@ -340,6 +354,7 @@
         var largestFree = 0;
         var engineRecord = 0;
         var typeBytes = {}, typeCounts = {};
+        var packedLive = 0, packedCapacity = 0;
         var stringRecords = new Records(inspectedHeap, new Cells(inspectedHeap));
         var encodings = {latin1: {count: 0, bytes: 0},
             utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0},
@@ -358,6 +373,10 @@
             } else totalLiveBytes += record.size;
             typeBytes[record.type] = (typeBytes[record.type] || 0) + record.size;
             typeCounts[record.type] = (typeCounts[record.type] || 0) + 1;
+            if (record.type === Heap.Types.PROPERTY_STORAGE) {
+                packedLive += stringRecords.propertyStorageLiveCount(position);
+                packedCapacity += stringRecords.propertyStorageCapacity(position);
+            }
             if (record.type === Heap.Types.STRING) {
                 var encoding = stringRecords.stringIsSlice(position) ? "slice" :
                     stringRecords.stringIsRope(position) ? "rope" :
@@ -371,6 +390,9 @@
             totalLiveBytes + "; free: " + totalFreeBytes +
             "; protected free: " + protectedFreeBytes +
             "; largest reusable region: " + largestFree);
+        output("packed properties: live=" + packedLive + "; capacity=" +
+            packedCapacity + "; unused/tombstone slot bytes=" +
+            (packedCapacity - packedLive) * Records.PropertyStorageLayout.ENTRY_BYTES);
         if (engineRecord) {
             var inspectionRecords = new Records(
                 inspectedHeap, new Cells(inspectedHeap));

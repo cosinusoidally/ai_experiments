@@ -32,8 +32,10 @@
     var PROPERTY_ENTRY_KEY = 0;
     var PROPERTY_ENTRY_ATTRIBUTES = 4;
     var PROPERTY_ENTRY_SETTER = 8;
+    var PROPERTY_ENTRY_PADDING = 12;
     var PROPERTY_ENTRY_VALUE = 16;
     var PROPERTY_ENTRY_BYTES = PROPERTY_ENTRY_VALUE + CELL_BYTES;
+    var PROPERTY_STORAGE_INITIAL_CAPACITY = 4;
 
     var PROPERTY_NEXT = 0;
     var PROPERTY_KEY = 4;
@@ -256,13 +258,21 @@
         HEAP_TYPE_PROPERTY_STORAGE: Heap.Types.PROPERTY_STORAGE,
         PROPERTY_STORAGE_LENGTH: Heap.HEADER_SIZE + PROPERTY_STORAGE_LENGTH,
         PROPERTY_STORAGE_CAPACITY: Heap.HEADER_SIZE + PROPERTY_STORAGE_CAPACITY,
+        PROPERTY_STORAGE_LIVE_COUNT: Heap.HEADER_SIZE + PROPERTY_STORAGE_LIVE_COUNT,
         PROPERTY_STORAGE_HASH: Heap.HEADER_SIZE + PROPERTY_STORAGE_HASH,
         PROPERTY_STORAGE_ENTRIES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES,
         PROPERTY_STORAGE_ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
+        PROPERTY_STORAGE_RECORD_BYTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES,
+        PROPERTY_STORAGE_SINGLE_BYTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_BYTES,
+        PROPERTY_STORAGE_PAIR_BYTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_BYTES * 2,
+        PROPERTY_STORAGE_INITIAL_CAPACITY: PROPERTY_STORAGE_INITIAL_CAPACITY,
         PROPERTY_STORAGE_KEY: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_KEY,
+        PROPERTY_STORAGE_ATTRIBUTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_ATTRIBUTES,
+        PROPERTY_STORAGE_PADDING: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_PADDING,
         PROPERTY_STORAGE_SETTER: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_SETTER,
         PROPERTY_STORAGE_VALUE: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_VALUE,
         HEAP_WORD_BYTES: Heap.WORD_BYTES,
+        HEAP_HEADER_BYTES: Heap.HEADER_SIZE,
         HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
         HEAP_TYPE_PROPERTY_INDEX: Heap.Types.PROPERTY_INDEX,
         OBJECT_PROPERTY_INDEX: Heap.HEADER_SIZE + OBJECT_PROPERTY_INDEX,
@@ -668,6 +678,9 @@
     Records.prototype.propertyIndexCount = function (address) {
         return this.heap.readTrustedFieldU32(address, PROPERTY_INDEX_COUNT, Heap.Types.PROPERTY_INDEX);
     };
+    Records.prototype.propertyIndexStorage = function (address) {
+        return this.heap.readTrustedFieldU32(address, PROPERTY_INDEX_HEAD, Heap.Types.PROPERTY_INDEX);
+    };
     Records.prototype.propertyIndexCapacity = function (address) {
         return this.heap.readTrustedFieldU32(address, PROPERTY_INDEX_CAPACITY, Heap.Types.PROPERTY_INDEX);
     };
@@ -676,61 +689,155 @@
             PROPERTY_INDEX_SLOTS + slot * Heap.WORD_BYTES, Heap.Types.PROPERTY_INDEX);
     };
 
-    /* Owner/entry boundary for property consumers. During migration the
-     * legacy backing uses property-record IDs; packed backing will use slots.
-     * Consumers must not infer an address from an entry ID. Value-cell
-     * addresses are temporary and cannot survive a structural mutation. */
+    /* Ordinary-object entries are one-based packed slots. Named entries on
+     * special record kinds remain legacy record IDs behind this boundary.
+     * Value-cell addresses are temporary, never persistent property handles. */
     Records.prototype.ownPropertyStorage = function (owner) {
         return this.objectPropertyHead(owner);
     };
     Records.prototype.ownPropertyEpoch = function (owner) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(owner);
+            return storage ? this.heap.flags(storage) : 0;
+        }
         return this.heap.flags(owner);
     };
     Records.prototype.ownPropertyGeneration = function (owner) {
         return this.heap.mark(owner);
     };
     Records.prototype.ownPropertyEntryValueCell = function (owner, entry) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            return this.propertyStorageValueCell(this.ownPropertyStorage(owner), entry);
+        }
         return this.propertyValueCell(entry);
     };
     Records.prototype.ownPropertyEntryAttributes = function (owner, entry) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            return this.propertyStorageAttributes(this.ownPropertyStorage(owner), entry);
+        }
         return this.propertyAttributes(entry);
     };
     Records.prototype.ownPropertyEntryKey = function (owner, entry) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            return this.propertyStorageKey(this.ownPropertyStorage(owner), entry);
+        }
         return this.propertyKey(entry);
     };
     Records.prototype.setOwnPropertyEntryAttributes = function (owner, entry, attributes) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(owner);
+            this.heap.writeTrustedFieldU32(storage,
+                this.propertyStorageEntryOffset(storage, entry) + PROPERTY_ENTRY_ATTRIBUTES,
+                attributes);
+            return;
+        }
         this.setPropertyAttributes(entry, attributes);
     };
     Records.prototype.ownPropertyEntrySetter = function (owner, entry) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            return this.propertyStorageSetter(this.ownPropertyStorage(owner), entry);
+        }
         return this.propertySetter(entry);
     };
     Records.prototype.setOwnPropertyEntrySetter = function (owner, entry, setter) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            if (setter) this.heap.requireRecord(setter);
+            var storage = this.ownPropertyStorage(owner);
+            this.heap.writeTrustedFieldU32(storage,
+                this.propertyStorageEntryOffset(storage, entry) + PROPERTY_ENTRY_SETTER,
+                setter || 0);
+            return;
+        }
         this.setPropertySetter(entry, setter);
     };
 
     Records.prototype.findOwnPropertyEntry = function (owner, key) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(owner);
+            if (!storage) return 0;
+            if (typeof key === "number") return this.findPropertyStorageEntry(storage, key);
+            var entry = this.lastOwnPropertyEntry(owner);
+            while (entry) {
+                if (this.readString(this.propertyStorageKey(storage, entry)) === key) return entry;
+                entry = this.previousOwnPropertyEntry(owner, entry);
+            }
+            return 0;
+        }
         return this.findOwnProperty(owner, key);
     };
     Records.prototype.defineOwnPropertyEntry = function (owner, key, attributes) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var entry = this.findOwnPropertyEntry(owner, key);
+            if (entry) {
+                this.setOwnPropertyEntryAttributes(owner, entry,
+                    attributes === undefined ? DEFAULT_ATTRIBUTES : attributes);
+                return entry;
+            }
+            var storage = this.ownPropertyStorage(owner);
+            var previousStorage = storage;
+            if (!storage) storage = this.allocatePropertyStorage(PROPERTY_STORAGE_INITIAL_CAPACITY);
+            else if (this.propertyStorageLength(storage) === this.propertyStorageCapacity(storage)) {
+                if (this.propertyStorageCapacity(storage) === 0) {
+                    storage = this.growPropertyStorage(storage, PROPERTY_STORAGE_INITIAL_CAPACITY);
+                } else if (this.propertyStorageLiveCount(storage) * 2 <= this.propertyStorageLength(storage)) {
+                    storage = this.copyLivePropertyStorage(storage, this.propertyStorageCapacity(storage));
+                } else storage = this.growPropertyStorage(storage, this.propertyStorageLength(storage) + 1);
+            }
+            this.setObjectPropertyHead(owner, storage);
+            if (previousStorage && previousStorage !== storage) {
+                var previousIndex = this.propertyStorageHashIndex(previousStorage);
+                if (previousIndex) this.heap.freeRecord(previousIndex);
+                this.heap.memory.fill(this.heap.trustedPayloadAddress(previousStorage, 0),
+                    this.heap.recordSize(previousStorage) - Heap.HEADER_SIZE, 0);
+                this.heap.freeRecord(previousStorage);
+            }
+            return this.appendPropertyStorageEntry(storage, key, attributes);
+        }
         return this.defineOwnProperty(owner, key, attributes);
     };
     Records.prototype.deleteOwnPropertyEntry = function (owner, key) {
         var entry = this.findOwnPropertyEntry(owner, key);
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            if (entry) this.deletePropertyStorageEntry(this.ownPropertyStorage(owner), entry);
+            return true;
+        }
         var deleted = this.deleteOwnProperty(owner, key);
         if (entry && deleted) this.heap.freeRecord(entry);
         return deleted;
     };
 
-    /* Walk backwards in insertion order. The legacy list is newest first;
-     * packed storage will walk live slots backwards. Never expose list links
+    /* Walk backwards in insertion order. Legacy lists are newest first;
+     * packed storage walks live slots backwards. Never expose list links
      * or assume that an entry is a separately allocated heap record. */
     Records.prototype.lastOwnPropertyEntry = function (owner) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(owner);
+            return storage ? this.previousOwnPropertyEntry(owner,
+                this.propertyStorageLength(storage) + 1) : 0;
+        }
         return this.objectPropertyHead(owner);
     };
     Records.prototype.previousOwnPropertyEntry = function (owner, entry) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(owner);
+            while (--entry > 0) {
+                if (this.propertyStorageKey(storage, entry)) return entry;
+            }
+            return 0;
+        }
         return this.propertyNext(entry);
     };
     Records.prototype.releaseOwnPropertyStorage = function (owner) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            var storage = this.ownPropertyStorage(owner);
+            this.setObjectPropertyHead(owner, 0);
+            if (storage) {
+                var hash = this.propertyStorageHashIndex(storage);
+                if (hash) this.heap.freeRecord(hash);
+                this.heap.freeRecord(storage);
+            }
+            return;
+        }
         var entry = this.lastOwnPropertyEntry(owner);
         var index = this.heap.recordType(owner) === Heap.Types.OBJECT ?
             this.objectPropertyIndex(owner) : 0;
@@ -744,6 +851,9 @@
     };
 
     Records.prototype.findOwnProperty = function (object, keyString) {
+        if (this.heap.recordType(object) === Heap.Types.OBJECT) {
+            throw new Error("ordinary properties require owner/entry accessors");
+        }
         var keyAddress = typeof keyString === "number" ? keyString : 0;
         var property = this.objectPropertyHead(object);
         while (property) {
@@ -760,6 +870,9 @@
     };
 
     Records.prototype.defineOwnProperty = function (object, keyAddress, attributes) {
+        if (this.heap.recordType(object) === Heap.Types.OBJECT) {
+            throw new Error("ordinary properties require owner/entry accessors");
+        }
         this.heap.requireRecord(keyAddress, Heap.Types.STRING);
         var property = this.findOwnProperty(object, keyAddress);
         if (!property) {
@@ -810,21 +923,21 @@
     };
 
     Records.prototype.countEnumerableOwnProperties = function (source) {
-        var property = this.objectPropertyHead(source);
+        var property = this.lastOwnPropertyEntry(source);
         var count = 0;
         while (property) {
-            if (this.propertyAttributes(property) & ATTR_ENUMERABLE) count++;
-            property = this.propertyNext(property);
+            if (this.ownPropertyEntryAttributes(source, property) & ATTR_ENUMERABLE) count++;
+            property = this.previousOwnPropertyEntry(source, property);
         }
         return count;
     };
 
     Records.prototype.countOwnProperties = function (source) {
-        var property = this.objectPropertyHead(source);
+        var property = this.lastOwnPropertyEntry(source);
         var count = 0;
         while (property) {
             count++;
-            property = this.propertyNext(property);
+            property = this.previousOwnPropertyEntry(source, property);
         }
         return count;
     };
@@ -840,14 +953,38 @@
         if (this.objectPropertyHead(target)) {
             throw new Error("property clone target must be empty");
         }
-        var sourceProperty = this.objectPropertyHead(source);
+        var sourceProperty = this.lastOwnPropertyEntry(source);
         var propertyCount = knownPropertyCount === undefined ?
             (enumerableOnly ? this.countEnumerableOwnProperties(source) :
                               this.countOwnProperties(source)) :
             knownPropertyCount;
         if (!propertyCount) return 0;
+        if (this.heap.recordType(target) === Heap.Types.OBJECT) {
+            var storage = this.allocatePropertyStorage(propertyCount);
+            this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LENGTH, propertyCount);
+            this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT, propertyCount);
+            var entry = propertyCount;
+            while (sourceProperty) {
+                var sourceAttributes = this.ownPropertyEntryAttributes(source, sourceProperty);
+                if (!enumerableOnly || (sourceAttributes & ATTR_ENUMERABLE)) {
+                    var offset = this.propertyStorageEntryOffset(storage, entry);
+                    this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_KEY,
+                        this.ownPropertyEntryKey(source, sourceProperty));
+                    this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_ATTRIBUTES, sourceAttributes);
+                    this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_SETTER,
+                        this.ownPropertyEntrySetter(source, sourceProperty));
+                    this.cells.copyAt(this.propertyStorageValueCell(storage, entry),
+                        this.ownPropertyEntryValueCell(source, sourceProperty));
+                    entry--;
+                }
+                sourceProperty = this.previousOwnPropertyEntry(source, sourceProperty);
+            }
+            this.setObjectPropertyHead(target, storage);
+            return storage;
+        }
         if (this.heap.recordInitializer &&
-            this.heap.recordInitializer.cloneProperties) {
+            this.heap.recordInitializer.cloneProperties &&
+            this.heap.recordType(source) !== Heap.Types.OBJECT) {
             var recordBytes = Heap.HEADER_SIZE + PROPERTY_BYTES;
             var requestedBytes = propertyCount * recordBytes;
             var block = this.heap.allocateRecord(
@@ -858,17 +995,17 @@
                 this.objectPropertyHead(source), target, block, blockBytes,
                 propertyCount, enumerableOnly);
         }
-        sourceProperty = this.objectPropertyHead(source);
+        sourceProperty = this.lastOwnPropertyEntry(source);
         var firstClone = 0;
         var previousClone = 0;
         while (sourceProperty) {
-            var attributes = this.propertyAttributes(sourceProperty);
+            var attributes = this.ownPropertyEntryAttributes(source, sourceProperty);
             if (!enumerableOnly || (attributes & ATTR_ENUMERABLE)) {
                 var clone = this.heap.allocateRecordWords(Heap.Types.PROPERTY,
-                    PROPERTY_BYTES, 0, this.propertyKey(sourceProperty),
-                    attributes, this.propertySetter(sourceProperty));
+                    PROPERTY_BYTES, 0, this.ownPropertyEntryKey(source, sourceProperty),
+                    attributes, this.ownPropertyEntrySetter(source, sourceProperty));
                 this.cells.copyAt(this.propertyValueCell(clone),
-                                  this.propertyValueCell(sourceProperty));
+                                  this.ownPropertyEntryValueCell(source, sourceProperty));
                 if (!firstClone) firstClone = clone;
                 if (previousClone) {
                     this.heap.writeTrustedFieldU32(previousClone,
@@ -876,13 +1013,16 @@
                 }
                 previousClone = clone;
             }
-            sourceProperty = this.propertyNext(sourceProperty);
+            sourceProperty = this.previousOwnPropertyEntry(source, sourceProperty);
         }
         this.setObjectPropertyHead(target, firstClone);
         return firstClone;
     };
 
     Records.prototype.deleteOwnProperty = function (object, keyAddress) {
+        if (this.heap.recordType(object) === Heap.Types.OBJECT) {
+            return this.deleteOwnPropertyEntry(object, keyAddress);
+        }
         var previous = 0;
         var property = this.objectPropertyHead(object);
         while (property) {
@@ -1493,6 +1633,22 @@
     };
     Records.prototype.findPropertyStorageEntry = function (storage, key) {
         this.heap.requireRecord(key, Heap.Types.STRING);
+        var index = this.preparePropertyStorageIndex(storage);
+        if (index) {
+            var hash = this.stringHash(key);
+            var capacity = this.propertyIndexCapacity(index);
+            var bucket = hash & (capacity - 1);
+            var probes = 0;
+            while (probes++ < capacity) {
+                var slot = this.propertyIndexSlot(index, bucket);
+                if (!slot) return 0;
+                var candidateKey = this.propertyStorageKey(storage, slot);
+                if (candidateKey === key || (this.stringHash(candidateKey) === hash &&
+                        this.readString(candidateKey) === this.readString(key))) return slot;
+                bucket = (bucket + 1) & (capacity - 1);
+            }
+            return 0;
+        }
         var text = null, entry = 1, length = this.propertyStorageLength(storage);
         while (entry <= length) {
             var candidate = this.propertyStorageKey(storage, entry);
@@ -1505,10 +1661,58 @@
         }
         return 0;
     };
+    Records.prototype.insertPropertyStorageIndex = function (storage, index, entry) {
+        var capacity = this.propertyIndexCapacity(index);
+        var bucket = this.stringHash(this.propertyStorageKey(storage, entry)) & (capacity - 1);
+        var probes = 0;
+        while (probes++ < capacity) {
+            if (!this.propertyIndexSlot(index, bucket)) {
+                this.heap.writeTrustedFieldU32(index,
+                    PROPERTY_INDEX_SLOTS + bucket * Heap.WORD_BYTES, entry);
+                return true;
+            }
+            bucket = (bucket + 1) & (capacity - 1);
+        }
+        return false;
+    };
+    Records.prototype.preparePropertyStorageIndex = function (storage) {
+        var index = this.propertyStorageHashIndex(storage);
+        var epoch = this.heap.flags(storage);
+        if (index) {
+            if (this.heap.readTrustedFieldU32(index, PROPERTY_INDEX_VERSION) === epoch) return index;
+            this.discardPropertyStorageIndex(storage);
+        }
+        var count = this.propertyStorageLiveCount(storage);
+        if (count < PROPERTY_INDEX_MINIMUM_PROPERTIES) return 0;
+        var capacity = PROPERTY_INDEX_MINIMUM_PROPERTIES * 2;
+        while (capacity < count * 2) capacity *= 2;
+        var bytes = Heap.HEADER_SIZE + PROPERTY_INDEX_SLOTS + capacity * Heap.WORD_BYTES;
+        if (this.heap.bump + bytes > this.heap.allocationLimit) return 0;
+        index = this.heap.allocateRecordWords(Heap.Types.PROPERTY_INDEX,
+            PROPERTY_INDEX_SLOTS + capacity * Heap.WORD_BYTES, storage, epoch, count, capacity);
+        var length = this.propertyStorageLength(storage);
+        for (var entry = 1; entry <= length; entry++) {
+            if (this.propertyStorageKey(storage, entry)) {
+                if (!this.insertPropertyStorageIndex(storage, index, entry)) return 0;
+            }
+        }
+        this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_HASH, index);
+        return index;
+    };
     Records.prototype.definePropertyStorageEntry = function (storage, key, attributes, setter) {
         var entry = this.findPropertyStorageEntry(storage, key);
         if (entry) return entry;
-        entry = this.propertyStorageLength(storage) + 1;
+        return this.appendPropertyStorageEntry(storage, key, attributes, setter);
+    };
+    Records.prototype.discardPropertyStorageIndex = function (storage) {
+        var index = this.propertyStorageHashIndex(storage);
+        if (index) {
+            this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_HASH, 0);
+            this.heap.freeRecord(index);
+        }
+    };
+    Records.prototype.appendPropertyStorageEntry = function (storage, key, attributes, setter) {
+        var entry = this.propertyStorageLength(storage) + 1;
         if (entry > this.propertyStorageCapacity(storage)) {
             throw new RangeError("property storage needs growth before insertion");
         }
@@ -1522,8 +1726,18 @@
         this.cells.writePrimitiveAt(this.propertyStorageValueCell(storage, entry), undefined);
         this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT,
             this.propertyStorageLiveCount(storage) + 1);
-        this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_HASH, 0);
-        this.heap.setFlags(storage, (this.heap.flags(storage) + 1) >>> 0);
+        var epoch = this.heap.flags(storage);
+        this.heap.setFlags(storage, (epoch + 1) >>> 0);
+        var index = this.propertyStorageHashIndex(storage);
+        if (index) {
+            var live = this.propertyStorageLiveCount(storage);
+            if (this.heap.readTrustedFieldU32(index, PROPERTY_INDEX_VERSION) === epoch &&
+                    live * 2 <= this.propertyIndexCapacity(index) &&
+                    this.insertPropertyStorageIndex(storage, index, entry)) {
+                this.heap.writeTrustedFieldU32(index, PROPERTY_INDEX_COUNT, live);
+                this.heap.writeTrustedFieldU32(index, PROPERTY_INDEX_VERSION, (epoch + 1) >>> 0);
+            } else this.discardPropertyStorageIndex(storage);
+        }
         return entry;
     };
     Records.prototype.deletePropertyStorageEntry = function (storage, entry) {
@@ -1532,7 +1746,7 @@
         this.heap.memory.fill(this.heap.trustedPayloadAddress(storage, offset), PROPERTY_ENTRY_BYTES, 0);
         this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT,
             this.propertyStorageLiveCount(storage) - 1);
-        this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_HASH, 0);
+        this.discardPropertyStorageIndex(storage);
         this.heap.setFlags(storage, (this.heap.flags(storage) + 1) >>> 0);
         return true;
     };
@@ -1558,8 +1772,11 @@
         return grown;
     };
     Records.prototype.compactPropertyStorage = function (storage) {
+        return this.copyLivePropertyStorage(storage, this.propertyStorageLiveCount(storage));
+    };
+    Records.prototype.copyLivePropertyStorage = function (storage, capacity) {
         var count = this.propertyStorageLiveCount(storage);
-        var compacted = this.allocatePropertyStorage(count);
+        var compacted = this.allocatePropertyStorage(capacity);
         var entry = 1, target = 0, length = this.propertyStorageLength(storage);
         while (entry <= length) {
             var offset = this.propertyStorageEntryOffset(storage, entry);

@@ -1,11 +1,18 @@
-# Ordered object properties: migration contract
+# Ordered object properties
 
-The target representation is a growable array of **inline entries**, in
+Ordinary objects now use a growable array of **inline entries**, in
 insertion order, plus an optional hash index from a name to an entry ID. It is
 not a linked list with faster searching, nor an array of pointers to separately
-allocated property records. The existing linked representation remains active
-until its consumers have been converted; the new packed component is not yet
-the default object representation.
+allocated property records. Empty objects have a null storage reference until
+their first insertion. Arrays, functions, RegExp and Buffer records retain
+their special indexed/internal layouts and legacy *named* entries behind the
+same owner/entry accessor boundary. The cutover is for ordinary objects.
+
+Both the reference implementation and the compiled interpreter use this
+representation by default. Native constructors create packed entries directly;
+there is no linked-list construction followed by a lazy conversion. The native
+implementation is `property_storage_kernel.js`, compiled by the shared kernel
+pipeline. Compiler contract 51 invalidates incompatible code-only snapshots.
 
 ## Entries and ordering
 
@@ -24,15 +31,16 @@ required. Hash bucket order is never enumeration order. Ordinary numeric-looking
 string names retain insertion order too; existing dense-array index behaviour
 is a separate concern.
 
-Growth allocates a larger backing store and bulk-copies entries without
-changing IDs. Stable compaction copies live entries in their current order,
-but changes IDs. Both operations return a new storage reference. The storage
+The component's explicit growth operation preserves IDs; stable compaction
+changes IDs while preserving order. Ordinary-object regrowth can compact at
+the same time, so IDs must always be checked against their backing. Both
+operations return a new storage reference. The storage
 record flags hold a mutation epoch. An optional hash must contain entry IDs,
 not raw entry addresses, and must be invalidated/rebuilt when appropriate.
 
 ## Address/lifetime audit
 
-These existing consumers prevent a safe one-step layout replacement:
+The ownership boundary is shared by all execution paths:
 
 - `runtime.js` now has owner-scoped `propertyEntries` maps on its heap proxies.
   Their guards are backing identity, heap structural epoch and GC generation;
@@ -42,25 +50,48 @@ These existing consumers prevent a safe one-step layout replacement:
   an ephemeral cell only when performing an access. Descriptor operations
   continue through the semantic property access API, including inherited
   getter/setter receiver handling.
-- Native interpreter property-cache entries currently contain property-record
-  addresses. They must cache the owning object and entry ID instead.
-- Property traversal currently returns raw property records, including after
-  a prototype walk. The found owner must remain available separately from the
+- Native interpreter property-cache entries contain the owning object, its
+  storage identity/epoch, GC generation and entry ID, not a persistent cell
+  address. Slot resolution happens only after validating those guards.
+- Property traversal preserves the found owner separately from the
   original receiver; accessor `this` must still be the receiver.
 - Some low-level APIs return a value-cell address. Such an address is
   ephemeral: callers must not retain it across storage growth, compaction or
   re-entrant guest code. JavaScript references spanning an RHS/getter/setter
   evaluation retain the owner and key and resolve the entry when needed.
-- The collector currently follows property-list links. Packed storage instead
+- The collector follows the owner's storage reference. Packed storage
   traces each live entry's key, setter and tagged value, plus the optional
   index. Tombstones retain nothing.
 
-Owner-and-entry accessor conversion precedes the default-layout cutover. The
-legacy records may serve as a temporary implementation behind those accessors;
-they are not the final storage. Descriptor, prototype and permission handling
-must remain separate from lookup acceleration.
+Descriptor, prototype and permission handling remain separate from lookup
+acceleration. Reverse traversal is explicitly named: enumeration reverses it
+to expose insertion order, while internal searches can start at the last slot.
 
-## Working increments
+## Growth, hashes and retirement
+
+Ordinary insertion starts with capacity four and grows geometrically. When a
+full backing is at least half tombstones, regrowth compacts into the current
+capacity instead of growing it. Individual deletion never shifts later slots.
+The optional open-addressed index starts at 32 live entries, stays at or below
+half occupancy and stores slot IDs. It is not an enumeration structure.
+Insertion updates a current index incrementally where capacity permits;
+deletion, replacement or incompatible epochs discard it. Native index creation
+uses only available arena space and falls back to scanning without forcing GC.
+
+Superseded backings and discarded indexes are private implementation records.
+Once the replacement is published, their payloads are cleared and their records
+retired; the normal allocator/collector rebuild reclaims native retired records.
+This is necessary for lifetime hygiene as well as deterministic snapshots:
+obsolete copies of a libc-symbol dictionary must not retain producing-process
+addresses after the live binding cells have been normalized. No serializer-only
+copying/caching workaround or source/debug stripping is involved.
+
+Descriptor operations that can append to their own source object preserve any
+needed temporary value before regrowth. Raw cell addresses must not outlive
+that mutation. Both collector backends trace only live entries, their keys,
+setters and tagged values; tombstones retain nothing.
+
+## Original migration sequence
 
 1. Implement packed allocation, lookup, append/update, deletion, growth,
    compaction, enumeration and both collector backends. Validate the complete
@@ -83,7 +114,30 @@ external corpus modifications are part of this migration. Tests and benchmarks
 remain serial. A component passing does not imply the object-layout cutover
 or the snapshot performance-parity objective is complete.
 
-## Owner/entry conversion checkpoint, 2026-10-24
+## Cutover checkpoint, 2026-10-25
+
+The ordinary-object cutover is enabled and passes both-host project suites,
+the expanded bounded structural GC workload on both hosts, eight previously
+working Octane quick suites and standalone language integration. Short demos
+1–8 checks render, accept input and exit normally; demo8 visits garage and
+free-drive auto pilot. Both web servers serve byte-identical text and ELF
+data, generate a directory listing and select a supplied `index.html`.
+
+The fresh image is 8,132,248 bytes and is bit-identical to its genuine
+self-hosted rebuild. The independent heap/marker audit reports 32,908
+reachable records and zero missing marks. Both the reference and native GC
+stress runs perform 67 embedding collections and 27 audits over 72,842 edges,
+including 221 property-index audits. Maximum observed guest bumps are 363,336
+and 388,184 bytes, below the 8 MiB cap. The standalone workload exercises 47
+native automatic collections. No demo or external corpus source was changed.
+
+Initial serial build timings are 82.02 seconds under js_min and 79.59 seconds
+self-hosted. A fresh exported pre-cutover baseline and full bounded Test262
+comparison are still pending at this checkpoint; these timings alone do not
+establish a build speedup. Raw logs/images use ignored `artifacts/packed-final`
+and `artifacts/packed-retirement` prefixes.
+
+## Historical owner/entry conversion checkpoint, 2026-10-24
 
 The record layer provides named owner/entry accessors. Its legacy adapter
 currently interprets entry IDs as legacy record IDs; callers must not calculate
@@ -102,7 +156,7 @@ retains the found owner after walking the prototype chain, and resolves its
 entry through compiled owner-aware helpers. These helpers are normal kernel
 functions, not host callbacks or new dialect semantics.
 
-Remaining before the default-layout cutover: convert the other native lookup,
+At that checkpoint, remaining before the default-layout cutover: convert the other native lookup,
 allocation, descriptor, enumeration, deletion and cloning paths, together with
 the record-layer cloning/initialization implementations. Then change entry
 resolution to packed slots and replace the transitional list index with the
