@@ -1,5 +1,16 @@
 # Native kernel interpreter design
 
+## Ordered ordinary-object properties (2026-10-25)
+
+Ordinary objects now own packed entry storage rather than linked property
+records. `property_storage_kernel.js` supplies named owner/entry helpers to
+the same kernel compiler and both backends. Native constructors create packed
+storage directly; global, computed and constant-name lookups use guarded slot
+references. Temporary descriptor views resolve multi-field accesses once,
+but never survive a callback or mutation. See
+[ordered property storage](../PROPERTY_STORAGE.md) for the complete layout,
+cache, insertion-order, retirement and saved-context ownership contract.
+
 ## Execution-local addresses and integer paths (2026-10-22)
 
 The dispatch engine keeps absolute addresses of its current bytecode payload

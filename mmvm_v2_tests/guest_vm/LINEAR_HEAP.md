@@ -97,7 +97,7 @@ Every allocation starts with this 16-byte header:
 Payload offsets are relative to byte 16. `checkPayload` validates the record,
 expected type, offset, width, and allocation boundary before any field access.
 
-## Planned payload layouts
+## Payload layouts
 
 New fields require a named accessor and documentation update in the same
 commit. Consumers must not duplicate these offsets.
@@ -107,23 +107,27 @@ commit. Consumers must not duplicate these offsets.
 | Payload offset | Field |
 |---:|---|
 | 0 | prototype reference |
-| 4 | first property-entry reference |
-| 8 | last property-entry reference |
-| 12 | property count |
+| 4 | packed property-storage reference, or zero when empty |
+| 8 | extensibility flags |
+| 12 | reserved |
 
-### Property entry
+### Legacy named property
 
 | Payload offset | Field |
 |---:|---|
-| 0 | interned key-string reference |
-| 4 | next property-entry reference |
+| 0 | next property-entry reference |
+| 4 | interned key-string reference |
 | 8 | attributes |
-| 12 | reserved/alignment |
+| 12 | setter reference |
 | 16 | 16-byte value cell |
 
-Properties initially use an insertion-ordered linked list. A later hash index
-must itself live in linear memory and remain an optimization behind the same
-accessor API.
+These records remain for special objects' named properties, not ordinary
+objects. Ordinary objects use a growable insertion-ordered array of inline
+entries, with tombstones and an optional heap-owned hash from names to slot
+IDs. The layouts and lifetime/accessor contract are documented in
+[ordered property storage](../PROPERTY_STORAGE.md); `heap_records.js` is the
+authoritative source of offsets. Neither caches nor hash buckets define
+enumeration order.
 
 ### Array
 

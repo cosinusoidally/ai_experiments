@@ -883,8 +883,31 @@ performance are separate mandatory regression gates.
   lifecycle is also covered by the existing embedding-context test, rather
   than a new set of language micro-tests. The Node project suite passes.
   Raw log: ignored `artifacts/packed-restore-test262-40.log`.
-- A new complete native inventory is running; the focused result above is not
-  presented as the final whole-suite total. No external corpus was modified.
+- Corrected complete native inventory (`0deb997`): **3,292 executed:
+  3,139 passed, 153 failed, 0 not run, 6 timed out**. The exact failing
+  IDs/variants match the pre-cutover set. Elapsed 587.10 seconds; peak RSS
+  285,212 KiB. Raw log: ignored `artifacts/packed-restore-test262-full.log`.
+  Correctness is back to baseline, but this timing does not establish
+  performance parity with the earlier 317.86-second run.
+- A serial, same-machine repeat of the exported pre-cutover inventory confirms
+  the same 3,139 pass / 153 fail / zero not-run / six-timeout set in **308.96
+  seconds** (307.74 user, 0.85 system), peak RSS 288,336 KiB. The whole-suite
+  slowdown is therefore real, not dismissed as timing noise. Raw log: ignored
+  `artifacts/packed-baseline-test262-repeat.log`. A focused phase comparison of
+  152 cases (`ch11/11.6 ch11/11.7`) has identical 151-pass/one-failure results:
+  first-100 context creation/restore 375 versus 308 ms, compilation/registration
+  5,874 versus 6,104 ms, execution 1,226 versus 828 ms (packed versus baseline).
+  Native interpreter time for the complete selection is 94 versus 85 ms, with
+  identical bytecode/exit counts. These instrumented figures do not explain
+  the entire difference in the whole-suite wall times. No corpus was modified.
+- An explicitly named resolved-entry descriptor/value-cell accessor now skips
+  repeated slot bounds/key validation only after semantic lookup or guarded
+  cache validation has established a live entry. The checked low-level API is
+  unchanged; neither view may survive re-entry or structural mutation. The
+  Node project suite passes, and the same 152-case selection remains 151 pass /
+  one existing failure. First-100 compilation/registration is 5,309 ms and
+  execution 1,110 ms. A complete instrumented run is in progress to identify
+  the remaining whole-suite cost; performance parity is not claimed.
 
 ## Rules for subsequent entries
 

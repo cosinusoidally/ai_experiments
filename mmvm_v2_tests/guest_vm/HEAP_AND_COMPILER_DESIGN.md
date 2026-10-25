@@ -39,9 +39,10 @@ mark generation, and flags. Current payloads are:
 
 | Record | Payload |
 | --- | --- |
-| String | UTF-16 length, stable hash, UTF-16 code units |
-| Object | prototype reference, property-list head, extensibility flags |
-| Property | next reference, string-key reference, attributes, value cell |
+| String | UTF-16 length/hash, flat bytes/code units or rope/slice backing |
+| Object | prototype reference, packed-storage reference, extensibility flags |
+| Property storage | length, capacity, live count, optional index, inline entries |
+| Legacy named property | next reference, string key, attributes, setter, value cell |
 | Value vector | logical length, capacity, consecutive value cells |
 | Array | prototype, named-property head, value-vector reference |
 | Environment | parent environment, slot count, consecutive value cells |
@@ -58,18 +59,18 @@ and `heapAddress`. The runtime may canonicalize handles by address so host
 identity comparisons remain cheap. A final handle exposes no mutable guest
 properties, elements, prototype, or closure fields.
 
-The JavaScript backend may maintain guarded property or element caches. A cache
-entry contains a heap address, version/shape guard, and decoded value. Every
-write updates the heap first and then updates or invalidates the cache. Cache
-misses decode from the heap. GC scans heap records and never cache contents.
-The native interpreter currently keeps a 256-entry direct-mapped cache for
-constant-name reads of own properties on ordinary objects. Each entry checks
-receiver and key identity, the receiver's structural version, its GC-generation
-mark, and its current property-head address. A hit supplies only the property
-record address; the value is reread from its authoritative value cell. Adding
-a property changes the head guard, deletion advances the structure version,
-and collection clears all entries before address reuse. Cache words are weak
-derived state and are deliberately not collector edges.
+The JavaScript backend may maintain guarded property or element caches. Property
+site caches hold owner/entry references guarded by identity, backing, mutation
+epoch and GC generation, not persistent value-cell addresses or decoded values.
+The authoritative value is read through a temporary descriptor view. GC scans
+heap records, not cache contents. The native interpreter's 256-entry weak
+direct-mapped cache serves ordinary own lookups, including global and computed
+names. It checks owner/key, backing, epoch and generation and returns a slot ID.
+Growth/compaction replaces the backing; insertion/deletion changes its epoch;
+collection clears entries before address reuse. Context restoration clears
+derived views too, because restoring epochs cannot validate a cache from the
+abandoned timeline. See [ordered property storage](../PROPERTY_STORAGE.md)
+for descriptor ownership, enumeration, retirement and saved-context pins.
 
 String interning is a weak canonicalization table, not a root set. A live
 property key, program atom, value, or snapshot marks its string record through

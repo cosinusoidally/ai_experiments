@@ -133,8 +133,9 @@
         return 1;
     }
 
-    /* Replaced private backings have no remaining owner. Clear their payload
-     * before retiring them: copied FFI values must not survive as stale
+    /* Replaced private backings can be retired unless a saved context still
+     * owns their record boundaries. Clear unpinned payloads first: copied
+     * FFI values must not survive as stale
      * process addresses in a ready-to-run heap image. They become ordinary
      * free records, reclaimed by the normal allocator/collector rebuild. */
     function retirePropertyRecordKernel(heapBase, state, record) {

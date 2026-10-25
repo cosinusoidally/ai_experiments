@@ -33,6 +33,13 @@ still retain only guarded owners and entry IDs. The snapshot inspection tool
 recognizes the preceding contract-51 value-cell layout when inspecting older
 images; raw heap dumps are interpreted using the current layout.
 
+The reference runtime distinguishes the checked descriptor API from the
+resolved-entry API. The latter is used immediately after lookup or guarded
+cache validation establishes a live entry, so it need not repeat slot bounds
+and key checks. This is the same prevalidated-access pattern as
+`vectorCellWithinLength`, not an unguarded persistent pointer cache. No callback
+or structural mutation may intervene before the view is consumed.
+
 Entry IDs are one-based array slots, with zero meaning not found. New names
 append. Updating a value or descriptor does not move the entry. Deletion clears
 the entry, leaving a tombstone; recreating that name appends a new entry.

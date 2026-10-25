@@ -737,6 +737,17 @@
     Records.prototype.propertyDescriptorAttributes = function (descriptor) {
         return this.heap.memory.readU32Trusted(descriptor + PROPERTY_DESCRIPTOR_ATTRIBUTES);
     };
+    /* Internal semantic accesses have just found or guarded this live entry.
+     * Like vectorCellWithinLength, this avoids repeating bounds/key checks.
+     * No callback or structural mutation may intervene before using the view.
+     * Keep ownPropertyEntryDescriptor as the checked low-level API. */
+    Records.prototype.resolvedOwnPropertyEntryDescriptor = function (owner, entry) {
+        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
+            return this.propertyStorageEntriesAddress(this.ownPropertyStorage(owner)) +
+                (entry - 1) * PROPERTY_ENTRY_BYTES + PROPERTY_ENTRY_KEY;
+        }
+        return this.heap.trustedPayloadAddress(entry, PROPERTY_KEY);
+    };
     Records.prototype.propertyDescriptorSetter = function (descriptor) {
         return this.heap.memory.readU32Trusted(descriptor + PROPERTY_DESCRIPTOR_SETTER);
     };
@@ -745,6 +756,10 @@
     };
     Records.prototype.ownPropertyEntryValueCell = function (owner, entry) {
         return this.propertyDescriptorValueCell(this.ownPropertyEntryDescriptor(owner, entry));
+    };
+    Records.prototype.resolvedOwnPropertyEntryValueCell = function (owner, entry) {
+        return this.propertyDescriptorValueCell(
+            this.resolvedOwnPropertyEntryDescriptor(owner, entry));
     };
     Records.prototype.ownPropertyEntryAttributes = function (owner, entry) {
         if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
