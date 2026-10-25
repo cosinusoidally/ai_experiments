@@ -202,6 +202,36 @@
         assert(firstRuntime.runtime.linearHeap.isFreeRecord(abortedFrameAddress),
                "abort did not release the guest frame record");
 
+        /* Exercise a saved environment as an owner, not just the currently
+         * running context. Two snapshots share the original backing while
+         * repeated mutation grows/retires replacements across collection. */
+        firstContext.run("var snapshotBag = {};" +
+            "for (var saved = 0; saved < 48; saved++) " +
+            "snapshotBag['key' + saved] = {value: saved};",
+            "saved_context_dictionary.js");
+        var savedContextA = firstContext.createSnapshot();
+        var savedContextB = firstContext.createSnapshot();
+        var mutateSavedContext = "for (var changed = 0; changed < 48; changed++) {" +
+            "delete snapshotBag['key' + changed];" +
+            "snapshotBag['replacement' + changed] = {value: -changed};}";
+        firstContext.run(mutateSavedContext, "mutated_context_dictionary.js");
+        firstRuntime.collect();
+        firstContext.restoreSnapshot(savedContextA);
+        firstContext.run("if (snapshotBag.key7.value !== 7 || " +
+            "Object.keys(snapshotBag).join(',') !== " +
+            "(function () {var names = []; for (var n = 0; n < 48; n++) " +
+            "names.push('key' + n); return names.join(',');}())) " +
+            "throw new Error('saved context values/order were not restored');",
+            "restored_context_dictionary.js");
+        firstRuntime.runtime.destroyHeapStateSnapshot(savedContextA.heapState);
+        firstContext.run(mutateSavedContext, "second_context_mutation.js");
+        firstRuntime.collect();
+        firstContext.restoreSnapshot(savedContextB);
+        firstContext.run("if (snapshotBag.key47.value !== 47) " +
+            "throw new Error('remaining snapshot lost its backing');",
+            "remaining_context_snapshot.js");
+        firstRuntime.runtime.destroyHeapStateSnapshot(savedContextB.heapState);
+
         firstRuntime.destroy();
         otherRuntime.destroy();
         return "runtime/context isolation and resumable execution passed";

@@ -857,6 +857,35 @@ performance are separate mandatory regression gates.
   legacy backing while owner/entry consumers are migrated; packed default
   storage is not claimed to be enabled at this checkpoint.
 
+### 2026-10-25, morning GMT — packed-storage cutover validation
+
+- Fresh exported pre-cutover reference: `bfec626`, native js_min,
+  complete authored inventory, `--quiet --instruction-limit 20000`.
+  **3,292 executed: 3,139 passed, 153 failed, 0 not run, 6 timed out**
+  (timeouts are included in failures). Elapsed 317.86 seconds; peak RSS
+  288,436 KiB. Raw log: ignored `artifacts/packed-baseline-test262-full.log`.
+- The packed cutover exposed a context-snapshot lifetime defect: eager backing
+  retirement could reuse a record still owned by a saved context. Snapshot
+  pins now preserve those boundaries, while saved immutable targets remain GC
+  roots even after the running context deletes their references. An initial
+  aborted run is not counted as a complete-suite result.
+- Intermediate diagnostic with backing lifetime corrected but restore-cache
+  invalidation still missing: **3,292 executed: 3,099 passed, 193 failed,
+  0 not run, 6 timed out**. Elapsed 565.52 seconds; peak RSS 271,856 KiB.
+  This is not an accepted regression baseline. The exact failing set was the
+  original 153 plus 40 cases; no original failure disappeared to mask them.
+  Raw log: ignored `artifacts/packed-pins-test262-full.log`.
+- Restoring old epochs cannot validate weak views from the abandoned execution
+  timeline. Restore now clears native lookup caches, threaded property/array
+  views and handle entry maps, including handles adopted after capture.
+  The exact 40 added failures now all pass: **40 executed, 40 passed, 0 failed,
+  0 not run, 0 timed out**. The both-snapshot dictionary/collection/restore
+  lifecycle is also covered by the existing embedding-context test, rather
+  than a new set of language micro-tests. The Node project suite passes.
+  Raw log: ignored `artifacts/packed-restore-test262-40.log`.
+- A new complete native inventory is running; the focused result above is not
+  presented as the final whole-suite total. No external corpus was modified.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

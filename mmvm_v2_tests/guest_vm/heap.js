@@ -536,7 +536,8 @@
                 ", flags " + this.memory.readU32(address + HEADER_FLAGS) + ")");
         }
         if (expectedType !== undefined && type !== expectedType) {
-            throw new TypeError("unexpected guest heap record type");
+            throw new TypeError("unexpected guest heap record type at " + address +
+                ": expected " + expectedType + ", found " + type);
         }
         return address;
     };

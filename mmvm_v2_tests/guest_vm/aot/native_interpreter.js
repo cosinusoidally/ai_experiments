@@ -17362,7 +17362,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 52,
+                compilerVersion: 53,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17398,6 +17398,8 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    PROPERTY_RECORD_SNAPSHOT_PIN: kernelConstantOverrides.PROPERTY_RECORD_SNAPSHOT_PIN,
+                    PROPERTY_STORAGE_EPOCH_MASK: kernelConstantOverrides.PROPERTY_STORAGE_EPOCH_MASK,
                     PROPERTY_DESCRIPTOR_KEY: kernelConstantOverrides.PROPERTY_DESCRIPTOR_KEY,
                     PROPERTY_DESCRIPTOR_ATTRIBUTES: kernelConstantOverrides.PROPERTY_DESCRIPTOR_ATTRIBUTES,
                     PROPERTY_DESCRIPTOR_SETTER: kernelConstantOverrides.PROPERTY_DESCRIPTOR_SETTER,

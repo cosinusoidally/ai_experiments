@@ -1798,6 +1798,7 @@
         var visited = {};
         var queue = [rootAddress];
         var addresses = [];
+        var immutableRoots = [];
         var queueIndex = 0;
         while (queueIndex < queue.length) {
             var address = queue[queueIndex++];
@@ -1809,7 +1810,14 @@
              * and engine/platform state belong to the execution containing
              * the embedder call, not to the context being snapshotted. */
             if (type === Heap.Types.STRING || type === Heap.Types.PROGRAM ||
-                type === Heap.Types.BYTECODE || type === Heap.Types.FRAME ||
+                    type === Heap.Types.BYTECODE) {
+                /* Saved cells may stop referring to these immutable records
+                 * while the context runs (for example after a deletion).
+                 * Retain their identities even though no byte copy is needed. */
+                immutableRoots.push(address);
+                continue;
+            }
+            if (type === Heap.Types.FRAME ||
                 type === Heap.Types.HANDLER ||
                 type === Heap.Types.ENGINE_STATE ||
                 type === Heap.Types.PLATFORM_SERVICES) continue;
@@ -1819,6 +1827,22 @@
             });
         }
         addresses.sort(function (left, right) { return left - right; });
+        /* Saved contexts retain superseded private backings too. Their
+         * addresses must remain record boundaries until the snapshot dies;
+         * otherwise eager retirement can reuse/coalesce the saved regions. */
+        var pinnedPropertyRecords = [];
+        var pinIndex = 0;
+        while (pinIndex < addresses.length) {
+            var pinnedAddress = addresses[pinIndex++];
+            var pinnedType = this.linearHeap.recordType(pinnedAddress);
+            if (pinnedType === Heap.Types.PROPERTY_STORAGE ||
+                    pinnedType === Heap.Types.PROPERTY_INDEX) {
+                this.linearHeap.setFlags(pinnedAddress,
+                    this.linearHeap.flags(pinnedAddress) |
+                    HeapRecords.PropertyRecordSnapshotPin);
+                pinnedPropertyRecords.push(pinnedAddress);
+            }
+        }
         var regions = [];
         var addressIndex = 0;
         while (addressIndex < addresses.length) {
@@ -1845,7 +1869,9 @@
         var snapshot = {
             memory: this.linearHeap.memory.createRegionSnapshot(regions),
             regions: regions, addresses: addresses,
-            handles: handles, destroyed: false
+            roots: addresses.concat(immutableRoots),
+            handles: handles, pinnedPropertyRecords: pinnedPropertyRecords,
+            destroyed: false
         };
         this.heapStateSnapshots.push(snapshot);
         return snapshot;
@@ -1860,10 +1886,20 @@
         }
         this.linearHeap.memory.restoreRegionSnapshot(
             snapshot.memory, snapshot.regions);
+        /* Storage epochs and GC marks have rolled back. They cannot guard
+         * weak views captured on the abandoned execution timeline. This also
+         * covers handles first adopted after the snapshot was created. */
+        if (this.nativeInterpreter) this.heapRecords.clearEnginePropertyCache(
+            this.nativeInterpreter.stateAddress);
+        if (this.threadedCompiler) this.threadedCompiler.invalidateHeapViews();
+        var addressIndex = 0;
+        while (addressIndex < snapshot.addresses.length) {
+            var handle = this.heapHandles["$" + snapshot.addresses[addressIndex++]];
+            if (handle) handle.propertyEntries = {};
+        }
         var index = 0;
         while (index < snapshot.handles.length) {
             var state = snapshot.handles[index++];
-            state.handle.propertyEntries = {};
             state.handle.propertyVersion = state.propertyVersion;
             state.handle.valueVersion = state.valueVersion;
             state.handle.arrayStructureVersion = state.arrayStructureVersion;
@@ -1875,6 +1911,25 @@
         this.linearHeap.memory.destroySnapshot(snapshot.memory);
         snapshot.memory = null;
         snapshot.destroyed = true;
+        var retainedPins = {};
+        var snapshotIndex = 0;
+        while (snapshotIndex < this.heapStateSnapshots.length) {
+            var retained = this.heapStateSnapshots[snapshotIndex++];
+            if (retained.destroyed) continue;
+            var retainedIndex = 0;
+            while (retainedIndex < retained.pinnedPropertyRecords.length) {
+                retainedPins["$" + retained.pinnedPropertyRecords[retainedIndex++]] = true;
+            }
+        }
+        var pinIndex = 0;
+        while (pinIndex < snapshot.pinnedPropertyRecords.length) {
+            var address = snapshot.pinnedPropertyRecords[pinIndex++];
+            if (!retainedPins["$" + address]) {
+                this.linearHeap.setFlags(address, this.linearHeap.flags(address) &
+                    ~HeapRecords.PropertyRecordSnapshotPin);
+            }
+        }
+        snapshot.pinnedPropertyRecords = [];
     };
 
     Runtime.prototype.programAddress = function (program) {
@@ -4559,8 +4614,8 @@
             var snapshot = this.heapStateSnapshots[snapshotIndex++];
             if (!snapshot || snapshot.destroyed) continue;
             var snapshotAddressIndex = 0;
-            while (snapshotAddressIndex < snapshot.addresses.length) {
-                enqueue(snapshot.addresses[snapshotAddressIndex++],
+            while (snapshotAddressIndex < snapshot.roots.length) {
+                enqueue(snapshot.roots[snapshotAddressIndex++],
                     "heap snapshot");
             }
         }
@@ -4659,9 +4714,9 @@
             var snapshot = this.heapStateSnapshots[snapshotIndex++];
             if (!snapshot || snapshot.destroyed) continue;
             var snapshotAddressIndex = 0;
-            while (snapshotAddressIndex < snapshot.addresses.length) {
+            while (snapshotAddressIndex < snapshot.roots.length) {
                 this.linearHeap.setMark(
-                    snapshot.addresses[snapshotAddressIndex++], generation);
+                    snapshot.roots[snapshotAddressIndex++], generation);
             }
         }
         var retainedProgramKey;

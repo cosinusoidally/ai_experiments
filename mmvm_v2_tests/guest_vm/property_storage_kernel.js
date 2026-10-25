@@ -138,6 +138,7 @@
      * process addresses in a ready-to-run heap image. They become ordinary
      * free records, reclaimed by the normal allocator/collector rebuild. */
     function retirePropertyRecordKernel(heapBase, state, record) {
+        if ((recordFlags(heapBase, record) & PROPERTY_RECORD_SNAPSHOT_PIN) !== 0) return 0;
         var bytes = recordSize(heapBase, record) - HEAP_HEADER_BYTES;
         var memsetPointer = platformMemsetPointer(heapBase,
             enginePlatformServices(heapBase, state));
@@ -163,6 +164,12 @@
             retirePropertyRecordKernel(heapBase, state, index);
         }
         return 0;
+    }
+
+    function nextPropertyStorageEpochKernel(heapBase, storage) {
+        var flags = recordFlags(heapBase, storage);
+        return (flags & PROPERTY_RECORD_SNAPSHOT_PIN) |
+            ((flags + 1) & PROPERTY_STORAGE_EPOCH_MASK);
     }
 
     function propertyIndexFindKernel(heapBase, index, key, hash) {
@@ -311,7 +318,8 @@
             }
             source = source + 1;
         }
-        if (old !== 0) setRecordFlags(heapBase, storage, recordFlags(heapBase, old) + 1);
+        if (old !== 0) setRecordFlags(heapBase, storage,
+            nextPropertyStorageEpochKernel(heapBase, old) & PROPERTY_STORAGE_EPOCH_MASK);
         setEngineHeapBump(heapBase, state, storage + bytes);
         setObjectPropertyHead(heapBase, owner, storage);
         if (old !== 0) {
@@ -334,14 +342,14 @@
             setValueCellUndefined(propertyStorageValueCellAt(heapBase, storage, entry - 1));
             setPropertyStorageLength(heapBase, storage, entry);
             setPropertyStorageLiveCount(heapBase, storage, live);
-            setRecordFlags(heapBase, storage, epoch + 1);
+            setRecordFlags(heapBase, storage, nextPropertyStorageEpochKernel(heapBase, storage));
             var index = propertyStorageHashIndex(heapBase, storage);
             if (index !== 0) {
                 if (propertyIndexVersion(heapBase, index) === epoch &&
                         live * 2 <= propertyIndexCapacity(heapBase, index) &&
                         propertyIndexInsertKernel(heapBase, index, entry) === 1) {
                     setPropertyIndexCount(heapBase, index, live);
-                    setPropertyIndexVersion(heapBase, index, epoch + 1);
+                    setPropertyIndexVersion(heapBase, index, recordFlags(heapBase, storage));
                 } else discardPropertyStorageIndexKernel(heapBase, state, storage);
             }
             return entry;
@@ -372,7 +380,7 @@
             setPropertyStorageLiveCount(heapBase, storage,
                 propertyStorageLiveCount(heapBase, storage) - 1);
             discardPropertyStorageIndexKernel(heapBase, state, storage);
-            setRecordFlags(heapBase, storage, recordFlags(heapBase, storage) + 1);
+            setRecordFlags(heapBase, storage, nextPropertyStorageEpochKernel(heapBase, storage));
         } else {
             var next = propertyNext(heapBase, entry);
             if (previous !== 0) setPropertyNext(heapBase, previous, next);
@@ -383,6 +391,7 @@
     }
 
     var kernels = {
+        nextPropertyStorageEpochKernel: nextPropertyStorageEpochKernel,
         ownPropertyEntryDescriptorKernel: ownPropertyEntryDescriptorKernel,
         ownPropertyEpochKernel: ownPropertyEpochKernel,
         ownPropertyEntryAttributesKernel: ownPropertyEntryAttributesKernel,

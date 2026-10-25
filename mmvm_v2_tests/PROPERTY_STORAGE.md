@@ -12,7 +12,7 @@ Both the reference implementation and the compiled interpreter use this
 representation by default. Native constructors create packed entries directly;
 there is no linked-list construction followed by a lazy conversion. The native
 implementation is `property_storage_kernel.js`, compiled by the shared kernel
-pipeline. Compiler contract 52 invalidates incompatible code-only snapshots.
+pipeline. Compiler contract 53 invalidates incompatible code-only snapshots.
 
 ## Entries and ordering
 
@@ -47,6 +47,17 @@ the same time, so IDs must always be checked against their backing. Both
 operations return a new storage reference. The storage
 record flags hold a mutation epoch. An optional hash must contain entry IDs,
 not raw entry addresses, and must be invalidated/rebuilt when appropriate.
+
+The high flags bit is reserved for an embedding context-snapshot pin; the
+remaining bits are the wrapping mutation epoch. Epoch updates preserve pins,
+but replacement storage does not inherit them. A pin prevents eager retirement,
+not mutation: the saved context owns a byte copy and retains the original
+record boundaries until its last snapshot owner releases them. Ordinary GC
+then reclaims any now-unreachable backings. Snapshot roots also retain immutable
+targets of saved cells, even when the running context deletes those references.
+Restoration invalidates native lookup caches, threaded property/array views and
+handle entry maps: rolled-back epochs cannot validate views from an abandoned
+execution timeline. This is a context-lifetime rule, not Test262-specific logic.
 
 ## Address/lifetime audit
 

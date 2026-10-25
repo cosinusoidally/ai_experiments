@@ -14,6 +14,7 @@
         this.runtime = runtime;
         this.programs = [];
         this.compiled = [];
+        this.propertyCaches = [];
         this.fallback = null;
         this.profileSerial = 0;
         this.profileTimes = {};
@@ -80,16 +81,33 @@
         var source = program.astBody ? this.generateStructured(program) :
                                       this.generate(program);
         var factory = Function("hc", "p", "ic", source);
-        var compiled = factory(this, program,
+        var propertyCache =
             {propertyReferences: [], polymorphicReferences: [], keyAddresses: [], arrayObjects: [],
              arrayVersions: [], arrayVectors: [], arrayLengths: [],
-             propertyCounts: []});
+             propertyCounts: []};
+        this.propertyCaches.push(propertyCache);
+        var compiled = factory(this, program, propertyCache);
         this.programs.push(program);
         this.compiled.push(compiled);
         program.threadedCompiler = this;
         program.threadedFunction = compiled;
         this.reportCompileDecision(program, "structured");
         return compiled;
+    };
+
+    ThreadedCompiler.prototype.invalidateHeapViews = function () {
+        var index = 0;
+        while (index < this.propertyCaches.length) {
+            var cache = this.propertyCaches[index++];
+            cache.propertyReferences = [];
+            cache.polymorphicReferences = [];
+            cache.keyAddresses = [];
+            cache.arrayObjects = [];
+            cache.arrayVersions = [];
+            cache.arrayVectors = [];
+            cache.arrayLengths = [];
+            cache.propertyCounts = [];
+        }
     };
 
     ThreadedCompiler.prototype.reportCompileDecision = function (program, decision) {

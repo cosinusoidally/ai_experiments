@@ -50,6 +50,8 @@
     var PROPERTY_ENTRY_PADDING = PROPERTY_ENTRY_VALUE + CELL_BYTES;
     var PROPERTY_ENTRY_BYTES = PROPERTY_ENTRY_PADDING + Heap.WORD_BYTES;
     var PROPERTY_STORAGE_INITIAL_CAPACITY = 4;
+    var PROPERTY_RECORD_SNAPSHOT_PIN = 0x80000000 | 0;
+    var PROPERTY_STORAGE_EPOCH_MASK = 0x7fffffff;
 
     var STRING_LENGTH = 0;
     var STRING_HASH = 4;
@@ -259,11 +261,14 @@
         VALUE: PROPERTY_ENTRY_VALUE
     };
     Records.LegacyPackedPropertyLayout = {compilerVersion: 51, VALUE: 16};
+    Records.PropertyRecordSnapshotPin = PROPERTY_RECORD_SNAPSHOT_PIN;
 
     /* Kernel-dialect source declares same-named constants so it remains
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        PROPERTY_RECORD_SNAPSHOT_PIN: PROPERTY_RECORD_SNAPSHOT_PIN,
+        PROPERTY_STORAGE_EPOCH_MASK: PROPERTY_STORAGE_EPOCH_MASK,
         PROPERTY_DESCRIPTOR_KEY: PROPERTY_DESCRIPTOR_KEY,
         PROPERTY_DESCRIPTOR_ATTRIBUTES: PROPERTY_DESCRIPTOR_ATTRIBUTES,
         PROPERTY_DESCRIPTOR_SETTER: PROPERTY_DESCRIPTOR_SETTER,
@@ -815,11 +820,8 @@
             }
             this.setObjectPropertyHead(owner, storage);
             if (previousStorage && previousStorage !== storage) {
-                var previousIndex = this.propertyStorageHashIndex(previousStorage);
-                if (previousIndex) this.heap.freeRecord(previousIndex);
-                this.heap.memory.fill(this.heap.trustedPayloadAddress(previousStorage, 0),
-                    this.heap.recordSize(previousStorage) - Heap.HEADER_SIZE, 0);
-                this.heap.freeRecord(previousStorage);
+                this.discardPropertyStorageIndex(previousStorage);
+                this.retirePropertyStorageRecord(previousStorage);
             }
             return this.appendPropertyStorageEntry(storage, key, attributes);
         }
@@ -1751,8 +1753,19 @@
         var index = this.propertyStorageHashIndex(storage);
         if (index) {
             this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_HASH, 0);
-            this.heap.freeRecord(index);
+            this.retirePropertyStorageRecord(index);
         }
+    };
+    Records.prototype.retirePropertyStorageRecord = function (record) {
+        if (this.heap.flags(record) & PROPERTY_RECORD_SNAPSHOT_PIN) return;
+        this.heap.memory.fill(this.heap.trustedPayloadAddress(record, 0),
+            this.heap.recordSize(record) - Heap.HEADER_SIZE, 0);
+        this.heap.freeRecord(record);
+    };
+    Records.prototype.nextPropertyStorageEpoch = function (storage) {
+        var flags = this.heap.flags(storage);
+        return ((flags & PROPERTY_RECORD_SNAPSHOT_PIN) |
+            ((flags + 1) & PROPERTY_STORAGE_EPOCH_MASK)) >>> 0;
     };
     Records.prototype.appendPropertyStorageEntry = function (storage, key, attributes, setter) {
         var entry = this.propertyStorageLength(storage) + 1;
@@ -1770,7 +1783,7 @@
         this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT,
             this.propertyStorageLiveCount(storage) + 1);
         var epoch = this.heap.flags(storage);
-        this.heap.setFlags(storage, (epoch + 1) >>> 0);
+        this.heap.setFlags(storage, this.nextPropertyStorageEpoch(storage));
         var index = this.propertyStorageHashIndex(storage);
         if (index) {
             var live = this.propertyStorageLiveCount(storage);
@@ -1778,7 +1791,7 @@
                     live * 2 <= this.propertyIndexCapacity(index) &&
                     this.insertPropertyStorageIndex(storage, index, entry)) {
                 this.heap.writeTrustedFieldU32(index, PROPERTY_INDEX_COUNT, live);
-                this.heap.writeTrustedFieldU32(index, PROPERTY_INDEX_VERSION, (epoch + 1) >>> 0);
+                this.heap.writeTrustedFieldU32(index, PROPERTY_INDEX_VERSION, this.heap.flags(storage));
             } else this.discardPropertyStorageIndex(storage);
         }
         return entry;
@@ -1790,7 +1803,7 @@
         this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT,
             this.propertyStorageLiveCount(storage) - 1);
         this.discardPropertyStorageIndex(storage);
-        this.heap.setFlags(storage, (this.heap.flags(storage) + 1) >>> 0);
+        this.heap.setFlags(storage, this.nextPropertyStorageEpoch(storage));
         return true;
     };
     Records.prototype.growPropertyStorage = function (storage, required) {
@@ -1811,7 +1824,7 @@
         this.heap.writeTrustedFieldU32(grown, PROPERTY_STORAGE_LENGTH, length);
         this.heap.writeTrustedFieldU32(grown, PROPERTY_STORAGE_LIVE_COUNT,
             this.propertyStorageLiveCount(storage));
-        this.heap.setFlags(grown, (this.heap.flags(storage) + 1) >>> 0);
+        this.heap.setFlags(grown, this.nextPropertyStorageEpoch(storage) & PROPERTY_STORAGE_EPOCH_MASK);
         return grown;
     };
     Records.prototype.compactPropertyStorage = function (storage) {
@@ -1833,7 +1846,7 @@
         }
         this.heap.writeTrustedFieldU32(compacted, PROPERTY_STORAGE_LENGTH, count);
         this.heap.writeTrustedFieldU32(compacted, PROPERTY_STORAGE_LIVE_COUNT, count);
-        this.heap.setFlags(compacted, (this.heap.flags(storage) + 1) >>> 0);
+        this.heap.setFlags(compacted, this.nextPropertyStorageEpoch(storage) & PROPERTY_STORAGE_EPOCH_MASK);
         return compacted;
     };
 
@@ -1843,7 +1856,7 @@
         if (setter) this.heap.requireRecord(setter);
         this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_ATTRIBUTES, attributes);
         this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_SETTER, setter || 0);
-        this.heap.setFlags(storage, (this.heap.flags(storage) + 1) >>> 0);
+        this.heap.setFlags(storage, this.nextPropertyStorageEpoch(storage));
     };
 
     Records.prototype.propertyStorageKeys = function (storage, enumerableOnly) {
