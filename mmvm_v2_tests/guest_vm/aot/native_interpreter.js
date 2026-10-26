@@ -17436,8 +17436,9 @@
         var kernelConstantOverrides = runtimeSupportConstantOverrides(
             runtime.profileOpcodeCounts,
             runtime.heapRecords.constructor.KernelConstants);
-        var snapshotNeedsSource = runtime.nativeSnapshotWrite ||
-            (runtime.nativeSnapshotRead && !runtime.skipNativeSnapshotHash);
+        /* Loading validates the executable contract version, not current
+         * source text. Only builders need the source fingerprint metadata. */
+        var snapshotNeedsSource = !!runtime.nativeSnapshotWrite;
         var kernelSource = null;
         if (snapshotNeedsSource) {
             kernelSource = nativeExecutionKernel.toString();
@@ -17725,8 +17726,7 @@
             reportSnapshot("loaded native snapshot: " +
                            runtime.nativeSnapshotRead + " (" +
                            this.nativeResult.length + " bytes" +
-                           (runtime.skipNativeSnapshotHash ?
-                               ", source hash unchecked" : "") + ")");
+                           ", version checked)");
         }
         var nativeBackendFinished = constructionStarted ?
             new Date().getTime() : 0;

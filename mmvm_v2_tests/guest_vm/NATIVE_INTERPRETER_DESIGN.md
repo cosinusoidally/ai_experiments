@@ -350,13 +350,13 @@ is a default cache policy. Embedders expose the same choice as the mutually
 exclusive `snapshot` and `withSnapshot` runtime options, both of which require
 `nativeInterpreter: true` and an MMVM host.
 
-An embedder which trusts a snapshot produced for the exact current checkout
-may combine `withSnapshot` with `skipSnapshotHash: true`; the command-line form
-is `--with-snapshot FILE --skip-snapshot-hash`. This avoids both
-`interpreterKernel.toString()` and the source-hash pass. The loader continues
-to validate every other header and file-layout field, but deliberately cannot
-reject executable code generated from stale kernel source. The unchecked mode
-is never implicit and is invalid without `withSnapshot`.
+Loading does not stringify, parse or fingerprint current kernel source.
+Compatibility is determined by the executable contract version and header
+mode/layout checks. Maintainers must bump the contract for incompatible
+kernel/backend changes; a source edit alone is not a compatibility check.
+Builds still record a deterministic source fingerprint as diagnostic metadata.
+The old `skipSnapshotHash` option / `--skip-snapshot-hash` flag is retained as
+a compatibility no-op and is invalid without `withSnapshot`.
 
 The loader accepts two image generations. Version 1 contains a 32-byte header
 followed by the macro assembler's i386 output. Version 2 is the standalone

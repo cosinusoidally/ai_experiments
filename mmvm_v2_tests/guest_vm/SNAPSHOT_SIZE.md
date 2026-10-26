@@ -2,6 +2,15 @@
 
 ## Execution-oriented versus compact storage
 
+Here "execution-oriented" describes a record layout, not a separate execution
+engine: 32-bit bytecode words and tagged constant cells can be read directly.
+Compact retained records lazily acquire cached expanded views when called.
+This trades image size for first-call work and some additional resident memory;
+it is not automatically a startup optimization. Both layouts use the same
+interpreter. Snapshot startup and execution must be measured independently of
+file size. Snapshot loading no longer fingerprints current kernel source;
+explicit executable-contract versions govern compatibility.
+
 Normal VMs default to execution-oriented program storage. Snapshot builders
 default to `compactProgramStorage: true`; embedders can select this explicitly
 in VM/JSRuntime options. Retained nested programs then use narrow canonical

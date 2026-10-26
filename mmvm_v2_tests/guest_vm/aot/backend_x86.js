@@ -408,7 +408,6 @@
         var standalone = formatVersion === 2;
         var compilerVersion = peek32(header + (standalone ? STANDALONE_HEADER_FIELDS.compilerVersion : 8)) >>> 0;
         var profileMode = peek32(header + (standalone ? 84 : 12)) >>> 0;
-        var sourceHash = peek32(header + (standalone ? STANDALONE_HEADER_FIELDS.sourceHash : 16)) >>> 0;
         var operandMode = peek32(header + (standalone ?
             STANDALONE_OPERAND_MODE_OFFSET : SNAPSHOT_OPERAND_MODE_OFFSET)) >>> 0;
         var codeOffset = standalone ? peek32(header + STANDALONE_HEADER_FIELDS.codeOffset) >>> 0 :
@@ -421,8 +420,6 @@
             compilerVersion !== (expected.compilerVersion >>> 0) ||
             profileMode !== (expected.profileMode >>> 0) ||
             operandMode !== (expected.operandMode >>> 0) ||
-            (!expected.skipSourceHash &&
-             sourceHash !== (expected.sourceHash >>> 0)) ||
             length <= 0 || length > 16 * 1024 * 1024) {
             this.ffi.call(closePointer, [descriptor]);
             throw new Error("native snapshot is incompatible with this VM: " +

@@ -347,14 +347,14 @@ when the file is absent, truncated, built for profiling mode, or stale. Remove
 snapshots with `./mk_clean`; they are temporary build artifacts and must not be
 committed.
 
-`--skip-snapshot-hash` is an explicit faster but unchecked form of
-`--with-snapshot FILE`. It avoids converting the interpreter kernel function
-back to source and hashing that source at startup. The loader still checks the
+`--with-snapshot FILE` does not fingerprint current kernel source at startup.
+Compatibility uses explicit versioning. The loader still checks the
 snapshot magic, file-format version, compiler version, profiling mode, declared
 code length, and actual file length. It cannot detect that a snapshot was made
-from older kernel source, however, so use it only with a snapshot whose origin
-is trusted and whose build is known to match the current checkout. The option
-is rejected unless `--with-snapshot FILE` is also present.
+from older kernel source if its executable contract version was not bumped.
+Maintainers must bump that version for incompatible kernel/backend changes.
+Use only trusted snapshots. `--skip-snapshot-hash` remains a compatibility
+no-op and still requires `--with-snapshot FILE`.
 
 Build `js_runner.c` and create the generic runner image as documented in the
 top-level `README.md`. The image reads arbitrary source through guest-owned
