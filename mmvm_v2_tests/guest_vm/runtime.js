@@ -401,7 +401,7 @@
                 this.datePrototype, this.dateValueKey);
         }
         this.installProgramBuilder();
-        if (options.rawFFI) this.installRawFFI();
+        if (options.rawFFI) this.installRawFFI(options.rawFFIBridge);
         this.finalizeBuiltinGlobals();
     }
 
@@ -3489,9 +3489,9 @@
         this.setGlobal("Date", dateConstructor);
     };
 
-    Runtime.prototype.installRawFFI = function () {
-        var bridge = new HostFFI();
-        if (!bridge.isMMVM) {
+    Runtime.prototype.installRawFFI = function (bridge) {
+        bridge = bridge || new HostFFI();
+        if (!bridge.isMMVM && !bridge.snapshotBindings) {
             throw new Error("raw guest FFI requires the js_min.exe host");
         }
         this.hostFFI = bridge;
@@ -3511,13 +3511,15 @@
                 }
                 return bridge.call(pointer, callArguments);
             }, "intrinsic", NativeIntrinsics.FFI_CALL));
-        this.linearHeap.memory.setNativeCaller(function (pointer, args) {
-            return bridge.call(pointer, args);
+        var memory = this.linearHeap.memory;
+        memory.setNativeCaller(function (pointer, args) {
+            return bridge.snapshotBindings ? bridge.callRaw(pointer, args, memory) :
+                bridge.call(pointer, args);
         });
         if (this.nativeInterpreter) {
             this.nativeInterpreter.setDlsymPointer(bridge.getDlsym());
             this.nativeInterpreter.setGettimeofdayPointer(
-                bridge.resolve("gettimeofday"));
+                bridge.snapshotBindings ? 0 : bridge.resolve("gettimeofday"));
         }
         this.setGlobal("peek8", this.makeNativeFunction("peek8",
             function (receiver, args) { return bridge.peek8(args[0]); },

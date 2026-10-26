@@ -503,7 +503,10 @@
 
     Records.prototype.findPreparedFlatString = function (haystack, needle) {
         if (needle.length > haystack.length) return -1;
-        if (haystack.latin1 && needle.latin1) {
+        /* Native hosts have bulk memmem. Emulated memory otherwise performs
+         * a byte-accessor call for every comparison; decode each immutable
+         * prepared span once and use the existing exact UTF-16 search below. */
+        if (haystack.latin1 && needle.latin1 && this.heap.memory.host.isMMVM) {
             return this.heap.memory.findBytes(
                 haystack.characters, haystack.length,
                 needle.characters, needle.length);

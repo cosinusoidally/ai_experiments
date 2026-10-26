@@ -41,6 +41,10 @@ var guestRunnerGCStress = false;
 var guestRunnerBuildSourcesStarted = new Date().getTime();
 
 if (guestRunnerIsNode) {
+    var print = function (message) { console.log(message); };
+    var read = function (filename) {
+        return require("fs").readFileSync(filename).toString("utf8");
+    };
     GuestRunnerVM = require("./guest_vm/vm.js");
     GuestRunnerNodeEnvironment = require("./guest_vm/node_environment.js");
     guestRunnerArguments = process.argv.slice(2);
@@ -186,7 +190,9 @@ if (guestRunnerNativeSamples) {
     load("guest_vm/native_sampler.js");
     guestRunnerSampler = new GuestVMNativeSampler(__guestVMStandaloneImageBase);
 }
-var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode,
+var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode || !!guestRunnerSnapshot,
+                                        rawFFIBridge: guestRunnerIsNode && guestRunnerSnapshot ?
+                                            require("./guest_vm/host_ffi.js").snapshotBindings() : null,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
                                             guestRunnerTraceExceptions,

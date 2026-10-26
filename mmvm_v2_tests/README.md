@@ -218,6 +218,19 @@ LD_LIBRARY_PATH="$MOZJS_LIB" \
   --snapshot artifacts/snap
 ```
 
+Alternatively, build the same i386/Linux image using stock Node and its
+builtin APIs (no npm, FFI addon or native-code execution by Node):
+
+```sh
+node guest_runner.js --vm-native --snapshot artifacts/snap
+```
+
+Node is a cross-build host here, not the snapshot's execution platform.
+The image still runs with the i386 `js_runner.exe` above. Its libc bindings
+are resolved when launched, not copied from the Node process. The Node,
+js_min and genuine self-hosted builds must produce identical files from the
+same sources/options. No application filename is needed to generate one.
+
 The resulting image can load arbitrary guest source through its libc-backed
 filesystem layer, tokenize, parse, compile, and execute it without
 SpiderMonkey or `LD_LIBRARY_PATH`:
@@ -300,6 +313,13 @@ compiler invocation during the runner-image fixed-point rebuild:
 
 ```sh
 guest_vm/tests/run_standalone_snapshot_test.sh
+```
+
+Pass `both` to additionally compare a Node-built image against the js_min
+image. The default test remains usable without Node:
+
+```sh
+guest_vm/tests/run_standalone_snapshot_test.sh both
 ```
 
 ### libc-only static web server

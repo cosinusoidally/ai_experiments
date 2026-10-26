@@ -27,6 +27,7 @@
         load("guest_vm/aot/kernel_compiler.js");
         load("guest_vm/aot/backend_js.js");
         load("guest_vm/aot/x86_assembler.js");
+        load("guest_vm/aot/snapshot_output.js");
         load("guest_vm/aot/backend_x86.js");
         load("guest_vm/aot/record_initializer.js");
         load("guest_vm/aot/heap_sweeper.js");

@@ -129,9 +129,6 @@
     };
 
     GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
-        if (this.nodeHost) {
-            throw new Error("standalone runtime snapshots require js_min.exe");
-        }
         this.context.installGlobal("__guestVMStandaloneArgc", 0);
         this.context.installGlobal("__guestVMStandaloneArgv", 0);
         this.context.installGlobal("__guestVMStandaloneImageBase", 0);

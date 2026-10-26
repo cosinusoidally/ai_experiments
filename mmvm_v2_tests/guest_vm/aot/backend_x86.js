@@ -4,9 +4,11 @@
     var WORD_BYTES = 4;
     var Assembler = root.GuestVMX86Assembler;
     var HostFFI = root.GuestVMHostFFI;
+    var SnapshotOutput = root.GuestVMSnapshotOutput;
     if (typeof module !== "undefined" && module.exports) {
         Assembler = require("./x86_assembler.js");
         HostFFI = require("../host_ffi.js");
+        SnapshotOutput = require("./snapshot_output.js");
     }
 
     function X86Backend(options) {
@@ -361,8 +363,11 @@
     var STANDALONE_SNAPSHOT_MAGIC = 0x32535647;
     var STANDALONE_SNAPSHOT_VERSION = 2;
     var STANDALONE_HEADER_BYTES = 128;
-    var STANDALONE_HEADER_FIELDS = {codeOffset: 20, codeLength: 24,
-        heapOffset: 28, heapLength: 32, compilerVersion: 80, sourceHash: 88};
+    var STANDALONE_HEADER_FIELDS = {magic: 0, version: 4, fileLength: 8,
+        entryOffset: 12, entryLength: 16, codeOffset: 20, codeLength: 24,
+        heapOffset: 28, heapLength: 32, heapCapacity: 36, frameAddress: 40,
+        contextAddress: 44, dlsymCellAddress: 48, compilerVersion: 80,
+        profileMode: 84, sourceHash: 88};
     X86Backend.StandaloneHeaderFields = STANDALONE_HEADER_FIELDS;
     var STANDALONE_ENGINE_BUDGET = 2147483647;
     var ENGINE_EXIT_BUDGET = 1;
@@ -773,7 +778,7 @@
 
     X86Backend.prototype.writeStandaloneSnapshot = function (
             path, result, runtime, execution, expectedProgramPath, metadata) {
-        if (!this.ffi.isMMVM || !result || !result.pointer || !metadata ||
+        if (!result || (!result.pointer && !result.bytes) || !metadata ||
             !execution || !execution.frames || execution.frames.length !== 1) {
             return false;
         }
@@ -950,79 +955,46 @@
                 nativeInterpreter.stateAddress, savedGCDiagnostics);
         }
 
-        var openPointer = this.ffi.resolve("open");
-        var closePointer = this.ffi.resolve("close");
-        var writePointer = this.ffi.resolve("write");
-        var renamePointer = this.ffi.resolve("rename");
-        var unlinkPointer = this.ffi.resolve("unlink");
-        var getpidPointer = this.ffi.resolve("getpid");
-        var callocPointer = this.ffi.resolve("calloc");
-        var freePointer = this.ffi.resolve("free");
-        var temporaryPath = path + ".tmp." +
-                            this.ffi.call(getpidPointer, []);
-        var descriptor = this.ffi.call(openPointer,
-            [temporaryPath, 577, 384]);
-        if (descriptor < 0) {
-            heap.memory.destroySnapshot(heapImage);
-            return false;
-        }
-        var stagingLength = layout.heapOffset;
-        var staging = this.ffi.call(callocPointer, [stagingLength, 1]);
-        var complete = !!staging;
-        if (complete) {
-            poke32(staging, STANDALONE_SNAPSHOT_MAGIC);
-            poke32(staging + 4, STANDALONE_SNAPSHOT_VERSION);
-            poke32(staging + 8, fileLength);
-            poke32(staging + 12, layout.entryOffset);
-            poke32(staging + 16, bootstrap.bytes.length);
-            poke32(staging + STANDALONE_HEADER_FIELDS.codeOffset, layout.codeOffset);
-            poke32(staging + STANDALONE_HEADER_FIELDS.codeLength, result.length);
-            poke32(staging + 28, layout.heapOffset);
-            poke32(staging + 32, heapImageLength);
-            poke32(staging + 36, heapCapacity);
-            poke32(staging + 40, layout.frameAddress);
-            poke32(staging + 44, layout.contextAddress);
-            poke32(staging + 48, layout.dlsymCellAddress);
-            poke32(staging + STANDALONE_HEADER_FIELDS.compilerVersion, metadata.compilerVersion | 0);
-            poke32(staging + 84, metadata.profileMode | 0);
-            poke32(staging + STANDALONE_HEADER_FIELDS.sourceHash, metadata.sourceHash | 0);
-            poke32(staging + STANDALONE_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
-            copyBytesToNative(staging + layout.entryOffset, bootstrap.bytes);
-            copyBytesToNative(staging + layout.mmapNameOffset,
-                              mmapNameBytes);
-            copyBytesToNative(staging + layout.memcpyNameOffset,
-                              memcpyNameBytes);
-            copyBytesToNative(staging + layout.strcmpNameOffset,
-                              strcmpNameBytes);
-            copyBytesToNative(staging + layout.expectedNameOffset,
-                              expectedNameBytes);
-            copyBytesToNative(staging + layout.dprintfNameOffset,
-                              dprintfNameBytes);
-            copyBytesToNative(staging + layout.unsupportedFormatOffset,
-                              unsupportedFormatBytes);
+        var output = null;
+        try {
+            output = new SnapshotOutput(heap.memory, layout.heapOffset);
+            var header = STANDALONE_HEADER_FIELDS;
+            output.write32(header.magic, STANDALONE_SNAPSHOT_MAGIC);
+            output.write32(header.version, STANDALONE_SNAPSHOT_VERSION);
+            output.write32(header.fileLength, fileLength);
+            output.write32(header.entryOffset, layout.entryOffset);
+            output.write32(header.entryLength, bootstrap.bytes.length);
+            output.write32(header.codeOffset, layout.codeOffset);
+            output.write32(header.codeLength, result.length);
+            output.write32(header.heapOffset, layout.heapOffset);
+            output.write32(header.heapLength, heapImageLength);
+            output.write32(header.heapCapacity, heapCapacity);
+            output.write32(header.frameAddress, layout.frameAddress);
+            output.write32(header.contextAddress, layout.contextAddress);
+            output.write32(header.dlsymCellAddress, layout.dlsymCellAddress);
+            output.write32(header.compilerVersion, metadata.compilerVersion | 0);
+            output.write32(header.profileMode, metadata.profileMode | 0);
+            output.write32(header.sourceHash, metadata.sourceHash | 0);
+            output.write32(STANDALONE_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
+            output.copyBytes(layout.entryOffset, bootstrap.bytes);
+            output.copyBytes(layout.mmapNameOffset, mmapNameBytes);
+            output.copyBytes(layout.memcpyNameOffset, memcpyNameBytes);
+            output.copyBytes(layout.strcmpNameOffset, strcmpNameBytes);
+            output.copyBytes(layout.expectedNameOffset, expectedNameBytes);
+            output.copyBytes(layout.dprintfNameOffset, dprintfNameBytes);
+            output.copyBytes(layout.unsupportedFormatOffset, unsupportedFormatBytes);
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
-                copyBytesToNative(staging +
-                    layout.nativeBindings[bindingIndex].nameOffset,
+                output.copyBytes(layout.nativeBindings[bindingIndex].nameOffset,
                     bindingNameBytes[bindingIndex]);
                 bindingIndex++;
             }
-            this.ffi.call(this.ffi.resolve("memcpy"),
-                [staging + layout.codeOffset, result.pointer, result.length]);
-            complete = writeExact(this.ffi, writePointer, descriptor,
-                                  staging, stagingLength) &&
-                       writeExact(this.ffi, writePointer, descriptor,
-                                  heapImage.pointer, heapImageLength);
+            output.copyCode(layout.codeOffset, result);
+            return output.write(path, heapImage, heapImageLength);
+        } finally {
+            if (output) output.destroy();
+            heap.memory.destroySnapshot(heapImage);
         }
-        if (staging) this.ffi.call(freePointer, [staging]);
-        heap.memory.destroySnapshot(heapImage);
-        this.ffi.call(closePointer, [descriptor]);
-        if (!complete ||
-            this.ffi.call(renamePointer, [temporaryPath, path]) !== 0) {
-            this.ffi.call(unlinkPointer, [temporaryPath]);
-            return false;
-        }
-        return true;
     };
 
     function readExact(ffi, readPointer, descriptor, pointer, length) {

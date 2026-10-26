@@ -6,6 +6,12 @@ suite_directory=$(CDPATH= cd -- "$test_directory/../.." && pwd)
 workspace_directory=$(CDPATH= cd -- "$suite_directory/../.." && pwd)
 js_min_binary=${JS_MIN_BINARY:-"$workspace_directory/mmvm_v2/artifacts/js_min.exe"}
 firefox_library_directory=${FIREFOX_LIB_DIR:-"$workspace_directory/firefox-1.0.8/lib"}
+build_hosts=${1:-js_min}
+case "$build_hosts" in
+    js_min|both) ;;
+    *) echo "usage: run_standalone_snapshot_test.sh [js_min|both]" >&2; exit 2 ;;
+esac
+node_binary=${NODE_BINARY:-node}
 
 mkdir -p "$suite_directory/artifacts"
 temporary_directory=$(mktemp -d \
@@ -26,6 +32,12 @@ LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     --snapshot "$temporary_directory/snap-b" \
     guest_vm/tests/standalone_alternate_program.js >/dev/null
 cmp "$temporary_directory/snap-a" "$temporary_directory/snap-b"
+if [ "$build_hosts" = both ]; then
+    DISPLAY=:node-snapshot XAUTHORITY=/snapshot/node HOME=/snapshot/node-home \
+        "$node_binary" guest_runner.js --vm-native \
+        --snapshot "$temporary_directory/snap-node" >/dev/null
+    cmp "$temporary_directory/snap-a" "$temporary_directory/snap-node"
+fi
 standalone_output=$("$temporary_directory/js_runner.exe" \
     "$temporary_directory/snap-b" hello.js)
 if [ "$standalone_output" != "Hello, world!" ]; then
