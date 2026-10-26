@@ -5004,16 +5004,16 @@
                     var applyArgumentRegisters = load32(
                         callArgumentsCell + VALUE_CELL_LOW);
                     if (applyForwardingValid === 1) {
-                        if (recordType(heapBase,
-                            applyArgumentRegisters) !==
-                            HEAP_TYPE_ARRAY) {
+                        if (recordType(heapBase, applyArgumentRegisters) !== HEAP_TYPE_ARRAY &&
+                                recordType(heapBase, applyArgumentRegisters) !== HEAP_TYPE_INTEGER_VECTOR) {
                             applyForwardingValid = 0;
                         }
                     }
                     var applyArgumentRegisterVector = 0;
                     if (applyForwardingValid === 1) {
-                        applyArgumentRegisterVector = arrayElements(
-                            heapBase, applyArgumentRegisters);
+                        applyArgumentRegisterVector = argumentRegisterVectorKernel(
+                            heapBase, state, applyArgumentRegisters);
+                        if (applyArgumentRegisterVector === 0) return 0;
                         if (vectorLength(heapBase,
                             applyArgumentRegisterVector) < 2) {
                             applyForwardingValid = 0;
@@ -5095,9 +5095,8 @@
                     var callArgumentRegisters = valueCellReference(
                         0, callArgumentsCell);
                     if (callForwardingValid === 1) {
-                        if (recordType(heapBase,
-                            callArgumentRegisters) !==
-                            HEAP_TYPE_ARRAY) {
+                        if (recordType(heapBase, callArgumentRegisters) !== HEAP_TYPE_ARRAY &&
+                                recordType(heapBase, callArgumentRegisters) !== HEAP_TYPE_INTEGER_VECTOR) {
                             callForwardingValid = 0;
                         }
                     }
@@ -5126,8 +5125,9 @@
                         }
                     }
                     if (callForwardingValid === 1) {
-                        bytecodeArgumentVector = arrayElements(
-                            heapBase, callArgumentRegisters);
+                        bytecodeArgumentVector = argumentRegisterVectorKernel(
+                            heapBase, state, callArgumentRegisters);
+                        if (bytecodeArgumentVector === 0) return 0;
                         bytecodeArgumentCount = vectorLength(
                             heapBase, bytecodeArgumentVector);
                         if (bytecodeArgumentCount > 0) {
@@ -5178,9 +5178,8 @@
                 }
                 if (bytecodeCallValid === 1) {
                 if (explicitReceiverCell === 0) {
-                    if (load32(heapBase +
-                        bytecodeArgumentRegisters) !==
-                        HEAP_TYPE_ARRAY) {
+                    if (recordType(heapBase, bytecodeArgumentRegisters) !== HEAP_TYPE_ARRAY &&
+                            recordType(heapBase, bytecodeArgumentRegisters) !== HEAP_TYPE_INTEGER_VECTOR) {
                         bytecodeCallValid = 0;
                         setEngineCallRejectReason(
                             heapBase, state, CALL_REJECT_ARGUMENT_LIST);
@@ -5190,8 +5189,9 @@
                 if (explicitReceiverCell === 0) {
                 if (bytecodeApplyForwarding === 0) {
                     if (bytecodeCallValid === 1) {
-                        bytecodeArgumentVector = arrayElements(
-                            heapBase, bytecodeArgumentRegisters);
+                        bytecodeArgumentVector = argumentRegisterVectorKernel(
+                            heapBase, state, bytecodeArgumentRegisters);
+                        if (bytecodeArgumentVector === 0) return 0;
                         bytecodeArgumentCount = vectorLength(
                             heapBase, bytecodeArgumentVector);
                     }
@@ -6050,16 +6050,17 @@
         var intrinsicArgumentsVector = 0;
         var intrinsicArgumentCount = 0;
         if (intrinsicCallValid === 1) {
-            if (recordType(heapBase, intrinsicArgumentsArray) !==
-                    HEAP_TYPE_ARRAY) {
+            if (recordType(heapBase, intrinsicArgumentsArray) !== HEAP_TYPE_ARRAY &&
+                    recordType(heapBase, intrinsicArgumentsArray) !== HEAP_TYPE_INTEGER_VECTOR) {
                 intrinsicCallValid = 0;
                 setEngineCallRejectReason(
                     heapBase, state,
                     CALL_REJECT_INTRINSIC_ARGUMENT_ARRAY);
             }
             else {
-                intrinsicArgumentsVector = load32(
-                    heapBase + intrinsicArgumentsArray + ARRAY_ELEMENTS);
+                intrinsicArgumentsVector = argumentRegisterVectorKernel(
+                    heapBase, state, intrinsicArgumentsArray);
+                if (intrinsicArgumentsVector === 0) return EXIT_UNSUPPORTED;
                 intrinsicArgumentCount = load32(
                     heapBase + intrinsicArgumentsVector + VECTOR_LENGTH);
             }
@@ -14967,7 +14968,7 @@
     }
 
     function programIntegerVectorBytesKernel(length) {
-        return (VECTOR_FIXED_BYTES + length * HEAP_WORD_BYTES +
+        return (INTEGER_VECTOR_FIXED_BYTES + length * HEAP_WORD_BYTES +
             HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
     }
 
@@ -14979,12 +14980,41 @@
         setRecordFlags(heapBase, vector, 0);
         setVectorLength(heapBase, vector, length);
         setVectorCapacity(heapBase, vector, length);
+        setIntegerVectorExecutionCache(heapBase, vector, 0);
+        setIntegerVectorReserved(heapBase, vector, 0);
         var index = 0;
         while (index < length) {
             setIntegerVectorValue(heapBase, vector, index, initial);
             index = index + 1;
         }
         return bytes;
+    }
+
+    /* Compiler register lists are immutable integers, not guest arrays.
+     * Resolve a tagged execution view once; all existing intrinsic argument
+     * readers then retain their direct value-cell access. Ordinary ARRAY
+     * descriptors from embedders remain supported and independently mutable. */
+    function argumentRegisterVectorKernel(heapBase, state, descriptor) {
+        if (recordType(heapBase, descriptor) === HEAP_TYPE_ARRAY) {
+            return arrayElements(heapBase, descriptor);
+        }
+        if (recordType(heapBase, descriptor) !== HEAP_TYPE_INTEGER_VECTOR) return 0;
+        var cached = integerVectorExecutionCache(heapBase, descriptor);
+        if (cached !== 0) return cached;
+        var count = integerVectorLength(heapBase, descriptor);
+        var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        cached = engineHeapBump(heapBase, state);
+        initializeProgramVectorKernel(heapBase, cached, count, INVALID_PROGRAM_INTEGER);
+        var index = 0;
+        while (index < count) {
+            setValueCellInt32(vectorCellAddress(heapBase, cached, index),
+                integerVectorValue(heapBase, descriptor, index));
+            index = index + 1;
+        }
+        setEngineHeapBump(heapBase, state, cached + bytes);
+        setIntegerVectorExecutionCache(heapBase, descriptor, cached);
+        return cached;
     }
 
     function initializeProgramCallableKernel(heapBase, callable, program,
@@ -17267,6 +17297,7 @@
             initializeProgramVectorKernel: initializeProgramVectorKernel,
             initializeProgramIntegerVectorKernel: initializeProgramIntegerVectorKernel,
             programIntegerVectorBytesKernel: programIntegerVectorBytesKernel,
+            argumentRegisterVectorKernel: argumentRegisterVectorKernel,
             interpreterKernel: interpreterKernel,
             prepareExecutionBytecodeKernel: prepareExecutionBytecodeKernel,
             canonicalBytecodeWordKernel: canonicalBytecodeWordKernel,
@@ -17422,7 +17453,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 56,
+                compilerVersion: 57,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17458,6 +17489,10 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    INTEGER_VECTOR_EXECUTION_CACHE: kernelConstantOverrides.INTEGER_VECTOR_EXECUTION_CACHE,
+                    INTEGER_VECTOR_RESERVED: kernelConstantOverrides.INTEGER_VECTOR_RESERVED,
+                    INTEGER_VECTOR_VALUES: kernelConstantOverrides.INTEGER_VECTOR_VALUES,
+                    INTEGER_VECTOR_FIXED_BYTES: kernelConstantOverrides.INTEGER_VECTOR_FIXED_BYTES,
                     BYTECODE_COMPACT_FLAG: kernelConstantOverrides.BYTECODE_COMPACT_FLAG,
                     BYTECODE_PACKED_UNIT_BYTES: kernelConstantOverrides.BYTECODE_PACKED_UNIT_BYTES,
                     BYTECODE_PACKED_MINUS_ONE: kernelConstantOverrides.BYTECODE_PACKED_MINUS_ONE,
@@ -18892,18 +18927,23 @@
             var constants = records.programConstants(programAddress);
             var argumentListCell = records.vectorCellWithinLength(
                 constants, frame.code[pc + 4]);
-            var argumentList = this.runtime.readHeapValue(argumentListCell);
-            if (argumentList && argumentList.guestType === "array") {
-                var vector = records.arrayElements(argumentList.heapAddress);
-                var count = records.vectorLength(vector);
+            var packedArguments = this.runtime.valueCells.tagAt(argumentListCell) === ValueCells.Tags.REFERENCE ?
+                this.runtime.valueCells.referenceAddressAt(argumentListCell) : 0;
+            if (packedArguments && this.runtime.linearHeap.recordType(packedArguments) !==
+                    HeapRecords.KernelConstants.HEAP_TYPE_INTEGER_VECTOR) packedArguments = 0;
+            var argumentList = packedArguments ? null : this.runtime.readHeapValue(argumentListCell);
+            if (packedArguments || (argumentList && argumentList.guestType === "array")) {
+                var vector = packedArguments || records.arrayElements(argumentList.heapAddress);
+                var count = packedArguments ? records.integerVectorLength(vector) : records.vectorLength(vector);
                 var heapKinds = [];
                 var argumentIndex = 0;
                 while (argumentIndex < count) {
-                    var descriptorCell = records.vectorCellWithinLength(
-                        vector, argumentIndex++);
-                    var descriptorTag = this.runtime.valueCells.tagAt(
-                        descriptorCell);
-                    var descriptor = this.runtime.readHeapValue(descriptorCell);
+                    var descriptorCell = packedArguments ? 0 : records.vectorCellWithinLength(vector, argumentIndex);
+                    var descriptorTag = packedArguments ? ValueCells.Tags.INT32 :
+                        this.runtime.valueCells.tagAt(descriptorCell);
+                    var descriptor = packedArguments ? records.integerVectorValue(vector, argumentIndex) :
+                        this.runtime.readHeapValue(descriptorCell);
+                    argumentIndex++;
                     var sourceTag = descriptorTag;
                     if (typeof descriptor === "number" && descriptor >= 0 &&
                         descriptor < records.frameRegisterCount(

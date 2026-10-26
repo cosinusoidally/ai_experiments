@@ -38,7 +38,9 @@
         STRING_SLICE_FLAG: HeapRecords.KernelConstants.STRING_SLICE_FLAG,
         STRING_SLICE_BACKING: HeapRecords.KernelConstants.STRING_SLICE_BACKING,
         HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
-        BYTECODE_EXECUTION_CACHE: HeapRecords.KernelConstants.BYTECODE_EXECUTION_CACHE
+        BYTECODE_EXECUTION_CACHE: HeapRecords.KernelConstants.BYTECODE_EXECUTION_CACHE,
+        HEAP_TYPE_INTEGER_VECTOR: Heap.Types.INTEGER_VECTOR,
+        INTEGER_VECTOR_EXECUTION_CACHE: HeapRecords.KernelConstants.INTEGER_VECTOR_EXECUTION_CACHE
     };
 
     /* Ordinary closure bindings, taken from the authoritative heap layout.
@@ -435,6 +437,9 @@
                                       itemIndex * VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
                     } else referenceIndex = -2;
+                } else if (type === HEAP_TYPE_INTEGER_VECTOR) {
+                    if (referenceIndex === 0) target = integerVectorExecutionCache(heapBase, address);
+                    else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_BYTECODE) {
                     if (referenceIndex === 0) target = bytecodeExecutionCache(heapBase, address);
                     else referenceIndex = -2;

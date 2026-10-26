@@ -1727,15 +1727,12 @@
         var key = "$arguments:" + Array.prototype.join.call(values, ",");
         var address = pool[key];
         if (address) return address;
-        address = this.heapRecords.allocateArray(
-            this.arrayPrototype ? this.arrayPrototype.heapAddress : 0, values.length);
+        address = this.heapRecords.allocateIntegerVector(values.length);
         index = 0;
         while (index < values.length) {
-            this.valueCells.writePrimitiveAt(
-                this.heapRecords.arrayElementCell(address, index), values[index]);
+            this.heapRecords.setIntegerVectorValue(address, index, values[index]);
             index++;
         }
-        this.heapRecords.setArrayLength(address, values.length);
         pool[key] = address;
         return address;
     };
@@ -2004,6 +2001,8 @@
                 if (this.linearHeap.recordType(reference) ===
                     Heap.Types.PROGRAM) {
                     constants[index] = this.adoptHeapProgram(reference);
+                } else if (this.linearHeap.recordType(reference) === Heap.Types.INTEGER_VECTOR) {
+                    constants[index] = integerVector(reference);
                 } else constants[index] = this.readHeapReference(reference, cell);
             } else constants[index] = this.readHeapValue(cell);
             index++;

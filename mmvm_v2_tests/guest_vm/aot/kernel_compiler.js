@@ -657,6 +657,7 @@
         stringRopeDepth: "STRING_ROPE_DEPTH",
         vectorLength: "VECTOR_LENGTH",
         integerVectorLength: "VECTOR_LENGTH",
+        integerVectorExecutionCache: "INTEGER_VECTOR_EXECUTION_CACHE",
         vectorCapacity: "VECTOR_CAPACITY",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
         regexpPropertyHead: "REGEXP_PROPERTY_HEAD",
@@ -725,6 +726,8 @@
         setPropertyStorageHashIndex: "PROPERTY_STORAGE_HASH",
         setValueCellTag: "VALUE_CELL_TAG",
         setVectorLength: "VECTOR_LENGTH",
+        setIntegerVectorExecutionCache: "INTEGER_VECTOR_EXECUTION_CACHE",
+        setIntegerVectorReserved: "INTEGER_VECTOR_RESERVED",
         setRecordType: "RECORD_TYPE",
         setRecordSize: "RECORD_SIZE",
         setRecordMark: "RECORD_MARK",
@@ -848,7 +851,7 @@
     };
 
     var READ_INDEXED_FIELD_ACCESSORS = {
-        integerVectorValue: {field: "VECTOR_CELLS", stride: "HEAP_WORD_BYTES"},
+        integerVectorValue: {field: "INTEGER_VECTOR_VALUES", stride: "HEAP_WORD_BYTES"},
         propertyStorageKeyAt: {field: "PROPERTY_STORAGE_KEY", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageAttributesAt: {field: "PROPERTY_STORAGE_ATTRIBUTES", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageSetterAt: {field: "PROPERTY_STORAGE_SETTER", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},

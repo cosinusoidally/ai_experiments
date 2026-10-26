@@ -1,5 +1,24 @@
 # Snapshot size and compact strings
 
+## 2026-10-26: private call-argument descriptors
+
+Private CALL/CONSTRUCT register lists now use integer vectors directly,
+instead of an ARRAY record plus a full tagged value-vector backing. A derived
+tagged execution view is created on first use and traced through the integer
+record's explicit cache field. Map records leave that field zero. Both native
+and reference visitors trace only that field, never the integer payload.
+The kernel retains its existing tagged argument readers after normalization.
+Ordinary/embedding array constants remain independent: the use-classification
+guard still excludes every slot also used as an ordinary CONST value.
+Adopting heap-native programs decodes private descriptors into implementation
+metadata arrays, not guest-visible arrays. ABI 57 covers the extra cache field.
+
+This checkpoint's heap is 6,196,952 bytes. Argument descriptors fall from
+502,216 to 226,224 bytes; only 41 ordinary ARRAY records remain in the ready
+image instead of 5,102. Extra cache/header/source costs make the net image
+saving about 250 KiB. The Node project suite, standalone hello, bounded GC
+and independent marking audit pass; remaining validation is pending.
+
 ## 2026-10-26: compact canonical instruction storage
 
 The next checkpoint is 6,832,648 bytes, down from the 8,230,816-byte baseline.

@@ -309,7 +309,10 @@
                     var cell = records.vectorCell(constants, index++);
                     if (cells.tagAt(cell) === Cells.Tags.REFERENCE) {
                         var target = cells.referenceAddressAt(cell);
-                        if (inspectedHeap.recordType(target) === Heap.Types.ARRAY) {
+                        if (inspectedHeap.recordType(target) === Heap.Types.INTEGER_VECTOR) {
+                            count("argument-register descriptors", target,
+                                integerSignature(target), inspectedHeap.recordSize(target));
+                        } else if (inspectedHeap.recordType(target) === Heap.Types.ARRAY) {
                             var elements = records.arrayElements(target);
                             count("argument-register descriptors", target,
                                 integerSignature(elements), inspectedHeap.recordSize(target) +

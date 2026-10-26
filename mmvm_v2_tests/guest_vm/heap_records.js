@@ -118,6 +118,9 @@
     var BYTECODE_PACKED_MINUS_ONE = 65534;
     var BYTECODE_PACKED_WIDE = 65535;
     var BYTECODE_WIDE_ENTRY_WORDS = 2;
+    var INTEGER_VECTOR_EXECUTION_CACHE = 8;
+    var INTEGER_VECTOR_RESERVED = 12;
+    var INTEGER_VECTOR_VALUES = 16;
 
     var PROGRAM_BYTECODE = 0;
     var PROGRAM_CONSTANTS = 4;
@@ -298,6 +301,10 @@
         HEAP_WORD_BYTES: Heap.WORD_BYTES,
         HEAP_RECORD_ALIGNMENT: Heap.RECORD_ALIGNMENT,
         HEAP_TYPE_INTEGER_VECTOR: Heap.Types.INTEGER_VECTOR,
+        INTEGER_VECTOR_EXECUTION_CACHE: Heap.HEADER_SIZE + INTEGER_VECTOR_EXECUTION_CACHE,
+        INTEGER_VECTOR_RESERVED: Heap.HEADER_SIZE + INTEGER_VECTOR_RESERVED,
+        INTEGER_VECTOR_VALUES: Heap.HEADER_SIZE + INTEGER_VECTOR_VALUES,
+        INTEGER_VECTOR_FIXED_BYTES: Heap.HEADER_SIZE + INTEGER_VECTOR_VALUES,
         HEAP_HEADER_BYTES: Heap.HEADER_SIZE,
         HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
         HEAP_TYPE_PROPERTY_INDEX: Heap.Types.PROPERTY_INDEX,
@@ -1183,7 +1190,7 @@
             throw new RangeError("invalid integer-vector length");
         }
         return this.heap.allocateRecordWords(Heap.Types.INTEGER_VECTOR,
-            VECTOR_CELLS + length * Heap.WORD_BYTES, length, length, 0, 0);
+            INTEGER_VECTOR_VALUES + length * Heap.WORD_BYTES, length, length, 0, 0);
     };
 
     Records.prototype.integerVectorLength = function (vector) {
@@ -1195,7 +1202,7 @@
         if (index < 0 || index >= this.integerVectorLength(vector) ||
                 index !== Math.floor(index)) throw new RangeError("invalid integer-vector index");
         return this.heap.readTrustedFieldU32(vector,
-            VECTOR_CELLS + index * Heap.WORD_BYTES, Heap.Types.INTEGER_VECTOR) | 0;
+            INTEGER_VECTOR_VALUES + index * Heap.WORD_BYTES, Heap.Types.INTEGER_VECTOR) | 0;
     };
 
     Records.prototype.setIntegerVectorValue = function (vector, index, value) {
@@ -1204,7 +1211,12 @@
             throw new RangeError("invalid integer-vector write");
         }
         this.heap.writeTrustedFieldU32(vector,
-            VECTOR_CELLS + index * Heap.WORD_BYTES, value, Heap.Types.INTEGER_VECTOR);
+            INTEGER_VECTOR_VALUES + index * Heap.WORD_BYTES, value, Heap.Types.INTEGER_VECTOR);
+    };
+
+    Records.prototype.integerVectorExecutionCache = function (vector) {
+        return this.heap.readTrustedFieldU32(vector, INTEGER_VECTOR_EXECUTION_CACHE,
+            Heap.Types.INTEGER_VECTOR);
     };
 
     Records.prototype.vectorLength = function (vector) {
@@ -2869,6 +2881,8 @@
             while (vectorIndex < records.vectorLength(address)) {
                 cell(records.vectorCell(address, vectorIndex++));
             }
+        } else if (type === Heap.Types.INTEGER_VECTOR) {
+            reference(records.integerVectorExecutionCache(address));
         } else if (type === Heap.Types.FRAME) {
             reference(records.frameProgram(address));
             reference(records.frameEnvironment(address));
