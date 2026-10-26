@@ -509,6 +509,18 @@ guest_vm/tests/run_tests.sh js_min
 Paths shown here are placeholders supplied by the embedder, not repository
 defaults. The checked-in launcher derives its defaults relative to itself.
 
+### Timer resources in the Node environment
+
+The optional platform environment returns opaque numeric IDs from guest
+`setTimeout` and `requestAnimationFrame`. Host timer handles stay private to
+the environment; Node's Timeout objects must not enter the guest heap. This
+is the demo platform timer API, not Node's complete Timeout class API.
+Each pending timer retains its guest callback until firing, cancellation,
+scheduling failure or environment destruction. Cancellation removes the
+entry before clearing the host timer, so a stale callback cannot invoke a
+cancelled guest function. Unknown IDs are ignored. Environment destruction
+cancels pending timers and releases their callback roots.
+
 When adding a language feature, add a small guest source file or focused
 assertion that demonstrates that feature. When adding a runtime representation
 or lifetime invariant that guest syntax cannot yet express, add a portable

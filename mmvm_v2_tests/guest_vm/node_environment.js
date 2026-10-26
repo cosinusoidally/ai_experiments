@@ -37,6 +37,8 @@
         this.runtime = vm.runtime;
         this.context = vm.context;
         this.retained = [];
+        this.timers = {};
+        this.nextTimerId = 1;
         this.servers = [];
         this.moduleCache = {};
         this.moduleContexts = [];
@@ -181,6 +183,43 @@
     GuestNodeEnvironment.prototype.clearHostTimeout = function (id) {
         if (this.nodeHost) clearTimeout(id);
         else NodeRuntime.clearTimeout(id);
+    };
+
+    /* Host timer objects are platform resources, never guest heap values.
+     * A callback root belongs to exactly one active timer entry and is
+     * released on firing, cancellation, scheduling failure or teardown. */
+    GuestNodeEnvironment.prototype.scheduleGuestTimeout = function (
+            callback, delay, animationFrame) {
+        var environment = this;
+        var id = this.nextTimerId++;
+        var key = "$" + id;
+        var timer = {handle: null, root: this.vm.retain(callback)};
+        this.timers[key] = timer;
+        try {
+            timer.handle = this.setHostTimeout(function () {
+                if (environment.timers[key] !== timer) return;
+                delete environment.timers[key];
+                try {
+                    environment.invoke(callback, undefined,
+                        animationFrame ? [environment.hostNow()] : []);
+                } finally { environment.vm.release(timer.root); }
+            }, delay);
+        } catch (error) {
+            delete this.timers[key];
+            this.vm.release(timer.root);
+            throw error;
+        }
+        return id;
+    };
+
+    GuestNodeEnvironment.prototype.cancelGuestTimeout = function (id) {
+        if (typeof id !== "number") return;
+        var key = "$" + id;
+        var timer = this.timers[key];
+        if (!timer) return;
+        delete this.timers[key];
+        try { this.clearHostTimeout(timer.handle); }
+        finally { this.vm.release(timer.root); }
     };
 
     GuestNodeEnvironment.prototype.hostNow = function () {
@@ -1087,24 +1126,14 @@
         };
 
         publish("setTimeout", this.makeFunction("setTimeout", function (receiver, args) {
-            var callback = args[0];
-            var callbackRoot = environment.vm.retain(callback);
-            return environment.setHostTimeout(function () {
-                try { environment.invoke(callback, undefined, []); }
-                finally { environment.vm.release(callbackRoot); }
-            }, Number(args[1]) || 0);
+            return environment.scheduleGuestTimeout(args[0], Number(args[1]) || 0, false);
         }));
         publish("clearTimeout", this.makeFunction("clearTimeout", function (receiver, args) {
-            environment.clearHostTimeout(args[0]);
+            environment.cancelGuestTimeout(args[0]);
         }));
         publish("requestAnimationFrame", this.makeFunction("requestAnimationFrame",
             function (receiver, args) {
-                var callback = args[0];
-                var callbackRoot = environment.vm.retain(callback);
-                return environment.setHostTimeout(function () {
-                    try { environment.invoke(callback, undefined, [environment.hostNow()]); }
-                    finally { environment.vm.release(callbackRoot); }
-                }, 16);
+                return environment.scheduleGuestTimeout(args[0], 16, true);
             }));
     };
 
@@ -1140,6 +1169,11 @@
     };
 
     GuestNodeEnvironment.prototype.destroy = function () {
+        var timerKey, timerIds = [];
+        for (timerKey in this.timers) {
+            if (own(this.timers, timerKey)) timerIds.push(Number(timerKey.substring(1)));
+        }
+        while (timerIds.length) this.cancelGuestTimeout(timerIds.pop());
         var index = 0;
         while (index < this.retained.length) {
             try { this.vm.release(this.retained[index]); } catch (ignored) {}
