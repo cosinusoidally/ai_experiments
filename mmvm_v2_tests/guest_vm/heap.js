@@ -38,7 +38,8 @@
         ENGINE_STATE: 19,
         PLATFORM_SERVICES: 20,
         PROPERTY_INDEX: 21,
-        PROPERTY_STORAGE: 22
+        PROPERTY_STORAGE: 22,
+        INTEGER_VECTOR: 23
     };
 
     function align8(value) {
@@ -88,7 +89,7 @@
     }
 
     Heap.Types = Types;
-    Heap.LastRecordType = Types.PROPERTY_STORAGE;
+    Heap.LastRecordType = Types.INTEGER_VECTOR;
     Heap.WORD_BYTES = WORD_BYTES;
     Heap.HEADER_SIZE = HEADER_SIZE;
     Heap.FIRST_RECORD = FIRST_RECORD;

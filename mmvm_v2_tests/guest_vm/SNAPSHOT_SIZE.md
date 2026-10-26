@@ -1,5 +1,23 @@
 # Snapshot size and compact strings
 
+## 2026-10-26: integer-only program maps
+
+The fresh Node-built baseline is 8,230,816 bytes. Register/parameter maps
+consume about 813 KiB because each signed slot index occupies a 16-byte
+general value cell. Dedicated INTEGER_VECTOR records retain named length,
+index and setter accessors but store each element as one signed int32.
+The collector treats their contents as leaves, never potential references.
+Ordinary mutable JS arrays and value vectors are unchanged. Shared compiler
+maps retain copy-on-write behavior in both host and native program builders.
+Compiler contract 55 prevents old execution kernels from reading this layout.
+
+At the first integer-map checkpoint, maps occupy 235,152 bytes rather than
+813,000 bytes; the initialized heap falls from 7,849,888 to 7,281,512 bytes.
+The Node project suite passes all 12 programs/270 assertions; standalone
+hello, the 24-round/47-collection GC workload and independent marking audit
+pass. Broader validation and further large-payload reductions follow; this
+checkpoint is not a final size or performance claim.
+
 ## Accepted checkpoint, 2026-10-24
 
 The current dense image is **8,326,112 bytes (7.94 MiB)**, below the 8 MiB

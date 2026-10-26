@@ -291,6 +291,8 @@
         PROPERTY_STORAGE_SETTER: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_SETTER,
         PROPERTY_STORAGE_VALUE: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_VALUE,
         HEAP_WORD_BYTES: Heap.WORD_BYTES,
+        HEAP_RECORD_ALIGNMENT: Heap.RECORD_ALIGNMENT,
+        HEAP_TYPE_INTEGER_VECTOR: Heap.Types.INTEGER_VECTOR,
         HEAP_HEADER_BYTES: Heap.HEADER_SIZE,
         HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
         HEAP_TYPE_PROPERTY_INDEX: Heap.Types.PROPERTY_INDEX,
@@ -1161,6 +1163,38 @@
         var address = this.heap.allocateRecordWords(Heap.Types.VALUE_VECTOR,
             VECTOR_CELLS + capacity * CELL_BYTES, 0, capacity, 0, 0);
         return address;
+    };
+
+    /* Private program maps contain signed register/slot indices, not values
+     * or references. Their length/capacity header matches a value vector, but
+     * each element is one int32 and the collector treats the record as a leaf. */
+    Records.prototype.allocateIntegerVector = function (length) {
+        if (length < 0 || length !== Math.floor(length)) {
+            throw new RangeError("invalid integer-vector length");
+        }
+        return this.heap.allocateRecordWords(Heap.Types.INTEGER_VECTOR,
+            VECTOR_CELLS + length * Heap.WORD_BYTES, length, length, 0, 0);
+    };
+
+    Records.prototype.integerVectorLength = function (vector) {
+        return this.heap.readTrustedFieldU32(vector, VECTOR_LENGTH,
+            Heap.Types.INTEGER_VECTOR);
+    };
+
+    Records.prototype.integerVectorValue = function (vector, index) {
+        if (index < 0 || index >= this.integerVectorLength(vector) ||
+                index !== Math.floor(index)) throw new RangeError("invalid integer-vector index");
+        return this.heap.readTrustedFieldU32(vector,
+            VECTOR_CELLS + index * Heap.WORD_BYTES, Heap.Types.INTEGER_VECTOR) | 0;
+    };
+
+    Records.prototype.setIntegerVectorValue = function (vector, index, value) {
+        if (index < 0 || index >= this.integerVectorLength(vector) ||
+                index !== Math.floor(index) || value !== (value | 0)) {
+            throw new RangeError("invalid integer-vector write");
+        }
+        this.heap.writeTrustedFieldU32(vector,
+            VECTOR_CELLS + index * Heap.WORD_BYTES, value, Heap.Types.INTEGER_VECTOR);
     };
 
     Records.prototype.vectorLength = function (vector) {

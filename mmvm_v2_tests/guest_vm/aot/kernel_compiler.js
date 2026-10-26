@@ -656,6 +656,7 @@
         stringRopeRight: "STRING_ROPE_RIGHT",
         stringRopeDepth: "STRING_ROPE_DEPTH",
         vectorLength: "VECTOR_LENGTH",
+        integerVectorLength: "VECTOR_LENGTH",
         vectorCapacity: "VECTOR_CAPACITY",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
         regexpPropertyHead: "REGEXP_PROPERTY_HEAD",
@@ -847,6 +848,7 @@
     };
 
     var READ_INDEXED_FIELD_ACCESSORS = {
+        integerVectorValue: {field: "VECTOR_CELLS", stride: "HEAP_WORD_BYTES"},
         propertyStorageKeyAt: {field: "PROPERTY_STORAGE_KEY", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageAttributesAt: {field: "PROPERTY_STORAGE_ATTRIBUTES", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageSetterAt: {field: "PROPERTY_STORAGE_SETTER", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
@@ -868,6 +870,7 @@
     };
 
     var WRITE_INDEXED_FIELD_ACCESSORS = {
+        setIntegerVectorValue: READ_INDEXED_FIELD_ACCESSORS.integerVectorValue,
         setRecordPayloadWord: {field: "HEAP_HEADER_BYTES", stride: "HEAP_WORD_BYTES"},
         setPropertyStorageKeyAt: READ_INDEXED_FIELD_ACCESSORS.propertyStorageKeyAt,
         setPropertyStorageAttributesAt: READ_INDEXED_FIELD_ACCESSORS.propertyStorageAttributesAt,

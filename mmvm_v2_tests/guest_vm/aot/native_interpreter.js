@@ -5641,26 +5641,19 @@
                         frameRegisterCellAddress(heapBase, calleeFrame, 0));
                     var calleeParameterSlots = programParameterSlots(
                         heapBase, calleeProgram);
-                    var calleeParameterCount = load32(
-                        heapBase + calleeParameterSlots + VECTOR_LENGTH);
+                    var calleeParameterCount = integerVectorLength(heapBase, calleeParameterSlots);
                     var initializeParameter = 0;
                     while (initializeParameter < calleeParameterCount) {
-                        var parameterSlotCell = heapBase +
-                            calleeParameterSlots + VECTOR_CELLS +
-                            initializeParameter * VALUE_CELL_BYTES;
-                        var parameterSlot = load32(
-                            parameterSlotCell + VALUE_CELL_LOW);
+                        var parameterSlot = integerVectorValue(heapBase,
+                            calleeParameterSlots, initializeParameter);
                         var parameterTarget = 0;
                         if (calleeBindingRegisters === 0) {
                             parameterTarget = heapBase +
                                 calleeEnvironment + ENVIRONMENT_CELLS +
                                 parameterSlot * VALUE_CELL_BYTES;
                         } else {
-                            var parameterRegisterCell = heapBase +
-                                calleeBindingRegisters + VECTOR_CELLS +
-                                parameterSlot * VALUE_CELL_BYTES;
-                            var parameterRegister = load32(
-                                parameterRegisterCell + VALUE_CELL_LOW);
+                            var parameterRegister = integerVectorValue(heapBase,
+                                calleeBindingRegisters, parameterSlot);
                             parameterTarget = heapBase + calleeFrame +
                                 FRAME_REGISTERS + parameterRegister *
                                 VALUE_CELL_BYTES;
@@ -5718,11 +5711,8 @@
                             var registerArgumentsSlot =
                                 programArgumentsSlot(
                                     heapBase, calleeProgram);
-                            var argumentsRegisterCell = heapBase +
-                                calleeBindingRegisters + VECTOR_CELLS +
-                                registerArgumentsSlot * VALUE_CELL_BYTES;
-                            var argumentsRegister = load32(
-                                argumentsRegisterCell + VALUE_CELL_LOW);
+                            var argumentsRegister = integerVectorValue(heapBase,
+                                calleeBindingRegisters, registerArgumentsSlot);
                             var registerArgumentsTarget = heapBase +
                                 calleeFrame + FRAME_REGISTERS +
                                 argumentsRegister * VALUE_CELL_BYTES;
@@ -5736,11 +5726,8 @@
                             store32(registerArgumentsTarget +
                                     VALUE_CELL_AUX, 0);
                         }
-                        var thisRegisterCell = heapBase +
-                            calleeBindingRegisters + VECTOR_CELLS +
-                            thisSlot * VALUE_CELL_BYTES;
-                        var thisRegister = load32(
-                            thisRegisterCell + VALUE_CELL_LOW);
+                        var thisRegister = integerVectorValue(heapBase,
+                            calleeBindingRegisters, thisSlot);
                         thisTarget = heapBase + calleeFrame +
                             FRAME_REGISTERS + thisRegister *
                             VALUE_CELL_BYTES;
@@ -5813,12 +5800,8 @@
                                 calleeEnvironment + ENVIRONMENT_CELLS +
                                 functionNameSlot * VALUE_CELL_BYTES;
                         } else {
-                            var functionNameRegisterCell = heapBase +
-                                calleeBindingRegisters + VECTOR_CELLS +
-                                functionNameSlot * VALUE_CELL_BYTES;
-                            var functionNameRegister = load32(
-                                functionNameRegisterCell +
-                                VALUE_CELL_LOW);
+                            var functionNameRegister = integerVectorValue(heapBase,
+                                calleeBindingRegisters, functionNameSlot);
                             functionNameTarget = heapBase + calleeFrame +
                                 FRAME_REGISTERS + functionNameRegister *
                                 VALUE_CELL_BYTES;
@@ -11445,18 +11428,12 @@
         var program = environmentProgram(heapBase, environment);
         if (program === 0) return 0;
         var parameterSlots = programParameterSlots(heapBase, program);
-        var parameterCount = vectorLength(heapBase, parameterSlots);
+        var parameterCount = integerVectorLength(heapBase, parameterSlots);
         if (index >= parameterCount) return 0;
-        var slotCell = vectorCellAddress(
-            heapBase, parameterSlots, index);
-        if (valueCellTag(0, slotCell) !== VALUE_TAG_INT32) return 0;
-        var slot = valueCellInt32(0, slotCell);
+        var slot = integerVectorValue(heapBase, parameterSlots, index);
         var later = index + 1;
         while (later < parameterCount) {
-            var laterSlotCell = vectorCellAddress(
-                heapBase, parameterSlots, later);
-            if (valueCellTag(0, laterSlotCell) !== VALUE_TAG_INT32) return 0;
-            if (valueCellInt32(0, laterSlotCell) === slot) return 0;
+            if (integerVectorValue(heapBase, parameterSlots, later) === slot) return 0;
             later = later + 1;
         }
         return environmentCellAddress(heapBase, environment, slot);
@@ -14960,6 +14937,27 @@
         return bytes;
     }
 
+    function programIntegerVectorBytesKernel(length) {
+        return (VECTOR_FIXED_BYTES + length * HEAP_WORD_BYTES +
+            HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
+    }
+
+    function initializeProgramIntegerVectorKernel(heapBase, vector, length, initial) {
+        var bytes = programIntegerVectorBytesKernel(length);
+        setRecordType(heapBase, vector, HEAP_TYPE_INTEGER_VECTOR);
+        setRecordSize(heapBase, vector, bytes);
+        setRecordMark(heapBase, vector, 0);
+        setRecordFlags(heapBase, vector, 0);
+        setVectorLength(heapBase, vector, length);
+        setVectorCapacity(heapBase, vector, length);
+        var index = 0;
+        while (index < length) {
+            setIntegerVectorValue(heapBase, vector, index, initial);
+            index = index + 1;
+        }
+        return bytes;
+    }
+
     function initializeProgramCallableKernel(heapBase, callable, program,
                                              context, stringSupport) {
         /* Firefox 1's Function#toString decompiler rewrites a local named
@@ -15083,9 +15081,10 @@
         if (evalProgram < 0) return 0;
         var bytecodeBytes = (BYTECODE_FIXED_BYTES + codeLength * 4 + 7) & -8;
         var constantBytes = 24 + constantLength * VALUE_CELL_BYTES;
-        var bindingBytes = 24 + bindingLength * VALUE_CELL_BYTES;
-        var parameterBytes = 24 + parameterLength * VALUE_CELL_BYTES;
-        var programAllocationBytes = bytecodeBytes + constantBytes * 2 +
+        var constantMapBytes = programIntegerVectorBytesKernel(constantLength);
+        var bindingBytes = programIntegerVectorBytesKernel(bindingLength);
+        var parameterBytes = programIntegerVectorBytesKernel(parameterLength);
+        var programAllocationBytes = bytecodeBytes + constantBytes + constantMapBytes +
             bindingBytes + parameterBytes + PROGRAM_RECORD_BYTES +
             FUNCTION_RECORD_BYTES + OBJECT_RECORD_BYTES +
             PROPERTY_RECORD_BYTES + PROPERTY_STORAGE_SINGLE_BYTES;
@@ -15095,7 +15094,7 @@
         var bytecode = engineHeapBump(heapBase, state);
         var constants = bytecode + bytecodeBytes;
         var constantRegisters = constants + constantBytes;
-        var bindingRegisters = constantRegisters + constantBytes;
+        var bindingRegisters = constantRegisters + constantMapBytes;
         var parameters = bindingRegisters + bindingBytes;
         var program = parameters + parameterBytes;
         var callable = program + PROGRAM_RECORD_BYTES;
@@ -15116,11 +15115,11 @@
         }
         var initializedBytes = initializeProgramVectorKernel(
             heapBase, constants, constantLength, INVALID_PROGRAM_INTEGER);
-        initializedBytes = initializeProgramVectorKernel(
+        initializedBytes = initializeProgramIntegerVectorKernel(
             heapBase, constantRegisters, constantLength, -1);
-        initializedBytes = initializeProgramVectorKernel(
+        initializedBytes = initializeProgramIntegerVectorKernel(
             heapBase, bindingRegisters, bindingLength, -1);
-        initializedBytes = initializeProgramVectorKernel(
+        initializedBytes = initializeProgramIntegerVectorKernel(
             heapBase, parameters, parameterLength, -1);
         setRecordType(heapBase, program, HEAP_TYPE_PROGRAM);
         setRecordSize(heapBase, program, PROGRAM_RECORD_BYTES);
@@ -15186,10 +15185,10 @@
     function copyProgramRegisterConstantsKernel(heapBase, program, registers) {
         var constants = programConstants(heapBase, program);
         var mapping = programConstantRegisters(heapBase, program);
-        var count = vectorLength(heapBase, mapping);
+        var count = integerVectorLength(heapBase, mapping);
         var index = 0;
         while (index < count) {
-            var target = valueCellInt32(0, vectorCellAddress(heapBase, mapping, index));
+            var target = integerVectorValue(heapBase, mapping, index);
             if (target >= 0) {
                 copyValueCell(valueCellAddress(0, registers, target),
                     vectorCellAddress(heapBase, constants, index));
@@ -15268,18 +15267,18 @@
         else if (kind === 1) vector = programBindingRegisters(heapBase, program);
         else vector = programParameterSlots(heapBase, program);
         if (vector === 0) return 0;
-        if (index >= vectorLength(heapBase, vector)) return 0;
+        if (index >= integerVectorLength(heapBase, vector)) return 0;
         if ((recordFlags(heapBase, vector) & VECTOR_SHARED_METADATA_FLAG) !== 0) {
-            var count = vectorLength(heapBase, vector);
-            var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+            var count = integerVectorLength(heapBase, vector);
+            var bytes = programIntegerVectorBytesKernel(count);
             if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
             var writable = engineHeapBump(heapBase, state);
-            initializeProgramVectorKernel(heapBase, writable, count,
+            initializeProgramIntegerVectorKernel(heapBase, writable, count,
                 INVALID_PROGRAM_INTEGER);
             var element = 0;
             while (element < count) {
-                copyValueCell(vectorCellAddress(heapBase, writable, element),
-                    vectorCellAddress(heapBase, vector, element));
+                setIntegerVectorValue(heapBase, writable, element,
+                    integerVectorValue(heapBase, vector, element));
                 element = element + 1;
             }
             setEngineHeapBump(heapBase, state, writable + bytes);
@@ -15288,7 +15287,7 @@
             else setProgramParameterSlots(heapBase, program, writable);
             vector = writable;
         }
-        setValueCellInt32(vectorCellAddress(heapBase, vector, index), value);
+        setIntegerVectorValue(heapBase, vector, index, value);
         setValueCellReference(targetCell, callable);
         return 1;
     }
@@ -17209,6 +17208,8 @@
             instantiateGlobalDeclarationsKernel:
                 instantiateGlobalDeclarationsKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
+            initializeProgramIntegerVectorKernel: initializeProgramIntegerVectorKernel,
+            programIntegerVectorBytesKernel: programIntegerVectorBytesKernel,
             interpreterKernel: interpreterKernel,
             prepareExecutionBytecodeKernel: prepareExecutionBytecodeKernel,
             executionBytecodeAddressKernel: executionBytecodeAddressKernel,
@@ -17362,7 +17363,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 54,
+                compilerVersion: 55,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17398,6 +17399,8 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    HEAP_TYPE_INTEGER_VECTOR: kernelConstantOverrides.HEAP_TYPE_INTEGER_VECTOR,
+                    HEAP_RECORD_ALIGNMENT: kernelConstantOverrides.HEAP_RECORD_ALIGNMENT,
                     PROPERTY_RECORD_SNAPSHOT_PIN: kernelConstantOverrides.PROPERTY_RECORD_SNAPSHOT_PIN,
                     PROPERTY_STORAGE_EPOCH_MASK: kernelConstantOverrides.PROPERTY_STORAGE_EPOCH_MASK,
                     PROPERTY_DESCRIPTOR_KEY: kernelConstantOverrides.PROPERTY_DESCRIPTOR_KEY,

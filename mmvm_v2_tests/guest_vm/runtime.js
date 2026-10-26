@@ -1435,14 +1435,12 @@
         var program = this.heapRecords.environmentProgram(environment);
         if (!program) return 0;
         var parameterSlots = this.heapRecords.programParameterSlots(program);
-        var parameterCount = this.heapRecords.vectorLength(parameterSlots);
+        var parameterCount = this.heapRecords.integerVectorLength(parameterSlots);
         if (index < 0 || index >= parameterCount) return 0;
-        var slot = this.readHeapValue(
-            this.heapRecords.vectorCell(parameterSlots, index));
+        var slot = this.heapRecords.integerVectorValue(parameterSlots, index);
         var later = index + 1;
         while (later < parameterCount) {
-            if (this.readHeapValue(
-                    this.heapRecords.vectorCell(parameterSlots, later)) === slot) {
+            if (this.heapRecords.integerVectorValue(parameterSlots, later) === slot) {
                 return 0;
             }
             later++;
@@ -1705,14 +1703,12 @@
         var key = "$map:" + normalized.join(",");
         var address = pool[key];
         if (address) return address;
-        address = this.heapRecords.allocateValueVector(length);
+        address = this.heapRecords.allocateIntegerVector(length);
         index = 0;
         while (index < length) {
-            this.valueCells.writePrimitiveAt(this.heapRecords.vectorCell(
-                address, index), normalized[index]);
+            this.heapRecords.setIntegerVectorValue(address, index, normalized[index]);
             index++;
         }
-        this.heapRecords.setVectorLength(address, length);
         this.linearHeap.setFlags(address,
             HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG);
         pool[key] = address;
@@ -1751,14 +1747,13 @@
                          records.programParameterSlots(program.heapAddress);
         if (!(this.linearHeap.flags(source) &
                 HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG)) return source;
-        var length = records.vectorLength(source);
-        var target = records.allocateValueVector(length), index = 0;
+        var length = records.integerVectorLength(source);
+        var target = records.allocateIntegerVector(length), index = 0;
         while (index < length) {
-            this.valueCells.copyAt(records.vectorCell(target, index),
-                records.vectorCell(source, index));
+            records.setIntegerVectorValue(target, index,
+                records.integerVectorValue(source, index));
             index++;
         }
-        records.setVectorLength(target, length);
         if (kind === 0) {
             records.setProgramConstantRegisters(program.heapAddress, target);
             program.heapConstantRegistersAddress = target;
@@ -1967,12 +1962,11 @@
         var runtime = this;
         function integerVector(vector) {
             if (!vector) return null;
-            var length = records.vectorLength(vector);
+            var length = records.integerVectorLength(vector);
             var values = new Array(length);
             var vectorIndex = 0;
             while (vectorIndex < length) {
-                values[vectorIndex] = runtime.readHeapValue(
-                    records.vectorCell(vector, vectorIndex));
+                values[vectorIndex] = records.integerVectorValue(vector, vectorIndex);
                 vectorIndex++;
             }
             return values;
@@ -3730,8 +3724,7 @@
                 }
                 values[index] = value;
                 address = runtime.writableProgramVector(program, kind);
-                runtime.writeHeapValue(
-                    runtime.heapRecords.vectorCell(address, index), value);
+                runtime.heapRecords.setIntegerVectorValue(address, index, value);
                 return args[0];
             }, "intrinsic", NativeIntrinsics.PROGRAM_SET_VECTOR));
     };
@@ -4237,7 +4230,7 @@
         if (callable.guestType === "bytecodeFunction") {
             var program = this.heapRecords.functionMetadata(
                 callable.heapAddress);
-            return this.heapRecords.vectorLength(
+            return this.heapRecords.integerVectorLength(
                 this.heapRecords.programParameterSlots(program));
         }
         return 0;

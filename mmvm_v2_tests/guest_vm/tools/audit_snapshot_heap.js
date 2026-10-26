@@ -254,6 +254,12 @@
         var roles = {}, seen = {}, reusedNonemptyArgumentEntries = 0;
         function integerSignature(vector) {
             var values = [], index = 0;
+            if (inspectedHeap.recordType(vector) === Heap.Types.INTEGER_VECTOR) {
+                while (index < records.integerVectorLength(vector)) {
+                    values.push(records.integerVectorValue(vector, index++));
+                }
+                return "$" + values.join(",");
+            }
             while (index < records.vectorLength(vector)) {
                 var cell = records.vectorCell(vector, index++);
                 if (cells.tagAt(cell) !== Cells.Tags.INT32) return null;
@@ -382,6 +388,9 @@
         var engineRecord = 0;
         var typeBytes = {}, typeCounts = {};
         var packedLive = 0, packedCapacity = 0;
+        var vectorSpareBytes = 0, integerElements = 0;
+        var narrowBytecodeBytes = 0, narrowBytecodes = 0;
+        var sliceSpareBytes = 0;
         var stringRecords = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         var encodings = {latin1: {count: 0, bytes: 0},
             utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0},
@@ -404,12 +413,27 @@
                 packedLive += stringRecords.propertyStorageLiveCount(position);
                 packedCapacity += stringRecords.propertyStorageCapacity(position);
             }
+            if (record.type === Heap.Types.VALUE_VECTOR) {
+                vectorSpareBytes += (stringRecords.vectorCapacity(position) -
+                    stringRecords.vectorLength(position)) * Cells.PAYLOAD_BYTES;
+            } else if (record.type === Heap.Types.INTEGER_VECTOR) {
+                integerElements += stringRecords.integerVectorLength(position);
+            } else if (record.type === Heap.Types.BYTECODE) {
+                var fits16 = true, wordCount = stringRecords.bytecodeLength(position);
+                for (var wordIndex = 0; wordIndex < wordCount; wordIndex++) {
+                    var value = stringRecords.bytecodeWord(position, wordIndex);
+                    if (value < 0 || value > 65535) { fits16 = false; break; }
+                }
+                if (fits16) { narrowBytecodes++; narrowBytecodeBytes += wordCount * 2; }
+            }
             if (record.type === Heap.Types.STRING) {
                 var encoding = stringRecords.stringIsSlice(position) ? "slice" :
                     stringRecords.stringIsRope(position) ? "rope" :
                     stringRecords.stringIsLatin1(position) ? "latin1" : "utf16";
                 encodings[encoding].count++;
                 encodings[encoding].bytes += record.size;
+                if (encoding === "slice") sliceSpareBytes += record.size -
+                    Records.KernelConstants.STRING_SLICE_RECORD_BYTES;
             }
             position += record.size;
         }
@@ -420,6 +444,11 @@
         output("packed properties: live=" + packedLive + "; capacity=" +
             packedCapacity + "; unused/tombstone slot bytes=" +
             (packedCapacity - packedLive) * Records.PropertyStorageLayout.ENTRY_BYTES);
+        output("value-vector spare bytes=" + vectorSpareBytes +
+            "; integer-vector elements=" + integerElements +
+            "; string-view spare bytes=" + sliceSpareBytes);
+        output("bytecode unsigned-16 candidates=" + narrowBytecodes +
+            "; potential operand bytes saved=" + narrowBytecodeBytes);
         if (engineRecord) {
             var inspectionRecords = inspectionRecordsFor(
                 inspectedHeap, new Cells(inspectedHeap));
