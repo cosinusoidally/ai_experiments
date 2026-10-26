@@ -987,6 +987,14 @@ performance are separate mandatory regression gates.
   to but above the preceding 412.72-second run; no throughput speedup is
   claimed. Node construction is faster; guest interpreter optimization is
   a separate task.
+- The subsequent Node-only deferred-token isolation fix passes the complete
+  three-host snapshot regression again. All eight actual demos, both HTTP
+  servers, the supported Octane quick selections, native compiler dependency
+  graph and standalone GC/audit checks pass with its final image. The native
+  interpreter code section and kernel fingerprint exactly match a freshly
+  built pre-change `5883e86` image. Zlib quick correctness took 47.34 seconds
+  versus 47.35 seconds for that fresh reference; no language changes were
+  introduced by the guard fix.
 
 ## Rules for subsequent entries
 

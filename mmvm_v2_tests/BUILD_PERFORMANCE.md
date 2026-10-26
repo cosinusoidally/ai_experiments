@@ -27,6 +27,19 @@ fixed-point/environment/program test (249.39 seconds for the complete test).
 Distinct deferred symbol tokens ensure only the dlsym token can request
 resolution; no native-call-shaped request is accepted as symbol lookup.
 
+A fresh pre-change (`5883e86`) image built under js_min in 81.71 seconds.
+Its native interpreter code section (376,145 bytes) and kernel fingerprint
+match the cross-built image exactly. Its zlib quick correctness workload took
+47.35 seconds, versus 47.34 seconds for the final cross-built image (47.07
+versus 47.06 seconds user CPU). The other seven established quick selections
+pass on both images. This supports no material zlib regression, not a claim
+of new guest interpreter throughput or stock Octane scores.
+
+Complete Test262 totals remain 3,139 pass / 153 fail / 0 not run (six bounded
+timeouts included), at 429.33 seconds versus the preceding 412.72-second run.
+The language/kernel implementation is unchanged; these individual timings
+do not establish a Test262 throughput improvement.
+
 The objective is substantially faster genuine snapshot construction under
 both js_min and the standalone guest, ultimately favoring the standalone
 guest. No source/parse cache, snapshot-copy shortcut, benchmark-specific

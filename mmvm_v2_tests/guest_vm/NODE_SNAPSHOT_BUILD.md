@@ -95,19 +95,32 @@ run the emitted image through `js_runner` for that capability.
   `792569f34ddb9b64f600e2402794f165f28021e13c0f6ba6734bf6a4457206e7`.
 - Final-image language integration, independent heap marking audit and
   standalone 24-round GC workload passed; the workload observed 47 automatic
-  collections. The independent audit found 33,315 reachable records and zero
+  collections. The final guard image's independent audit found 33,317 reachable records and zero
   missing marks. Both-host embedding stress passed 27 structural audits,
   72,842 edges and 221 property-index audits, with 67 collections each and
   guest heaps bounded to 8 MiB.
 - Actual X11 demos 1–8 passed window/input/exit smoke checks at 320x240 with
   a 20 FPS limit. Demo8 entered garage and free-driving autopilot; captured
   frames were inspected. This is not a sustained-FPS or long-soak claim.
+- These demo checks, both servers, language integration, standalone GC and
+  all eight supported Octane quick selections were repeated successfully
+  using the final distinct-token guard image. The NativeCompiler dependency
+  reference test passes on Node; its compiled seven-function graph passes
+  both directly under js_min and through the final standalone guest, including
+  mutual recursion, nine internal arguments, lifetime and declaration errors.
 - `net.js` and `node_web.js` served byte-identical text/binary content,
   generated directory listings and default index files over loopback.
 - All eight previously supported Octane quick correctness selections passed:
   Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay/latency,
-  NavierStokes and zlib. The zlib check took 47.89 seconds; these quick runs
+  NavierStokes and zlib. The final zlib check took 47.34 seconds versus
+  47.35 seconds for a freshly built pre-change image (`5883e86`); these quick runs
   are not stock Octane scores or evidence of a guest-interpreter speedup.
+- Direct comparison against that pre-change image found the entire
+  376,145-byte native interpreter code section and kernel fingerprint
+  identical. Its fresh js_min build took 81.71 seconds, compared with
+  79.23 seconds at the cross-build checkpoint. No material construction or
+  zlib throughput regression was observed; individual timings are not a
+  statistical guarantee for every workload.
 
 Raw logs and captures are ignored under `artifacts/cross-`; build logs use
 `artifacts/node-cross-`, `artifacts/jsmin-cross-` and `artifacts/self-cross-`.
