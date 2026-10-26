@@ -80,6 +80,8 @@
         this.freeBlocks = [];
         this.freeBlocksAreMaxHeap = false;
         this.allocationCount = 0;
+        this.allocationSearchProfile = options.profileAllocationSearch ?
+            {allocations: 0, candidates: 0, misses: 0, maximumCandidates: 0} : null;
         this.growthCount = 0;
         this.destroyed = false;
         this.recordInitializer = null;
@@ -167,6 +169,16 @@
                 break;
             }
             freeIndex++;
+        }
+        var searchProfile = this.allocationSearchProfile;
+        if (searchProfile) {
+            var candidates = freeIndex + (address ? 1 : 0);
+            searchProfile.allocations++;
+            searchProfile.candidates += candidates;
+            if (!address) searchProfile.misses++;
+            if (candidates > searchProfile.maximumCandidates) {
+                searchProfile.maximumCandidates = candidates;
+            }
         }
         if (!address) {
             address = this.bump;

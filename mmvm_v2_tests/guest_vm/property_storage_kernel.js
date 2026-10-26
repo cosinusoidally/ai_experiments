@@ -153,8 +153,11 @@
             }
         }
         setRecordType(heapBase, record, HEAP_TYPE_FREE);
-        setRecordMark(heapBase, record, 0);
         setRecordFlags(heapBase, record, 0);
+        /* FREE headers reuse the mark word as their allocator link. Publish
+         * retirement in the ownership domain, not just in the record graph. */
+        setFreeRecordNext(heapBase, record, engineNativeRetiredRegion(heapBase, state));
+        setEngineNativeRetiredRegion(heapBase, state, record);
         return 0;
     }
 

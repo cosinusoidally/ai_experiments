@@ -714,6 +714,7 @@
     };
 
     var WRITE_FIELD_ACCESSORS = {
+        setFreeRecordNext: "RECORD_MARK",
         setPropertyDescriptorKey: "PROPERTY_DESCRIPTOR_KEY",
         setPropertyDescriptorAttributes: "PROPERTY_DESCRIPTOR_ATTRIBUTES",
         setPropertyDescriptorSetter: "PROPERTY_DESCRIPTOR_SETTER",

@@ -7,6 +7,11 @@
             var key = records.allocateString("answer");
             var stringSamples = ["", "a", "abc", "\u0000\u007f\u0080\u00ff",
                 "\u0000\u00ff\u0100\ud800\udfff\uffff", "\ud800x\udfff"];
+            var largeMixedString = "";
+            for (var mixedIndex = 0; mixedIndex < 100; mixedIndex++) {
+                largeMixedString += "\u00ff\u0100\ud800\udfff";
+            }
+            stringSamples.push(largeMixedString);
             var sampleIndex = 0;
             while (sampleIndex < stringSamples.length) {
                 var sample = stringSamples[sampleIndex++];

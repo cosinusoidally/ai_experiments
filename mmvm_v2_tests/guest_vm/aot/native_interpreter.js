@@ -17362,7 +17362,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 53,
+                compilerVersion: 54,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17589,6 +17589,10 @@
         this.allocationRegion = null;
         this.forceTailAllocation = false;
         this.nativeFreeRegionsOwned = false;
+        this.borrowedFreeBlocks = null;
+        this.freeIndexReuseCount = 0;
+        this.freeIndexRebuildCount = 0;
+        this.freeIndexRebuildElapsedMs = 0;
         this.stateAddress = runtime.heapRecords.allocateEngineState();
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
@@ -18086,6 +18090,24 @@
             indirectCompiler.heapAddress);
     };
 
+    /* Reuse a derived host index only with a certificate that its entire
+     * ownership domain stayed unchanged. This deliberately rejects uncertain
+     * cases; allocation/retirement/collection retain the authoritative rebuild.
+     * Retirements are explicitly linked, including private property backings. */
+    NativeInterpreter.prototype.canRestoreBorrowedFreeIndex = function () {
+        var heap = this.runtime.linearHeap;
+        var records = this.runtime.heapRecords;
+        return this.borrowedFreeBlocks !== null && !this.allocationRegion &&
+            heap.freeBlocks.length === 0 && heap.bump === this.borrowedFreeBump &&
+            records.engineHeapBump(this.stateAddress) === this.borrowedFreeBump &&
+            records.engineNativeTailBump(this.stateAddress) === this.borrowedFreeBump &&
+            records.engineNativeRegionActive(this.stateAddress) === 0 &&
+            records.engineNativeFreeRegion(this.stateAddress) === this.borrowedFreeHead &&
+            records.engineNativeRetiredRegion(this.stateAddress) === 0 &&
+            records.engineFreeFrame(this.stateAddress) === this.borrowedFrameHead &&
+            records.engineGCCollections(this.stateAddress) === this.borrowedFreeCollections;
+    };
+
     /* A published native allocation suffix is private only between
      * collections.  Collection rebuilds and coalesces the authoritative free
      * record graph, so retaining its old cursor across that operation would
@@ -18096,6 +18118,9 @@
         var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;
         if (this.nativeFreeRegionsOwned) {
+            var restoreBorrowedIndex = !deferIndexRebuild &&
+                this.canRestoreBorrowedFreeIndex();
+            var borrowedBlocks = this.borrowedFreeBlocks;
             var tailBump = records.engineNativeTailBump(this.stateAddress);
             if (tailBump > heap.bump) heap.bump = tailBump;
             var freeRegion = records.engineNativeFreeRegion(
@@ -18117,6 +18142,7 @@
                 this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0,
                 0);
             this.nativeFreeRegionsOwned = false;
+            this.borrowedFreeBlocks = null;
             heap.freeBlocksAreMaxHeap = false;
             /* Reconstruct the reusable index from record boundaries at the
              * ownership transition.  Native execution may split one arena
@@ -18124,7 +18150,18 @@
              * record graph is authoritative and avoids carrying a stale or
              * overlapping range into host allocation. */
             if (deferIndexRebuild) heap.freeBlocks = [];
-            else this.runtime.rebuildFreeBlockIndex();
+            else if (restoreBorrowedIndex) {
+                heap.freeBlocks = borrowedBlocks;
+                heap.freeBlocksAreMaxHeap = this.borrowedFreeBlocksAreMaxHeap;
+                this.freeIndexReuseCount++;
+            } else {
+                var rebuildStarted = this.runtime.profileOpcodeCounts ?
+                    new Date().getTime() : 0;
+                this.runtime.rebuildFreeBlockIndex();
+                this.freeIndexRebuildCount++;
+                if (rebuildStarted) this.freeIndexRebuildElapsedMs +=
+                    new Date().getTime() - rebuildStarted;
+            }
         }
         if (!this.allocationRegion) {
             records.setEngineNativeAllocator(
@@ -18157,12 +18194,16 @@
                 nativeRegions.push({address: address, size: size});
             }
         }
-        /* A collection wholly inside the native engine may coalesce free
-         * records and rebuild its allocator.  Therefore no address from the
-         * old host index, including a small block which native allocation
-         * currently ignores, may survive the ownership transfer.  Those
-         * records are re-indexed from authoritative headers when ownership
-         * returns to the host. */
+        /* A native collection may coalesce records. Remove every old index
+         * address from the host allocator, including small blocks which
+         * native allocation ignores. The borrowed copy is dormant: only an
+         * unchanged-domain certificate permits reuse on return. All other
+         * handoffs reconstruct the index from authoritative headers. */
+        this.borrowedFreeBlocks = heap.freeBlocks;
+        this.borrowedFreeBlocksAreMaxHeap = heap.freeBlocksAreMaxHeap;
+        this.borrowedFreeBump = heap.bump;
+        this.borrowedFrameHead = this.runtime.heapRecords.engineFreeFrame(this.stateAddress);
+        this.borrowedFreeCollections = this.runtime.heapRecords.engineGCCollections(this.stateAddress);
         heap.freeBlocks = [];
         heap.freeBlocksAreMaxHeap = false;
         /* Keep large compound allocations on the constant-time head path.
@@ -18184,6 +18225,7 @@
         }
         this.runtime.heapRecords.setEngineNativeFreeRegion(
             this.stateAddress, nativeHead);
+        this.borrowedFreeHead = nativeHead;
         this.nativeFreeRegionsOwned = true;
     };
 
@@ -18494,6 +18536,20 @@
         if (typeof print === "function") print(line);
         else if (typeof console !== "undefined" && console.log) console.log(line);
         var records = this.runtime.heapRecords;
+        var allocationSearch = this.runtime.linearHeap.allocationSearchProfile;
+        if (allocationSearch) {
+            line = "host allocator search: allocations=" + allocationSearch.allocations +
+                " candidates=" + allocationSearch.candidates +
+                " misses=" + allocationSearch.misses +
+                " maximumCandidates=" + allocationSearch.maximumCandidates;
+            if (typeof print === "function") print(line);
+            else if (typeof console !== "undefined" && console.log) console.log(line);
+        }
+        line = "native allocator index handoffs: reused=" + this.freeIndexReuseCount +
+            " rebuilt=" + this.freeIndexRebuildCount +
+            " rebuildMs=" + this.freeIndexRebuildElapsedMs;
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
         line = "native guest GC: collections=" +
                records.engineGCCollections(this.stateAddress) +
                " liveBytes=" + records.engineGCLiveBytes(this.stateAddress) +

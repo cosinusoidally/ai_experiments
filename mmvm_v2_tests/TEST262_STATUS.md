@@ -909,6 +909,29 @@ performance are separate mandatory regression gates.
   execution 1,110 ms. A complete instrumented run is in progress to identify
   the remaining whole-suite cost; performance parity is not claimed.
 
+### 2026-10-26, morning GMT — span decoding and bounded property scans
+
+- Complete native js_min run with string-span decoding and length/hash
+  rejection before text comparison: **3,292 executed: 3,139 passed,
+  153 failed, 0 not run, 6 timed out**. Exact failing IDs/variants unchanged.
+  Elapsed 417.41 seconds (409.84 user, 2.49 system); peak RSS 299,376 KiB.
+  Raw log: ignored `artifacts/packed-span-test262-full.log`.
+- Follow-up with the packed linear-scan span validated once, using its named
+  within-length key accessor: **3,292 executed: 3,139 passed, 153 failed,
+  0 not run, 6 timed out**. Elapsed 412.72 seconds (410.74 user, 1.02 system);
+  peak RSS 304,176 KiB. Raw log: ignored
+  `artifacts/packed-scan-test262-full.log`. The exact failure-set comparison
+  is retained separately from total-count checks.
+- Both totals match the pre-cutover set. The earlier 40 added failures and
+  harness-restore crash are fixed. This is not full ES5.1 conformance: the
+  original 153 failures, including six diagnostic-cap timeouts, remain.
+- The former 587.10-second cutover run is substantially improved, but whole
+  inventory performance is still below the 308.96-second baseline repeat.
+  No performance-parity claim is made. Both-host project/CLI/context checks
+  and bounded GC checks pass at the span-reader checkpoint. Fresh snapshot
+  generation and genuine self-hosted generation produce bit-identical dense
+  images; final unchanged-demo/server/Octane rechecks are still pending.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

@@ -429,6 +429,7 @@
         if (!this.linearHeap) {
             this.linearHeap = new Heap({heapBytes: this.linearHeapBytes,
                 maxHeapBytes: this.maximumLinearHeapBytes,
+                profileAllocationSearch: !!this.profileOpcodeCounts,
                 collectorWorkspace: true});
             this.valueCells = new ValueCells(this.linearHeap);
             this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);

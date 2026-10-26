@@ -68,6 +68,7 @@
     var STRING_HASH_PRIME = 16777619;
     var STRING_SLICE_BACKING = 8;
     var STRING_SLICE_START = 12;
+    var STRING_DECODE_CHUNK_UNITS = 256;
 
     var VECTOR_LENGTH = 0;
     var VECTOR_CAPACITY = 4;
@@ -614,14 +615,62 @@
 
     Records.prototype.readString = function (address) {
         var length = this.stringLength(address);
-        var result = "";
-        var index = 0;
-        while (index < length) {
-            result += String.fromCharCode(
-                this.stringCharacterCodeUnit(address, index));
-            index++;
+        var start = 0, chunk = "", chunks = null, pending = null;
+        if (!length) return chunk;
+        /* Resolve immutable views once per span, not once per character.
+         * The explicit stack handles slices crossing rope branches without
+         * consuming the host call stack. Chunks bound concatenation work on
+         * older hosts which eagerly copy strings instead of building ropes. */
+        while (true) {
+            this.heap.requireRecord(address, Heap.Types.STRING);
+            if (start < 0 || start + length > this.stringLength(address)) {
+                throw new RangeError("string decode span is out of bounds");
+            }
+            var flags = this.heap.flags(address);
+            if (flags & STRING_SLICE_FLAG) {
+                start += this.stringSliceStart(address);
+                address = this.stringSliceBacking(address);
+                continue;
+            }
+            if (flags & STRING_ROPE_FLAG) {
+                var left = this.stringRopeLeft(address);
+                var leftLength = this.stringLength(left);
+                if (start >= leftLength) {
+                    start -= leftLength;
+                    address = this.stringRopeRight(address);
+                    continue;
+                }
+                var leftCount = Math.min(length, leftLength - start);
+                if (leftCount < length) {
+                    if (!pending) pending = [];
+                    pending.push(this.stringRopeRight(address), 0, length - leftCount);
+                }
+                address = left;
+                length = leftCount;
+                continue;
+            }
+            var unitBytes = flags & STRING_LATIN1_FLAG ? 1 : 2;
+            var characters = this.heap.checkPayload(address,
+                STRING_CHARS + start * unitBytes, length * unitBytes, Heap.Types.STRING);
+            var end = characters + length * unitBytes;
+            while (characters < end) {
+                var code = this.heap.memory.readU8Trusted(characters++);
+                if (unitBytes === 2) code |= this.heap.memory.readU8Trusted(characters++) << 8;
+                chunk += String.fromCharCode(code);
+                if (chunk.length === STRING_DECODE_CHUNK_UNITS) {
+                    if (!chunks) chunks = [];
+                    chunks.push(chunk);
+                    chunk = "";
+                }
+            }
+            if (!pending || !pending.length) break;
+            length = pending.pop();
+            start = pending.pop();
+            address = pending.pop();
         }
-        return result;
+        if (!chunks) return chunk;
+        if (chunk.length) chunks.push(chunk);
+        return chunks.join("");
     };
 
     Records.prototype.allocateObject = function (prototype) {
@@ -1676,6 +1725,12 @@
         return this.heap.readTrustedFieldU32(storage,
             this.propertyStorageEntryOffset(storage, entry) + PROPERTY_ENTRY_KEY);
     };
+    /* For a synchronous scan whose complete entry span was checked once.
+     * No allocation, callback or structural mutation may invalidate that span. */
+    Records.prototype.propertyStorageKeyWithinLength = function (storage, entry) {
+        return this.heap.readTrustedFieldU32(storage,
+            PROPERTY_STORAGE_ENTRIES + (entry - 1) * PROPERTY_ENTRY_BYTES + PROPERTY_ENTRY_KEY);
+    };
     Records.prototype.propertyStorageAttributes = function (storage, entry) {
         return this.heap.readTrustedFieldU32(storage,
             this.propertyStorageEntryOffset(storage, entry) + PROPERTY_ENTRY_ATTRIBUTES);
@@ -1710,10 +1765,21 @@
             return 0;
         }
         var text = null, entry = 1, length = this.propertyStorageLength(storage);
+        this.heap.checkPayload(storage, PROPERTY_STORAGE_ENTRIES,
+            length * PROPERTY_ENTRY_BYTES, Heap.Types.PROPERTY_STORAGE);
+        var keyLength = this.stringLength(key), keyHash = 0, hashReady = false;
         while (entry <= length) {
-            var candidate = this.propertyStorageKey(storage, entry);
+            var candidate = this.propertyStorageKeyWithinLength(storage, entry);
             if (candidate === key) return entry;
-            if (candidate) {
+            if (candidate && this.stringLength(candidate) === keyLength) {
+                if (!hashReady) {
+                    keyHash = this.stringHash(key);
+                    hashReady = true;
+                }
+                if (this.stringHash(candidate) !== keyHash) {
+                    entry++;
+                    continue;
+                }
                 if (text === null) text = this.readString(key);
                 if (this.readString(candidate) === text) return entry;
             }

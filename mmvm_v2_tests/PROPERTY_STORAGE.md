@@ -12,7 +12,7 @@ Both the reference implementation and the compiled interpreter use this
 representation by default. Native constructors create packed entries directly;
 there is no linked-list construction followed by a lazy conversion. The native
 implementation is `property_storage_kernel.js`, compiled by the shared kernel
-pipeline. Compiler contract 53 invalidates incompatible code-only snapshots.
+pipeline. Compiler contract 54 invalidates incompatible code-only snapshots.
 
 ## Entries and ordering
 
@@ -125,6 +125,33 @@ Descriptor operations that can append to their own source object preserve any
 needed temporary value before regrowth. Raw cell addresses must not outlive
 that mutation. Both collector backends trace only live entries, their keys,
 setters and tagged values; tombstones retain nothing.
+
+## Bulk access and allocator diagnostics, 2026-10-26
+
+Small-table linear lookup rejects unequal UTF-16 lengths and canonical hashes
+before decoding text. Hash collisions still receive exact string comparison;
+pointer identity alone is never assumed to establish inequality. A complete
+entry span can be validated once for a synchronous scan, then read through
+the explicitly named `propertyStorageKeyWithinLength` accessor. The checked
+per-entry API remains available. No callback or structural mutation may
+intervene during the borrowed scan.
+
+Bulk string decoding resolves slices/rope branches into checked flat spans,
+reads their code units directly, and joins bounded chunks. It preserves UTF-16,
+including lone surrogates, and avoids host-stack recursion or repeated view
+resolution per character. This improves ordinary property lookup and source
+decoding; it is not a workload-specific replacement or parse cache.
+
+Native property retirement is published in the engine's retired-free list.
+Allocator handoff may restore a dormant copy of the host free-block index only
+when its bump bounds, free/retired heads, frame-cache head, collection count
+and empty host free index certify an unchanged ownership domain. Allocation,
+retirement, collection or uncertainty retains the full authoritative rebuild.
+Profile output reports reuse/rebuild counts and rebuild time, plus optional
+host allocation-search counts. These counters showed that this optimization
+alone did not explain the slow scope-test range; string decoding was the
+larger measured cost. See `BUILD_PERFORMANCE.md` for the portable diagnostic
+tool and measurement limitations.
 
 ## Original migration sequence
 
