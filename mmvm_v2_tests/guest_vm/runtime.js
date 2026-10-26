@@ -366,6 +366,11 @@
         this.hostCallLogCount = 0;
         this.verifyNativeHeap = !!options.verifyNativeHeap;
         this.nativeSnapshotWrite = options.snapshot || null;
+        /* Execution-oriented VMs avoid encoding short-lived programs only to
+         * decode them immediately. Snapshot construction favors compact,
+         * retained nested programs; embedders can select either policy. */
+        this.compactProgramStorage = options.compactProgramStorage === undefined ?
+            !!options.snapshot : !!options.compactProgramStorage;
         this.nativeSnapshotRead = options.withSnapshot || null;
         this.deferNativeSnapshotWrite = !!options.deferSnapshotWrite;
         this.skipNativeSnapshotHash = !!options.skipSnapshotHash;
@@ -1585,7 +1590,7 @@
     };
 
     Runtime.prototype.registerProgram = function (program, enclosingSource,
-                                                   enclosingSourceAddress) {
+                                                   enclosingSourceAddress, compactStorage) {
         if (program && program.heapAddress) {
             this.linearHeap.requireRecord(program.heapAddress,
                                           Heap.Types.PROGRAM);
@@ -1594,7 +1599,7 @@
         var index = 0;
         this.ensureLinearHeap();
         program.heapBytecodeAddress =
-            this.heapRecords.allocateBytecode(program.code || [], true);
+            this.heapRecords.allocateBytecode(program.code || [], !!compactStorage);
         program.heapConstantsAddress = this.heapRecords.allocateValueVector(
             program.constants ? program.constants.length : 0);
         program.heapConstantRegistersAddress =
@@ -1646,7 +1651,7 @@
             if (value && typeof value === "object" && value.code && value.constants) {
                 this.valueCells.writeReferenceAt(cell, this.registerProgram(
                     value, program.source || enclosingSource,
-                    sourceAddress || enclosingSourceAddress));
+                    sourceAddress || enclosingSourceAddress, this.compactProgramStorage));
             } else if (value && typeof value === "object" &&
                        typeof value.length === "number") {
                 if (argumentConstants["$" + index]) {
@@ -1658,7 +1663,10 @@
         }
         this.heapRecords.setVectorLength(program.heapConstantsAddress,
             program.constants ? program.constants.length : 0);
-        this.heapRecords.narrowProgramConstants(program.heapConstantsAddress);
+        /* Entry programs are normally executed immediately: do not build a
+         * compact pool only to expand it on entry. Retained nested functions
+         * use canonical compact storage and lazily prepare execution views. */
+        if (compactStorage) this.heapRecords.narrowProgramConstants(program.heapConstantsAddress);
         return address;
     };
 
@@ -1728,12 +1736,21 @@
         var key = "$arguments:" + Array.prototype.join.call(values, ",");
         var address = pool[key];
         if (address) return address;
-        address = this.heapRecords.allocateIntegerVector(values.length);
+        if (this.compactProgramStorage) {
+            address = this.heapRecords.allocateIntegerVector(values.length);
+        } else {
+            address = this.heapRecords.allocateArray(
+                this.arrayPrototype ? this.arrayPrototype.heapAddress : 0, values.length);
+        }
         index = 0;
         while (index < values.length) {
-            this.heapRecords.setIntegerVectorValue(address, index, values[index]);
+            if (this.compactProgramStorage) {
+                this.heapRecords.setIntegerVectorValue(address, index, values[index]);
+            } else this.valueCells.writePrimitiveAt(
+                this.heapRecords.arrayElementCell(address, index), values[index]);
             index++;
         }
+        if (!this.compactProgramStorage) this.heapRecords.setArrayLength(address, values.length);
         pool[key] = address;
         return address;
     };

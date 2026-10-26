@@ -22,6 +22,7 @@
     }
     var heapCap = 8 * 1024 * 1024;
     var vm = new VM({nativeInterpreter: true, verifyNativeHeap: true,
+        compactProgramStorage: true,
         heapBytes: 512 * 1024, maxHeapBytes: heapCap, gcThreshold: 256});
     var audits = 0, edges = 0, indexAudits = 0, maximumBump = 0;
     var started = new Date().getTime();

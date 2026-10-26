@@ -1,5 +1,25 @@
 # Snapshot size and compact strings
 
+## Execution-oriented versus compact storage
+
+Normal VMs default to execution-oriented program storage. Snapshot builders
+default to `compactProgramStorage: true`; embedders can select this explicitly
+in VM/JSRuntime options. Retained nested programs then use narrow canonical
+instructions/constants and integer argument descriptors. Entry programs are
+registered in execution format, since they are about to run. The same native
+interpreter accepts both layouts, with no filename/test/benchmark dispatch.
+The bounded GC driver explicitly selects compact storage to exercise its
+additional cache edges and narrow-record lifetimes.
+
+An earlier policy compacted every program indiscriminately. It retained the
+same Test262 totals (3,139 pass / 153 fail / zero not run, six budget timeouts)
+but took 517.92 seconds, so that policy was rejected for ordinary execution.
+It also did unnecessary encode/decode work on entry scripts. After separating
+the policies, the candidate is 5,867,216 bytes. Paired demo8 command-line
+startup medians are 3.14 versus 3.11 seconds, with lower startup RSS, rather
+than the initial 3.25 versus 3.05 regression. Final inventory/control checks
+are still pending. These timings are not a claimed interpreter speedup.
+
 ## Warm-entry validation follow-up
 
 The initial compact image's demo8 command-line startup median was about

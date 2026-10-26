@@ -509,6 +509,17 @@ guest_vm/tests/run_tests.sh js_min
 Paths shown here are placeholders supplied by the embedder, not repository
 defaults. The checked-in launcher derives its defaults relative to itself.
 
+### Program storage policy
+
+VM and JSRuntime options accept `compactProgramStorage`. Ordinary execution
+defaults to false; a snapshot-construction runtime defaults to true. This
+selects compact canonical storage for retained nested programs, not different
+language semantics. Entry programs use direct execution storage to avoid
+encoding and immediately decoding the same script. In compact mode the
+native interpreter prepares ordinary instruction/value views once on demand;
+the same heap-owned caches are supported by the Node reference backend.
+Sources, PCs, exact constants and mutable array semantics are preserved.
+
 ### Timer resources in the Node environment
 
 The optional platform environment returns opaque numeric IDs from guest
