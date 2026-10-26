@@ -208,6 +208,12 @@
             return bytecodePayloadWord(heapBase, bytecode + BYTECODE_WORDS, index);
         }
         var byteIndex = index * BYTECODE_PACKED_UNIT_BYTES;
+        if ((recordFlags(heapBase, bytecode) & BYTECODE_COMPACT8_FLAG) !== 0) {
+            var small = bytecodePackedByte(heapBase, bytecode, index);
+            if (small === BYTECODE_PACKED8_MINUS_ONE) return -1;
+            if (small !== BYTECODE_PACKED8_WIDE) return small;
+            return wideBytecodeOperandKernel(heapBase, bytecode, index);
+        }
         var unit = bytecodePackedByte(heapBase, bytecode, byteIndex) |
             (bytecodePackedByte(heapBase, bytecode, byteIndex + 1) << 8);
         if (unit === BYTECODE_PACKED_MINUS_ONE) return -1;
@@ -216,12 +222,13 @@
     }
 
     function wideBytecodeOperandKernel(heapBase, bytecode, index) {
-        var dataBytes = (bytecodeLength(heapBase, bytecode) * BYTECODE_PACKED_UNIT_BYTES +
+        var unitBytes = BYTECODE_PACKED_UNIT_BYTES;
+        if ((recordFlags(heapBase, bytecode) & BYTECODE_COMPACT8_FLAG) !== 0) unitBytes = 1;
+        var dataBytes = (bytecodeLength(heapBase, bytecode) * unitBytes +
             HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
         var firstWord = divideI32(dataBytes, HEAP_WORD_BYTES);
         var low = 0;
-        var high = divideI32(recordSize(heapBase, bytecode) - BYTECODE_FIXED_BYTES - dataBytes,
-            BYTECODE_WIDE_ENTRY_WORDS * HEAP_WORD_BYTES);
+        var high = recordFlags(heapBase, bytecode) >>> BYTECODE_WIDE_COUNT_SHIFT;
         while (low < high) {
             var middle = (low + high) >>> 1;
             var word = firstWord + middle * BYTECODE_WIDE_ENTRY_WORDS;
@@ -15003,10 +15010,14 @@
         if (recordType(heapBase, descriptor) !== HEAP_TYPE_INTEGER_VECTOR) return 0;
         var cached = integerVectorExecutionCache(heapBase, descriptor);
         if (cached !== 0) return cached;
+        return prepareArgumentRegisterVectorKernel(heapBase, state, descriptor);
+    }
+
+    function prepareArgumentRegisterVectorKernel(heapBase, state, descriptor) {
         var count = integerVectorLength(heapBase, descriptor);
         var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
         if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
-        cached = engineHeapBump(heapBase, state);
+        var cached = engineHeapBump(heapBase, state);
         initializeProgramVectorKernel(heapBase, cached, count, INVALID_PROGRAM_INTEGER);
         var index = 0;
         while (index < count) {
@@ -15248,10 +15259,14 @@
         if (recordType(heapBase, pool) !== HEAP_TYPE_CONSTANT_POOL) return pool;
         var cached = constantPoolExecutionCache(heapBase, pool);
         if (cached !== 0) return cached;
+        return prepareConstantPoolKernel(heapBase, state, pool);
+    }
+
+    function prepareConstantPoolKernel(heapBase, state, pool) {
         var count = constantPoolLength(heapBase, pool);
         var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
         if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
-        cached = engineHeapBump(heapBase, state);
+        var cached = engineHeapBump(heapBase, state);
         initializeProgramVectorKernel(heapBase, cached, count, INVALID_PROGRAM_INTEGER);
         var data = pool + CONSTANT_POOL_TAGS +
             ((count + HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT));
@@ -17328,6 +17343,7 @@
             initializeRegisterBankKernel: initializeRegisterBankKernel,
             copyProgramRegisterConstantsKernel: copyProgramRegisterConstantsKernel,
             executionProgramConstantsKernel: executionProgramConstantsKernel,
+            prepareConstantPoolKernel: prepareConstantPoolKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
             instantiateGlobalDeclarationsKernel:
                 instantiateGlobalDeclarationsKernel,
@@ -17335,6 +17351,7 @@
             initializeProgramIntegerVectorKernel: initializeProgramIntegerVectorKernel,
             programIntegerVectorBytesKernel: programIntegerVectorBytesKernel,
             argumentRegisterVectorKernel: argumentRegisterVectorKernel,
+            prepareArgumentRegisterVectorKernel: prepareArgumentRegisterVectorKernel,
             interpreterKernel: interpreterKernel,
             prepareExecutionBytecodeKernel: prepareExecutionBytecodeKernel,
             canonicalBytecodeWordKernel: canonicalBytecodeWordKernel,
@@ -17490,7 +17507,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 59,
+                compilerVersion: HeapRecords.BytecodeLayout.wideCountContract,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17526,6 +17543,10 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    BYTECODE_COMPACT8_FLAG: kernelConstantOverrides.BYTECODE_COMPACT8_FLAG,
+                    BYTECODE_WIDE_COUNT_SHIFT: kernelConstantOverrides.BYTECODE_WIDE_COUNT_SHIFT,
+                    BYTECODE_PACKED8_MINUS_ONE: kernelConstantOverrides.BYTECODE_PACKED8_MINUS_ONE,
+                    BYTECODE_PACKED8_WIDE: kernelConstantOverrides.BYTECODE_PACKED8_WIDE,
                     HEAP_TYPE_CONSTANT_POOL: kernelConstantOverrides.HEAP_TYPE_CONSTANT_POOL,
                     CONSTANT_POOL_LENGTH: kernelConstantOverrides.CONSTANT_POOL_LENGTH,
                     CONSTANT_POOL_EXECUTION_CACHE: kernelConstantOverrides.CONSTANT_POOL_EXECUTION_CACHE,

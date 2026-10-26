@@ -79,6 +79,8 @@
         Records.LegacyPackedPropertyLayout.compilerVersion;
     function inspectionRecordsFor(inspectedHeap, cells) {
         var result = new Records(inspectedHeap, cells);
+        result.legacyBytecodeFlags = !rawHeap && header(headerFields.compilerVersion) <
+            Records.BytecodeLayout.wideCountContract;
         if (legacyPacked) {
             /* ABI 51 placed alignment padding before the value cell.
              * Inspection must follow the image ABI, not the running VM ABI. */
@@ -432,6 +434,7 @@
         var narrowBytecodeBytes = 0, narrowBytecodes = 0;
         var sliceSpareBytes = 0;
         var compactCodeBytes = 0, executionCodeBytes = 0, executionCodeCount = 0;
+        var smallCodeBytes = 0, smallCodeCount = 0, poolViewBytes = 0, argumentViewBytes = 0;
         var stringRecords = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         var encodings = {latin1: {count: 0, bytes: 0},
             utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0},
@@ -459,9 +462,18 @@
                     stringRecords.vectorLength(position)) * Cells.PAYLOAD_BYTES;
             } else if (record.type === Heap.Types.INTEGER_VECTOR) {
                 integerElements += stringRecords.integerVectorLength(position);
+                var argumentView = stringRecords.integerVectorExecutionCache(position);
+                if (argumentView) argumentViewBytes += inspectedHeap.recordSize(argumentView);
+            } else if (record.type === Heap.Types.CONSTANT_POOL) {
+                var poolViewAddress = stringRecords.constantPoolExecutionCache(position);
+                if (poolViewAddress) poolViewBytes += inspectedHeap.recordSize(poolViewAddress);
             } else if (record.type === Heap.Types.BYTECODE) {
                 if (record.flags & Records.KernelConstants.BYTECODE_COMPACT_FLAG) {
                     compactCodeBytes += record.size;
+                    if (record.flags & Records.KernelConstants.BYTECODE_COMPACT8_FLAG) {
+                        smallCodeBytes += record.size;
+                        smallCodeCount++;
+                    }
                 }
                 var executionCode = stringRecords.bytecodeExecutionCache(position);
                 if (executionCode) {
@@ -501,6 +513,9 @@
         output("compact canonical bytecode bytes=" + compactCodeBytes +
             "; execution views=" + executionCodeCount +
             "; execution-view bytes=" + executionCodeBytes);
+        output("8-bit bytecode: records=" + smallCodeCount + "; bytes=" + smallCodeBytes +
+            "; constant execution-view bytes=" + poolViewBytes +
+            "; argument execution-view bytes=" + argumentViewBytes);
         if (engineRecord) {
             var inspectionRecords = inspectionRecordsFor(
                 inspectedHeap, new Cells(inspectedHeap));

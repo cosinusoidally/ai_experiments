@@ -114,9 +114,13 @@
     var BYTECODE_EXECUTION_CACHE = 4;
     var BYTECODE_WORDS = 8;
     var BYTECODE_COMPACT_FLAG = 1;
+    var BYTECODE_COMPACT8_FLAG = 2;
+    var BYTECODE_WIDE_COUNT_SHIFT = 2;
     var BYTECODE_PACKED_UNIT_BYTES = 2;
     var BYTECODE_PACKED_MINUS_ONE = 65534;
     var BYTECODE_PACKED_WIDE = 65535;
+    var BYTECODE_PACKED8_MINUS_ONE = 254;
+    var BYTECODE_PACKED8_WIDE = 255;
     var BYTECODE_WIDE_ENTRY_WORDS = 2;
     var INTEGER_VECTOR_EXECUTION_CACHE = 8;
     var INTEGER_VECTOR_RESERVED = 12;
@@ -268,6 +272,8 @@
                           CONFIGURABLE: ATTR_CONFIGURABLE,
                           ACCESSOR: ATTR_ACCESSOR,
                           DEFAULT: DEFAULT_ATTRIBUTES};
+    Records.BytecodeLayout = {wideCountContract: 60};
+
     Records.PropertyStorageLayout = {
         ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
         ENTRIES: PROPERTY_STORAGE_ENTRIES,
@@ -329,6 +335,10 @@
         PLATFORM_MEMSET_POINTER: Heap.HEADER_SIZE + PLATFORM_MEMSET_POINTER,
         HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
         BYTECODE_COMPACT_FLAG: BYTECODE_COMPACT_FLAG,
+        BYTECODE_COMPACT8_FLAG: BYTECODE_COMPACT8_FLAG,
+        BYTECODE_WIDE_COUNT_SHIFT: BYTECODE_WIDE_COUNT_SHIFT,
+        BYTECODE_PACKED8_MINUS_ONE: BYTECODE_PACKED8_MINUS_ONE,
+        BYTECODE_PACKED8_WIDE: BYTECODE_PACKED8_WIDE,
         BYTECODE_PACKED_UNIT_BYTES: BYTECODE_PACKED_UNIT_BYTES,
         BYTECODE_PACKED_MINUS_ONE: BYTECODE_PACKED_MINUS_ONE,
         BYTECODE_PACKED_WIDE: BYTECODE_PACKED_WIDE,
@@ -1783,38 +1793,51 @@
     };
 
     Records.prototype.allocateBytecode = function (code, compact) {
-        var wideCount = 0, index;
+        var wideCount = 0, wide8Count = 0, index;
         if (compact) {
             for (index = 0; index < code.length; index++) {
                 if (code[index] !== -1 && (code[index] < 0 ||
                         code[index] >= BYTECODE_PACKED_MINUS_ONE)) wideCount++;
+                if (code[index] !== -1 && (code[index] < 0 ||
+                        code[index] >= BYTECODE_PACKED8_MINUS_ONE)) wide8Count++;
             }
             var packedBytes = (code.length * BYTECODE_PACKED_UNIT_BYTES +
                 Heap.RECORD_ALIGNMENT - 1) & ~(Heap.RECORD_ALIGNMENT - 1);
             var tableBytes = wideCount * BYTECODE_WIDE_ENTRY_WORDS * Heap.WORD_BYTES;
+            var packed8Bytes = (code.length + Heap.RECORD_ALIGNMENT - 1) & ~(Heap.RECORD_ALIGNMENT - 1);
+            var table8Bytes = wide8Count * BYTECODE_WIDE_ENTRY_WORDS * Heap.WORD_BYTES;
+            var unitBytes = BYTECODE_PACKED_UNIT_BYTES;
+            var minusOne = BYTECODE_PACKED_MINUS_ONE, wideMarker = BYTECODE_PACKED_WIDE;
+            if (packed8Bytes + table8Bytes < packedBytes + tableBytes) {
+                packedBytes = packed8Bytes; tableBytes = table8Bytes; wideCount = wide8Count;
+                unitBytes = 1; minusOne = BYTECODE_PACKED8_MINUS_ONE; wideMarker = BYTECODE_PACKED8_WIDE;
+            }
             if (packedBytes + tableBytes < code.length * Heap.WORD_BYTES) {
                 var packed = this.heap.allocateRecordWords(Heap.Types.BYTECODE,
                     BYTECODE_WORDS + packedBytes + tableBytes, code.length, 0, 0, 0);
-                this.heap.setFlags(packed, BYTECODE_COMPACT_FLAG);
+                this.heap.setFlags(packed, BYTECODE_COMPACT_FLAG |
+                    (unitBytes === 1 ? BYTECODE_COMPACT8_FLAG : 0) |
+                    (wideCount << BYTECODE_WIDE_COUNT_SHIFT));
                 var base = this.bytecodeWordsAddress(packed);
                 var wideOffset = BYTECODE_WORDS + packedBytes;
-                var pendingUnit = 0;
+                var pendingUnit = 0, unitsPerWord = Heap.WORD_BYTES / unitBytes;
                 for (index = 0; index < code.length; index++) {
                     var value = code[index], unit = value;
-                    if (value === -1) unit = BYTECODE_PACKED_MINUS_ONE;
-                    else if (value < 0 || value >= BYTECODE_PACKED_MINUS_ONE) {
-                        unit = BYTECODE_PACKED_WIDE;
+                    if (value === -1) unit = minusOne;
+                    else if (value < 0 || value >= minusOne) {
+                        unit = wideMarker;
                         this.heap.writeTrustedFieldU32(packed, wideOffset, index);
                         this.heap.writeTrustedFieldU32(packed, wideOffset + Heap.WORD_BYTES, value);
                         wideOffset += BYTECODE_WIDE_ENTRY_WORDS * Heap.WORD_BYTES;
                     }
-                    if (index & 1) {
-                        this.heap.memory.writeU32(base + (index - 1) * BYTECODE_PACKED_UNIT_BYTES,
-                            pendingUnit | (unit << 16));
-                    } else pendingUnit = unit;
+                    pendingUnit |= unit << ((index & (unitsPerWord - 1)) * unitBytes * 8);
+                    if (((index + 1) & (unitsPerWord - 1)) === 0) {
+                        this.heap.memory.writeU32(base + (index + 1 - unitsPerWord) * unitBytes, pendingUnit);
+                        pendingUnit = 0;
+                    }
                 }
-                if (code.length & 1) this.heap.memory.writeU16(base +
-                    (code.length - 1) * BYTECODE_PACKED_UNIT_BYTES, pendingUnit);
+                if (code.length & (unitsPerWord - 1)) this.heap.memory.writeU32(base +
+                    (code.length & ~(unitsPerWord - 1)) * unitBytes, pendingUnit);
                 return packed;
             }
         }
@@ -1848,15 +1871,20 @@
         if (index < 0 || index >= this.bytecodeLength(bytecode) ||
             index !== Math.floor(index)) throw new RangeError("invalid bytecode index");
         if (this.heap.flags(bytecode) & BYTECODE_COMPACT_FLAG) {
-            var unit = this.heap.memory.readU16(this.bytecodeWordsAddress(bytecode) +
-                index * BYTECODE_PACKED_UNIT_BYTES);
-            if (unit === BYTECODE_PACKED_MINUS_ONE) return -1;
-            if (unit !== BYTECODE_PACKED_WIDE) return unit;
+            var flags = this.heap.flags(bytecode);
+            var small = !!(flags & BYTECODE_COMPACT8_FLAG);
+            var unitBytes = small ? 1 : BYTECODE_PACKED_UNIT_BYTES;
+            var unit = small ? this.heap.memory.readU8(this.bytecodeWordsAddress(bytecode) + index) :
+                this.heap.memory.readU16(this.bytecodeWordsAddress(bytecode) + index * unitBytes);
+            if (unit === (small ? BYTECODE_PACKED8_MINUS_ONE : BYTECODE_PACKED_MINUS_ONE)) return -1;
+            if (unit !== (small ? BYTECODE_PACKED8_WIDE : BYTECODE_PACKED_WIDE)) return unit;
             var table = BYTECODE_WORDS + ((this.bytecodeLength(bytecode) *
-                BYTECODE_PACKED_UNIT_BYTES + Heap.RECORD_ALIGNMENT - 1) &
+                unitBytes + Heap.RECORD_ALIGNMENT - 1) &
                 ~(Heap.RECORD_ALIGNMENT - 1));
             var pairBytes = BYTECODE_WIDE_ENTRY_WORDS * Heap.WORD_BYTES;
-            var low = 0, high = (this.heap.recordSize(bytecode) - Heap.HEADER_SIZE - table) / pairBytes;
+            var low = 0, high = flags >>> BYTECODE_WIDE_COUNT_SHIFT;
+            if (this.legacyBytecodeFlags) high =
+                (this.heap.recordSize(bytecode) - Heap.HEADER_SIZE - table) / pairBytes;
             while (low < high) {
                 var middle = (low + high) >>> 1;
                 var offset = table + middle * pairBytes;

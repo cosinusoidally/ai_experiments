@@ -1,5 +1,29 @@
 # Snapshot size and compact strings
 
+## 2026-10-26: adaptive canonical words, final candidate
+
+The combined candidate is **5,878,808 bytes**, down from **8,230,816 bytes**
+before this work (about 28.6%). Canonical instructions choose 8-, 16- or
+32-bit storage per record by actual total cost, including the full-width
+exception table. The table's explicit entry count is encoded in named header
+flag fields; it is never inferred from allocation size, since an allocator
+may absorb a small spare tail. Contract 60 identifies this representation.
+There are 2,191 narrow 8-bit records; total canonical bytecode is 756,008
+bytes. The 95 warm execution views total 161,480 bytes and keep normal direct
+32-bit dispatch. Small cache-hit resolvers are separated from preparation
+loops so the shared kernel compiler can inline their ordinary JS bodies.
+
+The remaining 2,546 KiB of flat string records closely matches the 2,514,352
+bytes of implementation source on disk (the exact source inventory changes
+slightly during development). The backing audit reports zero profitable
+remaining duplicated flat strings. Other measured slack is 33,544 bytes of
+free records, 20,288 bytes of unused property slots, 73,536 bytes of view
+padding and 128 spare value-vector bytes. These are small compared with the
+large metadata redundancies removed above. Warm constant/argument execution
+views occupy 93,480/1,112 bytes. Sources, debug mappings and every logical
+instruction/constant are retained; no compression or image-load decoder is
+introduced. Broader final validation is recorded below when complete.
+
 ## 2026-10-26: private constant pools
 
 Program constants no longer reserve sixteen bytes for every literal. A
