@@ -6,6 +6,30 @@ guest. No source/parse cache, snapshot-copy shortcut, benchmark-specific
 replacement or C support code is part of the approach. Existing demo sources
 and the external `js_tests` tree remain untouched.
 
+## Locating host-side costs
+
+From `mmvm_v2_tests`, the ES3-compatible phase profiler runs the real runner
+and existing test inputs under either host, without npm or new C support:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_vm/tools/profile_host_runtime.js \
+  --vm-native test262_runner.js --quiet --instruction-limit 20000 \
+  ch10/10.4/10.4.2/S10.4.2_A1.1_T10.js
+
+node guest_vm/tools/profile_host_runtime.js --vm-native test262_runner.js \
+  --quiet --instruction-limit 20000 ch10/10.4/10.4.2/S10.4.2_A1.1_T10.js
+```
+
+It reports inclusive call counts, accumulated milliseconds and maximum call
+time for runtime, record-layer and native-entry methods, including startup.
+Child times overlap parent times: do not sum the rows. Wrappers and clocks add
+overhead, so these are cost-location diagnostics, not throughput measurements.
+The wrappers are noncapturing functions backed by an explicit diagnostic
+registry. Capturing wrappers around these re-entrant methods triggered a
+Firefox 1 activation-lifetime crash during startup; that form is not used.
+No wrapper or registry is installed in ordinary runner execution.
+
 ## Preconditions and baseline, 2026-10-24
 
 Before performance edits, rebuilt the unchanged ANSI i386 launcher and produced
