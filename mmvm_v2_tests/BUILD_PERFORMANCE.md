@@ -6,6 +6,31 @@ guest. No source/parse cache, snapshot-copy shortcut, benchmark-specific
 replacement or C support code is part of the approach. Existing demo sources
 and the external `js_tests` tree remain untouched.
 
+## 2026-10-26 packed-object checkpoint
+
+This cutover is a representation/lifetime improvement, not yet a build-time
+win. The pre-cutover reference (`bfec626`) constructed a snapshot under js_min
+in 74.87 seconds and genuinely rebuilt it under itself in 73.33 seconds.
+The packed-scan checkpoint (`dfbdfca`) took 76.20 and 79.97 seconds respectively.
+Both new images were byte-identical, 8,194,224 bytes, with no sparse-file
+shortcut. Self-build peak RSS was 493,096 KiB versus 463,480 KiB for the
+reference. These are individual same-machine measurements, not statistical
+throughput estimates; they do not demonstrate the requested speedup.
+
+The complete bounded Test262 inventory retains exactly the reference's
+3,139 passing and 153 failing cases. Its 412.72-second wall time remains
+above the 308.96-second reference repeat, although below the initial
+587.10-second cutover run. Checked string-span decoding and length/hash
+rejection before packed-key text comparisons recovered much of that loss.
+Inclusive phase profiling is available below to guide further work rather
+than attributing every cost to object lookup or GC.
+
+After the independently validated platform timer-lifetime fix, the final
+pair took 77.12 seconds (js_min) and 79.26 seconds (self-hosted); peak RSS was
+304,676 and 492,780 KiB respectively. Both dense files are byte-identical at
+8,201,744 bytes. That follow-up fixes raw Node timer objects crossing into
+the guest heap; it is not a build-performance optimization.
+
 ## Locating host-side costs
 
 From `mmvm_v2_tests`, the ES3-compatible phase profiler runs the real runner

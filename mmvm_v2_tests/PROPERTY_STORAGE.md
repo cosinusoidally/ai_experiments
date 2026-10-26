@@ -263,3 +263,40 @@ checked edges and 142 property-index audits each. Maximum observed bumps are
 These validate the traversal follow-up; the snapshot timings and integration
 inventory above describe the preceding owner/reference checkpoint, not an
 additional build or full Test262 run of this follow-up.
+
+## 2026-10-26: packed ordinary-object cutover verification
+
+Ordinary objects now use insertion-ordered packed entries, with an optional
+hash index. Special array/function/regexp/buffer named-property layouts are
+not part of this cutover. Persistent references use guarded owner/entry
+identities rather than pointers into movable storage. Saved-context backing
+pins, immutable roots and cache invalidation on restore are required parts
+of that lifetime contract, not optional performance features.
+
+The complete bounded Test262 inventory executes 3,292 cases: 3,139 pass,
+153 fail, zero not run. The failing IDs and variants exactly match the
+pre-cutover reference; six instruction-limit timeouts are included among
+failures. See TEST262_STATUS.md for the sequence of runs and fixes.
+
+Both-host project suites, bounded GC audits, standalone language integration
+and the eight previously supported Octane quick correctness selections pass.
+The selections are Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay
+(including latency), NavierStokes and zlib. These are correctness checks, not
+stock benchmark scores or a claim that all Octane benchmarks work.
+
+Actual X11 demos 1–8 were exercised from the packed-scan standalone image at
+320x240 with a 20 FPS limit, including garage and free-driving autopilot
+transitions in demo8. They rendered, accepted input and exited normally.
+These were short interactive smoke checks, not long stability soaks or a
+proof of sustained 20 FPS. The separate bounded GC workload completed 47
+automatic native collections; independent snapshot tracing found no missing
+marks across 33,172 reachable records.
+
+The cutover does **not yet improve build speed**. Before the timer-bridge
+follow-up, cold js_min construction took 76.20 seconds and genuine
+self-hosted construction 79.97 seconds, versus 74.87 and 73.33 seconds for
+the pre-cutover reference. The two new images were byte-identical, dense,
+8,194,224-byte files. Whole-inventory Test262 time improved from the initial
+587.10-second cutover run to 412.72 seconds, but remains slower than the
+308.96-second pre-cutover repeat. Correctness recovery must not be confused
+with performance parity.

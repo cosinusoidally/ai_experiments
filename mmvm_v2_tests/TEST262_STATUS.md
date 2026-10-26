@@ -930,7 +930,38 @@ performance are separate mandatory regression gates.
   No performance-parity claim is made. Both-host project/CLI/context checks
   and bounded GC checks pass at the span-reader checkpoint. Fresh snapshot
   generation and genuine self-hosted generation produce bit-identical dense
-  images; final unchanged-demo/server/Octane rechecks are still pending.
+  images. Unchanged demos 1–8 subsequently passed actual standalone X11
+  rendering/input/exit checks, including garage and free-driving autopilot.
+  These are short smoke checks, not long soaks. The eight previously working
+  Octane quick correctness selections also pass; no stock-score claim is made.
+
+### 2026-10-26, final packed-object integration checks
+
+- The complete inventory result above remains **3,139 pass / 153 fail /
+  0 not run**, with six bounded timeouts included in failures. The subsequent
+  platform timer fix did not change the language interpreter or compiler.
+- Real Node-hosted X11 execution exposed a host Timeout object escaping into
+  a guest return value. The environment now keeps timer handles private and
+  returns numeric guest IDs, with callback roots released on every lifecycle
+  path. Actual demo1 passes on Node and js_min; Node threaded demos 4–7 pass.
+  The Node project suite passes all 12 guest programs and 270 assertions,
+  embedding/compiler checks and the 100-call three-context example.
+- Final snapshot generation: 77.12 seconds under js_min, 79.26 seconds for a
+  genuine self-hosted rebuild; both dense 8,201,744-byte images are identical.
+  This is not faster than the pre-cutover build reference. Raw logs are
+  `artifacts/packed-final-build.log` and `artifacts/packed-final-self.log`.
+- Both `net.js` and `node_web.js` pass loopback HTTP checks from that final
+  image: text and binary byte comparisons, generated directory listings and
+  default `index.html`. Temporary fixtures remain ignored under artifacts;
+  neither demo source nor the external test corpus was changed.
+- The final image also passes all eight previously working Octane quick
+  correctness selections, including zlib. Independent tracing reports
+  33,192 reachable records and zero missing GC marks. Logs use the ignored
+  `artifacts/packed-final-` prefix. RegExp remains outside this checkpoint.
+- All eight actual X11 demo checks were repeated with that final image:
+  320x240, 20 FPS cap, input and clean exit. Demo8 additionally enters garage
+  and free-driving autopilot before exit. These remain bounded smoke checks,
+  not a sustained-throughput measurement.
 
 ## Rules for subsequent entries
 
