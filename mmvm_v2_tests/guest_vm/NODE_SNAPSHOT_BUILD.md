@@ -80,3 +80,33 @@ allocation order and target layouts. Do not introduce host pointers, clock
 values or environment data into the serialized ready state. Building on Node
 does not make arbitrary FFI-dependent applications executable inside Node;
 run the emitted image through `js_runner` for that capability.
+
+## 2026-10-26 verification checkpoint
+
+- Both-host project suite: 12 guest programs and 270 guest assertions per
+  host, plus embedding/compiler, CLI and three-context checks, passed.
+- `run_standalone_snapshot_test.sh both` passed in 241.33 seconds, including
+  all cross-host/environment/program comparisons and the genuine fixed point.
+- Final Node construction: 5.91 seconds, peak RSS 246,656 KiB. The dense
+  image is 8,229,960 bytes (16,080 allocated 512-byte blocks), SHA-256
+  `28538e07e81a0e95f79677a1d2f3586e7c6257c41788d7fea588b9f9bd2cee41`.
+- Final-image language integration, independent heap marking audit and
+  standalone 24-round GC workload passed; the workload observed 47 automatic
+  collections. The independent audit found 33,315 reachable records and zero
+  missing marks. Both-host embedding stress passed 27 structural audits,
+  72,842 edges and 221 property-index audits, with 67 collections each and
+  guest heaps bounded to 8 MiB.
+- Actual X11 demos 1–8 passed window/input/exit smoke checks at 320x240 with
+  a 20 FPS limit. Demo8 entered garage and free-driving autopilot; captured
+  frames were inspected. This is not a sustained-FPS or long-soak claim.
+- `net.js` and `node_web.js` served byte-identical text/binary content,
+  generated directory listings and default index files over loopback.
+- All eight previously supported Octane quick correctness selections passed:
+  Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay/latency,
+  NavierStokes and zlib. The zlib check took 47.89 seconds; these quick runs
+  are not stock Octane scores or evidence of a guest-interpreter speedup.
+
+Raw logs and captures are ignored under `artifacts/cross-`; build logs use
+`artifacts/node-cross-`, `artifacts/jsmin-cross-` and `artifacts/self-cross-`.
+The complete bounded Test262 regression run is recorded separately in
+`../TEST262_STATUS.md`; the known baseline is not fully conformant.

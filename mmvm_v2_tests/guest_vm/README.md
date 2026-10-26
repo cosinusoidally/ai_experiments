@@ -7,6 +7,10 @@ guest-language target; the currently implemented
 language and Buffer features are always exercised by checked-in tests under
 both Node.js and `js_min.exe`.
 
+Stock Node can also cross-build the same standalone i386/Linux snapshot as
+js_min and the self-hosted builder. See [Node snapshot construction](NODE_SNAPSHOT_BUILD.md)
+for commands, the build-host/target boundary and byte-identity validation.
+
 Guest garbage collection is automatic at allocation-triggered interpreter safe
 points. `VM.collect()` remains available for deterministic tests and explicit
 memory-pressure handling, but applications do not need to call it.

@@ -1,5 +1,26 @@
 # Guest build performance investigation
 
+## 2026-10-26: Node cross-build host
+
+Stock Node can now construct the same i386/Linux standalone image, without
+executing native code or using addons. The final Node build took **5.91 s**
+(6.72 user, 0.29 system), peak RSS **246,656 KiB**. The initial three-way
+comparison measured 6.11 s under Node, 79.23 s under js_min, and 80.60 s for a
+genuine self-hosted rebuild; all three files were byte-identical. Node was
+about 13 times faster as a construction host in those individual measurements.
+The js_min/self-hosted timings remain close to the preceding 77.12/79.26 s
+checkpoint, not a demonstrated improvement to the guest interpreter itself.
+
+After the output-adapter cleanup, the complete high-level standalone test
+passed again in 241.33 s: two js_min builds with different environments and
+application inputs, a Node build, executable-program/environment checks and
+a genuine self-build, with byte comparisons. The final image is a dense
+8,229,960-byte file; its independent heap audit reports 33,315 reachable
+records and no missing marks. Temporary images are not checked in.
+
+See [Node snapshot construction](guest_vm/NODE_SNAPSHOT_BUILD.md) for the
+shared serialization design, deferred binding boundary and reproduction.
+
 The objective is substantially faster genuine snapshot construction under
 both js_min and the standalone guest, ultimately favoring the standalone
 guest. No source/parse cache, snapshot-copy shortcut, benchmark-specific
