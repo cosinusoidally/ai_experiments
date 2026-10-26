@@ -1810,6 +1810,12 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
+            node.callee.name === "bytecodePackedByte" && node.arguments.length === 3) {
+            return {op: "load_u8", address: indexedAddressDescriptor(
+                {field: "BYTECODE_WORDS", strideValue: 1}, node.arguments, symbols), type: "i32"};
+        }
+        if (node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
             (node.callee.name === "latin1StringCharacterCodeUnit" ||
              node.callee.name === "flatStringStorageByte") &&
             node.arguments.length === 3) {

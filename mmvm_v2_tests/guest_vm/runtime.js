@@ -1594,7 +1594,7 @@
         var index = 0;
         this.ensureLinearHeap();
         program.heapBytecodeAddress =
-            this.heapRecords.allocateBytecode(program.code || []);
+            this.heapRecords.allocateBytecode(program.code || [], true);
         program.heapConstantsAddress = this.heapRecords.allocateValueVector(
             program.constants ? program.constants.length : 0);
         program.heapConstantRegistersAddress =
@@ -1765,6 +1765,17 @@
             program.heapParameterSlotsAddress = target;
         }
         return target;
+    };
+
+    Runtime.prototype.writableProgramBytecode = function (program) {
+        var records = this.heapRecords, address = program.heapBytecodeAddress;
+        if (!(this.linearHeap.flags(address) &
+                HeapRecords.KernelConstants.BYTECODE_COMPACT_FLAG)) return address;
+        var writable = !this.nativeOperandPredecode ? records.bytecodeExecutionCache(address) : 0;
+        if (!writable) writable = records.allocateBytecode(program.code);
+        records.setProgramBytecode(program.heapAddress, writable);
+        program.heapBytecodeAddress = writable;
+        return writable;
     };
 
     Runtime.prototype.retainProgram = function (program) {
@@ -1948,7 +1959,18 @@
     Runtime.prototype.adoptHeapProgram = function (address) {
         var key = "$" + address;
         var existing = this.programMetadata[key];
-        if (existing) return existing;
+        if (existing) {
+            var currentBytecode = this.heapRecords.programBytecode(address);
+            if (currentBytecode !== existing.heapBytecodeAddress) {
+                existing.heapBytecodeAddress = currentBytecode;
+                var currentLength = this.heapRecords.bytecodeLength(currentBytecode);
+                existing.code.length = currentLength;
+                for (var wordIndex = 0; wordIndex < currentLength; wordIndex++) {
+                    existing.code[wordIndex] = this.heapRecords.bytecodeWord(currentBytecode, wordIndex);
+                }
+            }
+            return existing;
+        }
         this.linearHeap.requireRecord(address, Heap.Types.PROGRAM);
         var records = this.heapRecords;
         var bytecode = records.programBytecode(address);
@@ -3676,7 +3698,7 @@
                 }
                 program.code[index] = value;
                 runtime.heapRecords.setBytecodeWord(
-                    program.heapBytecodeAddress, index, value);
+                    runtime.writableProgramBytecode(program), index, value);
                 return args[0];
             }, "intrinsic", NativeIntrinsics.PROGRAM_SET_CODE));
         this.setGlobal("__guestVMProgramSetConstant", this.makeNativeFunction(

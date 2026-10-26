@@ -203,6 +203,36 @@
         return overrides;
     }
 
+    function canonicalBytecodeWordKernel(heapBase, bytecode, index) {
+        if ((recordFlags(heapBase, bytecode) & BYTECODE_COMPACT_FLAG) === 0) {
+            return bytecodePayloadWord(heapBase, bytecode + BYTECODE_WORDS, index);
+        }
+        var byteIndex = index * BYTECODE_PACKED_UNIT_BYTES;
+        var unit = bytecodePackedByte(heapBase, bytecode, byteIndex) |
+            (bytecodePackedByte(heapBase, bytecode, byteIndex + 1) << 8);
+        if (unit === BYTECODE_PACKED_MINUS_ONE) return -1;
+        if (unit !== BYTECODE_PACKED_WIDE) return unit;
+        return wideBytecodeOperandKernel(heapBase, bytecode, index);
+    }
+
+    function wideBytecodeOperandKernel(heapBase, bytecode, index) {
+        var dataBytes = (bytecodeLength(heapBase, bytecode) * BYTECODE_PACKED_UNIT_BYTES +
+            HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
+        var firstWord = divideI32(dataBytes, HEAP_WORD_BYTES);
+        var low = 0;
+        var high = divideI32(recordSize(heapBase, bytecode) - BYTECODE_FIXED_BYTES - dataBytes,
+            BYTECODE_WIDE_ENTRY_WORDS * HEAP_WORD_BYTES);
+        while (low < high) {
+            var middle = (low + high) >>> 1;
+            var word = firstWord + middle * BYTECODE_WIDE_ENTRY_WORDS;
+            var found = bytecodePayloadWord(heapBase, bytecode + BYTECODE_WORDS, word);
+            if (found < index) low = middle + 1;
+            else if (found > index) high = middle;
+            else return bytecodePayloadWord(heapBase, bytecode + BYTECODE_WORDS, word + 1);
+        }
+        return 0;
+    }
+
     /* One relative-offset execution view per canonical bytecode record. No
      * source parsing, host object, persistent cache or absolute heap address
      * participates. The record is published only after complete preparation. */
@@ -214,7 +244,8 @@
         var layoutLength = vectorLength(heapBase, layout);
         var opcodeLimit = divideI32(layoutLength, BYTECODE_LAYOUT_STRIDE);
         var length = bytecodeLength(heapBase, bytecode);
-        var bytes = recordSize(heapBase, bytecode);
+        var bytes = (BYTECODE_FIXED_BYTES + length * HEAP_WORD_BYTES +
+            HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
         if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
         var decoded = engineHeapBump(heapBase, state);
         setRecordType(heapBase, decoded, HEAP_TYPE_BYTECODE);
@@ -225,8 +256,7 @@
         setBytecodeExecutionCache(heapBase, decoded, 0);
         var pc = 0;
         while (pc < length) {
-            var opcode = bytecodePayloadWord(heapBase,
-                bytecode + BYTECODE_WORDS, pc);
+            var opcode = canonicalBytecodeWordKernel(heapBase, bytecode, pc);
             if (opcode < 0 || opcode >= opcodeLimit) return 0;
             var layoutIndex = opcode * BYTECODE_LAYOUT_STRIDE;
             if (layoutIndex < 0 || layoutIndex > layoutLength - BYTECODE_LAYOUT_STRIDE) return 0;
@@ -237,9 +267,9 @@
             if (width <= 0 || width > length - pc) return 0;
             var operand = 0;
             while (operand < width) {
-                var word = bytecodePayloadWord(heapBase,
-                    bytecode + BYTECODE_WORDS, pc + operand);
-                if ((mask & (1 << operand)) !== 0) {
+                var word = canonicalBytecodeWordKernel(heapBase, bytecode, pc + operand);
+                if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES &&
+                        (mask & (1 << operand)) !== 0) {
                     if (word < 0) return 0;
                     var offset = (word * VALUE_CELL_BYTES) | 0;
                     if (offset < 0 || divideI32(offset, VALUE_CELL_BYTES) !== word) return 0;
@@ -257,7 +287,8 @@
 
     function executionBytecodeAddressKernel(heapBase, state, program, stringSupport) {
         var bytecode = programBytecode(heapBase, program);
-        if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES) {
+        if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES ||
+                (recordFlags(heapBase, bytecode) & BYTECODE_COMPACT_FLAG) !== 0) {
             bytecode = prepareExecutionBytecodeKernel(heapBase, state, bytecode, stringSupport);
             if (bytecode === 0) return 0;
         }
@@ -267,7 +298,7 @@
     function bytecodePreparationExitKernel(heapBase, state, frame, instructions) {
         var pc = frameSavedPC(heapBase, frame);
         var bytecode = programBytecode(heapBase, frameProgram(heapBase, frame));
-        var opcode = bytecodePayloadWord(heapBase, bytecode + BYTECODE_WORDS, pc);
+        var opcode = canonicalBytecodeWordKernel(heapBase, bytecode, pc);
         return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
     }
 
@@ -4814,13 +4845,11 @@
                 }
                 var evalCallerProgram = frameProgram(
                     heapBase, nativeCallerFrame);
-                var evalCallerCode = programBytecode(
-                    heapBase, evalCallerProgram) + BYTECODE_WORDS;
+                var evalCallerCode = programBytecode(heapBase, evalCallerProgram);
                 var evalCallPC = frameSavedPC(
                     heapBase, nativeCallerFrame) - FIVE_WORD_INSTRUCTION;
-                var evalFunctionRegister = load32(
-                    heapBase + evalCallerCode +
-                    (evalCallPC + SECOND_OPERAND) * WORD_BYTES);
+                var evalFunctionRegister = canonicalBytecodeWordKernel(
+                    heapBase, evalCallerCode, evalCallPC + SECOND_OPERAND);
                 nativeReturnTarget = heapBase + nativeCallerFrame +
                     FRAME_REGISTERS + evalFunctionRegister * VALUE_CELL_BYTES;
                 setFramePC(heapBase, nativeCallerFrame, evalCallPC);
@@ -15212,6 +15241,34 @@
         var program = functionMetadata(heapBase, callable);
         var bytecode = programBytecode(heapBase, program);
         if (index >= bytecodeLength(heapBase, bytecode)) return 0;
+        if ((recordFlags(heapBase, bytecode) & BYTECODE_COMPACT_FLAG) !== 0) {
+            var writable = 0;
+            if (BYTECODE_REGISTER_SCALE === VALUE_CELL_BYTES) {
+                writable = bytecodeExecutionCache(heapBase, bytecode);
+            }
+            if (writable === 0) {
+                var length = bytecodeLength(heapBase, bytecode);
+                var bytes = (BYTECODE_FIXED_BYTES + length * HEAP_WORD_BYTES +
+                    HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
+                if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+                writable = engineHeapBump(heapBase, state);
+                setRecordType(heapBase, writable, HEAP_TYPE_BYTECODE);
+                setRecordSize(heapBase, writable, bytes);
+                setRecordMark(heapBase, writable, 0);
+                setRecordFlags(heapBase, writable, 0);
+                setBytecodeLength(heapBase, writable, length);
+                setBytecodeExecutionCache(heapBase, writable, 0);
+                var word = 0;
+                while (word < length) {
+                    store32(bytecodeWordAddress(heapBase, writable, word),
+                        canonicalBytecodeWordKernel(heapBase, bytecode, word));
+                    word = word + 1;
+                }
+                setEngineHeapBump(heapBase, state, writable + bytes);
+            }
+            setProgramBytecode(heapBase, program, writable);
+            bytecode = writable;
+        }
         store32(bytecodeWordAddress(heapBase, bytecode, index), value);
         setBytecodeExecutionCache(heapBase, bytecode, 0);
         setValueCellReference(targetCell, callable);
@@ -17212,6 +17269,8 @@
             programIntegerVectorBytesKernel: programIntegerVectorBytesKernel,
             interpreterKernel: interpreterKernel,
             prepareExecutionBytecodeKernel: prepareExecutionBytecodeKernel,
+            canonicalBytecodeWordKernel: canonicalBytecodeWordKernel,
+            wideBytecodeOperandKernel: wideBytecodeOperandKernel,
             executionBytecodeAddressKernel: executionBytecodeAddressKernel,
             bytecodePreparationExitKernel: bytecodePreparationExitKernel,
             intrinsicCallKernel: intrinsicCallKernel,
@@ -17363,7 +17422,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 55,
+                compilerVersion: 56,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17399,6 +17458,11 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    BYTECODE_COMPACT_FLAG: kernelConstantOverrides.BYTECODE_COMPACT_FLAG,
+                    BYTECODE_PACKED_UNIT_BYTES: kernelConstantOverrides.BYTECODE_PACKED_UNIT_BYTES,
+                    BYTECODE_PACKED_MINUS_ONE: kernelConstantOverrides.BYTECODE_PACKED_MINUS_ONE,
+                    BYTECODE_PACKED_WIDE: kernelConstantOverrides.BYTECODE_PACKED_WIDE,
+                    BYTECODE_WIDE_ENTRY_WORDS: kernelConstantOverrides.BYTECODE_WIDE_ENTRY_WORDS,
                     HEAP_TYPE_INTEGER_VECTOR: kernelConstantOverrides.HEAP_TYPE_INTEGER_VECTOR,
                     HEAP_RECORD_ALIGNMENT: kernelConstantOverrides.HEAP_RECORD_ALIGNMENT,
                     PROPERTY_RECORD_SNAPSHOT_PIN: kernelConstantOverrides.PROPERTY_RECORD_SNAPSHOT_PIN,

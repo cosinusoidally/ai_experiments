@@ -112,6 +112,7 @@
         inspectionHeap.memory = {
             readU32: inspectionWord,
             readU32Trusted: inspectionWord,
+            readU16: function (offset) { return file.readUInt16LE(heapOffset + offset); },
             readU8: function (offset) { return file[heapOffset + offset]; },
             readU8Trusted: function (offset) { return file[heapOffset + offset]; },
             byteLength: heapLength,
@@ -252,6 +253,8 @@
         var cells = new Cells(inspectedHeap);
         var records = inspectionRecordsFor(inspectedHeap, cells);
         var roles = {}, seen = {}, reusedNonemptyArgumentEntries = 0;
+        var constantPools = 0, constantPoolBytes = 0, constantCells = 0;
+        var constantTags = {}, constantPoolSeen = {};
         function integerSignature(vector) {
             var values = [], index = 0;
             if (inspectedHeap.recordType(vector) === Heap.Types.INTEGER_VECTOR) {
@@ -292,6 +295,16 @@
                 vector("binding-register maps", records.programBindingRegisters(position));
                 vector("parameter-slot maps", records.programParameterSlots(position));
                 var constants = records.programConstants(position), index = 0;
+                if (!constantPoolSeen["$" + constants]) {
+                    constantPoolSeen["$" + constants] = true;
+                    constantPools++;
+                    constantPoolBytes += inspectedHeap.recordSize(constants);
+                    constantCells += records.vectorLength(constants);
+                    for (var constantIndex = 0; constantIndex < records.vectorLength(constants); constantIndex++) {
+                        var tag = cells.tagAt(records.vectorCell(constants, constantIndex));
+                        constantTags[tag] = (constantTags[tag] || 0) + 1;
+                    }
+                }
                 while (index < records.vectorLength(constants)) {
                     var cell = records.vectorCell(constants, index++);
                     if (cells.tagAt(cell) === Cells.Tags.REFERENCE) {
@@ -331,6 +344,14 @@
             }
             position += header.size;
         }
+        var tagCounts = [];
+        for (var constantTag in constantTags) {
+            if (Object.prototype.hasOwnProperty.call(constantTags, constantTag)) {
+                tagCounts.push(constantTag + ":" + constantTags[constantTag]);
+            }
+        }
+        output("constant pools: " + constantPools + "; bytes=" + constantPoolBytes +
+            "; cells=" + constantCells + "; tags=" + tagCounts.join(","));
         output("reused nonempty argument constant entries: " + reusedNonemptyArgumentEntries);
         for (var name in roles) {
             if (Object.prototype.hasOwnProperty.call(roles, name)) {
@@ -391,6 +412,7 @@
         var vectorSpareBytes = 0, integerElements = 0;
         var narrowBytecodeBytes = 0, narrowBytecodes = 0;
         var sliceSpareBytes = 0;
+        var compactCodeBytes = 0, executionCodeBytes = 0, executionCodeCount = 0;
         var stringRecords = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         var encodings = {latin1: {count: 0, bytes: 0},
             utf16: {count: 0, bytes: 0}, rope: {count: 0, bytes: 0},
@@ -419,6 +441,14 @@
             } else if (record.type === Heap.Types.INTEGER_VECTOR) {
                 integerElements += stringRecords.integerVectorLength(position);
             } else if (record.type === Heap.Types.BYTECODE) {
+                if (record.flags & Records.KernelConstants.BYTECODE_COMPACT_FLAG) {
+                    compactCodeBytes += record.size;
+                }
+                var executionCode = stringRecords.bytecodeExecutionCache(position);
+                if (executionCode) {
+                    executionCodeBytes += inspectedHeap.recordSize(executionCode);
+                    executionCodeCount++;
+                }
                 var fits16 = true, wordCount = stringRecords.bytecodeLength(position);
                 for (var wordIndex = 0; wordIndex < wordCount; wordIndex++) {
                     var value = stringRecords.bytecodeWord(position, wordIndex);
@@ -449,6 +479,9 @@
             "; string-view spare bytes=" + sliceSpareBytes);
         output("bytecode unsigned-16 candidates=" + narrowBytecodes +
             "; potential operand bytes saved=" + narrowBytecodeBytes);
+        output("compact canonical bytecode bytes=" + compactCodeBytes +
+            "; execution views=" + executionCodeCount +
+            "; execution-view bytes=" + executionCodeBytes);
         if (engineRecord) {
             var inspectionRecords = inspectionRecordsFor(
                 inspectedHeap, new Cells(inspectedHeap));

@@ -1,5 +1,28 @@
 # Snapshot size and compact strings
 
+## 2026-10-26: compact canonical instruction storage
+
+The next checkpoint is 6,832,648 bytes, down from the 8,230,816-byte baseline.
+Canonical bytecode uses 16-bit logical words, a dedicated -1 sentinel, and
+an ordered index/full-int32 table for operands that do not fit. Logical PCs,
+all operand bits and source/debug information remain intact. The format is
+selected only when smaller than ordinary 32-bit storage; this is not a
+general-purpose compression stream or a snapshot-load decompression pass.
+
+The kernel prepares a 32-bit execution view on first use, retaining the same
+direct word loads in dispatch. The existing execution-cache edge is traced
+by both collectors. There are 95 warm execution views (158,784 bytes) in this
+checkpoint, versus 1,074,880 bytes of compact canonical instructions. Mutation
+uses an owner-aware writable 32-bit view, preserving shared record addresses
+and predecoded execution semantics. Small units are written in paired LE
+words so native construction does not double its JS/C byte-write crossings.
+Compiler contract 56 describes this format.
+
+Both Node and js_min project suites pass 12 programs/270 assertions, including
+the predecoded kernel. Standalone hello, the bounded 47-collection workload
+and independent mark audit pass. Cross-host fixed-point, performance and
+full integration checks remain required after the remaining large reductions.
+
 ## 2026-10-26: integer-only program maps
 
 The fresh Node-built baseline is 8,230,816 bytes. Register/parameter maps
