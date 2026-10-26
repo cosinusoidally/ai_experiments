@@ -40,9 +40,11 @@ Build-time source reads use the embedder's filesystem adapter. Node's builtin
 network/filesystem objects are not serialized as target services.
 
 `HostFFI.snapshotBindings()` is a restricted build-time symbol-binding
-service. It supplies a nonzero deferred address for successful symbol lookup,
+service. It supplies distinct nonzero deferred tokens for successful symbol lookup,
 including the native interpreter's C-string argument form. It rejects actual
-native function execution and raw native memory access; it does not pretend
+native function execution and raw native memory access. Only its dedicated
+`dlsym` token accepts lookup requests, so a libc call with lookup-shaped
+arguments cannot accidentally be treated as resolution. It does not pretend
 to implement libc under Node. The common snapshot writer clears transient
 addresses and records symbol names/binding locations. The i386 bootstrap
 resolves those bindings through the launcher's supplied `dlsym`.
@@ -85,11 +87,12 @@ run the emitted image through `js_runner` for that capability.
 
 - Both-host project suite: 12 guest programs and 270 guest assertions per
   host, plus embedding/compiler, CLI and three-context checks, passed.
-- `run_standalone_snapshot_test.sh both` passed in 241.33 seconds, including
+- `run_standalone_snapshot_test.sh both` passed in 249.39 seconds after
+  tightening deferred-token isolation (241.33 seconds at the initial checkpoint), including
   all cross-host/environment/program comparisons and the genuine fixed point.
-- Final Node construction: 5.91 seconds, peak RSS 246,656 KiB. The dense
-  image is 8,229,960 bytes (16,080 allocated 512-byte blocks), SHA-256
-  `28538e07e81a0e95f79677a1d2f3586e7c6257c41788d7fea588b9f9bd2cee41`.
+- Final Node construction: 6.05 seconds, peak RSS 249,308 KiB. The dense
+  image is 8,230,816 bytes (16,080 allocated 512-byte blocks), SHA-256
+  `792569f34ddb9b64f600e2402794f165f28021e13c0f6ba6734bf6a4457206e7`.
 - Final-image language integration, independent heap marking audit and
   standalone 24-round GC workload passed; the workload observed 47 automatic
   collections. The independent audit found 33,315 reachable records and zero

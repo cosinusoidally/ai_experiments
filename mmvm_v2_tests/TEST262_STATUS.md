@@ -46,8 +46,11 @@ improvement over a larger one.
 
 ### Complete ES5.1 suite — 3,292 files
 
-- No complete authored-program result has yet been recorded. The next complete
-  run will have 3,292 executed tests, zero not run, and no synthetic variants.
+- Latest complete authored-program checkpoint (2026-10-26, packed-object
+  cutover): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
+  instruction-budget timeouts are included in failures. See the dated
+  packed-object entries below. Historical synthetic-variant results are
+  retained separately and are not the current conformance totals.
 
 - 2026-09-12, revision `381a345`, 20,000-instruction diagnostic allowance:
   all 3,292 files and 5,765 variants were executed; 4,856 passed, 909 failed,
@@ -962,6 +965,28 @@ performance are separate mandatory regression gates.
   320x240, 20 FPS cap, input and clean exit. Demo8 additionally enters garage
   and free-driving autopilot before exit. These remain bounded smoke checks,
   not a sustained-throughput measurement.
+
+### 2026-10-26, morning GMT — Node cross-build regression inventory
+
+- Revision `5a2fd3c` runtime, same complete authored-program inventory and
+  20,000-instruction diagnostic allowance: **3,292 executed, 3,139 passed,
+  153 failed, 0 not run; 6 timeouts included in failures**. Totals match the
+  preceding packed-object checkpoint. Elapsed 429.33 seconds (423.67 user,
+  2.22 system), peak RSS 303,780 KiB. Raw log:
+  `artifacts/cross-test262-full.log`. Earlier temporary failure-ID logs had
+  been cleared, so this entry claims matching totals, not a fresh exact-ID
+  comparison against those deleted logs. The known failures remain real
+  conformance work, not skips.
+- Command: `js_min.exe guest_runner.js --vm-native test262_runner.js --quiet
+  --instruction-limit 20000`, with the documented library path exported.
+  The external corpus was not modified. No interpreter opcode or language
+  semantic implementation was changed for Node snapshot construction.
+- Both-host project suites, actual standalone demos 1–8, both HTTP servers,
+  all eight previously supported Octane quick selections and bounded GC
+  checks passed at the cross-build checkpoint. Complete suite time is close
+  to but above the preceding 412.72-second run; no throughput speedup is
+  claimed. Node construction is faster; guest interpreter optimization is
+  a separate task.
 
 ## Rules for subsequent entries
 

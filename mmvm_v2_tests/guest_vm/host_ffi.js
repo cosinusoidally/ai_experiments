@@ -15,28 +15,33 @@
      * permitted while constructing the target; the loader supplies addresses.
      * Zero cannot be used because the target checks resolution for failure. */
     HostFFI.snapshotBindings = function () {
-        var deferredAddress = 1;
+        var deferredDlsym = 1, nextBinding = deferredDlsym + 1;
+        var bindings = {};
         function unavailable() {
             throw new Error("native execution is unavailable during cross-build");
         }
         return {
             snapshotBindings: true,
-            getDlsym: function () { return deferredAddress; },
+            getDlsym: function () { return deferredDlsym; },
             resolve: function (name) {
                 if (typeof name !== "string" || !name) {
                     throw new TypeError("expected a native symbol name");
                 }
-                return deferredAddress;
+                var key = "$" + name;
+                if (!Object.prototype.hasOwnProperty.call(bindings, key)) {
+                    bindings[key] = nextBinding++;
+                }
+                return bindings[key];
             },
             call: function (pointer, args) {
-                if (pointer === deferredAddress && args.length === 2 &&
+                if (pointer === deferredDlsym && args.length === 2 &&
                         args[0] === 0 && typeof args[1] === "string") {
                     return this.resolve(args[1]);
                 }
                 return unavailable();
             },
             callRaw: function (pointer, args, memory) {
-                if (pointer !== deferredAddress || args.length !== 2 || args[0] !== 0) {
+                if (pointer !== deferredDlsym || args.length !== 2 || args[0] !== 0) {
                     return unavailable();
                 }
                 var name = "", address = args[1], code;

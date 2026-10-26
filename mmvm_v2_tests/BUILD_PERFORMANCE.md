@@ -21,6 +21,12 @@ records and no missing marks. Temporary images are not checked in.
 See [Node snapshot construction](guest_vm/NODE_SNAPSHOT_BUILD.md) for the
 shared serialization design, deferred binding boundary and reproduction.
 
+The deferred-symbol isolation follow-up took 6.05 seconds under Node, peak
+RSS 249,308 KiB. Its 8,230,816-byte image again passed the entire three-host
+fixed-point/environment/program test (249.39 seconds for the complete test).
+Distinct deferred symbol tokens ensure only the dlsym token can request
+resolution; no native-call-shaped request is accepted as symbol lookup.
+
 The objective is substantially faster genuine snapshot construction under
 both js_min and the standalone guest, ultimately favoring the standalone
 guest. No source/parse cache, snapshot-copy shortcut, benchmark-specific
