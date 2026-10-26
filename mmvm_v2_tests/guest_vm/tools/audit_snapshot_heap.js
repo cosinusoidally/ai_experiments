@@ -508,8 +508,8 @@
         output("value-vector spare bytes=" + vectorSpareBytes +
             "; integer-vector elements=" + integerElements +
             "; string-view spare bytes=" + sliceSpareBytes);
-        output("bytecode unsigned-16 candidates=" + narrowBytecodes +
-            "; potential operand bytes saved=" + narrowBytecodeBytes);
+        output("logical unsigned-16-fit bytecodes=" + narrowBytecodes +
+            "; operand-byte delta versus expanded 32-bit=" + narrowBytecodeBytes);
         output("compact canonical bytecode bytes=" + compactCodeBytes +
             "; execution views=" + executionCodeCount +
             "; execution-view bytes=" + executionCodeBytes);
@@ -602,6 +602,7 @@
     var result = compiled.fn.apply(null, parameters);
     if (result !== 0) throw new Error("marker failed: " + result);
     var missing = 0;
+    var unreachableCount = 0, unreachableBytes = 0, unreachableByType = {};
     address = Heap.FIRST_RECORD;
     while (address < heapLength) {
         if (reachable["$" + address] &&
@@ -610,10 +611,23 @@
                    heap.recordType(address));
             missing++;
         }
+        if (recordKind(address) !== Heap.Types.FREE && !reachable["$" + address]) {
+            unreachableCount++;
+            unreachableBytes += recordBytes(address);
+            var unreachableType = recordKind(address);
+            unreachableByType[unreachableType] = (unreachableByType[unreachableType] || 0) + recordBytes(address);
+        }
         address += recordBytes(address);
     }
     output("heap audit: " + reachableCount + " reachable records, " +
            missing + " missing marks; backend " + compiled.backend);
+    output("unreachable occupied records=" + unreachableCount + "; bytes=" + unreachableBytes);
+    for (var unreachableName in Heap.Types) {
+        if (Object.prototype.hasOwnProperty.call(Heap.Types, unreachableName) &&
+                unreachableByType[Heap.Types[unreachableName]]) {
+            output("unreachable " + unreachableName + ": " + unreachableByType[Heap.Types[unreachableName]] + " bytes");
+        }
+    }
     heap.destroy();
     if (missing) throw new Error("collector reachability mismatch");
 }(typeof arguments !== "undefined" ? arguments : []));

@@ -1,5 +1,27 @@
 # Snapshot size and compact strings
 
+## Warm-entry validation follow-up
+
+The initial compact image's demo8 command-line startup median was about
+3.25 seconds versus 3.05 seconds for the original image. This was not accepted
+as parity. Warm bytecode entry now reads its cached view directly instead of
+entering the cold preparer's frame; redundant argument descriptor type checks
+were consolidated into the named resolver. Constant preparation is no longer
+repeated through the bytecode-address helper. The shared compiler inlines
+these small ordinary-JS resolvers; there are no benchmark-specific paths.
+Three new alternating trials have medians 3.09 versus 3.04 seconds (user CPU
+3.01 versus 2.98), with lower startup RSS. The image is 5,872,872 bytes. This
+is near parity, not a statistically established speedup. Node project tests
+and the bounded standalone GC workload pass at this follow-up.
+
+A separate forced-collection-before-entry-frame experiment saved only about
+25 KiB and failed the independent root-publication audit. It was rejected;
+the production construction path does not perform that extra collection.
+The image audit separately reports roughly 231 KiB of unreachable occupied
+construction records rather than presenting them as live payload. Removing
+all such bytes requires broader lifetime/relocation work; it is not another
+large cheap payload-width win.
+
 ## 2026-10-26: adaptive canonical words, final candidate
 
 The combined candidate is **5,878,808 bytes**, down from **8,230,816 bytes**
@@ -13,7 +35,7 @@ bytes. The 95 warm execution views total 161,480 bytes and keep normal direct
 32-bit dispatch. Small cache-hit resolvers are separated from preparation
 loops so the shared kernel compiler can inline their ordinary JS bodies.
 
-The remaining 2,546 KiB of flat string records closely matches the 2,514,352
+The remaining approximately 2,546,000 bytes of flat string records closely match the 2,514,352
 bytes of implementation source on disk (the exact source inventory changes
 slightly during development). The backing audit reports zero profitable
 remaining duplicated flat strings. Other measured slack is 33,544 bytes of

@@ -293,12 +293,15 @@
     }
 
     function executionBytecodeAddressKernel(heapBase, state, program, stringSupport) {
-        if (executionProgramConstantsKernel(heapBase, state, program) === 0) return 0;
         var bytecode = programBytecode(heapBase, program);
         if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES ||
                 (recordFlags(heapBase, bytecode) & BYTECODE_COMPACT_FLAG) !== 0) {
-            bytecode = prepareExecutionBytecodeKernel(heapBase, state, bytecode, stringSupport);
-            if (bytecode === 0) return 0;
+            var cached = bytecodeExecutionCache(heapBase, bytecode);
+            if (cached === 0) {
+                cached = prepareExecutionBytecodeKernel(heapBase, state, bytecode, stringSupport);
+                if (cached === 0) return 0;
+            }
+            bytecode = cached;
         }
         return bytecodeWordAddress(heapBase, bytecode, 0);
     }
@@ -816,7 +819,10 @@
         if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
             heapBase, state, frame, 0);
         var constantCells = executionProgramConstantsKernel(
-            heapBase, state, currentProgram) + VECTOR_CELLS;
+            heapBase, state, currentProgram);
+        if (constantCells === 0) return bytecodePreparationExitKernel(
+            heapBase, state, frame, 0);
+        constantCells = constantCells + VECTOR_CELLS;
         var globalObject = contextGlobal(heapBase, currentContext);
         var framePC = frame + FRAME_PC;
         var registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -5011,12 +5017,6 @@
                     }
                     var applyArgumentRegisters = load32(
                         callArgumentsCell + VALUE_CELL_LOW);
-                    if (applyForwardingValid === 1) {
-                        if (recordType(heapBase, applyArgumentRegisters) !== HEAP_TYPE_ARRAY &&
-                                recordType(heapBase, applyArgumentRegisters) !== HEAP_TYPE_INTEGER_VECTOR) {
-                            applyForwardingValid = 0;
-                        }
-                    }
                     var applyArgumentRegisterVector = 0;
                     if (applyForwardingValid === 1) {
                         applyArgumentRegisterVector = argumentRegisterVectorKernel(
@@ -5102,12 +5102,6 @@
                     }
                     var callArgumentRegisters = valueCellReference(
                         0, callArgumentsCell);
-                    if (callForwardingValid === 1) {
-                        if (recordType(heapBase, callArgumentRegisters) !== HEAP_TYPE_ARRAY &&
-                                recordType(heapBase, callArgumentRegisters) !== HEAP_TYPE_INTEGER_VECTOR) {
-                            callForwardingValid = 0;
-                        }
-                    }
                     var callReceiverIndex = load32(
                         bytecodeAddress +
                         (pc + THIRD_OPERAND) * WORD_BYTES);
@@ -5183,16 +5177,6 @@
                 if (explicitReceiverCell === 0) {
                     bytecodeArgumentRegisters = load32(
                         callArgumentsCell + VALUE_CELL_LOW);
-                }
-                if (bytecodeCallValid === 1) {
-                if (explicitReceiverCell === 0) {
-                    if (recordType(heapBase, bytecodeArgumentRegisters) !== HEAP_TYPE_ARRAY &&
-                            recordType(heapBase, bytecodeArgumentRegisters) !== HEAP_TYPE_INTEGER_VECTOR) {
-                        bytecodeCallValid = 0;
-                        setEngineCallRejectReason(
-                            heapBase, state, CALL_REJECT_ARGUMENT_LIST);
-                    }
-                }
                 }
                 if (explicitReceiverCell === 0) {
                 if (bytecodeApplyForwarding === 0) {
@@ -6059,17 +6043,15 @@
         var intrinsicArgumentsVector = 0;
         var intrinsicArgumentCount = 0;
         if (intrinsicCallValid === 1) {
-            if (recordType(heapBase, intrinsicArgumentsArray) !== HEAP_TYPE_ARRAY &&
-                    recordType(heapBase, intrinsicArgumentsArray) !== HEAP_TYPE_INTEGER_VECTOR) {
+            intrinsicArgumentsVector = argumentRegisterVectorKernel(
+                heapBase, state, intrinsicArgumentsArray);
+            if (intrinsicArgumentsVector === 0) {
                 intrinsicCallValid = 0;
                 setEngineCallRejectReason(
                     heapBase, state,
                     CALL_REJECT_INTRINSIC_ARGUMENT_ARRAY);
             }
             else {
-                intrinsicArgumentsVector = argumentRegisterVectorKernel(
-                    heapBase, state, intrinsicArgumentsArray);
-                if (intrinsicArgumentsVector === 0) return EXIT_UNSUPPORTED;
                 intrinsicArgumentCount = load32(
                     heapBase + intrinsicArgumentsVector + VECTOR_LENGTH);
             }
@@ -15004,13 +14986,14 @@
      * readers then retain their direct value-cell access. Ordinary ARRAY
      * descriptors from embedders remain supported and independently mutable. */
     function argumentRegisterVectorKernel(heapBase, state, descriptor) {
-        if (recordType(heapBase, descriptor) === HEAP_TYPE_ARRAY) {
-            return arrayElements(heapBase, descriptor);
+        var kind = recordType(heapBase, descriptor);
+        if (kind === HEAP_TYPE_INTEGER_VECTOR) {
+            var cached = integerVectorExecutionCache(heapBase, descriptor);
+            if (cached !== 0) return cached;
+            return prepareArgumentRegisterVectorKernel(heapBase, state, descriptor);
         }
-        if (recordType(heapBase, descriptor) !== HEAP_TYPE_INTEGER_VECTOR) return 0;
-        var cached = integerVectorExecutionCache(heapBase, descriptor);
-        if (cached !== 0) return cached;
-        return prepareArgumentRegisterVectorKernel(heapBase, state, descriptor);
+        if (kind === HEAP_TYPE_ARRAY) return arrayElements(heapBase, descriptor);
+        return 0;
     }
 
     function prepareArgumentRegisterVectorKernel(heapBase, state, descriptor) {
