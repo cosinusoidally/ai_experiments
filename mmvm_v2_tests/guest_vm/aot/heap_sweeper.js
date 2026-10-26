@@ -40,6 +40,12 @@
         HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
         BYTECODE_EXECUTION_CACHE: HeapRecords.KernelConstants.BYTECODE_EXECUTION_CACHE,
         HEAP_TYPE_INTEGER_VECTOR: Heap.Types.INTEGER_VECTOR,
+        HEAP_TYPE_CONSTANT_POOL: Heap.Types.CONSTANT_POOL,
+        CONSTANT_POOL_LENGTH: HeapRecords.KernelConstants.CONSTANT_POOL_LENGTH,
+        CONSTANT_POOL_EXECUTION_CACHE: HeapRecords.KernelConstants.CONSTANT_POOL_EXECUTION_CACHE,
+        CONSTANT_POOL_TAGS: HeapRecords.KernelConstants.CONSTANT_POOL_TAGS,
+        CONSTANT_POOL_PAYLOAD_BYTES: HeapRecords.KernelConstants.CONSTANT_POOL_PAYLOAD_BYTES,
+        HEAP_RECORD_ALIGNMENT: Heap.RECORD_ALIGNMENT,
         INTEGER_VECTOR_EXECUTION_CACHE: HeapRecords.KernelConstants.INTEGER_VECTOR_EXECUTION_CACHE
     };
 
@@ -437,6 +443,25 @@
                                       itemIndex * VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
                     } else referenceIndex = -2;
+                } else if (type === HEAP_TYPE_CONSTANT_POOL) {
+                    var poolCache = constantPoolExecutionCache(heapBase, address);
+                    if (poolCache !== 0) {
+                        if (referenceIndex === 0) target = poolCache;
+                        else referenceIndex = -2;
+                    } else {
+                        var poolLength = constantPoolLength(heapBase, address);
+                        var poolData = address + CONSTANT_POOL_TAGS +
+                            ((poolLength + HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT));
+                        while (itemIndex < poolLength && target === 0) {
+                            var poolTag = constantPoolTag(heapBase, address, itemIndex);
+                            var poolIndex = itemIndex;
+                            itemIndex = itemIndex + 1;
+                            if (poolTag === VALUE_TAG_REFERENCE) {
+                                target = constantPoolLowWord(heapBase, poolData, poolIndex);
+                            }
+                        }
+                        if (itemIndex >= poolLength && target === 0) referenceIndex = -2;
+                    }
                 } else if (type === HEAP_TYPE_INTEGER_VECTOR) {
                     if (referenceIndex === 0) target = integerVectorExecutionCache(heapBase, address);
                     else referenceIndex = -2;

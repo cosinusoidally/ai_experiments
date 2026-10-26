@@ -26,7 +26,7 @@
         var js = makeJS(this.runtime, program, analysis.returnRegister);
         var assembler = new Assembler();
         var programAddress = this.runtime.programAddress(program);
-        var constants = this.runtime.heapRecords.programConstants(programAddress);
+        var constants = this.runtime.heapRecords.executionProgramConstants(programAddress);
         var targets = branchTargets(program);
         emitFrameKernelPrologue(assembler);
         var pc = 0;
@@ -279,7 +279,7 @@
             while (pc < program.code.length) {
                 var opcode = program.code[pc];
                 if (opcode === op.CONST) {
-                    var constants = runtime.heapRecords.programConstants(
+                    var constants = runtime.heapRecords.executionProgramConstants(
                         runtime.programAddress(program));
                     copyCell(runtime,
                         runtime.heapRecords.vectorCell(constants, program.code[pc + 2]),

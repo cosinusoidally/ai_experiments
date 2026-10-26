@@ -39,7 +39,8 @@
         PLATFORM_SERVICES: 20,
         PROPERTY_INDEX: 21,
         PROPERTY_STORAGE: 22,
-        INTEGER_VECTOR: 23
+        INTEGER_VECTOR: 23,
+        CONSTANT_POOL: 24
     };
 
     function align8(value) {
@@ -89,7 +90,7 @@
     }
 
     Heap.Types = Types;
-    Heap.LastRecordType = Types.INTEGER_VECTOR;
+    Heap.LastRecordType = Types.CONSTANT_POOL;
     Heap.WORD_BYTES = WORD_BYTES;
     Heap.HEADER_SIZE = HEADER_SIZE;
     Heap.FIRST_RECORD = FIRST_RECORD;
@@ -305,6 +306,25 @@
         this.memory.writeU32Trusted(address + HEADER_MARK, 0);
         this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
         this.freeBlocks.push(address);
+        this.freeBlocksAreMaxHeap = false;
+    };
+
+    /* Narrow a private record without moving its address or other records.
+     * The caller has finished moving its live payload inside the new span. */
+    Heap.prototype.shrinkRecord = function (address, payloadBytes, type) {
+        this.requireRecord(address);
+        var size = align8(HEADER_SIZE + payloadBytes);
+        var previous = this.recordSize(address), remainder = previous - size;
+        if (size < HEADER_SIZE || remainder < HEADER_SIZE + RECORD_ALIGNMENT) {
+            throw new RangeError("record tail is too small to retire");
+        }
+        var tail = address + size;
+        this.memory.fill(tail, remainder, 0);
+        this.memory.writeU32Trusted(address + HEADER_TYPE, type);
+        this.memory.writeU32Trusted(address + HEADER_SIZE_FIELD, size);
+        this.memory.writeU32Trusted(tail + HEADER_TYPE, Types.FREE);
+        this.memory.writeU32Trusted(tail + HEADER_SIZE_FIELD, remainder);
+        this.freeBlocks.push(tail);
         this.freeBlocksAreMaxHeap = false;
     };
 

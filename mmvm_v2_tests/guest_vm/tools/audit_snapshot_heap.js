@@ -255,6 +255,22 @@
         var roles = {}, seen = {}, reusedNonemptyArgumentEntries = 0;
         var constantPools = 0, constantPoolBytes = 0, constantCells = 0;
         var constantTags = {}, constantPoolSeen = {};
+        function poolView(pool) {
+            return inspectedHeap.recordType(pool) === Heap.Types.CONSTANT_POOL ?
+                (records.constantPoolExecutionCache(pool) || pool) : pool;
+        }
+        function poolLength(pool) {
+            return inspectedHeap.recordType(pool) === Heap.Types.CONSTANT_POOL ?
+                records.constantPoolLength(pool) : records.vectorLength(pool);
+        }
+        function poolTag(pool, index) {
+            return inspectedHeap.recordType(pool) === Heap.Types.CONSTANT_POOL ?
+                records.constantPoolTag(pool, index) : cells.tagAt(records.vectorCell(pool, index));
+        }
+        function poolReference(pool, index) {
+            return inspectedHeap.recordType(pool) === Heap.Types.CONSTANT_POOL ?
+                records.constantPoolLow(pool, index) : cells.referenceAddressAt(records.vectorCell(pool, index));
+        }
         function integerSignature(vector) {
             var values = [], index = 0;
             if (inspectedHeap.recordType(vector) === Heap.Types.INTEGER_VECTOR) {
@@ -299,16 +315,17 @@
                     constantPoolSeen["$" + constants] = true;
                     constantPools++;
                     constantPoolBytes += inspectedHeap.recordSize(constants);
-                    constantCells += records.vectorLength(constants);
-                    for (var constantIndex = 0; constantIndex < records.vectorLength(constants); constantIndex++) {
-                        var tag = cells.tagAt(records.vectorCell(constants, constantIndex));
+                    constantCells += poolLength(constants);
+                    for (var constantIndex = 0; constantIndex < poolLength(constants); constantIndex++) {
+                        var tag = poolTag(poolView(constants), constantIndex);
                         constantTags[tag] = (constantTags[tag] || 0) + 1;
                     }
                 }
-                while (index < records.vectorLength(constants)) {
-                    var cell = records.vectorCell(constants, index++);
-                    if (cells.tagAt(cell) === Cells.Tags.REFERENCE) {
-                        var target = cells.referenceAddressAt(cell);
+                constants = poolView(constants);
+                while (index < poolLength(constants)) {
+                    var constantSlot = index++;
+                    if (poolTag(constants, constantSlot) === Cells.Tags.REFERENCE) {
+                        var target = poolReference(constants, constantSlot);
                         if (inspectedHeap.recordType(target) === Heap.Types.INTEGER_VECTOR) {
                             count("argument-register descriptors", target,
                                 integerSignature(target), inspectedHeap.recordSize(target));
@@ -330,9 +347,8 @@
                     if (!width) break;
                     if (opcode === bytecodeLayout.CALL || opcode === bytecodeLayout.CONSTRUCT) {
                         var argumentIndex = words[pc + (opcode === bytecodeLayout.CALL ? 4 : 3)];
-                        var argumentCell = records.vectorCell(constants, argumentIndex);
-                        if (cells.tagAt(argumentCell) === Cells.Tags.REFERENCE) {
-                            var argument = cells.referenceAddressAt(argumentCell);
+                        if (poolTag(constants, argumentIndex) === Cells.Tags.REFERENCE) {
+                            var argument = poolReference(constants, argumentIndex);
                             if (inspectedHeap.recordType(argument) === Heap.Types.ARRAY &&
                                     records.arrayLength(argument) > 0) {
                                 if (argumentEntries["$" + argumentIndex]) reusedNonemptyArgumentEntries++;

@@ -121,6 +121,10 @@
     var INTEGER_VECTOR_EXECUTION_CACHE = 8;
     var INTEGER_VECTOR_RESERVED = 12;
     var INTEGER_VECTOR_VALUES = 16;
+    var CONSTANT_POOL_LENGTH = 0;
+    var CONSTANT_POOL_EXECUTION_CACHE = 4;
+    var CONSTANT_POOL_TAGS = 8;
+    var CONSTANT_POOL_PAYLOAD_BYTES = 4;
 
     var PROGRAM_BYTECODE = 0;
     var PROGRAM_CONSTANTS = 4;
@@ -301,6 +305,11 @@
         HEAP_WORD_BYTES: Heap.WORD_BYTES,
         HEAP_RECORD_ALIGNMENT: Heap.RECORD_ALIGNMENT,
         HEAP_TYPE_INTEGER_VECTOR: Heap.Types.INTEGER_VECTOR,
+        HEAP_TYPE_CONSTANT_POOL: Heap.Types.CONSTANT_POOL,
+        CONSTANT_POOL_LENGTH: Heap.HEADER_SIZE + CONSTANT_POOL_LENGTH,
+        CONSTANT_POOL_EXECUTION_CACHE: Heap.HEADER_SIZE + CONSTANT_POOL_EXECUTION_CACHE,
+        CONSTANT_POOL_TAGS: Heap.HEADER_SIZE + CONSTANT_POOL_TAGS,
+        CONSTANT_POOL_PAYLOAD_BYTES: CONSTANT_POOL_PAYLOAD_BYTES,
         INTEGER_VECTOR_EXECUTION_CACHE: Heap.HEADER_SIZE + INTEGER_VECTOR_EXECUTION_CACHE,
         INTEGER_VECTOR_RESERVED: Heap.HEADER_SIZE + INTEGER_VECTOR_RESERVED,
         INTEGER_VECTOR_VALUES: Heap.HEADER_SIZE + INTEGER_VECTOR_VALUES,
@@ -1180,6 +1189,89 @@
         var address = this.heap.allocateRecordWords(Heap.Types.VALUE_VECTOR,
             VECTOR_CELLS + capacity * CELL_BYTES, 0, capacity, 0, 0);
         return address;
+    };
+
+    Records.prototype.constantPoolLength = function (pool) {
+        return this.heap.readTrustedFieldU32(pool, CONSTANT_POOL_LENGTH, Heap.Types.CONSTANT_POOL);
+    };
+    Records.prototype.constantPoolExecutionCache = function (pool) {
+        return this.heap.readTrustedFieldU32(pool, CONSTANT_POOL_EXECUTION_CACHE, Heap.Types.CONSTANT_POOL);
+    };
+    Records.prototype.constantPoolTag = function (pool, index) {
+        return this.heap.memory.readU8(this.heap.trustedPayloadAddress(pool,
+            CONSTANT_POOL_TAGS + index, 1, Heap.Types.CONSTANT_POOL));
+    };
+    Records.prototype.constantPoolDataAddress = function (pool) {
+        var tagBytes = (this.constantPoolLength(pool) + Heap.RECORD_ALIGNMENT - 1) &
+            ~(Heap.RECORD_ALIGNMENT - 1);
+        return this.heap.trustedPayloadAddress(pool, CONSTANT_POOL_TAGS + tagBytes,
+            0, Heap.Types.CONSTANT_POOL);
+    };
+    Records.prototype.constantPoolLow = function (pool, index) {
+        return this.heap.memory.readU32(this.constantPoolDataAddress(pool) +
+            index * CONSTANT_POOL_PAYLOAD_BYTES);
+    };
+    Records.prototype.constantPoolHigh = function (pool, index) {
+        if (this.constantPoolTag(pool, index) !== ValueCells.Tags.DOUBLE) return 0;
+        var ordinal = 0;
+        for (var previous = 0; previous < index; previous++) {
+            if (this.constantPoolTag(pool, previous) === ValueCells.Tags.DOUBLE) ordinal++;
+        }
+        return this.heap.memory.readU32(this.constantPoolDataAddress(pool) +
+            this.constantPoolLength(pool) * CONSTANT_POOL_PAYLOAD_BYTES + ordinal * Heap.WORD_BYTES);
+    };
+
+    Records.prototype.narrowProgramConstants = function (vector) {
+        var length = this.vectorLength(vector);
+        var tagBytes = (length + Heap.RECORD_ALIGNMENT - 1) & ~(Heap.RECORD_ALIGNMENT - 1);
+        var tags = [], highs = [], base = this.vectorCellsAddress(vector), index;
+        for (index = 0; index < length; index++) {
+            var original = base + index * CELL_BYTES;
+            var originalTag = this.cells.tagAt(original);
+            tags[index] = originalTag;
+            if (originalTag === ValueCells.Tags.DOUBLE) highs.push(this.cells.payloadHighAt(original));
+        }
+        var payloadBytes = CONSTANT_POOL_TAGS + tagBytes + length * CONSTANT_POOL_PAYLOAD_BYTES +
+            highs.length * Heap.WORD_BYTES;
+        var size = (Heap.HEADER_SIZE + payloadBytes + Heap.RECORD_ALIGNMENT - 1) &
+            ~(Heap.RECORD_ALIGNMENT - 1);
+        if (this.heap.recordSize(vector) - size < Heap.HEADER_SIZE + Heap.RECORD_ALIGNMENT) return false;
+        /* Pack payloads forwards before shifting the packed run right. Tags
+         * are retained until that overlap-safe move completes. No inner-heap
+         * allocation or guest callback occurs during this transformation. */
+        for (index = 0; index < length; index++) {
+            var source = base + index * CELL_BYTES, tag = tags[index];
+            var low = tag === ValueCells.Tags.INT32 || tag === ValueCells.Tags.REFERENCE ||
+                tag === ValueCells.Tags.DOUBLE ? this.cells.payloadLowAt(source) : 0;
+            this.heap.memory.writeU32(base + index * CONSTANT_POOL_PAYLOAD_BYTES, low);
+        }
+        this.heap.memory.copy(base + tagBytes, base, length * CONSTANT_POOL_PAYLOAD_BYTES);
+        this.heap.memory.fill(base, tagBytes, 0);
+        for (index = 0; index < length; index++) this.heap.memory.writeU8(base + index, tags[index]);
+        var highBase = base + tagBytes + length * CONSTANT_POOL_PAYLOAD_BYTES;
+        for (index = 0; index < highs.length; index++) {
+            this.heap.memory.writeU32(highBase + index * Heap.WORD_BYTES, highs[index]);
+        }
+        this.heap.writeTrustedFieldU32(vector, CONSTANT_POOL_EXECUTION_CACHE, 0);
+        this.heap.shrinkRecord(vector, payloadBytes, Heap.Types.CONSTANT_POOL);
+        return true;
+    };
+
+    Records.prototype.executionProgramConstants = function (program) {
+        var pool = this.programConstants(program);
+        if (this.heap.recordType(pool) !== Heap.Types.CONSTANT_POOL) return pool;
+        var cached = this.constantPoolExecutionCache(pool);
+        if (cached) return cached;
+        var length = this.constantPoolLength(pool), index = 0;
+        cached = this.allocateValueVector(length);
+        while (index < length) {
+            this.cells.writeBitsAt(this.vectorCell(cached, index), this.constantPoolTag(pool, index),
+                this.constantPoolLow(pool, index), this.constantPoolHigh(pool, index));
+            index++;
+        }
+        this.setVectorLength(cached, length);
+        this.heap.writeTrustedFieldU32(pool, CONSTANT_POOL_EXECUTION_CACHE, cached, Heap.Types.CONSTANT_POOL);
+        return cached;
     };
 
     /* Private program maps contain signed register/slot indices, not values
@@ -2883,6 +2975,16 @@
             }
         } else if (type === Heap.Types.INTEGER_VECTOR) {
             reference(records.integerVectorExecutionCache(address));
+        } else if (type === Heap.Types.CONSTANT_POOL) {
+            var cachedConstants = records.constantPoolExecutionCache(address);
+            if (cachedConstants) reference(cachedConstants);
+            else {
+                for (var constantIndex = 0; constantIndex < records.constantPoolLength(address); constantIndex++) {
+                    if (records.constantPoolTag(address, constantIndex) === ValueCells.Tags.REFERENCE) {
+                        reference(records.constantPoolLow(address, constantIndex));
+                    }
+                }
+            }
         } else if (type === Heap.Types.FRAME) {
             reference(records.frameProgram(address));
             reference(records.frameEnvironment(address));

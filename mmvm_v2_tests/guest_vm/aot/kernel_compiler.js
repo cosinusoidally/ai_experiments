@@ -658,6 +658,8 @@
         vectorLength: "VECTOR_LENGTH",
         integerVectorLength: "VECTOR_LENGTH",
         integerVectorExecutionCache: "INTEGER_VECTOR_EXECUTION_CACHE",
+        constantPoolLength: "CONSTANT_POOL_LENGTH",
+        constantPoolExecutionCache: "CONSTANT_POOL_EXECUTION_CACHE",
         vectorCapacity: "VECTOR_CAPACITY",
         objectPropertyHead: "OBJECT_PROPERTY_HEAD",
         regexpPropertyHead: "REGEXP_PROPERTY_HEAD",
@@ -727,6 +729,7 @@
         setValueCellTag: "VALUE_CELL_TAG",
         setVectorLength: "VECTOR_LENGTH",
         setIntegerVectorExecutionCache: "INTEGER_VECTOR_EXECUTION_CACHE",
+        setConstantPoolExecutionCache: "CONSTANT_POOL_EXECUTION_CACHE",
         setIntegerVectorReserved: "INTEGER_VECTOR_RESERVED",
         setRecordType: "RECORD_TYPE",
         setRecordSize: "RECORD_SIZE",
@@ -851,6 +854,8 @@
     };
 
     var READ_INDEXED_FIELD_ACCESSORS = {
+        constantPoolLowWord: {fieldValue: 0, stride: "CONSTANT_POOL_PAYLOAD_BYTES"},
+        constantPoolHighWord: {fieldValue: 0, stride: "HEAP_WORD_BYTES"},
         integerVectorValue: {field: "INTEGER_VECTOR_VALUES", stride: "HEAP_WORD_BYTES"},
         propertyStorageKeyAt: {field: "PROPERTY_STORAGE_KEY", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
         propertyStorageAttributesAt: {field: "PROPERTY_STORAGE_ATTRIBUTES", stride: "PROPERTY_STORAGE_ENTRY_BYTES"},
@@ -1813,9 +1818,11 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
-            node.callee.name === "bytecodePackedByte" && node.arguments.length === 3) {
+            (node.callee.name === "bytecodePackedByte" || node.callee.name === "constantPoolTag") &&
+            node.arguments.length === 3) {
             return {op: "load_u8", address: indexedAddressDescriptor(
-                {field: "BYTECODE_WORDS", strideValue: 1}, node.arguments, symbols), type: "i32"};
+                {field: node.callee.name === "constantPoolTag" ? "CONSTANT_POOL_TAGS" :
+                    "BYTECODE_WORDS", strideValue: 1}, node.arguments, symbols), type: "i32"};
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&

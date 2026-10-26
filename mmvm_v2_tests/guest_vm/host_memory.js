@@ -292,6 +292,30 @@
         return this.copyAllocationRange(destination, 0, source, 0, length);
     };
 
+    HostMemory.prototype.moveAllocationRange = function (allocation, destination, source, length) {
+        if (!allocation || allocation.freed || destination < 0 || source < 0 || length < 0 ||
+                destination !== Math.floor(destination) || source !== Math.floor(source) ||
+                length !== Math.floor(length) || destination + length > allocation.length ||
+                source + length > allocation.length) throw new RangeError("invalid memory move");
+        if (allocation.isNative) {
+            if (!this.memmovePointer) this.memmovePointer = this.ffi.resolve("memmove");
+            this.ffi.call(this.memmovePointer, [allocation.pointer + destination,
+                allocation.pointer + source, length]);
+            return;
+        }
+        var backwards = destination > source && destination < source + length;
+        var words = ((destination | source | length) & 3) === 0;
+        var stride = words ? 4 : 1;
+        var index = backwards ? length - stride : 0;
+        while (backwards ? index >= 0 : index < length) {
+            if (words) writePagedWordLE(allocation, destination + index,
+                readPagedWordLE(allocation, source + index));
+            else writePagedByte(allocation, destination + index,
+                readPagedByte(allocation, source + index));
+            index += backwards ? -stride : stride;
+        }
+    };
+
     HostMemory.prototype.copyAllocationRange = function (
             destination, destinationOffset, source, sourceOffset, length) {
         length = Number(length);

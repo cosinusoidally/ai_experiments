@@ -286,6 +286,7 @@
     }
 
     function executionBytecodeAddressKernel(heapBase, state, program, stringSupport) {
+        if (executionProgramConstantsKernel(heapBase, state, program) === 0) return 0;
         var bytecode = programBytecode(heapBase, program);
         if (BYTECODE_REGISTER_SCALE !== VALUE_CELL_BYTES ||
                 (recordFlags(heapBase, bytecode) & BYTECODE_COMPACT_FLAG) !== 0) {
@@ -807,8 +808,8 @@
             heapBase, state, currentProgram, stringSupport);
         if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
             heapBase, state, frame, 0);
-        var constantCells = load32(
-            heapBase + currentProgram + PROGRAM_CONSTANTS) + VECTOR_CELLS;
+        var constantCells = executionProgramConstantsKernel(
+            heapBase, state, currentProgram) + VECTOR_CELLS;
         var globalObject = contextGlobal(heapBase, currentContext);
         var framePC = frame + FRAME_PC;
         var registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -960,8 +961,8 @@
                         heapBase, state, currentProgram, stringSupport);
                     if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                         heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = programConstants(
-                        heapBase, currentProgram) + VECTOR_CELLS;
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(
                         heapBase, currentContext);
                     framePC = frame + FRAME_PC;
@@ -3345,8 +3346,8 @@
                     heapBase, state, currentProgram, stringSupport);
                 if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                     heapBase, state, frame, initialBudget - budget + 1);
-                constantCells = programConstants(
-                    heapBase, currentProgram) + VECTOR_CELLS;
+                constantCells = executionProgramConstantsKernel(
+                    heapBase, state, currentProgram) + VECTOR_CELLS;
                 globalObject = contextGlobal(heapBase, currentContext);
                 framePC = frame + FRAME_PC;
                 registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -3431,8 +3432,8 @@
                         heapBase, state, currentProgram, stringSupport);
                     if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                         heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = programConstants(
-                        heapBase, currentProgram) + VECTOR_CELLS;
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(
                         heapBase, currentContext);
                     framePC = frame + FRAME_PC;
@@ -3482,8 +3483,8 @@
                         heapBase, state, currentProgram, stringSupport);
                     if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                         heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = programConstants(
-                        heapBase, currentProgram) + VECTOR_CELLS;
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(heapBase, currentContext);
                     framePC = frame + FRAME_PC;
                     registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -3559,8 +3560,8 @@
                     heapBase, state, currentProgram, stringSupport);
                 if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                     heapBase, state, frame, initialBudget - budget + 1);
-                constantCells = programConstants(
-                    heapBase, currentProgram) + VECTOR_CELLS;
+                constantCells = executionProgramConstantsKernel(
+                    heapBase, state, currentProgram) + VECTOR_CELLS;
                 globalObject = contextGlobal(heapBase, currentContext);
                 framePC = frame + FRAME_PC;
                 registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -4427,8 +4428,8 @@
                         heapBase, state, currentProgram, stringSupport);
                     if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                         heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = programConstants(
-                        heapBase, currentProgram) + VECTOR_CELLS;
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(heapBase, currentContext);
                     framePC = frame + FRAME_PC;
                     registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -4635,8 +4636,8 @@
                         heapBase, state, currentProgram, stringSupport);
                     if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
                         heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = programConstants(
-                        heapBase, currentProgram) + VECTOR_CELLS;
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
                     globalObject = contextGlobal(heapBase, currentContext);
                     framePC = frame + FRAME_PC;
                     registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
@@ -5199,6 +5200,7 @@
                 }
                 var calleeProgram = functionMetadata(
                     heapBase, bytecodeCallable);
+                if (executionProgramConstantsKernel(heapBase, state, calleeProgram) === 0) return 0;
                 var receiverToNormalize = bytecodeThisSource;
                 var receiverNeedsBoxing = 0;
                 if (callOperation !== 2) {
@@ -5666,7 +5668,7 @@
                     initializeRegisterBankKernel(heapBase, state,
                         frameRegisterCellAddress(heapBase, calleeFrame, 0),
                         calleeRegisterCount);
-                    copyProgramRegisterConstantsKernel(heapBase, calleeProgram,
+                    copyProgramRegisterConstantsKernel(heapBase, state, calleeProgram,
                         frameRegisterCellAddress(heapBase, calleeFrame, 0));
                     var calleeParameterSlots = programParameterSlots(
                         heapBase, calleeProgram);
@@ -13860,8 +13862,8 @@
                 heapBase, catchEnvironment, catchBindingSlot);
         } else {
             var catchProgram = frameProgram(heapBase, catchFrame);
-            var catchConstants = programConstants(
-                heapBase, catchProgram);
+            var catchConstants = executionProgramConstantsKernel(
+                heapBase, state, catchProgram);
             var catchNameCell = vectorCellAddress(
                 heapBase, catchConstants, -catchBindingSlot - 1);
             if (valueCellTag(0, catchNameCell) !==
@@ -15241,8 +15243,41 @@
         return 0;
     }
 
-    function copyProgramRegisterConstantsKernel(heapBase, program, registers) {
-        var constants = programConstants(heapBase, program);
+    function executionProgramConstantsKernel(heapBase, state, program) {
+        var pool = programConstants(heapBase, program);
+        if (recordType(heapBase, pool) !== HEAP_TYPE_CONSTANT_POOL) return pool;
+        var cached = constantPoolExecutionCache(heapBase, pool);
+        if (cached !== 0) return cached;
+        var count = constantPoolLength(heapBase, pool);
+        var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        cached = engineHeapBump(heapBase, state);
+        initializeProgramVectorKernel(heapBase, cached, count, INVALID_PROGRAM_INTEGER);
+        var data = pool + CONSTANT_POOL_TAGS +
+            ((count + HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT));
+        var highData = data + count * CONSTANT_POOL_PAYLOAD_BYTES;
+        var doubleIndex = 0;
+        var index = 0;
+        while (index < count) {
+            var cell = vectorCellAddress(heapBase, cached, index);
+            var tag = constantPoolTag(heapBase, pool, index);
+            var high = 0;
+            if (tag === VALUE_TAG_DOUBLE) {
+                high = constantPoolHighWord(heapBase, highData, doubleIndex);
+                doubleIndex = doubleIndex + 1;
+            }
+            setValueCellDoubleBits(cell, constantPoolLowWord(heapBase, data, index),
+                high);
+            setValueCellTag(0, cell, tag);
+            index = index + 1;
+        }
+        setEngineHeapBump(heapBase, state, cached + bytes);
+        setConstantPoolExecutionCache(heapBase, pool, cached);
+        return cached;
+    }
+
+    function copyProgramRegisterConstantsKernel(heapBase, state, program, registers) {
+        var constants = executionProgramConstantsKernel(heapBase, state, program);
         var mapping = programConstantRegisters(heapBase, program);
         var count = integerVectorLength(heapBase, mapping);
         var index = 0;
@@ -15317,7 +15352,8 @@
         if (index < 0) return 0;
         if (source === 0) return 0;
         var program = functionMetadata(heapBase, callable);
-        var constants = programConstants(heapBase, program);
+        var constants = executionProgramConstantsKernel(heapBase, state, program);
+        if (constants === 0) return 0;
         if (index >= vectorLength(heapBase, constants)) return 0;
         var target = vectorCellAddress(heapBase, constants, index);
         copyValueCell(target, source);
@@ -17291,6 +17327,7 @@
             initializeProgramCallableKernel: initializeProgramCallableKernel,
             initializeRegisterBankKernel: initializeRegisterBankKernel,
             copyProgramRegisterConstantsKernel: copyProgramRegisterConstantsKernel,
+            executionProgramConstantsKernel: executionProgramConstantsKernel,
             initializeDataPropertyKernel: initializeDataPropertyKernel,
             instantiateGlobalDeclarationsKernel:
                 instantiateGlobalDeclarationsKernel,
@@ -17453,7 +17490,7 @@
             snapshotMetadata = {
                 /* Bump this whenever backend or macro-assembler changes alter
                  * the executable contract without changing kernel source. */
-                compilerVersion: 57,
+                compilerVersion: 59,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
@@ -17489,6 +17526,11 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    HEAP_TYPE_CONSTANT_POOL: kernelConstantOverrides.HEAP_TYPE_CONSTANT_POOL,
+                    CONSTANT_POOL_LENGTH: kernelConstantOverrides.CONSTANT_POOL_LENGTH,
+                    CONSTANT_POOL_EXECUTION_CACHE: kernelConstantOverrides.CONSTANT_POOL_EXECUTION_CACHE,
+                    CONSTANT_POOL_TAGS: kernelConstantOverrides.CONSTANT_POOL_TAGS,
+                    CONSTANT_POOL_PAYLOAD_BYTES: kernelConstantOverrides.CONSTANT_POOL_PAYLOAD_BYTES,
                     INTEGER_VECTOR_EXECUTION_CACHE: kernelConstantOverrides.INTEGER_VECTOR_EXECUTION_CACHE,
                     INTEGER_VECTOR_RESERVED: kernelConstantOverrides.INTEGER_VECTOR_RESERVED,
                     INTEGER_VECTOR_VALUES: kernelConstantOverrides.INTEGER_VECTOR_VALUES,
@@ -18924,7 +18966,7 @@
         if (frame && frame.heapAddress && frame.code[pc] === Bytecode.CALL) {
             var records = this.runtime.heapRecords;
             var programAddress = records.frameProgram(frame.heapAddress);
-            var constants = records.programConstants(programAddress);
+            var constants = records.executionProgramConstants(programAddress);
             var argumentListCell = records.vectorCellWithinLength(
                 constants, frame.code[pc + 4]);
             var packedArguments = this.runtime.valueCells.tagAt(argumentListCell) === ValueCells.Tags.REFERENCE ?

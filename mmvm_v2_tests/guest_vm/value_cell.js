@@ -120,6 +120,21 @@
         return this.heap.memory.readU32Trusted(address + LOW_OFFSET);
     };
 
+    ValueCells.prototype.payloadLowAt = function (address) {
+        return this.heap.memory.readU32Trusted(address + LOW_OFFSET);
+    };
+
+    ValueCells.prototype.payloadHighAt = function (address) {
+        return this.heap.memory.readU32Trusted(address + HIGH_OFFSET);
+    };
+
+    ValueCells.prototype.writeBitsAt = function (address, tag, low, high) {
+        this.heap.memory.writeU32Trusted(address + TAG_OFFSET, tag);
+        this.heap.memory.writeU32Trusted(address + LOW_OFFSET, low);
+        this.heap.memory.writeU32Trusted(address + HIGH_OFFSET, high);
+        this.heap.memory.writeU32Trusted(address + AUX_OFFSET, 0);
+    };
+
     ValueCells.prototype.copyAt = function (destination, source) {
         this.heap.memory.writeU32Trusted(destination + TAG_OFFSET,
             this.heap.memory.readU32Trusted(source + TAG_OFFSET));

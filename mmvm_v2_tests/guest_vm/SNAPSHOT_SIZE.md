@@ -1,5 +1,31 @@
 # Snapshot size and compact strings
 
+## 2026-10-26: private constant pools
+
+Program constants no longer reserve sixteen bytes for every literal. A
+CONSTANT_POOL stores separate byte tags, one low payload word per slot, and
+an ordered high-word run only for DOUBLE slots. Tags remain separate from
+payloads: this is not NaN boxing. Every double bit is retained; reserved AUX
+and inactive payload words have no value semantics and are not duplicated.
+Only 55 of roughly 50,000 ready-image constants require a high word.
+
+Construction narrows the fresh private vector in place before execution,
+keeps its address stable and returns its unused tail to the allocator.
+Overlap-safe payload movement belongs to the host-memory adapter. The
+program's canonical storage reference never changes. Execution explicitly
+materializes ordinary tagged cells once; mutations update that view. Both
+collectors follow the authoritative cached view when present, otherwise
+only reference-tagged canonical payloads. Public mutable arrays/value vectors
+retain their existing layout. ABI 59 defines this pool representation.
+
+The first low-word-pool image has a 5,809,208-byte initialized heap. Canonical
+constant pools occupy 316,056 bytes, versus 856,056 bytes before narrowing;
+warm ordinary value vectors occupy 117,488 bytes. Source/implementation and
+allocator/cache costs reduce the net saving. Node project tests pass, as do
+standalone hello, 24 GC rounds/47 automatic collections, and an independent
+audit of 28,691 reachable records with no missing marks. Final cross-host
+and broader integration validation is still pending.
+
 ## 2026-10-26: private call-argument descriptors
 
 Private CALL/CONSTRUCT register lists now use integer vectors directly,

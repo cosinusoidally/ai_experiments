@@ -1658,6 +1658,7 @@
         }
         this.heapRecords.setVectorLength(program.heapConstantsAddress,
             program.constants ? program.constants.length : 0);
+        this.heapRecords.narrowProgramConstants(program.heapConstantsAddress);
         return address;
     };
 
@@ -1990,7 +1991,7 @@
             }
             return values;
         }
-        var constantsAddress = records.programConstants(address);
+        var constantsAddress = records.executionProgramConstants(address);
         var constantLength = records.vectorLength(constantsAddress);
         var constants = new Array(constantLength);
         index = 0;
@@ -3712,12 +3713,12 @@
                     value = value.program;
                     runtime.valueCells.writeReferenceAt(
                         runtime.heapRecords.vectorCell(
-                            program.heapConstantsAddress, index),
+                            runtime.heapRecords.executionProgramConstants(program.heapAddress), index),
                         runtime.programAddress(value));
                 } else {
                     runtime.writeConstantHeapValue(
                         runtime.heapRecords.vectorCell(
-                            program.heapConstantsAddress, index), value);
+                            runtime.heapRecords.executionProgramConstants(program.heapAddress), index), value);
                 }
                 program.constants[index] = value;
                 return args[0];

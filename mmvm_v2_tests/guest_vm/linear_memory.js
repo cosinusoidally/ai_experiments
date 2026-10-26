@@ -203,13 +203,7 @@
     LinearMemory.prototype.copy = function (destination, source, length) {
         this.checkRange(destination, length);
         this.checkRange(source, length);
-        var backwards = destination > source && destination < source + length;
-        var index = backwards ? length - 1 : 0;
-        while (backwards ? index >= 0 : index < length) {
-            this.host.write8(this.allocation, destination + index,
-                this.host.read8(this.allocation, source + index));
-            index += backwards ? -1 : 1;
-        }
+        this.host.moveAllocationRange(this.allocation, destination, source, length);
     };
 
     /* Newly allocated backing stores cannot overlap their live source. Keep
