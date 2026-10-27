@@ -943,6 +943,7 @@
         var heapImage = null;
         try {
             heapImage = heap.memory.createSnapshot(heapImageLength);
+            records.copyExternalBufferDataToSnapshot(heapImage, savedBufferPointers);
         } finally {
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {

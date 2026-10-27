@@ -1889,8 +1889,16 @@
                     arrayStructureVersion: handle.arrayStructureVersion});
             }
         }
+        var snapshotMemory = this.linearHeap.memory.createRegionSnapshot(regions);
+        try {
+            this.heapRecords.copyExternalBufferDataToSnapshot(snapshotMemory,
+                this.heapRecords.externalBufferBackings(addresses), regions);
+        } catch (error) {
+            this.linearHeap.memory.destroySnapshot(snapshotMemory);
+            throw error;
+        }
         var snapshot = {
-            memory: this.linearHeap.memory.createRegionSnapshot(regions),
+            memory: snapshotMemory,
             regions: regions, addresses: addresses,
             roots: addresses.concat(immutableRoots),
             handles: handles, pinnedPropertyRecords: pinnedPropertyRecords,
@@ -1909,6 +1917,7 @@
         }
         this.linearHeap.memory.restoreRegionSnapshot(
             snapshot.memory, snapshot.regions);
+        this.heapRecords.restoreExternalBufferSnapshotContents(snapshot.regions, snapshot.addresses);
         /* Storage epochs and GC marks have rolled back. They cannot guard
          * weak views captured on the abandoned execution timeline. This also
          * covers handles first adopted after the snapshot was created. */
@@ -3926,6 +3935,8 @@
                         "strtod");
         platformBinding(records.platformMallocPointerCellAddress(services),
                         "malloc");
+        platformBinding(records.platformCallocPointerCellAddress(services),
+                        "calloc");
         platformBinding(records.platformFreePointerCellAddress(services),
                         "free");
         platformBinding(records.platformSnprintfPointerCellAddress(services),

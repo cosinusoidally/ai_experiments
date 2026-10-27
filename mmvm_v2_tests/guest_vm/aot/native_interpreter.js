@@ -26,6 +26,8 @@
 
     var heapMarkKernel = HeapSweeper.markKernel;
     var heapSweepKernel = HeapSweeper.sweepKernel;
+    var BUFFER_BACKING_EXTERNAL_FLAG = HeapRecords.KernelConstants.BUFFER_BACKING_EXTERNAL_FLAG;
+    var LARGE_BUFFER_BYTES = HeapRecords.KernelConstants.LARGE_BUFFER_BYTES;
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
@@ -8797,6 +8799,46 @@
         return 0;
     }
 
+    /* Keep the complete logical reservation so byte budgets, record walks and
+     * canonical snapshots do not depend on the allocation strategy. Large
+     * native backings use calloc without dirtying their reserved inline bytes.
+     * All fallible work precedes publication of either backing or view. */
+    function initializeBufferBackingKernel(heapBase, state, backing,
+                                           backingBytes, byteLength) {
+        var external = 0;
+        var pointer = 0;
+        if (heapBase !== 0 && byteLength >= LARGE_BUFFER_BYTES) {
+            var services = enginePlatformServices(heapBase, state);
+            var callocPointer = platformCallocPointer(heapBase, services);
+            if (callocPointer !== 0 && platformFreePointer(heapBase, services) !== 0) {
+                pointer = callNativeI32(callocPointer, byteLength, 1);
+                if (pointer === 0) {
+                    setEngineAllocationFailed(heapBase, state, 1);
+                    return 0;
+                }
+                external = BUFFER_BACKING_EXTERNAL_FLAG;
+            }
+        }
+        var clearBytes = backingBytes;
+        if (external !== 0) clearBytes = BUFFER_BACKING_DATA;
+        var clearOffset = 0;
+        while (clearOffset < clearBytes) {
+            store32(heapBase + backing + clearOffset, 0);
+            clearOffset = clearOffset + 4;
+        }
+        if (external === 0 && heapBase !== 0) {
+            pointer = heapBase + backing + BUFFER_BACKING_DATA;
+        }
+        setRecordType(heapBase, backing, HEAP_TYPE_BUFFER_BACKING);
+        setRecordSize(heapBase, backing, backingBytes);
+        setRecordMark(heapBase, backing, 0);
+        setRecordFlags(heapBase, backing, external);
+        setBufferBackingPointer(heapBase, backing, pointer);
+        setBufferBackingLength(heapBase, backing, byteLength);
+        setBufferBackingMetadata(heapBase, backing, 0);
+        return 1;
+    }
+
     function allocateArrayBufferKernel(heapBase, state, targetCell,
                                        byteLength, prototype) {
         if (byteLength < 0) return 0;
@@ -8811,22 +8853,8 @@
         var view = backing + backingBytes;
         if (view + BUFFER_VIEW_RECORD_BYTES >
                 engineHeapLimit(heapBase, state)) return 2;
-        var clearOffset = 0;
-        while (clearOffset < backingBytes) {
-            store32(heapBase + backing + clearOffset, 0);
-            clearOffset = clearOffset + 4;
-        }
-        setRecordType(heapBase, backing, HEAP_TYPE_BUFFER_BACKING);
-        setRecordSize(heapBase, backing, backingBytes);
-        setRecordMark(heapBase, backing, 0);
-        setRecordFlags(heapBase, backing, 0);
-        if (heapBase === 0) {
-            setBufferBackingPointer(heapBase, backing, 0);
-        } else {
-            setBufferBackingPointer(heapBase, backing,
-                heapBase + backing + BUFFER_BACKING_DATA);
-        }
-        setBufferBackingLength(heapBase, backing, byteLength);
+        if (initializeBufferBackingKernel(heapBase, state, backing,
+                backingBytes, byteLength) === 0) return 2;
         setBufferBackingMetadata(heapBase, backing, view);
         setRecordType(heapBase, view, HEAP_TYPE_BUFFER_VIEW);
         setRecordSize(heapBase, view, BUFFER_VIEW_RECORD_BYTES);
@@ -9127,25 +9155,8 @@
         if (bufferAllocValid === 0) {
             return 0;
         }
-        var bufferClearOffset = 0;
-        while (bufferClearOffset < bufferBackingBytes) {
-            store32(heapBase + allocatedBacking + bufferClearOffset,
-                    0);
-            bufferClearOffset = bufferClearOffset + 4;
-        }
-        setRecordType(heapBase, allocatedBacking,
-                      HEAP_TYPE_BUFFER_BACKING);
-        setRecordSize(heapBase, allocatedBacking,
-                      bufferBackingBytes);
-        setRecordMark(heapBase, allocatedBacking, 0);
-        setRecordFlags(heapBase, allocatedBacking, 0);
-        if (heapBase === 0) {
-            setBufferBackingPointer(
-                heapBase, allocatedBacking, 0);
-        } else {
-            setBufferBackingPointer(heapBase, allocatedBacking,
-                heapBase + allocatedBacking + BUFFER_BACKING_DATA);
-        }
+        if (initializeBufferBackingKernel(heapBase, state, allocatedBacking,
+                bufferBackingBytes, bufferAllocSize) === 0) return 0;
         setBufferBackingLength(heapBase, allocatedBacking,
                                bufferAllocSize);
         setBufferBackingMetadata(heapBase, allocatedBacking, 0);
@@ -9212,8 +9223,8 @@
                     sourceArrayLength, stringSupport) === 0) return 0;
             var arrayView = valueCellReference(0, intrinsicTarget);
             var arrayBacking = bufferViewBacking(heapBase, arrayView);
-            var arrayDestination = heapBase + arrayBacking +
-                BUFFER_BACKING_DATA;
+            var arrayDestination = bufferBackingPointer(heapBase, arrayBacking);
+            if (heapBase === 0) arrayDestination = arrayBacking + BUFFER_BACKING_DATA;
             var arrayIndex = 0;
             while (arrayIndex < sourceArrayLength) {
                 var elementCell = vectorCellAddress(
@@ -9245,8 +9256,8 @@
                     sourceBufferLength, stringSupport) === 0) return 0;
             var copiedView = valueCellReference(0, intrinsicTarget);
             var copiedBacking = bufferViewBacking(heapBase, copiedView);
-            var copiedDestination = heapBase + copiedBacking +
-                BUFFER_BACKING_DATA;
+            var copiedDestination = bufferBackingPointer(heapBase, copiedBacking);
+            if (heapBase === 0) copiedDestination = copiedBacking + BUFFER_BACKING_DATA;
             var sourceBacking = bufferViewBacking(heapBase, sourceString);
             var sourceBufferPointer = bufferBackingPointer(
                 heapBase, sourceBacking) +
@@ -9364,7 +9375,8 @@
                                  byteLength, stringSupport) === 0) return 0;
         var allocatedView = valueCellReference(0, intrinsicTarget);
         var allocatedBacking = bufferViewBacking(heapBase, allocatedView);
-        var destination = heapBase + allocatedBacking + BUFFER_BACKING_DATA;
+        var destination = bufferBackingPointer(heapBase, allocatedBacking);
+        if (heapBase === 0) destination = allocatedBacking + BUFFER_BACKING_DATA;
         sourceIndex = 0;
         var destinationIndex = 0;
         while (sourceIndex < sourceLength) {
@@ -14548,7 +14560,8 @@
                 collectionCanResume = 0;
             } else {
                 var collectionReclaimed = heapSweepKernel(
-                    heapBase, collectionBump, collectionGeneration);
+                    heapBase, collectionBump, collectionGeneration,
+                    platformFreePointer(heapBase, platformServices));
                 var sweepingFinished = nativeCollectorClockKernel(
                     heapBase, state, platformServices);
                 var collectionLiveBytes = rebuildNativeAllocatorKernel(
@@ -17567,6 +17580,7 @@
             grownArrayCapacityKernel: HeapRecords.grownArrayCapacity,
             argumentRegisterTailKernel: argumentRegisterTailKernel,
             allocateArrayBufferKernel: allocateArrayBufferKernel,
+            initializeBufferBackingKernel: initializeBufferBackingKernel,
             allocateArrayKernel: allocateArrayKernel,
             allocateErrorKernel: allocateErrorKernel,
             errorConstructorKernel: errorConstructorKernel,
@@ -17905,6 +17919,9 @@
                     STRING_SLICE_START: kernelConstantOverrides.STRING_SLICE_START,
                     STRING_LATIN1_FLAG: kernelConstantOverrides.STRING_LATIN1_FLAG,
                     PLATFORM_MEMSET_POINTER: kernelConstantOverrides.PLATFORM_MEMSET_POINTER,
+                    PLATFORM_CALLOC_POINTER: kernelConstantOverrides.PLATFORM_CALLOC_POINTER,
+                    BUFFER_BACKING_EXTERNAL_FLAG: BUFFER_BACKING_EXTERNAL_FLAG,
+                    LARGE_BUFFER_BYTES: LARGE_BUFFER_BYTES,
                     BYTECODE_REGISTER_SCALE: runtime.nativeOperandPredecode ? 1 : BYTECODE_REGISTER_SCALE,
                     BYTECODE_LAYOUT_WIDTH: BYTECODE_LAYOUT_WIDTH,
                     BYTECODE_LAYOUT_REGISTER_MASK: BYTECODE_LAYOUT_REGISTER_MASK,
@@ -18121,6 +18138,8 @@
                 x86Backend.ffi.resolve("snprintf"));
             runtime.heapRecords.setPlatformMemsetPointer(
                 this.platformServicesAddress, x86Backend.ffi.resolve("memset"));
+            runtime.heapRecords.setPlatformCallocPointer(
+                this.platformServicesAddress, x86Backend.ffi.resolve("calloc"));
         }
         this.stringSupportAddress = runtime.heapRecords.allocateValueVector(
             RuntimeSupportLayout.COUNT);

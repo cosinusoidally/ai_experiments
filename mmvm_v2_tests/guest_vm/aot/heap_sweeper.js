@@ -57,6 +57,8 @@
     var HEAP_FIRST_RECORD = Heap.FIRST_RECORD;
     var RECORD_HEADER_BYTES = Heap.HEADER_SIZE;
     var HEAP_TYPE_FREE = Heap.Types.FREE;
+    var HEAP_TYPE_BUFFER_BACKING = Heap.Types.BUFFER_BACKING;
+    var BUFFER_BACKING_EXTERNAL_FLAG = Heap.BufferBackingPolicy.EXTERNAL;
     var RECORD_ALIGNMENT_MASK = Heap.RECORD_ALIGNMENT - 1;
     var freeRegionLayoutBindings = {
         RECORD_TYPE: RECORD_TYPE,
@@ -578,7 +580,7 @@
         return 0;
     }
 
-    function heapSweepKernel(heapBase, heapBump, generation) {
+    function heapSweepKernel(heapBase, heapBump, generation, freePointer) {
         var HEAP_FIRST_RECORD = 64;
         var HEAP_TYPE_FREE = 0;
         var RECORD_TYPE = 0;
@@ -593,6 +595,12 @@
             var size = recordSize(heapBase, address);
             if (type !== HEAP_TYPE_FREE) {
                 if (recordMark(heapBase, address) !== generation) {
+                    if (type === HEAP_TYPE_BUFFER_BACKING) {
+                        if ((recordFlags(heapBase, address) & BUFFER_BACKING_EXTERNAL_FLAG) !== 0) {
+                            var released = callNativeI32(freePointer,
+                                bufferBackingPointer(heapBase, address));
+                        }
+                    }
                     setRecordType(heapBase, address, HEAP_TYPE_FREE);
                     setRecordMark(heapBase, address, 0);
                     setRecordFlags(heapBase, address, 0);
@@ -672,6 +680,9 @@
             var backend = nativeMemory ? new X86Backend() : new JSBackend();
             var ir = new KernelCompiler().compile(heapSweepKernel, {
                 legacyConstantLocals: true,
+                constantBindings: {HEAP_TYPE_BUFFER_BACKING: HEAP_TYPE_BUFFER_BACKING,
+                    BUFFER_BACKING_POINTER: HeapRecords.KernelConstants.BUFFER_BACKING_POINTER,
+                    BUFFER_BACKING_EXTERNAL_FLAG: BUFFER_BACKING_EXTERNAL_FLAG},
                 registerPreferences: ["heapBase", "heapBump", "address"]
             });
             var sweeper = backend.compile(ir);
@@ -742,10 +753,11 @@
     HeapSweeper.prototype.sweep = function (generation) {
         if (this.compiled.backend === "i386") {
             return this.compiled.fn(this.heap.memory.nativeAddress(0),
-                                    this.heap.bump, generation) >>> 0;
+                                    this.heap.bump, generation,
+                                    this.heap.memory.host.freePointer) >>> 0;
         }
         return this.compiled.fn(this.heap.memory, 0,
-                                this.heap.bump, generation) >>> 0;
+                                this.heap.bump, generation, 0) >>> 0;
     };
 
     HeapSweeper.prototype.rebuildFreeBlocks = function () {

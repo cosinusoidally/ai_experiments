@@ -132,6 +132,7 @@
             var tail = Math.max(arenaBump, records.engineNativeTailBump(engine));
             var counts = {}, bytes = {}, resident = {}, free = 0, occupied = 0, largest = 0;
             var spareValues = 0, spareProperties = 0;
+            var externalBufferBytes = 0, externalBufferCount = 0;
             var position = Heap.FIRST_RECORD, recordCount = 0;
             while (position < tail) {
                 if (activeArena && position === arenaBump) {
@@ -153,7 +154,11 @@
                     largest = Math.max(largest, header.size);
                 } else {
                     occupied += header.size;
-                    if (header.type === Heap.Types.VALUE_VECTOR) {
+                    if (header.type === Heap.Types.BUFFER_BACKING &&
+                            records.bufferBackingIsExternal(position)) {
+                        externalBufferBytes += records.bufferBackingLength(position);
+                        externalBufferCount++;
+                    } else if (header.type === Heap.Types.VALUE_VECTOR) {
                         spareValues += (records.vectorCapacity(position) -
                             records.vectorLength(position)) * Cells.PAYLOAD_BYTES;
                     } else if (header.type === Heap.Types.PROPERTY_STORAGE) {
@@ -188,6 +193,7 @@
                 heapCapacity: heapCapacity, tail: tail, occupiedBytes: occupied,
                 freeBytes: free, largestFreeRecord: largest, recordCount: recordCount,
                 spareValueBytes: spareValues, sparePropertyBytes: spareProperties,
+                externalBufferBytes: externalBufferBytes, externalBufferCount: externalBufferCount,
                 collectorWorkspaceResidentBytes: residentInterior(
                     records.engineGCStackBase(engine), records.engineGCStackLimit(engine)),
                 collections: records.engineGCCollections(engine),

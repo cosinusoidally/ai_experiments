@@ -871,3 +871,47 @@ counter, budget and optional opcode counters account for both instructions.
 Unsupported types leave the conversion for ordinary execution. This is an
 interpreter operation-pair optimization, not source recognition or alternate
 benchmark code; no guest bytecode format or JS reference semantics change.
+## Large native byte backings (2026-10-27)
+
+Buffers and ArrayBuffers of at least `Heap.BufferBackingPolicy.LARGE_BYTES`
+(currently 1 MiB) use directly called libc `calloc` for their bytes on the
+native backend. The backing record still reserves its complete logical span
+in the non-moving guest heap. Only its header/metadata are initialized inline;
+the reserved payload is not needlessly written. Smaller backings and Node's
+reference implementation remain inline. This is an allocation policy, not a
+special case for an application or benchmark.
+
+Keeping the reservation preserves existing record walks, GC byte accounting,
+heap limits and canonical snapshot layout. It costs virtual address space in
+addition to the external allocation, but avoids committing the inline payload
+solely to initialize zero bytes. The external pointer is owned by the guest
+backing record, never by a host JS object. Views mark the backing normally.
+The native sweeper calls libc `free` before reclaiming an unreachable external
+backing; embedding-side collection, explicit record release and runtime
+destruction perform the equivalent release. Reused storage must still be zero
+initialized; the optimization relies on calloc's contract, not an assumption
+that a reused guest-heap range is clean.
+
+`BUFFER_BACKING_EXTERNAL_FLAG` distinguishes the pointer from an inline data
+pointer. Native indexed access already uses backing pointers; constructors
+and embedding accessors now honor the same representation. FFI pointers stay
+stable for the entire lifetime of a live backing. Function source storage and
+function `toString()` are unchanged.
+
+Portable snapshots remain canonical inline images. In the private snapshot
+copy, serialization copies external data into its reserved inline span,
+normalizes alignment padding, clears external ownership and clears native
+pointers. The existing bootstrap reconstructs inline pointers on load. The
+live allocation is never relocated or freed during serialization. This does
+not change the C loader or snapshot container format. A snapshot containing a
+large live backing still includes its full bytes, just as it did before.
+
+In-process context snapshots retain the original backing as a GC root and
+save/restore its contents at the same external address. Such snapshots can
+temporarily increase RSS through their private copies; they are not part of
+the normal benchmark execution path. They inspect only the retained address
+list, not an extra full-heap scan per context restore.
+
+Native contract 62 invalidates old compiled kernels. The calloc service uses
+the platform-services record's previously reserved final word. No thread,
+page-discard operation, compression or host-language callback is introduced.

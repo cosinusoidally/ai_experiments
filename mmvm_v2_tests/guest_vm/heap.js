@@ -90,6 +90,9 @@
     }
 
     Heap.Types = Types;
+    /* Large native byte backings keep their logical heap reservation for
+     * accounting/snapshot layout, but own separately calloc'ed data. */
+    Heap.BufferBackingPolicy = {EXTERNAL: 1, LARGE_BYTES: 1048576};
     Heap.LastRecordType = Types.CONSTANT_POOL;
     Heap.WORD_BYTES = WORD_BYTES;
     Heap.HEADER_SIZE = HEADER_SIZE;
@@ -126,13 +129,20 @@
     };
 
     Heap.prototype.allocateRecordWords = function (
-            type, payloadBytes, word0, word1, word2, word3) {
+            type, payloadBytes, word0, word1, word2, word3, externalBufferMetadataBytes) {
         if (!Types || type <= Types.FREE || type > Heap.LastRecordType) {
             throw new TypeError("invalid heap record type");
         }
         payloadBytes = Number(payloadBytes);
         if (payloadBytes < 0 || payloadBytes !== Math.floor(payloadBytes)) {
             throw new RangeError("invalid heap record payload size");
+        }
+        if (externalBufferMetadataBytes !== undefined &&
+                (type !== Types.BUFFER_BACKING ||
+                 externalBufferMetadataBytes < 4 * WORD_BYTES ||
+                 externalBufferMetadataBytes > payloadBytes ||
+                 externalBufferMetadataBytes !== Math.floor(externalBufferMetadataBytes))) {
+            throw new RangeError("invalid external backing metadata size");
         }
         var size = align8(HEADER_SIZE + payloadBytes);
         var address = 0;
@@ -193,7 +203,13 @@
         /* A collection may lower the bump pointer over a dead tail, so even a
          * bump allocation can cover previously used bytes. Clear every host
          * allocation before publishing its header. */
-        this.memory.fill(address, size, 0);
+        /* A byte backing may reserve its complete logical span while owning
+         * its data separately. Only its header/metadata are inline then. */
+        var initializedBytes = size;
+        if (externalBufferMetadataBytes !== undefined) {
+            initializedBytes = HEADER_SIZE + externalBufferMetadataBytes;
+        }
+        this.memory.fill(address, initializedBytes, 0);
         if (this.recordInitializer && size >= HEADER_SIZE + 16) {
             this.recordInitializer.initialize(address, type, size,
                 word0, word1, word2, word3);
@@ -302,6 +318,9 @@
                             (source ? ", released by " + source : "") + ")");
         }
         var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+        if (this.bufferBackingReleaser && this.recordType(address) === Types.BUFFER_BACKING) {
+            this.bufferBackingReleaser(address);
+        }
         this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
         this.memory.writeU32Trusted(address + HEADER_MARK, 0);
         this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
@@ -525,6 +544,9 @@
             }
             if (type !== Types.FREE &&
                 this.memory.readU32Trusted(address + HEADER_MARK) !== generation) {
+                if (type === Types.BUFFER_BACKING && this.bufferBackingReleaser) {
+                    this.bufferBackingReleaser(address);
+                }
                 this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
                 this.memory.writeU32Trusted(address + HEADER_MARK, 0);
                 this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
@@ -719,6 +741,12 @@
 
     Heap.prototype.destroy = function () {
         if (this.destroyed) return;
+        if (this.bufferBackingReleaser) {
+            var heap = this;
+            this.visitRecords(function (address, type) {
+                if (type === Types.BUFFER_BACKING) heap.bufferBackingReleaser(address);
+            });
+        }
         this.memory.destroy();
         this.destroyed = true;
         this.bump = 0;

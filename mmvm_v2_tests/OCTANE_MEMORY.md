@@ -59,3 +59,53 @@ their allocation ownership, not merely collecting the same memory again.
 Do not lower heap caps blindly or force repeated collections. No `madvise`
 work is in scope. Function source and working function `toString()` must be
 preserved; source removal is not an accepted memory optimization.
+
+## 2026-10-27: large native backings implemented
+
+Native contract 62 uses directly called libc calloc for native Buffer and
+ArrayBuffer backings of at least 1 MiB. The existing logical reservation is
+kept, but its inline data is not initialized. This reduces physical residency,
+not the configured virtual heap reservation. The shared sweeper, embedding
+collector and runtime destruction release owned data. Snapshot copies convert
+external backings back to canonical inline bytes without relocating live FFI
+pointers. Node retains its inline emulation. No C or demo source changed.
+See [the interpreter design](guest_vm/NATIVE_INTERPRETER_DESIGN.md) for ownership,
+accounting and snapshot details.
+
+The full stock zlib run passes with peak RSS **133,888 KiB**, down from
+**263,424 KiB**, approximately **49% lower** (126.5 MiB saved). It reports
+score **501**, wall **305.42 s**, user **303.95 s**. The earlier stock run
+scored 560 in 273.53 s, so this is not presented as a speedup. A subsequent
+same-session serial quick-correctness control measures the original image at
+48.10 s (47.32 s user, 263,168 KiB RSS) and the new image at 46.91 s
+(46.48 s user, 132,992 KiB RSS). Both pass; this pair shows no slowdown in
+that workload, but is not a statistical stock-score comparison.
+
+Working-point validation:
+
+- Node and js_min project suites pass all 270 guest assertions and existing
+  embedding/compiler/context checks. The expanded existing context check
+  covers a large odd-length backing, two saved contexts, restoration after
+  mutation/collection, canonical inline bytes/padding/flags/pointers, and
+  preservation of the live pointer.
+- The bounded native GC workload passes. Its instrumented driver reports
+  75 collections, 27 audits and 72,575 checked edges within the 8 MiB guest
+  cap (maximum observed bump 4,515,712 bytes). The workload now retains small
+  views of replaced large backings. Further final regression checks are
+  recorded below as they complete.
+- The full three-host snapshot harness passes in 294.24 s: differing
+  environments/program arguments, Node/js_min image equality, alternate
+  application execution, live launch environment and genuine self-hosted
+  recompilation producing a byte-identical image. No input-image copying.
+- Standalone language integration passes, including function-source comment
+  retention. Function source has not been removed.
+
+The next measured target is compiler working storage: samples during register
+packing and verification contain roughly 10--25 MiB of general value-vector
+records, and earlier optimization samples contain about 12 MiB of packed
+property storage. These are aggregate records present at those samples, not
+proof that the currently executing function owns all of them. Spare vector
+and property capacity totals only about 4 MiB at those points. Prioritize
+numeric/control-flow working representations and overlapping lifetimes over
+blanket growth-factor changes or dropping retained source. The remaining
+resident free pages cannot be eliminated merely by another mark/sweep pass.

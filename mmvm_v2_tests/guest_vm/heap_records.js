@@ -266,6 +266,7 @@
     var PLATFORM_FREE_POINTER = 48;
     var PLATFORM_SNPRINTF_POINTER = 52;
     var PLATFORM_MEMSET_POINTER = 56;
+    var PLATFORM_CALLOC_POINTER = 60;
     var PLATFORM_SERVICES_BYTES = 64;
 
     var ATTR_WRITABLE = 1;
@@ -277,6 +278,12 @@
     function Records(heap, cells) {
         if (!heap || !cells || cells.heap !== heap) {
             throw new TypeError("heap records require one heap and its value cells");
+        }
+        if (heap.memory.allocation && heap.memory.allocation.isNative) {
+            var records = this;
+            heap.bufferBackingReleaser = function (address) {
+                records.releaseExternalBufferBacking(address);
+            };
         }
         this.heap = heap;
         this.cells = cells;
@@ -291,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 61;
+    Records.NativeInterpreterContractVersion = 62;
     Records.grownArrayCapacity = grownArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
@@ -306,6 +313,10 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        BUFFER_BACKING_EXTERNAL_FLAG: Heap.BufferBackingPolicy.EXTERNAL,
+        BUFFER_BACKING_POINTER: Heap.HEADER_SIZE + BUFFER_BACKING_POINTER,
+        LARGE_BUFFER_BYTES: Heap.BufferBackingPolicy.LARGE_BYTES,
+        PLATFORM_CALLOC_POINTER: Heap.HEADER_SIZE + PLATFORM_CALLOC_POINTER,
         INITIAL_ARRAY_CAPACITY: INITIAL_ARRAY_CAPACITY,
         MAX_VECTOR_LENGTH: MAX_VECTOR_LENGTH,
         PROPERTY_RECORD_SNAPSHOT_PIN: PROPERTY_RECORD_SNAPSHOT_PIN,
@@ -1502,8 +1513,21 @@
 
     Records.prototype.allocateBufferBacking = function (length) {
         length = Number(length);
+        var host = this.heap.memory.host;
+        var external = host.isMMVM && length >= Heap.BufferBackingPolicy.LARGE_BYTES;
         var address = this.heap.allocateRecordWords(Heap.Types.BUFFER_BACKING,
-            BUFFER_BACKING_DATA + length, 0, length, 0, 0);
+            BUFFER_BACKING_DATA + length, 0, length, 0, 0,
+            external ? BUFFER_BACKING_DATA : undefined);
+        if (external) {
+            var externalPointer = host.ffi.call(host.callocPointer, [length, 1]);
+            if (!externalPointer) {
+                this.heap.freeRecord(address, "failed external backing allocation");
+                throw new RangeError("native buffer allocation failed");
+            }
+            this.heap.setFlags(address, Heap.BufferBackingPolicy.EXTERNAL);
+            this.setBufferBackingPointer(address, externalPointer);
+            return address;
+        }
         var pointer = this.heap.memory.nativeAddress(
             address + Heap.HEADER_SIZE + BUFFER_BACKING_DATA);
         this.heap.writeTrustedFieldU32(address, BUFFER_BACKING_POINTER,
@@ -1562,14 +1586,32 @@
             pointer, Heap.Types.BUFFER_BACKING);
     };
 
+    Records.prototype.bufferBackingIsExternal = function (backing) {
+        if (this.heap.memory.allocation && !this.heap.memory.allocation.isNative) return false;
+        return (this.heap.flags(backing) & Heap.BufferBackingPolicy.EXTERNAL) !== 0;
+    };
+
+    Records.prototype.releaseExternalBufferBacking = function (backing) {
+        if (!this.bufferBackingIsExternal(backing)) return;
+        var pointer = this.bufferBackingPointer(backing);
+        this.setBufferBackingPointer(backing, 0);
+        this.heap.setFlags(backing, this.heap.flags(backing) & ~Heap.BufferBackingPolicy.EXTERNAL);
+        var host = this.heap.memory.host;
+        host.ffi.call(host.freePointer, [pointer]);
+    };
+
     Records.prototype.suspendBufferPointersForSnapshot = function () {
         var records = this;
         var saved = [];
         this.heap.visitRecords(function (address, type) {
             if (type !== Heap.Types.BUFFER_BACKING) return;
             saved.push({address: address,
-                        pointer: records.bufferBackingPointer(address)});
+                        pointer: records.bufferBackingPointer(address),
+                        flags: records.heap.flags(address),
+                        length: records.bufferBackingLength(address)});
             records.setBufferBackingPointer(address, 0);
+            records.heap.setFlags(address, records.heap.flags(address) &
+                ~Heap.BufferBackingPolicy.EXTERNAL);
         });
         return saved;
     };
@@ -1577,9 +1619,73 @@
     Records.prototype.restoreBufferPointersAfterSnapshot = function (saved) {
         var index = 0;
         while (index < saved.length) {
-            this.setBufferBackingPointer(saved[index].address,
-                                         saved[index].pointer);
+            this.setBufferBackingPointer(saved[index].address, saved[index].pointer);
+            this.heap.setFlags(saved[index].address, saved[index].flags);
             index++;
+        }
+    };
+
+    /* Canonical files always contain inline bytes and no external ownership.
+     * Copy into the private snapshot, never relocate a live backing whose
+     * address may have escaped through FFI. Region snapshots retain ownership
+     * in-process and restore content to the same allocation. */
+    Records.prototype.copyExternalBufferDataToSnapshot = function (snapshot, saved, regions) {
+        var host = this.heap.memory.host;
+        if (!snapshot.isNative) return;
+        var index = 0;
+        while (index < saved.length) {
+            var backing = saved[index++];
+            if (!(backing.flags & Heap.BufferBackingPolicy.EXTERNAL)) continue;
+            var destination = backing.address;
+            if (regions) {
+                destination = -1;
+                for (var r = 0; r < regions.length; r++) {
+                    var region = regions[r];
+                    if (backing.address >= region.address && backing.address +
+                            Heap.HEADER_SIZE + BUFFER_BACKING_DATA + backing.length <=
+                            region.address + region.length) {
+                        destination = region.snapshotOffset + backing.address - region.address;
+                        break;
+                    }
+                }
+                if (destination < 0) continue;
+            }
+            var data = destination + Heap.HEADER_SIZE + BUFFER_BACKING_DATA;
+            host.ffi.call(host.memcpyPointer, [snapshot.pointer + data, backing.pointer, backing.length]);
+            var padding = (Heap.RECORD_ALIGNMENT - backing.length % Heap.RECORD_ALIGNMENT) % Heap.RECORD_ALIGNMENT;
+            if (padding) host.fillAllocationRange(snapshot, data + backing.length, padding, 0);
+        }
+    };
+
+    Records.prototype.externalBufferBackings = function (addresses) {
+        var result = [], records = this;
+        if (!this.heap.memory.allocation.isNative) return result;
+        function visit(address, type) {
+            if (type === Heap.Types.BUFFER_BACKING && records.bufferBackingIsExternal(address)) {
+                result.push({address: address, pointer: records.bufferBackingPointer(address),
+                    flags: records.heap.flags(address), length: records.bufferBackingLength(address)});
+            }
+        }
+        if (addresses) {
+            for (var index = 0; index < addresses.length; index++) {
+                visit(addresses[index], this.heap.recordType(addresses[index]));
+            }
+        } else this.heap.visitRecords(visit);
+        return result;
+    };
+
+    Records.prototype.restoreExternalBufferSnapshotContents = function (regions, addresses) {
+        var saved = this.externalBufferBackings(addresses), host = this.heap.memory.host;
+        for (var index = 0; index < saved.length; index++) {
+            var backing = saved[index];
+            var included = false;
+            for (var r = 0; r < regions.length; r++) {
+                if (backing.address >= regions[r].address && backing.address <
+                        regions[r].address + regions[r].length) included = true;
+            }
+            if (!included) continue;
+            host.ffi.call(host.memcpyPointer, [backing.pointer,
+                this.heap.memory.nativeAddress(this.bufferBackingDataAddress(backing.address)), backing.length]);
         }
     };
 
@@ -1613,6 +1719,9 @@
         if (offset < 0 || offset >= length) {
             throw new RangeError("Buffer index out of range");
         }
+        if (this.bufferBackingIsExternal(backing)) {
+            return this.heap.memory.host.ffi.peek8(this.bufferBackingPointer(backing) + offset);
+        }
         return this.heap.memory.readU8Trusted(
             this.bufferBackingDataAddress(backing) + offset);
     };
@@ -1622,6 +1731,10 @@
         if (offset < 0 || offset >= length) {
             throw new RangeError("Buffer index out of range");
         }
+        if (this.bufferBackingIsExternal(backing)) {
+            this.heap.memory.host.ffi.poke8(this.bufferBackingPointer(backing) + offset, value);
+            return;
+        }
         this.heap.memory.writeU8Trusted(
             this.bufferBackingDataAddress(backing) + offset, value);
     };
@@ -1630,6 +1743,9 @@
         if (offset < 0 || offset + 4 > this.bufferBackingLength(backing)) {
             throw new RangeError("Buffer read out of range");
         }
+        if (this.bufferBackingIsExternal(backing)) {
+            return this.heap.memory.host.ffi.peek32(this.bufferBackingPointer(backing) + offset) >>> 0;
+        }
         return this.heap.memory.readU32Trusted(
             this.bufferBackingDataAddress(backing) + offset);
     };
@@ -1637,6 +1753,10 @@
     Records.prototype.writeBufferU32LE = function (backing, offset, value) {
         if (offset < 0 || offset + 4 > this.bufferBackingLength(backing)) {
             throw new RangeError("Buffer write out of range");
+        }
+        if (this.bufferBackingIsExternal(backing)) {
+            this.heap.memory.host.ffi.poke32(this.bufferBackingPointer(backing) + offset, value);
+            return;
         }
         this.heap.memory.writeU32Trusted(
             this.bufferBackingDataAddress(backing) + offset, value);
@@ -2725,6 +2845,16 @@
     Records.prototype.platformMemsetPointerCellAddress = function (services) {
         this.heap.requireRecord(services, Heap.Types.PLATFORM_SERVICES);
         return this.heap.trustedPayloadAddress(services, PLATFORM_MEMSET_POINTER);
+    };
+
+    Records.prototype.setPlatformCallocPointer = function (services, pointer) {
+        this.heap.writeTrustedFieldU32(services, PLATFORM_CALLOC_POINTER,
+            pointer, Heap.Types.PLATFORM_SERVICES);
+    };
+
+    Records.prototype.platformCallocPointerCellAddress = function (services) {
+        return this.heap.trustedPayloadAddress(services, PLATFORM_CALLOC_POINTER,
+            4, Heap.Types.PLATFORM_SERVICES);
     };
 
     /* Native service addresses are process-local capabilities and must never

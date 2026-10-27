@@ -88,4 +88,23 @@ if ((89.456).toPrecision(3) !== "89.5") {
     throw new Error("Number.prototype.toPrecision failed");
 }
 
+function standaloneSourceRetention(value) {
+    /* source-retention-marker */
+    return value + 1;
+}
+if (standaloneSourceRetention.toString().indexOf("source-retention-marker") < 0 ||
+        standaloneSourceRetention(4) !== 5) {
+    throw new Error("function source or execution was lost");
+}
+var standaloneLargeBuffer = Buffer.alloc(1024 * 1024 + 3);
+standaloneLargeBuffer[0] = 65;
+standaloneLargeBuffer[standaloneLargeBuffer.length - 1] = 91;
+var standaloneLargeCopy = Buffer.from(standaloneLargeBuffer);
+standaloneLargeCopy[1] = 66;
+if (standaloneLargeCopy[standaloneLargeCopy.length - 1] !== 91 ||
+        standaloneLargeBuffer[1] !== 0 ||
+        standaloneLargeCopy.slice(0, 2).toString("ascii") !== "AB") {
+    throw new Error("large buffer copy/view contents or ownership are incorrect");
+}
+
 print("standalone integration: passed");

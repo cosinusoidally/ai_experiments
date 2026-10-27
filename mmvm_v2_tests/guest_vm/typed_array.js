@@ -247,6 +247,11 @@
         var length = this.viewLength(view);
         if (index < 0 || index >= length) return undefined;
         var description = this.description(view);
+        var records = this.runtime.heapRecords, backing = this.viewBacking(view);
+        if (records.bufferBackingIsExternal(backing)) {
+            return this.readExternal(records, backing,
+                this.viewOffset(view) + index * description.bytes, description.kind);
+        }
         var memory = this.runtime.linearHeap.memory;
         var address = this.dataAddress(view, index);
         if (description.kind === Kinds.UINT8) return memory.readU8Trusted(address);
@@ -273,6 +278,12 @@
         var length = this.viewLength(view);
         if (index < 0 || index >= length) return value;
         var description = this.description(view);
+        var records = this.runtime.heapRecords, backing = this.viewBacking(view);
+        if (records.bufferBackingIsExternal(backing)) {
+            this.writeExternal(records, backing, this.viewOffset(view) +
+                index * description.bytes, description.kind, Number(value));
+            return value;
+        }
         var memory = this.runtime.linearHeap.memory;
         var address = this.dataAddress(view, index);
         value = Number(value);
@@ -289,6 +300,41 @@
         } else if (description.kind === Kinds.FLOAT64) memory.writeF64(address, value);
         else memory.writeU32Trusted(address, Binary64.encode32(value));
         return value;
+    };
+
+    /* Embedding fallback only. Native guest execution uses the same backing
+     * pointer directly; Node's inline emulation remains unchanged. */
+    TypedArraySupport.prototype.readExternal = function (records, backing, offset, kind) {
+        if (kind === Kinds.UINT8 || kind === Kinds.INT8) {
+            var octet = records.readBufferByte(backing, offset);
+            return kind === Kinds.INT8 && (octet & 128) ? octet - 256 : octet;
+        }
+        if (kind === Kinds.UINT16 || kind === Kinds.INT16) {
+            var half = records.readBufferByte(backing, offset) |
+                (records.readBufferByte(backing, offset + 1) << 8);
+            return kind === Kinds.INT16 && (half & 32768) ? half - 65536 : half;
+        }
+        var low = records.readBufferU32LE(backing, offset);
+        if (kind === Kinds.INT32) return low | 0;
+        if (kind === Kinds.UINT32) return low;
+        if (kind === Kinds.FLOAT32) return Binary64.decode32(low);
+        return Binary64.decode(low, records.readBufferU32LE(backing, offset + 4));
+    };
+
+    TypedArraySupport.prototype.writeExternal = function (records, backing, offset, kind, value) {
+        if (kind === Kinds.UINT8 || kind === Kinds.INT8) {
+            records.writeBufferByte(backing, offset, value & 255);
+        } else if (kind === Kinds.UINT16 || kind === Kinds.INT16) {
+            records.writeBufferByte(backing, offset, value & 255);
+            records.writeBufferByte(backing, offset + 1, (value >>> 8) & 255);
+        } else if (kind === Kinds.FLOAT64) {
+            var words = Binary64.encode(value);
+            records.writeBufferU32LE(backing, offset, words.low);
+            records.writeBufferU32LE(backing, offset + 4, words.high);
+        } else {
+            records.writeBufferU32LE(backing, offset,
+                kind === Kinds.FLOAT32 ? Binary64.encode32(value) : value);
+        }
     };
 
     TypedArraySupport.prototype.copyElements = function (target, source, offsetValue) {

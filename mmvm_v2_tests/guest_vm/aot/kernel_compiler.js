@@ -714,7 +714,8 @@
         platformMallocPointer: "PLATFORM_MALLOC_POINTER",
         platformFreePointer: "PLATFORM_FREE_POINTER",
         platformSnprintfPointer: "PLATFORM_SNPRINTF_POINTER",
-        platformMemsetPointer: "PLATFORM_MEMSET_POINTER"
+        platformMemsetPointer: "PLATFORM_MEMSET_POINTER",
+        platformCallocPointer: "PLATFORM_CALLOC_POINTER"
     };
 
     var WRITE_FIELD_ACCESSORS = {

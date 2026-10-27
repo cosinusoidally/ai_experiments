@@ -206,18 +206,25 @@
          * running context. Two snapshots share the original backing while
          * repeated mutation grows/retires replacements across collection. */
         firstContext.run("var snapshotBag = {};" +
+            "var snapshotBytes = Buffer.alloc(1024 * 1024 + 3);" +
+            "snapshotBytes[0] = 19; snapshotBytes[snapshotBytes.length - 1] = 37;" +
             "for (var saved = 0; saved < 48; saved++) " +
             "snapshotBag['key' + saved] = {value: saved};",
             "saved_context_dictionary.js");
         var savedContextA = firstContext.createSnapshot();
         var savedContextB = firstContext.createSnapshot();
-        var mutateSavedContext = "for (var changed = 0; changed < 48; changed++) {" +
+        var mutateSavedContext = "snapshotBytes[0] = 77;" +
+            "snapshotBytes[snapshotBytes.length - 1] = 88;" +
+            "for (var changed = 0; changed < 48; changed++) {" +
             "delete snapshotBag['key' + changed];" +
             "snapshotBag['replacement' + changed] = {value: -changed};}";
         firstContext.run(mutateSavedContext, "mutated_context_dictionary.js");
         firstRuntime.collect();
         firstContext.restoreSnapshot(savedContextA);
-        firstContext.run("if (snapshotBag.key7.value !== 7 || " +
+        firstContext.run("if (snapshotBytes[0] !== 19 || " +
+            "snapshotBytes[snapshotBytes.length - 1] !== 37 || snapshotBytes[12345] !== 0) " +
+            "throw new Error('saved backing bytes were not restored');" +
+            "if (snapshotBag.key7.value !== 7 || " +
             "Object.keys(snapshotBag).join(',') !== " +
             "(function () {var names = []; for (var n = 0; n < 48; n++) " +
             "names.push('key' + n); return names.join(',');}())) " +
@@ -227,10 +234,43 @@
         firstContext.run(mutateSavedContext, "second_context_mutation.js");
         firstRuntime.collect();
         firstContext.restoreSnapshot(savedContextB);
-        firstContext.run("if (snapshotBag.key47.value !== 47) " +
+        firstContext.run("if (snapshotBytes[0] !== 19 || " +
+            "snapshotBytes[snapshotBytes.length - 1] !== 37) " +
+            "throw new Error('remaining snapshot lost backing contents');" +
+            "if (snapshotBag.key47.value !== 47) " +
             "throw new Error('remaining snapshot lost its backing');",
             "remaining_context_snapshot.js");
         firstRuntime.runtime.destroyHeapStateSnapshot(savedContextB.heapState);
+
+        /* A portable file image uses canonical inline bytes, without moving
+         * or changing ownership of the live backing. Check the same conversion
+         * used by standalone snapshot output, including an odd byte length. */
+        var records = firstRuntime.runtime.heapRecords;
+        var heap = firstRuntime.runtime.linearHeap, memory = heap.memory;
+        var savedBytes = firstRuntime.runtime.getGlobal(firstContext, "snapshotBytes");
+        var backing = firstRuntime.runtime.bufferSupport.viewBacking(savedBytes);
+        var livePointer = records.bufferBackingPointer(backing);
+        var savedPointers = records.suspendBufferPointersForSnapshot();
+        var image = null;
+        try {
+            image = memory.createSnapshot(heap.bump);
+            records.copyExternalBufferDataToSnapshot(image, savedPointers);
+            var dataAddress = records.bufferBackingDataAddress(backing);
+            assert(memory.host.read8(image, dataAddress) === 19 &&
+                   memory.host.read8(image, dataAddress + 1024 * 1024 + 2) === 37 &&
+                   memory.host.read8(image, dataAddress + 1024 * 1024 + 3) === 0,
+                   "portable snapshot lost large backing contents");
+            assert(memory.host.read32LE(image, backing + heap.constructor.HeaderFields.FLAGS) === 0,
+                   "portable snapshot retained external ownership");
+            assert(memory.host.read32LE(image, backing +
+                records.standaloneBufferRebindLayout().bufferPointer) === 0,
+                "portable snapshot retained a process-local buffer pointer");
+        } finally {
+            records.restoreBufferPointersAfterSnapshot(savedPointers);
+            if (image) memory.destroySnapshot(image);
+        }
+        assert(records.bufferBackingPointer(backing) === livePointer,
+               "snapshot conversion relocated the live buffer");
 
         firstRuntime.destroy();
         otherRuntime.destroy();

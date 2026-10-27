@@ -3,6 +3,7 @@
 (function () {
     var slots = [], slotCount = 8, rounds = 24;
     var bufferBytes = 128, transientGraphs = 12;
+    var largeView = null, largeSeed = 0, largeBytes = 1024 * 1024 + 32;
     var initialCollections = typeof __guestVMGCStress === "function" ?
         __guestVMGCStress() : 0;
     if (typeof __guestVMGCStress === "function") __guestVMGCStress(50000);
@@ -90,6 +91,20 @@
         }
     }
     for (var round = 0; round < rounds; round++) {
+        /* Exercise separately owned large data, shared views, zeroing on
+         * replacement and collection of old backings without a large live
+         * set. Only the small view retains each ArrayBuffer. */
+        if (round % 6 === 0) {
+            if (round % 12 === 0) {
+                largeView = new Uint8Array(new ArrayBuffer(largeBytes)).subarray(16, 32);
+            } else largeView = Buffer.alloc(largeBytes).slice(16, 32);
+            if (largeView[0] !== 0 || largeView[15] !== 0) {
+                throw new Error("GC stress: large backing was not zero initialized");
+            }
+            largeSeed = round + 1;
+            largeView[0] = largeSeed;
+            largeView[15] = largeSeed + 7;
+        }
         slots[round % slotCount] = makeGraph(round);
         for (var discarded = 0; discarded < transientGraphs; discarded++) {
             makeGraph(1000 + round * transientGraphs + discarded);
@@ -115,8 +130,13 @@
         }
         current.dictionary["field-7"] = current.seed + 21;
         for (var slot = 0; slot < slots.length; slot++) checkGraph(slots[slot]);
+        if (largeView[0] !== largeSeed || largeView[15] !== largeSeed + 7 ||
+                largeView[1] !== 0) {
+            throw new Error("GC stress: orphan large view lost its backing");
+        }
     }
     slots = null;
+    largeView = null;
     if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(rounds);
     var collections = typeof __guestVMGCStress === "function" ?
         __guestVMGCStress() - initialCollections : 0;
