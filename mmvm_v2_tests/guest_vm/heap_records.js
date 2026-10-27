@@ -1674,16 +1674,10 @@
         return result;
     };
 
-    Records.prototype.restoreExternalBufferSnapshotContents = function (regions, addresses) {
-        var saved = this.externalBufferBackings(addresses), host = this.heap.memory.host;
+    Records.prototype.restoreExternalBufferSnapshotContents = function (saved) {
+        var host = this.heap.memory.host;
         for (var index = 0; index < saved.length; index++) {
             var backing = saved[index];
-            var included = false;
-            for (var r = 0; r < regions.length; r++) {
-                if (backing.address >= regions[r].address && backing.address <
-                        regions[r].address + regions[r].length) included = true;
-            }
-            if (!included) continue;
             host.ffi.call(host.memcpyPointer, [backing.pointer,
                 this.heap.memory.nativeAddress(this.bufferBackingDataAddress(backing.address)), backing.length]);
         }

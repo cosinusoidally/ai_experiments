@@ -1889,16 +1889,18 @@
                     arrayStructureVersion: handle.arrayStructureVersion});
             }
         }
+        var externalBackings = this.heapRecords.externalBufferBackings(addresses);
         var snapshotMemory = this.linearHeap.memory.createRegionSnapshot(regions);
         try {
             this.heapRecords.copyExternalBufferDataToSnapshot(snapshotMemory,
-                this.heapRecords.externalBufferBackings(addresses), regions);
+                externalBackings, regions);
         } catch (error) {
             this.linearHeap.memory.destroySnapshot(snapshotMemory);
             throw error;
         }
         var snapshot = {
             memory: snapshotMemory,
+            externalBackings: externalBackings,
             regions: regions, addresses: addresses,
             roots: addresses.concat(immutableRoots),
             handles: handles, pinnedPropertyRecords: pinnedPropertyRecords,
@@ -1917,7 +1919,7 @@
         }
         this.linearHeap.memory.restoreRegionSnapshot(
             snapshot.memory, snapshot.regions);
-        this.heapRecords.restoreExternalBufferSnapshotContents(snapshot.regions, snapshot.addresses);
+        this.heapRecords.restoreExternalBufferSnapshotContents(snapshot.externalBackings);
         /* Storage epochs and GC marks have rolled back. They cannot guard
          * weak views captured on the abandoned execution timeline. This also
          * covers handles first adopted after the snapshot was created. */
@@ -1942,6 +1944,7 @@
         if (!snapshot || snapshot.destroyed) return;
         this.linearHeap.memory.destroySnapshot(snapshot.memory);
         snapshot.memory = null;
+        snapshot.externalBackings = null;
         snapshot.destroyed = true;
         var retainedPins = {};
         var snapshotIndex = 0;

@@ -909,8 +909,11 @@ large live backing still includes its full bytes, just as it did before.
 In-process context snapshots retain the original backing as a GC root and
 save/restore its contents at the same external address. Such snapshots can
 temporarily increase RSS through their private copies; they are not part of
-the normal benchmark execution path. They inspect only the retained address
-list, not an extra full-heap scan per context restore.
+the normal benchmark execution path. Creation captures the external-backing
+list from retained addresses. Those records remain rooted and their pointers
+stay stable until the snapshot is destroyed, so restoration visits only that
+list. A snapshot with no external backings performs no backing-discovery scan
+on restore.
 
 Native contract 62 invalidates old compiled kernels. The calloc service uses
 the platform-services record's previously reserved final word. No thread,

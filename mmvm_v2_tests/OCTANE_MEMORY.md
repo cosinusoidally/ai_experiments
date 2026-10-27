@@ -130,3 +130,11 @@ the record again for the inline case. Record type/lifetime and byte bounds
 checks remain in place. Node uses its original logical heap addressing.
 Ownership flags remain a GC/serialization concern. Both project suites pass
 after this access-path simplification; standalone kernel code is unchanged.
+
+Context snapshot ownership discovery is now done once at creation and retained
+with the snapshot. Restore visits only that captured list; snapshots without
+external backings do no discovery work. Backing addresses and lengths remain
+stable while the snapshot roots own them. Destruction releases the captured
+metadata along with the private byte copy. This avoids adding a retained-record
+scan to every context restore. The Node project suite and native embedding
+context/snapshot integration pass after this change.
