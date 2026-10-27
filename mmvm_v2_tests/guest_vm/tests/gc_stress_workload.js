@@ -19,6 +19,13 @@
             values: [seed, seed + 0.25, -seed], wide: "\u0100\ud800" + seed};
         root.self = root;
         root.child = {parent: root, shared: root.values};
+        /* Exercise retained capacity and discarded references across the
+         * same collections as the rest of the graph, including regrowth. */
+        root.history = new Array(32);
+        root.history.length = 0;
+        root.history.push(seed, {discarded: root.child});
+        root.history.length = 1;
+        root.history.length = 3;
         root.dictionary = {};
         for (index = 0; index < 48; index++) {
             root.dictionary["field-" + index] = seed + index * 3;
@@ -45,6 +52,10 @@
             if (root.bytes[index] !== bytePattern(root.seed, index)) {
                 throw new Error("GC stress: corrupt Buffer at seed " + root.seed + ", byte " + index);
             }
+        }
+        if (root.history.length !== 3 || root.history[0] !== root.seed ||
+                1 in root.history || 2 in root.history) {
+            throw new Error("GC stress: array truncation/regrowth resurrected an element");
         }
         var seen = 0, expected = 0, name;
         for (name in root.dictionary) {

@@ -4560,6 +4560,18 @@
                 var setPropertyConstantKey = load32(
                     setPropertyKeyCell + VALUE_CELL_LOW);
                 var setPropertyIgnored = 0;
+                if (setPropertyObjectType === HEAP_TYPE_ARRAY &&
+                        stringKeysEqualKernel(heapBase, setPropertyConstantKey,
+                            arrayLengthKey) === 1) {
+                    if (setArrayLengthKernel(heapBase, state, setPropertyObject,
+                            frameRegisterCellAddress(heapBase, frame,
+                                setPropertySourceIndex)) === 0) {
+                        return unsupportedExitKernel(heapBase, state, frame,
+                            pc, opcode, initialBudget - budget);
+                    }
+                    pc = pc + FOUR_WORD_INSTRUCTION;
+                    setPropertyIgnored = 1;
+                }
                 /* A string primitive's length is a non-writable own
                  * property. Sloppy PutValue ignores the write; strict code
                  * takes the exception path rather than mutating the string. */
@@ -7889,6 +7901,39 @@
         }
         setArrayElements(heapBase, array, grownVector);
         setEngineHeapBump(heapBase, state, grownVector + grownBytes);
+        return 1;
+    }
+
+    /* Plain dense arrays have an implicit writable length. Descriptor-bearing
+     * arrays require the full property algorithm rather than silently storing
+     * a shadow property which the indexed-array reader would ignore. */
+    function setArrayLengthKernel(heapBase, state, array, source) {
+        if (arrayReserved(heapBase, array) !== 0) return 0;
+        if (lastOwnPropertyEntryKernel(heapBase, array) !== 0) return 0;
+        var tag = valueCellTag(0, source);
+        var length = 0;
+        if (tag === VALUE_TAG_INT32) {
+            length = valueCellInt32(0, source);
+        } else if (tag === VALUE_TAG_DOUBLE) {
+            length = toInt32F64(loadF64(source + VALUE_CELL_LOW));
+            setEngineScratchLeft(heapBase, state, length);
+            if (equalF64(loadF64(source + VALUE_CELL_LOW),
+                    loadI32F64(engineScratchLeftAddress(heapBase, state))) === 0) return 0;
+        } else if (tag === VALUE_TAG_TRUE) {
+            length = 1;
+        } else if (tag !== VALUE_TAG_FALSE && tag !== VALUE_TAG_NULL) return 0;
+        if (length < 0 || length > MAX_VECTOR_LENGTH) return 0;
+        if (ensureArrayCapacityKernel(heapBase, state, array, length) === 0) return 0;
+        var vector = arrayElements(heapBase, array);
+        var previousLength = vectorLength(heapBase, vector);
+        var first = previousLength;
+        var end = length;
+        if (length < previousLength) {
+            first = length;
+            end = previousLength;
+        }
+        var cleared = clearAbsentValueCellsKernel(heapBase, vector, first, end);
+        setVectorLength(heapBase, vector, length);
         return 1;
     }
 
@@ -17633,6 +17678,7 @@
             computeStringKeyHashKernel: computeStringKeyHashKernel,
             stringHashStep: HeapRecords.stringHashStep,
             clearAbsentValueCellsKernel: clearAbsentValueCellsKernel,
+            setArrayLengthKernel: setArrayLengthKernel,
             concatenateStringsKernel: concatenateStringsKernel,
             heapMarkKernel: heapMarkKernel,
             heapSweepKernel: heapSweepKernel,
