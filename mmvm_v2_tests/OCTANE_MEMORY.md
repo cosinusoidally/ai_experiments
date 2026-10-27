@@ -122,3 +122,11 @@ The mixed workload's instrumented audit then passes with 75 collections,
 8 MiB cap. The Node project suite also passes after the boundary correction.
 This is an embedding boundary correction, not a new host language-service
 dependency or a workaround recognizing a benchmark.
+
+Both native inline and external backings already carry the authoritative
+native data pointer. Embedding byte/word access now uses that pointer for
+both, rather than testing ownership flags on every access and then validating
+the record again for the inline case. Record type/lifetime and byte bounds
+checks remain in place. Node uses its original logical heap addressing.
+Ownership flags remain a GC/serialization concern. Both project suites pass
+after this access-path simplification; standalone kernel code is unchanged.

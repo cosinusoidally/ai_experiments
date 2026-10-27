@@ -1719,11 +1719,11 @@
         if (offset < 0 || offset >= length) {
             throw new RangeError("Buffer index out of range");
         }
-        if (this.bufferBackingIsExternal(backing)) {
+        var inlineAddress = this.bufferBackingDataAddress(backing);
+        if (this.heap.memory.allocation && this.heap.memory.allocation.isNative) {
             return this.heap.memory.host.ffi.peek8(this.bufferBackingPointer(backing) + offset);
         }
-        return this.heap.memory.readU8Trusted(
-            this.bufferBackingDataAddress(backing) + offset);
+        return this.heap.memory.readU8Trusted(inlineAddress + offset);
     };
 
     Records.prototype.writeBufferByte = function (backing, offset, value) {
@@ -1731,35 +1731,35 @@
         if (offset < 0 || offset >= length) {
             throw new RangeError("Buffer index out of range");
         }
-        if (this.bufferBackingIsExternal(backing)) {
+        var inlineAddress = this.bufferBackingDataAddress(backing);
+        if (this.heap.memory.allocation && this.heap.memory.allocation.isNative) {
             this.heap.memory.host.ffi.poke8(this.bufferBackingPointer(backing) + offset, value);
             return;
         }
-        this.heap.memory.writeU8Trusted(
-            this.bufferBackingDataAddress(backing) + offset, value);
+        this.heap.memory.writeU8Trusted(inlineAddress + offset, value);
     };
 
     Records.prototype.readBufferU32LE = function (backing, offset) {
         if (offset < 0 || offset + 4 > this.bufferBackingLength(backing)) {
             throw new RangeError("Buffer read out of range");
         }
-        if (this.bufferBackingIsExternal(backing)) {
+        var inlineAddress = this.bufferBackingDataAddress(backing);
+        if (this.heap.memory.allocation && this.heap.memory.allocation.isNative) {
             return this.heap.memory.host.ffi.peek32(this.bufferBackingPointer(backing) + offset) >>> 0;
         }
-        return this.heap.memory.readU32Trusted(
-            this.bufferBackingDataAddress(backing) + offset);
+        return this.heap.memory.readU32Trusted(inlineAddress + offset);
     };
 
     Records.prototype.writeBufferU32LE = function (backing, offset, value) {
         if (offset < 0 || offset + 4 > this.bufferBackingLength(backing)) {
             throw new RangeError("Buffer write out of range");
         }
-        if (this.bufferBackingIsExternal(backing)) {
+        var inlineAddress = this.bufferBackingDataAddress(backing);
+        if (this.heap.memory.allocation && this.heap.memory.allocation.isNative) {
             this.heap.memory.host.ffi.poke32(this.bufferBackingPointer(backing) + offset, value);
             return;
         }
-        this.heap.memory.writeU32Trusted(
-            this.bufferBackingDataAddress(backing) + offset, value);
+        this.heap.memory.writeU32Trusted(inlineAddress + offset, value);
     };
 
     Records.prototype.functionClosure = function (address) {
