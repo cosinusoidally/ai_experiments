@@ -12,11 +12,9 @@
 
     function verify(program) {
         var code = program.code;
-        var boundaries = {};
         var jumps = [];
         var pc = 0;
         while (pc < code.length) {
-            boundaries[pc] = true;
             var opcode = code[pc];
             var width = op.WIDTHS[opcode];
             if (!width) throw new Error("invalid opcode " + opcode + " at bytecode " + pc);
@@ -138,9 +136,16 @@
             pc += width;
         }
         if (pc !== code.length) throw new Error("bytecode has trailing partial instruction");
+        /* Validate the relatively small set of edges against a second linear
+         * instruction walk. A property per instruction wastes substantial
+         * space on large straight-line initializers and is unnecessary. */
+        jumps.sort(function (left, right) { return left - right; });
+        pc = 0;
         var index = 0;
         while (index < jumps.length) {
-            if (!boundaries[jumps[index]]) {
+            var target = jumps[index];
+            while (pc < target && pc < code.length) pc += op.WIDTHS[code[pc]];
+            if (pc !== target || pc >= code.length) {
                 throw new Error("jump target is not an instruction boundary: " + jumps[index]);
             }
             index++;
