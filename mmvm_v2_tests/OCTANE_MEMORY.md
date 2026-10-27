@@ -109,3 +109,16 @@ and property capacity totals only about 4 MiB at those points. Prioritize
 numeric/control-flow working representations and overlapping lifetimes over
 blanket growth-factor changes or dropping retained source. The remaining
 resident free pages cannot be eliminated merely by another mark/sweep pass.
+
+The final workload alternates large Buffer slices and typed-array subarrays.
+This exposed a pre-existing pending-host-call synchronization error: a call
+that had yielded to the embedder had not produced its result yet, but the
+fallback synchronizer spilled a stale host-side destination handle. Additional
+collections made that old handle refer to a freed view. Pending calls now
+leave the destination authoritative in the heap until `completeHostCall`
+publishes the result, just as scheduled bytecode callees already did.
+The mixed workload's instrumented audit then passes with 75 collections,
+27 audits, 72,746 checked edges and maximum bump 4,516,168 bytes within the
+8 MiB cap. The Node project suite also passes after the boundary correction.
+This is an embedding boundary correction, not a new host language-service
+dependency or a workaround recognizing a benchmark.

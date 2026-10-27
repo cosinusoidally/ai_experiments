@@ -230,9 +230,15 @@
          * register would copy a stale value over the authoritative heap slot.
          * Stale handles are expected after native execution and may already
          * name records reclaimed by GC.  Synchronous semantic operations keep
-         * this frame on top and still publish their completed destination. */
+         * this frame on top and still publish their completed destination.
+         * An embedder call also suspends before producing its result, but
+         * keeps the caller on top. Do not publish that stale destination
+         * while the host request is pending either. completeHostCall owns it. */
+        var pendingResult = this.pendingHostCall &&
+            this.pendingHostCall.frame === frame &&
+            this.pendingHostCall.destination === frame.code[pc + 1];
         if (this.fallbackHasDestination(opcode) &&
-            this.frames[this.frames.length - 1] === frame) {
+            this.frames[this.frames.length - 1] === frame && !pendingResult) {
             this.runtime.spillFrameRegister(frame, frame.code[pc + 1]);
         }
         frame.nativeHeapCurrent = true;

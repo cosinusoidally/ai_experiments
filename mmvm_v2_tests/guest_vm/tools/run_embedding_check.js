@@ -1,6 +1,7 @@
 /* Run an existing embedding integration check with a full bootstrap stack.
  * js_min.exe guest_vm/tools/run_embedding_check.js FILE GLOBAL_EXPORT
  * node guest_vm/tools/run_embedding_check.js FILE
+ * Pass --script as the second argument for an auto-running check script.
  * FILE is relative to the suite working directory; no new test expectations. */
 (function (root, shellArguments) {
     var node = typeof module !== "undefined" && module.exports;
@@ -17,6 +18,7 @@
             VM = GuestVM;
             check = root[args[1]];
         }
+        if (args[1] === "--script") return;
         if (typeof check !== "function") throw new Error("check export is not callable");
         output(check(VM));
     } catch (error) {
