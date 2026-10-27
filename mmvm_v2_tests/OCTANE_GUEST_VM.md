@@ -2,9 +2,24 @@
 
 ## Objective
 
+### 2026-10-27: complete current standalone stock sweep
+
+The fresh 14-suite `js_runner` sweep is complete: **10 passed, four failed,
+zero timed out, zero crashed**. RegExp remains excluded at the user's request.
+Current scores are Richards 99.5, DeltaBlue 90.3, Crypto 183, RayTrace 234,
+EarleyBoyer 442, Splay 703 (combined throughput/latency), NavierStokes 272,
+Gameboy 995, Box2D 311 and zlib 560. PdfJS, Mandreel, CodeLoad and Typescript
+still fail without scores. All eight suites that passed the October 22 stock
+sweep still pass, plus Box2D and Gameboy. Full timings, image identity and
+failure diagnostics are recorded in
+[OCTANE_SCORES_2026-10-27.md](OCTANE_SCORES_2026-10-27.md).
+No Node comparison was rerun. The following milestone text retains the
+earlier individual measurements and regression checks as history.
+
 ### 2026-10-27: Box2D and Gameboy stock passes
 
-The October 22 stock results below remain the last complete stock sweep.
+Before the complete sweep above, the October 22 stock results were the last
+complete stock sweep.
 Box2D now completes both unchanged standalone quick correctness and a full
 stock run: **score 315, 18.47 s elapsed, 143,872 KiB peak RSS**. This follows
 native configurable accessor-descriptor updates, numeric `parseInt`, unary
@@ -103,7 +118,7 @@ Post-reboot recheck (2026-10-27, source revision `713cfbe`):
   then genuinely recompiles under the standalone image and compares that
   output byte-for-byte. All comparisons pass. Tests ran serially.
 
-Latest complete stock comparison:
+Latest paired stock comparison (historical Node baseline):
 [2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
 Including the two follow-up passes above, ten of the 14 requested suites now
 have confirmed standalone stock passes. PdfJS, Mandreel, CodeLoad and
