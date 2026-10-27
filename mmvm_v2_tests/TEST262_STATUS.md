@@ -46,11 +46,25 @@ improvement over a larger one.
 
 ### Complete ES5.1 suite — 3,292 files
 
-- Latest complete authored-program checkpoint (2026-10-26, packed-object
-  cutover): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
+- Latest complete authored-program checkpoint (2026-10-27, Box2D/Gameboy
+  bring-up): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
   instruction-budget timeouts are included in failures. See the dated
   packed-object entries below. Historical synthetic-variant results are
   retained separately and are not the current conformance totals.
+
+- 2026-10-27, approximately 09:53 UTC, revision `70ff17d`:
+  `js_min.exe guest_runner.js --vm-native test262_runner.js --quiet
+  --instruction-limit 20000`. All 3,292 authored variants executed:
+  **3,139 passed, 153 failed, 0 not run; 6 timeouts included in failures**.
+  Elapsed 415.93 s; user CPU 410.42 s; peak RSS 276,372 KiB. The totals
+  match the preceding checkpoint. The fresh serial control run of `81d1545`
+  completed around 10:02 UTC with the same totals, in 423.15 s (user CPU
+  421.66 s; peak RSS 274,540 KiB). Sorted failing IDs and strict/sloppy
+  variants compare byte-for-byte: **153 unchanged failures, zero new failures,
+  zero newly passing cases**. These are single-run regression measurements,
+  not a statistically established speedup. No corpus
+  files or expectations were changed. JSON tests are a separate selected
+  integration check, since this Test262 import has no chapter 15.12.
 
 - 2026-09-12, revision `381a345`, 20,000-instruction diagnostic allowance:
   all 3,292 files and 5,765 variants were executed; 4,856 passed, 909 failed,

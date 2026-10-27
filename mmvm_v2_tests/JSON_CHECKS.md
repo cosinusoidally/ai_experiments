@@ -38,7 +38,8 @@ The default selection is 12 modest JSON integration files from the read-only
 `../../js_tests/tests/ecma_5/JSON` directory: primitives and nested data,
 invalid numeric/octal syntax, truncated arrays/objects/escapes, trailing
 commas, control characters, escaping, omitted elements and missing arguments.
-Stock Node and our codec each pass **908 assertions** in those files.
+Stock Node, our codec in Node, the js_min-hosted guest and the standalone
+image each pass **908 assertions** in those files.
 This is a selected subset, not a claim that all 36 external test files pass.
 The multi-million-element stress test and optional JSON-feature tests are
 not part of this milestone. Individual external filenames may be supplied

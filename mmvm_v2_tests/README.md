@@ -322,6 +322,16 @@ image. The default test remains usable without Node:
 guest_vm/tests/run_standalone_snapshot_test.sh both
 ```
 
+### Everyday JSON integration checks
+
+`./artifacts/js_runner.exe artifacts/snap json_runner.js` runs a bounded
+selection of unchanged external JSON tests. The same checks run with
+`../../mmvm_v2/artifacts/js_min.exe guest_runner.js json_runner.js` when
+`LD_LIBRARY_PATH` points to the Firefox libraries as above. Node is optional:
+`node json_runner.js --reference` uses stock Node JSON as a black-box control,
+while `node json_runner.js` checks our codec. See [JSON_CHECKS.md](JSON_CHECKS.md)
+for the selected coverage, remaining limitations and harness details.
+
 ### libc-only static web server
 
 `net.js` uses only libc through the MMVM FFI for its network and filesystem

@@ -9,8 +9,8 @@ Box2D now completes both unchanged standalone quick correctness and a full
 stock run: **score 315, 18.47 s elapsed, 143,872 KiB peak RSS**. This follows
 native configurable accessor-descriptor updates, numeric `parseInt`, unary
 numeric conversion and guarded default object relational conversion were
-implemented. Final-image stock checks report **Box2D 317, 18.44 s,
-133,888 KiB peak RSS**, and **Gameboy 1063, 15.00 s, 116,992 KiB peak RSS**,
+implemented. Final-image stock checks report **Box2D 316, 18.45 s,
+134,016 KiB peak RSS**, and **Gameboy 1060, 15.03 s, 116,864 KiB peak RSS**,
 including Gameboy's unchanged processor-state comparison. The preceding
 Gameboy run scored 1042 in 15.50 s; these single-run differences are not
 presented as an optimization result.
@@ -48,12 +48,46 @@ previous standalone Octane passes also pass quick correctness again; zlib took
 claim). The final image repeats all eight quick passes (zlib 43.84 s) and
 passes 24 bounded GC rounds with 47 automatic native collections. The 12
 selected external JSON files pass 908 assertions under stock Node, our codec
-in Node, and standalone execution; see [JSON_CHECKS.md](JSON_CHECKS.md).
-The js_min project/CLI/context checks passed in 145.63 s before the final
-JSON adapter change; final broader regression validation is still in progress. Executable
+in Node, the js_min-hosted guest, and standalone execution; see
+[JSON_CHECKS.md](JSON_CHECKS.md).
+The js_min project/CLI/context checks passed in 142.75 s. Executable
 contract 61 is independent of bytecode-layout contract 60, so native kernel
 changes can invalidate old images without changing the layout version or
 fingerprinting sources at load time.
+
+Final regression checkpoint (2026-10-27):
+
+- The complete Test262 authored-program run reports **3,139 pass, 153 fail,
+  zero not run**. A serial control run of revision `81d1545` has exactly the
+  same failing IDs and strict/sloppy variants, not merely matching totals.
+  See [TEST262_STATUS.md](TEST262_STATUS.md) for timings and known limitations.
+- Node and js_min project suites pass 270 guest assertions. The final lexical
+  constant cleanup preserves all 395,307 native interpreter machine-code bytes;
+  Node checks, both stock benchmarks, bounded standalone GC and compiler
+  dependency integration were repeated after that cleanup.
+- Node, js_min and genuine self-hosted builds produce byte-identical images.
+  The final js_min build took 89.20 s and the self-hosted build 88.30 s.
+  Self-hosting really recompiles the sources; it does not copy the input image.
+- The bounded embedding GC check completes 24 rounds, 67 collections and 27
+  structural audits, including 221 property-index audits. The standalone check
+  completes 24 rounds and 47 collections. An independent reachable-heap audit
+  finds 29,069 records and zero missing marks.
+- Demos 1 through 7 were exercised in live X11 windows. Demo8 was exercised in
+  garage and auto-drive modes, with screenshots inspected, followed by a clean
+  menu exit. These are bounded integration checks, not long-duration stability
+  or sustained-20-FPS claims: observed garage/auto-drive periods were about
+  16.9/19.0 FPS at 320x240.
+- Both libc `net.js` and `node_web.js` serve text, byte-identical binary data,
+  directory listings and default index files through the standalone image.
+  Native-compiler dependency checks pass under Node, raw js_min and standalone
+  guest execution. Demo and external test sources remain unchanged.
+
+The full js_min suite, Test262 comparison and GUI checks preceded the final
+lexical-only kernel cleanup; the unchanged emitted interpreter bytes and the
+repeated checks above distinguish that cleanup from a fresh full-suite rerun.
+Measurements are serial, single-run observations, not statistical performance
+claims. JSON remains deliberately bounded rather than a claim of complete
+ES5.1 JSON conformance.
 
 Latest complete stock comparison:
 [2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
