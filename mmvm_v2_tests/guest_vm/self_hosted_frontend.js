@@ -24,13 +24,14 @@ exports.parse = function (source, filename) {
         {compactLiterals: true}).parseProgram();
 };
 
-exports.compileAst = function (ast) {
+exports.compileAst = function (ast, consumeAst) {
     ensureFrontend();
-    return selfHostedVerify(new SelfHostedCompiler().compile(ast));
+    return selfHostedVerify(new SelfHostedCompiler(null, null, false,
+        {consumeAst: !!consumeAst}).compile(ast));
 };
 
 exports.compile = function (source, filename) {
-    return exports.compileAst(exports.parse(source, filename));
+    return exports.compileAst(exports.parse(source, filename), true);
 };
 
 function adoptProgramDescriptor(program, contextAnchor) {
@@ -133,6 +134,9 @@ exports.compileExecutable = function (source, filename, contextAnchor,
     var program = exports.compile(source, filename);
     var executable = adoptProgramDescriptor(program, contextAnchor);
     var globalDeclarations = program.globalDeclarations || [];
+    /* The returned closure needs the adopted callable and declaration names,
+     * not the compiler's temporary descriptor graph and numeric builders. */
+    program = null;
     return function () {
         /* Adopted programs enter as guest bytecode calls rather than through
          * JSContext.startProgram. Reproduce global declaration
@@ -186,5 +190,38 @@ exports.installEvalCompiler = function (frontend) {
         throw new Error("self-hosted eval installation is unavailable");
     }
     __guestVMInstallEvalCompiler(exports.compileEvalExecutable,
-                                 exports.compileIndirectEvalExecutable);
+                                 exports.compileIndirectEvalExecutable,
+                                 exports.compileFunctionExecutable);
+};
+
+/* Ordinary Function-constructor arguments, including their observable
+ * left-to-right ToString conversions. The parser/compiler run as guest code;
+ * adoption returns a callable without executing its body. */
+exports.compileFunctionExecutable = function () {
+    ensureFrontend();
+    var parameters = [];
+    var index = 0;
+    while (index + 1 < arguments.length) {
+        parameters.push(String(arguments[index++]));
+    }
+    var body = arguments.length ? String(arguments[arguments.length - 1]) : "";
+    var parameterSource = parameters.join(",");
+    /* Validate the parameter grammar separately so a closing parenthesis in
+     * an argument cannot inject a body into the combined source. */
+    var parameterAst = new SelfHostedParser("function anonymous(" + parameterSource + "\n) {}",
+        "<Function>", {compactLiterals: true}).parseProgram();
+    if (parameterAst.body.length !== 1 ||
+            parameterAst.body[0].type !== "FunctionDeclaration" ||
+            parameterAst.body[0].body.body.length !== 0) {
+        throw new SyntaxError("invalid Function constructor parameters");
+    }
+    var source = "function anonymous(" + parameterSource + "\n) {\n" + body + "\n}";
+    var ast = new SelfHostedParser(source, "<Function>",
+        {compactLiterals: true}).parseProgram();
+    if (ast.body.length !== 1 || ast.body[0].type !== "FunctionDeclaration") {
+        throw new SyntaxError("invalid Function constructor source");
+    }
+    var compiler = new SelfHostedCompiler(null, null, false, {consumeAst: true});
+    compiler.filename = "<Function>";
+    return adoptProgramDescriptor(selfHostedVerify(compiler.compileFunction(ast.body[0])));
 };

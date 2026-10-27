@@ -146,7 +146,10 @@
             "load(\"node_compat/http.js\");",
             "var GuestStandaloneFrontend = require(" +
                 "\"./guest_vm/self_hosted_frontend.js\");",
-            "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);"
+            "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);",
+            "var GuestStandaloneJSON = GuestVMJSONSupport.forValues();",
+            "JSON.parse = function (text) { return GuestStandaloneJSON.parse(String(text)); };",
+            "JSON.stringify = function (value) { return GuestStandaloneJSON.stringify(value); };"
         ].join("\n"), "<standalone-runtime-bootstrap>");
     };
 

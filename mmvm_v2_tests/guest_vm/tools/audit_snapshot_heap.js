@@ -29,6 +29,9 @@
         args = shellArguments;
         output = print;
     }
+    var inspectFrame = args[0] === "--heap-frame";
+    var frameAddress = inspectFrame ? Number(args[1]) : 0;
+    if (inspectFrame) args = args.slice(2);
     var inspectString = args[0] === "--string";
     var shareBackings = args[0] === "--share-backings";
     if (shareBackings) {
@@ -44,9 +47,9 @@
     var propertiesOnly = args[0] === "--heap-properties";
     var snapshotStatistics = args[0] === "--snapshot-stats";
     var statisticsOnly = args[0] === "--heap-stats" || propertiesOnly || snapshotStatistics;
-    var rawHeap = statisticsOnly && !snapshotStatistics;
+    var rawHeap = inspectFrame || (statisticsOnly && !snapshotStatistics);
     if (statisticsOnly) args = args.slice(1);
-    var inspectionOnly = statisticsOnly || inspectString || inspectSources || inspectSharing || inspectMetadata;
+    var inspectionOnly = inspectFrame || statisticsOnly || inspectString || inspectSources || inspectSharing || inspectMetadata;
     if (!args.length) {
         throw new Error("usage: audit_snapshot_heap.js snapshot | " +
                         "--snapshot-stats snapshot | " +
@@ -54,6 +57,7 @@
                         "--string-sharing snapshot | " +
                         "--share-backings snapshot | " +
                         "--metadata-sharing snapshot | " +
+                        "--heap-frame ADDRESS raw-heap-dump | " +
                         "--heap-stats raw-heap-dump | " +
                         "--heap-properties raw-heap-dump");
     }
@@ -121,7 +125,8 @@
             destroy: function () {}
         };
         inspectionHeap.bump = heapLength;
-        if (inspectMetadata) reportMetadataSharing(inspectionHeap);
+        if (inspectFrame) reportFrame(inspectionHeap);
+        else if (inspectMetadata) reportMetadataSharing(inspectionHeap);
         else if (inspectSharing) reportStringSharing(inspectionHeap);
         else if (inspectString || inspectSources) reportSource(inspectionHeap);
         else if (propertiesOnly) reportProperties(inspectionHeap);
@@ -163,7 +168,8 @@
         reportStringSharing(heap);
     }
     if (inspectionOnly) {
-        if (inspectMetadata) reportMetadataSharing(heap);
+        if (inspectFrame) reportFrame(heap);
+        else if (inspectMetadata) reportMetadataSharing(heap);
         else if (inspectSharing) reportStringSharing(heap);
         else if (inspectString || inspectSources) reportSource(heap);
         else if (propertiesOnly) reportProperties(heap);
@@ -171,6 +177,80 @@
         heap.destroy();
         return;
     }
+    function reportFrame(inspectedHeap) {
+        var cells = new Cells(inspectedHeap);
+        var records = inspectionRecordsFor(inspectedHeap, cells);
+        var bytecodes = nodeHost ? require("../bytecode.js") : GuestVMBytecode;
+        function describeCell(cell) {
+            var tag = cells.tagAt(cell);
+            if (tag === Cells.Tags.REFERENCE) {
+                var address = cells.referenceAddressAt(cell);
+                var kind = inspectedHeap.recordType(address);
+                var description = "reference " + address + " type=" + kind;
+                if (kind === Heap.Types.NATIVE_FUNCTION) {
+                    description += " intrinsic=" + records.functionMetadata(address);
+                    var property = records.lastOwnPropertyEntry(address);
+                    while (property) {
+                        var key = records.readString(records.ownPropertyEntryKey(address, property));
+                        var propertyCell = records.ownPropertyEntryValueCell(address, property);
+                        if (key === "name" && cells.tagAt(propertyCell) === Cells.Tags.REFERENCE) {
+                            description += " name=" + records.readString(cells.referenceAddressAt(propertyCell));
+                        }
+                        property = records.previousOwnPropertyEntry(address, property);
+                    }
+                }
+                if (kind === Heap.Types.BUFFER_VIEW) description +=
+                    " viewKind=" + records.bufferViewKind(address) +
+                    " length=" + records.bufferViewLength(address);
+                if (kind === Heap.Types.STRING) description += " " +
+                    records.readString(address).substring(0, 160);
+                return description;
+            }
+            return "tag=" + tag + " payload=" + cells.payloadLowAt(cell);
+        }
+        var frame = frameAddress;
+        while (frame) {
+            var program = records.frameProgram(frame);
+            var pc = records.framePC(frame);
+            var code = records.programBytecode(program);
+            var codeLength = records.bytecodeLength(code);
+            if (pc < 0 || pc >= codeLength) {
+                output("frame=" + frame + " program=" + program + " pc=" + pc +
+                    " (outside bytecode length " + codeLength + ")");
+                frame = records.frameCaller(frame);
+                continue;
+            }
+            var opcode = records.bytecodeWord(code, pc);
+            output("frame=" + frame + " program=" + program + " pc=" + pc +
+                " opcode=" + bytecodes.NAMES[opcode]);
+            var source = records.programSource(program);
+            if (source) output("source: " + records.readString(source).substring(0, 240));
+            var width = bytecodes.WIDTHS[opcode] || 1;
+            if (pc + width > codeLength) {
+                output("truncated instruction at pc=" + pc);
+                width = codeLength - pc;
+            }
+            var operands = [];
+            for (var index = 1; index < width; index++) {
+                var operand = records.bytecodeWord(code, pc + index);
+                operands.push(operand);
+                if (operand >= 0 && operand < records.frameRegisterCount(frame)) {
+                    output("operand " + index + " register " + operand + ": " +
+                        describeCell(records.frameRegisterCell(frame, operand)));
+                }
+            }
+            output("operands: " + operands.join(", "));
+            if (opcode === bytecodes.GET_PROPERTY_CONST || opcode === bytecodes.SET_PROPERTY_CONST) {
+                var constants = records.programConstants(program);
+                if (inspectedHeap.recordType(constants) === Heap.Types.VALUE_VECTOR) {
+                    var keyIndex = operands[opcode === bytecodes.GET_PROPERTY_CONST ? 2 : 1];
+                    output("property key: " + describeCell(records.vectorCell(constants, keyIndex)));
+                }
+            }
+            frame = records.frameCaller(frame);
+        }
+    }
+
     function reportSource(inspectedHeap) {
         var sourceRecords = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
         function describeString(address) {

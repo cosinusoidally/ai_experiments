@@ -224,6 +224,44 @@
                 rawMemoryHeap.destroy();
                 rawMemoryX86.destroy();
             }
+            /* Exercise float32 storage through the shared pipeline, including
+             * IEEE ties-to-even, subnormals, signed zero and overflow. */
+            function binary32Kernel(base, input, output) {
+                storeRawF32(base + output, loadF64(base + input));
+                storeF64(base + output + 8, loadRawF32(base + output));
+                return output;
+            }
+            var f32IR = compiler.compile(binary32Kernel);
+            var f32JS = new JSBackend().compile(f32IR);
+            var f32X86 = new X86Backend().compile(f32IR);
+            var f32Heap = new Heap({heapBytes: 4096});
+            try {
+                var f32Inputs = [[0, 0], [-0, 0x80000000], [1, 0x3f800000],
+                    [1 + Math.pow(2, -24), 0x3f800000],
+                    [1 + 3 * Math.pow(2, -24), 0x3f800002],
+                    [Math.pow(2, -150), 0], [3 * Math.pow(2, -150), 2],
+                    [Math.pow(2, 128), 0x7f800000]];
+                for (var f32Index = 0; f32Index < f32Inputs.length; f32Index++) {
+                    f32Heap.memory.writeF64(64, f32Inputs[f32Index][0]);
+                    var f32Expected = f32Inputs[f32Index][1] | 0;
+                    f32JS.fn(f32Heap.memory, 0, 64, 80);
+                    if ((f32Heap.memory.readU32(80) | 0) !== f32Expected) {
+                        throw new Error("JS float32 roundtrip bits mismatch");
+                    }
+                    var f32Decoded = f32Heap.memory.readF64(88);
+                    if (f32X86.fn) {
+                        f32X86.fn(f32Heap.memory.nativeAddress(0), 64, 80);
+                        if ((f32Heap.memory.readU32(80) | 0) !== f32Expected ||
+                                f32Heap.memory.readF64(88) !== f32Decoded ||
+                                (f32Decoded === 0 && 1 / f32Heap.memory.readF64(88) !== 1 / f32Decoded)) {
+                            throw new Error("i386 float32 roundtrip differs from JS");
+                        }
+                    }
+                }
+            } finally {
+                f32Heap.destroy();
+                f32X86.destroy();
+            }
             function binary64Kernel(base, left, right, output) {
                 storeF64(base + output,
                     divideF64(multiplyF64(

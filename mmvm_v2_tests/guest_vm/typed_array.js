@@ -4,8 +4,10 @@
  * indexing. */
 (function (root) {
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var Binary64 = root.GuestVMBinary64;
     if (typeof module !== "undefined" && module.exports) {
         NativeIntrinsics = require("./native_intrinsics.js");
+        Binary64 = require("./binary64.js");
     }
     function integer(value) {
         value = Number(value);
@@ -123,7 +125,7 @@
         this.prototypes[description.kind] = viewPrototype;
         this.runtime.setProperty(viewPrototype, "subarray",
             this.makeNative(description.name + ".prototype.subarray",
-                subarrayCallback));
+                subarrayCallback, NativeIntrinsics.TYPED_ARRAY_SUBARRAY));
         this.runtime.setProperty(viewPrototype, "set",
             this.makeNative(description.name + ".prototype.set",
                 setCallback, NativeIntrinsics.TYPED_ARRAY_SET));
@@ -264,7 +266,7 @@
         if (description.kind === Kinds.UINT32) return memory.readU32Trusted(address) >>> 0;
         if (description.kind === Kinds.INT32) return memory.readU32Trusted(address) | 0;
         if (description.kind === Kinds.FLOAT64) return memory.readF64Trusted(address);
-        return decodeFloat32(memory.readU32Trusted(address));
+        return Binary64.decode32(memory.readU32Trusted(address));
     };
 
     TypedArraySupport.prototype.write = function (view, index, value) {
@@ -285,7 +287,7 @@
                    description.kind === Kinds.INT32) {
             memory.writeU32Trusted(address, value);
         } else if (description.kind === Kinds.FLOAT64) memory.writeF64(address, value);
-        else memory.writeU32Trusted(address, encodeFloat32(value));
+        else memory.writeU32Trusted(address, Binary64.encode32(value));
         return value;
     };
 
@@ -355,34 +357,6 @@
         var metadata = this.runtime.heapRecords.bufferBackingMetadata(this.viewBacking(view));
         if (metadata) this.runtime.linearHeap.setMark(metadata, generation);
     };
-
-    function decodeFloat32(bits) {
-        var sign = bits & 0x80000000 ? -1 : 1;
-        var exponent = (bits >>> 23) & 255;
-        var fraction = bits & 0x7fffff;
-        if (exponent === 255) return fraction ? NaN : sign * Infinity;
-        if (exponent === 0) return sign * fraction * Math.pow(2, -149);
-        return sign * (1 + fraction / 8388608) * Math.pow(2, exponent - 127);
-    }
-
-    function encodeFloat32(value) {
-        if (value !== value) return 0x7fc00000;
-        var sign = value < 0 || (value === 0 && 1 / value < 0) ? 0x80000000 : 0;
-        value = Math.abs(value);
-        if (value === Infinity) return (sign | 0x7f800000) >>> 0;
-        if (value === 0) return sign >>> 0;
-        if (value < Math.pow(2, -126)) {
-            return (sign | Math.round(value / Math.pow(2, -149))) >>> 0;
-        }
-        var exponent = Math.floor(Math.log(value) / Math.LN2);
-        var fraction = Math.round((value / Math.pow(2, exponent) - 1) * 8388608);
-        if (fraction === 8388608) {
-            fraction = 0;
-            exponent++;
-        }
-        if (exponent > 127) return (sign | 0x7f800000) >>> 0;
-        return (sign | ((exponent + 127) << 23) | (fraction & 0x7fffff)) >>> 0;
-    }
 
     root.GuestVMTypedArraySupport = TypedArraySupport;
     if (typeof module !== "undefined" && module.exports) module.exports = TypedArraySupport;

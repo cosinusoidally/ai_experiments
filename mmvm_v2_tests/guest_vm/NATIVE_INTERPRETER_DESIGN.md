@@ -41,6 +41,32 @@ inlining candidates and expanded call-site count on either bootstrap host.
 
 ### Kernel compiler data movement
 
+The shared IR also supports `loadRawF32(address)` and
+`storeRawF32(address, value)`. Values participate in binary64 expressions, but
+the memory operation reads/writes IEEE binary32. The i386 backend uses named
+x87 `fld_f32_ptr_eax` / `fstp_f32_ptr_ecx` macros. The JS backend uses the
+memory boundary's shared binary32 conversion, including round-to-nearest,
+ties-to-even, subnormals, signed zero and overflow. Typed-array indexed access
+uses these operations; it does not leave the native interpreter for Float32
+reads or writes. Buffer slices and typed-array subarrays share the view
+construction path, with offsets scaled by the actual element size.
+
+Dynamic `Function` construction can enter a guest bytecode compiler installed
+alongside the eval compilers. Its native continuation returns the adopted
+callable without executing it and re-homes it to the calling context. The
+compiler validates parameter and body syntax and adopts ordinary program
+records. Parser-owned compilations may use the compiler's `consumeAst` option
+to detach completed function bodies after scope/return analysis and lowering;
+the default non-consuming API retains ASTs for the structured backend and
+embedders. Adopted executable closures do not retain their temporary compiler
+descriptor graph.
+
+For failed standalone runs, `guest_vm/tools/audit_snapshot_heap.js
+--heap-frame ADDRESS raw-heap-dump` displays the suspended frame chain,
+function source prefixes, instruction operands and referenced record kinds.
+This is read-only diagnostic tooling usable on Node or js_min, not a test
+which fixes private instruction layouts in place.
+
 The compiler forwards single-definition, single-use locals through runs of
 integer assignments without calls, writes or control-flow boundaries. It
 invalidates a candidate when an input local is assigned. Loads may move only

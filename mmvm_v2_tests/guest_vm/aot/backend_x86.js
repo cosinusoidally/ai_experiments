@@ -61,12 +61,13 @@
         var instructionIndex = 0;
         while (instructionIndex < ir.instructions.length) {
             var instruction = ir.instructions[instructionIndex++];
-            if (instruction.op === "store_f64") {
+            if (instruction.op === "store_f64" || instruction.op === "store_raw_f32") {
                 emitExpression(assembler, instruction.address);
                 assembler.pushEax();
                 emitF64Expression(assembler, instruction.value);
                 assembler.popEcx();
-                assembler.storeF64EcxPop();
+                if (instruction.op === "store_f64") assembler.storeF64EcxPop();
+                else assembler.storeF32EcxPop();
             } else if (instruction.op !== "store_u32") {
                 throw new Error("unsupported i386 kernel instruction " + instruction.op);
             } else {
@@ -732,6 +733,18 @@
         assembler.jump("standalone_return");
         assembler.label("standalone_unsupported_error");
         resolveSymbol(layout.dprintfNameOffset);
+        /* Include allocator pressure in cold-exit diagnostics. These are
+         * authoritative engine fields, not guesses from process RSS. */
+        var allocationDiagnosticFields = ["heapMaximum", "heapLimit",
+            "heapTail", "gcLiveBytes", "gcCollections"];
+        var diagnosticIndex = 0;
+        while (diagnosticIndex < allocationDiagnosticFields.length) {
+            assembler.movEaxLocal(HEAP_BASE_LOCAL);
+            assembler.addEaxImmediate(layout.statePayloadAddress +
+                layout.engineDiagnostic[allocationDiagnosticFields[diagnosticIndex++]]);
+            assembler.movEaxDwordPtrEax();
+            assembler.pushEax();
+        }
         assembler.movEaxLocal(HEAP_BASE_LOCAL);
         assembler.addEaxImmediate(layout.statePayloadAddress +
                                   layout.engineDiagnostic.allocation);
@@ -758,7 +771,7 @@
         assembler.pushEax();
         assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
         assembler.callEax();
-        discardCallWords(6);
+        discardCallWords(6 + allocationDiagnosticFields.length);
         assembler.movEaxImmediate(70);
         assembler.jump("standalone_return");
         assembler.label("standalone_allocation_error");
@@ -792,7 +805,8 @@
         var dprintfNameBytes = standaloneStringBytes("dprintf");
         var unsupportedFormatBytes = standaloneStringBytes(
             "guest VM unsupported opcode %d at bytecode pc %d " +
-            "(detail %d, allocation %d)\n");
+            "(detail %d, allocation %d; GC %u, live %u, " +
+            "tail %u, limit %u, maximum %u)\n");
         var layout = {
             entryOffset: STANDALONE_HEADER_BYTES,
             heapOffset: 0,
@@ -1379,12 +1393,13 @@
             else assembler.movDwordPtrEcxEax();
             return;
         }
-        if (node.op === "store_f64") {
+        if (node.op === "store_f64" || node.op === "store_raw_f32") {
             emitControlExpression(assembler, node.address, state);
             assembler.pushEax();
             emitControlF64(assembler, node.value, state);
             assembler.popEcx();
-            assembler.storeF64EcxPop();
+            if (node.op === "store_f64") assembler.storeF64EcxPop();
+            else assembler.storeF32EcxPop();
             return;
         }
         if (node.op === "return") {
@@ -2196,9 +2211,10 @@
             else assembler.cosF64();
             return;
         }
-        if (node.op === "load_f64" || node.op === "load_i32_f64") {
+        if (node.op === "load_f64" || node.op === "load_i32_f64" || node.op === "load_raw_f32") {
             emitControlExpression(assembler, node.address, state);
             if (node.op === "load_f64") assembler.loadF64Eax();
+            else if (node.op === "load_raw_f32") assembler.loadF32Eax();
             else assembler.loadI32EaxAsF64();
             return;
         }
@@ -2355,9 +2371,10 @@
             else assembler.cosF64();
             return;
         }
-        if (node.op === "load_f64") {
+        if (node.op === "load_f64" || node.op === "load_raw_f32") {
             emitExpression(assembler, node.address);
-            assembler.loadF64Eax();
+            if (node.op === "load_f64") assembler.loadF64Eax();
+            else assembler.loadF32Eax();
             return;
         }
         emitF64Expression(assembler, node.left);

@@ -328,6 +328,7 @@
         this.hostRootPersistentAddresses = [];
         this.evalCompilerRoot = 0;
         this.indirectEvalCompilerRoot = 0;
+        this.functionCompilerRoot = 0;
         this.gcGeneration = 0;
         this.gcThreshold = options.gcStress ? 1 :
             normalizeGCThreshold(options.gcThreshold);
@@ -1474,8 +1475,8 @@
         var oldVector = this.heapRecords.arrayElements(array.heapAddress);
         var oldCapacity = this.heapRecords.vectorCapacity(oldVector);
         if (required <= oldCapacity) return oldVector;
-        var capacity = oldCapacity || 4;
-        while (capacity < required) capacity *= 2;
+        var capacity = HeapRecords.grownArrayCapacity(oldCapacity, required);
+        if (!capacity) throw new RangeError("array backing exceeds guest heap limits");
         var newVector = this.heapRecords.allocateValueVector(capacity);
         var length = this.heapRecords.vectorLength(oldVector);
         var index = 0;
@@ -3329,7 +3330,7 @@
             this.makeNativeFunction("Array.isArray", function (receiver, args) {
                 return !!args[0] && args[0].guestType === "array" &&
                     !runtime.isArgumentsObject(args[0]);
-            }), HeapRecords.Attributes.WRITABLE |
+            }, "intrinsic", NativeIntrinsics.ARRAY_IS_ARRAY), HeapRecords.Attributes.WRITABLE |
                 HeapRecords.Attributes.CONFIGURABLE);
         if (this.arrayPrototype) {
             this.setProperty(arrayConstructor, "prototype", this.arrayPrototype);
@@ -3630,6 +3631,10 @@
                 function (receiver, args) {
                     var compiler = args[0];
                     var indirectCompiler = args[1];
+                    var functionCompiler = args[2];
+                    if (functionCompiler && functionCompiler.guestType !== "bytecodeFunction") {
+                        throw new TypeError("Function compiler must be guest bytecode");
+                    }
                     if (!compiler || compiler.guestType !==
                             "bytecodeFunction") {
                         throw new TypeError(
@@ -3649,9 +3654,11 @@
                     runtime.evalCompilerRoot = runtime.retain(compiler);
                     runtime.indirectEvalCompilerRoot =
                         runtime.retain(indirectCompiler);
+                    if (runtime.functionCompilerRoot) runtime.release(runtime.functionCompilerRoot);
+                    runtime.functionCompilerRoot = functionCompiler ? runtime.retain(functionCompiler) : 0;
                     if (runtime.nativeInterpreter) {
                         runtime.nativeInterpreter.setEvalCompilers(
-                            compiler, indirectCompiler);
+                            compiler, indirectCompiler, functionCompiler);
                     }
                     return undefined;
                 }));
@@ -4419,6 +4426,25 @@
             return this.setNamedProperty(object, key, value, strict);
         }
         key = this.propertyKey(key);
+        if (!object.guestType) {
+            /* ES5.1 8.7.2: PutValue boxes primitive bases for descriptor
+             * lookup, but may only invoke an inherited setter. It cannot
+             * create a lasting property or write a data property. */
+            var wrapper = this.toObject(object);
+            var owner = wrapper;
+            var entry = this.heapOwnProperty(owner, key, false);
+            if (!entry) {
+                owner = this.findPrototypePropertyOwner(wrapper, key);
+                if (owner) entry = this.heapOwnProperty(owner, key, false);
+            }
+            if (entry && (this.heapRecords.ownPropertyEntryAttributes(
+                    owner.heapAddress, entry) & HeapRecords.Attributes.ACCESSOR)) {
+                this.writePropertyEntry(owner, entry, object, value, strict);
+            } else if (strict) {
+                throw new TypeError("cannot write property on primitive value");
+            }
+            return value;
+        }
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             return this.setNamedProperty(object, key, value, strict);

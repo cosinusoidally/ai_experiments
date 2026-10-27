@@ -2,12 +2,66 @@
 
 ## Objective
 
-Latest stock comparison: [2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
-The standalone guest passes eight of the 14 requested suites, including full
-stock zlib (229), RayTrace (201), and EarleyBoyer (91.6). Six suites return
-native semantic exits. RegExp was excluded explicitly by the user. Node
-24.14.1 passes all 14. These results supersede the older stock sweep below;
-there is still no complete guest Octane score.
+### 2026-10-27: Box2D and Gameboy stock passes
+
+The October 22 stock results below remain the last complete stock sweep.
+Box2D now completes both unchanged standalone quick correctness and a full
+stock run: **score 315, 18.47 s elapsed, 143,872 KiB peak RSS**. This follows
+native configurable accessor-descriptor updates, numeric `parseInt`, unary
+numeric conversion and guarded default object relational conversion were
+implemented. Final-image stock checks report **Box2D 317, 18.44 s,
+133,888 KiB peak RSS**, and **Gameboy 1063, 15.00 s, 116,992 KiB peak RSS**,
+including Gameboy's unchanged processor-state comparison. The preceding
+Gameboy run scored 1042 in 15.50 s; these single-run differences are not
+presented as an optimization result.
+Mandreel is deferred at the user's request. These are individual follow-up
+stock runs, not a repeat of the entire October 22 stock sweep.
+
+Gameboy exposed sloppy writes to string `length`, dynamic Function construction
+and bitwise coercion. Dynamic Function compilation now enters the guest-owned
+parser/compiler through a native continuation, with the resulting callable
+assigned to the caller's realm. It does not ask the bootstrap host to compile
+the body. Standalone diagnostics now include collection count, last live-byte
+count and allocator tail/limit/maximum, using named engine layout fields.
+Float32 indexed loads/stores now use the shared compiler's binary32 memory
+operations and named x87 macros. Typed-array subarrays retain their backing,
+element-sized byte offset and prototype. `Array.isArray` is native. JSON's
+existing parser/serializer is shared between the embedding representation and
+ordinary guest values; the standalone image installs guest-bytecode JSON
+entry points rather than retaining host callbacks.
+
+Mandreel's 5 MB input exposed compiler allocation pressure at the existing
+512 MiB guest-heap ceiling (not an absent CALL opcode). Before lifetime
+changes, a stopped run reported 312,181,432 live bytes; consuming parser-owned
+function AST bodies reduced that to 287,450,552 at a subsequent allocation
+failure, but did not by itself complete the workload. The structured backend
+and public non-consuming compile API retain their ASTs. The self-hosted
+executable closure now releases its temporary program descriptor after adoption.
+An experimental 3/2 growth policy still failed to complete Mandreel, so it was
+not retained. Host and kernel now share the existing doubling policy with
+overflow validation. The heap ceiling has not been increased. No external
+benchmark or demo sources were modified.
+
+The ordinary Node-hosted project suite passes 270 guest assertions. All eight
+previous standalone Octane passes also pass quick correctness again; zlib took
+45.78 s versus 45.41 s at the preceding checkpoint (single runs, not a speedup
+claim). The final image repeats all eight quick passes (zlib 43.84 s) and
+passes 24 bounded GC rounds with 47 automatic native collections. The 12
+selected external JSON files pass 908 assertions under stock Node, our codec
+in Node, and standalone execution; see [JSON_CHECKS.md](JSON_CHECKS.md).
+The js_min project/CLI/context checks passed in 145.63 s before the final
+JSON adapter change; final broader regression validation is still in progress. Executable
+contract 61 is independent of bytecode-layout contract 60, so native kernel
+changes can invalidate old images without changing the layout version or
+fingerprinting sources at load time.
+
+Latest complete stock comparison:
+[2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
+Including the two follow-up passes above, ten of the 14 requested suites now
+have confirmed standalone stock passes. PdfJS, Mandreel, CodeLoad and
+Typescript remain unresolved. RegExp was excluded explicitly by the user.
+There is still no complete guest Octane score, and earlier scores have not
+been presented as newly measured results.
 
 The external Octane 2.0 checkout is a demanding integration workload for the
 ES5.1 guest VM. The immediate goal is to execute every suite correctly. Once

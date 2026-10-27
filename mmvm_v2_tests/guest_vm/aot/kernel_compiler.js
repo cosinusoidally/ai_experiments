@@ -950,9 +950,10 @@
             } else if (statement.type === "ExpressionStatement" &&
                 statement.expression.type === "CallExpression" &&
                 statement.expression.callee.type === "Identifier" &&
-                statement.expression.callee.name === "storeF64" &&
+                (statement.expression.callee.name === "storeF64" ||
+                 statement.expression.callee.name === "storeRawF32") &&
                 statement.expression.arguments.length === 2) {
-                instructions.push({op: "store_f64",
+                instructions.push({op: statement.expression.callee.name === "storeF64" ? "store_f64" : "store_raw_f32",
                     address: lower(statement.expression.arguments[0], locals),
                     value: lowerF64(statement.expression.arguments[1], locals)});
             } else if (statement.type === "ReturnStatement" &&
@@ -1592,9 +1593,10 @@
             }
             if (expression.type === "CallExpression" &&
                 expression.callee.type === "Identifier" &&
-                expression.callee.name === "storeF64" &&
+                (expression.callee.name === "storeF64" ||
+                 expression.callee.name === "storeRawF32") &&
                 expression.arguments.length === 2) {
-                return {op: "store_f64",
+                return {op: expression.callee.name === "storeF64" ? "store_f64" : "store_raw_f32",
                     address: lowerKernelExpression(expression.arguments[0], symbols),
                     value: lowerKernelF64Expression(expression.arguments[1], symbols)};
             }
@@ -2120,9 +2122,10 @@
                 pointer: lowerKernelExpression(node.arguments[0], symbols),
                 arguments: nativeArguments, type: "f64"};
         }
-        if ((name === "loadF64" || name === "loadI32F64") &&
+        if ((name === "loadF64" || name === "loadI32F64" || name === "loadRawF32") &&
             node.arguments.length === 1) {
-            return {op: name === "loadF64" ? "load_f64" : "load_i32_f64",
+            return {op: name === "loadF64" ? "load_f64" :
+                name === "loadRawF32" ? "load_raw_f32" : "load_i32_f64",
                     address: lowerKernelExpression(node.arguments[0], symbols),
                     type: "f64"};
         }
@@ -2235,8 +2238,9 @@
                 pointer: lower(node.arguments[0], locals),
                 arguments: nativeArguments, type: "f64"};
         }
-        if (name === "loadF64" && node.arguments.length === 1) {
-            return {op: "load_f64", address: lower(node.arguments[0], locals),
+        if ((name === "loadF64" || name === "loadRawF32") && node.arguments.length === 1) {
+            return {op: name === "loadF64" ? "load_f64" : "load_raw_f32",
+                    address: lower(node.arguments[0], locals),
                     type: "f64"};
         }
         var operations = {addF64: "add_f64", subtractF64: "sub_f64",

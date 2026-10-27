@@ -174,6 +174,14 @@
             this.host.read32LETrusted(this.allocation, address + 4));
     };
 
+    LinearMemory.prototype.readRawF32Trusted = function (address) {
+        return Binary64.decode32(this.readRawU32Trusted(address));
+    };
+
+    LinearMemory.prototype.writeRawF32Trusted = function (address, value) {
+        this.writeRawU32Trusted(address, Binary64.encode32(value));
+    };
+
     LinearMemory.prototype.writeF64Trusted = function (address, value) {
         var words = Binary64.encode(Number(value));
         this.host.write32LETrusted(this.allocation, address, words.low);

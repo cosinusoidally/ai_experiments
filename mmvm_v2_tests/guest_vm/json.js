@@ -4,8 +4,61 @@
 (function (root) {
     function JSONSupport(runtime) {
         this.runtime = runtime;
-        this.install();
+        this.values = runtime ? runtimeValues(runtime) : ordinaryValues;
+        if (runtime) this.install();
     }
+
+    /* One parser/serializer, with only the value representation abstracted.
+     * When this module executes inside the VM, ordinary JS objects already
+     * are guest-heap values and none of these operations crosses to a host. */
+    var ordinaryValues = {
+        makeObject: function () { return {}; },
+        makeArray: function () { return []; },
+        arrayLength: function (array) { return array.length; },
+        arrayGet: function (array, index) { return array[index]; },
+        arraySet: function (array, index, value) { array[index] = value; },
+        getProperty: function (object, key) { return object[key]; },
+        defineProperty: function (object, key, value) {
+            Object.defineProperty(object, key, {value: value,
+                writable: true, enumerable: true, configurable: true});
+        },
+        identity: function (object) { return object; },
+        kind: function (value) {
+            if (typeof value === "function") return "function";
+            return Array.isArray(value) ? "array" : "object";
+        },
+        keys: function (object) {
+            var keys = [], key;
+            for (key in object) {
+                if (Object.prototype.hasOwnProperty.call(object, key)) keys.push(key);
+            }
+            return keys;
+        }
+    };
+
+    function runtimeValues(runtime) {
+        var dataAttributes = runtime.heapRecords.constructor.Attributes.DEFAULT;
+        return {
+            makeObject: function () { return runtime.makeObject(); },
+            makeArray: function () { return runtime.makeArray(); },
+            arrayLength: function (array) { return runtime.arrayLength(array); },
+            arrayGet: function (array, index) { return runtime.arrayGet(array, index); },
+            arraySet: function (array, index, value) { runtime.arraySet(array, index, value); },
+            getProperty: function (object, key) { return runtime.getProperty(object, key); },
+            defineProperty: function (object, key, value) {
+                runtime.defineDataProperty(object, key, value, dataAttributes);
+            },
+            identity: function (object) { return object.heapAddress; },
+            kind: function (value) {
+                if (!value || !value.guestType) return "unsupported";
+                if (value.guestType === "function" || value.guestType === "bytecodeFunction") return "function";
+                return value.guestType === "array" ? "array" : "object";
+            },
+            keys: function (object) { return runtime.keys(object); }
+        };
+    }
+
+    JSONSupport.forValues = function () { return new JSONSupport(null); };
 
     JSONSupport.prototype.install = function () {
         var support = this;
@@ -72,26 +125,31 @@
             }
             fail();
         }
+        function decimalDigitAt(index) {
+            if (index >= text.length) return false;
+            var code = text.charCodeAt(index);
+            return code >= 48 && code <= 57;
+        }
         function numberValue() {
             var start = position;
             if (text.charAt(position) === "-") position++;
             if (text.charAt(position) === "0") position++;
             else {
-                if (text.charCodeAt(position) < 49 || text.charCodeAt(position) > 57) fail();
-                while (text.charCodeAt(position) >= 48 && text.charCodeAt(position) <= 57) position++;
+                if (!decimalDigitAt(position)) fail();
+                while (decimalDigitAt(position)) position++;
             }
             if (text.charAt(position) === ".") {
                 position++;
-                if (text.charCodeAt(position) < 48 || text.charCodeAt(position) > 57) fail();
-                while (text.charCodeAt(position) >= 48 && text.charCodeAt(position) <= 57) position++;
+                if (!decimalDigitAt(position)) fail();
+                while (decimalDigitAt(position)) position++;
             }
             var exponent = text.charAt(position);
             if (exponent === "e" || exponent === "E") {
                 position++;
                 var sign = text.charAt(position);
                 if (sign === "+" || sign === "-") position++;
-                if (text.charCodeAt(position) < 48 || text.charCodeAt(position) > 57) fail();
-                while (text.charCodeAt(position) >= 48 && text.charCodeAt(position) <= 57) position++;
+                if (!decimalDigitAt(position)) fail();
+                while (decimalDigitAt(position)) position++;
             }
             return Number(text.substring(start, position));
         }
@@ -101,15 +159,15 @@
             if (character === '"') return stringValue();
             if (character === "[") {
                 position++;
-                var array = support.runtime.makeArray();
+                var array = support.values.makeArray();
                 space();
                 if (text.charAt(position) === "]") {
                     position++;
                     return array;
                 }
                 while (true) {
-                    support.runtime.arraySet(array,
-                        support.runtime.arrayLength(array), value());
+                    support.values.arraySet(array,
+                        support.values.arrayLength(array), value());
                     space();
                     character = text.charAt(position++);
                     if (character === "]") return array;
@@ -118,7 +176,7 @@
             }
             if (character === "{") {
                 position++;
-                var object = support.runtime.makeObject();
+                var object = support.values.makeObject();
                 space();
                 if (text.charAt(position) === "}") {
                     position++;
@@ -130,7 +188,7 @@
                     var key = stringValue();
                     space();
                     if (text.charAt(position++) !== ":") fail();
-                    support.runtime.setProperty(object, key, value());
+                    support.values.defineProperty(object, key, value());
                     space();
                     character = text.charAt(position++);
                     if (character === "}") return object;
@@ -184,35 +242,37 @@
         function encode(item, inArray) {
             if (item === null) return "null";
             if (typeof item === "string") return quote(item);
-            if (typeof item === "number") return isFinite(item) ? String(item) : "null";
+            if (typeof item === "number") return item === item && item !== Infinity && item !== -Infinity ? String(item) : "null";
             if (typeof item === "boolean") return item ? "true" : "false";
-            if (item === undefined || (item && (item.guestType === "function" ||
-                                                item.guestType === "bytecodeFunction"))) {
+            if (item === undefined) return inArray ? "null" : undefined;
+            var kind = support.values.kind(item);
+            if (kind === "function") {
                 return inArray ? "null" : undefined;
             }
-            if (!item || !item.guestType) return undefined;
+            if (kind === "unsupported") return undefined;
+            var identity = support.values.identity(item);
             var activeIndex = 0;
             while (activeIndex < active.length) {
-                if (active[activeIndex++] === item.heapAddress) {
+                if (active[activeIndex++] === identity) {
                     throw new TypeError("cyclic object value");
                 }
             }
-            active.push(item.heapAddress);
+            active.push(identity);
             var parts = [];
             var index;
-            if (item.guestType === "array") {
+            if (kind === "array") {
                 index = 0;
-                while (index < support.runtime.arrayLength(item)) {
-                    parts.push(encode(support.runtime.arrayGet(item, index++), true));
+                while (index < support.values.arrayLength(item)) {
+                    parts.push(encode(support.values.arrayGet(item, index++), true));
                 }
                 active.pop();
                 return "[" + parts.join(",") + "]";
             }
-            var keys = support.runtime.keys(item);
+            var keys = support.values.keys(item);
             index = 0;
-            while (index < support.runtime.arrayLength(keys)) {
-                var key = support.runtime.arrayGet(keys, index++);
-                var encoded = encode(support.runtime.getProperty(item, key), false);
+            while (index < support.values.arrayLength(keys)) {
+                var key = support.values.arrayGet(keys, index++);
+                var encoded = encode(support.values.getProperty(item, key), false);
                 if (encoded !== undefined) parts.push(quote(key) + ":" + encoded);
             }
             active.pop();

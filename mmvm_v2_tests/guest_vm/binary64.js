@@ -49,7 +49,43 @@
         return negative ? -value : value;
     }
 
-    var Binary64 = {encode: encode, decode: decode};
+    function roundEven(value) {
+        var integer = Math.floor(value);
+        var fraction = value - integer;
+        if (fraction > 0.5 || (fraction === 0.5 && integer % 2 !== 0)) integer++;
+        return integer;
+    }
+
+    function decode32(bits) {
+        var sign = bits & 0x80000000 ? -1 : 1;
+        var exponent = (bits >>> 23) & 255;
+        var fraction = bits & 0x7fffff;
+        if (exponent === 255) return fraction ? NaN : sign * Infinity;
+        if (exponent === 0) return sign * fraction * Math.pow(2, -149);
+        return sign * (1 + fraction / 8388608) * Math.pow(2, exponent - 127);
+    }
+
+    function encode32(value) {
+        if (value !== value) return 0x7fc00000;
+        var sign = value < 0 || (value === 0 && 1 / value < 0) ? 0x80000000 : 0;
+        value = Math.abs(value);
+        if (value === Infinity) return (sign | 0x7f800000) >>> 0;
+        if (value === 0) return sign >>> 0;
+        if (value < Math.pow(2, -126)) {
+            return (sign | roundEven(value / Math.pow(2, -149))) >>> 0;
+        }
+        var exponent = Math.floor(Math.log(value) / Math.LN2);
+        var power = Math.pow(2, exponent);
+        while (value < power) { exponent--; power /= 2; }
+        while (value >= power * 2) { exponent++; power *= 2; }
+        var fraction = roundEven((value / power - 1) * 8388608);
+        if (fraction === 8388608) { fraction = 0; exponent++; }
+        if (exponent > 127) return (sign | 0x7f800000) >>> 0;
+        return (sign | ((exponent + 127) << 23) | fraction) >>> 0;
+    }
+
+    var Binary64 = {encode: encode, decode: decode,
+        encode32: encode32, decode32: decode32};
     /* Shared with integer-only numeric kernels. These describe the payload,
      * not a NaN-boxed value representation. */
     Binary64.KernelConstants = {

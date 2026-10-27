@@ -11,8 +11,8 @@
         var index = 0;
         while (index < ir.instructions.length) {
             var instruction = ir.instructions[index++];
-            if (instruction.op === "store_f64") {
-                body += "memory.writeF64Trusted(" + emit(instruction.address, parameters) +
+            if (instruction.op === "store_f64" || instruction.op === "store_raw_f32") {
+                body += "memory." + (instruction.op === "store_f64" ? "writeF64Trusted" : "writeRawF32Trusted") + "(" + emit(instruction.address, parameters) +
                         "," + emitF64(instruction.value, parameters) + ");";
             } else if (instruction.op !== "store_u32") {
                 throw new Error("unsupported JS kernel instruction " + instruction.op);
@@ -111,8 +111,8 @@
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlExpression(node.value, parameters, locals) + ");";
         }
-        if (node.op === "store_f64") {
-            return "memory.writeF64Trusted(" +
+        if (node.op === "store_f64" || node.op === "store_raw_f32") {
+            return "memory." + (node.op === "store_f64" ? "writeF64Trusted" : "writeRawF32Trusted") + "(" +
                 emitControlExpression(node.address, parameters, locals) + "," +
                 emitControlF64(node.value, parameters, locals) + ");";
         }
@@ -271,8 +271,8 @@
             return "Math." + (node.op === "sin_f64" ? "sin" : "cos") + "(" +
                 emitControlF64(node.value, parameters, locals) + ")";
         }
-        if (node.op === "load_f64") {
-            return "memory.readF64Trusted(" +
+        if (node.op === "load_f64" || node.op === "load_raw_f32") {
+            return "memory." + (node.op === "load_f64" ? "readF64Trusted" : "readRawF32Trusted") + "(" +
                 emitControlExpression(node.address, parameters, locals) + ")";
         }
         if (node.op === "load_i32_f64") {
@@ -361,8 +361,8 @@
             return "Math." + (node.op === "sin_f64" ? "sin" : "cos") + "(" +
                 emitF64(node.value, parameters) + ")";
         }
-        if (node.op === "load_f64") {
-            return "memory.readF64Trusted(" + emit(node.address, parameters) + ")";
+        if (node.op === "load_f64" || node.op === "load_raw_f32") {
+            return "memory." + (node.op === "load_f64" ? "readF64Trusted" : "readRawF32Trusted") + "(" + emit(node.address, parameters) + ")";
         }
         var operators = {add_f64: "+", sub_f64: "-", mul_f64: "*", div_f64: "/"};
         if (!operators[node.op]) throw new Error("unsupported JS f64 IR " + node.op);

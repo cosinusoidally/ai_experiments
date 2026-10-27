@@ -10,7 +10,8 @@
     var isLiteralExpression = Parser.isLiteralExpression;
     var literalExpressionValue = Parser.literalExpressionValue;
 
-    function Compiler(scopeBindings, outerScopes, registerBindings) {
+    function Compiler(scopeBindings, outerScopes, registerBindings, options) {
+        this.consumeAst = !!options && options.consumeAst === true;
         this.code = [];
         this.constants = [];
         this.primitiveConstantIndexes = {};
@@ -201,7 +202,8 @@
          * if the arguments object escapes its activation. */
         var useRegisters = canUseRegisterBindings(expression.body, bindingMap) &&
             (!!expression.strict || !usesArguments);
-        var nested = new Compiler(bindings, this.scopes, useRegisters);
+        var nested = new Compiler(bindings, this.scopes, useRegisters,
+            {consumeAst: this.consumeAst});
         if (containsDirectEval(expression.body)) {
             /* Sloppy eval may introduce a new var binding in this activation
              * which shadows an outer binding. Keep known locals in their
@@ -232,7 +234,7 @@
         program.usesArguments = usesArguments;
         program.name = expression.name || "";
         program.source = expression.source || null;
-        program.astBody = expression.body;
+        if (!this.consumeAst) program.astBody = expression.body;
         program.returnKind = inferReturnKind(expression.body);
         program.nonlocalBindings = describeNonlocalBindings(expression.body, nested);
         /* Direct eval is compiled after this function has started executing.
@@ -240,6 +242,12 @@
          * resolve through the complete lexical chain, not merely its caller's
          * innermost activation. */
         program.outerEnvironmentScopes = nested.scopes.slice(1);
+        /* A parser-owned AST has no external observer. Once all scope/return
+         * analyses and lowering have consumed this function, detach its body
+         * so a large compilation need not retain every AST beside every
+         * emitted program. The default API remains non-destructive for the
+         * structured backend and embedders which retain their ASTs. */
+        if (this.consumeAst) expression.body = null;
         return program;
     };
 

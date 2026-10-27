@@ -598,6 +598,10 @@
         if (this.macros) this.macros.push("fld_f64_ptr_eax()");
         this.emitBytes2(0xdd, 0x00);
     };
+    Assembler.prototype.loadF32Eax = function () {
+        if (this.macros) this.macros.push("fld_f32_ptr_eax()");
+        this.emitBytes2(0xd9, 0x00);
+    };
     Assembler.prototype.loadI32EaxAsF64 = function () {
         if (this.macros) this.macros.push("fild_i32_ptr_eax()");
         this.emitBytes2(0xdb, 0x00);
@@ -605,6 +609,10 @@
     Assembler.prototype.storeF64EcxPop = function () {
         if (this.macros) this.macros.push("fstp_f64_ptr_ecx()");
         this.emitBytes2(0xdd, 0x19);
+    };
+    Assembler.prototype.storeF32EcxPop = function () {
+        if (this.macros) this.macros.push("fstp_f32_ptr_ecx()");
+        this.emitBytes2(0xd9, 0x19);
     };
     Assembler.prototype.addF64Pop = function () {
         if (this.macros) this.macros.push("faddp_st1_st0()");

@@ -12,6 +12,21 @@
     }
 
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
+    var INITIAL_ARRAY_CAPACITY = 4;
+    var MAX_VECTOR_LENGTH = 134217726;
+
+    /* Shared geometric growth policy for both execution backends. Validate
+     * the bound before multiplication so a large index cannot wrap capacity. */
+    function grownArrayCapacityKernel(capacity, required) {
+        if (required > MAX_VECTOR_LENGTH) return 0;
+        if (capacity < INITIAL_ARRAY_CAPACITY) capacity = INITIAL_ARRAY_CAPACITY;
+        while (capacity < required) {
+            var growth = capacity;
+            if (growth > MAX_VECTOR_LENGTH - capacity) capacity = required;
+            else capacity = capacity + growth;
+        }
+        return capacity;
+    }
 
     var OBJECT_PROTOTYPE = 0;
     var OBJECT_PROPERTIES = 4;
@@ -273,6 +288,11 @@
                           ACCESSOR: ATTR_ACCESSOR,
                           DEFAULT: DEFAULT_ATTRIBUTES};
     Records.BytecodeLayout = {wideCountContract: 60};
+    /* Executable compatibility changes independently of the heap layout.
+     * Bump when native kernel/backend semantics change: loaders deliberately
+     * do not fingerprint current sources at startup. */
+    Records.NativeInterpreterContractVersion = 61;
+    Records.grownArrayCapacity = grownArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
         ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
@@ -286,6 +306,8 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        INITIAL_ARRAY_CAPACITY: INITIAL_ARRAY_CAPACITY,
+        MAX_VECTOR_LENGTH: MAX_VECTOR_LENGTH,
         PROPERTY_RECORD_SNAPSHOT_PIN: PROPERTY_RECORD_SNAPSHOT_PIN,
         PROPERTY_STORAGE_EPOCH_MASK: PROPERTY_STORAGE_EPOCH_MASK,
         PROPERTY_DESCRIPTOR_KEY: PROPERTY_DESCRIPTOR_KEY,
@@ -2749,7 +2771,12 @@
             pc: ENGINE_PC,
             opcode: ENGINE_RESULT_CELL,
             detail: ENGINE_CALL_REJECT_REASON,
-            allocation: ENGINE_ALLOCATION_FAILED
+            allocation: ENGINE_ALLOCATION_FAILED,
+            gcCollections: ENGINE_GC_COLLECTIONS,
+            gcLiveBytes: ENGINE_GC_LIVE_BYTES,
+            heapTail: ENGINE_NATIVE_TAIL_BUMP,
+            heapLimit: ENGINE_NATIVE_TAIL_LIMIT,
+            heapMaximum: ENGINE_NATIVE_MAX_LIMIT
         };
     };
 
