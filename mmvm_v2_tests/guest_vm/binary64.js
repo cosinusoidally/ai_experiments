@@ -71,6 +71,9 @@
         value = Math.abs(value);
         if (value === Infinity) return (sign | 0x7f800000) >>> 0;
         if (value === 0) return sign >>> 0;
+        /* Bound overflow before taking logarithms: log(MAX_DOUBLE) can
+         * round to exponent 1024, whose power is already Infinity. */
+        if (value >= Math.pow(2, 128)) return (sign | 0x7f800000) >>> 0;
         if (value < Math.pow(2, -126)) {
             return (sign | roundEven(value / Math.pow(2, -149))) >>> 0;
         }

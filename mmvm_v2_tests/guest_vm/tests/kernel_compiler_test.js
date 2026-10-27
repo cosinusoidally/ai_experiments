@@ -240,7 +240,8 @@
                     [1 + Math.pow(2, -24), 0x3f800000],
                     [1 + 3 * Math.pow(2, -24), 0x3f800002],
                     [Math.pow(2, -150), 0], [3 * Math.pow(2, -150), 2],
-                    [Math.pow(2, 128), 0x7f800000]];
+                    [Math.pow(2, 128), 0x7f800000],
+                    [Number.MAX_VALUE, 0x7f800000], [-Number.MAX_VALUE, 0xff800000]];
                 for (var f32Index = 0; f32Index < f32Inputs.length; f32Index++) {
                     f32Heap.memory.writeF64(64, f32Inputs[f32Index][0]);
                     var f32Expected = f32Inputs[f32Index][1] | 0;

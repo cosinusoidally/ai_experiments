@@ -55,7 +55,9 @@ Dynamic `Function` construction can enter a guest bytecode compiler installed
 alongside the eval compilers. Its native continuation returns the adopted
 callable without executing it and re-homes it to the calling context. The
 compiler validates parameter and body syntax and adopts ordinary program
-records. Parser-owned compilations may use the compiler's `consumeAst` option
+records. Its continuation flag and call/construct modes are real shared
+lexical constants supplied as external compiler bindings, not additional
+compiler-local pseudo-constants. Parser-owned compilations may use the compiler's `consumeAst` option
 to detach completed function bodies after scope/return analysis and lowering;
 the default non-consuming API retains ASTs for the structured backend and
 embedders. Adopted executable closures do not retain their temporary compiler

@@ -62,6 +62,11 @@
     var INTRINSIC_DECODE_URI = NativeIntrinsics.DECODE_URI;
     var INTRINSIC_STRING_TO_LOWER_CASE = NativeIntrinsics.STRING_TO_LOWER_CASE;
     var INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
+    var INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
+    var INTRINSIC_ARRAY_IS_ARRAY = NativeIntrinsics.ARRAY_IS_ARRAY;
+    var FRAME_FLAG_FUNCTION_COMPILE = 4;
+    var CALL_OPERATION_CALL = 1;
+    var CALL_OPERATION_CONSTRUCT = 2;
     var INTRINSIC_FIRST_ERROR_CONSTRUCTOR = NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR;
     var INTRINSIC_LAST_ERROR_CONSTRUCTOR = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
     var INTRINSIC_OPCODE_COUNTER_WORD = NativeIntrinsics.OPCODE_COUNTER_WORD;
@@ -199,6 +204,9 @@
         overrides.INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
         overrides.INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
         overrides.INTRINSIC_ARRAY_IS_ARRAY = NativeIntrinsics.ARRAY_IS_ARRAY;
+        overrides.FRAME_FLAG_FUNCTION_COMPILE = FRAME_FLAG_FUNCTION_COMPILE;
+        overrides.CALL_OPERATION_CALL = CALL_OPERATION_CALL;
+        overrides.CALL_OPERATION_CONSTRUCT = CALL_OPERATION_CONSTRUCT;
         overrides.INTRINSIC_STRING_TO_LOWER_CASE =
             NativeIntrinsics.STRING_TO_LOWER_CASE;
         overrides.INTRINSIC_DECODE_URI_COMPONENT =
@@ -488,7 +496,6 @@
         var FRAME_FLAG_NATIVE_CALL = 1;
         var FRAME_FLAG_NATIVE_CONSTRUCT = 2;
         var FRAME_FLAG_INDIRECT_EVAL_COMPILE = 3;
-        var FRAME_FLAG_FUNCTION_COMPILE = 4;
         var INTRINSIC_RESULT_COMPLETE = 1;
         /* Distinct from helper-local handled/allocation results (1 and 2)
          * and from public engine exits (1 through 4). */
@@ -6634,10 +6641,13 @@
                 RUNTIME_SUPPORT_FUNCTION_COMPILER);
             if (valueCellTag(0, functionCompilerCell) === VALUE_TAG_REFERENCE) {
                 var functionCallerAdvance = FIVE_WORD_INSTRUCTION;
-                if (callOperation === 2) functionCallerAdvance = FOUR_WORD_INSTRUCTION;
+                if (callOperation === CALL_OPERATION_CONSTRUCT) functionCallerAdvance = FOUR_WORD_INSTRUCTION;
+                /* Call the compiler normally, even for new Function(...).
+                 * Its argument count is read from the descriptor vector;
+                 * call mode must never be inferred from that count. */
                 var functionCompileEntered = bytecodeCallKernel(
                     heapBase, state, frame, functionCompilerCell,
-                    callArgumentsCell, 1, callTargetIndex,
+                    callArgumentsCell, CALL_OPERATION_CALL, callTargetIndex,
                     currentContext, stringSupport, arrayPrototype,
                     bytecodeAddress, registerAddress, pc, frame + FRAME_PC,
                     0, functionCallerAdvance, 0);
@@ -17924,6 +17934,9 @@
                     INTRINSIC_BUFFER_IS_BUFFER: INTRINSIC_BUFFER_IS_BUFFER,
                     INTRINSIC_TYPED_ARRAY_SUBARRAY: NativeIntrinsics.TYPED_ARRAY_SUBARRAY,
                     INTRINSIC_ARRAY_IS_ARRAY: NativeIntrinsics.ARRAY_IS_ARRAY,
+                    FRAME_FLAG_FUNCTION_COMPILE: FRAME_FLAG_FUNCTION_COMPILE,
+                    CALL_OPERATION_CALL: CALL_OPERATION_CALL,
+                    CALL_OPERATION_CONSTRUCT: CALL_OPERATION_CONSTRUCT,
                     INTRINSIC_FIRST_ERROR_CONSTRUCTOR: INTRINSIC_FIRST_ERROR_CONSTRUCTOR,
                     INTRINSIC_LAST_ERROR_CONSTRUCTOR: INTRINSIC_LAST_ERROR_CONSTRUCTOR,
                     ERROR_CONSTRUCTOR_PROTOTYPE_BASE: ERROR_CONSTRUCTOR_PROTOTYPE_BASE,
