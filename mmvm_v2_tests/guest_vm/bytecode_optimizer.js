@@ -9,6 +9,10 @@
     var UNKNOWN = 0, INT32 = 1, ZERO = 2;
     /* Bound analysis memory, not the size of programs accepted by the VM. */
     var MAX_STATE_ENTRIES = 262144;
+    /* Bound repeated dataflow work as well as resident state. Sixteen full
+     * state-table visits permit ordinary loop convergence without allowing
+     * an optional optimization to dominate compilation on a difficult CFG. */
+    var MAX_ANALYSIS_WORK = MAX_STATE_ENTRIES * 16;
 
     function numberKind(value) {
         if (typeof value !== "number" || value !== (value | 0)) return UNKNOWN;
@@ -78,17 +82,22 @@
             }
         }
         if (blocks.length * program.registerCount > MAX_STATE_ENTRIES) return program;
+        var occurrences = [], definitions = [];
+        if (!countRegisterUses(program, occurrences, definitions)) return program;
+        var immutable = [];
         var initial = [];
         for (index = 0; index < program.registerCount; index++) initial[index] = UNKNOWN;
         for (index = 0; index < constantRegisters.length; index++) {
             if (typeof constantRegisters[index] === "number") {
-                initial[constantRegisters[index]] = numberKind(program.constants[index]);
+                var constantRegister = constantRegisters[index];
+                initial[constantRegister] = numberKind(program.constants[index]);
+                if (!definitions[constantRegister]) immutable[constantRegister] = true;
             }
         }
         blocks[0].input = initial;
         blocks[0].queued = true;
         var queue = [0], head = 0;
-        var state, last;
+        var state, last, analysisWork = 0;
         while (head < queue.length) {
             index = queue[head++];
             block = blocks[index];
@@ -99,18 +108,26 @@
                 transfer(program, pc, state);
             }
             opcode = code[last];
-            if (opcode === op.JUMP) propagateRegisterState(blocks, queue, byPC[code[last + 1]], state);
-            else if (opcode === op.JUMP_IF_FALSE) {
-                propagateRegisterState(blocks, queue, byPC[code[last + 2]], state);
-                propagateRegisterState(blocks, queue, byPC[block.end], state);
+            analysisWork += program.registerCount + block.end - block.start;
+            if (opcode === op.JUMP) {
+                analysisWork += propagateRegisterState(
+                    blocks, queue, byPC[code[last + 1]], state, immutable);
+            } else if (opcode === op.JUMP_IF_FALSE) {
+                analysisWork += propagateRegisterState(
+                    blocks, queue, byPC[code[last + 2]], state, immutable);
+                analysisWork += propagateRegisterState(
+                    blocks, queue, byPC[block.end], state, immutable);
             } else if (opcode !== op.RETURN && opcode !== op.THROW &&
                        opcode !== op.INVALID_ASSIGNMENT) {
-                propagateRegisterState(blocks, queue, byPC[block.end], state);
+                analysisWork += propagateRegisterState(
+                    blocks, queue, byPC[block.end], state, immutable);
+            }
+            if (analysisWork > MAX_ANALYSIS_WORK) {
+                program.optimizationStats = {int32AnalysisBudgetExceeded: true};
+                return program;
             }
         }
 
-        var occurrences = [], definitions = [];
-        if (!countRegisterUses(program, occurrences, definitions)) return program;
         var replacements = {}, removed = 0, fused = 0, conversions = 0;
         var next, temporary;
         for (index = 0; index < blocks.length; index++) {
@@ -156,22 +173,54 @@
         return program;
     }
 
-    function propagateRegisterState(blocks, queue, next, state) {
-        if (next === undefined) return;
+    function propagateRegisterState(blocks, queue, next, state, immutable) {
+        if (next === undefined) return 0;
         var successor = blocks[next], changed = false, register, old, value;
-        if (!successor.input) {
+        var input = successor.input, work = 0;
+        if (!input) {
             successor.input = state.slice(0);
+            work = state.length;
             changed = true;
         } else {
-            for (register = 0; register < state.length; register++) {
-                old = successor.input[register];
-                value = state[register];
-                /* ZERO is a subtype of INT32. Other disagreements lose
-                 * the fact; joins never invent new information. */
-                value = old && value ? (old === value ? old : INT32) : UNKNOWN;
-                if (old !== value) {
-                    successor.input[register] = value;
-                    changed = true;
+            var facts = successor.mutableFacts;
+            if (!facts) {
+                /* Input facts only weaken. Unknown entries never become
+                 * known at a join; proven unwritten constants never weaken.
+                 * Build a sparse list once, at the first actual join. */
+                facts = [];
+                var count = state.length;
+                work = count;
+                for (register = 0; register < count; register++) {
+                    old = input[register];
+                    if (old && !immutable[register]) {
+                        value = state[register];
+                        value = value ? (old === value ? old : INT32) : UNKNOWN;
+                        if (old !== value) {
+                            input[register] = value;
+                            changed = true;
+                        }
+                        if (value) facts.push(register);
+                    }
+                }
+                successor.mutableFacts = facts;
+            } else {
+                var factIndex = 0, factCount = facts.length;
+                work = factCount;
+                while (factIndex < factCount) {
+                    register = facts[factIndex];
+                    old = input[register];
+                    value = state[register];
+                    value = value ? (old === value ? old : INT32) : UNKNOWN;
+                    if (old !== value) {
+                        input[register] = value;
+                        changed = true;
+                    }
+                    if (value) factIndex++;
+                    else {
+                        factCount--;
+                        facts[factIndex] = facts[factCount];
+                        facts.length = factCount;
+                    }
                 }
             }
         }
@@ -179,6 +228,7 @@
             successor.queued = true;
             queue.push(next);
         }
+        return work;
     }
 
     function countRegisterOccurrence(occurrences, register, registerCount) {
