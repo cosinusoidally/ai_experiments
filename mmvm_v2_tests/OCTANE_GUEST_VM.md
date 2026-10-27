@@ -2,6 +2,21 @@
 
 ## Objective
 
+### 2026-10-27 evening: large-backing memory follow-up
+
+The general native Buffer/ArrayBuffer allocator now uses GC-owned calloc
+storage for large backings, while retaining canonical inline snapshots.
+Uninstrumented stock zlib passes at **133,888 KiB peak RSS**, versus
+263,424 KiB before, approximately 49% lower. That run scores 501 in
+305.42 s; the earlier stock result is 560 in 273.53 s, so it is not presented
+as a speedup. A subsequent serial old/new quick-correctness pair measures
+48.10/46.91 s, and the final-image quick run passes in 44.85 s at 132,480 KiB.
+All ten previously working suites pass final-image quick correctness. This
+is not another full 14-suite stock sweep, and it does not resolve the other
+four suites. No benchmark/demos were modified. Full ownership design,
+memory limitations and regression/build validation are in
+[OCTANE_MEMORY.md](OCTANE_MEMORY.md).
+
 ### 2026-10-27: complete current standalone stock sweep
 
 The fresh 14-suite `js_runner` sweep is complete: **10 passed, four failed,

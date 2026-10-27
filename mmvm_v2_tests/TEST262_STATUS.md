@@ -46,8 +46,8 @@ improvement over a larger one.
 
 ### Complete ES5.1 suite — 3,292 files
 
-- Latest complete authored-program checkpoint (2026-10-27, Box2D/Gameboy
-  bring-up): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
+- Latest complete authored-program checkpoint (2026-10-27, native backing
+  memory work): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
   instruction-budget timeouts are included in failures. See the dated
   packed-object entries below. Historical synthetic-variant results are
   retained separately and are not the current conformance totals.
@@ -65,6 +65,36 @@ improvement over a larger one.
   not a statistically established speedup. No corpus
   files or expectations were changed. JSON tests are a separate selected
   integration check, since this Test262 import has no chapter 15.12.
+
+- 2026-10-27, approximately 17:31 UTC, loaded revision `e387dde`:
+  the complete authored-program run with `--vm-native --quiet
+  --instruction-limit 20000` again executes all 3,292 variants:
+  **3,139 passed, 153 failed, 0 not run; 6 timeouts included in failures**.
+  Elapsed 486.95 s; user CPU 480.00 s; peak RSS 281,356 KiB. This is the
+  large-backing memory checkpoint, including the pending embedder-call
+  synchronization correction. Totals match the previous complete checkpoint;
+  the extra embedding buffer-access work prompted the next refinement.
+
+- 2026-10-27, approximately 17:47 UTC, loaded revision `5e7b15c`:
+  the same complete command executes all 3,292 authored variants:
+  **3,139 passed, 153 failed, 0 not run; 6 timeouts included in failures**.
+  Elapsed 454.49 s; user CPU 453.00 s; peak RSS 281,080 KiB. Native byte
+  access now uses the authoritative backing pointer for inline and external
+  storage. Failing IDs and strict/sloppy variants match the preceding
+  `e387dde` run exactly: 153 unchanged failures, zero newly passing cases.
+  These are serial single-run measurements, not statistical speedup claims.
+
+- 2026-10-27, approximately 18:00 UTC, loaded revision `c918b07`:
+  the same complete command executes all 3,292 authored variants:
+  **3,139 passed, 153 failed, 0 not run; 6 timeouts included in failures**.
+  Elapsed 428.99 s; user CPU 427.57 s; peak RSS 319,592 KiB. Context
+  snapshots now retain their external-backing metadata rather than discovering
+  it again at every restore. Failing IDs and strict/sloppy variants match
+  both preceding memory-work runs exactly: 153 unchanged failures and no
+  newly passing cases. Compared with the earlier 415.93/423.15 s checkpoints,
+  timing is close, not a demonstrated speedup. This hosted suite's peak RSS
+  is higher than the preceding runs; the standalone zlib memory reduction
+  must not be generalized to all workloads. See [OCTANE_MEMORY.md](OCTANE_MEMORY.md).
 
 - 2026-09-12, revision `381a345`, 20,000-instruction diagnostic allowance:
   all 3,292 files and 5,765 variants were executed; 4,856 passed, 909 failed,
