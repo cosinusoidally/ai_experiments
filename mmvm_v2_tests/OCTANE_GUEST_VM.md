@@ -89,6 +89,20 @@ Measurements are serial, single-run observations, not statistical performance
 claims. JSON remains deliberately bounded rather than a claim of complete
 ES5.1 JSON conformance.
 
+Post-reboot recheck (2026-10-27, source revision `713cfbe`):
+
+- Standalone GC stress passes again: 24 rounds and 47 automatic native
+  collections. The instrumented js_min check also passes: 67 embedding
+  collections, 27 structural audits, 71,981 checked edges and 221
+  property-index audits, with an 8 MiB guest-heap cap and a maximum observed
+  bump of 395,632 bytes. Its workload/check phase took 31,469 ms.
+- `sh guest_vm/tests/run_standalone_snapshot_test.sh both` passes in
+  285.97 s total (281.39 s user, 2.87 s system). It builds two js_min images
+  under different environments/program arguments, compares a Node-built
+  image, checks hello/alternate programs and launch-time environment values,
+  then genuinely recompiles under the standalone image and compares that
+  output byte-for-byte. All comparisons pass. Tests ran serially.
+
 Latest complete stock comparison:
 [2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
 Including the two follow-up passes above, ten of the 14 requested suites now
