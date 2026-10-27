@@ -167,7 +167,7 @@ passed; the final three builds really recompile, rather than copying an image.
   audits, 72,746 checked edges and 221 property-index audits, with maximum
   bump 4,516,168 bytes under the 8 MiB cap; workload/check phase 32,682 ms.
   Large Buffer slices and typed-array subarrays are both exercised.
-- The independent ready-image heap audit finds 29,216 reachable records and
+- The independent deployed-image heap audit finds 29,220 reachable records and
   zero missing marks. The selected standalone JSON integration passes all
   12 files and 908 assertions. Source-retention and large-copy integration
   pass, including the function's original comment in `toString()`.
