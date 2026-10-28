@@ -78,6 +78,20 @@ improvement over a larger one.
   and ten try/catch/finally failures. Catch lexical environments remain work.
   The imported corpus is unchanged; no test is skipped or marked passing
   without execution. See `ES51_SEMANTICS_PROGRESS.md` for design/build gates.
+- 2026-10-28, approximately 22:05 UTC, same-boot performance control using
+  the unchanged `ec5e517` image:
+  **3,292 executed, 3,168 passed, 124 failed, 0 not run; 6 timeouts included
+  in failures**. Command: `./artifacts/js_runner.exe
+  artifacts/completion-final-node.snap test262_runner.js --instruction-limit
+  20000`. Elapsed **415.19 seconds**, user CPU **412.49 seconds**, peak RSS
+  **549,608 KiB**; exit status 1. Failure IDs exactly match the original
+  checkpoint; none of the changed image's eleven new passes is an incidental
+  baseline change. Raw log: `artifacts/unwind-control-test262.log`.
+  The changed image's 431.43-second run is 3.9% longer elapsed / 2.7% more
+  user CPU in this single pair, with essentially unchanged peak RSS. Record
+  this as a suite-time difference requiring further measurement, not a
+  demonstrated speedup or proven performance parity. This control is an
+  intentionally older image, not a regression in the checked-in source.
 - 2026-10-28, approximately 16:37 UTC, efficient statement-completion/early-error
   checkpoint `ec5e517`:
   **3,292 executed, 3,168 passed, 124 failed, 0 not run; 6 timeouts included

@@ -111,17 +111,27 @@ CPU 411.47 seconds, peak RSS 549,536 KiB. Raw log:
 The final compiler-allocation/return refinements have now completed the same
 inventory with **3,179 passed / 113 failed / 0 not run / 6 timeouts**, exactly
 the same failing IDs, in **431.43 seconds**, user CPU 423.77 seconds, peak RSS
-549,496 KiB. Log: `artifacts/unwind-final-test262.log`. These measurements
-span a reboot; a fresh old-image control is pending to distinguish execution
-performance from changed machine conditions.
+549,496 KiB. Log: `artifacts/unwind-final-test262.log`. The preceding
+396.74-second checkpoint run was before a reboot. A fresh same-boot old-image
+control now completes in **415.19 seconds**, user CPU 412.49 seconds, peak
+RSS 549,608 KiB, with its original **3,168 passed / 124 failed / 0 not run /
+6 timeouts** and identical failing IDs. Log:
+`artifacts/unwind-control-test262.log`. The changed image is about **3.9%
+slower elapsed / 2.7% more user CPU** in this single pair; the peak RSS is
+essentially unchanged. This is an outstanding suite-time difference, not
+evidence of performance parity or a statistically established slowdown.
+The zlib/build comparisons below do not erase that observation.
 
 Those refinements pass both host project suites (12 guest programs / 270
 assertions each) and produce byte-identical Node, js_min and genuine self-hosted
-snapshots. Self-hosted construction measured 102.05 seconds versus the
-preceding checkpoint's 111.39 seconds, but the js_min build-performance gate
-remains open: recent measurements vary from 92.53 to 96.73 seconds versus
-an isolated baseline's 90.37 seconds. Do not infer non-regression from image
-identity or from the faster self-hosted build alone.
+snapshots. Node construction measured 6.69 seconds; genuine self-hosted
+construction measured 102.05 seconds versus the preceding checkpoint's
+111.39 seconds. Self-hosted peak RSS was higher: **543,360 KiB versus
+484,096 KiB**. A faster build does not establish a memory improvement; the
+extra peak remains a separate optimization concern. Initial js_min
+measurements varied from 92.53 to 96.73 seconds versus an isolated baseline's
+90.37 seconds and therefore required the fresh comparison below. Image
+identity alone is not a performance gate.
 
 Focused build profiles after reboot show inclusive compiler time of 41.42
 seconds for the changed source versus 43.18 seconds for the baseline, while
