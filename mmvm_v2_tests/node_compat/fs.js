@@ -64,7 +64,9 @@ var NodeFs = {
         return names;
     },
 
-    readFileSync: function (path) {
+    readFileSync: function (path, options) {
+        var encoding = typeof options === "string" ? options :
+            options && options.encoding;
         path = String(path);
         var file = NodeLibc.fopen(path, "rb");
         if (!file) throw nodeFsError("open", path, NodeLibc.errno());
@@ -95,7 +97,8 @@ var NodeFs = {
         }
         NodeMemory.free(pointer);
         NodeLibc.fclose(file);
-        return offset === length ? result : result.slice(0, offset);
+        if (offset !== length) result = result.slice(0, offset);
+        return encoding ? result.toString(encoding) : result;
     },
 
     stat: function (path, callback) {
@@ -122,10 +125,17 @@ var NodeFs = {
         });
     },
 
-    readFile: function (path, callback) {
+    readFile: function (path, options, callback) {
+        if (typeof options === "function") {
+            callback = options;
+            options = null;
+        }
+        if (typeof callback !== "function") {
+            throw new TypeError("readFile callback must be a function");
+        }
         NodeRuntime.enqueue(function () {
             var result;
-            try { result = NodeFs.readFileSync(path); }
+            try { result = NodeFs.readFileSync(path, options); }
             catch (error) {
                 callback(error);
                 return;
