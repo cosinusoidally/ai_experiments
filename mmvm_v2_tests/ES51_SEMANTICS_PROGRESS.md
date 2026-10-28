@@ -49,10 +49,106 @@ Ordinary compilation therefore has no new per-expression mode check. This
 uses standard JS method selection, not compiler-only variable semantics, AST
 mutation, or a duplicate statement compiler.
 
-This is a first stage, not a claim of a complete abrupt-completion redesign.
-Break/continue across protected regions and catch lexical environments still
-need their own general unwinding/environment work. Existing exception and
-return machinery remains in use during this checkpoint.
+This first stage handled normal statement values. The protected-edge lowering
+below extends it to abrupt exits; catch lexical environments remain separate
+work. Existing runtime exception search remains responsible for throws.
+
+## Protected-edge lowering
+
+The compiler now keeps a single lexical region stack for installed exception
+handlers, with scopes, and finally handlers. Each break/continue/label target
+records the region depth it retains. A transfer emits cleanup only for the
+regions it actually leaves, in innermost-first order:
+
+- Handler: emit `POP_CATCH`, including pure try/catch handlers. Leaving one
+  installed after a jump can incorrectly catch a later unrelated exception.
+- With scope: emit `LEAVE_WITH` and adjust compiler-visible scope resolution
+  while lowering any enclosing finalizers.
+- Finally handler: pop its handler, then lower its finalizer in the lexical
+  enclosing region/loop/label context, not in an inner loop of its try body.
+
+Ordinary loop jumps that stay at the same depth emit the same jump as before.
+The metadata exists only during compilation; there is no runtime region stack
+or per-iteration allocation beyond the VM's existing exception machinery.
+Handler/with markers are shared immutable compiler objects. Finalizers retain
+the lexical target depths they need; ordinary loops use their existing patch
+arrays as target records rather than adding separate wrapper records.
+
+Unwind lowering copies compiler stacks only when a scope change or finalizer
+needs them, then restores the original state for other control-flow paths.
+Pure handler cleanup walks the original stack without allocating copies;
+ordinary same-depth jumps do not call the unwind helper. Each finalizer is lowered with
+only its own enclosing jump targets visible. This matters when a finalizer's
+break/continue overrides a pending exit from a loop inside its try block.
+An abrupt finalizer exits before the pending transfer is emitted/executed.
+There is one lowering implementation, not separate ad hoc return, break and
+continue cleanup algorithms.
+
+Returns use the same region walk, stopping after the outermost finalizer.
+The return boundary itself discards the frame's remaining handlers and
+environments, so pure try/catch returns need no explicit cleanup bytecodes.
+When a finalizer exists, snapshot the evaluated return value only if it is
+held in a mutable named-binding register. Those occupy the compiler's initial
+binding-register prefix; private temporaries, constants and environment-load
+results are already independent values. Assignment to the original binding
+must not change an already evaluated return value. Catch binding
+instantiation/shadowing is not implemented by this region stack and must not
+be claimed fixed by these changes.
+
+Finalizers currently retain the preexisting inline-lowering policy. Shared
+epilogues/continuations are a possible later code-size improvement for very
+large finalizers with many abrupt exits; they would need to preserve the
+ordinary-path performance that inline cleanup provides.
+
+### Protected-edge validation, 2026-10-28
+
+The first complete standalone run of this lowering completed all 3,292
+authored tests: **3,179 passed / 113 failed / 0 not run**, with the same six
+timeouts included in failures. Exact failure-ID comparison with `ec5e517`
+shows **11 new passes and zero new failures**. Elapsed 414.29 seconds, user
+CPU 411.47 seconds, peak RSS 549,536 KiB. Raw log:
+`artifacts/unwind-test262.log`. This is the initial implementation's result.
+The final compiler-allocation/return refinements have now completed the same
+inventory with **3,179 passed / 113 failed / 0 not run / 6 timeouts**, exactly
+the same failing IDs, in **431.43 seconds**, user CPU 423.77 seconds, peak RSS
+549,496 KiB. Log: `artifacts/unwind-final-test262.log`. These measurements
+span a reboot; a fresh old-image control is pending to distinguish execution
+performance from changed machine conditions.
+
+Those refinements pass both host project suites (12 guest programs / 270
+assertions each) and produce byte-identical Node, js_min and genuine self-hosted
+snapshots. Self-hosted construction measured 102.05 seconds versus the
+preceding checkpoint's 111.39 seconds, but the js_min build-performance gate
+remains open: recent measurements vary from 92.53 to 96.73 seconds versus
+an isolated baseline's 90.37 seconds. Do not infer non-regression from image
+identity or from the faster self-hosted build alone.
+
+Focused build profiles after reboot show inclusive compiler time of 41.42
+seconds for the changed source versus 43.18 seconds for the baseline, while
+parsing and program registration vary in the opposite direction. These are
+instrumented, overlapping timings, not throughput numbers. A fresh ordinary
+control/change pair subsequently completed in **103.29 seconds for the
+baseline / 99.26 seconds for the changed build**, with peak RSS 331,308 /
+329,344 KiB. The changed image is identical to all three previously built
+release images. This same-session comparison does not show a build slowdown;
+the spread across runs also prevents a statistical speedup claim.
+
+The final workload gates pass:
+
+- All ten previously working standalone Octane quick selections: Richards,
+  DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay, NavierStokes, Box2D, Gameboy
+  and zlib. RegExp remains excluded at the user's request. Changed-image zlib
+  took 36.75 seconds; a fresh old-image control took 36.47 seconds, with peak
+  RSS 126,080 / 126,208 KiB. This is quick correctness, not a stock score or
+  evidence of a meaningful throughput difference.
+- Bounded native GC workload: 24 rounds / 47 native collections.
+- Live demos 1–8 at 320x240 / 20 FPS cap, input and clean exit, with demo8
+  garage and free-drive autopilot. These are bounded interaction checks, not
+  long soaks or guarantees of sustained frame rate.
+- Both HTTP servers: text, byte-identical binary snapshot, directory listing.
+
+No demo, external test, benchmark source or runtime/kernel implementation was
+changed for this checkpoint. No generated image is checked in.
 
 ## Frontend representation and early errors
 

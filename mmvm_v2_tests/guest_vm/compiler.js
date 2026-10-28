@@ -9,6 +9,10 @@
     }
     var isLiteralExpression = Parser.isLiteralExpression;
     var literalExpressionValue = Parser.literalExpressionValue;
+    /* Immutable compiler-only markers. Handler/with regions need no
+     * per-occurrence object; finalizers carry their lexical target depths. */
+    var HANDLER_REGION = {kind: "handler"};
+    var WITH_REGION = {kind: "with"};
 
     function Compiler(scopeBindings, outerScopes, registerBindings, options) {
         this.consumeAst = !!options && options.consumeAst === true;
@@ -23,7 +27,7 @@
         this.breakTargets = [];
         this.continueTargets = [];
         this.labelTargets = [];
-        this.finallyBlocks = [];
+        this.unwindRegions = [];
         this.completionRegister = -1;
         this.constantRegisters = [];
         this.registerHints = [];
@@ -301,6 +305,60 @@
         this.restoreCompletionValue(pending);
     };
 
+    Compiler.prototype.makeJumpTarget = function (position) {
+        var target = [];
+        target.position = position;
+        target.unwindDepth = this.unwindRegions.length;
+        return target;
+    };
+
+    Compiler.prototype.emitJumpTo = function (target) {
+        if (this.unwindRegions.length !== target.unwindDepth) {
+            this.emitUnwindTo(target.unwindDepth);
+        }
+        if (target.position >= 0) this.emit(op.JUMP, target.position);
+        else target.push(this.emit(op.JUMP, 0));
+    };
+
+    /* Materialize cleanup at an abrupt edge, not on every loop iteration.
+     * The original compiler stacks remain intact for other control-flow
+     * paths. Recursive abrupt exits from a finalizer see only its lexical
+     * enclosing regions/targets, never those inside the abandoned try body. */
+    Compiler.prototype.emitUnwindTo = function (depth) {
+        if (this.unwindRegions.length === depth) return;
+        var regions = this.unwindRegions;
+        var scopes = this.scopes;
+        var withDepth = this.withDepth;
+        var index = regions.length;
+        while (index > depth) {
+            var region = regions[--index];
+            if (region.kind === "with") {
+                this.emit(op.LEAVE_WITH);
+                if (this.scopes === scopes) this.scopes = scopes.slice(0);
+                this.scopes.shift();
+                this.withDepth--;
+            } else {
+                this.emit(op.POP_CATCH);
+                if (region.kind === "finally") {
+                    this.unwindRegions = regions.slice(0, index);
+                    var breaks = this.breakTargets;
+                    var continues = this.continueTargets;
+                    var labels = this.labelTargets;
+                    this.breakTargets = breaks.slice(0, region.breakDepth);
+                    this.continueTargets = continues.slice(0, region.continueDepth);
+                    this.labelTargets = labels.slice(0, region.labelDepth);
+                    this.compileFinalizer(region.block, region.completionEntry);
+                    this.breakTargets = breaks;
+                    this.continueTargets = continues;
+                    this.labelTargets = labels;
+                }
+            }
+        }
+        this.unwindRegions = regions;
+        this.scopes = scopes;
+        this.withDepth = withDepth;
+    };
+
     Compiler.prototype.compileStatement = function (statement) {
         if (statement.location) this.currentLocation = statement.location;
         var index;
@@ -323,7 +381,9 @@
             this.scopes.unshift({bindings: {}, createsEnvironment: true,
                                  dynamic: true});
             this.withDepth++;
+            this.unwindRegions.push(WITH_REGION);
             this.compileStatement(statement.body);
+            this.unwindRegions.pop();
             this.withDepth--;
             this.scopes.shift();
             this.emit(op.LEAVE_WITH);
@@ -332,7 +392,7 @@
         if (statement.type === "LabeledStatement") {
             var labelledTarget = {
                 name: statement.label,
-                breaks: [],
+                breaks: this.makeJumpTarget(-1),
                 iteration: labelledIteration(statement.body),
                 continueTarget: null
             };
@@ -389,10 +449,11 @@
             var whileStart = this.code.length;
             condition = this.compileExpression(statement.test);
             var whileEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
-            var whileBreaks = [];
+            var whileBreaks = this.makeJumpTarget(-1);
+            var whileContinues = this.makeJumpTarget(whileStart);
             this.breakTargets.push(whileBreaks);
-            this.continueTargets.push(whileStart);
-            bindLabelContinues(this, statement, whileStart);
+            this.continueTargets.push(whileContinues);
+            bindLabelContinues(this, statement, whileContinues);
             this.compileStatement(statement.body);
             this.continueTargets.pop();
             this.breakTargets.pop();
@@ -415,8 +476,8 @@
                 condition = this.compileExpression(statement.test);
                 forEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
             }
-            var forBreaks = [];
-            var forContinues = [];
+            var forBreaks = this.makeJumpTarget(-1);
+            var forContinues = this.makeJumpTarget(-1);
             this.breakTargets.push(forBreaks);
             this.continueTargets.push(forContinues);
             bindLabelContinues(this, statement, forContinues);
@@ -432,8 +493,8 @@
         }
         if (statement.type === "DoWhileStatement") {
             var doStart = this.code.length;
-            var doBreaks = [];
-            var doContinues = [];
+            var doBreaks = this.makeJumpTarget(-1);
+            var doContinues = this.makeJumpTarget(-1);
             this.breakTargets.push(doBreaks);
             this.continueTargets.push(doContinues);
             bindLabelContinues(this, statement, doContinues);
@@ -474,8 +535,8 @@
             var forInKey = this.allocate();
             this.emit(op.GET_PROPERTY, forInKey, forInKeys, forInIndex);
             this.storeReference(forInReference, forInKey);
-            var forInBreaks = [];
-            var forInContinues = [];
+            var forInBreaks = this.makeJumpTarget(-1);
+            var forInContinues = this.makeJumpTarget(-1);
             this.breakTargets.push(forInBreaks);
             this.continueTargets.push(forInContinues);
             bindLabelContinues(this, statement, forInContinues);
@@ -493,11 +554,11 @@
         if (statement.type === "BreakStatement") {
             if (statement.label !== null) {
                 var labelledBreak = findLabel(this, statement.label);
-                labelledBreak.breaks.push(this.emit(op.JUMP, 0));
+                this.emitJumpTo(labelledBreak.breaks);
                 return;
             }
             if (!this.breakTargets.length) throw new SyntaxError("break outside loop");
-            this.breakTargets[this.breakTargets.length - 1].push(this.emit(op.JUMP, 0));
+            this.emitJumpTo(this.breakTargets[this.breakTargets.length - 1]);
             return;
         }
         if (statement.type === "ContinueStatement") {
@@ -515,8 +576,7 @@
                 continueTarget = this.continueTargets[
                     this.continueTargets.length - 1];
             }
-            if (typeof continueTarget === "number") this.emit(op.JUMP, continueTarget);
-            else continueTarget.push(this.emit(op.JUMP, 0));
+            this.emitJumpTo(continueTarget);
             return;
         }
         if (statement.type === "ThrowStatement") {
@@ -528,7 +588,9 @@
             if (!statement.finalizer) {
                 var catchPush = this.emit(op.PUSH_CATCH, 0,
                     this.exceptionBindingOperand(statement.parameter));
+                this.unwindRegions.push(HANDLER_REGION);
                 this.compileStatement(statement.block);
+                this.unwindRegions.pop();
                 this.emit(op.POP_CATCH);
                 var catchEnd = this.emit(op.JUMP, 0);
                 this.patch(catchPush + 1, this.code.length);
@@ -539,31 +601,32 @@
             }
             var finallyPush = this.emit(op.PUSH_CATCH, 0,
                 this.exceptionBindingOperand(statement.finallyParameter));
-            var protectedHandlers = 1;
+            var finalizerRegion = {kind: "finally", block: statement.finalizer,
+                completionEntry: tryCompletion,
+                breakDepth: this.breakTargets.length,
+                continueDepth: this.continueTargets.length,
+                labelDepth: this.labelTargets.length};
+            this.unwindRegions.push(finalizerRegion);
             var userCatchPush = -1;
             if (statement.handler) {
                 userCatchPush = this.emit(op.PUSH_CATCH, 0,
                     this.exceptionBindingOperand(statement.parameter));
-                protectedHandlers = 2;
+                this.unwindRegions.push(HANDLER_REGION);
             }
-            this.finallyBlocks.push({block: statement.finalizer,
-                                     popCount: protectedHandlers,
-                                     completionEntry: tryCompletion});
             this.compileStatement(statement.block);
-            this.finallyBlocks.pop();
-            if (statement.handler) this.emit(op.POP_CATCH);
+            if (statement.handler) {
+                this.unwindRegions.pop();
+                this.emit(op.POP_CATCH);
+            }
             var skipUserCatch = -1;
             if (statement.handler) {
                 skipUserCatch = this.emit(op.JUMP, 0);
                 this.patch(userCatchPush + 1, this.code.length);
                 this.restoreCompletionValue(tryCompletion);
-                this.finallyBlocks.push({block: statement.finalizer,
-                                         popCount: 1,
-                                         completionEntry: tryCompletion});
                 this.compileStatement(statement.handler);
-                this.finallyBlocks.pop();
                 this.patch(skipUserCatch + 1, this.code.length);
             }
+            this.unwindRegions.pop();
             this.emit(op.POP_CATCH);
             this.compileFinalizer(statement.finalizer, tryCompletion);
             var finallyEnd = this.emit(op.JUMP, 0);
@@ -596,7 +659,7 @@
                 index++;
             }
             var defaultDispatch = this.emit(op.JUMP, 0);
-            var switchBreaks = [];
+            var switchBreaks = this.makeJumpTarget(-1);
             this.breakTargets.push(switchBreaks);
             var casePositions = [];
             index = 0;
@@ -628,33 +691,30 @@
             var returned = statement.argument !== null ?
                 this.compileExpression(statement.argument) :
                 this.emitConstant(undefined);
-            var returnWithScopes = [];
-            var returnWithIndex = 0;
-            while (returnWithIndex < this.withDepth) {
-                this.emit(op.LEAVE_WITH);
-                returnWithScopes.push(this.scopes.shift());
-                returnWithIndex++;
-            }
-            if (this.finallyBlocks.length) {
-                var activeFinalizers = this.finallyBlocks.slice(0);
-                var finalizerIndex = activeFinalizers.length - 1;
-                while (finalizerIndex >= 0) {
-                    var activeFinalizer = activeFinalizers[finalizerIndex];
-                    var popIndex = 0;
-                    while (popIndex++ < activeFinalizer.popCount) {
-                        this.emit(op.POP_CATCH);
-                    }
-                    this.finallyBlocks.length = finalizerIndex;
-                    this.compileFinalizer(activeFinalizer.block,
-                                          activeFinalizer.completionEntry);
-                    finalizerIndex--;
+            var returnDepth = this.unwindRegions.length;
+            var regionIndex = 0;
+            while (regionIndex < returnDepth) {
+                if (this.unwindRegions[regionIndex].kind === "finally") {
+                    returnDepth = regionIndex;
+                    break;
                 }
-                this.finallyBlocks = activeFinalizers;
+                regionIndex++;
             }
+            if (returnDepth < this.unwindRegions.length) {
+                /* Named binding registers occupy the initial register
+                 * prefix. Other results are already private temporaries or
+                 * constants and cannot be reassigned by the finalizer. */
+                if (returned < this.bindingRegisterCount) {
+                    var stableReturn = this.allocate();
+                    this.emit(op.MOVE, stableReturn, returned);
+                    returned = stableReturn;
+                }
+                this.emitUnwindTo(returnDepth);
+            }
+            /* The return boundary discards the frame and its remaining
+             * handlers/environments. Only cleanup through the outermost
+             * finalizer must run explicitly before that boundary. */
             this.emit(op.RETURN, returned);
-            while (returnWithScopes.length) {
-                this.scopes.unshift(returnWithScopes.pop());
-            }
             return;
         }
         throw new Error("unsupported statement: " + statement.type);

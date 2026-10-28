@@ -59,6 +59,25 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-28, approximately 21:51 UTC, protected-edge cleanup checkpoint:
+  **3,292 executed, 3,179 passed, 113 failed, 0 not run; 6 timeouts included
+  in failures**. Pass rate **96.57%**. Command:
+  `./artifacts/js_runner.exe artifacts/unwind-recheck.snap test262_runner.js
+  --instruction-limit 20000`. Elapsed **431.43 seconds**, user CPU **423.77
+  seconds**, peak RSS **549,496 KiB**; exit status 1. Exact failing-ID/variant
+  comparison against `ec5e517` shows **11 new passes and zero new failures**.
+  The final optimized compiler has the same failure IDs as its initial
+  protected-edge implementation (3179/113/0 in 414.29 seconds). The initial
+  run was before a reboot; these times alone do not isolate throughput changes.
+  Raw final log: `artifacts/unwind-final-test262.log`.
+  All eleven new passes are chapter-12 try/finally abrupt-exit cases:
+  `S12.14_A9_T2/T3/T5`, `A10_T2/T3/T5`, `A11_T2/T3`, `A12_T2/T3`, and `A15`.
+  Cleanup is emitted by the shared compiler, not a test-specific runtime path.
+  Remaining failures by chapter: **7: 6; 9: 7; 10: 10; 11: 8; 12: 42;
+  13: 40**. Chapter 12 has 24 with-scope, eight loop/hoisting/enumeration,
+  and ten try/catch/finally failures. Catch lexical environments remain work.
+  The imported corpus is unchanged; no test is skipped or marked passing
+  without execution. See `ES51_SEMANTICS_PROGRESS.md` for design/build gates.
 - 2026-10-28, approximately 16:37 UTC, efficient statement-completion/early-error
   checkpoint `ec5e517`:
   **3,292 executed, 3,168 passed, 124 failed, 0 not run; 6 timeouts included
