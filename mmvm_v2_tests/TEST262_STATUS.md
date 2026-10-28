@@ -59,6 +59,37 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-28, approximately 16:37 UTC, efficient statement-completion/early-error checkpoint:
+  **3,292 executed, 3,168 passed, 124 failed, 0 not run; 6 timeouts included
+  in failures**. Pass rate **96.23%**. Command:
+  `./artifacts/js_runner.exe artifacts/completion-final-node.snap
+  test262_runner.js --instruction-limit 20000`. Elapsed **396.74 seconds**,
+  user CPU **394.80 seconds**, peak RSS **549,476 KiB**; exit status 1.
+  The fresh serial baseline at `4ea036a` completed with **3,139 passed /
+  153 failed / 0 not run / 6 timeouts**, in **403.81 seconds**, user CPU
+  **401.31 seconds**, peak RSS **549,396 KiB**. Exact failing-ID/variant
+  comparison shows **29 newly passing tests and zero new failures**.
+  These single-run measurements show no throughput or RSS regression in this
+  inventory; they do not establish a statistically significant speedup or
+  parity with V8 jitless. Logs remain ignored under
+  `artifacts/completion-baseline-test262.log` and
+  `artifacts/completion-final-test262.log`.
+  The 29 new passes are five switch cases, thirteen loop/enumeration/eval
+  completion cases, one strict try/eval case, and all ten top-level-return
+  negative tests. No tests were suppressed or changed. See
+  `ES51_SEMANTICS_PROGRESS.md` for the shared frontend design and build gates.
+  Remaining failures by chapter: **7: 6; 9: 7; 10: 10; 11: 8; 12: 53;
+  13: 40**. Chapter 12 now has 24 with-scope, eight loop/hoisting/enumeration,
+  and 21 try/catch/finally failures; no switch or top-level-return failures
+  remain in this inventory.
+  Build and workload gates also passed: three-way byte-identical snapshots;
+  Node/js_min/self-hosted build times 6.35/90.40/111.39 seconds versus fresh
+  baselines 6.57/95.01/120.72 seconds; both project suites (270 assertions
+  each); all ten previously working standalone Octane quick runs; GC stress
+  (24 rounds / 47 native collections); live demos 1–8, including demo8 garage
+  and auto-pilot; and HTTP text/binary/directory-listing checks. No new
+  language micro-test files, generated files or external corpus changes were
+  needed. These single-run build timings are not statistical speedup claims.
 - 2026-10-28, approximately 15:13 UTC, final contract-66 image, revision `572c2d6`:
   **3,292 executed, 3,139 passed, 153 failed, 0 not run; 6 timeouts included
   in failures**. Pass rate **95.35%**. Command:
@@ -99,8 +130,9 @@ improvement over a larger one.
   These individual runs show lower standalone elapsed time but substantially
   higher memory usage; they are not a statistical performance comparison.
 
-Failure inventory from this completed standalone run (groups are source
-chapters, not mutually exclusive root-cause diagnoses):
+Initial bring-up failure inventory (the 153-failure baseline, retained for
+comparison; current chapter totals appear above). Groups are source chapters,
+not mutually exclusive root-cause diagnoses:
 
 - Chapter 7: **6**, all instruction-cap timeouts (two comment/eval tests and
   four generated regexp-literal lexer tests).

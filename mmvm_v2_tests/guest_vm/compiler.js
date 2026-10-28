@@ -24,6 +24,7 @@
         this.continueTargets = [];
         this.labelTargets = [];
         this.finallyBlocks = [];
+        this.completionRegister = -1;
         this.constantRegisters = [];
         this.registerHints = [];
         this.sourceLocations = [];
@@ -168,26 +169,23 @@
             this.storeReference(this.referenceForName(declaration.name), declaredFunction);
         }
         var index = 0;
-        var completionRegister = -1;
+        if (preserveCompletionValue) {
+            this.completionRegister = this.allocate();
+            this.compileStatement = this.compileStatementWithCompletion;
+            this.emit(op.MOVE, this.completionRegister,
+                      this.emitConstant(undefined));
+        }
         while (index < program.body.length) {
             var statement = program.body[index];
-            if (preserveCompletionValue &&
-                statement.type === "ExpressionStatement") {
-                if (statement.location) this.currentLocation = statement.location;
-                completionRegister = this.compileExpression(statement.expression);
-            } else {
-                this.compileStatement(statement);
-            }
+            this.compileStatement(statement);
             /* All whole-body analyses precede lowering. Release completed
              * root statements only; nested finally bodies may be replayed
              * along multiple control-flow paths and must remain intact. */
             if (this.consumeAst) program.body[index] = null;
             index++;
         }
-        if (completionRegister < 0) {
-            completionRegister = this.emitConstant(undefined);
-        }
-        this.emit(op.RETURN, completionRegister);
+        this.emit(op.RETURN, this.completionRegister < 0 ?
+                  this.emitConstant(undefined) : this.completionRegister);
         return optimizer.optimize({code: this.code, constants: this.constants,
                 constantRegisters: this.constantRegisters,
                 registerHints: this.registerHints,
@@ -275,6 +273,32 @@
             this.constantRegisters[constant] = target;
         }
         return target;
+    };
+
+    /* Empty statement completions leave the eval prefix unchanged. These
+     * helpers emit nothing in ordinary functions/source-loading programs. */
+    Compiler.prototype.saveCompletionValue = function () {
+        if (this.completionRegister < 0) return -1;
+        var saved = this.allocate();
+        this.emit(op.MOVE, saved, this.completionRegister);
+        return saved;
+    };
+
+    Compiler.prototype.restoreCompletionValue = function (saved) {
+        if (saved >= 0) this.emit(op.MOVE, this.completionRegister, saved);
+    };
+
+    Compiler.prototype.compileFinalizer = function (statement, entry) {
+        if (this.completionRegister < 0) {
+            this.compileStatement(statement);
+            return;
+        }
+        var pending = this.saveCompletionValue();
+        this.restoreCompletionValue(entry);
+        this.compileStatement(statement);
+        /* Abrupt completions leave this path before the restore. A normal
+         * finally completion never replaces the pending try/catch value. */
+        this.restoreCompletionValue(pending);
     };
 
     Compiler.prototype.compileStatement = function (statement) {
@@ -500,6 +524,7 @@
             return;
         }
         if (statement.type === "TryStatement") {
+            var tryCompletion = this.saveCompletionValue();
             if (!statement.finalizer) {
                 var catchPush = this.emit(op.PUSH_CATCH, 0,
                     this.exceptionBindingOperand(statement.parameter));
@@ -507,6 +532,7 @@
                 this.emit(op.POP_CATCH);
                 var catchEnd = this.emit(op.JUMP, 0);
                 this.patch(catchPush + 1, this.code.length);
+                this.restoreCompletionValue(tryCompletion);
                 this.compileStatement(statement.handler);
                 this.patch(catchEnd + 1, this.code.length);
                 return;
@@ -521,7 +547,8 @@
                 protectedHandlers = 2;
             }
             this.finallyBlocks.push({block: statement.finalizer,
-                                     popCount: protectedHandlers});
+                                     popCount: protectedHandlers,
+                                     completionEntry: tryCompletion});
             this.compileStatement(statement.block);
             this.finallyBlocks.pop();
             if (statement.handler) this.emit(op.POP_CATCH);
@@ -529,17 +556,19 @@
             if (statement.handler) {
                 skipUserCatch = this.emit(op.JUMP, 0);
                 this.patch(userCatchPush + 1, this.code.length);
+                this.restoreCompletionValue(tryCompletion);
                 this.finallyBlocks.push({block: statement.finalizer,
-                                         popCount: 1});
+                                         popCount: 1,
+                                         completionEntry: tryCompletion});
                 this.compileStatement(statement.handler);
                 this.finallyBlocks.pop();
                 this.patch(skipUserCatch + 1, this.code.length);
             }
             this.emit(op.POP_CATCH);
-            this.compileStatement(statement.finalizer);
+            this.compileFinalizer(statement.finalizer, tryCompletion);
             var finallyEnd = this.emit(op.JUMP, 0);
             this.patch(finallyPush + 1, this.code.length);
-            this.compileStatement(statement.finalizer);
+            this.compileFinalizer(statement.finalizer, tryCompletion);
             this.emit(op.THROW, this.loadReference(
                 this.referenceForName(statement.finallyParameter)));
             this.patch(finallyEnd + 1, this.code.length);
@@ -552,7 +581,9 @@
             index = 0;
             while (index < statement.cases.length) {
                 var switchCase = statement.cases[index];
-                if (switchCase.test) {
+                /* Compact literal tests can be 0, false or "". Only the
+                 * absence sentinel denotes a default arm. */
+                if (switchCase.test !== null) {
                     var caseValue = this.compileExpression(switchCase.test);
                     var caseMatches = this.allocate();
                     this.emit(op.STRICT_EQUAL, caseMatches,
@@ -614,7 +645,8 @@
                         this.emit(op.POP_CATCH);
                     }
                     this.finallyBlocks.length = finalizerIndex;
-                    this.compileStatement(activeFinalizer.block);
+                    this.compileFinalizer(activeFinalizer.block,
+                                          activeFinalizer.completionEntry);
                     finalizerIndex--;
                 }
                 this.finallyBlocks = activeFinalizers;
@@ -626,6 +658,19 @@
             return;
         }
         throw new Error("unsupported statement: " + statement.type);
+    };
+
+    /* Select the completion-aware entry only for eval. Recursive statement
+     * lists call this.compileStatement, so they automatically retain the
+     * selected mode, while ordinary functions keep the original fast path.
+     * The shared body is not copied and the public AST is never retagged. */
+    Compiler.prototype.compileOrdinaryStatement = Compiler.prototype.compileStatement;
+    Compiler.prototype.compileStatementWithCompletion = function (statement) {
+        if (statement.type === "ExpressionStatement") {
+            if (statement.location) this.currentLocation = statement.location;
+            var value = this.compileExpression(statement.expression);
+            this.emit(op.MOVE, this.completionRegister, value);
+        } else this.compileOrdinaryStatement(statement);
     };
 
     Compiler.prototype.emitBinary = function (operator, target, left, right) {

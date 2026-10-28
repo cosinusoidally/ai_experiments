@@ -18,6 +18,7 @@
             !!options && options.compactLiterals === true);
         this.allowIn = true;
         this.strict = !!options && options.strict === true;
+        this.functionDepth = 0;
         this.finallySerial = 0;
         this.compactLiterals = !!options && options.compactLiterals === true;
         /* Only compiler-owned ASTs may share leaves. Public ASTs retain
@@ -304,6 +305,7 @@
     };
 
     Parser.prototype.parseReturnStatement = function () {
+        if (this.functionDepth === 0) this.error("return outside function");
         this.advance(true);
         var argument = null;
         if (!this.current.lineBefore && !this.isPunctuator(";") &&
@@ -475,6 +477,7 @@
 
     Parser.prototype.parseFunctionBody = function (allowRegexpAfterClose) {
         this.expectPunctuator("{", true);
+        this.functionDepth++;
         var body = [];
         var directivePrologue = true;
         var directiveHadOctalEscape = false;
@@ -509,6 +512,7 @@
             }
         }
         var close = this.expectPunctuator("}", !!allowRegexpAfterClose);
+        this.functionDepth--;
         return {type: "BlockStatement", body: body, sourceEnd: close.end};
     };
 
