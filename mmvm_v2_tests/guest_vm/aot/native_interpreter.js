@@ -13604,7 +13604,10 @@
         if ((flags & STRING_LATIN1_FLAG) !== 0) {
             return latin1StringCharacterCodeUnit(heapBase, string, index);
         }
-        return flatStringCharacterCodeUnit(heapBase, string, index);
+        /* The flat storage primitive reads a word. This logical accessor
+         * must return only the requested UTF-16 code unit, independently of
+         * the following character or unused bytes after the string. */
+        return flatStringCharacterCodeUnit(heapBase, string, index) & 65535;
     }
 
     /* Keep the common flat load small enough for the normal, bounded kernel
@@ -13630,7 +13633,7 @@
         if ((flags & STRING_LATIN1_FLAG) !== 0) {
             return latin1StringCharacterCodeUnit(heapBase, string, index);
         }
-        return flatStringCharacterCodeUnit(heapBase, string, index);
+        return flatStringCharacterCodeUnit(heapBase, string, index) & 65535;
     }
 
     function stringTreeDepthKernel(heapBase, string) {

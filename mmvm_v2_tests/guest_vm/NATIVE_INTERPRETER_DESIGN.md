@@ -1071,3 +1071,16 @@ on restore.
 Native contract 62 invalidates old compiled kernels. The calloc service uses
 the platform-services record's previously reserved final word. No thread,
 page-discard operation, compression or host-language callback is introduced.
+
+### Logical UTF-16 access and numeric property keys
+
+Native contract 66 corrects the logical `stringCharacterCodeUnit` accessor,
+including its indirect-string path. The flat storage primitive performs a
+word load; the logical accessor now masks that load to one UTF-16 code unit.
+Previously most callers supplied their own mask, but numeric property-key
+matching compared the unmasked result. Bytes beyond a one-character key could
+therefore affect lookup: an assembler scale table could contain `"2": 1` and
+resolve `table["2"]` correctly while `table[2]` incorrectly returned undefined.
+The extra bytes depended on storage history, explaining the intermittent
+self-hosted assembly failures. Fixing the accessor's contract, rather than
+coercing keys in the assembler, also protects every other logical caller.
