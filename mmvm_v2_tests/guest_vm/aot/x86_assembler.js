@@ -275,7 +275,9 @@
         var scales = ADDRESS_SCALES;
         if (registers[base] === undefined || registers[index] === undefined || index === "esp" ||
             scales[scale] === undefined) {
-            throw new Error("invalid scaled-register load");
+            throw new Error("invalid scaled-register load: base=" + base +
+                ", index=" + index + ", scale=" + scale +
+                ", displacement=" + displacement);
         }
         if (this.macros) this.macros.push("mov_eax_ptr_scaled(" + base + ", " +
             index + ", " + scale + ", " + (displacement | 0) + ")");
@@ -293,7 +295,11 @@
         var registers = REGISTER_CODES;
         var scales = ADDRESS_SCALES;
         if (registers[base] === undefined || registers[index] === undefined || index === "esp" ||
-            scales[scale] === undefined) throw new Error("invalid scaled address");
+            scales[scale] === undefined) {
+            throw new Error("invalid scaled address: base=" + base +
+                ", index=" + index + ", scale=" + scale +
+                ", displacement=" + displacement);
+        }
         if (this.macros) this.macros.push("lea_eax_scaled(" + base + ", " +
             index + ", " + scale + ", " + (displacement | 0) + ")");
         var sib = (scales[scale] << 6) | (registers[index] << 3) | registers[base];

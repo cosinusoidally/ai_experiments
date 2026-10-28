@@ -225,6 +225,18 @@
                 " opcode=" + bytecodes.NAMES[opcode]);
             var source = records.programSource(program);
             if (source) output("source: " + records.readString(source).substring(0, 240));
+            var parameters = records.programParameterSlots(program);
+            var bindingRegisters = records.programBindingRegisters(program);
+            var parameterCount = parameters ? records.integerVectorLength(parameters) : 0;
+            var parameterIndex = 0;
+            while (parameterIndex < parameterCount && parameterIndex < 16) {
+                var slot = records.integerVectorValue(parameters, parameterIndex);
+                var parameterCell = bindingRegisters ? records.frameRegisterCell(frame,
+                    records.integerVectorValue(bindingRegisters, slot)) :
+                    records.environmentCell(records.frameEnvironment(frame), slot);
+                output("parameter " + parameterIndex + ": " + describeCell(parameterCell));
+                parameterIndex++;
+            }
             var width = bytecodes.WIDTHS[opcode] || 1;
             if (pc + width > codeLength) {
                 output("truncated instruction at pc=" + pc);
