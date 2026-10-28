@@ -25,6 +25,11 @@ The executable contract is version 65; rebuild generic images after these
 changes rather than expecting an older image's native semantics to change
 when loading new application source.
 
+The portable frame initializer also recognizes negative constant-register
+entries as unmapped, matching the native initializer. Heap-adopted programs
+use these sentinels where source descriptors used holes; they must not become
+named negative-index properties on the interpreter's register array.
+
 ## Program installation and property lookup (2026-10-28)
 
 The internal builder `__guestVMProgramSetCode(callable, start, words)` accepts

@@ -785,8 +785,12 @@
         var constantRegisters = program.constantRegisters || [];
         var constantIndex = 0;
         while (constantIndex < constantRegisters.length) {
-            if (constantRegisters[constantIndex] !== undefined) {
-                registers[constantRegisters[constantIndex]] =
+            var constantRegister = constantRegisters[constantIndex];
+            /* Heap-adopted layouts use a negative sentinel for constants
+             * without a preloaded register. Match native frame initialization
+             * rather than treating that sentinel as an array property. */
+            if (constantRegister !== undefined && constantRegister >= 0) {
+                registers[constantRegister] =
                     program.constants[constantIndex];
             }
             constantIndex++;
