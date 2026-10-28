@@ -59,7 +59,8 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
-- 2026-10-28, approximately 16:37 UTC, efficient statement-completion/early-error checkpoint:
+- 2026-10-28, approximately 16:37 UTC, efficient statement-completion/early-error
+  checkpoint `ec5e517`:
   **3,292 executed, 3,168 passed, 124 failed, 0 not run; 6 timeouts included
   in failures**. Pass rate **96.23%**. Command:
   `./artifacts/js_runner.exe artifacts/completion-final-node.snap

@@ -141,3 +141,17 @@ Final workload gates:
   long soak tests or sustained-FPS guarantees.
 - Both HTTP servers serve text, a byte-identical binary snapshot and directory
   listings. No demo or external test source was changed.
+
+V8-jitless reference for the same quick zlib wrapper:
+
+```sh
+node --jitless octane_node_runner.js --quick zlib
+```
+
+Node v24.14.1 passed in **17.54 seconds**, user CPU 17.34 seconds, peak RSS
+46,952 KiB. The guest's 34.90-second run is about **1.99 times** this elapsed
+time, so it has not reached jitless parity on this workload. This comparison
+includes startup, parsing, setup and teardown; it is one quick workload, not
+a stock-score or comprehensive interpreter comparison. Keep it as a reference
+for subsequent general runtime improvements rather than optimize for a zlib
+name or source pattern.
