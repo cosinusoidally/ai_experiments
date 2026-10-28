@@ -1,5 +1,30 @@
 # Native kernel interpreter design
 
+## Portable conversion paths (2026-10-28)
+
+Native `Number` uses the shared `convertValueToNumberKernel` rather than a
+second copy of its string parser. Invalid complete string conversions,
+including embedded NUL characters, yield NaN instead of requesting a semantic
+exit merely because libc did not consume the full text. Existing guarded
+ordinary-object/date handling is shared with the other numeric operations.
+This does not claim that libc's entire accepted numeric grammar is ES5.1's.
+
+Native `String` recognizes the canonical `[object Object]` result only after
+the existing method-identity/accessor guards establish unchanged ordinary
+conversion behavior. Overridden conversion methods still require the general
+callback-capable semantic path; they are not ignored.
+
+The portable `String.fromCharCode` implementation converts arguments in order
+to UTF-16 units and joins their strings, rather than building an unbounded
+variadic `apply` call into its embedding engine. This avoids an external
+argument-count/stack limit and permits the same implementation to execute
+inside a standalone guest embedding. Native `Function.apply` forwarding to
+all intrinsic targets remains separate unfinished work.
+
+The executable contract is version 65; rebuild generic images after these
+changes rather than expecting an older image's native semantics to change
+when loading new application source.
+
 ## Program installation and property lookup (2026-10-28)
 
 The internal builder `__guestVMProgramSetCode(callable, start, words)` accepts

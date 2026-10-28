@@ -3265,13 +3265,18 @@
         this.setProperty(this.stringPrototype, "constructor", stringConstructor);
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
-                var codes = [];
+                var characters = [];
                 var codeIndex = 0;
                 while (codeIndex < args.length) {
-                    codes[codeIndex] = runtime.toNumber(args[codeIndex]);
+                    /* Convert in argument order, then assemble UTF-16 code
+                     * units without relying on a host's variadic apply or
+                     * its argument-count/stack limit. ToInt32's low 16 bits
+                     * are exactly ToUint16, including NaN and infinities. */
+                    characters[codeIndex] = String.fromCharCode(
+                        runtime.toNumber(args[codeIndex]) & 65535);
                     codeIndex++;
                 }
-                return String.fromCharCode.apply(String, codes);
+                return characters.join("");
             }, "intrinsic", NativeIntrinsics.STRING_FROM_CHAR_CODE));
         this.setGlobal("String", stringConstructor);
         var numberConstructor = this.makeNativeFunction("Number",
