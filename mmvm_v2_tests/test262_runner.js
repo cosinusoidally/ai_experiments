@@ -87,9 +87,6 @@
         } else selectors.push(normalizeRelativePath(argument));
     }
     if (!selectors.length) selectors.push("");
-    if (selfHostedEval) {
-        require("./guest_vm/self_hosted_frontend.js").installEvalCompiler();
-    }
 
     function isApplicableRoot(name) {
         var index = 0;
@@ -144,6 +141,21 @@
         return;
     }
 
+    /* A snapshot may retain the hosted service's non-executable descriptor.
+     * Replace it explicitly rather than testing only for a missing global.
+     * Help/list operations must not construct a test runtime. */
+    var ownsTestRuntime = typeof Test262VM === "undefined" ||
+            (typeof __guestVMStandaloneImageBase === "number" &&
+             __guestVMStandaloneImageBase !== 0);
+    if (ownsTestRuntime) {
+        Test262VM = require("./guest_vm/standalone_test262.js").create(fs,
+            verbose ? function (phase) { console.log("Test262: " + phase); } : null);
+    }
+    if (selfHostedEval) {
+        if (ownsTestRuntime) Test262VM.installEvalCompiler();
+        else require("./guest_vm/self_hosted_frontend.js").installEvalCompiler();
+    }
+
     function hasDirective(source, name) {
         return source.indexOf("@" + name) >= 0;
     }
@@ -186,6 +198,7 @@
     while (testIndex < tests.length && !stopped) {
         var relativePath = tests[testIndex++];
         var filename = corpusDirectory + "/" + relativePath;
+        if (verbose) console.log("READ " + relativePath);
         var source = fs.readFileSync(filename, "utf8");
         var onlyStrict = hasDirective(source, "onlyStrict");
         var negative = hasDirective(source, "negative");
@@ -208,6 +221,7 @@
             var strict = variants[variantIndex++];
             var variantName = strict ? "strict" : "non-strict";
             counts.executed++;
+            if (verbose) console.log("RUN " + relativePath + " (" + variantName + ")");
             var result = Test262VM.runVariant(
                 filename, source, strict, harnessFiles, instructionLimit,
                 freshContexts);
@@ -256,5 +270,6 @@
     console.log("  not run:    " + counts.notRun);
     console.log("  timed out:  " + counts.timedOut);
     if (stopped) console.log("  stopped:    first failure (--fail-fast)");
+    if (ownsTestRuntime) Test262VM.destroy();
     if (counts.failed) process.exit(1);
 }(arguments));

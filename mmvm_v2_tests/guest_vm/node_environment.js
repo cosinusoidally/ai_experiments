@@ -1,6 +1,7 @@
-/* Embedder-side Node subset for guest programs.  This file deliberately runs
- * in the js_min.exe host, not inside the guest.  The libc-backed compatibility
- * stack owns descriptors and polling; only guest values cross this boundary. */
+/* Portable embedding adapters for guest programs. Normally these execute in
+ * the js_min/Node host. The standalone Test262 adapter reuses the realm
+ * scheduler as guest-executed code; it does not construct the Node adapters
+ * or require an external JavaScript engine. The compatibility stack owns I/O. */
 (function (root) {
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     if (typeof module !== "undefined" && module.exports) {
@@ -9,6 +10,19 @@
 
     function own(object, key) {
         return Object.prototype.hasOwnProperty.call(object, key);
+    }
+
+    /* Reporting an exception must not invoke arbitrary conversion methods on
+     * it, or coerce a wrapper belonging to another runtime. In particular a
+     * primitive throw may have been wrapped in a diagnostic Error already. */
+    function diagnosticThrownText(value) {
+        var kind = typeof value;
+        if (value !== null && (kind === "object" || kind === "function")) {
+            if (typeof value.message === "string") return value.message;
+            return "<thrown " + (typeof value.guestType === "string" ?
+                value.guestType : kind) + ">";
+        }
+        return String(value);
     }
 
     function normalizePosixPath(path) {
@@ -279,7 +293,7 @@
                      property("columnNumber") || 1;
         var name = direct.$name || property("name") || error.name || "Error";
         var message = direct.$message || property("message") ||
-                      error.message || String(error);
+                      error.message || diagnosticThrownText(error);
         var description = filename + ":" + line + ":" + column + ": " +
             name + (message ? ": " + message : "");
         var visible = new Error(description);
@@ -466,7 +480,7 @@
             phase: phase,
             name: property("name") || error && error.name || "Error",
             message: property("message") || error && error.message ||
-                String(visible || error),
+                diagnosticThrownText(visible || error),
             filename: property("fileName") || error &&
                 (error.guestFilename || error.fileName) || "",
             line: Number(property("lineNumber") || error &&
@@ -716,51 +730,60 @@
                 var harnessFiles = environment.runtime.arrayToHost(args[3]);
                 var instructionLimit = Number(args[4]);
                 var freshContext = !!args[5];
-                if (!(instructionLimit > 0)) instructionLimit = 20000000;
-
-                var harnessFailure = environment.prepareTest262Harness(
-                    harnessFiles, instructionLimit);
-                if (harnessFailure) return harnessFailure;
-                var profile = environment.runtime.profileOpcodeCounts ?
-                    environment.test262Timings : null;
-                var contextStarted = profile ? new Date().getTime() : 0;
-                var globalContext = environment.instantiateTest262Harness(
-                    freshContext);
-                if (profile) {
-                    profile.context += new Date().getTime() - contextStarted;
-                }
-                try {
-                    if (strict) source = "\"use strict\";\n" + source;
-                    return environment.runTest262Source(
-                        globalContext, source, filename, instructionLimit);
-                } catch (serviceError) {
-                    return environment.test262ErrorResult(
-                        "threw", "service", serviceError, 0);
-                } finally {
-                    var destroyStarted = profile ? new Date().getTime() : 0;
-                    if (freshContext) globalContext.destroy();
-                    else {
-                        globalContext.execution = null;
-                        environment.runtime.heapRecords.setContextActiveFrame(
-                            globalContext.heapAddress, 0);
-                    }
-                    if (profile) {
-                        profile.destroy += new Date().getTime() - destroyStarted;
-                        profile.variants++;
-                        if (profile.variants % 100 === 0) {
-                            print("Test262 host phases: variants=" +
-                                profile.variants + " context=" +
-                                profile.context + "ms (create=" +
-                                profile.contextCreate + "ms harness=" +
-                                profile.harnessExecute + "ms) compile=" +
-                                profile.compile + "ms execute=" +
-                                profile.execute + "ms destroy=" +
-                                profile.destroy + "ms");
-                        }
-                    }
-                }
+                return environment.runTest262Variant(filename, source, strict,
+                    harnessFiles, instructionLimit, freshContext);
             }));
         return service;
+    };
+
+    /* The scheduler is ordinary portable JS. The hosted adapter above only
+     * converts the calling realm's arguments; a standalone guest embedding
+     * can invoke this same implementation without a host-service callback. */
+    GuestNodeEnvironment.prototype.runTest262Variant = function (
+            filename, source, strict, harnessFiles, instructionLimit, freshContext) {
+        var environment = this;
+        if (!(instructionLimit > 0)) instructionLimit = 20000000;
+        var harnessFailure = environment.prepareTest262Harness(
+            harnessFiles, instructionLimit);
+        if (harnessFailure) return harnessFailure;
+        var profile = environment.runtime.profileOpcodeCounts ?
+            environment.test262Timings : null;
+        var contextStarted = profile ? new Date().getTime() : 0;
+        var globalContext = environment.instantiateTest262Harness(
+            freshContext);
+        if (profile) {
+            profile.context += new Date().getTime() - contextStarted;
+        }
+        try {
+            if (strict) source = "\"use strict\";\n" + source;
+            return environment.runTest262Source(
+                globalContext, source, filename, instructionLimit);
+        } catch (serviceError) {
+            return environment.test262ErrorResult(
+                "threw", "service", serviceError, 0);
+        } finally {
+            var destroyStarted = profile ? new Date().getTime() : 0;
+            if (freshContext) globalContext.destroy();
+            else {
+                globalContext.execution = null;
+                environment.runtime.heapRecords.setContextActiveFrame(
+                    globalContext.heapAddress, 0);
+            }
+            if (profile) {
+                profile.destroy += new Date().getTime() - destroyStarted;
+                profile.variants++;
+                if (profile.variants % 100 === 0) {
+                    print("Test262 host phases: variants=" +
+                        profile.variants + " context=" +
+                        profile.context + "ms (create=" +
+                        profile.contextCreate + "ms harness=" +
+                        profile.harnessExecute + "ms) compile=" +
+                        profile.compile + "ms execute=" +
+                        profile.execute + "ms destroy=" +
+                        profile.destroy + "ms");
+                }
+            }
+        }
     };
 
     GuestNodeEnvironment.prototype.makeSocket = function (hostSocket) {

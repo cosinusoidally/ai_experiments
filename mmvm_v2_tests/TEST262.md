@@ -53,6 +53,11 @@ The default remains the faster transitional eval frontend until this general
 path reaches throughput parity; the flag does not change test selection or
 expected semantics.
 
+Under `js_runner` the default embedding frontend is already guest-executed
+code in the control runtime, not a host-JS parser. In that configuration
+`--self-hosted-eval` moves eval compilation into the test runtime itself; it
+is not required to make the process independent of a host JavaScript engine.
+
 The runner has no Python, Node.js, npm, or SpiderMonkey dependency.  The
 external corpus is supplied by the user and is read in place.
 
@@ -64,7 +69,48 @@ from the read-only external tree and never writes into that tree.
 
 ## Runtime and context lifetime
 
-One command invocation owns one `JSRuntime`. Each test observes a freshly
+### Standalone embedding
+
+The same wrapper can be launched from a generic standalone image:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap test262_runner.js --instruction-limit 20000
+./artifacts/js_runner.exe artifacts/snap test262_runner.js --verbose ch06
+./artifacts/js_runner.exe artifacts/snap test262_runner.js --list ch09
+```
+
+`guest_vm/standalone_test262.js` supplies the embedding service when running
+inside an image. A snapshot's old hosted service descriptor is not executable
+and must not be mistaken for a working service merely because its global
+exists. Listing/help do not construct a test runtime.
+
+Rebuild the generic image from the current sources before using this adapter;
+it requires the guest embedding library's `runTest262Variant` interface.
+The standalone source runner is the control runtime. The adapter constructs
+one persistent, independent test `JSRuntime`, then uses the existing embedding
+library's `runTest262Variant` scheduler for context isolation, budgets and
+structured exceptions. That library itself executes as guest JavaScript in
+the control runtime; it does not call Node, SpiderMonkey, a subprocess, or a C
+VM-support API. Filesystem reads use the control runtime's libc-backed `fs`.
+Result objects are explicitly copied across the runtime boundary as primitive
+fields rather than exposing another runtime's heap references.
+
+This is genuine guest execution of the embedding implementation, **not** a
+claim that every operation executes in the test runtime's native kernel.
+Semantic exits from that kernel can run the portable interpreter/runtime
+implementation in the control guest VM. Thus the standalone run still exposes
+missing native operations needed by that implementation. The two runtimes
+have separate heaps, so memory figures must include both. Test execution is
+serial. Neither runtime is restarted for every test, and no benchmark/test
+source is cached specially. The adapter destroys its test runtime at normal
+completion, including a reported fail-fast stop.
+
+Consult `TEST262_STATUS.md` for completed versus interrupted runs. Do not
+present hosted totals as standalone totals or an interrupted inventory as a
+complete result.
+
+The test service owns one persistent `JSRuntime` for the whole selection.
+The standalone control runtime described above is separate. Each test observes a freshly
 restored `JSContext` environment within that runtime. Source is evaluated as
 authored (and is therefore sloppy by default); `@onlyStrict` explicitly asks
 the runner to prepend a strict directive. Contexts share runtime-owned immutable infrastructure and compiled

@@ -140,8 +140,14 @@ Outstanding general work exposed by this group:
 
 ### Test262
 
-- The current standalone runner loads and compiles `test262_runner.js`, but a
-  chapter-6 run stops at `require("fs")` before producing conformance counts.
+- The original standalone audit could not execute the wrapper and produced
+  no conformance counts. That historical limitation is replaced by the
+  guest-executed embedding service described in `TEST262.md` (2026-10-28).
+  The complete standalone inventory now executes all 3,292 authored tests:
+  3,139 passed, 153 failed (including six diagnostic-budget timeouts), zero
+  not run, in 362.20 seconds. Both runtimes and the embedding implementation
+  execute in guest code; no host JS engine participates. See
+  `TEST262_STATUS.md` for scope, peak memory, failure groups and run details.
 - A hosted one-file chapter-6 audit passes and shows the remaining bootstrap
   boundary explicitly: `require`, `load`, `fs.readFileSync`, and
   `Test262VM.runVariant` are embedder calls. Console output is also an embedder
@@ -153,13 +159,14 @@ Outstanding general work exposed by this group:
 
 Outstanding general work exposed by this group:
 
-- complete the guest-owned Test262 driver on top of the existing standalone
-  `require`, `load`, and synchronous filesystem implementation;
-- implement `Test262VM.runVariant` on the guest-owned runtime/context API so it
-  creates a cheap fresh `JSContext`, evaluates the harness/test, reports its
-  structured result, and tears the context down without an embedder callback;
-- once bootstrap completes, run all 3,292 authored ES5.1 files to completion
-  and record pass/fail/not-run counts in `TEST262_STATUS.md`;
+- resolve the 153 remaining conformance/diagnostic-budget failures without
+  suppressing tests, and the three Function/eval realm cases in the optional
+  inner-realm eval diagnostic;
+- keep distinguishing native-kernel coverage from guest execution of the
+  portable interpreter/runtime: both are host-independent in this standalone
+  embedding, but only the former is fully native;
+- preserve complete-run counts and exact failure-ID comparisons across both
+  standalone and hosted regression runs;
 - keep context teardown reclaiming per-test state so the full run does not
   reproduce the previously observed long-run heap growth.
 

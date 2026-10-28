@@ -57,13 +57,115 @@ failure counts is directly comparable. The intended progression within each
 group is toward zero failures; a smaller selection is never presented as an
 improvement over a larger one.
 
-### Complete ES5.1 suite — 3,292 files
+### Standalone js_runner — 3,292 authored tests
 
-- Latest complete authored-program checkpoint (2026-10-27, native backing
-  memory work): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
+- 2026-10-28, guest-executed embedding bring-up, executable contract 65:
+  **3,292 executed, 3,139 passed, 153 failed, 0 not run; 6 timeouts included
+  in failures**. Pass rate: **95.35%**. Command:
+  `./artifacts/js_runner.exe artifacts/test262-errors.snap test262_runner.js
+  --instruction-limit 20000`. Elapsed **362.20 seconds** (6m 2.20s), user CPU
+  **359.23 seconds**, peak RSS **549,504 KiB** (536.625 MiB). This includes
+  construction of the persistent guest-owned test runtime and final teardown.
+  Both the control embedding and the test runtime execute inside the guest VM;
+  no Node or SpiderMonkey engine is present in the process. Raw detailed log:
+  ignored `artifacts/test262-js-runner-full3.log`.
+- This is a bounded diagnostic inventory, not complete ES5.1 conformance.
+  The six generated eval/lexer workloads exhaust the stated instruction
+  allowance; they remain failures, not skips. This historical import covers
+  chapters 6, 7, 9, 10, 11, 12 and 13, not every standard-library feature.
+- The first complete inventory exposed a separate process-status bug: the
+  standalone source entry returned zero after a caught `process.exit(1)`.
+  Exit-status forwarding was corrected afterward; a one-file failing
+  `--fail-fast` selection now returns 1, while an all-passing fresh-context
+  chapter-6 selection returns 0. The recorded full-run summary was not inferred
+  from that earlier exit code.
+- A fresh hosted comparison completed with exactly the same 153 failing IDs
+  and strict/sloppy variants, not merely matching totals. The serial hosted
+  run took 471.31 seconds (468.43 seconds user CPU), peak RSS 305,280 KiB.
+  These individual runs show lower standalone elapsed time but substantially
+  higher memory usage; they are not a statistical performance comparison.
+
+Failure inventory from this completed standalone run (groups are source
+chapters, not mutually exclusive root-cause diagnoses):
+
+- Chapter 7: **6**, all instruction-cap timeouts (two comment/eval tests and
+  four generated regexp-literal lexer tests).
+- Chapter 9: **7**: empty-string Boolean conversion (1), ES5 canonical
+  number-to-string formatting/exponent thresholds (4), and required TypeErrors
+  for property access on null/undefined (2).
+- Chapter 10: **10**, all in arguments-object semantics/property descriptors,
+  including strict `arguments.callee` access that must throw.
+- Chapter 11: **8**, including missing function `length`, boxed-string
+  addition/compound assignment, deletion and `in` behavior, and the previously
+  documented strict Math.PI corpus erratum. Do not change valid language
+  semantics merely to accept its `NotEarlyError` expectation.
+- Chapter 12: **82**: loops/hoisting/enumeration (21), dynamic `with` resolution
+  (24), switch/fall-through (5), top-level return incorrectly accepted (10),
+  and try/catch/finally behavior (22). The latter includes finally blocks
+  skipped across break/continue and a catch-binding compilation limitation.
+- Chapter 13: **40**: function/arguments bindings and function-object property
+  metadata, including absent descriptors and enumerable `prototype.constructor`.
+  One catch-binding case also fails during compilation.
+
+Only two of the 153 failures are compile-phase failures, both reporting
+`catch binding is not directly addressable`. Most remaining work is incomplete
+or incorrect semantics of already accepted constructs, not wholesale absence
+of their syntax. Merely adding parser productions would not resolve it.
+
+Bring-up checkpoints, not full-suite results:
+
+- 2026-10-28, native contract 66: the snapshot regression gate exposed a
+  logical UTF-16 accessor returning neighboring storage bits. Numeric property
+  lookup could fail even though the equivalent string-key lookup succeeded.
+  Corrected both flat and indirect logical-accessor paths, without changing
+  assembler lookups. Node, js_min and genuine self-hosted builds now produce
+  byte-identical 6,005,936-byte images (SHA-256
+  `778154be4aed4e20a296d909cb524f51a1d7411bb35de93f0451ca3c7f995e26`).
+  The complete inventory above predates this accessor fix; a final inventory
+  is recorded separately once completed.
+- Contract-66 regression gates: both complete project suites passed under
+  js_min and Node (12 guest programs / 270 guest assertions each, plus heap,
+  embedding and compiler checks). Live demos 1–8 opened at 320x240/20 FPS
+  and exited cleanly; demo8 also entered garage and free-drive auto-pilot.
+  These were short interaction checks, not long-duration soak tests or a
+  sustained-FPS claim. Both HTTP servers served text, a byte-identical binary
+  snapshot and a directory listing. The standalone GC workload passed 24
+  rounds / 47 native collections. All ten previously working standalone
+  Octane quick-correctness runs passed: Richards, DeltaBlue, Crypto, RayTrace,
+  EarleyBoyer, Splay, NavierStokes, Box2D, Gameboy and zlib. No stock-score
+  sweep or RegExp benchmark is implied by those quick runs.
+- Initial standalone chapter 6: 1 executed / 1 passed / 0 failed.
+- Chapter 9 after portable conversion fixes: 128 executed / 121 passed /
+  7 failed / 0 not run / 0 timed out.
+- Label/throw selections `ch12/12.12 ch12/12.13` after safe exception reporting:
+  15 executed / 15 passed / 0 failed / 0 not run / 0 timed out.
+- `--self-hosted-eval ch10/10.1` with the ordinary 20-million-instruction
+  allowance: 43 executed / 40 passed / 3 failed / 0 not run / 0 timed out.
+  These are Function/eval realm/global-binding cases. At the smaller 20,000
+  allowance the same three cases time out because eval compilation is charged
+  inside the test realm. This mode is not the default standalone inventory.
+  A heap-adopted constant-register sentinel bug exposed by the mode was fixed:
+  the portable frame initializer now skips negative unmapped-register entries,
+  like the native frame initializer.
+- Earlier full attempts stopped at native semantic exits, first while
+  converting internal property-key strings and later while formatting a
+  primitive thrown value. Neither partial attempt replaces the completed
+  inventory above. VM inspection was extended to include frame parameters;
+  temporary raw heap dumps and logs are not committed.
+
+### Hosted native interpreter under js_min — 3,292 files
+
+- Latest completed hosted authored-program checkpoint (2026-10-28, standalone
+  bring-up comparison): **3,292 executed, 3,139 passed, 153 failed, 0 not run**; six
   instruction-budget timeouts are included in failures. See the dated
   packed-object entries below. Historical synthetic-variant results are
   retained separately and are not the current conformance totals.
+
+- 2026-10-28: `js_min.exe guest_runner.js --vm-native test262_runner.js --quiet
+  --instruction-limit 20000`: **3,139 passed, 153 failed, 0 not run; 6 timeouts**.
+  Elapsed 471.31 seconds, user CPU 468.43 seconds, peak RSS 305,280 KiB.
+  Sorted failing IDs and variants exactly match the completed standalone run
+  above. Raw log: ignored `artifacts/test262-hosted-current-full.log`.
 
 - 2026-10-27, approximately 09:53 UTC, revision `70ff17d`:
   `js_min.exe guest_runner.js --vm-native test262_runner.js --quiet

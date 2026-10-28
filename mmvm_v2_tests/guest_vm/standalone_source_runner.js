@@ -260,6 +260,9 @@ function guestStandaloneRunGuestRunner(runnerArguments) {
     try {
         guestStandaloneRunGuestRunnerUnchecked(runnerArguments);
     } catch (error) {
+        if (error === NodeProcess.exitMarker) {
+            guestStandaloneQuit(NodeProcess.exitCode);
+        }
         var description = guestStandaloneDescribeError(error);
         console.error(description);
         guestStandaloneQuit(3);
@@ -296,3 +299,6 @@ if (GuestStandaloneGCStress) {
     console.log("GC stress completed: " + __guestVMGCStress() +
                 " native collections");
 }
+/* The native loader cannot infer a guest process.exit status. Propagate it
+ * through libc rather than returning a successful kernel return to C. */
+if (NodeProcess.exitCode !== 0) guestStandaloneQuit(NodeProcess.exitCode);
