@@ -7,6 +7,7 @@ function guestRunnerRequestsSnapshot(runnerArguments) {
         var option = runnerArguments[index++];
         if (option === "--snapshot") return true;
         if (option === "--with-snapshot" ||
+            option === "--vm-max-heap-mib" ||
             option === "--vm-profile-duration") index++;
         else if (option.charAt(0) !== "-") return false;
     }
@@ -38,6 +39,7 @@ var guestRunnerForbidHostCalls = false;
 var guestRunnerLogHostCalls = false;
 var guestRunnerProfileDuration = 0;
 var guestRunnerGCStress = false;
+var guestRunnerMaxHeapBytes;
 var guestRunnerBuildSourcesStarted = new Date().getTime();
 
 if (guestRunnerIsNode) {
@@ -102,6 +104,15 @@ for (var guestRunnerOptionIndex = 0;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-gc-stress") {
         guestRunnerGCStress = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
+               "--vm-max-heap-mib") {
+        var guestRunnerHeapMiB = Number(
+            guestRunnerArguments[++guestRunnerOptionIndex]);
+        if (!(guestRunnerHeapMiB >= 64 && guestRunnerHeapMiB <= 1024 &&
+                guestRunnerHeapMiB === Math.floor(guestRunnerHeapMiB))) {
+            throw new RangeError("--vm-max-heap-mib requires an integer from 64 to 1024");
+        }
+        guestRunnerMaxHeapBytes = guestRunnerHeapMiB * 1024 * 1024;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-threaded") {
         guestRunnerThreaded = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
@@ -160,6 +171,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-trace-exceptions] " +
                      "[--vm-verify-heap] [--vm-threaded] " +
                      "[--vm-gc-stress] " +
+                     "[--vm-max-heap-mib 64..1024] " +
                      "[--vm-no-host-calls] " +
                      "[--vm-log-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
@@ -201,6 +213,7 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode || !!guestRun
                                         logHostCalls:
                                             guestRunnerLogHostCalls,
                                         verifyNativeHeap: guestRunnerVerifyHeap,
+                                        maxHeapBytes: guestRunnerMaxHeapBytes,
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,
                                         nativeOperandPredecode: guestRunnerPredecode,

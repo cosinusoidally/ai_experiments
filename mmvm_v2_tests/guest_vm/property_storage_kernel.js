@@ -222,9 +222,16 @@
         var capacity = PROPERTY_INDEX_MINIMUM_PROPERTIES * 2;
         while (capacity < count * 2) capacity = capacity * 2;
         var bytes = PROPERTY_INDEX_RECORD_BYTES + capacity * HEAP_WORD_BYTES;
+        /* Reuse another available arena when this one is too small. An
+         * optional accelerator still never forces collection or changes the
+         * instruction's allocation-failure status. Limiting it to the current
+         * arena silently disabled indexing on large dictionaries. */
+        var previousFailure = engineAllocationFailed(heapBase, state);
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) {
+            setEngineAllocationFailed(heapBase, state, previousFailure);
+            return 0;
+        }
         index = engineHeapBump(heapBase, state);
-        /* An optional accelerator never forces growth or collection. */
-        if (index + bytes < index || index + bytes > engineHeapLimit(heapBase, state)) return 0;
         setRecordType(heapBase, index, HEAP_TYPE_PROPERTY_INDEX);
         setRecordSize(heapBase, index, bytes);
         setRecordMark(heapBase, index, 0);
@@ -269,9 +276,17 @@
                 setPropertyStorageHashIndex(heapBase, storage, 0);
             }
             var slot = propertyStorageLength(heapBase, storage);
+            var keyLength = stringLength(heapBase, key);
             while (slot > 0) {
                 var candidate = propertyStorageKeyAt(heapBase, storage, slot - 1);
-                if (candidate !== 0 && stringKeysEqualKernel(heapBase, candidate, key) === 1) return slot;
+                if (candidate === key) return slot;
+                /* Small objects deliberately have no hash index. Reject
+                 * unequal keys here before entering the general string
+                 * comparator (which also supports ropes and mixed encodings).
+                 * Hash equality is only a filter, never proof of equality. */
+                if (candidate !== 0 && stringLength(heapBase, candidate) === keyLength &&
+                        stringKeyHashKernel(heapBase, candidate) === hash &&
+                        stringKeysEqualKernel(heapBase, candidate, key) === 1) return slot;
                 slot = slot - 1;
             }
             return 0;

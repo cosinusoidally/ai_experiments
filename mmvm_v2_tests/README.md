@@ -231,6 +231,14 @@ are resolved when launched, not copied from the Node process. The Node,
 js_min and genuine self-hosted builds must produce identical files from the
 same sources/options. No application filename is needed to generate one.
 
+`guest_runner.js --vm-max-heap-mib N` exposes the runtime's maximum growable
+heap size (integer MiB, 64 through 1024). It does not eagerly allocate that
+much resident memory or change the 64 MiB initial heap. The default maximum
+remains 512 MiB. Pass the option when constructing a snapshot to configure
+that image's maximum; an already built standalone image retains its own
+reservation. This is useful for diagnosing large compilations, not a cache
+or an application-specific snapshot option.
+
 The resulting image can load arbitrary guest source through its libc-backed
 filesystem layer, tokenize, parse, compile, and execute it without
 SpiderMonkey or `LD_LIBRARY_PATH`:

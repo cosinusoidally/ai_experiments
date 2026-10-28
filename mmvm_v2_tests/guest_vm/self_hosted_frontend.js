@@ -30,8 +30,15 @@ exports.compileAst = function (ast, consumeAst) {
         {consumeAst: !!consumeAst}).compile(ast));
 };
 
-exports.compile = function (source, filename) {
-    return exports.compileAst(exports.parse(source, filename), true);
+exports.compile = function (source, filename, options) {
+    ensureFrontend();
+    var captureLocations = !options || options.captureLocations !== false;
+    var ast = new SelfHostedParser(source, filename,
+        {compactLiterals: true, shareIdentifiers: true,
+         captureLocations: captureLocations}).parseProgram();
+    return selfHostedVerify(new SelfHostedCompiler(null, null, false,
+        {consumeAst: true, captureLocations: captureLocations,
+         finishFunction: options && options.finishFunction}).compile(ast));
 };
 
 function adoptProgramDescriptor(program, contextAnchor) {
@@ -70,12 +77,8 @@ function adoptProgramDescriptor(program, contextAnchor) {
             program.source || null);
         retainAdoptionRoot(callable);
         try {
+            __guestVMProgramSetCode(callable, 0, program.code);
             var index = 0;
-            while (index < program.code.length) {
-                __guestVMProgramSetCode(callable, index, program.code[index]);
-                index++;
-            }
-            index = 0;
             while (index < program.constants.length) {
                 var constant = program.constants[index];
                 if (constant && typeof constant === "object" &&
@@ -131,7 +134,15 @@ exports.adoptProgram = adoptProgramDescriptor;
 
 exports.compileExecutable = function (source, filename, contextAnchor,
                                       owningGlobal) {
-    var program = exports.compile(source, filename);
+    /* Adoption retains exact function source, but has no location-table input.
+     * Do not build/retain a second, unused source-position graph here. Public
+     * descriptor compilation still captures locations by default. */
+    var program = exports.compile(source, filename, {
+        captureLocations: false,
+        finishFunction: function (nestedProgram) {
+            return adoptProgramDescriptor(selfHostedVerify(nestedProgram), contextAnchor);
+        }
+    });
     var executable = adoptProgramDescriptor(program, contextAnchor);
     var globalDeclarations = program.globalDeclarations || [];
     /* The returned closure needs the adopted callable and declaration names,
@@ -217,7 +228,7 @@ exports.compileFunctionExecutable = function () {
     }
     var source = "function anonymous(" + parameterSource + "\n) {\n" + body + "\n}";
     var ast = new SelfHostedParser(source, "<Function>",
-        {compactLiterals: true}).parseProgram();
+        {compactLiterals: true, shareIdentifiers: true}).parseProgram();
     if (ast.body.length !== 1 || ast.body[0].type !== "FunctionDeclaration") {
         throw new SyntaxError("invalid Function constructor source");
     }

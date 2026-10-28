@@ -9,10 +9,10 @@
     var UNKNOWN = 0, INT32 = 1, ZERO = 2;
     /* Bound analysis memory, not the size of programs accepted by the VM. */
     var MAX_STATE_ENTRIES = 262144;
-    /* Bound repeated dataflow work as well as resident state. Sixteen full
+    /* Bound repeated dataflow work as well as resident state. Two full
      * state-table visits permit ordinary loop convergence without allowing
      * an optional optimization to dominate compilation on a difficult CFG. */
-    var MAX_ANALYSIS_WORK = MAX_STATE_ENTRIES * 16;
+    var MAX_ANALYSIS_WORK = MAX_STATE_ENTRIES * 2;
 
     function numberKind(value) {
         if (typeof value !== "number" || value !== (value | 0)) return UNKNOWN;

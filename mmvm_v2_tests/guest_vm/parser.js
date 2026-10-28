@@ -20,6 +20,12 @@
         this.strict = !!options && options.strict === true;
         this.finallySerial = 0;
         this.compactLiterals = !!options && options.compactLiterals === true;
+        /* Only compiler-owned ASTs may share leaves. Public ASTs retain
+         * independent, mutable nodes at every source occurrence. Identifier
+         * leaves contain no location or binding state: resolution belongs to
+         * the compiler scope, not to this descriptor. */
+        this.identifierNodes = options && options.shareIdentifiers === true ?
+            {} : null;
         this.captureLocations = !options || options.captureLocations !== false;
         this.captureFunctionSource = !options ||
             options.captureFunctionSource !== false;
@@ -30,6 +36,17 @@
 
     Parser.prototype.error = function (message) {
         this.tokenizer.error(message, this.current.line, this.current.column);
+    };
+
+    Parser.prototype.makeIdentifier = function (name) {
+        if (!this.identifierNodes) return {type: "Identifier", name: name};
+        var key = "$" + name;
+        var node = this.identifierNodes[key];
+        if (!node) {
+            node = {type: "Identifier", name: name};
+            this.identifierNodes[key] = node;
+        }
+        return node;
     };
 
     Parser.prototype.makeLiteral = function (value, token) {
@@ -767,7 +784,8 @@
                 this.error("reserved word is not an identifier in strict code");
             }
             this.advance(false);
-            return {type: "Identifier", name: token.value};
+            return this.identifierNodes ? this.makeIdentifier(token.value) :
+                {type: "Identifier", name: token.value};
         }
         if (this.isKeyword("this")) {
             this.advance(false);

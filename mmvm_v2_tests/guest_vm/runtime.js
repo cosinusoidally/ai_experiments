@@ -3728,13 +3728,26 @@
             "__guestVMProgramSetCode", function (receiver, args) {
                 var program = programFor(args[0]);
                 var index = integer(args[1], "code index");
-                var value = integer(args[2], "bytecode word");
-                if (index < 0 || index >= program.code.length) {
+                var source = args[2];
+                var isRange = source && source.guestType === "array";
+                var count = isRange ? runtime.arrayLength(source) : 1;
+                if (index < 0 || index > program.code.length ||
+                        count > program.code.length - index) {
                     throw new RangeError("bytecode index is out of bounds");
                 }
-                program.code[index] = value;
-                runtime.heapRecords.setBytecodeWord(
-                    runtime.writableProgramBytecode(program), index, value);
+                var words = [], word = 0;
+                while (word < count) {
+                    words.push(integer(isRange ? runtime.getProperty(source,
+                        String(word)) : source, "bytecode word"));
+                    word++;
+                }
+                var bytecode = runtime.writableProgramBytecode(program);
+                word = 0;
+                while (word < count) {
+                    program.code[index + word] = words[word];
+                    runtime.heapRecords.setBytecodeWord(bytecode, index + word, words[word]);
+                    word++;
+                }
                 return args[0];
             }, "intrinsic", NativeIntrinsics.PROGRAM_SET_CODE));
         this.setGlobal("__guestVMProgramSetConstant", this.makeNativeFunction(

@@ -764,6 +764,110 @@ or construction algorithm (for example, a guest-owned rope/concatenation
 representation with bounded-depth traversal or flattening), while preserving
 ES5 string immutability and both backends' semantics.
 
+## 2026-10-27: Mandreel frontend allocation investigation
+
+The unchanged stock Mandreel run on the current standalone image fails during
+compilation, not because `SET_PROPERTY` or `CALL` is missing. The native exit
+reports `allocation 1`: the 512 MiB heap has reached its limit. The baseline
+run took 64.28 seconds, reached 532,060 KiB peak RSS, and reported 287,452,208
+live bytes after 17 collections. A read-only memory trace confirms the peak
+overlaps the parsed AST with the compiler's growing vectors.
+
+The frontend work targets representation and lifetime, not benchmark names:
+
+- Share immutable identifier leaves only in compiler-owned ASTs; public AST
+  identity and mutability remain unchanged.
+- Complete scope/return analysis before lowering and release completed root
+  statements in consuming mode. Replayed `finally` bodies remain intact.
+- Adopt verified nested programs as they complete, so parent compilation
+  retains executable templates rather than every child's builder arrays.
+
+Identifier sharing plus statement release alone is insufficient. An
+instrumented run still failed after 39 collections with 197,901,672 live bytes
+and 338,969,096 free bytes: fragmentation, not just live-data size, matters.
+Early nested-program adoption was retained after regression checks, but did
+not make stock Mandreel pass. No Mandreel pass is claimed by these partial
+results. An experimental in-place optimizer rewrite was excluded after a
+standalone regression; the established instruction-rewrite algorithm remains.
+
+## 2026-10-28: measured native frontend costs (Mandreel still unresolved)
+
+The previous tuned frontend reached `mandreelAppInit` but failed after about
+952 seconds, with 50,655,128 live bytes in the 512 MiB reservation and a largest
+free record of only 2,723,656 bytes. This is **not** a Mandreel pass. Its very
+long compilation and fragmented contiguous-allocation failure remain open;
+raising the heap cap or adding a benchmark cache is not the intended fix.
+
+A bounded 25-second libc `profil` sample found approximately 41% of native
+samples in the interpreter body, 10% in bytecode call setup, 10% in intrinsic
+dispatch, 8% in constant-register copying, and 5% in allocation. Constant-name
+property reads were the largest approximate case region (12% of all samples).
+The percentages exclude libc and are not an end-to-end speedup measurement.
+
+General small-object key rejection checks reduced string-comparator samples
+from about 4.6% to 0.5% in a subsequent bounded sample. Checked cross-owner
+property-slot hints preserve descriptor lookup and cache invalidation semantics.
+A single EarleyBoyer quick timing changed from 2.87 to 2.78 seconds: modest,
+not evidence of a major improvement. No benchmark source was changed.
+
+The self-hosted program builder now installs a checked code-word array in one
+call instead of issuing a VM call for each bytecode word. A genuine self-hosted
+rebuild completed in 103.50 seconds at 477,696 KiB peak RSS and produced an
+image bit-identical to its Node cross-build. This confirms rebuild correctness,
+not that the Mandreel performance target has been met. The Node-hosted suite
+passed 12 guest programs / 270 assertions. The preceding property-lookup image
+also passed all ten previously working Octane quick workloads and the existing
+24-round / 47-native-collection GC workload. The range-installation image
+subsequently passed the same ten quick workloads and GC stress workload.
+
+See [bounded native profiling](guest_vm/tools/NATIVE_PROFILING.md) for the
+checked-in diagnostic commands. Generated images, symbols and raw logs remain
+ignored artifacts; no diagnostic code is required by ordinary snapshot startup.
+
+### General checkpoint; Mandreel investigation paused
+
+Work on Mandreel was paused at the user's request. The retained changes are
+general frontend lifetime/adoption interfaces, bounded optional analyses,
+checked range installation, ordinary-object lookup, and native allocation
+handling. There is no benchmark-name check, parsing cache, benchmark edit or
+new host-language implementation of guest features. Experimental largest-first
+declaration scheduling and call-count capacity hints were removed before this
+checkpoint; declaration lowering remains in source order.
+
+The simplified checkpoint passed the Node-hosted 12-program / 270-assertion
+suite and the 24-round / 47-native-collection GC workload. Its genuine
+self-hosted build completed in 111.67 seconds at 485,376 KiB peak RSS and was
+bit-identical to the Node-built image. This is not a controlled before/after
+timing, so no overall performance improvement is claimed. A focused 165-test
+Test262 comparison produced 164 passes and the same one failure on both the
+starting revision and this work; see `TEST262_STATUS.md`.
+
+Live standalone demos 1–7 ran at 320x240 and exited cleanly after their input
+tests. Demo8 also entered garage and free-drive auto-pilot modes and exited
+cleanly. Its transition sample was 17.1 FPS; subsequent samples were 19.8,
+19.4 and 20.0 FPS at the 20 FPS limit. These are short regression checks, not
+a long-duration stability guarantee. Demo files and the external corpus were
+not modified.
+
+Final checkpoint verification after removing the scheduling/capacity
+experiments:
+
+- Node and `js_min` project suites: 12 guest programs / 270 assertions each,
+  including the existing embedding and self-hosted frontend integration checks.
+- All ten previously working standalone Octane quick correctness workloads:
+  Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay (including latency),
+  NavierStokes, Box2D, Gameboy and zlib. These are not fresh stock scores.
+- Native GC workload: 24 rounds / 47 native collections.
+- Node, `js_min` and genuine self-hosted snapshot builds: byte-identical,
+  6,009,584 bytes; SHA-256
+  `09d9c16d27d10e0689871b2b52f67c060fe11a7f43321c7f690ed0165a3beae6`.
+- Both `net.js` and `node_web.js` under the final standalone image served
+  `hello.js`, the complete binary snapshot (byte-compared), and a directory
+  listing correctly over localhost. No HTTP fixture or demo was modified.
+
+RegExp was not investigated. No new full Test262 run, full stock Octane score
+table or Mandreel success is claimed. Work is paused pending further direction.
+
 ## 2026-09-27: balanced guest strings and accessor calls
 
 The native heap now represents sufficiently large concatenations as immutable

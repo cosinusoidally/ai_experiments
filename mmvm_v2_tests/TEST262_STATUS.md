@@ -21,6 +21,19 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-28, general frontend/property-lookup checkpoint: focused authored
+  selection `ch09/9.5 ch11/11.6 ch11/11.7` completed all 165 tests with
+  164 passed, 1 failed, 0 not run and 0 timed out. An isolated copy of starting
+  revision `5327ff5` produced exactly the same counts and failure ID:
+  `ch11/11.6/11.6.1/S11.6.1_A3.2_T2.3.js` (boxed String plus undefined).
+  Current run: 47.78 seconds / 200,896 KiB peak RSS; starting revision:
+  47.05 seconds / 201,648 KiB. This is a focused no-regression check, not a
+  new full-suite conformance total or a claimed speedup. Commands used the
+  documented `js_min.exe guest_runner.js --vm-native test262_runner.js
+  --quiet` shape with the three selectors and the library path exported.
+  Raw logs remain ignored under `artifacts/general-checkpoint-test262-baseline.log`
+  and `artifacts/mandreel-batch-test262.log`.
+
 - 2026-10-23, after precise register-use analysis/temporary coalescing
   (`b723791` plus named value-cell writer cleanup): focused selection
   `ch09/9.5 ch11/11.6 ch11/11.7`, 165 files/variants executed, 153 passed,

@@ -28,6 +28,7 @@
     var heapSweepKernel = HeapSweeper.sweepKernel;
     var BUFFER_BACKING_EXTERNAL_FLAG = HeapRecords.KernelConstants.BUFFER_BACKING_EXTERNAL_FLAG;
     var LARGE_BUFFER_BYTES = HeapRecords.KernelConstants.LARGE_BUFFER_BYTES;
+    var PREFERRED_NATIVE_REGION_BYTES = HeapRecords.KernelConstants.PREFERRED_NATIVE_REGION_BYTES;
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
@@ -4237,11 +4238,11 @@
                 var propertyFoundOnReceiver = 0;
                 var propertyReceiverStorage = 0;
                 var propertyReceiverEpoch = 0;
-                var propertyCacheIndex =
-                    ((propertyReceiver >>> 3) ^
-                     stringKeyHashKernel(heapBase, propertyConstantKey)) &
-                    (PROPERTY_CACHE_ENTRY_COUNT - 1);
+                var propertyCacheIndex = 0;
                 if (virtualPropertyObjectType === HEAP_TYPE_OBJECT) {
+                    propertyCacheIndex =
+                        stringKeyHashKernel(heapBase, propertyConstantKey) &
+                        (PROPERTY_CACHE_ENTRY_COUNT - 1);
                     propertyReceiverStorage = objectPropertyHead(heapBase, propertyReceiver);
                     if (propertyReceiverStorage !== 0) {
                         propertyReceiverEpoch = recordFlags(heapBase, propertyReceiverStorage);
@@ -4560,7 +4561,10 @@
                 var setPropertyConstantKey = load32(
                     setPropertyKeyCell + VALUE_CELL_LOW);
                 var setPropertyIgnored = 0;
+                /* Arguments objects share array storage but their length is
+                 * an ordinary property, not the virtual true-array length. */
                 if (setPropertyObjectType === HEAP_TYPE_ARRAY &&
+                        arrayReserved(heapBase, setPropertyObject) === 0 &&
                         stringKeysEqualKernel(heapBase, setPropertyConstantKey,
                             arrayLengthKey) === 1) {
                     if (setArrayLengthKernel(heapBase, state, setPropertyObject,
@@ -14233,6 +14237,70 @@
         return releasedFrames;
     }
 
+    /* Allocation-free bottom-up merge sort of reclaimed arenas. Keeping
+     * small holes first makes first-fit selection preserve large extents
+     * without a full best-fit search on every small allocation. */
+    function sortNativeFreeRegionsKernel(heapBase, head) {
+        var runLength = 1;
+        var finished = 0;
+        while (finished === 0) {
+            var left = head;
+            var output = 0;
+            var tail = 0;
+            var merges = 0;
+            while (left !== 0) {
+                merges = merges + 1;
+                var right = left;
+                var leftCount = 0;
+                while (leftCount < runLength && right !== 0) {
+                    leftCount = leftCount + 1;
+                    right = recordMark(heapBase, right);
+                }
+                var rightCount = runLength;
+                while (leftCount > 0 || (rightCount > 0 && right !== 0)) {
+                    var selected = 0;
+                    if (leftCount === 0) {
+                        selected = right;
+                        right = recordMark(heapBase, right);
+                        rightCount = rightCount - 1;
+                    } else if (rightCount === 0 || right === 0 ||
+                            recordSize(heapBase, left) <= recordSize(heapBase, right)) {
+                        selected = left;
+                        left = recordMark(heapBase, left);
+                        leftCount = leftCount - 1;
+                    } else {
+                        selected = right;
+                        right = recordMark(heapBase, right);
+                        rightCount = rightCount - 1;
+                    }
+                    if (tail === 0) output = selected;
+                    else setRecordMark(heapBase, tail, selected);
+                    tail = selected;
+                }
+                left = right;
+            }
+            if (tail !== 0) setRecordMark(heapBase, tail, 0);
+            head = output;
+            if (merges <= 1) finished = 1;
+            else runLength = runLength * 2;
+        }
+        return head;
+    }
+
+    function insertNativeFreeRegionKernel(heapBase, state, region) {
+        var size = recordSize(heapBase, region);
+        var current = engineNativeFreeRegion(heapBase, state);
+        var previous = 0;
+        while (current !== 0 && recordSize(heapBase, current) < size) {
+            previous = current;
+            current = recordMark(heapBase, current);
+        }
+        setRecordMark(heapBase, region, current);
+        if (previous === 0) setEngineNativeFreeRegion(heapBase, state, region);
+        else setRecordMark(heapBase, previous, region);
+        return 0;
+    }
+
     function rebuildNativeAllocatorKernel(heapBase, state, heapBump) {
         var address = HEAP_FIRST_RECORD;
         var freeHead = 0;
@@ -14255,7 +14323,8 @@
             address = address + size;
         }
         setEngineNativeRegionEnd(heapBase, state, 0);
-        setEngineNativeFreeRegion(heapBase, state, freeHead);
+        setEngineNativeFreeRegion(heapBase, state,
+            sortNativeFreeRegionsKernel(heapBase, freeHead));
         setEngineNativeTailBump(heapBase, state, tailBump);
         setEngineNativeRegionActive(heapBase, state, 0);
         setEngineNativeRetiredRegion(heapBase, state, 0);
@@ -14343,8 +14412,7 @@
         /* Content addressing lets freshly constructed but equal computed
          * keys reuse entries. A collision is verified by exact equality. */
         var hash = stringKeyHashKernel(heapBase, key);
-        var index = ((object >>> 3) ^ hash) &
-            (PROPERTY_CACHE_ENTRY_COUNT - 1);
+        var index = hash & (PROPERTY_CACHE_ENTRY_COUNT - 1);
         var head = objectPropertyHead(heapBase, object);
         if (propertyCacheObject(heapBase, state, index) === object &&
                 propertyCacheVersion(heapBase, state, index) === ownPropertyEpochKernel(heapBase, object) &&
@@ -14355,7 +14423,26 @@
                 return propertyCacheProperty(heapBase, state, index);
             }
         }
-        var property = indexedOwnObjectPropertyKernel(heapBase, state, object, key, hash);
+        var property = 0;
+        /* The entry is an insertion-order slot, not a persistent address.
+         * Across owners it is only a hint: validate bounds and the current
+         * slot's key before resolving its descriptor. This benefits ordinary
+         * objects with similar layouts without assuming shared shapes or
+         * retaining a pointer into another object's storage. Collection clears
+         * the cache owner; never inspect its cached key after invalidation. */
+        if (head !== 0 && propertyCacheObject(heapBase, state, index) !== 0 &&
+                propertyCacheKey(heapBase, state, index) === key) {
+            var hintedEntry = propertyCacheProperty(heapBase, state, index);
+            if (hintedEntry > 0 && hintedEntry <= propertyStorageLength(heapBase, head)) {
+                var hintedKey = propertyStorageKeyAt(heapBase, head, hintedEntry - 1);
+                if (hintedKey === key) property = hintedEntry;
+                else if (hintedKey !== 0 &&
+                        stringKeysEqualKernel(heapBase, hintedKey, key) === 1) property = hintedEntry;
+            }
+        }
+        if (property === 0) {
+            property = indexedOwnObjectPropertyKernel(heapBase, state, object, key, hash);
+        }
         if (property !== 0) {
             setPropertyCacheKey(heapBase, state, index, key);
             setPropertyCacheVersion(heapBase, state, index, ownPropertyEpochKernel(heapBase, object));
@@ -14653,13 +14740,22 @@
                     var pressureLimitGrowth = growNativeHeapLimitKernel(
                         heapBase, state);
                 }
-                /* Match the hosted collector's adaptive pressure policy.
+                /* Use adaptive allocation pressure after collection.
                  * A high-churn program must receive useful allocation
                  * headroom after paying for a complete mark/sweep; otherwise
                  * it repeatedly scans the same mostly-live heap. Reclaimed
                  * holes remain the allocator's first choice, so extending the
                  * tail pressure bound does not discard reusable storage. */
                 var postCollectionHeadroom = collectionReclaimed >> 1;
+                /* A growing, mostly-live graph also needs headroom in
+                 * proportion to its tracing cost. Small fragmented holes
+                 * are not useful space for a growing contiguous vector;
+                 * reclaimed-byte headroom alone can otherwise cause a full
+                 * trace after each minimum-sized increment of the tail. */
+                var liveGraphHeadroom = collectionLiveBytes >> 1;
+                if (postCollectionHeadroom < liveGraphHeadroom) {
+                    postCollectionHeadroom = liveGraphHeadroom;
+                }
                 if (postCollectionHeadroom <
                         MINIMUM_POST_COLLECTION_HEADROOM) {
                     postCollectionHeadroom =
@@ -14772,9 +14868,8 @@
                  * must not consume the tail while reusable storage waits
                  * for another full collection. The active arena has already
                  * been detached and its suffix is a complete free record. */
-                setRecordMark(heapBase, remaining,
-                    engineNativeFreeRegion(heapBase, state));
-                setEngineNativeFreeRegion(heapBase, state, remaining);
+                var insertedRemaining = insertNativeFreeRegionKernel(
+                    heapBase, state, remaining);
             } else if (remainingSize >= FREE_RECORD_HEADER_BYTES + 8) {
                 setRecordMark(heapBase, remaining,
                     engineNativeRetiredRegion(heapBase, state));
@@ -14797,13 +14892,28 @@
                 }
             }
             if (bytes <= usableFreeBytes) {
-                var freeRegionEnd = freeRegion + freeRegionSize;
                 if (previousFreeRegion === 0) {
-                    setEngineNativeFreeRegion(
-                        heapBase, state, nextFreeRegion);
+                    setEngineNativeFreeRegion(heapBase, state, nextFreeRegion);
                 } else {
-                    setRecordMark(heapBase, previousFreeRegion,
-                                  nextFreeRegion);
+                    setRecordMark(heapBase, previousFreeRegion, nextFreeRegion);
+                }
+                /* Do not hand a whole large extent to small bump allocations.
+                 * Retain an arena-sized window and publish the untouched
+                 * suffix immediately, in size order, for future large data. */
+                var arenaBytes = bytes + FREE_RECORD_HEADER_BYTES;
+                if (arenaBytes < PREFERRED_NATIVE_REGION_BYTES) {
+                    arenaBytes = PREFERRED_NATIVE_REGION_BYTES;
+                }
+                var freeRegionEnd = freeRegion + freeRegionSize;
+                if (freeRegionSize - arenaBytes >= MIN_NATIVE_REGION_BYTES) {
+                    var suffix = freeRegion + arenaBytes;
+                    setRecordType(heapBase, suffix, HEAP_TYPE_FREE);
+                    setRecordSize(heapBase, suffix, freeRegionSize - arenaBytes);
+                    setRecordMark(heapBase, suffix, 0);
+                    setRecordFlags(heapBase, suffix, 0);
+                    var insertedSuffix = insertNativeFreeRegionKernel(
+                        heapBase, state, suffix);
+                    freeRegionEnd = suffix;
                 }
                 setEngineNativeRegionEnd(heapBase, state, freeRegionEnd);
                 setEngineNativeRegionActive(heapBase, state, 1);
@@ -15594,12 +15704,31 @@
             heapBase, state, argumentsVector, registerAddress, 1);
         var value = programIntArgumentKernel(
             heapBase, state, argumentsVector, registerAddress, 2);
+        var sourceCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerAddress, 2);
+        var sourceVector = 0;
+        var writeCount = 1;
         if (callable === 0) return 0;
         if (index < 0) return 0;
-        if (value === INVALID_PROGRAM_INTEGER) return 0;
+        if (sourceCell !== 0 && valueCellTag(0, sourceCell) === VALUE_TAG_REFERENCE) {
+            var sourceArray = valueCellReference(0, sourceCell);
+            if (recordType(heapBase, sourceArray) !== HEAP_TYPE_ARRAY) return 0;
+            sourceVector = arrayElements(heapBase, sourceArray);
+            writeCount = vectorLength(heapBase, sourceVector);
+            /* This internal builder accepts dense integer arrays, not
+             * arbitrary array-like objects or coercing/accessor reads. Check
+             * the entire range before modifying the executable program. */
+            var checkedWord = 0;
+            while (checkedWord < writeCount) {
+                if (valueCellTag(0, vectorCellAddress(heapBase, sourceVector,
+                        checkedWord)) !== VALUE_TAG_INT32) return 0;
+                checkedWord = checkedWord + 1;
+            }
+        } else if (value === INVALID_PROGRAM_INTEGER) return 0;
         var program = functionMetadata(heapBase, callable);
         var bytecode = programBytecode(heapBase, program);
-        if (index >= bytecodeLength(heapBase, bytecode)) return 0;
+        var codeLength = bytecodeLength(heapBase, bytecode);
+        if (index > codeLength || writeCount > codeLength - index) return 0;
         if ((recordFlags(heapBase, bytecode) & BYTECODE_COMPACT_FLAG) !== 0) {
             var writable = 0;
             if (BYTECODE_REGISTER_SCALE === VALUE_CELL_BYTES) {
@@ -15628,7 +15757,16 @@
             setProgramBytecode(heapBase, program, writable);
             bytecode = writable;
         }
-        store32(bytecodeWordAddress(heapBase, bytecode, index), value);
+        if (sourceVector === 0) {
+            store32(bytecodeWordAddress(heapBase, bytecode, index), value);
+        } else {
+            var copiedWord = 0;
+            while (copiedWord < writeCount) {
+                store32(bytecodeWordAddress(heapBase, bytecode, index + copiedWord),
+                    valueCellInt32(0, vectorCellAddress(heapBase, sourceVector, copiedWord)));
+                copiedWord = copiedWord + 1;
+            }
+        }
         setBytecodeExecutionCache(heapBase, bytecode, 0);
         setValueCellReference(targetCell, callable);
         return 1;
@@ -17511,92 +17649,95 @@
      * Match the canonical decimal spelling in place so indexed access on an
      * ordinary object does not allocate a temporary string or leave the guest
      * engine. */
+    function numericStringKeyMatchesKernel(heapBase, key, number, length) {
+        if (stringLength(heapBase, key) !== length) return 0;
+        var character = 0;
+        while (character < length) {
+            if (stringCharacterCodeUnit(heapBase, key, character) !==
+                    integerDecimalCodeUnitKernel(number, character)) return 0;
+            character = character + 1;
+        }
+        return 1;
+    }
+
+    /* Numeric keys use the same canonical decimal text/hash as string keys,
+     * without allocating a temporary string for a successful lookup. Packed
+     * objects share their ordinary hash index; legacy owners keep their list. */
+    function numericOwnPropertyEntryKernel(heapBase, state, object, number,
+                                           length, hash) {
+        if (recordType(heapBase, object) === HEAP_TYPE_OBJECT) {
+            var index = prepareObjectPropertyIndexKernel(heapBase, state, object);
+            if (index !== 0) {
+                var capacity = propertyIndexCapacity(heapBase, index);
+                var bucket = hash & (capacity - 1);
+                var probes = 0;
+                var storage = propertyIndexHead(heapBase, index);
+                while (probes < capacity) {
+                    var entry = propertyIndexSlot(heapBase, index, bucket);
+                    if (entry === 0) return 0;
+                    if (numericStringKeyMatchesKernel(heapBase,
+                            propertyStorageKeyAt(heapBase, storage, entry - 1),
+                            number, length) === 1) return entry;
+                    bucket = (bucket + 1) & (capacity - 1);
+                    probes = probes + 1;
+                }
+            }
+        }
+        var property = lastOwnPropertyEntryKernel(heapBase, object);
+        while (property !== 0) {
+            if (numericStringKeyMatchesKernel(heapBase,
+                    ownPropertyEntryKeyKernel(heapBase, object, property),
+                    number, length) === 1) return property;
+            property = previousOwnPropertyEntryKernel(heapBase, object, property);
+        }
+        return 0;
+    }
+
     function numericPropertyGetKernel(heapBase, state, targetCell, object,
                                       index, sourceCell, operation) {
         if (index < 0) return 0;
+        var digitCount = integerDecimalLengthKernel(index);
+        var hash = STRING_HASH_OFFSET_BASIS;
+        var digitIndex = 0;
+        while (digitIndex < digitCount) {
+            hash = stringHashStep(hash,
+                integerDecimalCodeUnitKernel(index, digitIndex));
+            digitIndex = digitIndex + 1;
+        }
         var currentObject = object;
         while (currentObject !== 0) {
             var objectType = recordType(heapBase, currentObject);
             if (objectType < HEAP_TYPE_OBJECT) return 0;
             if (objectType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
-            var property = lastOwnPropertyEntryKernel(heapBase, currentObject);
-            while (property !== 0) {
-                var key = ownPropertyEntryKeyKernel(heapBase, currentObject, property);
-                var length = stringLength(heapBase, key);
-                var matches = 1;
-                var parsed = 0;
-                var characterIndex = 0;
-                if (length === 0) matches = 0;
-                if (length > 1) {
-                    if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) ===
-                        48) matches = 0;
-                }
-                while (characterIndex < length) {
-                    var character = stringCharacterCodeUnit(
-                        heapBase, key, characterIndex) & 65535;
-                    if (matches === 0) {
-                        /* Keep the kernel loop structurally simple. */
-                    } else if (character < 48) {
-                        matches = 0;
-                    } else if (character > 57) {
-                        matches = 0;
-                    } else {
-                        if (parsed > 214748364) {
-                            matches = 0;
-                        } else {
-                            parsed = parsed * 10 + character - 48;
-                            if (parsed < 0) matches = 0;
-                        }
-                    }
-                    characterIndex = characterIndex + 1;
-                }
-                if (matches === 1) {
-                    if (parsed === index) {
-                        var propertyCell = ownPropertyEntryValueCellKernel(heapBase, currentObject, property);
-                        if (operation === 1) {
-                            copyValueCell(propertyCell, sourceCell);
-                        } else {
-                            copyValueCell(targetCell, propertyCell);
-                        }
-                        return 1;
-                    }
-                }
-                property = previousOwnPropertyEntryKernel(heapBase, currentObject, property);
+            var property = numericOwnPropertyEntryKernel(
+                heapBase, state, currentObject, index, digitCount, hash);
+            if (property !== 0) {
+                var propertyCell = ownPropertyEntryValueCellKernel(
+                    heapBase, currentObject, property);
+                if (operation === 1) copyValueCell(propertyCell, sourceCell);
+                else copyValueCell(targetCell, propertyCell);
+                return 1;
             }
             if (operation === 1) currentObject = 0;
             else currentObject = objectPrototype(heapBase, currentObject);
         }
         if (operation === 1) {
-            var digitCount = 1;
-            var measuredIndex = index;
-            while (measuredIndex >= 10) {
-                measuredIndex = divideI32(measuredIndex, 10);
-                digitCount = digitCount + 1;
-            }
-            var stringBytes = (STRING_CHARS + digitCount * 2 + 7) & -8;
+            var stringBytes = (STRING_CHARS + digitCount +
+                HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
             if (reserveNativeAllocationKernel(
                     heapBase, state, stringBytes) === 0) return 2;
             var stringAddress = engineHeapBump(heapBase, state);
             setRecordType(heapBase, stringAddress, HEAP_TYPE_STRING);
             setRecordSize(heapBase, stringAddress, stringBytes);
             setRecordMark(heapBase, stringAddress, 0);
-            setRecordFlags(heapBase, stringAddress, 0);
+            setRecordFlags(heapBase, stringAddress,
+                STRING_KEY_HASH_FLAG | STRING_LATIN1_FLAG);
             setStringLength(heapBase, stringAddress, digitCount);
-            var hash = -2128831035;
-            var digitIndex = 0;
+            digitIndex = 0;
             while (digitIndex < digitCount) {
-                var place = digitCount - digitIndex - 1;
-                var digits = index;
-                while (place > 0) {
-                    digits = divideI32(digits, 10);
-                    place = place - 1;
-                }
-                var characterCode = 48 + digits % 10;
+                var characterCode = integerDecimalCodeUnitKernel(index, digitIndex);
                 setStringCharacterByte(heapBase, stringAddress,
-                                       digitIndex * 2, characterCode);
-                setStringCharacterByte(heapBase, stringAddress,
-                                       digitIndex * 2 + 1, 0);
-                hash = (hash ^ characterCode) * 16777619;
+                                       digitIndex, characterCode);
                 digitIndex = digitIndex + 1;
             }
             setStringHash(heapBase, stringAddress, hash);
@@ -17711,6 +17852,8 @@
             mathIntrinsicKernel: mathIntrinsicKernel,
             roundLargeNumberKernel: roundLargeNumberKernel,
             numericPropertyGetKernel: numericPropertyGetKernel,
+            numericOwnPropertyEntryKernel: numericOwnPropertyEntryKernel,
+            numericStringKeyMatchesKernel: numericStringKeyMatchesKernel,
             numberCellToStringKernel: numberCellToStringKernel,
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
@@ -17746,6 +17889,8 @@
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
             rebuildNativeAllocatorKernel: rebuildNativeAllocatorKernel,
+            sortNativeFreeRegionsKernel: sortNativeFreeRegionsKernel,
+            insertNativeFreeRegionKernel: insertNativeFreeRegionKernel,
             nativeCollectorClockKernel: nativeCollectorClockKernel,
             releaseNativeCachedFramesKernel: releaseNativeCachedFramesKernel,
             restoreContextActiveFrameKernel:
@@ -17887,6 +18032,7 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    PREFERRED_NATIVE_REGION_BYTES: PREFERRED_NATIVE_REGION_BYTES,
                     INITIAL_ARRAY_CAPACITY: kernelConstantOverrides.INITIAL_ARRAY_CAPACITY,
                     MAX_VECTOR_LENGTH: kernelConstantOverrides.MAX_VECTOR_LENGTH,
                     BYTECODE_COMPACT8_FLAG: kernelConstantOverrides.BYTECODE_COMPACT8_FLAG,

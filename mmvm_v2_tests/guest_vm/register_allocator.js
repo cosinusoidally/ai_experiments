@@ -6,8 +6,13 @@
     var op = root.GuestVMBytecode;
     if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
 
+    /* Packing is optional. Its per-register liveness vectors must not consume
+     * an unbounded fraction of the heap for very large generated functions. */
+    var MAX_PACKING_REGISTERS = 262144;
+
     function pack(program, bindingCount) {
         var code = program.code, count = program.registerCount;
+        if (count > MAX_PACKING_REGISTERS) return program;
         var boundaries = {0: true}, first = [], last = [], blocks = [];
         var definitions = [], firstDefinition = [], firstRead = [], pinned = [];
         var pc, opcode, index, reads, destination, vector, argument;

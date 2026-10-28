@@ -12,6 +12,8 @@
 
     function Compiler(scopeBindings, outerScopes, registerBindings, options) {
         this.consumeAst = !!options && options.consumeAst === true;
+        this.finishFunction = options && options.finishFunction || null;
+        this.captureLocations = !options || options.captureLocations !== false;
         this.code = [];
         this.constants = [];
         this.primitiveConstantIndexes = {};
@@ -130,7 +132,9 @@
 
     Compiler.prototype.emit = function () {
         var position = this.code.length;
-        if (this.currentLocation) this.sourceLocations[position] = this.currentLocation;
+        if (this.captureLocations && this.currentLocation) {
+            this.sourceLocations[position] = this.currentLocation;
+        }
         var index = 0;
         while (index < arguments.length) {
             this.code.push(arguments[index]);
@@ -174,6 +178,10 @@
             } else {
                 this.compileStatement(statement);
             }
+            /* All whole-body analyses precede lowering. Release completed
+             * root statements only; nested finally bodies may be replayed
+             * along multiple control-flow paths and must remain intact. */
+            if (this.consumeAst) program.body[index] = null;
             index++;
         }
         if (completionRegister < 0) {
@@ -203,7 +211,8 @@
         var useRegisters = canUseRegisterBindings(expression.body, bindingMap) &&
             (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters,
-            {consumeAst: this.consumeAst});
+            {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
+             captureLocations: this.captureLocations});
         if (containsDirectEval(expression.body)) {
             /* Sloppy eval may introduce a new var binding in this activation
              * which shadows an outer binding. Keep known locals in their
@@ -218,6 +227,10 @@
                                expression.location.filename : this.filename,
                            location: expression.location || null,
                            strict: !!expression.strict};
+        /* These analyses need the AST, not emitted instructions. Finish them
+         * before the consuming compiler releases completed statements. */
+        var returnKind = inferReturnKind(expression.body);
+        var nonlocalBindings = describeNonlocalBindings(expression.body, nested);
         var program = nested.compile(bodyProgram);
         program.parameters = expression.parameters.slice(0);
         program.locals = locals;
@@ -235,8 +248,8 @@
         program.name = expression.name || "";
         program.source = expression.source || null;
         if (!this.consumeAst) program.astBody = expression.body;
-        program.returnKind = inferReturnKind(expression.body);
-        program.nonlocalBindings = describeNonlocalBindings(expression.body, nested);
+        program.returnKind = returnKind;
+        program.nonlocalBindings = nonlocalBindings;
         /* Direct eval is compiled after this function has started executing.
          * Preserve the compiler-visible outer environment layouts so eval can
          * resolve through the complete lexical chain, not merely its caller's
@@ -248,7 +261,10 @@
          * emitted program. The default API remains non-destructive for the
          * structured backend and embedders which retain their ASTs. */
         if (this.consumeAst) expression.body = null;
-        return program;
+        /* A frontend sink can adopt a completed nested program immediately.
+         * Its parent then retains only the executable template rather than
+         * every child's temporary bytecode and analysis arrays. */
+        return this.finishFunction ? this.finishFunction(program) : program;
     };
 
     Compiler.prototype.emitConstant = function (value) {

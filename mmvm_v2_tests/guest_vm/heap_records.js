@@ -298,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 63;
+    Records.NativeInterpreterContractVersion = 64;
     Records.grownArrayCapacity = grownArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
@@ -441,6 +441,7 @@
         GC_STRESS_DEFAULT_INTERVAL: GC_STRESS_DEFAULT_INTERVAL,
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
+        PREFERRED_NATIVE_REGION_BYTES: 64 * 1024,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
         STRING_LATIN1_FLAG: STRING_LATIN1_FLAG,
         VECTOR_SHARED_METADATA_FLAG: VECTOR_SHARED_METADATA_FLAG,

@@ -1,5 +1,33 @@
 # Native kernel interpreter design
 
+## Program installation and property lookup (2026-10-28)
+
+The internal builder `__guestVMProgramSetCode(callable, start, words)` accepts
+either one integer word (the existing form) or a dense guest array of integer
+words. The range form validates all source tags and destination bounds before
+writing. It uses the same writable-bytecode/copy-on-write path and invalidates
+the execution cache once after installation. Source code, source locations,
+verification and the public JS language are unchanged. The self-hosted frontend
+uses the range form rather than paying a full guest call for each emitted
+word. Both the structured runtime and native kernel implement this internal
+API; native installation neither materializes host objects nor calls the host
+VM. Interpreter contract version 64 requires images containing this API.
+
+Small ordinary objects retain their insertion-ordered packed entries without
+requiring a hash index. Their linear lookup checks identity, length and hash
+before invoking general string equality; hash equality is never sufficient to
+accept a key. The property cache is indexed by key hash. Its fully guarded
+owner hit remains valid only for the same owner, storage, epoch and generation.
+Across owners the cached entry is merely a slot-number hint: bounds and the
+current slot's key must match before resolving the current descriptor. This
+does not assume shared shapes, retain an interior property address, or bypass
+getters. A cleared cache owner invalidates both the full hit and the hint, so
+cached keys are never consulted after collection invalidates the table.
+
+Optional single-threaded native sampling is documented in
+[native profiling](tools/NATIVE_PROFILING.md). Sampling percentages locate
+costs; they are not substituted for end-to-end timing or correctness runs.
+
 ## Ordered ordinary-object properties (2026-10-25)
 
 Ordinary objects now own packed entry storage rather than linked property
@@ -469,9 +497,16 @@ and linked heads for available and retired free regions. Allocation helpers
 reserve complete compound record groups before publishing any member. Region
 selection and switching are compiled kernel operations; ordinary bytecode does
 not call the host merely to obtain another reclaimed block. Available regions
-are linked in heap storage and searched for the first region which can satisfy
-the current request. Once a suffix is too small for an allocation it is retired
-for that native slice instead of being reconsidered on every later allocation.
+are linked in heap storage. The standalone collector sorts reclaimed arenas
+by size using an allocation-free linked-list merge sort. First-fit then
+preserves large holes without an exhaustive best-fit search for every small
+record. Reusable suffixes are inserted in size order. Selecting a large extent
+does not give all its remaining space to unrelated bump allocations: the
+active window is at most the request plus its sentinel, bounded below by
+`PREFERRED_NATIVE_REGION_BYTES` (64 KiB); any useful excess remains on the free
+list immediately. No object or native Buffer address moves. Once a suffix is too small
+for an allocation it is retired for that native slice instead of being
+reconsidered on every later allocation.
 The host-coordinated collector handoff walks both named lists and restores
 their records to the host index without scanning the entire heap.
 
@@ -487,9 +522,27 @@ are not immortal structural roots: active programs are traced from frames,
 callables, and constant references, while the host-coordinated path explicitly
 seeds programs retained by its runtime metadata.
 
-Host handles, parsed ASTs, compiler analysis, generated-code addresses, and
-libc symbol addresses are bootstrap metadata only. The native engine cannot
-dereference or call a host handle.
+After collection the tail headroom is at least half the live graph, half the
+reclaimed storage, or the minimum post-collection headroom, whichever is
+largest, bounded by the configured heap maximum. A non-moving heap can contain
+many small free holes which cannot satisfy a contiguous vector allocation;
+reclaimed storage alone is therefore not a useful growth-pressure metric.
+The live-graph term amortizes tracing cost during frontend construction without
+moving references or increasing the maximum heap reservation.
+
+Integer-keyed ordinary objects use the same optional hash index as string-keyed
+objects. Decimal length/digits and the authoritative string-hash step compute
+the probe without allocating a string on a hit; collision checks compare exact
+canonical decimal text, so `"01"` is not key `1`. Only a missing write allocates
+its key (Latin-1 ASCII). Hash-index construction may switch allocator arenas,
+but remains optional and never forces collection or masks an existing
+allocation-failure flag. Requiring the index to fit only the current arena
+would silently turn large dictionaries back into linear searches.
+
+Host handles are bootstrap metadata only; the native engine cannot dereference
+or call one. The standalone source frontend's ASTs and compiler analysis are
+ordinary guest-owned objects. Generated-code and libc addresses are native
+process capabilities, rebound where necessary when an image starts.
 
 The engine-state record also owns a small direct-mapped constant-property
 cache. It accelerates repeated own-property reads without changing object
@@ -699,6 +752,15 @@ other destinations invalidate their previous facts. At control-flow joins a
 fact survives only if every incoming path supports it. The worklist reaches a
 fixed point before any instructions are rewritten, including loop backedges.
 
+Join propagation caches the successor input vector and lazily builds a sparse
+list of facts which can still weaken. Unknown facts cannot become known at a
+must-analysis join; preloaded constants are excluded only after the shared
+write analysis proves their registers unwritten. Facts which weaken to unknown
+are removed from that list. This preserves the same lattice/fixed point while
+avoiding repeated scans of unknown temporaries and immutable constant banks.
+The analysis-work budget counts the actual visited/joined cells, not a guessed
+full-vector cost for each sparse join.
+
 The first transformation replaces `int32Value | positiveZero` with a move,
 or removes it when source and destination are identical. It does not remove
 coercions of unknown values, fractional numbers, objects, or negative zero.
@@ -713,6 +775,67 @@ analysis-state limit bounds compiler memory; exceeding it leaves the function
 unoptimized, never rejects an otherwise valid program. Neither limitation
 changes guest semantics. This pass is shared by both host execution paths and
 the standalone frontend; it contains no benchmark-specific recognition.
+
+### Compiler-owned AST and nested-program lifetimes
+
+The public parser continues to return independent mutable nodes. The consuming
+self-hosted frontend explicitly enables `shareIdentifiers`: within one parse,
+immutable Identifier leaves with the same name share a descriptor. These leaves
+have no source location, binding slot, or scope state. Where location capture is
+enabled, statement/function locations remain per occurrence. Exact function
+source is retained, and binding resolution still
+occurs in each compiler's lexical scope. No function bodies are shared.
+
+In consuming mode the compiler completes whole-function scope, return-kind,
+and nonlocal-binding analysis before lowering, then clears completed root
+statements. It does not clear nested statement lists: a `finally` body can be
+lowered on several control-flow paths. Default compilation remains
+non-destructive for embedders retaining an AST.
+
+`Compiler` also accepts an optional `finishFunction(program)` sink, inherited
+by nested compilers. It runs only after the function descriptor is complete.
+The executable frontend verifies and adopts each completed function through
+the existing guest program intrinsics, returning its callable template to the
+parent's constant table. Program-constant installation converts that template
+to its program reference; `MAKE_FUNCTION` still creates each actual closure
+with the execution-time lexical environment. This avoids retaining all child
+compiler vectors until the entire source file has been lowered. Descriptor
+APIs without a sink retain their existing return format. Adoption roots protect
+both the source descriptor and the incomplete destination during collection.
+
+The executable-adoption interface does not accept a per-instruction location
+table. That path therefore disables temporary AST/bytecode location-table
+capture instead of retaining unused tables until adoption finishes. This does
+not remove data from executable programs or snapshots: the interface did not
+retain those tables previously. Tokenizer/parser error coordinates, filenames,
+exact function source, and the public parser/descriptor compiler's default
+location tables remain available. `captureLocations` is an explicit compiler
+option inherited by nested compilers, not a change to JavaScript semantics.
+
+Declaration bodies are lowered in their original source order. Experimental
+largest-first scheduling and call-count-based builder preallocation were not
+retained: AST lifetime management and completed-function adoption provide a
+clearer general interface without depending on source-shape heuristics.
+
+Optional register packing also has an explicit `MAX_PACKING_REGISTERS` analysis
+budget. Above it the emitted program retains its original register numbering;
+the compiler does not allocate the many full-sized liveness vectors merely to
+save some temporary registers. This is a compilation-resource limit, not a
+language limit, and is separate from the int32 dataflow-state budget.
+
+The int32 pass bounds repeated work as well as resident state. Its
+`MAX_ANALYSIS_WORK` accounts for copied/joined register cells and traversed
+bytecode words. If convergence exceeds that budget it returns the unmodified
+program before rewriting any instructions, exposing
+`optimizationStats.int32AnalysisBudgetExceeded` for inspection. Ordinary
+control-flow analysis is not allowed to become unbounded compilation work.
+
+Native assignment to a plain dense array's `length` updates the vector's
+logical length, not a shadow ordinary property. Shrinking clears removed
+elements/references; growing creates absent slots, and spare capacity can be
+retained. Descriptor-bearing arrays and unsupported coercions leave this fast
+path rather than silently bypassing property semantics. This operation is a
+general array runtime operation, not a special compiler allocation API.
 
 ### Fused wrapping arithmetic
 
