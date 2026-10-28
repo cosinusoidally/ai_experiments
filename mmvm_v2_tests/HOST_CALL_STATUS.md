@@ -144,11 +144,12 @@ Outstanding general work exposed by this group:
   no conformance counts. That historical limitation is replaced by the
   guest-executed embedding service described in `TEST262.md` (2026-10-28).
   The complete standalone inventory now executes all 3,292 authored tests:
-  3,179 passed, 113 failed (including six diagnostic-budget timeouts), zero
-  not run, in 431.43 seconds at the protected-edge cleanup checkpoint.
-  Its preceding checkpoint was 3,168 passed / 124 failed in 396.74 seconds;
-  exact failing IDs show 11 newly passing tests and no new failures. These
-  runs span a reboot and are not a controlled throughput comparison. Both
+  3,227 passed, 65 failed (including six diagnostic-budget timeouts), zero
+  not run, in approximately 460 seconds at the contract-67 descriptor and
+  lexical-binding checkpoint. There are 59 non-timeout failures remaining.
+  Exact failing IDs show 48 newly passing tests and no new failures against
+  a fresh 3,179/113 baseline; three gains correct the wrapper's positive
+  NotEarlyError interpretation, rather than changing VM semantics. Both
   runtimes and the embedding implementation execute in guest code; no host
   JS engine participates. See
   `TEST262_STATUS.md` for scope, peak memory, failure groups and run details.
@@ -163,7 +164,7 @@ Outstanding general work exposed by this group:
 
 Outstanding general work exposed by this group:
 
-- resolve the 113 remaining conformance/diagnostic-budget failures without
+- resolve the 65 remaining conformance/diagnostic-budget failures without
   suppressing tests, and the three Function/eval realm cases in the optional
   inner-realm eval diagnostic;
 - keep distinguishing native-kernel coverage from guest execution of the

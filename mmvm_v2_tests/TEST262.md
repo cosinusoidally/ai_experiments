@@ -175,8 +175,11 @@ and strict directives in authored source. Separate focused dual-mode tests may
 be used during VM development, but are not counted as corpus results.
 
 Negative tests retain the distinction between lexical/parse or other early
-errors and runtime exceptions.  In particular, the corpus's `NotEarlyError`
-sentinel must not turn a missing early error into a pass.  Result
+errors and runtime exceptions. The pattern `^((?!NotEarlyError).)*$` excludes
+the corpus's sentinel, so a missing early error cannot pass such a test.
+The plain `NotEarlyError` pattern has the opposite meaning: it expects the
+sentinel, for example to prove that parsing did not incorrectly reject valid
+syntax. The wrapper must not classify these two directives identically. Result
 classification uses structured VM status rather than scraping console text.
 
 ## Execution and containment

@@ -365,6 +365,9 @@
             this.advance(false);
             this.expectPunctuator("(", false);
             parameter = this.expectIdentifier().value;
+            if (this.strict && (parameter === "eval" || parameter === "arguments")) {
+                this.error("invalid catch binding in strict code");
+            }
             this.expectPunctuator(")", true);
             handler = this.parseBlock();
         }

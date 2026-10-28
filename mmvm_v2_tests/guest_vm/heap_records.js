@@ -298,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 66;
+    Records.NativeInterpreterContractVersion = 67;
     Records.grownArrayCapacity = grownArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
@@ -335,6 +335,10 @@
         PROPERTY_STORAGE_RECORD_BYTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES,
         PROPERTY_STORAGE_SINGLE_BYTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_BYTES,
         PROPERTY_STORAGE_PAIR_BYTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_BYTES * 2,
+        PROGRAM_CALLABLE_RECORD_BYTES: (Heap.HEADER_SIZE + FUNCTION_BYTES) +
+            (Heap.HEADER_SIZE + OBJECT_BYTES) +
+            (Heap.HEADER_SIZE + PROPERTY_BYTES) * 2 +
+            (Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_BYTES),
         PROPERTY_STORAGE_INITIAL_CAPACITY: PROPERTY_STORAGE_INITIAL_CAPACITY,
         PROPERTY_STORAGE_KEY: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_KEY,
         PROPERTY_STORAGE_ATTRIBUTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_ATTRIBUTES,

@@ -12,6 +12,15 @@ Timeouts are included in `failed` and also shown as a diagnostic subset. A
 normal unfiltered complete run is valid only when `not run` is zero. There are
 no conformance skips: unsupported ES5.1 behavior fails until implemented.
 
+Negative-metadata correction (2026-10-28): previous notes describing the
+strict `Math.PI` assignment test as a corpus erratum were mistaken. This
+import's plain `@negative NotEarlyError` pattern expects that sentinel;
+`@negative ^((?!NotEarlyError).)*$` excludes it. The wrapper had incorrectly
+rejected the sentinel in both cases. The corrected interpretation preserves
+ES5.1 semantics, executes the original tests unchanged and needs no corpus
+exception. Historical counts below retain the old wrapper's results; new
+results identify harness corrections separately from VM semantic fixes.
+
 As of 2026-09-13 the runner follows this historical corpus's authored-program
 model: every file runs once as written, except that `@onlyStrict` directs the
 harness to prepend a strict prologue. Earlier 5,765-variant measurements below
@@ -59,6 +68,29 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-28, approximately 23:31 UTC, contract-67 function descriptors,
+  lexical-this/hoisting and negative-pattern checkpoint:
+  **3,292 executed, 3,227 passed, 65 failed, 0 not run; 6 instruction-limit
+  timeouts included in failures**. Pass rate **98.03%**; **59 non-timeout
+  failures remain**. Command: `./artifacts/js_runner.exe
+  artifacts/es51-checkpoint.snap test262_runner.js --instruction-limit 20000`.
+  All original files execute unchanged. Exact failing-ID/variant comparison
+  with the fresh baseline shows **48 new passes and zero new failures**:
+  45 VM fixes and three positive `NotEarlyError` pattern classifications.
+  Remaining chapter totals: **7: 6; 9: 4; 10: 10; 11: 4; 12: 9; 13: 32**.
+  The six chapter-7 timeouts remain counted, not skipped or silently accepted.
+  Elapsed approximately **460 seconds**, based on output-file creation and
+  final-write timestamps; CPU time and peak RSS were not captured for this
+  run. Do not present sampled RSS as a measured peak. The same-session fresh
+  baseline completed **3,179 passed / 113 failed / 0 not run / 6 timeouts** in
+  approximately **445 seconds**, measured the same way. Extra completed test
+  bodies and measurement variability prevent these individual runs from
+  establishing interpreter-throughput parity. Raw logs:
+  `artifacts/es51-checkpoint-full.log`, `artifacts/es51-baseline-tests.log`.
+  Earlier focused selections of the 107 non-timeout baseline failures
+  progressed from **12 passed / 95 failed** to **42 passed / 65 failed**, both
+  with zero not run/timeouts. Those selections are diagnostics, not separate
+  whole-suite totals. Design: `ES51_SEMANTICS_PROGRESS.md`.
 - 2026-10-28, approximately 21:51 UTC, protected-edge cleanup checkpoint:
   **3,292 executed, 3,179 passed, 113 failed, 0 not run; 6 timeouts included
   in failures**. Pass rate **96.57%**. Command:

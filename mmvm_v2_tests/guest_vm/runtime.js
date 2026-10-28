@@ -717,10 +717,13 @@
         callable.source = program.source || null;
         callable.homeContext = homeContext;
         this.functionMetadata["$" + callable.heapAddress] = callable;
-        this.setProperty(this.functionConstructionCallable, "prototype",
-                         this.functionConstructionPrototype);
-        this.setProperty(this.functionConstructionPrototype, "constructor",
-                         this.functionConstructionCallable);
+        this.defineDataProperty(this.functionConstructionCallable, "length",
+            program.parameters.length, 0);
+        this.defineDataProperty(this.functionConstructionCallable, "prototype",
+            this.functionConstructionPrototype, HeapRecords.Attributes.WRITABLE);
+        this.defineDataProperty(this.functionConstructionPrototype, "constructor",
+            this.functionConstructionCallable,
+            HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
         callable = this.functionConstructionCallable;
         this.functionConstructionCallable = null;
         this.functionConstructionPrototype = null;
@@ -2448,6 +2451,7 @@
             "Function.prototype", function () { return undefined; });
         this.heapRecords.setObjectPrototype(
             this.functionPrototype.heapAddress, this.objectPrototype.heapAddress);
+        this.defineDataProperty(this.functionPrototype, "length", 0, 0);
         this.stringPrototype = this.makeObject();
         this.numberPrototype = this.makeObject();
         this.booleanPrototype = this.makeObject();

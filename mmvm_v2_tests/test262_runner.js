@@ -184,8 +184,15 @@
         var directive = marker < 0 ? "" : source.substring(
             marker, end < 0 ? source.length : end);
         var description = String(result.name) + ": " + String(result.message);
-        if (directive.indexOf("NotEarlyError") >= 0 &&
-            description.indexOf("NotEarlyError") >= 0) return false;
+        /* This import uses both positive sentinel patterns and the negative
+         * lookahead pattern. They have opposite meanings, not a common
+         * "mentions NotEarlyError" early-error annotation. */
+        if (directive.indexOf("^((?!NotEarlyError).)*$") >= 0) {
+            return description.indexOf("NotEarlyError") < 0;
+        }
+        if (directive.indexOf("NotEarlyError") >= 0) {
+            return description.indexOf("NotEarlyError") >= 0;
+        }
         if (directive.indexOf("SyntaxError") >= 0 &&
             result.name !== "SyntaxError") return false;
         return true;

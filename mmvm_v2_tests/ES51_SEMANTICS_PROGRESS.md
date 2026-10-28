@@ -162,6 +162,58 @@ changed for this checkpoint. No generated image is checked in.
 
 ## Frontend representation and early errors
 
+### Function descriptors and lexical declarations (contract 67)
+
+Bytecode function creation now has one shared kernel initializer for ordinary
+`MAKE_FUNCTION`, frontend program adoption and dynamic Function construction.
+The callable has an own, immutable, non-enumerable, non-configurable `length`
+derived from its program's parameter vector. Its `prototype` is writable but
+neither enumerable nor configurable. The new prototype's `constructor` is
+writable/configurable and non-enumerable. The reference execution path builds
+the same guest-heap descriptors; `Function.prototype.length` is zero.
+
+Functions still use the existing function-record linked-property layout;
+ordinary objects use packed owner-relative entries. Mixing those entry-ID
+conventions is invalid. The common callable allocation-size constant lives
+with the heap layout, and all three native construction sites reserve that
+size before initialization. The data-property initializer accepts real value
+tags rather than a separate undocumented numeric value-kind convention.
+
+Boolean conversion now inspects a referenced guest string's length; empty
+strings are false without treating empty String wrapper objects as false.
+Named property lookup cannot overwrite a failed null/undefined receiver
+guard merely because its key is a string.
+
+`this` expression lowering bypasses dynamic identifier resolution: a with
+object cannot shadow the execution context's `this` binding. Function-local
+receiver bindings retain their lexical environment depth, including intervening
+with environments; script code uses the existing global-this opcode. Variable
+declaration collection now descends through labels and with bodies, without
+descending into nested functions. This hoists even unreachable declarations
+while leaving their initializers in place. Strict catch bindings named `eval`
+or `arguments` are rejected by the parser before execution.
+
+The historical Test262 wrapper also distinguishes a positive `NotEarlyError`
+exception pattern from the negative-lookahead pattern that excludes that
+sentinel. This is harness interpretation, not a VM semantic improvement or a
+corpus exception. The external tests remain unchanged. Validation results are
+recorded in `TEST262_STATUS.md` after completed runs.
+
+The first complete contract-67 run is **3,227 passed / 65 failed / 0 not run**,
+including six instruction-limit timeouts: 48 new passes, zero new failing IDs.
+Of these gains, 45 are VM semantics and three are wrapper interpretation.
+The Node project suite passes 12 programs / 270 assertions; all ten previously
+working standalone Octane quick selections pass, as does the bounded GC
+workload (24 rounds / 47 collections). Quick zlib took 33.34 seconds, user
+CPU 33.10 seconds, peak RSS 126,208 KiB; this is not a stock score.
+
+Node, js_min and genuinely self-hosted snapshots compare byte-identical.
+The js_min build took 92.22 seconds (90.96 user, 331,168 KiB peak RSS);
+self-hosted construction took 114.77 seconds (113.65 user, 480,768 KiB peak
+RSS). These are individual measurements, not statistically significant
+performance comparisons. Live demo/HTTP checks and the complete js_min
+project suite are the next regression gates for this checkpoint.
+
 Compact literal ASTs represent `0`, `false`, and the empty string directly.
 An optional expression must therefore be tested against its absence sentinel,
 not by truthiness. In particular, a switch's default arm has a null test;

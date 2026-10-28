@@ -814,6 +814,23 @@
         return null;
     };
 
+    /* `this` is an execution-context binding, never an identifier resolved
+     * through a with object's properties or a dynamically introduced name. */
+    Compiler.prototype.referenceForThis = function () {
+        var depth = 0;
+        var index = 0;
+        while (index < this.scopes.length) {
+            var scope = this.scopes[index++];
+            var binding = scope.bindings.$this;
+            if (binding !== undefined) {
+                if (binding.kind === "register") return binding;
+                return {kind: "local", depth: depth, slot: binding.slot};
+            }
+            if (scope.createsEnvironment) depth++;
+        }
+        return {kind: "global"};
+    };
+
     /* PUSH_CATCH stores one signed binding descriptor. Environment slots are
      * non-negative. A top-level/global catch name is encoded as the negative
      * constant index minus one, keeping exception dispatch independent of
@@ -990,7 +1007,7 @@
                 this.emit(op.GET_THIS, evalThis);
                 return evalThis;
             }
-            var thisReference = this.referenceForName("this");
+            var thisReference = this.referenceForThis();
             if (thisReference.kind === "global") {
                 var globalThis = this.allocate();
                 this.emit(op.GET_THIS, globalThis);
@@ -1589,6 +1606,9 @@
                 }
             } else if (statement.type === "FunctionDeclaration") {
                 add(statement.name);
+            } else if (statement.type === "LabeledStatement" ||
+                       statement.type === "WithStatement") {
+                visit(statement.body);
             } else if (statement.type === "BlockStatement") {
                 index = 0;
                 while (index < statement.body.length) {
