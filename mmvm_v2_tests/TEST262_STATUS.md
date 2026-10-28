@@ -91,6 +91,11 @@ improvement over a larger one.
   progressed from **12 passed / 95 failed** to **42 passed / 65 failed**, both
   with zero not run/timeouts. Those selections are diagnostics, not separate
   whole-suite totals. Design: `ES51_SEMANTICS_PROGRESS.md`.
+  Checkpoint revision `ec3347f` also passes both complete host project suites
+  (270 guest assertions each), all ten prior standalone Octane quick
+  selections, GC stress (24 rounds / 47 collections), live demos 1–8 with
+  demo8 garage/auto-pilot, both HTTP servers, and three-way byte-identical
+  Node/js_min/genuine self-hosted snapshots. The tests and demos are unchanged.
 - 2026-10-28, approximately 21:51 UTC, protected-edge cleanup checkpoint:
   **3,292 executed, 3,179 passed, 113 failed, 0 not run; 6 timeouts included
   in failures**. Pass rate **96.57%**. Command:

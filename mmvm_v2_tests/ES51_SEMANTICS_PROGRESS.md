@@ -211,8 +211,12 @@ Node, js_min and genuinely self-hosted snapshots compare byte-identical.
 The js_min build took 92.22 seconds (90.96 user, 331,168 KiB peak RSS);
 self-hosted construction took 114.77 seconds (113.65 user, 480,768 KiB peak
 RSS). These are individual measurements, not statistically significant
-performance comparisons. Live demo/HTTP checks and the complete js_min
-project suite are the next regression gates for this checkpoint.
+performance comparisons. The complete js_min project suite also passes
+(12 programs / 270 assertions plus embedding/CLI checks). Live demos 1–8
+pass bounded 320x240/20-FPS-cap interaction checks, including demo8 garage
+and free-drive autopilot, and both HTTP servers pass text/binary/listing
+checks. No demo, external test or benchmark source was modified. This
+checkpoint is revision `ec3347f`; subsequent work uses a newer contract.
 
 Compact literal ASTs represent `0`, `false`, and the empty string directly.
 An optional expression must therefore be tested against its absence sentinel,
