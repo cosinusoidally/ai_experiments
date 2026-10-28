@@ -145,8 +145,9 @@ Outstanding general work exposed by this group:
   guest-executed embedding service described in `TEST262.md` (2026-10-28).
   The complete standalone inventory now executes all 3,292 authored tests:
   3,139 passed, 153 failed (including six diagnostic-budget timeouts), zero
-  not run, in 362.20 seconds. Both runtimes and the embedding implementation
-  execute in guest code; no host JS engine participates. See
+  not run, in 361.85 seconds on the final contract-66 image. The exact failing
+  IDs and variants match the fresh hosted run. Both runtimes and the embedding
+  implementation execute in guest code; no host JS engine participates. See
   `TEST262_STATUS.md` for scope, peak memory, failure groups and run details.
 - A hosted one-file chapter-6 audit passes and shows the remaining bootstrap
   boundary explicitly: `require`, `load`, `fs.readFileSync`, and

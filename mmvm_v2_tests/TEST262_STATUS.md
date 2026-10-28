@@ -2,9 +2,9 @@
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
 is read from `../../js_tests/tests/test262` and is never modified. Counts in
-the full-suite table are recorded only after every selected variant reaches a
-pass, failure, or timeout result; interrupted and focused runs appear in the
-investigation log and are not used to claim progress.
+completed full-suite results are recorded only after every selected variant
+reaches a pass, failure, or timeout result; interrupted and focused runs appear
+in the investigation log and are not used to claim progress.
 
 Each current run reports `passed`, `failed`, and `not run` as mutually
 exclusive outcomes, with their sum equal to the applicable variant total.
@@ -59,6 +59,20 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-28, approximately 15:13 UTC, final contract-66 image, revision `572c2d6`:
+  **3,292 executed, 3,139 passed, 153 failed, 0 not run; 6 timeouts included
+  in failures**. Pass rate **95.35%**. Command:
+  `./artifacts/js_runner.exe artifacts/test262-codeunit-node.snap
+  test262_runner.js --instruction-limit 20000`. Elapsed **361.85 seconds**
+  (6m 1.85s), user CPU **355.65 seconds**, peak RSS **549,516 KiB**
+  (536.64 MiB). The process correctly returned **exit status 1** for the
+  failing suite, after reporting every test and tearing down the test runtime.
+  Sorted failing IDs and strict/sloppy variants exactly match both the prior
+  standalone full run and the fresh hosted comparison below: **zero new
+  failures, zero lost tests**. Elapsed time is essentially unchanged from the
+  362.20-second standalone bring-up run; these are single-run observations,
+  not a statistical speedup claim. Raw log: ignored
+  `artifacts/test262-codeunit-full.log`.
 - 2026-10-28, guest-executed embedding bring-up, executable contract 65:
   **3,292 executed, 3,139 passed, 153 failed, 0 not run; 6 timeouts included
   in failures**. Pass rate: **95.35%**. Command:
@@ -121,8 +135,7 @@ Bring-up checkpoints, not full-suite results:
   assembler lookups. Node, js_min and genuine self-hosted builds now produce
   byte-identical 6,005,936-byte images (SHA-256
   `778154be4aed4e20a296d909cb524f51a1d7411bb35de93f0451ca3c7f995e26`).
-  The complete inventory above predates this accessor fix; a final inventory
-  is recorded separately once completed.
+  The final complete inventory above uses this corrected image.
 - Contract-66 regression gates: both complete project suites passed under
   js_min and Node (12 guest programs / 270 guest assertions each, plus heap,
   embedding and compiler checks). Live demos 1–8 opened at 320x240/20 FPS
