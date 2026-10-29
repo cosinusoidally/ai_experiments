@@ -298,7 +298,8 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 67;
+    Records.NativeInterpreterContractVersion = 68;
+    Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};
     Records.grownArrayCapacity = grownArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
@@ -339,6 +340,8 @@
             (Heap.HEADER_SIZE + OBJECT_BYTES) +
             (Heap.HEADER_SIZE + PROPERTY_BYTES) * 2 +
             (Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_BYTES),
+        RESTRICTED_FUNCTION_PROPERTY_BYTES: (Heap.HEADER_SIZE + PROPERTY_BYTES) * 2,
+        ARGUMENTS_UNMAPPED_ENVIRONMENT: Records.ArgumentsLayout.UNMAPPED_ENVIRONMENT | 0,
         PROPERTY_STORAGE_INITIAL_CAPACITY: PROPERTY_STORAGE_INITIAL_CAPACITY,
         PROPERTY_STORAGE_KEY: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_KEY,
         PROPERTY_STORAGE_ATTRIBUTES: Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + PROPERTY_ENTRY_ATTRIBUTES,

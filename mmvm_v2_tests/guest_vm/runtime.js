@@ -584,7 +584,8 @@
         this.heapRecords.setObjectPrototype(
             result.heapAddress, this.objectPrototype.heapAddress);
         this.heapRecords.setArrayReserved(result.heapAddress, strict ?
-            4294967295 : environment ? environment.heapAddress : 0);
+            HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT :
+            environment ? environment.heapAddress : 0);
         this.defineDataProperty(result, "length", values.length,
             HeapRecords.Attributes.WRITABLE |
             HeapRecords.Attributes.CONFIGURABLE);
@@ -724,11 +725,19 @@
         this.defineDataProperty(this.functionConstructionPrototype, "constructor",
             this.functionConstructionCallable,
             HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
+        if (program.strict) this.poisonFunctionProperties(this.functionConstructionCallable);
         callable = this.functionConstructionCallable;
         this.functionConstructionCallable = null;
         this.functionConstructionPrototype = null;
         this.functionConstructionProgram = 0;
         return callable;
+    };
+
+    Runtime.prototype.poisonFunctionProperties = function (callable) {
+        this.defineAccessorProperty(callable, this.internStringAddress("caller"),
+            this.strictArgumentsThrower, this.strictArgumentsThrower, 0);
+        this.defineAccessorProperty(callable, this.internStringAddress("arguments"),
+            this.strictArgumentsThrower, this.strictArgumentsThrower, 0);
     };
 
     Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
@@ -756,10 +765,11 @@
             index++;
         }
         if (program.evalCode) return environment;
-        this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
-            program.argumentsSlot),
-            this.makeArgumentsObject(
-                args, callable, !!program.strict, environment));
+        if (program.usesArguments && program.argumentsSlot >= 0) {
+            this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
+                program.argumentsSlot),
+                this.makeArgumentsObject(args, callable, !!program.strict, environment));
+        }
         this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
             program.thisSlot), receiver);
         if (program.functionNameSlot >= 0) this.writeHeapValue(
@@ -811,8 +821,10 @@
             index++;
         }
         if (program.evalCode) return;
-        registers[bindingRegisters[program.argumentsSlot]] =
-            this.makeArgumentsObject(args, callable, !!program.strict);
+        if (program.usesArguments && program.argumentsSlot >= 0) {
+            registers[bindingRegisters[program.argumentsSlot]] =
+                this.makeArgumentsObject(args, callable, !!program.strict);
+        }
         registers[bindingRegisters[program.thisSlot]] = receiver;
         if (program.functionNameSlot >= 0) {
             registers[bindingRegisters[program.functionNameSlot]] = callable;
@@ -1443,7 +1455,7 @@
 
     Runtime.prototype.argumentsMappedCell = function (array, index) {
         var environment = this.heapRecords.arrayReserved(array.heapAddress);
-        if (!environment || environment === 4294967295 ||
+        if (!environment || environment === HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT ||
             !this.arrayHas(array, index)) return 0;
         var program = this.heapRecords.environmentProgram(environment);
         if (!program) return 0;
@@ -2459,7 +2471,8 @@
         this.strictArgumentsThrower = this.makeNativeFunction(
             "ThrowTypeError", function () {
                 throw new TypeError("restricted arguments property");
-            });
+            }, "intrinsic", NativeIntrinsics.THROW_TYPE_ERROR);
+        this.defineDataProperty(this.strictArgumentsThrower, "length", 0, 0);
         if (this.functionPrototype) {
             this.defineInternalValue(this.functionPrototype,
                 "\x00StrictArgumentsThrower", this.strictArgumentsThrower);
@@ -3135,6 +3148,10 @@
                 runtime.setProperty(boundFunction, "\x00boundTarget", target);
                 runtime.setProperty(boundFunction, "\x00boundReceiver", boundReceiver);
                 runtime.setProperty(boundFunction, "\x00boundArguments", boundArguments);
+                runtime.defineDataProperty(boundFunction, "length",
+                    Math.max(Number(runtime.getProperty(target, "length")) -
+                        runtime.arrayLength(boundArguments), 0), 0);
+                runtime.poisonFunctionProperties(boundFunction);
                 return boundFunction;
             });
         this.functionMethods.toString = this.makeNativeFunction("Function.toString",

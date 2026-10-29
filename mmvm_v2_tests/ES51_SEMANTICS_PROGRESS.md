@@ -218,6 +218,53 @@ and free-drive autopilot, and both HTTP servers pass text/binary/listing
 checks. No demo, external test or benchmark source was modified. This
 checkpoint is revision `ec3347f`; subsequent work uses a newer contract.
 
+### Restricted accessors and arguments instantiation (contract 68)
+
+Strict functions have non-enumerable, non-configurable `caller` and
+`arguments` accessors. Strict arguments objects have the corresponding
+`caller` and `callee` accessors. All getters and setters in a runtime refer
+to its single ThrowTypeError callable, also used by bound-function restricted
+properties. That callable now has a native intrinsic: it allocates a guest
+TypeError and uses the interpreter's existing exception unwinder, never a
+host JavaScript exception callback. Its declared length is zero.
+
+The runtime-support vector roots the thrower and shares the property keys
+and message. Native callable sizing/initialization is shared; only strict
+functions reserve the additional descriptor records. Strict arguments objects
+are marked unmapped even when their function uses a register frame, rather
+than accidentally retaining its enclosing environment as a parameter map.
+The named unmapped sentinel is shared by reference and native implementations.
+Callable descriptor linkage preserves creation order when reflected: length,
+prototype, then the restricted properties.
+
+A formal parameter named `arguments` supplies that binding itself; function
+entry must not replace it with an arguments object. The compiler records no
+automatic arguments slot in that case. Otherwise direct eval conservatively
+requires an arguments binding, even without an explicit arguments identifier
+in the parsed body. Reference frame setup now avoids constructing unobserved
+arguments objects, matching the native path instead of paying an allocation
+for every ordinary call. This does not implement the still-missing permanent
+parameter-map detachment after deleting an arguments index.
+
+The complete initial contract-68 implementation passed **3,262 / 3,292**
+tests, with 30 failures including six instruction-limit timeouts, zero not
+run, and **35 new passes / zero new failures** against contract 67. Elapsed
+417.71 seconds, user CPU 414.60 seconds, peak RSS 549,752 KiB. Both the initial
+implementation and a subsequent call-setup refactor pass the Node project
+suite. That refactor reuses the immutable callee flags instead of loading
+them repeatedly for receiver/arguments setup; its focused selection passes
+35 of the prior 59 non-timeout failures, leaving the same 24.
+
+All ten previous standalone Octane quick selections and bounded GC stress
+pass the initial implementation. The flag-reuse build also passes GC stress
+and zlib quick correctness. Recent zlib timings were 35.33 seconds for a fresh
+contract-67 control, 36.46 for the initial implementation and 37.19 for the
+flag-reuse build. These individual runs indicate a possible small cost, not
+a speedup or proven throughput parity. The final combined changes need a
+fresh full-suite and complete workload/build regression sweep. Neither of
+the separately prepared formatting/lexical kernel modules is loaded by the
+contract-68 checkpoint.
+
 Compact literal ASTs represent `0`, `false`, and the empty string directly.
 An optional expression must therefore be tested against its absence sentinel,
 not by truthiness. In particular, a switch's default arm has a null test;

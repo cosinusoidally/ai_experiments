@@ -206,7 +206,19 @@
         var locals = collectLocals(expression.body, expression.name);
         var bindings = makeFunctionBindings(expression.parameters, locals);
         var bindingMap = makeBindingMap(bindings);
-        var usesArguments = referencesArguments(expression.body);
+        var directEval = containsDirectEval(expression.body);
+        var usesArguments = referencesArguments(expression.body) || directEval;
+        var argumentsSlot = bindingMap.$arguments;
+        var parameterIndex = 0;
+        while (parameterIndex < expression.parameters.length) {
+            if (expression.parameters[parameterIndex++] === "arguments") {
+                /* A formal parameter already supplies this binding. It must
+                 * not be replaced by an automatically created arguments object. */
+                argumentsSlot = -1;
+                usesArguments = false;
+                break;
+            }
+        }
         /* Sloppy arguments objects alias named parameter bindings.  Keep
          * those bindings in a guest environment so the mapping remains valid
          * if the arguments object escapes its activation. */
@@ -215,7 +227,7 @@
         var nested = new Compiler(bindings, this.scopes, useRegisters,
             {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
              captureLocations: this.captureLocations});
-        if (containsDirectEval(expression.body)) {
+        if (directEval) {
             /* Sloppy eval may introduce a new var binding in this activation
              * which shadows an outer binding. Keep known locals in their
              * fixed slots, but resolve every non-local name through the live
@@ -242,7 +254,7 @@
             bindingRegisters(bindings, nested.scopes[0]) : null;
         program.parameterSlots = bindingSlots(expression.parameters,
                                                program.bindingSlots);
-        program.argumentsSlot = program.bindingSlots.$arguments;
+        program.argumentsSlot = argumentsSlot;
         program.thisSlot = program.bindingSlots.$this;
         program.functionNameSlot = expression.name ?
             program.bindingSlots["$" + expression.name] : -1;

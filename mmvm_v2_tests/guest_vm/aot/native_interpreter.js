@@ -67,6 +67,7 @@
     var INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
     var INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
     var INTRINSIC_ARRAY_IS_ARRAY = NativeIntrinsics.ARRAY_IS_ARRAY;
+    var INTRINSIC_THROW_TYPE_ERROR = NativeIntrinsics.THROW_TYPE_ERROR;
     var FRAME_FLAG_FUNCTION_COMPILE = 4;
     var CALL_OPERATION_CALL = 1;
     var CALL_OPERATION_CONSTRUCT = 2;
@@ -146,6 +147,10 @@
         RuntimeSupportLayout.URI_ERROR_PROTOTYPE;
     RuntimeSupportLayout.BYTECODE_LAYOUT = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.FUNCTION_COMPILER = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.STRICT_ARGUMENTS_THROWER = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.CALLER_KEY = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.ARGUMENTS_KEY = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_FUNCTION_COMPILER = RuntimeSupportLayout.FUNCTION_COMPILER;
     var RUNTIME_SUPPORT_BYTECODE_LAYOUT = RuntimeSupportLayout.BYTECODE_LAYOUT;
     var RUNTIME_SUPPORT_URI_ERROR_NAME = RuntimeSupportLayout.URI_ERROR_NAME;
@@ -203,6 +208,7 @@
         overrides.INTRINSIC_BUFFER_READ_I16_LE =
             NativeIntrinsics.BUFFER_READ_I16_LE;
         overrides.INTRINSIC_GC_STRESS_CONTROL = NativeIntrinsics.GC_STRESS_CONTROL;
+        overrides.INTRINSIC_THROW_TYPE_ERROR = INTRINSIC_THROW_TYPE_ERROR;
         overrides.INTRINSIC_LAST_ID = NativeIntrinsics.LAST_ID;
         overrides.INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
         overrides.INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
@@ -3637,7 +3643,8 @@
                 }
                 var makeFunctionProgram = valueCellReference(
                     0, makeFunctionProgramCell);
-                var makeFunctionBytes = PROGRAM_CALLABLE_RECORD_BYTES;
+                var makeFunctionBytes = programCallableRecordBytesKernel(
+                    programFlags(heapBase, makeFunctionProgram) & PROGRAM_FLAG_STRICT);
                 if (reserveNativeAllocationKernel(
                         heapBase, state, makeFunctionBytes) === 0) {
                     return unsupportedExitKernel(
@@ -5250,6 +5257,10 @@
                 var calleeProgram = functionMetadata(
                     heapBase, bytecodeCallable);
                 if (executionProgramConstantsKernel(heapBase, state, calleeProgram) === 0) return 0;
+                /* Program flags cannot change during call setup. Reuse the
+                 * same read for receiver normalization and arguments layout. */
+                var calleeProgramFlags = programFlags(heapBase, calleeProgram);
+                var calleeStrictArguments = calleeProgramFlags & PROGRAM_FLAG_STRICT;
                 var receiverToNormalize = bytecodeThisSource;
                 var receiverNeedsBoxing = 0;
                 if (callOperation !== 2) {
@@ -5264,8 +5275,7 @@
                                 normalizationReceiverIndex * VALUE_CELL_BYTES;
                         }
                     }
-                    if ((programFlags(heapBase, calleeProgram) &
-                         PROGRAM_FLAG_STRICT) === 0) {
+                    if (calleeStrictArguments === 0) {
                         if (receiverToNormalize !== 0) {
                             var receiverToNormalizeTag = valueCellTag(
                                 0, receiverToNormalize);
@@ -5310,7 +5320,7 @@
                     argumentCheckIndex = argumentCheckIndex + 1;
                 }
                 var calleeNeedsArguments = 0;
-                if ((programFlags(heapBase, calleeProgram) &
+                if ((calleeProgramFlags &
                      PROGRAM_FLAG_USES_ARGUMENTS) !== 0) {
                     calleeNeedsArguments = 1;
                 }
@@ -5469,6 +5479,9 @@
                         PROPERTY_RECORD_BYTES;
                     bytecodeAllocationEnd = bytecodeAllocationEnd +
                         PROPERTY_RECORD_BYTES;
+                    if (calleeStrictArguments !== 0) {
+                        bytecodeAllocationEnd = bytecodeAllocationEnd + PROPERTY_RECORD_BYTES;
+                    }
                 }
                 var bytecodeAllocationStart =
                     engineHeapBump(heapBase, state);
@@ -5621,6 +5634,10 @@
                         setArrayReserved(heapBase,
                                          calleeArgumentsArray,
                                          calleeEnvironment);
+                        if (calleeStrictArguments !== 0) {
+                            setArrayReserved(heapBase, calleeArgumentsArray,
+                                ARGUMENTS_UNMAPPED_ENVIRONMENT);
+                        }
                         setRecordType(heapBase, calleeArgumentsVector,
                                       HEAP_TYPE_VALUE_VECTOR);
                         setRecordSize(heapBase, calleeArgumentsVector,
@@ -5686,6 +5703,21 @@
                                 VALUE_TAG_INT32, 0);
                         setValueCellInt32(propertyValueCellAddress(
                             heapBase, lengthProperty), bytecodeArgumentCount);
+                        if (calleeStrictArguments !== 0) {
+                            var callerProperty = lengthProperty + PROPERTY_RECORD_BYTES;
+                            var argumentsThrower = valueCellReference(0,
+                                vectorCellAddress(heapBase, stringSupport,
+                                    RUNTIME_SUPPORT_STRICT_ARGUMENTS_THROWER));
+                            initializedCalleeProperty = initializeRestrictedPropertyKernel(
+                                heapBase, calleeProperty, lengthProperty,
+                                vectorCellAddress(heapBase, stringSupport,
+                                    RUNTIME_SUPPORT_ARGUMENTS_CALLEE_KEY), argumentsThrower);
+                            initializedCalleeProperty = initializeRestrictedPropertyKernel(
+                                heapBase, callerProperty, calleeProperty,
+                                vectorCellAddress(heapBase, stringSupport,
+                                    RUNTIME_SUPPORT_CALLER_KEY), argumentsThrower);
+                            setArrayPropertyHead(heapBase, calleeArgumentsArray, callerProperty);
+                        }
                     }
                     setRecordType(heapBase, calleeFrame, HEAP_TYPE_FRAME);
                     if (calleeFrameReused === 0) {
@@ -5815,8 +5847,7 @@
                     var receiverIndex = -1;
                     var thisSource = bytecodeThisSource;
                     var strictThisBinding = 0;
-                    if ((programFlags(heapBase, calleeProgram) &
-                         PROGRAM_FLAG_STRICT) !== 0) {
+                    if (calleeStrictArguments !== 0) {
                         strictThisBinding = 1;
                     }
                     if (callOperation === 2) {
@@ -6400,6 +6431,21 @@
             } else setValueCellInt32(intrinsicTarget,
                     engineGCCollections(heapBase, state));
             intrinsicHandled = 1;
+        }
+        if (intrinsicId === INTRINSIC_THROW_TYPE_ERROR) {
+            var restrictedError = allocateErrorKernel(
+                heapBase, state, intrinsicTarget,
+                valueCellReference(0, vectorCellAddress(heapBase, stringSupport,
+                    RUNTIME_SUPPORT_RESTRICTED_PROPERTY_MESSAGE)),
+                RUNTIME_SUPPORT_TYPE_ERROR_PROTOTYPE,
+                RUNTIME_SUPPORT_TYPE_ERROR_NAME, stringSupport);
+            if (restrictedError === 1) {
+                if (unwindExceptionKernel(heapBase, state, frame, intrinsicTarget) === 1) {
+                    return INTRINSIC_RESULT_EXCEPTION_HANDLED;
+                }
+            }
+            return unsupportedDiagnosticExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
         }
         if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
             var booleanValue = 0;
@@ -11617,7 +11663,7 @@
     function argumentsMappedCellKernel(heapBase, array, index) {
         var environment = arrayReserved(heapBase, array);
         if (environment === 0) return 0;
-        if (environment === -1) return 0;
+        if (environment === ARGUMENTS_UNMAPPED_ENVIRONMENT) return 0;
         var elements = arrayElements(heapBase, array);
         if (index < 0) return 0;
         if (index >= vectorLength(heapBase, elements)) return 0;
@@ -15383,6 +15429,21 @@
         return cached;
     }
 
+    function programCallableRecordBytesKernel(strict) {
+        var bytes = PROGRAM_CALLABLE_RECORD_BYTES;
+        if (strict !== 0) bytes = bytes + RESTRICTED_FUNCTION_PROPERTY_BYTES;
+        return bytes;
+    }
+
+    function initializeRestrictedPropertyKernel(
+            heapBase, property, nextProperty, keyCell, thrower) {
+        var initialized = initializeDataPropertyKernel(
+            heapBase, property, nextProperty, keyCell,
+            PROPERTY_ATTRIBUTE_ACCESSOR, VALUE_TAG_REFERENCE, thrower);
+        setPropertySetter(heapBase, property, thrower);
+        return initialized;
+    }
+
     function initializeProgramCallableKernel(heapBase, callable, program,
                                              context, stringSupport) {
         /* Firefox 1's Function#toString decompiler rewrites a local named
@@ -15409,7 +15470,7 @@
         setRecordFlags(heapBase, callable, 0);
         setObjectPrototype(heapBase, callable,
                            valueCellReference(0, functionPrototypeCell));
-        setObjectPropertyHead(heapBase, callable, lengthProperty);
+        setObjectPropertyHead(heapBase, callable, prototypeProperty);
         setFunctionClosure(heapBase, callable, 0);
         setFunctionMetadata(heapBase, callable, program);
         setFunctionHomeContext(heapBase, callable, context);
@@ -15423,17 +15484,32 @@
         setObjectExtensible(heapBase, callablePrototype, 1);
         setObjectReserved(heapBase, callablePrototype, 0);
         var initializedProperty = initializeDataPropertyKernel(
-            heapBase, lengthProperty, prototypeProperty,
+            heapBase, lengthProperty, 0,
             vectorCellAddress(heapBase, stringSupport,
                 RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY), 0, VALUE_TAG_INT32,
             integerVectorLength(heapBase, programParameterSlots(heapBase, program)));
         initializedProperty = initializeDataPropertyKernel(
-            heapBase, prototypeProperty, 0, prototypeKeyCell,
+            heapBase, prototypeProperty, lengthProperty, prototypeKeyCell,
             PROPERTY_ATTRIBUTE_WRITABLE, VALUE_TAG_REFERENCE, callablePrototype);
         initializeOwnDataEntryKernel(heapBase, callablePrototype, 1,
             constructorKeyCell,
             PROPERTY_ATTRIBUTE_WRITABLE | PROPERTY_ATTRIBUTE_CONFIGURABLE, callable);
-        return constructorStorage + PROPERTY_STORAGE_SINGLE_BYTES;
+        var end = constructorStorage + PROPERTY_STORAGE_SINGLE_BYTES;
+        if ((programFlags(heapBase, program) & PROGRAM_FLAG_STRICT) !== 0) {
+            var callerProperty = end;
+            var argumentsProperty = callerProperty + PROPERTY_RECORD_BYTES;
+            var thrower = valueCellReference(0, vectorCellAddress(
+                heapBase, stringSupport, RUNTIME_SUPPORT_STRICT_ARGUMENTS_THROWER));
+            initializedProperty = initializeRestrictedPropertyKernel(
+                heapBase, callerProperty, prototypeProperty,
+                vectorCellAddress(heapBase, stringSupport, RUNTIME_SUPPORT_CALLER_KEY), thrower);
+            initializedProperty = initializeRestrictedPropertyKernel(
+                heapBase, argumentsProperty, callerProperty,
+                vectorCellAddress(heapBase, stringSupport, RUNTIME_SUPPORT_ARGUMENTS_KEY), thrower);
+            setObjectPropertyHead(heapBase, callable, argumentsProperty);
+            end = argumentsProperty + PROPERTY_RECORD_BYTES;
+        }
+        return end;
     }
 
     function programCreateKernel(heapBase, state, targetCell, registerAddress,
@@ -15507,9 +15583,10 @@
         var constantMapBytes = programIntegerVectorBytesKernel(constantLength);
         var bindingBytes = programIntegerVectorBytesKernel(bindingLength);
         var parameterBytes = programIntegerVectorBytesKernel(parameterLength);
+        var callableBytes = programCallableRecordBytesKernel(strictProgram);
         var programAllocationBytes = bytecodeBytes + constantBytes + constantMapBytes +
             bindingBytes + parameterBytes + PROGRAM_RECORD_BYTES +
-            PROGRAM_CALLABLE_RECORD_BYTES;
+            callableBytes;
         if (programAllocationBytes < bytecodeBytes) return 0;
         if (reserveNativeAllocationKernel(
                 heapBase, state, programAllocationBytes) === 0) return 2;
@@ -15520,7 +15597,7 @@
         var parameters = bindingRegisters + bindingBytes;
         var program = parameters + parameterBytes;
         var callable = program + PROGRAM_RECORD_BYTES;
-        var end = callable + PROGRAM_CALLABLE_RECORD_BYTES;
+        var end = callable + callableBytes;
         if (end < callable) return 0;
         if (end > engineHeapLimit(heapBase, state)) return 2;
         setRecordType(heapBase, bytecode, HEAP_TYPE_BYTECODE);
@@ -16152,11 +16229,12 @@
         }
         if (program === 0) return 0;
         if (recordType(heapBase, program) !== HEAP_TYPE_PROGRAM) return 0;
-        var functionAllocationBytes = PROGRAM_CALLABLE_RECORD_BYTES;
+        var functionAllocationBytes = programCallableRecordBytesKernel(
+            programFlags(heapBase, program) & PROGRAM_FLAG_STRICT);
         if (reserveNativeAllocationKernel(
                 heapBase, state, functionAllocationBytes) === 0) return 2;
         var callable = engineHeapBump(heapBase, state);
-        var allocationEnd = callable + PROGRAM_CALLABLE_RECORD_BYTES;
+        var allocationEnd = callable + functionAllocationBytes;
         if (allocationEnd > engineHeapLimit(heapBase, state)) return 2;
         var initializedEnd = initializeProgramCallableKernel(
             heapBase, callable, program, context, stringSupport);
@@ -17663,6 +17741,8 @@
             heapMarkKernel: heapMarkKernel,
             heapSweepKernel: heapSweepKernel,
             initializeProgramCallableKernel: initializeProgramCallableKernel,
+            programCallableRecordBytesKernel: programCallableRecordBytesKernel,
+            initializeRestrictedPropertyKernel: initializeRestrictedPropertyKernel,
             initializeRegisterBankKernel: initializeRegisterBankKernel,
             copyProgramRegisterConstantsKernel: copyProgramRegisterConstantsKernel,
             executionProgramConstantsKernel: executionProgramConstantsKernel,
@@ -17872,6 +17952,13 @@
                 preparedSource: preparedKernelSource,
                 constantBindings: {
                     PROGRAM_CALLABLE_RECORD_BYTES: kernelConstantOverrides.PROGRAM_CALLABLE_RECORD_BYTES,
+                    RESTRICTED_FUNCTION_PROPERTY_BYTES: kernelConstantOverrides.RESTRICTED_FUNCTION_PROPERTY_BYTES,
+                    ARGUMENTS_UNMAPPED_ENVIRONMENT: kernelConstantOverrides.ARGUMENTS_UNMAPPED_ENVIRONMENT,
+                    INTRINSIC_THROW_TYPE_ERROR: INTRINSIC_THROW_TYPE_ERROR,
+                    RUNTIME_SUPPORT_STRICT_ARGUMENTS_THROWER: RuntimeSupportLayout.STRICT_ARGUMENTS_THROWER,
+                    RUNTIME_SUPPORT_CALLER_KEY: RuntimeSupportLayout.CALLER_KEY,
+                    RUNTIME_SUPPORT_ARGUMENTS_KEY: RuntimeSupportLayout.ARGUMENTS_KEY,
+                    RUNTIME_SUPPORT_RESTRICTED_PROPERTY_MESSAGE: RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE,
                     PREFERRED_NATIVE_REGION_BYTES: PREFERRED_NATIVE_REGION_BYTES,
                     INITIAL_ARRAY_CAPACITY: kernelConstantOverrides.INITIAL_ARRAY_CAPACITY,
                     MAX_VECTOR_LENGTH: kernelConstantOverrides.MAX_VECTOR_LENGTH,
@@ -18237,6 +18324,18 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.CONSTRUCTOR_KEY),
             runtime.internStringAddress("constructor"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.STRICT_ARGUMENTS_THROWER),
+            runtime.strictArgumentsThrower.heapAddress);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.CALLER_KEY),
+            runtime.internStringAddress("caller"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.ARGUMENTS_KEY),
+            runtime.internStringAddress("arguments"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE),
+            runtime.internStringAddress("restricted arguments property"));
         var typeofNames = ["undefined", "object", "boolean", "number",
                            "string", "function"];
         var typeofNameIndex = 0;

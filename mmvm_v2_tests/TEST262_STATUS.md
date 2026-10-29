@@ -68,6 +68,22 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-28, approximately 23:51 UTC, contract-68 restricted accessors and
+  arguments instantiation:
+  **3,292 executed, 3,262 passed, 30 failed, 0 not run; 6 instruction-limit
+  timeouts included in failures**. Pass rate **99.09%**; **24 non-timeout
+  failures remain**. Command: `./artifacts/js_runner.exe
+  artifacts/es51-restricted-final.snap test262_runner.js --instruction-limit
+  20000`. Elapsed **417.71 seconds**, user CPU **414.60 seconds**, peak RSS
+  **549,752 KiB**; exit status 1. Exact failure-ID/variant comparison with
+  contract 67 shows **35 new passes and zero new failures**, all VM changes
+  with no wrapper reclassification in this run. Chapter 10 is now all passing.
+  Remaining chapter totals: **7: 6; 9: 4; 10: 0; 11: 4; 12: 9; 13: 7**.
+  Raw log: `artifacts/es51-restricted-full.log`. An earlier focused run of
+  the 59 non-timeout failures passed 33 and failed 26; subsequent formal
+  arguments-parameter fixes account for the other two new passes.
+  The Node project suite passes all 12 programs / 270 assertions. The
+  formatter module being prepared separately is not loaded by this image.
 - 2026-10-28, approximately 23:31 UTC, contract-67 function descriptors,
   lexical-this/hoisting and negative-pattern checkpoint:
   **3,292 executed, 3,227 passed, 65 failed, 0 not run; 6 instruction-limit
