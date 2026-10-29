@@ -11,6 +11,7 @@
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
     var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
+    var NumberFormatKernels = root.GuestVMNumberFormatKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -22,6 +23,7 @@
         ValueCells = require("../value_cell.js");
         HeapRecords = require("../heap_records.js");
         PropertyStorageKernels = require("../property_storage_kernel.js");
+        NumberFormatKernels = require("../number_format_kernel.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -189,6 +191,11 @@
         for (name in Binary64.KernelConstants) {
             if (Object.prototype.hasOwnProperty.call(Binary64.KernelConstants, name)) {
                 overrides[name] = Binary64.KernelConstants[name];
+            }
+        }
+        for (name in NumberFormatKernels.KernelConstants) {
+            if (Object.prototype.hasOwnProperty.call(NumberFormatKernels.KernelConstants, name)) {
+                overrides[name] = NumberFormatKernels.KernelConstants[name];
             }
         }
         for (name in RuntimeSupportLayout) {
@@ -10666,7 +10673,12 @@
     function numberCellToStringKernel(
             heapBase, state, intrinsicTarget, numberCell, numberTag,
             platformServices) {
-        var stringBytes = (STRING_CHARS + 112 + 7) & -8;
+        if (numberTag === VALUE_TAG_INT32) {
+            return integerRadixStringKernel(heapBase, state, intrinsicTarget,
+                valueCellInt32(0, numberCell), DECIMAL_RADIX);
+        }
+        var stringBytes = (STRING_CHARS + NUMBER_FORMAT_SCRATCH_BYTES +
+            HEAP_RECORD_ALIGNMENT - 1) & -HEAP_RECORD_ALIGNMENT;
         if (reserveNativeAllocationKernel(
                 heapBase, state, stringBytes) === 0) return 2;
         var resultString = engineHeapBump(heapBase, state);
@@ -10674,31 +10686,10 @@
             return 2;
         }
         var nativeBuffer = heapBase + resultString + STRING_CHARS;
-        var format = nativeBuffer + 96;
-        storeRaw8(format, 37);
-        storeRaw8(format + 1, 46);
-        storeRaw8(format + 2, 49);
-        storeRaw8(format + 3, 53);
-        storeRaw8(format + 4, 103);
-        storeRaw8(format + 5, 0);
-        var resultLength = 0;
-        if (numberTag === VALUE_TAG_INT32) {
-            var numberBits = engineScratchLeftAddress(heapBase, state);
-            storeF64(numberBits, loadI32F64(
-                numberCell + VALUE_CELL_LOW));
-            var snprintfPointer = platformSnprintfPointer(
-                heapBase, platformServices);
-            if (snprintfPointer === 0) return 0;
-            resultLength = callNativeI32(
-                snprintfPointer, nativeBuffer, 48, format,
-                load32(numberBits), load32(numberBits + 4));
-        } else {
-            resultLength = formatDoubleStringKernel(
-                heapBase, platformServices, numberCell,
-                nativeBuffer, format);
-        }
+        var resultLength = shortestDoubleAsciiKernel(
+            heapBase, platformServices, numberCell, nativeBuffer);
         if (resultLength < 0) return 0;
-        if (resultLength >= 48) return 0;
+        if (resultLength >= NUMBER_FORMAT_ASCII_CAPACITY) return 0;
         setRecordType(heapBase, resultString, HEAP_TYPE_STRING);
         setRecordSize(heapBase, resultString, stringBytes);
         setRecordMark(heapBase, resultString, 0);
@@ -10713,12 +10704,12 @@
             setStringCharacterByte(
                 heapBase, resultString, index * 2 + 1, 0);
         }
-        var hash = -2128831035;
+        var hash = STRING_HASH_OFFSET_BASIS;
         index = 0;
         while (index < resultLength) {
             code = stringCharacterCodeUnit(
                 heapBase, resultString, index) & 65535;
-            hash = (hash ^ code) * 16777619;
+            hash = (hash ^ code) * STRING_HASH_PRIME;
             index = index + 1;
         }
         setStringHash(heapBase, resultString, hash);
@@ -17850,6 +17841,11 @@
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var propertyKernelName;
+        for (propertyKernelName in NumberFormatKernels.functions) {
+            if (Object.prototype.hasOwnProperty.call(NumberFormatKernels.functions, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = NumberFormatKernels.functions[propertyKernelName];
+            }
+        }
         for (propertyKernelName in PropertyStorageKernels) {
             if (Object.prototype.hasOwnProperty.call(PropertyStorageKernels, propertyKernelName)) {
                 kernelDependencies[propertyKernelName] = PropertyStorageKernels[propertyKernelName];
@@ -18101,6 +18097,12 @@
                         Binary64.KernelConstants, binaryConstantName)) {
                     compilerOptions.constantBindings[binaryConstantName] =
                         Binary64.KernelConstants[binaryConstantName];
+                }
+            }
+            for (binaryConstantName in NumberFormatKernels.KernelConstants) {
+                if (Object.prototype.hasOwnProperty.call(NumberFormatKernels.KernelConstants, binaryConstantName)) {
+                    compilerOptions.constantBindings[binaryConstantName] =
+                        NumberFormatKernels.KernelConstants[binaryConstantName];
                 }
             }
             var graphLoweringStarted = runtime.nativeSnapshotWrite ?

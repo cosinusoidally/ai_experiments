@@ -265,6 +265,32 @@ fresh full-suite and complete workload/build regression sweep. Neither of
 the separately prepared formatting/lexical kernel modules is loaded by the
 contract-68 checkpoint.
 
+### Canonical number formatting (contract 69)
+
+`number_format_kernel.js` separates shortest-digit selection from ES5.1
+9.8.1 presentation. For finite nonzero binary64 values it searches decimal
+precision 1–17, using guest-owned libc snprintf/strtod to choose the smallest
+precision that round-trips to the original value. The search takes at most
+five trials and one final formatting call. A separate formatter applies the
+standard's fixed/scientific thresholds, explicit positive exponent sign and
+absence of leading exponent zeroes. Zero, negative zero, NaN and infinities
+retain their existing explicit spelling. There is no host JS conversion or
+per-number cache.
+
+The caller reserves one string record with bounded scratch storage. Candidate
+digits, formatting pattern and final ASCII occupy named non-overlapping
+regions; widening to UTF-16 happens only after conversion. All services use
+the existing guest FFI. Signed int32 values bypass libc and use the existing
+integer radix formatter, also avoiding an oversized per-integer scratch record.
+
+The complete imported number-to-string section passes **10/10**, including
+all four previously failing files. The Node project suite, bounded GC stress
+and standalone zlib quick correctness also pass (36.40 seconds / 36.19 user /
+126,592 KiB peak RSS). This is a focused checkpoint, not a new whole-suite
+total or an assertion of complete decimal-library conformance. The combined
+changes still require the final complete workload and snapshot fixed-point
+checks before the overall task is done.
+
 Compact literal ASTs represent `0`, `false`, and the empty string directly.
 An optional expression must therefore be tested against its absence sentinel,
 not by truthiness. In particular, a switch's default arm has a null test;

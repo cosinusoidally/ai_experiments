@@ -19,6 +19,7 @@
         load("guest_vm/host_ffi.js");
         load("guest_vm/host_memory.js");
         load("guest_vm/binary64.js");
+        load("guest_vm/number_format_kernel.js");
         load("guest_vm/linear_memory.js");
         load("guest_vm/heap.js");
         load("guest_vm/value_cell.js");

@@ -298,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 68;
+    Records.NativeInterpreterContractVersion = 69;
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};
     Records.grownArrayCapacity = grownArrayCapacityKernel;
 
