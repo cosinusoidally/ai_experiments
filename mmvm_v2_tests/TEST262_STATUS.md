@@ -1,5 +1,10 @@
 # Test262 status
 
+Latest completed whole-suite result (2026-10-29, standalone contract 74):
+**3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
+Elapsed 534.16 seconds. See the standalone result history below for the exact
+command, budget, memory use and historical comparisons.
+
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
 is read from `../../js_tests/tests/test262` and is never modified. Counts in
 completed full-suite results are recorded only after every selected variant
@@ -138,6 +143,19 @@ group is toward zero failures; a smaller selection is never presented as an
 improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
+
+- 2026-10-29, approximately 13:26 UTC, contract-74 regression gates after
+  the complete pass below: both host project suites pass (12 guest programs /
+  270 assertions each), both bounded structural GC audits pass, standalone
+  stress passes 24 rounds / 47 native collections, ten supported Octane quick
+  selections pass, live demos 1–8 render/exit (demo8 also garage/auto-drive),
+  and both HTTP servers pass text/binary/directory checks. Requested demo
+  settings are 320x240/20 FPS; those bounded checks are not sustained-FPS
+  guarantees. Genuine Node/js_min/self-hosted builds compare byte-identical.
+  The js_min build measures 85.16 seconds; self-hosted rebuild 114.94 seconds.
+  See `ES51_SEMANTICS_PROGRESS.md` for costs and limitations. No additional
+  Test262 run or altered conformance totals are implied by these workload
+  gates; the complete 3,292/0/0 result below remains the latest full run.
 
 - 2026-10-29, approximately 13:13 UTC, contract-74 shared-allocation image:
   **3,292 executed, 3,292 passed, 0 failed, 0 not run, 0 timed out**.

@@ -1,5 +1,68 @@
 # Efficient ES5.1 semantic bring-up
 
+## 2026-10-29: complete imported Test262 inventory
+
+Standalone contract 74 passes **all 3,292 authored Test262 files**, with zero
+failures, timeouts or unrun files. The unfiltered default-budget command took
+534.16 seconds, user CPU 527.98 seconds, peak RSS 575,788 KiB. The existing
+20,000,000-instruction default is sufficient for every case; historical
+20,000-instruction probes intentionally timed out six long Unicode loops.
+No imported file, demo, per-test budget or result classification was changed
+to obtain this result. The corpus is an old, partial import; passing it is
+not by itself proof of complete ES5.1 compliance.
+
+Running those loops fully exposed general allocation complexity rather than
+expensive RegExp matching. A portable semantic call could repeatedly recover
+the native free-space domain even when it contained megabytes of free memory.
+Portable construction now reserves spans through the same compiled allocator
+while that domain is native-owned. Reservation cannot collect; established
+safe points still govern collection. The portable free index is maintained
+as an incremental priority heap, and uncertain/collection handoffs reconstruct
+authoritative state. See `guest_vm/ALLOCATOR_HANDOFF.md` for the protocol,
+fallback and rooting guarantees. This adds no source/eval cache or
+workload-specific optimization.
+
+All three build paths produce byte-identical snapshots: Node, js_min and
+genuine guest-VM self-hosting. Measured js_min build: **85.16 seconds**, user
+CPU 83.65 seconds, peak RSS 354,900 KiB (previous recorded build 90.40
+seconds). Self-hosted rebuild: **114.94 seconds**, user CPU 113.71 seconds,
+peak RSS 508,288 KiB (previous 111.39 seconds). These are single-run
+comparisons, including a small self-hosted increase, not statistically
+significant speedup claims. The standalone image remains program-independent.
+
+The Node project suite passes 12 guest programs / 270 assertions. The bounded
+structural GC audit passes 27 audits / 87,198 checked references / 76 embedding
+collections under an 8 MiB guest cap. Standalone stress passes 24 rounds /
+47 native collections. All ten previously supported Octane quick selections
+pass, with the requested RegExp benchmark exclusion retained. Zlib quick
+correctness takes **36.23 seconds**, user CPU 35.98 seconds, peak RSS 126,208
+KiB, versus the previous single measurement of 34.90 seconds. These quick
+checks do not substitute for new stock benchmark scores.
+
+The full js_min project suite also passes 12 guest programs / 270 assertions,
+plus CLI and context-multiplexing checks. Its structural GC audit passes the
+same 27 audits / 87,198 references / 76 embedding collections, with maximum
+observed guest bump 4,569,728 bytes under the 8 MiB cap.
+
+Live demos 1–8 render and exit cleanly at a requested 320x240/20 FPS, including
+demo8 garage and free-drive auto-pilot transitions. These are bounded
+interaction checks, not a sustained-20-FPS or visual-quality guarantee: demos
+1–7 remain substantially slower than the requested frame limit in this VM.
+The dedicated GC audit, rather than a seven-minute demo soak, checks record
+and reference integrity. Both HTTP servers serve unchanged text, a
+byte-identical binary snapshot, and directory listings. No C, demo or external
+corpus source was changed. Raw logs and generated snapshots remain ignored in
+`artifacts/` with the `test262-final-` prefix; no generated files are checked in.
+
+A short demo1 comparison against the immediate architectural parent
+(`8a56736`, built independently from its tracked sources) reports about
+2.6–2.8 FPS there versus 2.5–2.7 FPS on contract 74, at the same 320x240/20 FPS
+request. These brief, low-frame-count samples do not establish a significant
+throughput change; they do confirm that the very low frame rate predates this
+reservation change. Logs: `artifacts/test262-parent-demo1.log` and
+`artifacts/test262-final-demo1.log`. No claim of demo performance parity with
+direct js_min follows from this checkpoint.
+
 ## Scope of this checkpoint
 
 Improve the shared frontend's statement completion handling and early-error
