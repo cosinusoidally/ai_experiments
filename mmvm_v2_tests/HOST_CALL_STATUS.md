@@ -143,13 +143,13 @@ Outstanding general work exposed by this group:
 - The original standalone audit could not execute the wrapper and produced
   no conformance counts. That historical limitation is replaced by the
   guest-executed embedding service described in `TEST262.md` (2026-10-28).
-  The complete standalone inventory now executes all 3,292 authored tests:
-  3,286 passed, 6 failed (all six diagnostic-budget timeouts), zero
-  not run, in 336.51 seconds on the final contract-71 lexical-scope/arguments
-  checkpoint. There are no non-timeout failures left in this imported corpus.
-  Exact failing IDs show nine new passes and no new failures against contract
-  70's 3,277/15 result. All gains in this batch are VM fixes, not wrapper
-  reclassification. Both
+  The complete standalone inventory now passes all 3,292 authored tests:
+  **3,292 passed, 0 failed, 0 not run, 0 timed out**, in 534.16 seconds on
+  contract 74 (2026-10-29). The six historical 20,000-instruction diagnostic
+  timeouts finish at the existing normal 20,000,000-instruction allowance.
+  General allocator ownership/reservation improvements remove the escalating
+  handoff overhead exposed by their long loops. No test source is modified,
+  skipped or granted a per-file budget exception. Both
   runtimes and the embedding implementation execute in guest code; no host
   JS engine participates. See
   `TEST262_STATUS.md` for scope, peak memory, failure groups and run details.

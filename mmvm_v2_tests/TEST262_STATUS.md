@@ -139,6 +139,23 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-29, approximately 13:13 UTC, contract-74 shared-allocation image:
+  **3,292 executed, 3,292 passed, 0 failed, 0 not run, 0 timed out**.
+  Pass rate **100% for this imported corpus**. Command:
+  `./artifacts/js_runner.exe artifacts/test262-final.snap test262_runner.js
+  --verbose`, using the existing default 20,000,000-instruction allowance and
+  default heap settings, with no per-file exceptions, skips, source edits or
+  cached test results. Elapsed **534.16 seconds** (8 minutes 54.16 seconds),
+  user CPU **527.98 seconds**, peak RSS **575,788 KiB**. All six historical
+  diagnostic-budget timeouts complete in this single unfiltered run.
+  The earlier 20,000-instruction runs are not directly comparable timings:
+  they intentionally terminated those long loops early. Both the control
+  runtime and test embedding execute within the standalone guest VM; no
+  JavaScript host supplies language semantics. This is completion of the
+  available import, not a claim that it exhaustively proves ES5.1 compliance.
+  Raw log: `artifacts/test262-final-full.log`. Broader regression gates are
+  recorded separately after completion.
+
 - 2026-10-29, approximately 07:58 UTC, final contract-71 image after all
   workload/build gates:
   **3,292 executed, 3,286 passed, 6 failed, 0 not run; all 6 failures are
@@ -169,7 +186,8 @@ improvement over a larger one.
   Raw log: `artifacts/es51-scopes-full.log`. Final-image regression gates are
   recorded separately after completion.
 
-Remaining diagnostic-budget timeouts (executed, not skipped):
+Historical diagnostic-budget timeouts (all pass at the normal budget above;
+an explicitly requested 20,000-instruction cap still times them out):
 
 - `ch07/7.4/S7.4_A5.js`
 - `ch07/7.4/S7.4_A6.js`
