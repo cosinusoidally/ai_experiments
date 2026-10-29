@@ -145,7 +145,7 @@ Outstanding general work exposed by this group:
   guest-executed embedding service described in `TEST262.md` (2026-10-28).
   The complete standalone inventory now executes all 3,292 authored tests:
   3,286 passed, 6 failed (all six diagnostic-budget timeouts), zero
-  not run, in 354.71 seconds at the contract-71 lexical-scope/arguments
+  not run, in 336.51 seconds on the final contract-71 lexical-scope/arguments
   checkpoint. There are no non-timeout failures left in this imported corpus.
   Exact failing IDs show nine new passes and no new failures against contract
   70's 3,277/15 result. All gains in this batch are VM fixes, not wrapper

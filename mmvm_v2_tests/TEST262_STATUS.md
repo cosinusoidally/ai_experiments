@@ -68,6 +68,22 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-29, approximately 07:58 UTC, final contract-71 image after all
+  workload/build gates:
+  **3,292 executed, 3,286 passed, 6 failed, 0 not run; all 6 failures are
+  instruction-limit timeouts**. Pass rate **99.82%**; **zero non-timeout
+  failures**. Command: `./artifacts/js_runner.exe artifacts/es51-final.snap
+  test262_runner.js --instruction-limit 20000`. Elapsed **336.51 seconds**
+  (5 minutes 36.51 seconds), user CPU **334.19 seconds**, peak RSS **549,788
+  KiB**; exit status 1 solely because timeouts remain failures. The six exact
+  IDs/variants match the preceding complete run; no new failures. All files
+  execute unchanged, with no skips or corpus exceptions. Both host project
+  suites, bounded GC audits, ten supported Octane quick selections, live
+  demos 1–8, HTTP text/binary/listing checks and genuine three-way snapshot
+  identity also pass. See `ES51_SEMANTICS_PROGRESS.md` for measured build and
+  runtime costs, including the build-time increase. Raw log:
+  `artifacts/es51-final-full.log`.
+
 - 2026-10-29, approximately 07:37 UTC, contract-71 lexical-scope and
   permanent arguments-detachment checkpoint:
   **3,292 executed, 3,286 passed, 6 failed, 0 not run; all 6 failures are

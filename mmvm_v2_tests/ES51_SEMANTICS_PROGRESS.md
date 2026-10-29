@@ -406,6 +406,48 @@ as proof of unchanged build performance or throughput parity. The original
 2026-10-28 starting-build measurements below remain available for context;
 runtime workload checks are tracked independently.
 
+Final contract-71 workload gates (2026-10-29, serial execution):
+
+- Both complete project suites pass: 12 guest programs / 270 assertions per
+  host, plus embedding, compiler, heap, command-line and context checks.
+- Bounded GC structural auditing passes under both hosts: 27 audits,
+  87,198 checked edges and 76 embedding collections. Maximum observed guest
+  bumps are 4,545,888 bytes (Node) and 4,569,600 bytes (js_min), with an 8 MiB
+  cap. The separate standalone workload passes 24 rounds / 47 collections.
+- All ten supported standalone Octane quick correctness selections pass:
+  Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay, NavierStokes,
+  Box2D, Gameboy and zlib. The requested RegExp exclusion is unchanged.
+  Final zlib: 35.67 seconds / 35.47 user CPU / 126,592 KiB peak RSS. A fresh
+  same-boot contract-70 image control passes in 35.06 seconds / 34.85 user CPU
+  / 126,464 KiB. Single quick runs do not establish exact throughput parity;
+  the measured difference is about 1.7%, not a large runtime change.
+- Live demos 1–8 open at 320x240 with a 20 FPS limit, run through multiple
+  frame reports, and exit cleanly. Demo8 additionally visits garage and
+  free-drive auto-pilot; its later reports are around 19.5–20 FPS, with a
+  slower 17.1 FPS mode-transition interval. The garage capture shows its
+  rendered car and floor. These are short interaction checks, not soak tests.
+  The older interpreted demos do not sustain the configured 20 FPS limit:
+  demo1 reports 2.6–2.8 FPS; the fresh older-image control reports 2.7–2.8 FPS.
+  Do not misrepresent a configured frame limit as measured throughput.
+- The unchanged NativeCompiler dependency workload passes under js_runner:
+  nested calls, mutual recursion, nine arguments, lifetime and error paths.
+- Both HTTP servers serve text, a byte-identical 6,235,792-byte binary image,
+  and directory listings. No demo, C source or external test file was changed.
+
+Raw generated logs/captures remain ignored under `artifacts/es51-final-*`;
+none are committed.
+
+After every gate above, the final byte-identical image completes the entire
+unchanged Test262 inventory again: **3,286 passed / 6 failed / 0 not run**,
+with all six failures being the exact same diagnostic-budget timeouts.
+Elapsed **336.51 seconds**, user CPU **334.19 seconds**, peak RSS **549,788
+KiB**. The earlier same-boot scope checkpoint was 354.71 seconds; this is a
+second complete measurement, not an isolated proof of which cleanup caused
+the difference. Against contract 70, nine formerly failing cases pass and
+no previously passing ID fails. There are no remaining non-timeout failures
+in the imported 3,292-file corpus. This is not a claim that an imported subset
+exhaustively proves every ES5.1 library behavior.
+
 ## Validation policy
 
 Run heavy tests serially. Record fresh baseline and changed build timings for
