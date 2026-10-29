@@ -1,13 +1,9 @@
 # Test262 status
 
-Latest matched whole-suite baseline control (2026-10-29,
-standalone contract 74):
+Latest completed whole-suite result (2026-10-29, standalone contract 75):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 636.82 seconds. A later local-refactor candidate also passed all tests
-in 615.29 seconds, but was parked in favor of architectural work; no production
-VM changes from these local-refactor experiments remain. The newer block-flow
-implementation (contract 75) has full-suite validation in progress; it must
-not be counted as a completed 3,292-pass run yet. See the history below for the exact
+Elapsed 538.51 seconds. This is the explicit block-flow implementation; the
+earlier local-refactor candidates remain parked. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -39,6 +35,23 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-29, explicit dispatch-region basic blocks, standalone contract 75:
+  **3,292 passed / 0 failed / 0 not run / 0 timed out**. Runner elapsed
+  537.882 seconds; external elapsed 538.51 seconds, user CPU 535.97 seconds,
+  peak RSS 576,032 KiB. The four long cases total 387.451 seconds; other
+  tests total 135.002 seconds. Versus the recent unchanged control below:
+  external elapsed 15.4% lower, long cases 19.5% lower, other tests 2.6%
+  lower. These are single-run measurements, not a repeatable-speed guarantee;
+  older historical baseline runs were also around 534--540 seconds. Budget,
+  authored-test selection and external corpus are unchanged. Both hosts'
+  project suites, bounded native GC, three-way bit-identical rebuilds and
+  the ten supported Octane quick selections pass. Subsequent bounded live
+  checks pass for demos 1--8 (including garage/autodrive), both HTTP servers'
+  text/binary/listing paths, and both hosts' structural GC audits (27 audits /
+  87,198 references each, 8 MiB cap). Matched build timings and
+  architectural details are in `guest_vm/INTERPRETER_ARCHITECTURE_PERFORMANCE.md`.
+  Raw full-suite log: `artifacts/flow-test262.log`.
 
 - 2026-10-29, architectural investigation checkpoint: the approximately 3%
   local-refactor candidate is parked at the user's request, not retained as

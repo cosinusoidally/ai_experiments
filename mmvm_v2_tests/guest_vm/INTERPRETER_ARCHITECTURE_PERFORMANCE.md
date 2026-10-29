@@ -234,11 +234,38 @@ Initial evidence, not the final architectural performance target:
 - Genuine Node/js_min/self-hosted builds produce byte-identical snapshots.
   js_min external build time: 85.21 s, user CPU 84.30 s, peak RSS 356,272 KiB.
   Self-hosted external build time: 100.67 s, user CPU 99.75 s, peak RSS
-  501,632 KiB. Matched unchanged-source build controls are in progress; no
-  build-speed improvement is claimed from historical comparisons alone.
-- Full Test262 and supported Octane revalidation are queued serially behind
-  those controls. No whole-suite or live-demo claim is made for this
-  implementation until those gates actually complete.
+  501,632 KiB. Matched unchanged-source controls take 83.98 s under js_min
+  (83.43 s user CPU, 355,032 KiB RSS) and 101.97 s self-hosted (101.18 s CPU,
+  508,544 KiB RSS). The small differences, +1.5% / -1.3% elapsed, do not
+  establish a build-speed change. The control also passes three-way identity.
+- Full standalone Test262: **3,292 passed / 0 failed / 0 timed out / 0 not
+  run**. External elapsed 538.51 s, user CPU 535.97 s, peak RSS 576,032 KiB.
+  Summed long-case time is 387.451 s, other-test time 135.002 s. Against the
+  earlier unchanged control (636.82 s external; 481.531 / 138.635 s test
+  categories), these are 15.4% / 19.5% / 2.6% lower, respectively. These are
+  single-run comparisons: earlier historical baseline runs were approximately
+  534--540 s, so do not present the 15.4% as an established repeatable gain.
+- All ten supported Octane quick-correctness selections pass: Richards,
+  DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay, NavierStokes, Box2D, Gameboy
+  and zlib. These checks are not stock scores or a claim that every Octane
+  benchmark is supported. RegExp remains outside this work.
+- The block-inspection tool successfully reports the bytecode-call graph.
+- Demos 1--7 render and close from a synthetic Escape event at 320x240 / a
+  requested 20 FPS limit. Demo8 visits garage and free-drive autopilot through
+  the menu, renders, and exits cleanly. Final autodrive samples are around
+  19--20 FPS. This is bounded smoke coverage, not a long soak or proof that the
+  slow pure-JS demos achieve the requested frame rate. Demos 2/3 initially hit
+  the harness timeout because their readiness messages differed; corrected
+  readiness checks and normal render/close reruns pass. No demo source changed.
+- `net.js` and `node_web.js` each serve byte-identical `hello.js`, the binary
+  snapshot, and a directory listing containing `runtime.js`, over localhost.
+- Both hosts' bounded structural GC audits pass: 27 audits / 87,198 references /
+  221 property-index audits / 76 embedding collections. Maximum observed bump
+  is 4,546,016 bytes under Node and 4,569,728 under js_min, with an 8 MiB cap.
+  These complement the native 24-round / 47-collection workload above.
+- Logs: `artifacts/flow-*`, all ignored. All heavy runs were serial; no new
+  demo/benchmark sources, external-corpus edits, C changes, downloads or
+  generated tracked files were required.
 
 Next: extend the representation's useful scope and add def/use/lifetime
 information without creating a second semantic implementation. The intended
