@@ -35,6 +35,19 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, performance investigation, rejected experimental image:
+  complete unfiltered run **3,292 passed / 0 failed / 0 not run / 0 timed out**.
+  Runner elapsed 554.764 seconds; external elapsed 555.41 seconds, user CPU
+  552.16 seconds, peak RSS 575,752 KiB. The four slow cases total 400.054
+  seconds versus 399.732 seconds in the user's baseline; other tests total
+  138.000 seconds versus 125.615 seconds. Early low-budget probe gains did
+  not translate into full-workload improvement. Experimental bulk metadata
+  initialization and grouped allocation were removed; the retained VM has
+  no implementation changes from this investigation. This is a historical
+  experimental result, not a new shipped performance claim. Work is paused.
+  Details and next-step notes: `guest_vm/EVAL_COMPILATION_PERFORMANCE.md`.
+  Raw log: `artifacts/eval-storage-full.log`.
+
 - 2026-10-29, direct Node comparison wrapper and default timing output:
   `test262_runner_node.js` supplies a Node-only execution backend to the
   existing manifest/metadata/reporting runner; it loads no guest VM. Both
