@@ -1,17 +1,31 @@
 /* Bounded external reader for libc profil counters. This Node diagnostic is
  * the parent of the one measured process, so /proc memory access needs no
  * debugger, C helper, extra guest VM, or system configuration change.
- * Usage: node .../profile_native_vm.js IMAGE SECONDS PROGRAM [ARGS...] */
+ * Usage: node .../profile_native_vm.js [--after-seconds N]
+ *        IMAGE SECONDS PROGRAM [ARGS...]
+ * The optional warmup is excluded by subtracting two counter reads. */
 var fs = require("fs");
 var spawn = require("child_process").spawn;
-var image = process.argv[2];
-var seconds = Number(process.argv[3]);
+var Bytecode = require("../bytecode.js");
+var args = process.argv.slice(2), afterSeconds = 0;
+if (args[0] === "--after-seconds") {
+    args.shift();
+    afterSeconds = Number(args.shift());
+    if (!(afterSeconds >= 0 && afterSeconds <= 120)) {
+        throw new Error("--after-seconds must be 0..120");
+    }
+}
+var image = args.shift();
+var seconds = Number(args.shift());
 if (!(seconds > 0 && seconds <= 120)) throw new Error("seconds must be 1..120");
+if (afterSeconds + seconds > 120) throw new Error("total profiling window exceeds 120 seconds");
+if (!image || !args.length) throw new Error("expected IMAGE SECONDS PROGRAM [ARGS...]");
 var metadata = JSON.parse(fs.readFileSync(image + ".symbols.json", "utf8"));
 var child = spawn("./artifacts/js_runner.exe", [image,
-    "guest_vm/tools/native_profile_entry.js"].concat(process.argv.slice(4)),
+    "guest_vm/tools/native_profile_entry.js"].concat(args),
     {stdio: ["ignore", "pipe", "inherit"]});
-var pending = "", started = false;
+var pending = "", started = false, baseline = null, completed = false;
+var sampleTimer = null;
 child.stdout.on("data", function (data) {
     process.stdout.write(data);
     pending += String(data);
@@ -22,17 +36,17 @@ child.stdout.on("data", function (data) {
             Number(match[2]) !== metadata.codeLength + 2) {
         child.kill(); throw new Error("symbol sidecar does not match image");
     }
-    setTimeout(function () {
+    sampleTimer = setTimeout(function () {
         child.kill("SIGSTOP");
-        readStopped(Number(match[1]), Number(match[2]), 0);
-    }, seconds * 1000);
+        readStopped(Number(match[1]), Number(match[2]), 0, afterSeconds > 0);
+    }, (afterSeconds || seconds) * 1000);
 });
-function readStopped(address, length, attempt) {
+function readStopped(address, length, attempt, warmup) {
     if (child.exitCode !== null) return;
     var status = fs.readFileSync("/proc/" + child.pid + "/status", "utf8");
     if (!/State:\s+T/.test(status)) {
         if (attempt > 100) { child.kill("SIGKILL"); return; }
-        setTimeout(function () { readStopped(address, length, attempt + 1); }, 10);
+        setTimeout(function () { readStopped(address, length, attempt + 1, warmup); }, 10);
         return;
     }
     try {
@@ -40,10 +54,32 @@ function readStopped(address, length, attempt) {
         var counters = Buffer.alloc(length);
         try { fs.readSync(memory, counters, 0, length, address); }
         finally { fs.closeSync(memory); }
-        report(counters);
+        if (warmup) baseline = counters;
+        else {
+            if (baseline) {
+                for (var offset = 0; offset + 1 < counters.length; offset += 2) {
+                    counters.writeUInt16LE((counters.readUInt16LE(offset) -
+                        baseline.readUInt16LE(offset)) & 65535, offset);
+                }
+            }
+            console.log("Native CPU sampling window: after " + afterSeconds +
+                " seconds, duration " + seconds + " seconds");
+            report(counters);
+            completed = true;
+        }
+    } catch (error) {
+        /* Never orphan the measured process if a warmup read fails. */
+        child.kill("SIGTERM");
+        throw error;
     } finally {
         child.kill("SIGCONT");
-        child.kill("SIGTERM");
+        if (!warmup) child.kill("SIGTERM");
+    }
+    if (warmup) {
+        sampleTimer = setTimeout(function () {
+            child.kill("SIGSTOP");
+            readStopped(address, length, 0, false);
+        }, seconds * 1000);
     }
 }
 function report(counters) {
@@ -76,9 +112,19 @@ function report(counters) {
     cases.sort(function (a, b) { return b.samples - a.samples; });
     console.log("Interpreter case regions (dispatch/loop overhead can fall between regions):");
     cases.slice(0, 15).forEach(function (item) {
-        console.log((100 * item.samples / (total || 1)).toFixed(1) + "% " + item.name);
+        var opcode = Number(item.name.substring(item.name.lastIndexOf("_") + 1));
+        console.log((100 * item.samples / (total || 1)).toFixed(1) + "% " +
+            (Bytecode.NAMES[opcode] || "unknown opcode") + " " + item.name);
     });
 }
 /* Also bound failure to reach the profiling entry (e.g. a loader regression). */
-var deadline = setTimeout(function () { child.kill("SIGKILL"); }, (seconds + 90) * 1000);
-child.on("exit", function () { clearTimeout(deadline); });
+var deadline = setTimeout(function () { child.kill("SIGKILL"); },
+    (afterSeconds + seconds + 90) * 1000);
+child.on("exit", function () {
+    clearTimeout(deadline);
+    clearTimeout(sampleTimer);
+    if (!completed) {
+        console.error("Native CPU sampling incomplete: program exited before the window completed");
+        process.exitCode = 1;
+    }
+});

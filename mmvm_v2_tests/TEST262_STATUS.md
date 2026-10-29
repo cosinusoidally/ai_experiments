@@ -1,8 +1,11 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-29, standalone contract 74):
+Retained VM's latest matched whole-suite control (2026-10-29,
+standalone contract 74):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 534.16 seconds. See the standalone result history below for the exact
+Elapsed 636.82 seconds. A later local-refactor candidate also passed all tests
+in 615.29 seconds, but was parked in favor of architectural work; no production
+VM changes from these experiments remain. See the result history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -35,13 +38,45 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, architectural investigation checkpoint: the approximately 3%
+  local-refactor candidate is parked at the user's request, not retained as
+  the performance solution. Production VM sources are unchanged. Its project
+  suites passed under Node and js_min (12 programs / 270 assertions each),
+  bounded GC audits passed under both hosts (27 audits each), and the native
+  24-round / 47-collection GC workload passed. Queued build validation was
+  deliberately stopped; no new three-way rebuild or live-demo claim is made.
+  Native CPU findings and architectural acceptance criteria are in
+  `guest_vm/INTERPRETER_ARCHITECTURE_PERFORMANCE.md`.
+
+- 2026-10-29, approximately 19:02 UTC, iterative declaration-walker/base
+  accessor candidate: **3,292 passed / 0 failed / 0 not run / 0 timed out**.
+  Runner elapsed 614.576 seconds; external elapsed 615.29 seconds, user CPU
+  611.41 seconds, peak RSS 575,956 KiB. Four long cases total 463.368 seconds;
+  other tests total 135.237 seconds. Compared with the matched unchanged
+  control below, external elapsed is 3.4% lower, the outliers 3.8% lower and
+  other tests 2.5% lower. These single-run differences are modest; neither
+  a major speedup nor a memory reduction is claimed. Default budget and
+  unfiltered authored-test selection are unchanged. Raw log:
+  `artifacts/eval-iterative-suite.log`. Project/GC/build gates are recorded
+  in `guest_vm/EVAL_COMPILATION_PERFORMANCE.md` as they complete.
+
+- 2026-10-29, approximately 18:48 UTC, matched unchanged-snapshot control:
+  **3,292 passed / 0 failed / 0 not run / 0 timed out**. External elapsed
+  636.82 seconds, user CPU 631.94 seconds, peak RSS 575,988 KiB; four long
+  cases 481.531 seconds, remaining tests 138.635 seconds. The recursive-walker
+  candidate below is faster overall but slower outside the outliers, so it
+  is not accepted unchanged. The follow-up iterative walker passes the
+  focused 87-test shift chapter, as does this control. Whole-suite iterative
+  validation is pending. Raw control log:
+  `artifacts/eval-current-baseline-suite.log`.
+
 - 2026-10-29, approximately 18:36 UTC, experimental declaration-walker/base
   accessor candidate on `guestVM-cleanup`: **3,292 passed / 0 failed /
   0 not run / 0 timed out**. Runner elapsed 606.654 seconds; external elapsed
   607.31 seconds, user CPU 596.20 seconds, peak RSS 575,928 KiB. The four
   long cases total 437.972 seconds; other tests total 149.042 seconds. This
   confirms correctness, not a performance improvement: results exceed the
-  older baseline and a matched unchanged-image control is pending. No
+  older baseline; the subsequent matched control is recorded above. No
   conformance result is claimed for the earlier largest-first allocator run,
   which was interrupted by system instability. See
   `guest_vm/EVAL_COMPILATION_PERFORMANCE.md`; candidate raw log:

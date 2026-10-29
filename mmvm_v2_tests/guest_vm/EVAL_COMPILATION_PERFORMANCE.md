@@ -14,6 +14,10 @@ not to subsequent candidates.
 
 ## Resumed experiments, 2026-10-29
 
+All local-refactor candidates below are now parked. Production VM sources
+are unchanged; the next work is architectural, based on native-PC evidence.
+See `INTERPRETER_ARCHITECTURE_PERFORMANCE.md` for findings and acceptance gates.
+
 - Fresh isolated `S7.8.5_A1.4_T2.js`, original implementation: **113.071 s**
   test time, 124.26 s external elapsed, 535,296 KiB peak RSS.
 - Native largest-first free-region candidate plus a base-address accessor:
@@ -29,7 +33,7 @@ not to subsequent candidates.
   unchanged, not evidence of a meaningful speedup. The accessor avoids range
   conversion for a known zero offset; it still checks liveness and reads the
   current allocation pointer, with no fixed-address or cached-pointer rule.
-- Current compilation candidate lifts the declaration walk's two capturing
+- First compilation candidate lifts the declaration walk's two capturing
   closures into reusable named functions. Each invocation still owns its
   deduplication set. Source order, duplicate handling and function boundaries
   are unchanged; the visitor reads the stable AST node kind once per visit.
@@ -39,9 +43,32 @@ not to subsequent candidates.
   **3,292 passed / 0 failed / 0 not run / 0 timed out**, 607.31 s external,
   596.20 s user CPU, 575,928 KiB peak RSS. Four long cases total 437.972 s;
   other tests total 149.042 s. This is slower than the older baseline and is
-  not an accepted performance improvement. A matched unchanged-snapshot run
-  is in progress after the system interruption. Raw candidate log:
+  not an accepted performance improvement. The matched unchanged snapshot
+  subsequently passes all 3,292 in 636.82 s external / 631.94 s user CPU /
+  575,988 KiB peak RSS. Its four long cases total 481.531 s; other tests total
+  138.635 s. The recursive candidate is 4.6% faster overall but 7.5% slower
+  outside the outliers; it is therefore not accepted unchanged. Raw candidate log:
   `artifacts/eval-walker-suite.log`.
+- Follow-up: use an iterative declaration walk instead of recursive helper
+  calls carrying the result/set through every statement. Root statements
+  are read directly; only nested statements enter the worklist, in reverse
+  order to preserve source-order traversal. This removes both capturing
+  closures and per-node recursive calls. Node project suite: 12 programs /
+  270 assertions pass. Focused standalone chapter `ch11/11.7`: **87/87 pass**
+  for both unchanged and iterative snapshots; summed test times 15.768 s and
+  15.602 s, respectively. This is essentially parity, not a large speedup.
+  Full standalone suite: **3,292 passed / 0 failed / 0 not run / 0 timed out**,
+  615.29 s external, 611.41 s user CPU, 575,956 KiB peak RSS. Four long cases
+  total 463.368 s; other tests total 135.237 s. Relative to the matched control,
+  external elapsed falls 3.4%, outlier time 3.8%, other-test time 2.5%.
+  These are single full runs, not statistically established steady-state gains;
+  peak memory is unchanged and this does not solve the main performance gap.
+  Both hosts' project suites and bounded GC audits subsequently pass; the
+  standalone 24-round / 47-collection GC workload also passes. Three-way
+  rebuild validation was stopped on redirection to architectural work. The
+  candidate is parked, not part of production VM sources. Raw logs:
+  `artifacts/eval-baseline-shifts.log`, `artifacts/eval-iterative-shifts.log`.
+  Full iterative log: `artifacts/eval-iterative-suite.log`.
 
 All experiments execute external tests unchanged. Generated snapshots and
 logs are ignored, not checked in. After the interruption, the original i386
