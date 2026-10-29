@@ -388,6 +388,24 @@ within its 8 MiB cap. The retained graph now includes escaped catch closures
 and permanently detached arguments, and the audit validates their scope-data
 record kinds. Further build/demo/benchmark gates are recorded separately.
 
+Three-way rebuilding on the frozen contract-71 source succeeds. Node, js_min
+and a genuine standalone self-hosted build produce byte-identical 6,235,792
+byte images (SHA-256
+`61bc055000832223f055da0cf50312cb58722f0784df1b55ed7823302154c57d`).
+No source/environment/program state is copied from the input snapshot to
+substitute for compilation.
+
+- Node: 7.04 seconds elapsed / 7.78 user CPU / 279,240 KiB peak RSS.
+- js_min: 100.38 seconds / 99.11 user CPU / 344,660 KiB peak RSS.
+- Genuine self-hosted: 125.23 seconds / 123.92 user CPU / 504,192 KiB peak RSS.
+
+These are end-to-end single builds. They are slower than the contract-67
+92.22/114.77-second js_min/self measurements, which preceded this batch's
+additional language/kernel implementations and a reboot. Do not present them
+as proof of unchanged build performance or throughput parity. The original
+2026-10-28 starting-build measurements below remain available for context;
+runtime workload checks are tracked independently.
+
 ## Validation policy
 
 Run heavy tests serially. Record fresh baseline and changed build timings for

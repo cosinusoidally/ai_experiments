@@ -91,6 +91,8 @@ Remaining diagnostic-budget timeouts (executed, not skipped):
 - `ch07/7.8/7.8.5/S7.8.5_A2.1_T2.js`
 - `ch07/7.8/7.8.5/S7.8.5_A2.4_T2.js`
 
+Previous complete runs:
+
 - 2026-10-29, approximately 00:27 UTC, contract-70 operator/prototype and
   inherited-enumeration checkpoint:
   **3,292 executed, 3,277 passed, 15 failed, 0 not run; 6 instruction-limit
