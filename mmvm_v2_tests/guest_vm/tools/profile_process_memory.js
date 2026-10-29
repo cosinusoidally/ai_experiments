@@ -4,6 +4,9 @@
  *      PROGRAM [ARGS...]
  * Optional leading --stack-only samples bounded guest call stacks instead of
  * walking every record. It uses a 200 ms interval; timings are perturbed.
+ * --stack-depth COUNT (1..128, default 12) controls the stack bound. Truncated
+ * stacks are identified explicitly: filtering for an ancestor absent below
+ * that bound otherwise biases a phase analysis toward shallow call chains.
  * Brief SIGSTOP samples perturb timing; do not use this run as a stock score.
  * No heap dumps, forced collections, page advice or runtime changes. */
 (function () {
@@ -12,8 +15,19 @@
     var Cells = require("../value_cell.js");
     var Backend = require("../aot/backend_x86.js");
     var args = process.argv.slice(2);
-    var stackOnly = args[0] === "--stack-only";
-    if (stackOnly) args.shift();
+    var stackOnly = false, stackDepth = 12;
+    var MAX_STACK_DEPTH = 128;
+    while (args.length && args[0].substring(0, 2) === "--") {
+        var option = args.shift();
+        if (option === "--stack-only") stackOnly = true;
+        else if (option === "--stack-depth") {
+            stackDepth = Number(args.shift());
+            if (!(stackDepth >= 1 && stackDepth <= MAX_STACK_DEPTH) ||
+                    stackDepth !== Math.floor(stackDepth)) {
+                throw new Error("--stack-depth requires an integer from 1 to " + MAX_STACK_DEPTH);
+            }
+        } else throw new Error("unknown profiler option: " + option);
+    }
     if (args.length < 3) throw new Error("expected SNAPSHOT OUTPUT_PREFIX PROGRAM [ARGS...]");
     var snapshot = args.shift(), prefix = args.shift();
     var fields = Backend.StandaloneHeaderFields;
@@ -118,8 +132,44 @@
             /* Bounded read cache, not a second copy of the guest heap. Reuse
              * the authoritative Heap/Records accessors for payload fields. */
             var cache = Buffer.alloc(65536), cacheStart = -1, cacheLength = 0;
+            /* A string slice alternates between its descriptor and backing.
+             * A single window thrashes on that access pattern, extending
+             * SIGSTOP pauses drastically for deeper stacks. Retain bounded
+             * chunks only for this stopped sample; never across GC/resume. */
+            var STACK_READ_CHUNK_BYTES = 4096;
+            var MAX_STACK_CACHE_BYTES = 1024 * 1024;
+            var stackChunks = {}, stackCacheBytes = 0;
+            function readStackWord(address) {
+                var start = Math.floor(address / STACK_READ_CHUNK_BYTES) * STACK_READ_CHUNK_BYTES;
+                var key = "$" + start, chunk = stackChunks[key];
+                if (!chunk) {
+                    var length = Math.min(STACK_READ_CHUNK_BYTES, heapCapacity - start);
+                    if (stackCacheBytes + length > MAX_STACK_CACHE_BYTES) {
+                        stackChunks = {};
+                        stackCacheBytes = 0;
+                    }
+                    chunk = Buffer.alloc(length);
+                    var got = fs.readSync(descriptor, chunk, 0, length, heapBase + start);
+                    if (got !== length) throw new Error("short stopped-heap chunk read");
+                    stackChunks[key] = chunk;
+                    stackCacheBytes += length;
+                }
+                var offset = address - start;
+                if (offset + Heap.WORD_BYTES <= chunk.length) return chunk.readUInt32LE(offset);
+                /* General unaligned reads may straddle chunks. */
+                var word = 0, byteIndex = 0;
+                while (byteIndex < Heap.WORD_BYTES) {
+                    var byteAddress = address + byteIndex;
+                    var aligned = byteAddress - byteAddress % Heap.WORD_BYTES;
+                    word |= ((readStackWord(aligned) >>>
+                        ((byteAddress % Heap.WORD_BYTES) * 8)) & 255) << (byteIndex * 8);
+                    byteIndex++;
+                }
+                return word >>> 0;
+            }
             function readWord(address) {
                 if (address < 0 || address + 4 > heapCapacity) throw new Error("heap read outside mapping");
+                if (stackOnly) return readStackWord(address);
                 if (address < cacheStart || address + 4 > cacheStart + cacheLength) {
                     cacheStart = Math.floor(address / cache.length) * cache.length;
                     cacheLength = fs.readSync(descriptor, cache, 0,
@@ -138,7 +188,7 @@
             var records = new Records(heap, new Cells(heap));
             if (stackOnly) {
                 var stack = [], stackFrame = records.engineCurrentFrame(engine);
-                while (stackFrame && stack.length < 12) {
+                while (stackFrame && stack.length < stackDepth) {
                     if (heap.recordType(stackFrame) !== Heap.Types.FRAME) break;
                     var stackProgram = records.frameProgram(stackFrame);
                     var stackSource = records.programSource(stackProgram);
@@ -152,7 +202,8 @@
                     stackFrame = records.frameCaller(stackFrame);
                 }
                 record({event: "stack", elapsedMs: Date.now() - started,
-                    rssKiB: totalRSS, stack: stack});
+                    rssKiB: totalRSS, stack: stack, maximumDepth: stackDepth,
+                    truncated: !!stackFrame});
                 samples++;
                 return;
             }

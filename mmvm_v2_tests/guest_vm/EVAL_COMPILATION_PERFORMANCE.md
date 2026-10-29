@@ -99,6 +99,46 @@ was not completed for these rejected changes; no such claim is made.
 
 ## Proposed next step — not implemented
 
+### Resumed diagnostic checkpoint on guestVM-cleanup
+
+The original sampler's 12-frame limit can hide `compileEval` beneath a deep
+parser chain. Filtering only stacks containing that ancestor biases the
+selection toward shallower installation calls. The tool now accepts
+`--stack-depth COUNT` (default 12, maximum 128) and reports truncation.
+Stack-only reads use a bounded 1 MiB chunk cache, discarded on every resume;
+the old single-window cache thrashed between slice descriptors and backing
+strings and made deep-stack pauses excessive. The heap-walk profiler path
+retains its existing window cache. No VM execution semantics change.
+
+`tools/summarize_stacks.js` reports leaf/inclusive counts and the direct child
+of a requested ancestor. It supports `--after-ms` to exclude startup, reports
+incomplete stacks explicitly and warns about ancestor-selection bias. It is
+an optional Node-based reader, like the existing process profiler, not a
+dependency of the VM or Test262 execution.
+
+The new 64-frame probe (`artifacts/eval-deep-cached.jsonl`) has 98 samples
+after 20 seconds, none truncated. Of these, 54 contain `compileEval`: its
+direct child is registration in 31, lowering in 11, parser construction in 5,
+program parsing in 4 and verification in 3. This is a small perturbed sample,
+not an exclusive full-test timing breakdown. Installation is still material,
+but compilation does not account for the entire test duration.
+
+```sh
+node guest_vm/tools/profile_process_memory.js --stack-only --stack-depth 64 \
+  artifacts/snap artifacts/eval-profile test262_runner.js \
+  --instruction-limit 2000000 ch07/7.8/7.8.5/S7.8.5_A1.4_T2.js
+node guest_vm/tools/summarize_stacks.js artifacts/eval-profile.jsonl \
+  --after-ms 20000 --ancestor 'function (source, filename, strict,'
+```
+
+The deliberately capped test times out, as expected; no conformance pass is
+claimed. The uncached deep probe was terminated during startup and must not
+be used as a VM speed measurement. i386 snapshot execution also passed the
+existing hello program. The next runtime experiment is a general allocator
+entry that combines reservation, zeroing and initial record words, replacing
+the separate calls currently required per portable allocation. It must be
+measured on completed workloads before being retained.
+
 Add optional, low-overhead sampled phase timing for eval compilation: parsing,
 scope setup/lowering, verification and program installation. Separate startup
 from sustained execution and distinguish compilation from frame setup, GC and
