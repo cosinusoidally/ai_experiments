@@ -33,6 +33,71 @@ summary.  `--fail-fast` is an optional diagnostic mode, never the default.
 the requested mode. They are diagnostic filters; tests in the other mode are
 reported as not run.
 
+By default every executed test prints a `PASS` or `FAIL` line followed by its
+elapsed milliseconds, for example:
+
+```text
+PASS ch06/6.1.js (non-strict); elapsed: 25.412 ms
+```
+
+The measurement surrounds the backend's entire test call: context preparation,
+harness installation, test compilation, execution and explicit teardown where
+applicable. It excludes reading the test source and printing its result.
+The first call also includes any one-time harness compilation performed by
+that backend. `test ms` in the summary is the sum of individual test-call
+times; `elapsed ms` includes test-runtime construction, source reads, reporting
+and final teardown, but excludes initial manifest discovery and argument
+handling. Guest runs use their existing `Date` clock; direct Node uses the
+monotonic `process.hrtime()` clock. Three decimal places are formatting, not
+a guarantee of microsecond clock precision.
+
+`--verbose` adds read/run diagnostics and guest instruction counts. `--quiet`
+suppresses successful per-test lines, while failures still include timings.
+`--summary-only` suppresses all per-test lines; both summary time totals remain
+available. Use the same output mode on both backends for throughput comparisons.
+
+## Direct Node comparison (no guest VM)
+
+```sh
+node test262_runner_node.js
+node test262_runner_node.js ch11/11.4
+node test262_runner_node.js --fail-fast ch11
+node test262_runner_node.js --strict-only ch09
+node test262_runner_node.js --summary-only
+node --jitless test262_runner_node.js --summary-only
+node test262_runner_node.js --timeout-ms 30000 ch07
+```
+
+This entry point uses only Node's built-in `fs`, `path` and `vm` APIs. It never
+loads `guest_vm`. It supplies a direct V8 backend to the existing
+`test262_runner.js`, so both paths use exactly the same manifest, selectors,
+authored strict/sloppy policy, negative-test classification and result/timing
+reporting. Relative source paths are resolved from the wrapper's own directory;
+there are no machine-specific paths or downloads. The external tests are read
+in place and unchanged.
+
+Every Node test receives a fresh context with fresh built-ins and harness
+globals, without `require` or `process`. Compiled harness scripts are reused,
+not mutable harness state or compiled test programs. This matches the guest
+embedding's existing in-memory repair of the root harness's inconsistent DST
+sentinels; neither backend edits the external harness. `--fresh-contexts` is
+accepted but redundant for Node, which always creates fresh contexts. Node's
+`vm` context isolation is not a security boundary for hostile code.
+
+V8 cannot count guest bytecodes. Node therefore offers `--timeout-ms` (default
+10,000 ms) per script execution in place of `--instruction-limit`. Compilation
+and context creation are included in timings, but not interrupted by that
+execution timeout. A timeout fails the test and is also counted in `timed out`;
+it cannot satisfy a negative test. Guest-only instruction-limit, test-heap and
+self-hosted-eval options are rejected rather than silently ignored. Node's
+verbose instruction count is explicitly reported as unavailable.
+
+Modern Node is not an ES5.1-only engine: tests of rules changed in later
+editions can legitimately disagree with this historical corpus. Preserve and
+report those results rather than patching Node's semantics. The measured Node
+inventory and differences are recorded in `TEST262_NODE_STATUS.md` separately
+from guest conformance totals.
+
 `--summary-only` performs the identical selection, execution, classification,
 and exit-status calculation while suppressing per-failure diagnostics and
 progress lines. It is intended for repeatable whole-suite throughput

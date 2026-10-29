@@ -11,6 +11,10 @@
 (function (runnerArguments) {
     var corpusDirectory = "../../js_tests/tests/test262";
     var fs = require("fs");
+    /* The direct Node backend supplies a monotonic clock. Hosted/standalone
+     * guest runs retain the portable ES3 Date clock. */
+    var now = typeof Test262Clock === "function" ? Test262Clock :
+        function () { return new Date().getTime(); };
     load("test262_manifest.js");
     var applicableRoots = [
         "ch06", "ch07", "ch09", "ch10", "ch11", "ch12", "ch13"
@@ -95,6 +99,7 @@
         } else selectors.push(normalizeRelativePath(argument));
     }
     if (!selectors.length) selectors.push("");
+    if (summaryOnly) verbose = false;
 
     function isApplicableRoot(name) {
         var index = 0;
@@ -148,6 +153,7 @@
         console.log("Test262: " + tests.length + " test file(s)");
         return;
     }
+    var suiteStarted = now();
 
     /* A snapshot may retain the hosted service's non-executable descriptor.
      * Replace it explicitly rather than testing only for a missing global.
@@ -209,7 +215,7 @@
         return true;
     }
 
-    var counts = {tests: tests.length, variants: 0, executed: 0,
+    var counts = {tests: tests.length, variants: 0, executed: 0, elapsedMs: 0,
                   passed: 0, failed: 0, notRun: 0, timedOut: 0};
     var stopped = false;
     testIndex = 0;
@@ -240,16 +246,19 @@
             var variantName = strict ? "strict" : "non-strict";
             counts.executed++;
             if (verbose) console.log("RUN " + relativePath + " (" + variantName + ")");
-            var variantStarted = verbose ? new Date().getTime() : 0;
+            var variantStarted = now();
             var result = Test262VM.runVariant(
                 filename, source, strict, harnessFiles, instructionLimit,
                 freshContexts);
+            var variantElapsed = now() - variantStarted;
+            counts.elapsedMs += variantElapsed;
+            var timing = "; elapsed: " + variantElapsed.toFixed(3) + " ms";
             var passed = negative ? negativePasses(source, result) :
                                     result.status === "completed";
             if (passed) {
                 counts.passed++;
-                if (verbose) console.log("PASS " + relativePath +
-                                         " (" + variantName + ")");
+                if (!quiet || verbose) console.log("PASS " + relativePath +
+                                         " (" + variantName + ")" + timing);
             } else {
                 counts.failed++;
                 if (result.status === "timeout") counts.timedOut++;
@@ -257,21 +266,15 @@
                     console.error("FAIL " + relativePath + " (" +
                         variantName + "): " +
                         (negative && result.status === "completed" ?
-                        "expected an exception" : resultDescription(result)));
+                        "expected an exception" : resultDescription(result)) + timing);
                 }
                 if (failFast) stopped = true;
             }
             if (verbose) {
-                console.log("  instructions: " + result.instructions +
-                    "; elapsed: " + (new Date().getTime() - variantStarted) + " ms");
+                console.log("  instructions: " + result.instructions);
             }
         }
         if (stopped) counts.notRun += variants.length - variantIndex;
-        if (!quiet && !verbose && testIndex % 100 === 0) {
-            console.log("Test262: " + testIndex + "/" + tests.length +
-                " files, " + counts.passed + " passed, " + counts.failed +
-                " failed");
-        }
     }
 
     /* A fail-fast diagnostic still reports the complete selected outcome
@@ -284,6 +287,8 @@
         counts.notRun++;
     }
 
+    if (ownsTestRuntime) Test262VM.destroy();
+    var suiteElapsed = now() - suiteStarted;
     console.log("Test262 ES5.1 summary");
     console.log("  test files: " + counts.tests);
     console.log("  variants:   " + counts.variants);
@@ -292,7 +297,8 @@
     console.log("  failed:     " + counts.failed);
     console.log("  not run:    " + counts.notRun);
     console.log("  timed out:  " + counts.timedOut);
+    console.log("  test ms:    " + counts.elapsedMs.toFixed(3));
+    console.log("  elapsed ms: " + suiteElapsed.toFixed(3));
     if (stopped) console.log("  stopped:    first failure (--fail-fast)");
-    if (ownsTestRuntime) Test262VM.destroy();
     if (counts.failed) process.exit(1);
 }(arguments));

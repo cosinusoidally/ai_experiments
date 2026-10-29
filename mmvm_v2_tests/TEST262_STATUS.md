@@ -35,6 +35,22 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, direct Node comparison wrapper and default timing output:
+  `test262_runner_node.js` supplies a Node-only execution backend to the
+  existing manifest/metadata/reporting runner; it loads no guest VM. Both
+  paths now time and report individual test calls by default, plus summed
+  test time and overall runner time. Standalone validation selection `ch06
+  ch10/10.6 ch11/11.1/11.1.5` passes **83/83, zero failures/timeouts/not run**
+  with both default output and summary-only output. Hosted js_min `ch06`
+  also passes with default timing output. This is a reporting/backend change,
+  not a new full guest conformance measurement: the 3,292-pass result above
+  remains the latest complete guest inventory. Two full direct Node v24.14.1
+  runs execute all 3,292 files and report 3,253 passes / 39 failures / zero
+  timeouts/not run in 29.59 and 30.10 seconds. Modern-engine differences and
+  exact IDs are recorded separately in `TEST262_NODE_STATUS.md`; Node's
+  failures are not folded into the guest VM's counts. No VM, demo or external
+  test source changes are required for this comparison.
+
 - 2026-10-29, approximately 13:03 UTC, all six previously timed-out cases
   complete unchanged on standalone contract 74: **6 executed / 6 passed /
   0 failed / 0 not run / 0 timed out**. This focused selection is not yet
