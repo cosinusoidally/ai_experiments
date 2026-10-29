@@ -35,6 +35,18 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, approximately 18:36 UTC, experimental declaration-walker/base
+  accessor candidate on `guestVM-cleanup`: **3,292 passed / 0 failed /
+  0 not run / 0 timed out**. Runner elapsed 606.654 seconds; external elapsed
+  607.31 seconds, user CPU 596.20 seconds, peak RSS 575,928 KiB. The four
+  long cases total 437.972 seconds; other tests total 149.042 seconds. This
+  confirms correctness, not a performance improvement: results exceed the
+  older baseline and a matched unchanged-image control is pending. No
+  conformance result is claimed for the earlier largest-first allocator run,
+  which was interrupted by system instability. See
+  `guest_vm/EVAL_COMPILATION_PERFORMANCE.md`; candidate raw log:
+  `artifacts/eval-walker-suite.log`.
+
 - 2026-10-29, performance investigation, rejected experimental image:
   complete unfiltered run **3,292 passed / 0 failed / 0 not run / 0 timed out**.
   Runner elapsed 554.764 seconds; external elapsed 555.41 seconds, user CPU

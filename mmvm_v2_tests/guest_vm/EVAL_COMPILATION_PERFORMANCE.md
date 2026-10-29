@@ -1,12 +1,51 @@
 # Small-program compilation performance investigation
 
-## Checkpoint: paused, 2026-10-29
+## Initial checkpoint: paused, 2026-10-29
 
 **No performance implementation from this investigation was retained.** All
 experimental source changes were removed after full-workload measurements
 failed to justify them. The retained VM implementation is unchanged from
 `7752861`. This document records results and proposed next steps, not features
 that currently exist in the code. Generated logs/images remain ignored.
+
+Later work on `guestVM-cleanup` is recorded below. The statement above refers
+to the initial rejected bulk-initialization/grouped-allocation experiments,
+not to subsequent candidates.
+
+## Resumed experiments, 2026-10-29
+
+- Fresh isolated `S7.8.5_A1.4_T2.js`, original implementation: **113.071 s**
+  test time, 124.26 s external elapsed, 535,296 KiB peak RSS.
+- Native largest-first free-region candidate plus a base-address accessor:
+  **111.474 s** isolated test time, 121.87 s external, 447,460 KiB peak RSS.
+  A subsequent complete-suite attempt was interrupted by system instability;
+  it passed the first three long cases in 119.340 / 124.721 / 129.147 s,
+  respectively, but did not produce a final inventory. These sustained times
+  do not justify retaining the allocator-policy change. The original native
+  sort/insertion/first-fit policy was restored. No completed whole-suite or
+  sustained performance improvement is claimed for this candidate.
+- Base-address accessor alone, original allocator: **112.289 s** isolated
+  test time, 122.68 s external, 535,320 KiB peak RSS. Treat this as essentially
+  unchanged, not evidence of a meaningful speedup. The accessor avoids range
+  conversion for a known zero offset; it still checks liveness and reads the
+  current allocation pointer, with no fixed-address or cached-pointer rule.
+- Current compilation candidate lifts the declaration walk's two capturing
+  closures into reusable named functions. Each invocation still owns its
+  deduplication set. Source order, duplicate handling and function boundaries
+  are unchanged; the visitor reads the stable AST node kind once per visit.
+  This removes repeated closure/environment construction rather than caching
+  programs or adding a test-specific shortcut. Node's existing project suite
+  passes 12 guest programs / 270 guest assertions. Completed standalone run:
+  **3,292 passed / 0 failed / 0 not run / 0 timed out**, 607.31 s external,
+  596.20 s user CPU, 575,928 KiB peak RSS. Four long cases total 437.972 s;
+  other tests total 149.042 s. This is slower than the older baseline and is
+  not an accepted performance improvement. A matched unchanged-snapshot run
+  is in progress after the system interruption. Raw candidate log:
+  `artifacts/eval-walker-suite.log`.
+
+All experiments execute external tests unchanged. Generated snapshots and
+logs are ignored, not checked in. After the interruption, the original i386
+snapshot successfully ran `hello.js`; no emulation or binary rebuild was used.
 
 The objective is to accelerate the four long Unicode/eval Test262 cases
 through general VM improvements, without regressing other tests. No external
