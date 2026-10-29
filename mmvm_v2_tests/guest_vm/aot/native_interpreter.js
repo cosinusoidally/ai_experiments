@@ -6864,7 +6864,7 @@
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
             intrinsicHandled = objectHasOwnPropertyKernel(
-                heapBase, intrinsicTarget, registerAddress,
+                heapBase, state, intrinsicTarget, registerAddress,
                 intrinsicArgumentsVector, bytecodeAddress, pc,
                 intrinsicId, callReceiverIndex, stringSupport);
         }
@@ -7826,7 +7826,7 @@
     }
 
     function objectHasOwnPropertyKernel(
-            heapBase, intrinsicTarget, registerAddress,
+            heapBase, state, intrinsicTarget, registerAddress,
             intrinsicArgumentsVector, bytecodeAddress, pc, intrinsicId,
             callReceiverIndex, stringSupport) {
         var intrinsicHandled = 0;
@@ -7868,6 +7868,13 @@
                 }
             }
             var ownFound = 0;
+            if (ownValid === 1 && ownObjectType === HEAP_TYPE_OBJECT) {
+                /* Weak-table cleanup performs own checks for every entry.
+                 * Use the ordinary packed-object index rather than turning
+                 * that linear cleanup into a quadratic property scan. */
+                if (findCachedOwnObjectPropertyKernel(heapBase, state, ownObject, ownKey) !== 0) ownFound = 1;
+                ownValid = 2;
+            }
             if (ownValid === 1 && ownObjectType === HEAP_TYPE_ARRAY) {
                 var ownArrayIndex = propertyKeyIndexKernel(heapBase, ownKey);
                 var ownElements = arrayElements(heapBase, ownObject);
@@ -14967,7 +14974,7 @@
                  * been detached and its suffix is a complete free record. */
                 var insertedRemaining = insertNativeFreeRegionKernel(
                     heapBase, state, remaining);
-            } else if (remainingSize >= FREE_RECORD_HEADER_BYTES + 8) {
+            } else if (remainingSize >= FREE_RECORD_HEADER_BYTES) {
                 setRecordMark(heapBase, remaining,
                     engineNativeRetiredRegion(heapBase, state));
                 setEngineNativeRetiredRegion(heapBase, state, remaining);
@@ -15135,6 +15142,14 @@
         }
         var previous = 0;
         var found = 0;
+        /* Packed objects already have an optional hash index. In particular,
+         * deleting an absent named key must not scan an ever-growing map:
+         * atom/metadata tables routinely perform that operation while loading
+         * new source. Legacy linked records still need their predecessor. */
+        if (objectType === HEAP_TYPE_OBJECT && numericKey === 0) {
+            found = findCachedOwnObjectPropertyKernel(heapBase, state, object, key);
+            property = 0;
+        }
         while (property !== 0) {
             var deleteKeyMatches = 0;
             if (numericKey === 1) {
@@ -18870,14 +18885,17 @@
             var restoreBorrowedIndex = !deferIndexRebuild &&
                 this.canRestoreBorrowedFreeIndex();
             var borrowedBlocks = this.borrowedFreeBlocks;
+            var recoverTrackedIndex = !deferIndexRebuild && !restoreBorrowedIndex &&
+                records.engineGCCollections(this.stateAddress) === this.borrowedFreeCollections;
             var tailBump = records.engineNativeTailBump(this.stateAddress);
             if (tailBump > heap.bump) heap.bump = tailBump;
             var freeRegion = records.engineNativeFreeRegion(
                 this.stateAddress);
-            this.runtime.heapSweeper.clearFreeRegionLinks(freeRegion);
+            if (!recoverTrackedIndex) this.runtime.heapSweeper.clearFreeRegionLinks(freeRegion);
             var retiredRegion = records.engineNativeRetiredRegion(
                 this.stateAddress);
-            this.runtime.heapSweeper.clearFreeRegionLinks(retiredRegion);
+            if (!recoverTrackedIndex) this.runtime.heapSweeper.clearFreeRegionLinks(retiredRegion);
+            var remainderRegion = 0;
             if (records.engineNativeRegionActive(this.stateAddress)) {
                 var regionBump = records.engineHeapBump(this.stateAddress);
                 var regionEnd = records.engineNativeRegionEnd(
@@ -18885,6 +18903,7 @@
                 var regionBytes = regionEnd - regionBump;
                 if (regionBytes >= FREE_RECORD_HEADER_BYTES) {
                     heap.publishFreeRegion(regionBump, regionBytes, 0);
+                    remainderRegion = regionBump;
                 }
             }
             records.setEngineNativeAllocator(
@@ -18903,6 +18922,8 @@
                 heap.freeBlocks = borrowedBlocks;
                 heap.freeBlocksAreMaxHeap = this.borrowedFreeBlocksAreMaxHeap;
                 this.freeIndexReuseCount++;
+            } else if (recoverTrackedIndex) {
+                this.runtime.heapSweeper.recoverTrackedFreeBlocks(freeRegion, retiredRegion, remainderRegion);
             } else {
                 var rebuildStarted = this.runtime.profileOpcodeCounts ?
                     new Date().getTime() : 0;
@@ -18935,12 +18956,16 @@
         var heap = this.runtime.linearHeap;
         var nativeHead = 0;
         var nativeRegions = [];
+        var smallHead = 0;
         var index = 0;
         while (index < heap.freeBlocks.length) {
             var address = heap.freeBlocks[index++];
             var size = heap.freeRecordSize(address);
             if (size >= MIN_NATIVE_ALLOCATION_REGION_BYTES) {
                 nativeRegions.push({address: address, size: size});
+            } else {
+                heap.setFreeRecordNext(address, smallHead);
+                smallHead = address;
             }
         }
         /* A native collection may coalesce records. Remove every old index
@@ -18974,18 +18999,21 @@
         }
         this.runtime.heapRecords.setEngineNativeFreeRegion(
             this.stateAddress, nativeHead);
+        this.runtime.heapRecords.setEngineNativeRetiredRegion(this.stateAddress, smallHead);
         this.borrowedFreeHead = nativeHead;
         this.nativeFreeRegionsOwned = true;
     };
 
     NativeInterpreter.prototype.prepareSemanticFallback = function (opcode) {
         var heap = this.runtime.linearHeap;
-        /* Host CALL and CONSTRUCT callbacks may synchronously enter another
-         * JSContext on this runtime (the Function constructor's guest parser
-         * is one example).  Return native allocator ownership before such a
-         * callback: the nested execution uses the same engine-state record
-         * and must not inherit an outer run's active arena. */
-        if (opcode === Bytecode.CALL || opcode === Bytecode.CONSTRUCT) {
+        /* A legacy wrapper-owned arena cannot survive recursive execution.
+         * The current engine-owned allocator is different: all contexts share
+         * its authoritative cursor, and run() republishes the portable tail
+         * before every entry. Portable allocation uses only the disjoint tail
+         * or its own free index. Re-entry therefore shares allocator state,
+         * not a stale per-execution arena. Collection still releases it. */
+        if (!this.nativeFreeRegionsOwned &&
+                (opcode === Bytecode.CALL || opcode === Bytecode.CONSTRUCT)) {
             this.releaseAllocationRegionForCollection();
             return false;
         }
@@ -19147,6 +19175,13 @@
         if (nativeTailBump > heap.bump) {
             heap.bump = nativeTailBump;
             this.runtime.noteNativeHeapBump(nativeTailBump);
+        }
+        /* Internal native collection can coalesce portable free records too.
+         * Reconcile the derived index before returning to any portable code,
+         * not merely on a later CALL. No pre-collection index may allocate. */
+        if (this.nativeFreeRegionsOwned && records.engineGCCollections(this.stateAddress) !==
+                this.borrowedFreeCollections) {
+            this.releaseAllocationRegionForCollection();
         }
         if (this.runtime.verifyNativeHeap) {
             heap.visitRecords(function () {});

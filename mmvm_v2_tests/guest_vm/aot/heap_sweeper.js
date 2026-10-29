@@ -6,12 +6,14 @@
     var X86Backend = root.GuestVMKernelX86Backend;
     var Heap = root.GuestVMHeap;
     var HeapRecords = root.GuestVMHeapRecords;
+    var FreeIndex = root.GuestVMFreeIndexKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
         Heap = require("../heap.js");
         HeapRecords = require("../heap_records.js");
+        FreeIndex = require("./free_index_kernel.js");
     }
 
     var sharedJS = null;
@@ -20,6 +22,8 @@
     var sharedMarkX86 = null;
     var sharedIndexJS = null;
     var sharedIndexX86 = null;
+    var sharedTrackedIndexJS = null;
+    var sharedTrackedIndexX86 = null;
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
     var markLayoutBindings = {
@@ -63,6 +67,8 @@
     var freeRegionLayoutBindings = {
         RECORD_TYPE: RECORD_TYPE,
         RECORD_MARK: RECORD_MARK,
+        RECORD_SIZE: Heap.HeaderFields.SIZE,
+        RECORD_FLAGS: Heap.HeaderFields.FLAGS,
         HEAP_FIRST_RECORD: HEAP_FIRST_RECORD,
         RECORD_HEADER_BYTES: RECORD_HEADER_BYTES,
         HEAP_TYPE_FREE: HEAP_TYPE_FREE,
@@ -634,11 +640,6 @@
         var RECORD_TYPE = 0;
         var RECORD_SIZE = 4;
         var RECORD_FLAGS = 12;
-        var WORD_BYTES = 4;
-        var OUTPUT_COUNT_WORD = 0;
-        var OUTPUT_BUMP_WORD = 1;
-        var OUTPUT_FREE_BYTES_WORD = 2;
-        var OUTPUT_FIRST_ADDRESS_WORD = 3;
         var address = HEAP_FIRST_RECORD;
         var count = 0;
         var freeBytes = 0;
@@ -694,9 +695,17 @@
             var marker = backend.compile(markIR);
             var indexIR = new KernelCompiler().compile(indexFreeBlocksKernel, {
                 legacyConstantLocals: true,
+                constantBindings: FreeIndex.constants,
                 registerPreferences: ["heapBase", "address", "count"]
             });
             var indexer = backend.compile(indexIR);
+            var trackedBindings = {}, binding;
+            for (binding in freeRegionLayoutBindings) trackedBindings[binding] = freeRegionLayoutBindings[binding];
+            for (binding in FreeIndex.constants) trackedBindings[binding] = FreeIndex.constants[binding];
+            var trackedIR = new KernelCompiler().compileGraph(
+                FreeIndex.functions.recoverTrackedFreeBlocksKernel,
+                FreeIndex.functions, {constantBindings: trackedBindings});
+            var trackedIndexer = backend.compile(trackedIR);
             var clearLinksIR = new KernelCompiler().compile(
                 clearFreeRegionLinksKernel, {
                     constantBindings: freeRegionLayoutBindings
@@ -706,11 +715,13 @@
                 sharedX86 = sweeper;
                 sharedMarkX86 = marker;
                 sharedIndexX86 = indexer;
+                sharedTrackedIndexX86 = trackedIndexer;
                 sharedClearLinksX86 = linkReleaser;
             } else {
                 sharedJS = sweeper;
                 sharedMarkJS = marker;
                 sharedIndexJS = indexer;
+                sharedTrackedIndexJS = trackedIndexer;
                 sharedClearLinksJS = linkReleaser;
             }
         }
@@ -721,6 +732,8 @@
                       sharedMarkX86 : sharedMarkJS;
         this.indexer = heap.memory.nativeAddress(0) && sharedIndexX86.fn ?
                        sharedIndexX86 : sharedIndexJS;
+        this.trackedIndexer = heap.memory.nativeAddress(0) && sharedTrackedIndexX86.fn ?
+                       sharedTrackedIndexX86 : sharedTrackedIndexJS;
         this.linkReleaser = heap.memory.nativeAddress(0) &&
             sharedClearLinksX86.fn ? sharedClearLinksX86 : sharedClearLinksJS;
     }
@@ -771,19 +784,50 @@
                 heap.collectorStackBase, heap.byteLength) | 0;
         }
         if (count < 0) return heap.rebuildFreeBlocks();
+        return this.installFreeBlockIndex(count);
+    };
+
+    HeapSweeper.prototype.recoverTrackedFreeBlocks = function (freeHead, retiredHead, remainder) {
+        var heap = this.heap, layout = FreeIndex.layout;
+        var index = 0, count = heap.freeBlocks.length;
+        if (heap.collectorStackBase + (layout.FIRST_ADDRESS_WORD + count) * Heap.WORD_BYTES > heap.byteLength) {
+            this.clearFreeRegionLinks(freeHead);
+            this.clearFreeRegionLinks(retiredHead);
+            return this.rebuildFreeBlocks();
+        }
+        while (index < count) {
+            heap.memory.writeU32(heap.collectorStackBase +
+                (layout.FIRST_ADDRESS_WORD + index) * Heap.WORD_BYTES, heap.freeBlocks[index]);
+            index++;
+        }
+        if (this.trackedIndexer.backend === "i386") {
+            count = this.trackedIndexer.fn(heap.memory.nativeAddress(0), heap.bump,
+                heap.collectorStackBase, heap.byteLength, freeHead, retiredHead, remainder, count) | 0;
+        } else {
+            count = this.trackedIndexer.fn(heap.memory, 0, heap.bump,
+                heap.collectorStackBase, heap.byteLength, freeHead, retiredHead, remainder, count) | 0;
+        }
+        if (count === -1) return this.rebuildFreeBlocks();
+        if (count < 0) throw new Error("invalid tracked native free region");
+        return this.installFreeBlockIndex(count);
+    };
+
+    HeapSweeper.prototype.installFreeBlockIndex = function (count) {
+        var heap = this.heap, layout = FreeIndex.layout;
         var rebuiltBump = heap.memory.readU32Trusted(
-            heap.collectorStackBase + 4);
+            heap.collectorStackBase + layout.BUMP_WORD * Heap.WORD_BYTES);
         this.reusableBytes = heap.memory.readU32Trusted(
-            heap.collectorStackBase + 8);
+            heap.collectorStackBase + layout.FREE_BYTES_WORD * Heap.WORD_BYTES);
         var blocks = [];
         var index = 0;
         while (index < count) {
             blocks[index] = heap.memory.readU32Trusted(
-                heap.collectorStackBase + 12 + index * 4);
+                heap.collectorStackBase + (layout.FIRST_ADDRESS_WORD + index) * Heap.WORD_BYTES);
             index++;
         }
         heap.bump = rebuiltBump;
         heap.freeBlocks = blocks;
+        heap.freeBlocksAreMaxHeap = false;
         return count;
     };
 

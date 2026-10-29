@@ -14,5 +14,6 @@ if (profileCalls.call(profileCalls.resolve("profil"), [profileBuffer, profileByt
 print("NATIVE_PROFILE " + (profileBuffer >>> 0) + " " + profileBytes + " " +
     (peek32(profileImage + profileHeader.sourceHash) >>> 0));
 var profileProgram = arguments[0];
-arguments = arguments.slice(1);
-load(profileProgram);
+/* Start a real program entry, including its own argv and require base. A
+ * plain load would leave relative requires bound to this tools directory. */
+guestStandaloneExecute(profileProgram, arguments.slice(1));

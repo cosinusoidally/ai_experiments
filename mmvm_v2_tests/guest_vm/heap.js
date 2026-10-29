@@ -145,46 +145,19 @@
             throw new RangeError("invalid external backing metadata size");
         }
         var size = align8(HEADER_SIZE + payloadBytes);
-        var address = 0;
-        var freeIndex = 0;
-        while (freeIndex < this.freeBlocks.length) {
-            var candidate = this.freeBlocks[freeIndex];
-            if (candidate < FIRST_RECORD ||
-                candidate !== Math.floor(candidate)) {
-                throw new Error("corrupt guest free-block index at " +
-                                freeIndex + ": " + candidate);
-            }
-            var candidateSize = this.memory.readU32Trusted(
-                candidate + HEADER_SIZE_FIELD);
-            if (candidateSize >= size) {
-                this.freeBlocksAreMaxHeap = false;
-                address = candidate;
-                var remainder = candidateSize - size;
-                if (remainder >= HEADER_SIZE + 8) {
-                    var remainderAddress = address + size;
-                    this.memory.writeU32Trusted(remainderAddress + HEADER_TYPE,
-                                                Types.FREE);
-                    this.memory.writeU32Trusted(remainderAddress + HEADER_SIZE_FIELD,
-                                                remainder);
-                    this.memory.writeU32Trusted(remainderAddress + HEADER_MARK, 0);
-                    this.memory.writeU32Trusted(remainderAddress + HEADER_FLAGS, 0);
-                    if (freeIndex === 0) {
-                        this.freeBlocks[0] = remainderAddress;
-                    } else {
-                        this.freeBlocks[freeIndex] = this.freeBlocks[0];
-                        this.freeBlocks[0] = remainderAddress;
-                    }
-                } else {
-                    size = candidateSize;
-                    this.freeBlocks.splice(freeIndex, 1);
-                }
-                break;
-            }
-            freeIndex++;
+        var candidates = this.freeBlocks.length ? 1 : 0;
+        var address = this.takeLargestFreeBlock(size);
+        if (address) {
+            var candidateSize = this.freeRecordSize(address);
+            var remainder = candidateSize - size;
+            if (remainder >= HEADER_SIZE + RECORD_ALIGNMENT) {
+                var remainderAddress = address + size;
+                this.publishFreeRegion(remainderAddress, remainder, 0);
+                this.addFreeBlock(remainderAddress);
+            } else size = candidateSize;
         }
         var searchProfile = this.allocationSearchProfile;
         if (searchProfile) {
-            var candidates = freeIndex + (address ? 1 : 0);
             searchProfile.allocations++;
             searchProfile.candidates += candidates;
             if (!address) searchProfile.misses++;
@@ -324,8 +297,7 @@
         this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
         this.memory.writeU32Trusted(address + HEADER_MARK, 0);
         this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
-        this.freeBlocks.push(address);
-        this.freeBlocksAreMaxHeap = false;
+        this.addFreeBlock(address);
     };
 
     /* Narrow a private record without moving its address or other records.
@@ -343,8 +315,7 @@
         this.memory.writeU32Trusted(address + HEADER_SIZE_FIELD, size);
         this.memory.writeU32Trusted(tail + HEADER_TYPE, Types.FREE);
         this.memory.writeU32Trusted(tail + HEADER_SIZE_FIELD, remainder);
-        this.freeBlocks.push(tail);
-        this.freeBlocksAreMaxHeap = false;
+        this.addFreeBlock(tail);
     };
 
     /* Rebuild the free-block index from authoritative record headers.  The
@@ -417,13 +388,30 @@
         this.freeBlocksAreMaxHeap = true;
     };
 
-    Heap.prototype.claimLargestFreeBlock = function (minimumSize) {
-        if (!this.freeBlocks.length) return null;
+    /* Maintain the priority index on ordinary frees and allocation splits.
+     * Bulk producers may still invalidate it and heapify once on demand. */
+    Heap.prototype.addFreeBlock = function (address) {
+        var blocks = this.freeBlocks;
+        blocks.push(address);
+        if (!this.freeBlocksAreMaxHeap) return;
+        var index = blocks.length - 1;
+        var size = this.freeRecordSize(address);
+        while (index > 0) {
+            var parent = Math.floor((index - 1) / 2);
+            if (this.freeRecordSize(blocks[parent]) >= size) break;
+            blocks[index] = blocks[parent];
+            index = parent;
+        }
+        blocks[index] = address;
+    };
+
+    Heap.prototype.takeLargestFreeBlock = function (minimumSize) {
+        if (!this.freeBlocks.length) return 0;
         if (!this.freeBlocksAreMaxHeap) this.buildFreeBlockMaxHeap();
         var claimedAddress = this.freeBlocks[0];
         var bestSize = this.memory.readU32Trusted(
             claimedAddress + HEADER_SIZE_FIELD);
-        if (bestSize < minimumSize) return null;
+        if (bestSize < minimumSize) return 0;
         var type = this.memory.readU32Trusted(claimedAddress + HEADER_TYPE);
         var flags = this.memory.readU32Trusted(claimedAddress + HEADER_FLAGS);
         if (type !== Types.FREE || flags !== 0) {
@@ -458,18 +446,18 @@
                 root = largest;
             }
         }
-        return {address: claimedAddress, size: bestSize};
+        return claimedAddress;
+    };
+
+    Heap.prototype.claimLargestFreeBlock = function (minimumSize) {
+        var address = this.takeLargestFreeBlock(minimumSize);
+        return address ? {address: address, size: this.freeRecordSize(address)} : null;
     };
 
     Heap.prototype.largestFreeBlockSize = function () {
-        var largest = 0;
-        var index = 0;
-        while (index < this.freeBlocks.length) {
-            var size = this.memory.readU32Trusted(
-                this.freeBlocks[index++] + HEADER_SIZE_FIELD);
-            if (size > largest) largest = size;
-        }
-        return largest;
+        if (!this.freeBlocks.length) return 0;
+        if (!this.freeBlocksAreMaxHeap) this.buildFreeBlockMaxHeap();
+        return this.freeRecordSize(this.freeBlocks[0]);
     };
 
     Heap.prototype.freeBlockDistribution = function () {

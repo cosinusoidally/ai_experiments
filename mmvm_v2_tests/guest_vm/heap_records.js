@@ -298,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 71;
+    Records.NativeInterpreterContractVersion = 72;
     Records.EnvironmentFlags = {SINGLE_BINDING: 1, DETACHED_ARGUMENTS: 2};
     Records.HandlerFlags = {LEXICAL_BINDING: 1};
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};
@@ -3013,6 +3013,11 @@
     Records.prototype.engineNativeRetiredRegion = function (state) {
         return this.heap.readTrustedFieldU32(
             state, ENGINE_NATIVE_RETIRED_REGION, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineNativeRetiredRegion = function (state, region) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_RETIRED_REGION,
+            region, Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.setEngineNativeTailBounds = function (

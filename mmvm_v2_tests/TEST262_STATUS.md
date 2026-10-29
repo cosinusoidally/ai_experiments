@@ -30,6 +30,26 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, approximately 09:42 UTC, completion investigation (focused,
+  not a new full-suite total): the two Unicode comment tests pass unchanged
+  at the existing default 20,000,000-instruction allowance. They use
+  4,639,972 and 11,780,108 instructions respectively, so neither can complete
+  within the historical 20,000-instruction diagnostic cap. The four Unicode
+  RegExp range tests are still being investigated at their full bounds.
+  No test-specific budget exceptions or source caches were added.
+  A bounded 500,000-instruction RegExp probe exposed growing allocator work:
+  179.44 seconds of measured variant execution before changes versus 6.86
+  seconds after shared allocator ownership and incremental priority indexing.
+  Both probes intentionally still time out at the same instruction count;
+  they are performance diagnostics, not conformance passes.
+  Node project checks (12 programs / 270 assertions), the bounded structural
+  GC audit (27 audits / 87,198 checked edges / 76 embedding collections), and
+  standalone GC stress (24 rounds / 47 native collections) pass at this
+  intermediate checkpoint. Full-suite totals above/below are not replaced
+  by this partial selection. The architecture is documented in
+  `guest_vm/ALLOCATOR_HANDOFF.md`; verbose execution now reports instructions,
+  elapsed time and periodic test-heap progress. Generated logs stay ignored.
+
 - 2026-10-28, general frontend/property-lookup checkpoint: focused authored
   selection `ch09/9.5 ch11/11.6 ch11/11.7` completed all 165 tests with
   164 passed, 1 failed, 0 not run and 0 timed out. An isolated copy of starting

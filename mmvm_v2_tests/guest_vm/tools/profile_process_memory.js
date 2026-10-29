@@ -2,6 +2,8 @@
  * executable; it provides no guest language support. ES3-compatible syntax.
  * node guest_vm/tools/profile_process_memory.js SNAPSHOT OUTPUT_PREFIX
  *      PROGRAM [ARGS...]
+ * Optional leading --stack-only samples bounded guest call stacks instead of
+ * walking every record. It uses a 200 ms interval; timings are perturbed.
  * Brief SIGSTOP samples perturb timing; do not use this run as a stock score.
  * No heap dumps, forced collections, page advice or runtime changes. */
 (function () {
@@ -10,6 +12,8 @@
     var Cells = require("../value_cell.js");
     var Backend = require("../aot/backend_x86.js");
     var args = process.argv.slice(2);
+    var stackOnly = args[0] === "--stack-only";
+    if (stackOnly) args.shift();
     if (args.length < 3) throw new Error("expected SNAPSHOT OUTPUT_PREFIX PROGRAM [ARGS...]");
     var snapshot = args.shift(), prefix = args.shift();
     var fields = Backend.StandaloneHeaderFields;
@@ -37,7 +41,7 @@
     var child = cp.spawn("./artifacts/js_runner.exe", [snapshot].concat(args),
         {stdio: ["ignore", "pipe", "pipe"]});
     var started = Date.now(), samples = 0, pending = false, closed = false;
-    var heapBase = 0, timer, interval = 5000;
+    var heapBase = 0, timer, interval = stackOnly ? 200 : 5000;
     function record(value) {
         fs.writeSync(output, JSON.stringify(value) + "\n");
     }
@@ -70,7 +74,10 @@
             var small = Buffer.alloc(Heap.HEADER_SIZE);
             for (i = 0; i < maps.length; i++) {
                 totalRSS += maps[i].rssKiB;
-                if (maps[i].start === heapBase) heapMap = maps[i];
+                /* Adjacent anonymous arenas can merge into one Linux VMA
+                 * after another runtime is created. The known heap base need
+                 * not remain the mapping's first address. */
+                if (heapBase && maps[i].start <= heapBase && maps[i].end > heapBase) heapMap = maps[i];
                 if (!heapBase && !maps[i].name && maps[i].permissions.indexOf("rw") === 0 &&
                         maps[i].end - maps[i].start >= heapCapacity) {
                     fs.readSync(descriptor, small, 0, small.length, maps[i].start + Heap.FIRST_RECORD);
@@ -89,13 +96,16 @@
              * pages are deliberately not attributed twice. No payload reads. */
             var pageBytes = heapMap.pageBytes;
             if (!pageBytes) throw new Error("mapping has no kernel page size");
-            var pageMap = Buffer.alloc(Math.ceil(heapCapacity / pageBytes) * 8);
-            var pageDescriptor = fs.openSync("/proc/" + child.pid + "/pagemap", "r");
-            try {
-                var got = fs.readSync(pageDescriptor, pageMap, 0, pageMap.length,
-                    heapBase / pageBytes * 8);
-                if (got !== pageMap.length) throw new Error("short pagemap read");
-            } finally { fs.closeSync(pageDescriptor); }
+            var pageMap = null;
+            if (!stackOnly) {
+                pageMap = Buffer.alloc(Math.ceil(heapCapacity / pageBytes) * 8);
+                var pageDescriptor = fs.openSync("/proc/" + child.pid + "/pagemap", "r");
+                try {
+                    var got = fs.readSync(pageDescriptor, pageMap, 0, pageMap.length,
+                        heapBase / pageBytes * 8);
+                    if (got !== pageMap.length) throw new Error("short pagemap read");
+                } finally { fs.closeSync(pageDescriptor); }
+            }
             function residentInterior(start, end) {
                 var first = Math.ceil(start / pageBytes), last = Math.floor(end / pageBytes);
                 var present = 0;
@@ -126,6 +136,26 @@
                 readU16: function (address) { return readByte(address) + readByte(address + 1) * 256; }};
             heap.bump = heapCapacity;
             var records = new Records(heap, new Cells(heap));
+            if (stackOnly) {
+                var stack = [], stackFrame = records.engineCurrentFrame(engine);
+                while (stackFrame && stack.length < 12) {
+                    if (heap.recordType(stackFrame) !== Heap.Types.FRAME) break;
+                    var stackProgram = records.frameProgram(stackFrame);
+                    var stackSource = records.programSource(stackProgram);
+                    var prefixText = "", prefixIndex = 0;
+                    if (stackSource) {
+                        var prefixLength = Math.min(160, records.stringLength(stackSource));
+                        while (prefixIndex < prefixLength) prefixText += String.fromCharCode(
+                            records.stringCharacterCodeUnit(stackSource, prefixIndex++));
+                    }
+                    stack.push({program: stackProgram, pc: records.framePC(stackFrame), source: prefixText});
+                    stackFrame = records.frameCaller(stackFrame);
+                }
+                record({event: "stack", elapsedMs: Date.now() - started,
+                    rssKiB: totalRSS, stack: stack});
+                samples++;
+                return;
+            }
             var arenaBump = records.engineHeapBump(engine);
             var activeArena = records.engineNativeRegionActive(engine);
             var regionEnd = records.engineNativeRegionEnd(engine);
@@ -188,8 +218,8 @@
             }
             var result = {event: "sample", elapsedMs: Date.now() - started,
                 currentFunctionSourcePrefix: sourcePrefix,
-                rssKiB: totalRSS, heapRssKiB: heapMap.rssKiB,
-                outsideHeapRssKiB: totalRSS - heapMap.rssKiB,
+                rssKiB: totalRSS, heapRssKiB: residentInterior(0, heapCapacity) / 1024,
+                outsideHeapRssKiB: totalRSS - residentInterior(0, heapCapacity) / 1024,
                 heapCapacity: heapCapacity, tail: tail, occupiedBytes: occupied,
                 freeBytes: free, largestFreeRecord: largest, recordCount: recordCount,
                 spareValueBytes: spareValues, sparePropertyBytes: spareProperties,

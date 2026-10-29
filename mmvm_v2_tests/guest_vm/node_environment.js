@@ -517,6 +517,8 @@
             var executeStarted = profile ? new Date().getTime() : 0;
             var used = 0;
             var slice = 100000;
+            var progressStarted = this.test262Progress ? new Date().getTime() : 0;
+            var progressReported = progressStarted;
             while (true) {
                 var remaining = instructionLimit - used;
                 if (remaining <= 0) {
@@ -531,6 +533,15 @@
                 used += result.instructions || 0;
                 if (result.status === "budget") {
                     this.runtime.gcSafePoint();
+                    if (this.test262Progress) {
+                        var progressNow = new Date().getTime();
+                        if (progressNow - progressReported >= 5000) {
+                            this.test262Progress("instructions " + used + "/" + instructionLimit +
+                                ", elapsed " + (progressNow - progressStarted) +
+                                " ms, test heap bump " + this.runtime.linearHeap.bump + " bytes");
+                            progressReported = progressNow;
+                        }
+                    }
                 } else if (result.status === "hostCall") {
                     execution.serviceHostCall();
                 } else if (result.status === "completed") {

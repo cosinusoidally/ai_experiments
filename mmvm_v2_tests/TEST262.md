@@ -184,6 +184,16 @@ classification uses structured VM status rather than scraping console text.
 
 ## Execution and containment
 
+The default per-variant allowance is **20,000,000 instructions**. The much
+smaller `--instruction-limit 20000` setting used in historical bring-up logs
+is a bounded diagnostic run, not a sufficient conformance budget: six Unicode
+range tests each exercise up to 65,536 iterations and cannot finish within
+20,000 bytecode instructions. Use the default for a complete conformance run;
+do not mistake low-budget timeouts for demonstrated language failures. An
+explicitly requested smaller limit remains enforced without exceptions for
+particular files. `--verbose` also reports each variant's instruction count
+and elapsed time, including failed/timed-out variants.
+
 Every variant receives a finite cumulative instruction allowance.  Exhausting
 one slice yields to the Test262 scheduler; it does not alter JavaScript state.
 The scheduler may grant another slice until the per-variant limit is reached.

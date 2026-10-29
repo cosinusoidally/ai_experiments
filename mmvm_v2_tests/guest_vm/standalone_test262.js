@@ -28,6 +28,7 @@ exports.create = function (filesystem, progress) {
     embedding.hostFs = filesystem;
     embedding.test262ProgramCache = {};
     embedding.test262HarnessTemplate = null;
+    embedding.test262Progress = progress || null;
     embedding.moduleCache = {};
     embedding.moduleContexts = [];
     embedding.builtinModules = {};

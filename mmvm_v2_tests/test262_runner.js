@@ -229,6 +229,7 @@
             var variantName = strict ? "strict" : "non-strict";
             counts.executed++;
             if (verbose) console.log("RUN " + relativePath + " (" + variantName + ")");
+            var variantStarted = verbose ? new Date().getTime() : 0;
             var result = Test262VM.runVariant(
                 filename, source, strict, harnessFiles, instructionLimit,
                 freshContexts);
@@ -248,6 +249,10 @@
                         "expected an exception" : resultDescription(result)));
                 }
                 if (failFast) stopped = true;
+            }
+            if (verbose) {
+                console.log("  instructions: " + result.instructions +
+                    "; elapsed: " + (new Date().getTime() - variantStarted) + " ms");
             }
         }
         if (stopped) counts.notRun += variants.length - variantIndex;

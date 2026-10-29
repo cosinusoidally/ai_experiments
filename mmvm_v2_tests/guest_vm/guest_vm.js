@@ -33,6 +33,7 @@
         load("guest_vm/aot/snapshot_output.js");
         load("guest_vm/aot/backend_x86.js");
         load("guest_vm/aot/record_initializer.js");
+        load("guest_vm/aot/free_index_kernel.js");
         load("guest_vm/aot/heap_sweeper.js");
         load("guest_vm/aot/bytecode_numeric_backend.js");
         load("guest_vm/aot/native_interpreter.js");
