@@ -1756,6 +1756,10 @@
                       {op: "const_i32", value: 0, type: "i32"}];
         var body = [];
         var index = 0;
+        /* Inactive words have no language meaning, but clearing them here
+         * also keeps retained value cells reproducible across snapshot build
+         * hosts. Omitting these writes requires canonicalizing the serialized
+         * cells first, not merely changing the executable setter. */
         while (index < fields.length) {
             body.push({op: "store_u32",
                 address: valueCellFieldAddress(target, fields[index], symbols),

@@ -271,3 +271,45 @@ Next: extend the representation's useful scope and add def/use/lifetime
 information without creating a second semantic implementation. The intended
 benefit is general register/dataflow optimization and a smaller, clearer
 interpreter implementation; branch cleanup alone is not the objective.
+
+## 2026-10-29: rejected scalar-allocation experiments
+
+Three straight-line scalar register-allocation variants passed their bounded
+correctness probes but did not improve execution. zlib quick-correctness took
+37.48, 37.08 and 37.58 seconds, respectively, against the then-validated block
+emitter's 33.68 seconds (an earlier unchanged control was 35.78 seconds).
+Those timings are not stock Octane scores. The extra register-boundary,
+canonical-home and predecessor-handoff machinery did not earn its complexity;
+none of these execution paths is retained in production. A liveness-only
+experiment took 32.39 seconds, which also does not establish the requested
+substantial gain. These experiments must not be described as successful
+register allocation or as an improvement in general VM performance.
+
+A further candidate used the existing block representation and emitter to
+propagate integer constants through forward edges, refine equality edges and
+intersect facts at joins. It discarded facts on backedges, without an iterative
+analysis. It reduced code by only 793 bytes beyond the setter cleanup and took
+31.71 seconds for zlib, versus 31.87 seconds for that cleanup and 31.14 seconds
+for the current-session unchanged control. These results do not justify the
+additional analysis/maintenance surface, so that pass is not retained either.
+None of these changes used threads or a benchmark-specific execution path.
+
+## Named-accessor checkpoint (not a performance win)
+
+Fifty four-word scalar/reference/tag-only writes in the native interpreter
+now use the existing named value-cell setters. The generated 407,634-byte
+native code section is **byte-identical** to the unchanged control. This
+removes 171 lines of repeated offset calculations without changing execution.
+
+An experiment also made the compiler's named setters omit inactive words,
+as permitted by the language-level tagged-union contract. It passed all
+3,292 Test262 tests in 501.14 seconds and the project suite, but did not make
+zlib faster (31.87 seconds versus the current-session 31.14-second control).
+More importantly, Node/js_min snapshots then differed in retained inactive
+payload words. The current writer preserves those bytes. Full-width writes
+are therefore restored; do not reintroduce the omission without a measured
+benefit and a deterministic serialization design. A whole-heap normalization
+pass is not justified for an execution optimization that did not pay off.
+
+The substantial execution-performance target remains open. Neither smaller
+source nor this maintenance checkpoint should be reported as meeting it.

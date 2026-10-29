@@ -947,10 +947,7 @@
                     (pc + FIRST_OPERAND) * WORD_BYTES);
                 var getThisTarget = registerAddress +
                     getThisTargetIndex * VALUE_CELL_BYTES;
-                store32(getThisTarget, VALUE_TAG_REFERENCE);
-                store32(getThisTarget + VALUE_CELL_LOW, globalObject);
-                store32(getThisTarget + VALUE_CELL_HIGH, 0);
-                store32(getThisTarget + VALUE_CELL_AUX, 0);
+                setValueCellReference(getThisTarget, globalObject);
                 pc = pc + TWO_WORD_INSTRUCTION;
             } else if (opcode === OP_GET_GLOBAL) {
                 var globalTargetIndex = load32(
@@ -1248,21 +1245,13 @@
                                     heapBase, namedGetObject) === 0) {
                                 var namedGetVector = arrayElements(
                                     heapBase, namedGetObject);
-                                store32(arrayGetTarget, VALUE_TAG_INT32);
-                                store32(arrayGetTarget + VALUE_CELL_LOW,
-                                    vectorLength(heapBase, namedGetVector));
-                                store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                                store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                                setValueCellInt32(arrayGetTarget, vectorLength(heapBase, namedGetVector));
                                 namedGetProperty = PROPERTY_FOUND_SENTINEL;
                                 namedGetObject = 0;
                             }
                         } else if (namedGetObjectType ===
                                    HEAP_TYPE_BUFFER_VIEW) {
-                            store32(arrayGetTarget, VALUE_TAG_INT32);
-                            store32(arrayGetTarget + VALUE_CELL_LOW,
-                                bufferViewLength(heapBase, namedGetObject));
-                            store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                            store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                            setValueCellInt32(arrayGetTarget, bufferViewLength(heapBase, namedGetObject));
                             namedGetProperty = PROPERTY_FOUND_SENTINEL;
                             namedGetObject = 0;
                         }
@@ -1287,11 +1276,7 @@
                                     heapBase, namedGetObject);
                                 namedBufferPointer = namedBufferPointer +
                                                      namedBufferOffset;
-                                store32(arrayGetTarget, VALUE_TAG_INT32);
-                                store32(arrayGetTarget + VALUE_CELL_LOW,
-                                        namedBufferPointer);
-                                store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                                store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                                setValueCellInt32(arrayGetTarget, namedBufferPointer);
                                 namedGetProperty = PROPERTY_FOUND_SENTINEL;
                                 namedGetObject = 0;
                             }
@@ -1337,11 +1322,7 @@
                             HEAP_TYPE_STRING) {
                             if (stringKeysEqualKernel(heapBase,
                                     namedGetKey, arrayLengthKey) === 1) {
-                                store32(arrayGetTarget, VALUE_TAG_INT32);
-                                store32(arrayGetTarget + VALUE_CELL_LOW,
-                                    stringLength(heapBase, namedGetObject));
-                                store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                                store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                                setValueCellInt32(arrayGetTarget, stringLength(heapBase, namedGetObject));
                                 namedGetProperty = PROPERTY_FOUND_SENTINEL;
                                 namedGetObject = 0;
                             } else {
@@ -1415,17 +1396,11 @@
                     }
                     if (namedGetProperty === 0) {
                         if (arrayGetOriginalObjectType === HEAP_TYPE_OBJECT) {
-                            store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
-                            store32(arrayGetTarget + VALUE_CELL_LOW, 0);
-                            store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                            store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                            setValueCellUndefined(arrayGetTarget);
                             namedGetProperty = PROPERTY_FOUND_SENTINEL;
                         } else if (arrayGetOriginalObjectType ===
                                    HEAP_TYPE_ARRAY) {
-                            store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
-                            store32(arrayGetTarget + VALUE_CELL_LOW, 0);
-                            store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                            store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                            setValueCellUndefined(arrayGetTarget);
                             namedGetProperty = PROPERTY_FOUND_SENTINEL;
                         } else arrayGetSupported = 0;
                     } else if (namedGetProperty !== PROPERTY_FOUND_SENTINEL) {
@@ -1451,10 +1426,7 @@
                     var indexedBufferLength = bufferViewLength(
                         heapBase, arrayGetObject);
                     if (arrayGetIndex >= indexedBufferLength) {
-                        store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
-                        store32(arrayGetTarget + VALUE_CELL_LOW, 0);
-                        store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                        store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                        setValueCellUndefined(arrayGetTarget);
                     } else {
                         var indexedBufferBacking = bufferViewBacking(
                             heapBase, arrayGetObject);
@@ -1573,19 +1545,13 @@
                 var arrayGetVector = arrayElements(heapBase, arrayGetObject);
                 var arrayGetLength = vectorLength(heapBase, arrayGetVector);
                 if (arrayGetIndex >= arrayGetLength) {
-                    store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
-                    store32(arrayGetTarget + VALUE_CELL_LOW, 0);
-                    store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                    store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                    setValueCellUndefined(arrayGetTarget);
                 } else {
                     var arrayGetSource = heapBase + arrayGetVector +
                         VECTOR_CELLS + arrayGetIndex * VALUE_CELL_BYTES;
                     var arrayGetTag = load32(arrayGetSource);
                     if (arrayGetTag === 0) {
-                        store32(arrayGetTarget, VALUE_TAG_UNDEFINED);
-                        store32(arrayGetTarget + VALUE_CELL_LOW, 0);
-                        store32(arrayGetTarget + VALUE_CELL_HIGH, 0);
-                        store32(arrayGetTarget + VALUE_CELL_AUX, 0);
+                        setValueCellUndefined(arrayGetTarget);
                     } else {
                         var mappedArgumentSource =
                             argumentsMappedCellKernel(
@@ -2177,11 +2143,7 @@
                                 heapBase, state, frame, pc, opcode,
                                 (initialBudget - budget));
                         }
-                        store32(arithmeticTarget, VALUE_TAG_REFERENCE);
-                        store32(arithmeticTarget + VALUE_CELL_LOW,
-                                ropeConcatenation);
-                        store32(arithmeticTarget + VALUE_CELL_HIGH, 0);
-                        store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                        setValueCellReference(arithmeticTarget, ropeConcatenation);
                     } else if (stringConcatenation === 1) {
                         var concatenationNative = 0;
                         var concatenationLeftNative = 0;
@@ -2402,11 +2364,7 @@
                                     heapBase, concatenationServices),
                                 concatenationNative);
                         }
-                        store32(arithmeticTarget, VALUE_TAG_REFERENCE);
-                        store32(arithmeticTarget + VALUE_CELL_LOW,
-                                concatenationAddress);
-                        store32(arithmeticTarget + VALUE_CELL_HIGH, 0);
-                        store32(arithmeticTarget + VALUE_CELL_AUX, 0);
+                        setValueCellReference(arithmeticTarget, concatenationAddress);
                         setEngineHeapBump(heapBase, state,
                             concatenationAddress + concatenationBytes);
                     } else {
@@ -4288,11 +4246,7 @@
                                 heapBase, propertyObject);
                             var propertyLengthTarget = registerAddress +
                                 propertyTargetIndex * VALUE_CELL_BYTES;
-                            store32(propertyLengthTarget, VALUE_TAG_INT32);
-                            store32(propertyLengthTarget + VALUE_CELL_LOW,
-                                vectorLength(heapBase, propertyArrayVector));
-                            store32(propertyLengthTarget + VALUE_CELL_HIGH, 0);
-                            store32(propertyLengthTarget + VALUE_CELL_AUX, 0);
+                            setValueCellInt32(propertyLengthTarget, vectorLength(heapBase, propertyArrayVector));
                             propertyRecord = PROPERTY_FOUND_SENTINEL;
                             propertyObject = 0;
                         }
@@ -4303,11 +4257,7 @@
                             propertyConstantKey, arrayLengthKey) === 1) {
                         var bufferLengthTarget = registerAddress +
                             propertyTargetIndex * VALUE_CELL_BYTES;
-                        store32(bufferLengthTarget, VALUE_TAG_INT32);
-                        store32(bufferLengthTarget + VALUE_CELL_LOW,
-                            bufferViewLength(heapBase, propertyObject));
-                        store32(bufferLengthTarget + VALUE_CELL_HIGH, 0);
-                        store32(bufferLengthTarget + VALUE_CELL_AUX, 0);
+                        setValueCellInt32(bufferLengthTarget, bufferViewLength(heapBase, propertyObject));
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                         propertyObject = 0;
                     } else {
@@ -4350,11 +4300,7 @@
                             propertyConstantKey, arrayLengthKey) === 1) {
                         var stringLengthTarget = registerAddress +
                             propertyTargetIndex * VALUE_CELL_BYTES;
-                        store32(stringLengthTarget, VALUE_TAG_INT32);
-                        store32(stringLengthTarget + VALUE_CELL_LOW,
-                            stringLength(heapBase, propertyObject));
-                        store32(stringLengthTarget + VALUE_CELL_HIGH, 0);
-                        store32(stringLengthTarget + VALUE_CELL_AUX, 0);
+                        setValueCellInt32(stringLengthTarget, stringLength(heapBase, propertyObject));
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                         propertyObject = 0;
                     } else {
@@ -4435,10 +4381,7 @@
                      * warrants a semantic exit. */
                     var missingPropertyTarget = registerAddress +
                         propertyTargetIndex * VALUE_CELL_BYTES;
-                    store32(missingPropertyTarget, VALUE_TAG_UNDEFINED);
-                    store32(missingPropertyTarget + VALUE_CELL_LOW, 0);
-                    store32(missingPropertyTarget + VALUE_CELL_HIGH, 0);
-                    store32(missingPropertyTarget + VALUE_CELL_AUX, 0);
+                    setValueCellUndefined(missingPropertyTarget);
                     propertyRecord = PROPERTY_FOUND_SENTINEL;
                 }
                 if (propertyRecord !== 0) {
@@ -5625,11 +5568,7 @@
                             constructedObject, 0);
                         var constructedTarget = registerAddress +
                             callTargetIndex * VALUE_CELL_BYTES;
-                        store32(constructedTarget, VALUE_TAG_REFERENCE);
-                        store32(constructedTarget + VALUE_CELL_LOW,
-                                constructedObject);
-                        store32(constructedTarget + VALUE_CELL_HIGH, 0);
-                        store32(constructedTarget + VALUE_CELL_AUX, 0);
+                        setValueCellReference(constructedTarget, constructedObject);
                     }
                     if (calleeBindingRegisters === 0) {
                         setRecordType(heapBase, calleeEnvironment,
@@ -5971,11 +5910,7 @@
                                 FRAME_REGISTERS + functionNameRegister *
                                 VALUE_CELL_BYTES;
                         }
-                        store32(functionNameTarget, VALUE_TAG_REFERENCE);
-                        store32(functionNameTarget + VALUE_CELL_LOW,
-                                bytecodeCallable);
-                        store32(functionNameTarget + VALUE_CELL_HIGH, 0);
-                        store32(functionNameTarget + VALUE_CELL_AUX, 0);
+                        setValueCellReference(functionNameTarget, bytecodeCallable);
                     }
                     var callerAdvance = explicitCallerAdvance;
                     if (callerAdvance === 0) {
@@ -6817,19 +6752,12 @@
             }
         }
         if (intrinsicId === INTRINSIC_GET_DLSYM) {
-            store32(intrinsicTarget, VALUE_TAG_INT32);
-            store32(intrinsicTarget + VALUE_CELL_LOW,
-                platformDlsymPointer(heapBase,
+            setValueCellInt32(intrinsicTarget, platformDlsymPointer(heapBase,
                     platformServices));
-            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
             intrinsicHandled = 1;
         }
         if (intrinsicId === INTRINSIC_DATE_GET_TIMEZONE_OFFSET) {
-            store32(intrinsicTarget, VALUE_TAG_INT32);
-            store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            setValueCellInt32(intrinsicTarget, 0);
             intrinsicHandled = 1;
         }
         if (intrinsicHandled === 0) {
@@ -7361,10 +7289,7 @@
                                           ffiArg2, ffiArg3, ffiArg4,
                                           ffiArg5, ffiArg6, ffiArg7);
             }
-            store32(intrinsicTarget, VALUE_TAG_INT32);
-            store32(intrinsicTarget + VALUE_CELL_LOW, ffiResult);
-            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            setValueCellInt32(intrinsicTarget, ffiResult);
             intrinsicHandled = 1;
         }
         }
@@ -7536,11 +7461,7 @@
                 setArrayElements(heapBase, arrayConstructObject,
                                  arrayConstructVector);
                 setArrayReserved(heapBase, arrayConstructObject, 0);
-                store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                store32(intrinsicTarget + VALUE_CELL_LOW,
-                        arrayConstructObject);
-                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                setValueCellReference(intrinsicTarget, arrayConstructObject);
                 setEngineHeapBump(heapBase, state,
                     arrayConstructObject + ARRAY_RECORD_BYTES);
                 intrinsicHandled = 1;
@@ -7660,11 +7581,7 @@
             }
             if (stringConvertValid === 1) {
                 if (stringConvertExisting !== 0) {
-                    store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                    store32(intrinsicTarget + VALUE_CELL_LOW,
-                            stringConvertExisting);
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    setValueCellReference(intrinsicTarget, stringConvertExisting);
                     intrinsicHandled = 1;
                 } else if (stringConvertFormattedDouble === 1) {
                     var stringConvertFormatResult =
@@ -7801,11 +7718,7 @@
                                       stringConvertHash);
                         setEngineHeapBump(heapBase, state,
                             stringConvertResult + stringConvertBytes);
-                        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                        store32(intrinsicTarget + VALUE_CELL_LOW,
-                                stringConvertResult);
-                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                        setValueCellReference(intrinsicTarget, stringConvertResult);
                         intrinsicHandled = 1;
                     }
                 }
@@ -8254,10 +8167,7 @@
             }
             var indexOfSoughtCell = engineScratchLeftAddress(
                 heapBase, state);
-            store32(indexOfSoughtCell, VALUE_TAG_UNDEFINED);
-            store32(indexOfSoughtCell + VALUE_CELL_LOW, 0);
-            store32(indexOfSoughtCell + VALUE_CELL_HIGH, 0);
-            store32(indexOfSoughtCell + VALUE_CELL_AUX, 0);
+            setValueCellUndefined(indexOfSoughtCell);
             if (intrinsicArgumentCount > 0) {
                 var indexOfSoughtDescriptor = heapBase +
                     intrinsicArgumentsVector + VECTOR_CELLS;
@@ -8348,10 +8258,7 @@
                     } else indexOfStart = indexOfStart + 1;
                 } else indexOfStart = indexOfStart + 1;
             }
-            store32(intrinsicTarget, VALUE_TAG_INT32);
-            store32(intrinsicTarget + VALUE_CELL_LOW, indexOfResult);
-            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            setValueCellInt32(intrinsicTarget, indexOfResult);
             intrinsicHandled = 1;
         }
         }
@@ -8413,10 +8320,7 @@
                 var popVector = arrayElements(heapBase, popArray);
                 var popLength = vectorLength(heapBase, popVector);
                 if (popLength === 0) {
-                    store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-                    store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    setValueCellUndefined(intrinsicTarget);
                 } else {
                     var popLastCell = heapBase + popVector +
                         VECTOR_CELLS +
@@ -8437,10 +8341,7 @@
                         store32(intrinsicTarget + VALUE_CELL_AUX,
                             load32(popLastCell + VALUE_CELL_AUX));
                     }
-                    store32(popLastCell, VALUE_TAG_UNDEFINED);
-                    store32(popLastCell + VALUE_CELL_LOW, 0);
-                    store32(popLastCell + VALUE_CELL_HIGH, 0);
-                    store32(popLastCell + VALUE_CELL_AUX, 0);
+                    setValueCellUndefined(popLastCell);
                     setVectorLength(heapBase, popVector,
                                     popLength - 1);
                 }
@@ -8476,19 +8377,13 @@
                 var shiftVector = arrayElements(heapBase, shiftArray);
                 var shiftLength = vectorLength(heapBase, shiftVector);
                 if (shiftLength === 0) {
-                    store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-                    store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    setValueCellUndefined(intrinsicTarget);
                 } else {
                     var shiftFirstCell = heapBase + shiftVector +
                         VECTOR_CELLS;
                     var shiftFirstTag = valueCellTag(0, shiftFirstCell);
                     if (shiftFirstTag === 0) {
-                        store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-                        store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-                        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                        setValueCellUndefined(intrinsicTarget);
                     } else {
                         copyValueCell(intrinsicTarget, shiftFirstCell);
                     }
@@ -8505,10 +8400,7 @@
                     var shiftLastCell = heapBase + shiftVector +
                         VECTOR_CELLS +
                         (shiftLength - 1) * VALUE_CELL_BYTES;
-                    store32(shiftLastCell, VALUE_TAG_UNDEFINED);
-                    store32(shiftLastCell + VALUE_CELL_LOW, 0);
-                    store32(shiftLastCell + VALUE_CELL_HIGH, 0);
-                    store32(shiftLastCell + VALUE_CELL_AUX, 0);
+                    setValueCellUndefined(shiftLastCell);
                     setVectorLength(heapBase, shiftVector,
                                     shiftLength - 1);
                 }
@@ -8720,10 +8612,7 @@
                 setStringHash(heapBase, joinResult, joinHash);
                 setEngineHeapBump(heapBase, state,
                                   joinResult + joinBytes);
-                store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                store32(intrinsicTarget + VALUE_CELL_LOW, joinResult);
-                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                setValueCellReference(intrinsicTarget, joinResult);
                 intrinsicHandled = 1;
             }
             if (joinAllocationFailed === 1) {
@@ -8799,10 +8688,7 @@
             }
             pushLength = pushLength + intrinsicArgumentCount;
             setVectorLength(heapBase, pushVector, pushLength);
-            store32(intrinsicTarget, VALUE_TAG_INT32);
-            store32(intrinsicTarget + VALUE_CELL_LOW, pushLength);
-            store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-            store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+            setValueCellInt32(intrinsicTarget, pushLength);
             intrinsicHandled = 1;
         }
         if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
@@ -9303,10 +9189,7 @@
         setBufferViewPropertyHead(heapBase, allocatedView, 0);
         setEngineHeapBump(heapBase, state,
             allocatedView + BUFFER_VIEW_RECORD_BYTES);
-        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-        store32(intrinsicTarget + VALUE_CELL_LOW, allocatedView);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellReference(intrinsicTarget, allocatedView);
         return 1;
     }
 
@@ -9651,10 +9534,7 @@
         setBufferViewPropertyHead(heapBase, sliceView, 0);
         setEngineHeapBump(heapBase, state,
             sliceView + BUFFER_VIEW_RECORD_BYTES);
-        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-        store32(intrinsicTarget + VALUE_CELL_LOW, sliceView);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellReference(intrinsicTarget, sliceView);
         return 1;
     }
     }
@@ -9909,10 +9789,7 @@
         setStringHash(heapBase, toStringResult, toStringHash);
         setEngineHeapBump(heapBase, state,
                           toStringResult + toStringRecordBytes);
-        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-        store32(intrinsicTarget + VALUE_CELL_LOW, toStringResult);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellReference(intrinsicTarget, toStringResult);
         return 1;
     }
     }
@@ -10082,17 +9959,9 @@
         intrinsicPointerCell + VALUE_CELL_LOW,
         intrinsicPointerTag));
     if (intrinsicId === INTRINSIC_PEEK8) {
-        store32(intrinsicTarget, VALUE_TAG_INT32);
-        store32(intrinsicTarget + VALUE_CELL_LOW,
-                loadRaw8(intrinsicPointer));
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellInt32(intrinsicTarget, loadRaw8(intrinsicPointer));
     } else if (intrinsicId === INTRINSIC_PEEK32) {
-        store32(intrinsicTarget, VALUE_TAG_INT32);
-        store32(intrinsicTarget + VALUE_CELL_LOW,
-                loadRaw32(intrinsicPointer));
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellInt32(intrinsicTarget, loadRaw32(intrinsicPointer));
     } else {
         var intrinsicValueRegisterCell =
             intrinsicPointerRegisterCell + VALUE_CELL_BYTES;
@@ -10115,10 +9984,7 @@
         if (intrinsicId === INTRINSIC_POKE8) {
             storeRaw8(intrinsicPointer, intrinsicValue);
         } else storeRaw32(intrinsicPointer, intrinsicValue);
-        store32(intrinsicTarget, VALUE_TAG_UNDEFINED);
-        store32(intrinsicTarget + VALUE_CELL_LOW, 0);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellUndefined(intrinsicTarget);
     }
     intrinsicHandled = 1;
     }
@@ -10251,10 +10117,7 @@
                 else copyIndex = copyIndex + 1;
             }
         }
-        store32(intrinsicTarget, VALUE_TAG_INT32);
-        store32(intrinsicTarget + VALUE_CELL_LOW, copyCount);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellInt32(intrinsicTarget, copyCount);
         return 1;
     }
 
@@ -12514,10 +12377,7 @@
                 indexOfCandidate = indexOfSourceLength + 1;
             } else indexOfCandidate = indexOfCandidate + 1;
         }
-        store32(intrinsicTarget, VALUE_TAG_INT32);
-        store32(intrinsicTarget + VALUE_CELL_LOW, indexOfResult);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellInt32(intrinsicTarget, indexOfResult);
         return 1;
     }
     }
@@ -12965,11 +12825,7 @@
             }
             return 0;
         }
-        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-        store32(intrinsicTarget + VALUE_CELL_LOW,
-                fromCharCodeResult);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellReference(intrinsicTarget, fromCharCodeResult);
         setEngineCallRejectReason(
             heapBase, state, CALL_DIAGNOSTIC_FROM_CHAR_CODE_COMPLETE);
         return 1;
@@ -13098,11 +12954,7 @@
                 heapBase, state, substrSource, substrStart, substrLength);
             if (substrResultAddress === 0) return 0;
         }
-        store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-        store32(intrinsicTarget + VALUE_CELL_LOW,
-                substrResultAddress);
-        store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+        setValueCellReference(intrinsicTarget, substrResultAddress);
         return 1;
     }
     }
@@ -13387,11 +13239,7 @@
         }
         if (replaceValid === 1) {
             if (replaceMatchCount === 0) {
-                store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                store32(intrinsicTarget + VALUE_CELL_LOW,
-                        replaceSource);
-                store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                setValueCellReference(intrinsicTarget, replaceSource);
                 return 1;
             } else {
                 var replaceResultLength = replaceSourceLength +
@@ -13474,11 +13322,7 @@
                                   replaceHash);
                     setEngineHeapBump(heapBase, state,
                         replaceResult + replaceResultBytes);
-                    store32(intrinsicTarget, VALUE_TAG_REFERENCE);
-                    store32(intrinsicTarget + VALUE_CELL_LOW,
-                            replaceResult);
-                    store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-                    store32(intrinsicTarget + VALUE_CELL_AUX, 0);
+                    setValueCellReference(intrinsicTarget, replaceResult);
                     return 1;
                 }
             }
@@ -16113,10 +15957,7 @@
         setArrayReserved(heapBase, resultArray, 0);
         setEngineHeapBump(heapBase, state,
                           resultArray + ARRAY_RECORD_BYTES);
-        store32(targetCell, VALUE_TAG_REFERENCE);
-        store32(targetCell + VALUE_CELL_LOW, resultArray);
-        store32(targetCell + VALUE_CELL_HIGH, 0);
-        store32(targetCell + VALUE_CELL_AUX, 0);
+        setValueCellReference(targetCell, resultArray);
         return 1;
     }
 
@@ -16228,10 +16069,7 @@
         setArrayReserved(heapBase, resultArray, 0);
         setEngineHeapBump(heapBase, state,
                           resultArray + ARRAY_RECORD_BYTES);
-        store32(targetCell, VALUE_TAG_REFERENCE);
-        store32(targetCell + VALUE_CELL_LOW, resultArray);
-        store32(targetCell + VALUE_CELL_HIGH, 0);
-        store32(targetCell + VALUE_CELL_AUX, 0);
+        setValueCellReference(targetCell, resultArray);
         return 1;
     }
 
@@ -16402,10 +16240,7 @@
                                  argumentsVector, platformServices) {
         if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
             if (vectorLength(heapBase, argumentsVector) === 0) {
-                store32(targetCell, VALUE_TAG_INT32);
-                store32(targetCell + VALUE_CELL_LOW, 0);
-                store32(targetCell + VALUE_CELL_HIGH, 0);
-                store32(targetCell + VALUE_CELL_AUX, 0);
+                setValueCellInt32(targetCell, 0);
                 return 1;
             }
             var descriptor = heapBase + argumentsVector + VECTOR_CELLS;
@@ -16552,10 +16387,7 @@
                     dateValueCell + VALUE_CELL_LOW, dateMilliseconds, 1);
             }
             store32(dateValueCell + VALUE_CELL_AUX, 0);
-            store32(targetCell, VALUE_TAG_REFERENCE);
-            store32(targetCell + VALUE_CELL_LOW, dateObject);
-            store32(targetCell + VALUE_CELL_HIGH, 0);
-            store32(targetCell + VALUE_CELL_AUX, 0);
+            setValueCellReference(targetCell, dateObject);
             setEngineHeapBump(heapBase, state, dateAllocationEnd);
             return 1;
         }
@@ -17819,10 +17651,7 @@
             copyValueCell(propertyCell, sourceCell);
             return 1;
         }
-        store32(targetCell, VALUE_TAG_UNDEFINED);
-        store32(targetCell + VALUE_CELL_LOW, 0);
-        store32(targetCell + VALUE_CELL_HIGH, 0);
-        store32(targetCell + VALUE_CELL_AUX, 0);
+        setValueCellUndefined(targetCell);
         return 1;
     }
 

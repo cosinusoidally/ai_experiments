@@ -1,9 +1,11 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-29, standalone contract 75):
+Latest completed whole-suite result (2026-10-29, standalone contract 77):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 538.51 seconds. This is the explicit block-flow implementation; the
-earlier local-refactor candidates remain parked. See the history below for the exact
+Elapsed 501.14 seconds. This run included an experimental inactive-word store
+omission, subsequently removed because it lost cross-host snapshot identity.
+The retained named-accessor cleanup emits native code byte-identical to the
+previous validated control. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -35,6 +37,24 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-29, approximately 23:38 UTC, named value-cell writes, standalone
+  contract 77: **3,292 passed / 0 failed / 0 timed out / 0 not run**, all
+  3,292 authored variants executed. Command:
+  `./artifacts/js_runner.exe artifacts/value-active.snap test262_runner.js`.
+  Default instruction budget and unchanged external corpus. External elapsed
+  501.14 s, user CPU 495.16 s, peak RSS 575,848 KiB; runner elapsed
+  500.475408 s, summed test time 484.616817 s. This validates the native
+  tagged-union setter lowering and 50 named-accessor replacements. It does
+  not establish a speedup against a current-session matched full-suite
+  control. The later constant-propagation experiment was not in this image
+  and was removed after its zlib measurement showed no meaningful gain.
+  Raw output: `artifacts/value-active-test262.log` (ignored).
+  Follow-up: the active-word-only lowering was rejected after Node/js_min
+  snapshot comparison differed in inactive payload words. Full-width setter
+  stores are restored. The retained source cleanup's complete native code
+  section is byte-identical to the unchanged contract-75 control (407,634
+  bytes), and its bounded native GC workload passes 24 rounds / 47 collections.
 
 - 2026-10-29, explicit dispatch-region basic blocks, standalone contract 75:
   **3,292 passed / 0 failed / 0 not run / 0 timed out**. Runner elapsed

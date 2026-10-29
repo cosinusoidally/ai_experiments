@@ -197,9 +197,14 @@ INT32 and REFERENCE use the low payload word; DOUBLE uses both payload words;
 undefined, null and booleans need only their tag. Inactive payload words and
 the reserved auxiliary word are unspecified. Consumers, including GC, must
 check the tag before interpreting payload. This was already the contract of
-`ValueCells.writePrimitiveAt` and `writeReferenceAt`. Native setters currently
-clear the inactive fields, and value copying copies all four words: experiments
-which omitted those writes/copies did not establish a performance gain.
+`ValueCells.writePrimitiveAt` and `writeReferenceAt`. Native named setters
+still clear inactive words, and value copying copies all four words. Although
+the language does not require clearing, the snapshot writer currently retains
+these words: omitting the stores loses cross-host byte identity. Fifty
+hand-expanded native write sequences now use the same named setters instead
+of duplicating field offsets. This is a readability cleanup, not an execution
+speedup; its complete native code section is byte-identical to the unchanged
+control's code section.
 Allocation/explicit clearing still zeroes storage. No cell size,
 field offset, tag, bytecode layout or snapshot relocation rule changes.
 
