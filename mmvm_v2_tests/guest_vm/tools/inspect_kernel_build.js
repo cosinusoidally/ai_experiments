@@ -7,6 +7,7 @@
  * node guest_vm/tools/inspect_kernel_build.js [function-name]
  * Add --predecode first to inspect the opt-in operand view. --symbols reports
  * sorted code-relative labels for native debugger/profiler attribution.
+ * --blocks [function-name] reports the shared control-flow block graph.
  */
 (function (shellArguments) {
     var nodeHost = typeof module !== "undefined" && module.exports;
@@ -27,6 +28,8 @@
     }
     var predecode = args[0] === "--predecode";
     if (predecode) args = args.slice(1);
+    var blocksOnly = args[0] === "--blocks";
+    if (blocksOnly) args = args.slice(1);
     if (args[0] === "--numbers") {
         var conversion = nodeHost ? require("../binary64.js") : GuestVMBinary64;
         var samples = [1.7976931348623157e308, 5e-324, 16777619,
@@ -108,6 +111,30 @@
                 continue;
             }
             if (args.length && fn.name !== args[0]) continue;
+            if (blocksOnly) {
+                var FlowCompiler = nodeHost ? require("../aot/kernel_compiler.js") :
+                    GuestVMKernelCompiler;
+                var flow = FlowCompiler.buildControlFlow(fn.body);
+                report(fn.name + " entry=block" + flow.entry.id +
+                    " blocks=" + flow.blocks.length);
+                var blockIndex = 0;
+                while (blockIndex < flow.blocks.length) {
+                    var block = flow.blocks[blockIndex++], operations = [];
+                    var statementIndex = 0;
+                    while (statementIndex < block.statements.length) {
+                        operations.push(block.statements[statementIndex++].op);
+                    }
+                    var edge = block.terminator, successor = edge.kind;
+                    if (edge.kind === "jump") successor += " block" + edge.target.id;
+                    else if (edge.kind === "branch") {
+                        successor += " " + edge.test.op + " ? block" +
+                            edge.consequent.id + " : block" + edge.alternate.id;
+                    }
+                    report("  block" + block.id + " [" +
+                        operations.join(", ") + "] -> " + successor);
+                }
+                continue;
+            }
             report(fn.name + " @" + labels["kernel_function_" + fn.name] +
                 " args=" + fn.parameters.join(",") +
                 " locals=" + fn.locals.join(","));

@@ -2255,6 +2255,100 @@
         throw new SyntaxError("unsupported binary64 kernel intrinsic " + name);
     }
 
+    /* Explicit basic blocks beneath the structured, host-independent IR.
+     * Statements/expressions are borrowed, not cloned. A dispatch consumer
+     * may specialize tests while discovering blocks, so it never constructs
+     * a complete copy of the interpreter for every opcode. JS emission can
+     * retain its structured source representation. */
+    KernelCompiler.buildControlFlow = function (body, selectTest) {
+        var blocks = [], nextId = 0;
+        function block() {
+            return {id: nextId++, statements: [], terminator: null};
+        }
+        function jump(from, target) {
+            if (from) from.terminator = {kind: "jump", target: target};
+        }
+        function sequence(node, current) {
+            if (!current) return null;
+            if (typeof node.length === "number") {
+                var index = 0;
+                while (current && index < node.length) {
+                    current = sequence(node[index++], current);
+                }
+                return current;
+            }
+            if (node.op === "block") return sequence(node.body, current);
+            if (node.op === "return") {
+                current.terminator = {kind: "return", statement: node};
+                return null;
+            }
+            if (node.op === "if") {
+                var test = selectTest ? selectTest(node.test) : node.test;
+                if (test.op === "const_i32") {
+                    return sequence(test.value ? node.consequent : node.alternate,
+                                    current);
+                }
+                var consequent = block(), alternate = block(), join = block();
+                current.terminator = {kind: "branch", test: test,
+                    consequent: consequent, alternate: alternate};
+                blocks.push(consequent);
+                var consequentEnd = sequence(node.consequent, consequent);
+                jump(consequentEnd, join);
+                blocks.push(alternate);
+                var alternateEnd = sequence(node.alternate, alternate);
+                jump(alternateEnd, join);
+                if (!consequentEnd && !alternateEnd) return null;
+                blocks.push(join);
+                return join;
+            }
+            if (node.op === "while") {
+                var header = block(), loopBody = block(), exit = block();
+                jump(current, header);
+                blocks.push(header);
+                header.terminator = {kind: "branch", test: node.test,
+                    consequent: loopBody, alternate: exit};
+                blocks.push(loopBody);
+                jump(sequence(node.body, loopBody), header);
+                blocks.push(exit);
+                return exit;
+            }
+            current.statements.push(node);
+            return current;
+        }
+        var entry = block();
+        blocks.push(entry);
+        var end = sequence(body, entry);
+        if (end) end.terminator = {kind: "finish"};
+
+        /* An empty arm is an edge, not executable code. Collapse such edges
+         * once with path compression; all consumers see canonical targets. A
+         * loop header remains a branch, so no empty jump cycle is introduced. */
+        function resolve(target) {
+            if (target.redirect) return target.redirect;
+            if (target.statements.length === 0 &&
+                    target.terminator.kind === "jump" &&
+                    target.terminator.target !== target) {
+                target.redirect = resolve(target.terminator.target);
+                return target.redirect;
+            }
+            return target;
+        }
+        var output = [], blockIndex = 0;
+        while (blockIndex < blocks.length) {
+            var item = blocks[blockIndex++];
+            if (resolve(item) !== item) continue;
+            var terminator = item.terminator;
+            if (terminator.kind === "jump") {
+                terminator.target = resolve(terminator.target);
+            } else if (terminator.kind === "branch") {
+                terminator.consequent = resolve(terminator.consequent);
+                terminator.alternate = resolve(terminator.alternate);
+            }
+            output.push(item);
+        }
+        return {entry: resolve(entry), blocks: output};
+    };
+
     root.GuestVMKernelCompiler = KernelCompiler;
     if (typeof module !== "undefined" && module.exports) module.exports = KernelCompiler;
 }(this));

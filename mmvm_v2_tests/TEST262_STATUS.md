@@ -1,11 +1,13 @@
 # Test262 status
 
-Retained VM's latest matched whole-suite control (2026-10-29,
+Latest matched whole-suite baseline control (2026-10-29,
 standalone contract 74):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
 Elapsed 636.82 seconds. A later local-refactor candidate also passed all tests
 in 615.29 seconds, but was parked in favor of architectural work; no production
-VM changes from these experiments remain. See the result history below for the exact
+VM changes from these local-refactor experiments remain. The newer block-flow
+implementation (contract 75) has full-suite validation in progress; it must
+not be counted as a completed 3,292-pass run yet. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus

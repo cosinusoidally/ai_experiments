@@ -3,8 +3,9 @@
 Investigation checkpoint: 2026-10-29, `guestVM-cleanup`.
 
 The small declaration-walker/base-address experiments are parked, not retained
-as the solution. Production VM sources are unchanged from the pre-investigation
-implementation. The objective is substantial general-purpose improvement by
+as the solution. The baseline investigation left production VM sources unchanged;
+the first architectural implementation is described at the end of this document.
+The objective is substantial general-purpose improvement by
 reducing repeated semantic work and improving the compiler/interpreter design,
 not accumulating benchmark-specific paths or superficial source rewrites.
 
@@ -169,7 +170,7 @@ ordinary JS subset; do not add more compile-time reinterpretations of local
 - Diagnostic sampling may perturb timings. Benchmark results must come from
   separate unprofiled runs. No substantial speedup is claimed at this point.
 
-## Current working-tree checkpoint
+## Baseline investigation checkpoint
 
 The iterative local-refactor candidate passed all 3,292 tests, both hosts'
 12-program / 270-assertion project suites, Node/js_min bounded GC audits
@@ -183,3 +184,63 @@ redirected; the subsequent self-hosted rebuild did not run. No completed
 three-way snapshot or new live-demo/Octane regression claim is made for this
 parked candidate. The profiling runs also deliberately terminate their child
 after the sample window; they must not be counted as benchmark passes.
+
+## First implementation: explicit dispatch-region blocks
+
+`KernelCompiler.buildControlFlow(body, selectTest)` now provides the initial
+shared block representation. It borrows expression and operation nodes; it
+does not clone the interpreter IR or reparse source. The optional test selector
+lets opcode dispatch prune constant tests during block discovery, rather than
+building a full specialized tree first.
+
+Each block has an ID, an ordered operation list and exactly one terminator:
+
+- `branch`: evaluate the test once, then take the consequent/alternate edge.
+- `jump`: unconditional successor, including loop backedges.
+- `return`: the existing return operation and its ABI/inline-return semantics.
+- `finish`: natural completion of this region, not a function return.
+
+The builder preserves source/effect order and omits unreachable statements
+after returns. Empty jump-only blocks are redirected with path compression.
+Loop headers retain an explicit branch, including for constant loop tests, so
+an empty infinite loop is not mistaken for an empty acyclic jump chain.
+An empty conditional still evaluates its test; side effects are not discarded.
+
+The native dispatch emitter consumes canonical edges and physical successors,
+omitting jumps when the successor is the next block. This replaces its former
+recursive conditional emitter. The ordinary JS backend remains unchanged.
+The pre-existing structured emitter is still used outside dispatch regions;
+this is a staged cutover, not yet a whole-function register allocator. Native
+contract version is bumped to 75 so old cached native kernels are not reused.
+
+Inspection (both bootstrap hosts and the standalone runner are supported):
+
+```sh
+node guest_vm/tools/inspect_kernel_build.js --blocks interpreterKernel
+```
+
+Initial evidence, not the final architectural performance target:
+
+- Node project suite: 12 guest programs / 270 assertions pass.
+- Snapshot executes `hello.js` and completes zlib quick correctness.
+- zlib external elapsed: 33.68 s candidate / 35.78 s unchanged control;
+  user CPU 33.29 / 35.52 s. These single runs are only preliminary evidence.
+- Kernel code size: 411,214 -> 407,634 bytes. This is code size, not full
+  snapshot size. Smaller code is not itself proof of a substantial speedup.
+- Node-built snapshot: 2.992 s reported build time, including preparation and
+  writing, comparable to the prior approximately 3 s builds.
+- js_min project suite passes 12 guest programs / 270 assertions, including
+  native execution. Standalone bounded GC passes 24 rounds / 47 collections.
+- Genuine Node/js_min/self-hosted builds produce byte-identical snapshots.
+  js_min external build time: 85.21 s, user CPU 84.30 s, peak RSS 356,272 KiB.
+  Self-hosted external build time: 100.67 s, user CPU 99.75 s, peak RSS
+  501,632 KiB. Matched unchanged-source build controls are in progress; no
+  build-speed improvement is claimed from historical comparisons alone.
+- Full Test262 and supported Octane revalidation are queued serially behind
+  those controls. No whole-suite or live-demo claim is made for this
+  implementation until those gates actually complete.
+
+Next: extend the representation's useful scope and add def/use/lifetime
+information without creating a second semantic implementation. The intended
+benefit is general register/dataflow optimization and a smaller, clearer
+interpreter implementation; branch cleanup alone is not the objective.

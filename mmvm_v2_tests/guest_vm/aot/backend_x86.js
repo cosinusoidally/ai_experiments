@@ -3,10 +3,12 @@
 (function (root) {
     var WORD_BYTES = 4;
     var Assembler = root.GuestVMX86Assembler;
+    var KernelCompiler = root.GuestVMKernelCompiler;
     var HostFFI = root.GuestVMHostFFI;
     var SnapshotOutput = root.GuestVMSnapshotOutput;
     if (typeof module !== "undefined" && module.exports) {
         Assembler = require("./x86_assembler.js");
+        KernelCompiler = require("./kernel_compiler.js");
         HostFFI = require("../host_ffi.js");
         SnapshotOutput = require("./snapshot_output.js");
     }
@@ -1683,45 +1685,52 @@
      * temporary object graph. */
     function emitSpecializedDispatchStatement(assembler, node, localIndex,
                                                value, state) {
-        if (typeof node.length === "number") {
-            var statementIndex = 0;
-            while (statementIndex < node.length) {
-                emitSpecializedDispatchStatement(assembler,
-                    node[statementIndex++], localIndex, value, state);
-            }
-            return;
+        var flow = KernelCompiler.buildControlFlow(node, function (test) {
+            return specializeDispatchExpression(test, localIndex, value);
+        });
+        emitControlFlowBlocks(assembler, flow, state);
+    }
+
+    function emitControlFlowBlocks(assembler, flow, state) {
+        var prefix = "kernel_block_" + state.nextLabel++ + "_";
+        var finishLabel = prefix + "finish";
+        var blocks = flow.blocks, index = 0;
+        if (blocks.length && blocks[0] !== flow.entry) {
+            assembler.jump(prefix + flow.entry.id);
         }
-        if (node.op === "block") {
-            emitSpecializedDispatchStatement(assembler, node.body, localIndex,
-                                             value, state);
-            return;
+        while (index < blocks.length) {
+            var block = blocks[index++];
+            var next = index < blocks.length ? blocks[index] : null;
+            assembler.label(prefix + block.id);
+            emitStatements(assembler, block.statements, state);
+            var edge = block.terminator;
+            if (edge.kind === "return") {
+                emitStatement(assembler, edge.statement, state);
+            } else if (edge.kind === "finish") {
+                if (next) assembler.jump(finishLabel);
+            } else if (edge.kind === "jump") {
+                if (edge.target !== next) assembler.jump(prefix + edge.target.id);
+            } else if (edge.kind === "branch") {
+                if (edge.consequent === edge.alternate) {
+                    /* Even an empty conditional may have observable calls or
+                     * loads in its test. Keep evaluation, not a dummy branch. */
+                    emitControlExpression(assembler, edge.test, state);
+                    if (edge.consequent !== next) {
+                        assembler.jump(prefix + edge.consequent.id);
+                    }
+                } else if (edge.alternate === next) {
+                    emitConditionJump(assembler, edge.test,
+                        prefix + edge.consequent.id, true, state);
+                } else {
+                    emitConditionJump(assembler, edge.test,
+                        prefix + edge.alternate.id, false, state);
+                    if (edge.consequent !== next) {
+                        assembler.jump(prefix + edge.consequent.id);
+                    }
+                }
+            } else throw new Error("unknown kernel control-flow edge " + edge.kind);
         }
-        if (node.op === "if") {
-            var test = specializeDispatchExpression(node.test, localIndex, value);
-            if (test.op === "const_i32") {
-                emitSpecializedDispatchStatement(assembler,
-                    test.value ? node.consequent : node.alternate,
-                    localIndex, value, state);
-                return;
-            }
-            var alternateLabel = "kernel_else_" + state.nextLabel;
-            var endLabel = "kernel_if_end_" + state.nextLabel++;
-            if (!emitIntegerComparisonFalseJump(
-                    assembler, test, alternateLabel, state)) {
-                emitControlExpression(assembler, test, state);
-                assembler.testEaxEax();
-                assembler.jumpEqual(alternateLabel);
-            }
-            emitSpecializedDispatchStatement(assembler, node.consequent,
-                                             localIndex, value, state);
-            assembler.jump(endLabel);
-            assembler.label(alternateLabel);
-            emitSpecializedDispatchStatement(assembler, node.alternate,
-                                             localIndex, value, state);
-            assembler.label(endLabel);
-            return;
-        }
-        emitStatement(assembler, node, state);
+        assembler.label(finishLabel);
     }
 
     function specializeDispatchExpression(node, localIndex, value) {
