@@ -12,6 +12,7 @@
     var HeapRecords = root.GuestVMHeapRecords;
     var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
     var NumberFormatKernels = root.GuestVMNumberFormatKernel;
+    var ObjectOperationKernels = root.GuestVMObjectOperationsKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -24,6 +25,7 @@
         HeapRecords = require("../heap_records.js");
         PropertyStorageKernels = require("../property_storage_kernel.js");
         NumberFormatKernels = require("../number_format_kernel.js");
+        ObjectOperationKernels = require("../object_operations_kernel.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -70,6 +72,7 @@
     var INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
     var INTRINSIC_ARRAY_IS_ARRAY = NativeIntrinsics.ARRAY_IS_ARRAY;
     var INTRINSIC_THROW_TYPE_ERROR = NativeIntrinsics.THROW_TYPE_ERROR;
+    var INTRINSIC_OBJECT_IS_PROTOTYPE_OF = NativeIntrinsics.OBJECT_IS_PROTOTYPE_OF;
     var FRAME_FLAG_FUNCTION_COMPILE = 4;
     var CALL_OPERATION_CALL = 1;
     var CALL_OPERATION_CONSTRUCT = 2;
@@ -216,6 +219,7 @@
             NativeIntrinsics.BUFFER_READ_I16_LE;
         overrides.INTRINSIC_GC_STRESS_CONTROL = NativeIntrinsics.GC_STRESS_CONTROL;
         overrides.INTRINSIC_THROW_TYPE_ERROR = INTRINSIC_THROW_TYPE_ERROR;
+        overrides.INTRINSIC_OBJECT_IS_PROTOTYPE_OF = INTRINSIC_OBJECT_IS_PROTOTYPE_OF;
         overrides.INTRINSIC_LAST_ID = NativeIntrinsics.LAST_ID;
         overrides.INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
         overrides.INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
@@ -2427,6 +2431,24 @@
                         arithmeticUndefined = 1;
                     }
                     if (arithmeticUndefined === 1) {
+                        /* A known NaN result does not erase observable
+                         * object coercion (or string-valued ToPrimitive for
+                         * addition). Do not commit the shortcut until both
+                         * remaining operands are primitives. */
+                        if (arithmeticLeftTag === VALUE_TAG_REFERENCE) {
+                            if (recordType(heapBase, valueCellReference(0,
+                                    arithmeticLeft)) !== HEAP_TYPE_STRING) {
+                                return unsupportedExitKernel(heapBase, state,
+                                    frame, pc, opcode, initialBudget - budget);
+                            }
+                        }
+                        if (arithmeticRightTag === VALUE_TAG_REFERENCE) {
+                            if (recordType(heapBase, valueCellReference(0,
+                                    arithmeticRight)) !== HEAP_TYPE_STRING) {
+                                return unsupportedExitKernel(heapBase, state,
+                                    frame, pc, opcode, initialBudget - budget);
+                            }
+                        }
                         setValueCellDoubleBits(
                             arithmeticTarget, 0, IEEE754_QUIET_NAN_HIGH);
                     } else {
@@ -3986,7 +4008,7 @@
                         heapBase, state, deleteNameTarget, deleteNameTarget,
                         deleteNameKeyCell,
                         programFlags(heapBase, currentProgram) &
-                            PROGRAM_FLAG_STRICT) === 0) {
+                            PROGRAM_FLAG_STRICT, arrayLengthKey) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
@@ -4009,7 +4031,7 @@
                         frameRegisterCellAddress(heapBase, frame,
                                                  deleteKeyIndex),
                         programFlags(heapBase, currentProgram) &
-                            PROGRAM_FLAG_STRICT) === 0) {
+                            PROGRAM_FLAG_STRICT, arrayLengthKey) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
@@ -4032,7 +4054,7 @@
                         heapBase + constantCells +
                             deleteConstantKeyIndex * VALUE_CELL_BYTES,
                         programFlags(heapBase, currentProgram) &
-                            PROGRAM_FLAG_STRICT) === 0) {
+                            PROGRAM_FLAG_STRICT, arrayLengthKey) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
@@ -4093,7 +4115,7 @@
                                              keysTargetIndex),
                     frameRegisterCellAddress(heapBase, frame,
                                              keysSourceIndex),
-                    arrayPrototype) === 0) {
+                    arrayPrototype, arrayLengthKey) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
@@ -6216,6 +6238,7 @@
                 heapBase, state, CALL_REJECT_INTRINSIC_CALL_FORM);
         }
         var requiredIntrinsicArguments = 1;
+        if (intrinsicId === INTRINSIC_OBJECT_IS_PROTOTYPE_OF) requiredIntrinsicArguments = 0;
         if (isErrorConstructor === 1) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_GET_DLSYM) {
@@ -6453,6 +6476,19 @@
             }
             return unsupportedDiagnosticExitKernel(
                 heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (intrinsicId === INTRINSIC_OBJECT_IS_PROTOTYPE_OF) {
+            var prototypeReceiver = 0;
+            if (callReceiverIndex >= 0) {
+                prototypeReceiver = frameRegisterCellAddress(heapBase, frame, callReceiverIndex);
+            }
+            var prototypeArgument = programArgumentCellKernel(
+                heapBase, intrinsicArgumentsVector, registerAddress, 0);
+            var prototypeResult = objectIsPrototypeOfKernel(
+                heapBase, intrinsicTarget, prototypeReceiver, prototypeArgument);
+            if (prototypeResult !== 1) return unsupportedDiagnosticExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+            intrinsicHandled = 1;
         }
         if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
             var booleanValue = 0;
@@ -11420,7 +11456,7 @@
     }
 
     function getKeysKernel(heapBase, state, targetCell, sourceCell,
-                           arrayPrototype) {
+                           arrayPrototype, arrayLengthKey) {
         var object = 0;
         var type = 0;
         var property = 0;
@@ -11451,14 +11487,22 @@
                 sourceIndex = sourceIndex + 1;
             }
         }
-        var count = indexedCount;
-        var countedProperty = property;
-        while (countedProperty !== 0) {
-            if ((ownPropertyEntryAttributesKernel(heapBase, object, countedProperty) &
-                 PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
-                count = count + 1;
-            }
-            countedProperty = previousOwnPropertyEntryKernel(heapBase, object, countedProperty);
+        var ownCount = 0;
+        var ancestor = 0;
+        if (object !== 0) {
+            ownCount = enumerationOwnCountKernel(heapBase, state, object, object, arrayLengthKey);
+            ancestor = objectPrototypeReferenceKernel(heapBase, object);
+        }
+        var count = indexedCount + ownCount;
+        while (ancestor !== 0) {
+            var ancestorType = recordType(heapBase, ancestor);
+            if (ancestorType === HEAP_TYPE_ARRAY) {
+                if (vectorLength(heapBase, arrayElements(heapBase, ancestor)) !== 0) return 0;
+            } else if (ancestorType < HEAP_TYPE_OBJECT ||
+                       ancestorType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+            count = count + enumerationOwnCountKernel(
+                heapBase, state, object, ancestor, arrayLengthKey);
+            ancestor = objectPrototypeReferenceKernel(heapBase, ancestor);
         }
         var vectorBytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
         if (vectorBytes < VECTOR_FIXED_BYTES) return 0;
@@ -11479,15 +11523,32 @@
         setVectorCapacity(heapBase, vector, count);
         var clearedKeyCells = clearAbsentValueCellsKernel(
             heapBase, vector, 0, indexedCount);
-        var index = count - 1;
-        while (property !== 0) {
-            if ((ownPropertyEntryAttributesKernel(heapBase, object, property) &
-                 PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
-                setValueCellReference(vectorCellAddress(
-                    heapBase, vector, index), ownPropertyEntryKeyKernel(heapBase, object, property));
-                index = index - 1;
+        /* Preserve each owner's insertion order, nearest owner first. Own
+         * entries need no duplicate probes; only inherited candidates query
+         * nearer owners, including their non-enumerable shadows. */
+        var owner = object;
+        var segmentStart = indexedCount;
+        var ownerCount = ownCount;
+        while (owner !== 0) {
+            var segmentEnd = segmentStart + ownerCount;
+            var index = segmentEnd - 1;
+            property = lastOwnPropertyEntryKernel(heapBase, owner);
+            while (property !== 0) {
+                if ((ownPropertyEntryAttributesKernel(heapBase, owner, property) &
+                        PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
+                    var key = ownPropertyEntryKeyKernel(heapBase, owner, property);
+                    if (owner === object || enumerationKeyVisibleKernel(
+                            heapBase, state, object, owner, key, arrayLengthKey) === 1) {
+                        setValueCellReference(vectorCellAddress(heapBase, vector, index), key);
+                        index = index - 1;
+                    }
+                }
+                property = previousOwnPropertyEntryKernel(heapBase, owner, property);
             }
-            property = previousOwnPropertyEntryKernel(heapBase, object, property);
+            segmentStart = segmentEnd;
+            owner = objectPrototypeReferenceKernel(heapBase, owner);
+            if (owner !== 0) ownerCount = enumerationOwnCountKernel(
+                heapBase, state, object, owner, arrayLengthKey);
         }
         setRecordType(heapBase, array, HEAP_TYPE_ARRAY);
         setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
@@ -14972,12 +15033,22 @@
     }
 
     function deletePropertyKernel(heapBase, state, targetCell, objectCell,
-                                  keyCell, strictMode) {
+                                  keyCell, strictMode, arrayLengthKey) {
         if (valueCellTag(0, objectCell) !== VALUE_TAG_REFERENCE) return 0;
         var object = valueCellReference(0, objectCell);
         var objectType = recordType(heapBase, object);
         var keyTag = valueCellTag(0, keyCell);
         if (objectType === HEAP_TYPE_ARRAY) {
+            if (arrayReserved(heapBase, object) === 0 && keyTag === VALUE_TAG_REFERENCE) {
+                var deleteArrayKey = valueCellReference(0, keyCell);
+                if (recordType(heapBase, deleteArrayKey) === HEAP_TYPE_STRING) {
+                    if (stringKeysEqualKernel(heapBase, deleteArrayKey, arrayLengthKey) === 1) {
+                        if (strictMode !== 0) return 0;
+                        setValueCellFalse(targetCell);
+                        return 1;
+                    }
+                }
+            }
             if (keyTag === VALUE_TAG_INT32) {
                 var elementIndex = valueCellInt32(0, keyCell);
                 var elements = arrayElements(heapBase, object);
@@ -15132,6 +15203,9 @@
             if (keyType !== HEAP_TYPE_STRING) return 0;
         } else return 0;
 
+        /* Negative/fractional/nonfinite numeric keys require ToString; an
+         * unsuccessful integer-index probe is not a missing-property result. */
+        if (key === 0 && numericKey === 0) return 0;
         var current = valueCellReference(0, objectCell);
         while (current !== 0) {
             var currentType = recordType(heapBase, current);
@@ -17841,6 +17915,11 @@
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var propertyKernelName;
+        for (propertyKernelName in ObjectOperationKernels.functions) {
+            if (Object.prototype.hasOwnProperty.call(ObjectOperationKernels.functions, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = ObjectOperationKernels.functions[propertyKernelName];
+            }
+        }
         for (propertyKernelName in NumberFormatKernels.functions) {
             if (Object.prototype.hasOwnProperty.call(NumberFormatKernels.functions, propertyKernelName)) {
                 kernelDependencies[propertyKernelName] = NumberFormatKernels.functions[propertyKernelName];
@@ -17951,6 +18030,7 @@
                     RESTRICTED_FUNCTION_PROPERTY_BYTES: kernelConstantOverrides.RESTRICTED_FUNCTION_PROPERTY_BYTES,
                     ARGUMENTS_UNMAPPED_ENVIRONMENT: kernelConstantOverrides.ARGUMENTS_UNMAPPED_ENVIRONMENT,
                     INTRINSIC_THROW_TYPE_ERROR: INTRINSIC_THROW_TYPE_ERROR,
+                    INTRINSIC_OBJECT_IS_PROTOTYPE_OF: INTRINSIC_OBJECT_IS_PROTOTYPE_OF,
                     RUNTIME_SUPPORT_STRICT_ARGUMENTS_THROWER: RuntimeSupportLayout.STRICT_ARGUMENTS_THROWER,
                     RUNTIME_SUPPORT_CALLER_KEY: RuntimeSupportLayout.CALLER_KEY,
                     RUNTIME_SUPPORT_ARGUMENTS_KEY: RuntimeSupportLayout.ARGUMENTS_KEY,

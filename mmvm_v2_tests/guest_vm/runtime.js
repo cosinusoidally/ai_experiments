@@ -1322,6 +1322,11 @@
         return property;
     };
 
+    Runtime.prototype.defineBuiltinProperty = function (object, key, value) {
+        return this.defineDataProperty(object, key, value,
+            HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
+    };
+
     Runtime.prototype.defineLiteralAccessor = function (
             object, key, callable, setterDefinition) {
         var keyAddress = this.internStringAddress(this.propertyKey(key));
@@ -2679,7 +2684,7 @@
             var stringMethodName;
             for (stringMethodName in this.stringMethods) {
                 if (own(this.stringMethods, stringMethodName)) {
-                    this.setProperty(this.stringPrototype, stringMethodName,
+                    this.defineBuiltinProperty(this.stringPrototype, stringMethodName,
                                      this.stringMethods[stringMethodName]);
                 }
             }
@@ -2690,9 +2695,9 @@
         this.stringMethods.valueOf = this.makeNativeFunction("String.valueOf",
             function (receiver) { return runtime.stringValue(receiver); },
             "intrinsic", NativeIntrinsics.STRING_VALUE_OF);
-        this.setProperty(this.stringPrototype, "toString",
+        this.defineBuiltinProperty(this.stringPrototype, "toString",
                          this.stringMethods.toString);
-        this.setProperty(this.stringPrototype, "valueOf",
+        this.defineBuiltinProperty(this.stringPrototype, "valueOf",
                          this.stringMethods.valueOf);
         this.arrayMethods = {};
         /* Array.prototype is observable through instanceof even on the
@@ -2844,6 +2849,18 @@
                 return -1;
             }, "intrinsic", NativeIntrinsics.ARRAY_INDEX_OF);
         this.objectMethods = {};
+        this.objectMethods.isPrototypeOf = this.makeNativeFunction(
+            "Object.isPrototypeOf", function (receiver, args) {
+                var value = args[0];
+                if (!value || !value.guestType) return false;
+                var object = runtime.toObject(receiver);
+                var current = runtime.heapRecords.objectPrototype(value.heapAddress);
+                while (current) {
+                    if (current === object.heapAddress) return true;
+                    current = runtime.heapRecords.objectPrototype(current);
+                }
+                return false;
+            }, "intrinsic", NativeIntrinsics.OBJECT_IS_PROTOTYPE_OF);
         this.objectMethods.hasOwnProperty = this.makeNativeFunction(
             "Object.hasOwnProperty", function (receiver, args) {
                 return runtime.hasOwnProperty(receiver, String(args[0]));
@@ -2887,18 +2904,21 @@
                 return receiver;
             }, "intrinsic", NativeIntrinsics.OBJECT_VALUE_OF);
         if (this.objectPrototype) {
-            this.setProperty(this.objectPrototype, "hasOwnProperty",
+            this.defineDataProperty(this.objectPrototype, "isPrototypeOf",
+                this.objectMethods.isPrototypeOf,
+                HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
+            this.defineBuiltinProperty(this.objectPrototype, "hasOwnProperty",
                              this.objectMethods.hasOwnProperty);
-            this.setProperty(this.objectPrototype, "toString",
+            this.defineBuiltinProperty(this.objectPrototype, "toString",
                              this.objectMethods.toString);
-            this.setProperty(this.objectPrototype, "valueOf",
+            this.defineBuiltinProperty(this.objectPrototype, "valueOf",
                              this.objectMethods.valueOf);
         }
         if (this.arrayPrototype) {
             var arrayMethodName;
             for (arrayMethodName in this.arrayMethods) {
                 if (own(this.arrayMethods, arrayMethodName)) {
-                    this.setProperty(this.arrayPrototype, arrayMethodName,
+                    this.defineBuiltinProperty(this.arrayPrototype, arrayMethodName,
                                      this.arrayMethods[arrayMethodName]);
                 }
             }
@@ -2913,7 +2933,7 @@
                     return runtime.invokePropertyFunction(
                         runtime.objectMethods.toString, receiver, []);
                 });
-            this.setProperty(this.arrayPrototype, "toString",
+            this.defineBuiltinProperty(this.arrayPrototype, "toString",
                              this.arrayMethods.toString);
         }
         var objectConstructor = this.makeNativeFunction("Object",
@@ -2936,7 +2956,7 @@
         if (this.objectPrototype) {
             this.setProperty(objectConstructor, "prototype",
                              this.objectPrototype);
-            this.setProperty(this.objectPrototype, "constructor",
+            this.defineBuiltinProperty(this.objectPrototype, "constructor",
                              objectConstructor);
         }
         this.setProperty(objectConstructor, "defineProperty",
@@ -3165,7 +3185,7 @@
             var functionMethodName;
             for (functionMethodName in this.functionMethods) {
                 if (own(this.functionMethods, functionMethodName)) {
-                    this.setProperty(this.functionPrototype, functionMethodName,
+                    this.defineBuiltinProperty(this.functionPrototype, functionMethodName,
                                      this.functionMethods[functionMethodName]);
                 }
             }
@@ -3196,13 +3216,13 @@
                 }
                 return value.toPrecision(precision);
             }, "intrinsic", NativeIntrinsics.NUMBER_TO_PRECISION);
-        this.setProperty(this.numberPrototype, "valueOf",
+        this.defineBuiltinProperty(this.numberPrototype, "valueOf",
                          this.numberMethods.valueOf);
-        this.setProperty(this.numberPrototype, "toString",
+        this.defineBuiltinProperty(this.numberPrototype, "toString",
                          this.numberMethods.toString);
-        this.setProperty(this.numberPrototype, "toFixed",
+        this.defineBuiltinProperty(this.numberPrototype, "toFixed",
                          this.numberMethods.toFixed);
-        this.setProperty(this.numberPrototype, "toPrecision",
+        this.defineBuiltinProperty(this.numberPrototype, "toPrecision",
                          this.numberMethods.toPrecision);
         this.regexpMethods = {};
         this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
@@ -3222,7 +3242,7 @@
             var regexpMethodName;
             for (regexpMethodName in this.regexpMethods) {
                 if (own(this.regexpMethods, regexpMethodName)) {
-                    this.setProperty(this.regexpPrototype, regexpMethodName,
+                    this.defineBuiltinProperty(this.regexpPrototype, regexpMethodName,
                                      this.regexpMethods[regexpMethodName]);
                 }
             }
@@ -3272,7 +3292,7 @@
         this.defineDataProperty(regexpConstructor, "length", 2, 0);
         if (this.regexpPrototype) {
             this.setProperty(regexpConstructor, "prototype", this.regexpPrototype);
-            this.setProperty(this.regexpPrototype, "constructor", regexpConstructor);
+            this.defineBuiltinProperty(this.regexpPrototype, "constructor", regexpConstructor);
         }
         this.setGlobal("RegExp", regexpConstructor);
         var stringConstructor = this.makeNativeFunction("String",
@@ -3287,7 +3307,7 @@
             return wrapper;
         };
         this.setProperty(stringConstructor, "prototype", this.stringPrototype);
-        this.setProperty(this.stringPrototype, "constructor", stringConstructor);
+        this.defineBuiltinProperty(this.stringPrototype, "constructor", stringConstructor);
         this.setProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
             "String.fromCharCode", function (receiver, args) {
                 var characters = [];
@@ -3314,7 +3334,7 @@
                 runtime.numberPrototype);
         };
         this.setProperty(numberConstructor, "prototype", this.numberPrototype);
-        this.setProperty(this.numberPrototype, "constructor", numberConstructor);
+        this.defineBuiltinProperty(this.numberPrototype, "constructor", numberConstructor);
         /* ES5.1 15.7.3. These values are guest primitive cells attached to
          * the guest constructor object; they are not borrowed objects from
          * the host's Number constructor. */
@@ -3334,9 +3354,9 @@
             });
         this.booleanMethods.valueOf = this.makeNativeFunction("Boolean.valueOf",
             function (receiver) { return runtime.booleanValue(receiver); });
-        this.setProperty(this.booleanPrototype, "toString",
+        this.defineBuiltinProperty(this.booleanPrototype, "toString",
                          this.booleanMethods.toString);
-        this.setProperty(this.booleanPrototype, "valueOf",
+        this.defineBuiltinProperty(this.booleanPrototype, "valueOf",
                          this.booleanMethods.valueOf);
         var booleanConstructor = this.makeNativeFunction("Boolean",
             function (receiver, args) {
@@ -3348,7 +3368,7 @@
                 runtime.booleanPrototype);
         };
         this.setProperty(booleanConstructor, "prototype", this.booleanPrototype);
-        this.setProperty(this.booleanPrototype, "constructor", booleanConstructor);
+        this.defineBuiltinProperty(this.booleanPrototype, "constructor", booleanConstructor);
         this.setGlobal("Boolean", booleanConstructor);
         var arrayConstructor = this.makeNativeFunction("Array",
             function (receiver, args) {
@@ -3376,7 +3396,7 @@
                 HeapRecords.Attributes.CONFIGURABLE);
         if (this.arrayPrototype) {
             this.setProperty(arrayConstructor, "prototype", this.arrayPrototype);
-            this.setProperty(this.arrayPrototype, "constructor", arrayConstructor);
+            this.defineBuiltinProperty(this.arrayPrototype, "constructor", arrayConstructor);
         }
         this.setGlobal("Array", arrayConstructor);
         var math = this.makeObject();
@@ -3522,7 +3542,7 @@
         dateSetter("setUTCMonth", "Month", true);
         dateSetter("setFullYear", "FullYear", false);
         dateSetter("setUTCFullYear", "FullYear", true);
-        this.setProperty(this.datePrototype, "getTimezoneOffset",
+        this.defineBuiltinProperty(this.datePrototype, "getTimezoneOffset",
             this.makeNativeFunction("Date.getTimezoneOffset", function () {
                 return DateSupport.localTimezoneOffset();
             }, "intrinsic", NativeIntrinsics.DATE_GET_TIMEZONE_OFFSET));
@@ -3539,7 +3559,7 @@
             return date;
         };
         this.setProperty(dateConstructor, "prototype", this.datePrototype);
-        this.setProperty(this.datePrototype, "constructor", dateConstructor);
+        this.defineBuiltinProperty(this.datePrototype, "constructor", dateConstructor);
         this.setProperty(dateConstructor, "now",
             this.makeNativeFunction("Date.now", function () {
                 return runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0;
@@ -4299,6 +4319,39 @@
                     values.push(key.substring(1));
                 }
             }
+        }
+        return this.arrayFrom(values);
+    };
+
+    /* For-in is not Object.keys: inherited names participate, and a nearer
+     * non-enumerable property still suppresses a farther enumerable one. */
+    Runtime.prototype.enumerableKeys = function (object) {
+        if (object === null || object === undefined) return this.makeArray(0);
+        var current = this.toObject(object);
+        var values = [];
+        var seen = {};
+        while (current) {
+            var names = this.ownPropertyNames(current);
+            var index = 0;
+            while (index < this.arrayLength(names)) {
+                var key = this.arrayGet(names, index++);
+                if (!own(seen, "$" + key)) {
+                    seen["$" + key] = true;
+                    var enumerable = false;
+                    if (current.guestType === "array" && isArrayIndex(key) &&
+                        this.arrayHas(current, Number(key))) {
+                        enumerable = true;
+                    } else {
+                        var entry = this.heapRecords.findOwnPropertyEntry(
+                            current.heapAddress, this.internStringAddress(key));
+                        if (entry) enumerable = !!(this.heapRecords.ownPropertyEntryAttributes(
+                            current.heapAddress, entry) & HeapRecords.Attributes.ENUMERABLE);
+                    }
+                    if (enumerable) values.push(key);
+                }
+            }
+            var inherited = this.heapRecords.objectPrototype(current.heapAddress);
+            current = inherited ? this.readHeapReference(inherited) : null;
         }
         return this.arrayFrom(values);
     };

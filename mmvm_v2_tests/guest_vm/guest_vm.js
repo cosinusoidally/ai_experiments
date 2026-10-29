@@ -25,6 +25,7 @@
         load("guest_vm/value_cell.js");
         load("guest_vm/heap_records.js");
         load("guest_vm/property_storage_kernel.js");
+        load("guest_vm/object_operations_kernel.js");
         load("guest_vm/aot/kernel_compiler.js");
         load("guest_vm/aot/backend_js.js");
         load("guest_vm/aot/x86_assembler.js");

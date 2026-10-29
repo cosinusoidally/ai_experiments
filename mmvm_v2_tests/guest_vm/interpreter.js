@@ -819,7 +819,7 @@
                         !!frame.program.strict);
                     frame.pc = pc + 4;
                 } else if (opcode === op.GET_KEYS) {
-                    registers[code[pc + 1]] = this.runtime.keys(registers[code[pc + 2]]);
+                    registers[code[pc + 1]] = this.runtime.enumerableKeys(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
                 } else if (opcode === op.JUMP) {
                     if (code[pc + 1] <= pc &&

@@ -68,6 +68,25 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-29, approximately 00:27 UTC, contract-70 operator/prototype and
+  inherited-enumeration checkpoint:
+  **3,292 executed, 3,277 passed, 15 failed, 0 not run; 6 instruction-limit
+  timeouts included in failures**. Pass rate **99.54%**; **9 non-timeout
+  failures remain**. Command: `./artifacts/js_runner.exe
+  artifacts/es51-enumeration.snap test262_runner.js --instruction-limit 20000`.
+  Elapsed **335.34 seconds**, user CPU **328.94 seconds**, peak RSS **549,644
+  KiB**; exit status 1. Exact failing-ID/variant comparison with contract 68
+  shows **15 new passes and zero new failures**. The remaining semantic
+  failures are eight catch-binding/scope cases and one permanent arguments
+  parameter-map detachment case. Chapters 9–11 now pass completely.
+  Remaining chapter totals: **7: 6; 9: 0; 10: 0; 11: 0; 12: 7; 13: 2**.
+  Raw log: `artifacts/es51-enumeration-full.log`. Both Node project checks
+  (12 programs / 270 assertions) and bounded GC stress pass. A system reboot
+  occurred after the contract-68 run; the faster total is not by itself a
+  controlled interpreter-throughput speedup claim. Focused checks of the
+  original 24 non-timeout failures progressed through 8/16, 13/11 and 15/9
+  pass/fail outcomes, each with zero not run/timeouts. No external source or
+  negative metadata expectation changed in this batch.
 - 2026-10-28, approximately 23:51 UTC, contract-68 restricted accessors and
   arguments instantiation:
   **3,292 executed, 3,262 passed, 30 failed, 0 not run; 6 instruction-limit

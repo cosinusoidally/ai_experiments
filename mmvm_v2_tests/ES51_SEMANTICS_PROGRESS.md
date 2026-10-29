@@ -291,6 +291,45 @@ total or an assertion of complete decimal-library conformance. The combined
 changes still require the final complete workload and snapshot fixed-point
 checks before the overall task is done.
 
+### Object operations and inherited enumeration (contract 70)
+
+The numeric-NaN shortcut no longer bypasses observable object coercion when
+the other operand is undefined. In particular, addition must let ToPrimitive
+select string concatenation before deciding its result. Unhandled object
+coercions use the guest-executed semantic interpreter, not a host JS engine.
+Likewise, an unsuccessful integer-index probe in `in` does not imply a
+missing property: negative/fractional/nonfinite numbers still require a
+property-key conversion. Array length deletion now respects its immutable
+non-configurable descriptor, including strict-mode error routing.
+
+`object_operations_kernel.js` centralizes representation-specific prototype
+selection and implements the `isPrototypeOf` intrinsic. It also supplies
+enumeration shadow checks: a nearer non-enumerable own property suppresses
+an inherited enumerable name just as an enumerable own property would.
+For-in enumeration visits the prototype chain in nearest-owner order and
+preserves each owner's insertion order. Ordinary own-entry loops avoid
+duplicate probes; inherited candidates consult the existing property lookup
+machinery. Indexed source-array elements retain their ordering. Unhandled
+exotic/indexed prototype cases use the matching guest semantic enumeration.
+
+The reference interpreter now distinguishes inherited enumeration from
+`Object.keys`, which remains own-only. Standard prototype methods and
+constructor links are installed with writable/configurable, non-enumerable
+attributes via one helper; user assignments keep ordinary property semantics.
+
+The full standalone inventory completes **3,277 passed / 15 failed / 0 not
+run**, including six instruction-limit timeouts: 15 new passes, zero new
+failing IDs against contract 68. Elapsed 335.34 seconds, user CPU 328.94,
+peak RSS 549,644 KiB. Node project checks and bounded GC stress pass. This
+run follows a reboot, so its faster elapsed time alone is not proof of an
+interpreter-throughput improvement. Nine non-timeout failures remain.
+
+All ten previously supported standalone Octane quick correctness selections
+also pass: Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay,
+NavierStokes, Box2D, Gameboy and zlib. The serial zlib run took 35.29 seconds
+(35.03 user CPU, 126,464 KiB peak RSS). These are correctness gates, not
+stock benchmark scores. RegExp remains excluded as requested.
+
 Compact literal ASTs represent `0`, `false`, and the empty string directly.
 An optional expression must therefore be tested against its absence sentinel,
 not by truthiness. In particular, a switch's default arm has a null test;
