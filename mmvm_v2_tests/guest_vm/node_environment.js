@@ -538,7 +538,14 @@
                         if (progressNow - progressReported >= 5000) {
                             this.test262Progress("instructions " + used + "/" + instructionLimit +
                                 ", elapsed " + (progressNow - progressStarted) +
-                                " ms, test heap bump " + this.runtime.linearHeap.bump + " bytes");
+                                " ms, test heap bump " + this.runtime.linearHeap.bump +
+                                ", limit " + this.runtime.linearHeap.allocationLimit +
+                                ", max " + this.runtime.linearHeap.maximumAllocationLimit +
+                                ", pressure " + this.runtime.gcHeapPressureBump +
+                                ", collections " + this.runtime.collectionCount +
+                                ", record allocations " + this.runtime.linearHeap.allocationCount +
+                                ", checkpoint " + this.runtime.gcRecordAllocationCheckpoint +
+                                ", last indexed free " + this.runtime.heapSweeper.reusableBytes);
                             progressReported = progressNow;
                         }
                     }

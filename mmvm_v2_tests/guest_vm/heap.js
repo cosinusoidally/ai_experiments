@@ -87,6 +87,7 @@
         this.growthCount = 0;
         this.destroyed = false;
         this.recordInitializer = null;
+        this.recordAllocationProvider = null;
     }
 
     Heap.Types = Types;
@@ -111,6 +112,10 @@
 
     Heap.prototype.setRecordInitializer = function (initializer) {
         this.recordInitializer = initializer;
+    };
+
+    Heap.prototype.setRecordAllocationProvider = function (provider) {
+        this.recordAllocationProvider = provider;
     };
 
     Heap.prototype.growToFit = function (requiredLimit) {
@@ -146,7 +151,9 @@
         }
         var size = align8(HEADER_SIZE + payloadBytes);
         var candidates = this.freeBlocks.length ? 1 : 0;
-        var address = this.takeLargestFreeBlock(size, true);
+        var address = this.recordAllocationProvider ?
+            this.recordAllocationProvider.reserveRecordSpan(size) : 0;
+        if (!address) address = this.takeLargestFreeBlock(size, true);
         if (address) size = this.freeRecordSize(address);
         var searchProfile = this.allocationSearchProfile;
         if (searchProfile) {

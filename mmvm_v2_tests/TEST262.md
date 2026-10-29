@@ -194,6 +194,16 @@ explicitly requested smaller limit remains enforced without exceptions for
 particular files. `--verbose` also reports each variant's instruction count
 and elapsed time, including failed/timed-out variants.
 
+For allocator diagnostics, standalone runs accept `--test-heap-bytes bytes`
+and `--test-max-heap-bytes bytes`. These configure only the inner test runtime;
+they do not change the control runtime or any instruction allowance. Without
+these options the normal VM defaults apply. The existing hosted test service
+rejects these options rather than silently ignoring a requested heap size.
+Verbose progress includes logical heap bounds and collection/allocation
+counters, useful for distinguishing live-memory pressure from allocator
+handoff overhead. An intentionally small instruction limit still produces a
+timeout; such a probe is not recorded as a conformance pass.
+
 Every variant receives a finite cumulative instruction allowance.  Exhausting
 one slice yields to the Test262 scheduler; it does not alter JavaScript state.
 The scheduler may grant another slice until the per-variant limit is reached.

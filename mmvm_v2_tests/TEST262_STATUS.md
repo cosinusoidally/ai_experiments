@@ -30,6 +30,32 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, approximately 13:03 UTC, all six previously timed-out cases
+  complete unchanged on standalone contract 74: **6 executed / 6 passed /
+  0 failed / 0 not run / 0 timed out**. This focused selection is not yet
+  a whole-suite result. Command: `./artifacts/js_runner.exe
+  artifacts/test262-shared-provider.snap test262_runner.js --verbose
+  --test-heap-bytes 8388608 --test-max-heap-bytes 536870912` followed by
+  the six exact IDs listed below. The normal 20,000,000-instruction budget
+  is unchanged. Elapsed **417.91 seconds**, user CPU **413.91 seconds**,
+  peak RSS **540,468 KiB**. Inner heap use stays around 3 MiB during the
+  RegExp loops, instead of repeatedly handing off a mostly free domain.
+  Raw log: `artifacts/test262-provider-six.log`.
+
+- 2026-10-29, shared reservation follow-up (in progress, not a full-suite
+  result): richer counters showed that the inner test runtime could have
+  about 15 MiB free at a 16 MiB logical limit, yet spend progressively longer
+  rebuilding allocator ownership on semantic calls. The previous growth
+  synchronization remains valid, but native GC was not the main cause of
+  these inner-runtime stalls: this embedding uses portable collection.
+  Portable record reservation now calls the existing compiled allocator
+  while native ownership is active; reservation itself never collects.
+  The Node project suite passes. A bounded 500,000-instruction probe with
+  an 8 MiB initial heap completes in 6.51 seconds of test execution, 17.04
+  seconds total, 199,188 KiB peak RSS, correctly reporting its requested
+  timeout rather than claiming a conformance pass. Six full-budget cases
+  are being rerun unchanged. Log: `artifacts/test262-provider-bounded.log`.
+
 - 2026-10-29, contract-73 growth synchronization checkpoint: an unfiltered
   default-budget run was interrupted while making slow progress in the
   second Unicode RegExp range case, after passing the two comment range

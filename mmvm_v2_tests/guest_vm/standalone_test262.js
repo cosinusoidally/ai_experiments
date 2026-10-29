@@ -14,9 +14,11 @@ if (typeof GuestVM !== "function" || typeof GuestNodeEnvironment !== "function" 
 var VM = GuestVM;
 var Environment = GuestNodeEnvironment;
 
-exports.create = function (filesystem, progress) {
+exports.create = function (filesystem, progress, options) {
     if (progress) progress("constructing guest test runtime");
-    var vm = new VM({rawFFI: true, nativeInterpreter: true, gcThreshold: 16384});
+    options = options || {};
+    var vm = new VM({rawFFI: true, nativeInterpreter: true, gcThreshold: 16384,
+        heapBytes: options.heapBytes, maxHeapBytes: options.maxHeapBytes});
     if (progress) progress("guest test runtime ready");
     /* Do not install a second Node environment, mutate the control globals,
      * or register callbacks to a process outside the standalone image. Reuse

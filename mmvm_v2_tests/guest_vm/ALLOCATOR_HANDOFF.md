@@ -6,10 +6,36 @@ not an external JavaScript host. A synchronous semantic call can re-enter a
 different context. A legacy wrapper-owned arena must relinquish ownership
 before such entry. The current engine-owned allocator instead has a single
 runtime-wide authoritative cursor: nested contexts share it, and every native
-entry republishes the portable tail. Portable allocation uses a disjoint free
-index or that tail. CALL/CONSTRUCT therefore do not themselves require an
+entry republishes the portable tail. Portable construction can reserve spans
+through that same compiled allocator. CALL/CONSTRUCT therefore do not themselves require an
 engine-owned allocator handoff. This is not permission to share stale,
 per-execution cursors.
+
+## Shared reservation service
+
+`Heap.setRecordAllocationProvider()` installs a runtime-owned provider.
+While native ownership is active, `NativeInterpreter.reserveRecordSpan()`
+reserves an aligned span through the compiled kernel entry. Frame zero selects
+this allocation-only entry mode; the budget argument carries the requested
+byte count rather than an execution allowance. It is an internal calling
+convention, not guest bytecode or a language feature. Normal frames retain
+their existing instruction-budget semantics. Both compiler backends execute
+the same `reservePortableRecordKernel` and `reserveNativeAllocationKernel`.
+
+Reservation never collects: partially constructed objects may not yet have
+their final roots. It preserves execution counters and the previous allocation
+failure status. On success it publishes valid reserved/free headers, advances
+the authoritative cursor and materializes the remaining arena suffix. The
+ordinary heap initializer still performs zeroing, including the existing
+separately allocated Buffer-backing metadata rule. On failure the provider
+releases ownership, allowing the ordinary allocator to reuse or grow storage;
+automatic collection remains at established safe points.
+
+This avoids copying the whole free-space index whenever the portable tail is
+full but native-owned regions are mostly empty. A logical heap limit is not
+proof of live-memory exhaustion. Verbose Test262 diagnostics include the
+logical bump/limit, collection pressure, collection count, record-allocation
+checkpoint and last indexed-free total to distinguish those conditions.
 
 ## Previously unbounded work
 

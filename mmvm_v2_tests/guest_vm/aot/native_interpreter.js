@@ -59,7 +59,7 @@
     /* Native execution consumes private contiguous suffixes of ordinary free
      * records. Region changes now happen inside the compiled allocator, so
      * they no longer re-enter the interpreter and do not need coarse 64 KiB
-     * arenas. Keep only very small holes for exact host-side allocations;
+     * arenas. Retire very small holes until collection can coalesce them;
      * measurements after demo8 collection show that the 256-byte cutoff makes
      * essentially all reclaimed bytes available to native execution while
      * avoiding a long chain of 32--64-byte records. */
@@ -14603,6 +14603,11 @@
     function nativeExecutionKernel(heapBase, frame, platformServices,
                                    arrayLengthKey, arrayPrototype,
                                    stringSupport, budget, state) {
+        /* Frame zero selects the allocation service, not bytecode execution.
+         * In that entry mode budget is the requested aligned span size. The
+         * service never collects or touches instruction/frame state, so a
+         * portable constructor can reserve storage before publishing roots. */
+        if (frame === 0) return reservePortableRecordKernel(heapBase, state, budget);
         var FREE_RECORD_HEADER_BYTES = 16;
         /* Record offsets are compiler-substituted from
          * HeapRecords.KernelConstants. The zero initializers are kernel
@@ -14920,10 +14925,36 @@
                 setRecordSize(heapBase, remainingRegion,
                               remainingRegionSize);
                 setRecordMark(heapBase, remainingRegion, 0);
-                setRecordFlags(heapBase, remainingRegion, 2);
+                setRecordFlags(heapBase, remainingRegion, NATIVE_ALLOCATION_REGION_FLAG);
             }
         }
         return reason;
+    }
+
+    function reservePortableRecordKernel(heapBase, state, bytes) {
+        var previousFailure = engineAllocationFailed(heapBase, state);
+        var reserved = reserveNativeAllocationKernel(heapBase, state, bytes);
+        setEngineAllocationFailed(heapBase, state, previousFailure);
+        if (reserved === 0) return 0;
+        var address = engineHeapBump(heapBase, state);
+        var next = address + bytes;
+        setEngineHeapBump(heapBase, state, next);
+        setRecordType(heapBase, address, HEAP_TYPE_FREE);
+        setRecordSize(heapBase, address, bytes);
+        setRecordMark(heapBase, address, 0);
+        setRecordFlags(heapBase, address, NATIVE_ALLOCATION_REGION_FLAG);
+        if (engineNativeRegionActive(heapBase, state) === 0) {
+            setEngineNativeTailBump(heapBase, state, next);
+        } else {
+            var remaining = engineNativeRegionEnd(heapBase, state) - next;
+            if (remaining >= FREE_RECORD_HEADER_BYTES) {
+                setRecordType(heapBase, next, HEAP_TYPE_FREE);
+                setRecordSize(heapBase, next, remaining);
+                setRecordMark(heapBase, next, 0);
+                setRecordFlags(heapBase, next, NATIVE_ALLOCATION_REGION_FLAG);
+            }
+        }
+        return address;
     }
 
     function reserveNativeAllocationKernel(heapBase, state, bytes) {
@@ -17938,6 +17969,7 @@
                 restoreContextActiveFrameKernel,
             returnFromBytecodeKernel: returnFromBytecodeKernel,
             reserveNativeAllocationKernel: reserveNativeAllocationKernel,
+            reservePortableRecordKernel: reservePortableRecordKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
@@ -18088,6 +18120,8 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: {
+                    NATIVE_ALLOCATION_REGION_FLAG: NATIVE_ALLOCATION_REGION_FLAG,
+                    FREE_RECORD_HEADER_BYTES: FREE_RECORD_HEADER_BYTES,
                     PROGRAM_CALLABLE_RECORD_BYTES: kernelConstantOverrides.PROGRAM_CALLABLE_RECORD_BYTES,
                     RESTRICTED_FUNCTION_PROPERTY_BYTES: kernelConstantOverrides.RESTRICTED_FUNCTION_PROPERTY_BYTES,
                     ARGUMENTS_UNMAPPED_ENVIRONMENT: kernelConstantOverrides.ARGUMENTS_UNMAPPED_ENVIRONMENT,
@@ -18743,6 +18777,7 @@
             this.nativeResult.bytes = null;
             this.nativeResult.assembly = "";
         }
+        runtime.linearHeap.setRecordAllocationProvider(this);
     }
 
     NativeInterpreter.Exit = Exit;
@@ -19009,8 +19044,8 @@
         /* A legacy wrapper-owned arena cannot survive recursive execution.
          * The current engine-owned allocator is different: all contexts share
          * its authoritative cursor, and run() republishes the portable tail
-         * before every entry. Portable allocation uses only the disjoint tail
-         * or its own free index. Re-entry therefore shares allocator state,
+         * before every entry. Portable allocation reserves through the same
+         * compiled allocator. Re-entry therefore shares allocator state,
          * not a stale per-execution arena. Collection still releases it. */
         if (!this.nativeFreeRegionsOwned &&
                 (opcode === Bytecode.CALL || opcode === Bytecode.CONSTRUCT)) {
@@ -19018,18 +19053,9 @@
             return false;
         }
         if (this.nativeFreeRegionsOwned) {
-            /* Native-owned regions have been removed from the host allocator
-             * index, while their active suffix is a published FREE record.
-             * Host semantics can therefore allocate safely from retained
-             * small blocks or the disjoint tail without forcing an ownership
-             * round trip. This is important for periodic formatting and I/O:
-             * sorting thousands of reclaimed regions at each such call makes
-             * an otherwise short host service visibly stall animation. */
-            if (heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES <=
-                    heap.allocationLimit ||
-                heap.largestFreeBlockSize() >=
-                    MIN_NATIVE_ALLOCATION_REGION_BYTES) return false;
-            this.releaseAllocationRegionForCollection();
+            /* Portable constructors use reserveRecordSpan(), sharing the
+             * compiled allocator rather than rebuilding its free index. */
+            return false;
         }
         if (!this.allocationRegion) {
             return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
@@ -19052,6 +19078,31 @@
                    heap.allocationLimit &&
                heap.largestFreeBlockSize() <
                    MIN_NATIVE_ALLOCATION_REGION_BYTES;
+    };
+
+    NativeInterpreter.prototype.reserveRecordSpan = function (bytes) {
+        if (!this.nativeFreeRegionsOwned) return 0;
+        var heap = this.runtime.linearHeap;
+        var records = this.runtime.heapRecords;
+        records.setEngineNativeTailBounds(this.stateAddress,
+            heap.bump, heap.allocationLimit);
+        if (!records.engineNativeRegionActive(this.stateAddress)) {
+            records.setEngineHeapBounds(this.stateAddress,
+                heap.bump, heap.allocationLimit);
+        }
+        var address = this.nativeResult.fn ? this.nativeResult.fn(
+            heap.memory.nativeAddress(0), 0, 0, 0, 0, 0, bytes,
+            this.statePayload) : this.js.fn(
+            heap.memory, 0, 0, 0, 0, 0, 0, bytes, this.statePayload);
+        var tail = records.engineNativeTailBump(this.stateAddress);
+        if (tail > heap.bump) heap.bump = tail;
+        if (!address) {
+            /* Reservation cannot collect while a constructor is incomplete.
+             * Return ownership to the ordinary allocator for growth; the
+             * next safe point remains responsible for collection. */
+            this.releaseAllocationRegionForCollection();
+        }
+        return address;
     };
 
     NativeInterpreter.prototype.needsLogicalHeapGrowth = function () {
@@ -19655,6 +19706,7 @@
     };
 
     NativeInterpreter.prototype.destroy = function () {
+        this.runtime.linearHeap.setRecordAllocationProvider(null);
         if (this.nativeResult) this.nativeResult.destroy();
         this.nativeResult = null;
         this.js = null;

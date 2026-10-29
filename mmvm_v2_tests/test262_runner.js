@@ -24,6 +24,7 @@
     var listOnly = false;
     var requestedVariant = "";
     var instructionLimit = 20000000;
+    var testRuntimeOptions = {};
     var selectors = [];
 
     function failUsage(message) {
@@ -32,7 +33,8 @@
             "[--quiet] [--summary-only] [--fresh-contexts] " +
             "[--self-hosted-eval] [--list] " +
             "[--strict-only|--non-strict-only] " +
-            "[--instruction-limit count] [all|path ...]");
+            "[--instruction-limit count] [--test-heap-bytes bytes] " +
+            "[--test-max-heap-bytes bytes] [all|path ...]");
         process.exit(2);
     }
 
@@ -73,6 +75,12 @@
             requestedVariant = "non-strict";
         }
         else if (argument === "--help") failUsage("");
+        else if (argument === "--test-heap-bytes" || argument === "--test-max-heap-bytes") {
+            if (argumentIndex >= runnerArguments.length) failUsage(argument + " requires bytes");
+            var heapOption = Number(runnerArguments[argumentIndex++]);
+            if (!(heapOption > 0) || heapOption !== Math.floor(heapOption)) failUsage("invalid heap size");
+            testRuntimeOptions[argument === "--test-heap-bytes" ? "heapBytes" : "maxHeapBytes"] = heapOption;
+        }
         else if (argument === "--instruction-limit") {
             if (argumentIndex >= runnerArguments.length) {
                 failUsage("--instruction-limit requires a count");
@@ -149,7 +157,10 @@
              __guestVMStandaloneImageBase !== 0);
     if (ownsTestRuntime) {
         Test262VM = require("./guest_vm/standalone_test262.js").create(fs,
-            verbose ? function (phase) { console.log("Test262: " + phase); } : null);
+            verbose ? function (phase) { console.log("Test262: " + phase); } : null,
+            testRuntimeOptions);
+    } else if (testRuntimeOptions.heapBytes || testRuntimeOptions.maxHeapBytes) {
+        failUsage("test heap options require the guest-owned standalone embedding");
     }
     if (selfHostedEval) {
         if (ownsTestRuntime) Test262VM.installEvalCompiler();
