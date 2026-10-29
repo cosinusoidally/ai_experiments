@@ -146,16 +146,8 @@
         }
         var size = align8(HEADER_SIZE + payloadBytes);
         var candidates = this.freeBlocks.length ? 1 : 0;
-        var address = this.takeLargestFreeBlock(size);
-        if (address) {
-            var candidateSize = this.freeRecordSize(address);
-            var remainder = candidateSize - size;
-            if (remainder >= HEADER_SIZE + RECORD_ALIGNMENT) {
-                var remainderAddress = address + size;
-                this.publishFreeRegion(remainderAddress, remainder, 0);
-                this.addFreeBlock(remainderAddress);
-            } else size = candidateSize;
-        }
+        var address = this.takeLargestFreeBlock(size, true);
+        if (address) size = this.freeRecordSize(address);
         var searchProfile = this.allocationSearchProfile;
         if (searchProfile) {
             searchProfile.allocations++;
@@ -405,7 +397,7 @@
         blocks[index] = address;
     };
 
-    Heap.prototype.takeLargestFreeBlock = function (minimumSize) {
+    Heap.prototype.takeLargestFreeBlock = function (minimumSize, split) {
         if (!this.freeBlocks.length) return 0;
         if (!this.freeBlocksAreMaxHeap) this.buildFreeBlockMaxHeap();
         var claimedAddress = this.freeBlocks[0];
@@ -419,9 +411,17 @@
                             claimedAddress + " type=" + type +
                             " flags=" + flags);
         }
-        var last = this.freeBlocks.pop();
+        var remainder = bestSize - minimumSize;
+        if (split && remainder >= HEADER_SIZE + RECORD_ALIGNMENT) {
+            var remainderAddress = claimedAddress + minimumSize;
+            this.publishFreeRegion(remainderAddress, remainder, 0);
+            this.memory.writeU32Trusted(claimedAddress + HEADER_SIZE_FIELD, minimumSize);
+            this.freeBlocks[0] = remainderAddress;
+        } else {
+            var last = this.freeBlocks.pop();
+            if (this.freeBlocks.length) this.freeBlocks[0] = last;
+        }
         if (this.freeBlocks.length) {
-            this.freeBlocks[0] = last;
             var root = 0;
             while (true) {
                 var left = root * 2 + 1;

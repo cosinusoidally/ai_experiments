@@ -30,6 +30,19 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, contract-73 growth synchronization checkpoint: an unfiltered
+  default-budget run was interrupted while making slow progress in the
+  second Unicode RegExp range case, after passing the two comment range
+  files and the first RegExp range file. It is **not** a completed suite
+  result. Logs showed repeated collection near a 64 MiB logical boundary.
+  Native GC's increased tail/headroom limit was being overwritten by the
+  portable wrapper on re-entry. Native return now synchronizes that growth
+  and adaptive pressure bound within the existing maximum reservation.
+  Allocation splits also update the priority root in place. The Node project
+  suite and both bounded GC checks pass; the full default-budget inventory
+  is being rerun from the beginning, not resumed with missing tests.
+  Interrupted log: `artifacts/test262-complete-default.log`.
+
 - 2026-10-29, approximately 09:49 UTC, first completed Unicode RegExp range
   result at the default budget: `ch07/7.8/7.8.5/S7.8.5_A1.1_T2.js` passes
   unchanged, **8,702,778 instructions**, measured variant time **104.80

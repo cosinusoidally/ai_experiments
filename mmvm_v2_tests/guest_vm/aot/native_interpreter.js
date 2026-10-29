@@ -19167,6 +19167,17 @@
         }
         var nativeHeapBump = records.engineHeapBump(this.stateAddress);
         var nativeTailBump = records.engineNativeTailBump(this.stateAddress);
+        var nativeTailLimit = records.engineNativeTailLimit(this.stateAddress);
+        /* Native GC can grant adaptive headroom or grow the logical limit.
+         * Preserve that decision across semantic calls. Reinstalling the old
+         * portable pressure bound on every entry otherwise makes a mostly
+         * live heap collect repeatedly at the same exhausted boundary. */
+        if (nativeTailLimit > heap.allocationLimit && !heap.growToFit(nativeTailLimit)) {
+            throw new RangeError("native heap growth exceeds the runtime reservation");
+        }
+        if (nativeTailLimit > this.runtime.gcHeapPressureBump) {
+            this.runtime.resetHeapPressureBump(nativeTailLimit);
+        }
         if (!records.engineNativeRegionActive(this.stateAddress) &&
             nativeHeapBump > heap.bump) {
             heap.bump = nativeHeapBump;

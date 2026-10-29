@@ -60,12 +60,23 @@ derived indexes and rebuilds from the post-collection record graph. The
 existing stricter unchanged-domain certificate can also restore an untouched
 borrowed index directly.
 
+The native return path also preserves increases in the native tail/pressure
+limit. `Heap.growToFit` synchronizes logical growth within the existing
+reservation, and `resetHeapPressureBump` carries adaptive post-GC headroom
+forward. Without this synchronization, the next entry reinstalls an older
+portable limit and repeatedly collects at the same boundary. Neither the
+reserved address span nor the configured maximum is increased.
+
 ## Portable allocation priority index
 
 The portable allocator no longer linearly searches all free blocks for every
 allocation. It consumes a sufficient maximum from the existing binary max
 heap. Ordinary frees and split remainders maintain that heap incrementally in
 O(log n); bulk producers invalidate it and heapify once when first queried.
+An allocation split decreases the existing root in place rather than popping
+and reinserting a nearly identical largest block. The common case keeps its
+maximum with only the root/child comparisons, avoiding two unnecessary tree
+walks per small record.
 An allocation larger than the maximum fails the free-space probe in O(1),
 then uses the tail/growth path. The allocation-search counters now count the
 single candidate inspected rather than hypothetical first-fit iterations.
