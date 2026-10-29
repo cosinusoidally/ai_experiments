@@ -71,6 +71,16 @@ then uses the tail/growth path. The allocation-search counters now count the
 single candidate inspected rather than hypothetical first-fit iterations.
 No record lifetime or zero-initialization guarantee changes.
 
+## Compilation pressure
+
+At ordinary GC safe points, allocation debt also considers the heap's
+monotonic record-allocation counter. Program descriptors, bytecode and
+constant pools otherwise allocate without necessarily creating object
+handles, so handle-only debt can postpone cleanup of their weak metadata.
+The checkpoint resets after collection. This adds no callback to allocation
+and never collects while a program record is partially constructed. Native
+allocations retain their existing byte-pressure/allocator-exhaustion policy.
+
 This is a general allocator protocol, not an eval/source/test cache. It does
 not weaken instruction limits or alter guest-visible allocation lifetimes.
 Both JavaScript and i386 backends use the same native kernel source; the

@@ -30,6 +30,18 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
+- 2026-10-29, approximately 09:49 UTC, first completed Unicode RegExp range
+  result at the default budget: `ch07/7.8/7.8.5/S7.8.5_A1.1_T2.js` passes
+  unchanged, **8,702,778 instructions**, measured variant time **104.80
+  seconds**; complete one-file command **115.21 seconds**, user CPU 114.25
+  seconds, peak RSS **551,336 KiB**. Selection totals: **1 passed / 0 failed /
+  0 not run / 0 timed out**. This is a focused result, not a whole-suite total.
+  The two comment range cases have also completed at the default allowance;
+  three other RegExp range files remain to be completed. Program-record
+  allocations now contribute to automatic GC pressure at existing safe
+  points. The Node project suite and both bounded GC checks pass after that
+  change. Raw log: `artifacts/test262-regexp-record-pressure.log`.
+
 - 2026-10-29, approximately 09:42 UTC, completion investigation (focused,
   not a new full-suite total): the two Unicode comment tests pass unchanged
   at the existing default 20,000,000-instruction allowance. They use

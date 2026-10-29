@@ -333,6 +333,7 @@
         this.gcThreshold = options.gcStress ? 1 :
             normalizeGCThreshold(options.gcThreshold);
         this.gcAllocationDebt = 0;
+        this.gcRecordAllocationCheckpoint = 0;
         this.gcPending = false;
         this.gcCollecting = false;
         this.gcHeapPressureBump = 0;
@@ -2456,6 +2457,14 @@
     };
 
     Runtime.prototype.gcSafePoint = function () {
+        /* Compiler/program records do not create ordinary object handles,
+         * but still consume heap and weak metadata. Include their actual
+         * record allocations in the existing debt policy, without adding a
+         * callback to every allocator operation or collecting mid-build. */
+        if (this.linearHeap && this.linearHeap.allocationCount -
+                this.gcRecordAllocationCheckpoint >= this.gcThreshold) {
+            this.gcPending = true;
+        }
         if (this.gcPending && !this.gcCollecting && this.compiledDepth === 0) {
             this.collect();
         }
@@ -5318,6 +5327,7 @@
             var sweepingFinished = this.profileOpcodeCounts ?
                 new Date().getTime() : 0;
             this.gcAllocationDebt = 0;
+            this.gcRecordAllocationCheckpoint = this.linearHeap.allocationCount;
             this.gcPending = false;
             this.collectionCount++;
             if (this.nativeInterpreter) {
