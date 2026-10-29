@@ -91,6 +91,13 @@
                 }
             } else if (opcode === op.JUMP) {
                 jumps.push(code[pc + 1]);
+            } else if (opcode === op.PUSH_CATCH_SCOPE) {
+                jumps.push(code[pc + 1]);
+                var scopeName = code[pc + 2];
+                if (scopeName < 0 || scopeName >= program.constants.length ||
+                        typeof program.constants[scopeName] !== "string") {
+                    throw new Error("invalid catch name at bytecode " + pc);
+                }
             } else if (opcode === op.PUSH_CATCH) {
                 jumps.push(code[pc + 1]);
                 var catchBinding = code[pc + 2];

@@ -13,6 +13,7 @@
     var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
     var NumberFormatKernels = root.GuestVMNumberFormatKernel;
     var ObjectOperationKernels = root.GuestVMObjectOperationsKernel;
+    var LexicalEnvironmentKernels = root.GuestVMLexicalEnvironmentKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
         JSBackend = require("./backend_js.js");
@@ -26,6 +27,7 @@
         PropertyStorageKernels = require("../property_storage_kernel.js");
         NumberFormatKernels = require("../number_format_kernel.js");
         ObjectOperationKernels = require("../object_operations_kernel.js");
+        LexicalEnvironmentKernels = require("../lexical_environment_kernel.js");
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
@@ -36,6 +38,8 @@
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
+    var OP_PUSH_CATCH_SCOPE = Bytecode.PUSH_CATCH_SCOPE;
+    var OP_LAST = Bytecode.NAMES.length - 1;
     var BYTECODE_REGISTER_SCALE = ValueCells.PAYLOAD_BYTES;
     var BYTECODE_LAYOUT_WIDTH = Bytecode.NATIVE_LAYOUT.WIDTH;
     var BYTECODE_LAYOUT_REGISTER_MASK = Bytecode.NATIVE_LAYOUT.REGISTER_MASK;
@@ -174,7 +178,9 @@
             PROFILE_OPCODES: profileOpcodes ? 1 : 0,
             OP_ADD_INT32: OP_ADD_INT32,
             OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
-            OP_TO_INT32: OP_TO_INT32
+            OP_TO_INT32: OP_TO_INT32,
+            OP_PUSH_CATCH_SCOPE: OP_PUSH_CATCH_SCOPE,
+            OP_LAST: OP_LAST
         };
         overrides.CELL_INT32 = CELL_INT32;
         overrides.CELL_DOUBLE = CELL_DOUBLE;
@@ -886,7 +892,7 @@
             }
             /* Unsupported opcodes take the dispatch body's default exit;
              * they do not need a second range filter on every iteration. */
-            beginOpcodeDispatch(opcode, OP_CONST, OP_TO_INT32);
+            beginOpcodeDispatch(opcode, OP_CONST, OP_LAST);
             if (opcode === OP_TO_INT32) {
                 var conversionTarget = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
@@ -1718,6 +1724,18 @@
                 var arraySetSource = registerAddress +
                     arraySetSourceIndex * VALUE_CELL_BYTES;
                 if (arraySetSupported === 1) {
+                    var argumentEnvironment = arrayReserved(heapBase, arraySetObject);
+                    if (argumentEnvironment !== 0 && argumentEnvironment !== ARGUMENTS_UNMAPPED_ENVIRONMENT) {
+                        var argumentPresent = 0;
+                        if (arraySetIndex < vectorLength(heapBase, arraySetVector)) {
+                            if (valueCellTag(0, vectorCellAddress(heapBase, arraySetVector, arraySetIndex)) !== 0) argumentPresent = 1;
+                        }
+                        if (argumentPresent === 0) {
+                            if (detachArgumentMappingKernel(heapBase, state, arraySetObject, arraySetIndex) === 0) {
+                                return unsupportedExitKernel(heapBase, state, frame, pc, opcode, initialBudget - budget);
+                            }
+                        }
+                    }
                     var mappedArgumentDestination =
                         argumentsMappedCellKernel(
                             heapBase, arraySetObject, arraySetIndex);
@@ -3596,7 +3614,11 @@
                         heapBase, state, frame, initialBudget - budget + 1);
                 }
                 gcStressInterval = engineGCStressInterval(heapBase, state);
-            } else if (opcode === OP_PUSH_CATCH) {
+            } else if (opcode === OP_LEAVE_WITH) {
+                environment = environmentParent(heapBase, environment);
+                setFrameEnvironment(heapBase, frame, environment);
+                pc = pc + 1;
+            } else if (opcode === OP_PUSH_CATCH || opcode === OP_PUSH_CATCH_SCOPE) {
                 if (reserveNativeAllocationKernel(
                         heapBase, state, HANDLER_RECORD_BYTES) === 0) {
                     return unsupportedExitKernel(
@@ -3612,6 +3634,9 @@
                 setRecordSize(heapBase, pushedHandler, HANDLER_RECORD_BYTES);
                 setRecordMark(heapBase, pushedHandler, 0);
                 setRecordFlags(heapBase, pushedHandler, 0);
+                if (opcode === OP_PUSH_CATCH_SCOPE) {
+                    setRecordFlags(heapBase, pushedHandler, HANDLER_LEXICAL_BINDING_FLAG);
+                }
                 setHandlerNext(heapBase, pushedHandler,
                                frameHandler(heapBase, frame));
                 setHandlerTarget(heapBase, pushedHandler, load32(
@@ -3988,7 +4013,7 @@
                 var deleteNameEnvironment = environment;
                 var deleteNameDynamicObject = 0;
                 while (deleteNameEnvironment !== 0) {
-                    if (environmentObject(
+                    if (environmentObjectKernel(
                             heapBase, deleteNameEnvironment) !== 0) {
                         deleteNameDynamicObject = 1;
                         deleteNameEnvironment = 0;
@@ -11718,6 +11743,7 @@
         if (environment === ARGUMENTS_UNMAPPED_ENVIRONMENT) return 0;
         var elements = arrayElements(heapBase, array);
         if (index < 0) return 0;
+        if (argumentMappingDetachedKernel(heapBase, environment, index) === 1) return 0;
         if (index >= vectorLength(heapBase, elements)) return 0;
         if (valueCellTag(0, vectorCellAddress(
                 heapBase, elements, index)) === 0) return 0;
@@ -14204,7 +14230,17 @@
         var catchBindingSlot = handlerBindingSlot(
             heapBase, catchHandler) | 0;
         var catchDestination = 0;
-        if (catchBindingSlot >= 0) {
+        if ((recordFlags(heapBase, catchHandler) & HANDLER_LEXICAL_BINDING_FLAG) !== 0) {
+            var scopedProgram = frameProgram(heapBase, catchFrame);
+            var scopedConstants = executionProgramConstantsKernel(heapBase, state, scopedProgram);
+            var scopedNameCell = vectorCellAddress(heapBase, scopedConstants, catchBindingSlot);
+            if (valueCellTag(0, scopedNameCell) !== VALUE_TAG_REFERENCE) return 0;
+            var scopedName = valueCellReference(0, scopedNameCell);
+            catchEnvironment = allocateCatchEnvironmentKernel(
+                heapBase, state, catchEnvironment, scopedName, throwSource);
+            if (catchEnvironment === 0) return 0;
+            catchDestination = environmentCellAddress(heapBase, catchEnvironment, 0);
+        } else if (catchBindingSlot >= 0) {
             if (catchEnvironment === 0) return 0;
             if (catchBindingSlot >= environmentCount(
                     heapBase, catchEnvironment)) return 0;
@@ -15049,17 +15085,23 @@
                     }
                 }
             }
+            var elementIndex = -1;
             if (keyTag === VALUE_TAG_INT32) {
-                var elementIndex = valueCellInt32(0, keyCell);
-                var elements = arrayElements(heapBase, object);
-                if (elementIndex >= 0) {
-                    if (elementIndex < vectorLength(heapBase, elements)) {
-                        store32(vectorCellAddress(
-                            heapBase, elements, elementIndex), 0);
-                    }
-                    setValueCellTrue(targetCell);
-                    return 1;
+                elementIndex = valueCellInt32(0, keyCell);
+            } else if (keyTag === VALUE_TAG_REFERENCE) {
+                var indexedDeleteKey = valueCellReference(0, keyCell);
+                if (recordType(heapBase, indexedDeleteKey) === HEAP_TYPE_STRING) {
+                    elementIndex = propertyKeyIndexKernel(heapBase, indexedDeleteKey);
                 }
+            }
+            if (elementIndex >= 0) {
+                var elements = arrayElements(heapBase, object);
+                if (elementIndex < vectorLength(heapBase, elements)) {
+                    if (detachArgumentMappingKernel(heapBase, state, object, elementIndex) === 0) return 0;
+                    setValueCellTag(0, vectorCellAddress(heapBase, elements, elementIndex), 0);
+                }
+                setValueCellTrue(targetCell);
+                return 1;
             }
         }
         var numericKey = 0;
@@ -15439,13 +15481,13 @@
         return bytes;
     }
 
-    function programIntegerVectorBytesKernel(length) {
+    function integerVectorRecordBytesKernel(length) {
         return (INTEGER_VECTOR_FIXED_BYTES + length * HEAP_WORD_BYTES +
             HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
     }
 
-    function initializeProgramIntegerVectorKernel(heapBase, vector, length, initial) {
-        var bytes = programIntegerVectorBytesKernel(length);
+    function initializeIntegerVectorKernel(heapBase, vector, length, initial) {
+        var bytes = integerVectorRecordBytesKernel(length);
         setRecordType(heapBase, vector, HEAP_TYPE_INTEGER_VECTOR);
         setRecordSize(heapBase, vector, bytes);
         setRecordMark(heapBase, vector, 0);
@@ -15645,9 +15687,9 @@
         if (evalProgram < 0) return 0;
         var bytecodeBytes = (BYTECODE_FIXED_BYTES + codeLength * 4 + 7) & -8;
         var constantBytes = 24 + constantLength * VALUE_CELL_BYTES;
-        var constantMapBytes = programIntegerVectorBytesKernel(constantLength);
-        var bindingBytes = programIntegerVectorBytesKernel(bindingLength);
-        var parameterBytes = programIntegerVectorBytesKernel(parameterLength);
+        var constantMapBytes = integerVectorRecordBytesKernel(constantLength);
+        var bindingBytes = integerVectorRecordBytesKernel(bindingLength);
+        var parameterBytes = integerVectorRecordBytesKernel(parameterLength);
         var callableBytes = programCallableRecordBytesKernel(strictProgram);
         var programAllocationBytes = bytecodeBytes + constantBytes + constantMapBytes +
             bindingBytes + parameterBytes + PROGRAM_RECORD_BYTES +
@@ -15678,11 +15720,11 @@
         }
         var initializedBytes = initializeProgramVectorKernel(
             heapBase, constants, constantLength, INVALID_PROGRAM_INTEGER);
-        initializedBytes = initializeProgramIntegerVectorKernel(
+        initializedBytes = initializeIntegerVectorKernel(
             heapBase, constantRegisters, constantLength, -1);
-        initializedBytes = initializeProgramIntegerVectorKernel(
+        initializedBytes = initializeIntegerVectorKernel(
             heapBase, bindingRegisters, bindingLength, -1);
-        initializedBytes = initializeProgramIntegerVectorKernel(
+        initializedBytes = initializeIntegerVectorKernel(
             heapBase, parameters, parameterLength, -1);
         setRecordType(heapBase, program, HEAP_TYPE_PROGRAM);
         setRecordSize(heapBase, program, PROGRAM_RECORD_BYTES);
@@ -15927,10 +15969,10 @@
         if (index >= integerVectorLength(heapBase, vector)) return 0;
         if ((recordFlags(heapBase, vector) & VECTOR_SHARED_METADATA_FLAG) !== 0) {
             var count = integerVectorLength(heapBase, vector);
-            var bytes = programIntegerVectorBytesKernel(count);
+            var bytes = integerVectorRecordBytesKernel(count);
             if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
             var writable = engineHeapBump(heapBase, state);
-            initializeProgramIntegerVectorKernel(heapBase, writable, count,
+            initializeIntegerVectorKernel(heapBase, writable, count,
                 INVALID_PROGRAM_INTEGER);
             var element = 0;
             while (element < count) {
@@ -17816,8 +17858,8 @@
             instantiateGlobalDeclarationsKernel:
                 instantiateGlobalDeclarationsKernel,
             initializeProgramVectorKernel: initializeProgramVectorKernel,
-            initializeProgramIntegerVectorKernel: initializeProgramIntegerVectorKernel,
-            programIntegerVectorBytesKernel: programIntegerVectorBytesKernel,
+            initializeIntegerVectorKernel: initializeIntegerVectorKernel,
+            integerVectorRecordBytesKernel: integerVectorRecordBytesKernel,
             argumentRegisterVectorKernel: argumentRegisterVectorKernel,
             prepareArgumentRegisterVectorKernel: prepareArgumentRegisterVectorKernel,
             interpreterKernel: interpreterKernel,
@@ -17915,6 +17957,11 @@
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var propertyKernelName;
+        for (propertyKernelName in LexicalEnvironmentKernels.functions) {
+            if (Object.prototype.hasOwnProperty.call(LexicalEnvironmentKernels.functions, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = LexicalEnvironmentKernels.functions[propertyKernelName];
+            }
+        }
         for (propertyKernelName in ObjectOperationKernels.functions) {
             if (Object.prototype.hasOwnProperty.call(ObjectOperationKernels.functions, propertyKernelName)) {
                 kernelDependencies[propertyKernelName] = ObjectOperationKernels.functions[propertyKernelName];
@@ -18133,6 +18180,8 @@
                     OP_ADD_INT32: OP_ADD_INT32,
                     OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
                     OP_TO_INT32: OP_TO_INT32,
+                    OP_PUSH_CATCH_SCOPE: OP_PUSH_CATCH_SCOPE,
+                    OP_LAST: OP_LAST,
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0,
                     ENGINE_OPCODE_COUNT: kernelConstantOverrides.ENGINE_OPCODE_COUNT,
                     ENGINE_OPCODE_TAG_COUNT: kernelConstantOverrides.ENGINE_OPCODE_TAG_COUNT,
@@ -18172,6 +18221,15 @@
                 constantOverrides: kernelConstantOverrides
             };
             var binaryConstantName;
+            var lexicalConstantNames = ["ENVIRONMENT_SINGLE_BINDING_FLAG",
+                "ENVIRONMENT_DETACHED_ARGUMENTS_FLAG", "HANDLER_LEXICAL_BINDING_FLAG",
+                "ENVIRONMENT_FIXED_BYTES", "ARGUMENT_MAPPING_WORD_BITS"];
+            var lexicalConstantIndex = 0;
+            while (lexicalConstantIndex < lexicalConstantNames.length) {
+                var lexicalConstantName = lexicalConstantNames[lexicalConstantIndex++];
+                compilerOptions.constantBindings[lexicalConstantName] =
+                    HeapRecords.KernelConstants[lexicalConstantName];
+            }
             for (binaryConstantName in Binary64.KernelConstants) {
                 if (Object.prototype.hasOwnProperty.call(
                         Binary64.KernelConstants, binaryConstantName)) {

@@ -31,6 +31,17 @@
             root.dictionary["field-" + index] = seed + index * 3;
         }
         root.read = function () { return root.values[1]; };
+        try {
+            throw {seed: seed, parent: root};
+        } catch (caught) {
+            root.readCaught = function () { return caught; };
+        }
+        root.detachedArguments = (function (parameter) {
+            var saved = arguments;
+            delete saved[0];
+            saved[0] = seed + 1;
+            return {saved: saved, readParameter: function () { return parameter; }};
+        }(seed));
         var orphan = Buffer.alloc(32);
         for (index = 0; index < 32; index++) orphan[index] = bytePattern(seed, index);
         root.orphanView = orphan.slice(8, 24);
@@ -43,6 +54,10 @@
         if (root.self !== root || root.child.parent !== root ||
                 root.child.shared !== root.values ||
                 root.read() !== root.seed + 0.25 ||
+                root.readCaught().seed !== root.seed ||
+                root.readCaught().parent !== root ||
+                root.detachedArguments.saved[0] !== root.seed + 1 ||
+                root.detachedArguments.readParameter() !== root.seed ||
                 root.values[0] !== root.seed || root.values[2] !== -root.seed ||
                 root.wide.charCodeAt(0) !== 256 ||
                 root.wide.charCodeAt(1) !== 55296 || root.text.length !== 45) {

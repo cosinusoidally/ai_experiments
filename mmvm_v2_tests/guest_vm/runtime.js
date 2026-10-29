@@ -1053,10 +1053,30 @@
         var metadata = this.environmentMetadata[key];
         if (metadata) return metadata;
         this.linearHeap.requireRecord(address, Heap.Types.ENVIRONMENT);
+        var bindingName = this.heapRecords.environmentBindingName(address);
+        if (bindingName) {
+            bindingSlots = {};
+            bindingSlots["$" + this.heapRecords.readString(bindingName)] = 0;
+        }
         var handle = {heapAddress: address, ownerRuntime: this};
         metadata = {handle: handle, bindingSlots: bindingSlots || {}};
         this.environmentMetadata[key] = metadata;
         return metadata;
+    };
+
+    Runtime.prototype.makeCatchEnvironment = function (parent, name, value) {
+        var valueRoot = this.retain(value);
+        var address = 0;
+        try {
+            var nameAddress = this.internStringAddress(name);
+            address = this.heapRecords.allocateEnvironment(parent, 1, 0);
+            this.linearHeap.setFlags(address, HeapRecords.EnvironmentFlags.SINGLE_BINDING);
+            this.heapRecords.setEnvironmentScopeData(address, nameAddress);
+            this.writeHeapValue(this.heapRecords.environmentCell(address, 0), value);
+            return this.adoptEnvironment(address, {}).handle;
+        } finally {
+            this.release(valueRoot);
+        }
     };
 
     Runtime.prototype.functionClosure = function (callable) {
@@ -1467,6 +1487,7 @@
         var parameterSlots = this.heapRecords.programParameterSlots(program);
         var parameterCount = this.heapRecords.integerVectorLength(parameterSlots);
         if (index < 0 || index >= parameterCount) return 0;
+        if (this.argumentMappingDetached(environment, index)) return 0;
         var slot = this.heapRecords.integerVectorValue(parameterSlots, index);
         var later = index + 1;
         while (later < parameterCount) {
@@ -1476,6 +1497,42 @@
             later++;
         }
         return this.heapRecords.environmentCell(environment, slot);
+    };
+
+    Runtime.prototype.argumentMappingDetached = function (environment, index) {
+        if (!(this.linearHeap.flags(environment) & HeapRecords.EnvironmentFlags.DETACHED_ARGUMENTS)) return false;
+        var map = this.heapRecords.environmentScopeData(environment);
+        var bits = HeapRecords.ArgumentsLayout.MAPPING_WORD_BITS;
+        var word = Math.floor(index / bits);
+        return word < this.heapRecords.integerVectorLength(map) &&
+            (this.heapRecords.integerVectorValue(map, word) & (1 << (index % bits))) !== 0;
+    };
+
+    Runtime.prototype.detachArgumentMapping = function (array, index) {
+        var environment = this.heapRecords.arrayReserved(array.heapAddress);
+        if (!environment || environment === HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT || index < 0) return;
+        var program = this.heapRecords.environmentProgram(environment);
+        if (!program) return;
+        var count = this.heapRecords.integerVectorLength(this.heapRecords.programParameterSlots(program));
+        if (index >= count) return;
+        var flags = this.linearHeap.flags(environment);
+        var map = this.heapRecords.environmentScopeData(environment);
+        var bits = HeapRecords.ArgumentsLayout.MAPPING_WORD_BITS;
+        if (!(flags & HeapRecords.EnvironmentFlags.DETACHED_ARGUMENTS)) {
+            var arrayRoot = this.retain(array);
+            try {
+                var words = Math.ceil(count / bits);
+                map = this.heapRecords.allocateIntegerVector(words);
+                for (var word = 0; word < words; word++) this.heapRecords.setIntegerVectorValue(map, word, 0);
+                this.heapRecords.setEnvironmentScopeData(environment, map);
+                this.linearHeap.setFlags(environment, flags | HeapRecords.EnvironmentFlags.DETACHED_ARGUMENTS);
+            } finally {
+                this.release(arrayRoot);
+            }
+        }
+        var indexWord = Math.floor(index / bits);
+        this.heapRecords.setIntegerVectorValue(map, indexWord,
+            this.heapRecords.integerVectorValue(map, indexWord) | (1 << (index % bits)));
     };
 
     Runtime.prototype.arrayHas = function (array, index) {
@@ -1530,6 +1587,9 @@
         if (index < 0 || index >= 4294967295 || index !== Math.floor(index)) {
             throw new RangeError("invalid array index");
         }
+        var mappingEnvironment = this.heapRecords.arrayReserved(array.heapAddress);
+        if (mappingEnvironment && mappingEnvironment !== HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT &&
+                !this.arrayHas(array, index)) this.detachArgumentMapping(array, index);
         var mappedCell = this.argumentsMappedCell(array, index);
         this.ensureArrayCapacity(array, index + 1);
         this.writeHeapValue(this.heapRecords.arrayElementCell(array.heapAddress, index),
@@ -4169,6 +4229,8 @@
         key = this.propertyKey(key);
         if (!object || !object.guestType) return false;
         if (object.guestType === "array" && isArrayIndex(key)) {
+            if (!this.arrayHas(object, Number(key))) return true;
+            this.detachArgumentMapping(object, Number(key));
             return this.arrayHas(object, Number(key));
         }
         if (object.guestType === "array" && key === "length" &&

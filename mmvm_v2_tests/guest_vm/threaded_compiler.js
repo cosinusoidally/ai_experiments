@@ -190,7 +190,7 @@
         var pc = 0;
         while (pc < code.length) {
             var opcode = code[pc];
-            if (opcode === op.PUSH_CATCH || opcode === op.POP_CATCH) return false;
+            if (opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE || opcode === op.POP_CATCH) return false;
             if (opcode === op.MAKE_FUNCTION && !program.astBody) return false;
             pc += width(opcode);
         }

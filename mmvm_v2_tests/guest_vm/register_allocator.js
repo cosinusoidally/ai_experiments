@@ -21,7 +21,7 @@
          * optimized. The normal compiler/verifier still handles them. */
         for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
             opcode = code[pc];
-            if (!op.SOURCE_OPERANDS[opcode] || opcode === op.PUSH_CATCH ||
+            if (!op.SOURCE_OPERANDS[opcode] || opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE ||
                     opcode === op.POP_CATCH || opcode === op.ENTER_WITH ||
                     opcode === op.LEAVE_WITH) return program;
             if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE) {

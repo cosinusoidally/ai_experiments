@@ -144,11 +144,12 @@ Outstanding general work exposed by this group:
   no conformance counts. That historical limitation is replaced by the
   guest-executed embedding service described in `TEST262.md` (2026-10-28).
   The complete standalone inventory now executes all 3,292 authored tests:
-  3,277 passed, 15 failed (including six diagnostic-budget timeouts), zero
-  not run, in 335.34 seconds at the contract-70 operator/prototype/enumeration
-  checkpoint. There are nine non-timeout failures left. Exact failing IDs
-  show 15 new passes and no new failures against contract 68's 3,262/30
-  result. All gains in this batch are VM fixes, not wrapper reclassification. Both
+  3,286 passed, 6 failed (all six diagnostic-budget timeouts), zero
+  not run, in 354.71 seconds at the contract-71 lexical-scope/arguments
+  checkpoint. There are no non-timeout failures left in this imported corpus.
+  Exact failing IDs show nine new passes and no new failures against contract
+  70's 3,277/15 result. All gains in this batch are VM fixes, not wrapper
+  reclassification. Both
   runtimes and the embedding implementation execute in guest code; no host
   JS engine participates. See
   `TEST262_STATUS.md` for scope, peak memory, failure groups and run details.

@@ -341,6 +341,53 @@ bodies, and allows top-level return to be rejected before execution. Nested
 function creation still uses ordinary JS scoping, not compiler-only variable
 semantics or extra host behavior.
 
+### Catch scope and permanent arguments detachment (contract 71)
+
+Catch entry now constructs a fresh one-binding declarative environment rather
+than overwriting a function/global variable. The compiler exposes that scope
+to nested closures and counts it when resolving outer lexical slots and
+`this`. Normal and abrupt exits share the existing lexical cleanup mechanism.
+Synthetic exceptional-finally continuations use the same scope representation,
+including when nested inside `with`; their private exception name is no longer
+hoisted into the user variable environment.
+
+The environment's existing reserved reference is now explicitly scope data:
+an object for `with`, a name string for catch, or a lazy integer bitset for
+detached arguments aliases. Named flags/accessors distinguish these meanings.
+Both collectors trace the raw reference, while semantic object-environment
+lookup excludes declarative scope data. Native catch construction reserves
+storage before changing the handler/frame state, allowing allocation failure
+to use the normal GC/retry protocol without losing the pending exception.
+
+Deleting a mapped argument index permanently detaches its parameter alias.
+Recreating the index cannot reconnect it. The bitset is allocated only on a
+detaching operation; ordinary calls and unmodified arguments objects keep
+their compact shared parameter-slot layout. Missing actual arguments cannot
+acquire aliases through a later assignment. Both execution paths use the same
+representation and retain the existing duplicate-parameter rules.
+
+See [the lexical-environment design](guest_vm/LEXICAL_ENVIRONMENTS.md) for
+layout, lifetime, embedding and validation details. The unchanged nine
+previously failing non-timeout Test262 cases now all pass in the focused
+standalone run. Full-suite and workload gates are recorded after completion;
+this focused result alone is not a new whole-suite total.
+
+The complete standalone run then finished **3,286 passed / 6 failed / 0 not
+run**. Every remaining failure is one of the same six diagnostic-budget
+timeouts; the failing-ID comparison finds nine new passes and no regressions.
+Elapsed 354.71 seconds, user CPU 347.00 seconds, peak RSS 549,676 KiB.
+The final image also specializes native dispatch for the new opcode and
+handles equivalent string/numeric argument-index deletions consistently.
+
+Initial regression gates pass on the final image: the complete Node project
+suite (12 programs / 270 assertions plus embedding/compiler/CLI checks),
+standalone GC stress (24 rounds / 47 native collections), and bounded
+structural GC auditing (27 audits / 87,198 checked edges / 76 embedding
+collections). The audit's maximum observed guest bump is 4,545,888 bytes
+within its 8 MiB cap. The retained graph now includes escaped catch closures
+and permanently detached arguments, and the audit validates their scope-data
+record kinds. Further build/demo/benchmark gates are recorded separately.
+
 ## Validation policy
 
 Run heavy tests serially. Record fresh baseline and changed build timings for

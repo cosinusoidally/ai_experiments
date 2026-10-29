@@ -298,8 +298,11 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 70;
+    Records.NativeInterpreterContractVersion = 71;
+    Records.EnvironmentFlags = {SINGLE_BINDING: 1, DETACHED_ARGUMENTS: 2};
+    Records.HandlerFlags = {LEXICAL_BINDING: 1};
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};
+    Records.ArgumentsLayout.MAPPING_WORD_BITS = Heap.WORD_BYTES * 8;
     Records.grownArrayCapacity = grownArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
@@ -314,6 +317,11 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        ENVIRONMENT_SINGLE_BINDING_FLAG: Records.EnvironmentFlags.SINGLE_BINDING,
+        ENVIRONMENT_DETACHED_ARGUMENTS_FLAG: Records.EnvironmentFlags.DETACHED_ARGUMENTS,
+        HANDLER_LEXICAL_BINDING_FLAG: Records.HandlerFlags.LEXICAL_BINDING,
+        ENVIRONMENT_FIXED_BYTES: Heap.HEADER_SIZE + ENVIRONMENT_CELLS,
+        ARGUMENT_MAPPING_WORD_BITS: Records.ArgumentsLayout.MAPPING_WORD_BITS,
         BUFFER_BACKING_EXTERNAL_FLAG: Heap.BufferBackingPolicy.EXTERNAL,
         BUFFER_BACKING_POINTER: Heap.HEADER_SIZE + BUFFER_BACKING_POINTER,
         LARGE_BUFFER_BYTES: Heap.BufferBackingPolicy.LARGE_BYTES,
@@ -1452,16 +1460,31 @@
             environment, ENVIRONMENT_PROGRAM, Heap.Types.ENVIRONMENT);
     };
 
-    Records.prototype.environmentObject = function (environment) {
+    Records.prototype.environmentScopeData = function (environment) {
         return this.heap.readTrustedFieldU32(
             environment, ENVIRONMENT_RESERVED, Heap.Types.ENVIRONMENT);
     };
 
-    Records.prototype.setEnvironmentObject = function (environment, object) {
-        if (object) this.heap.requireRecord(object);
+    Records.prototype.environmentObject = function (environment) {
+        if (this.heap.flags(environment) & (Records.EnvironmentFlags.SINGLE_BINDING |
+                Records.EnvironmentFlags.DETACHED_ARGUMENTS)) return 0;
+        return this.environmentScopeData(environment);
+    };
+
+    Records.prototype.environmentBindingName = function (environment) {
+        return this.heap.flags(environment) & Records.EnvironmentFlags.SINGLE_BINDING ?
+            this.environmentScopeData(environment) : 0;
+    };
+
+    Records.prototype.setEnvironmentScopeData = function (environment, reference) {
+        if (reference) this.heap.requireRecord(reference);
         this.heap.writeTrustedFieldU32(
-            environment, ENVIRONMENT_RESERVED, object || 0,
+            environment, ENVIRONMENT_RESERVED, reference || 0,
             Heap.Types.ENVIRONMENT);
+    };
+
+    Records.prototype.setEnvironmentObject = function (environment, object) {
+        this.setEnvironmentScopeData(environment, object);
     };
 
     Records.prototype.allocateObjectEnvironment = function (parent, object) {
@@ -1907,10 +1930,11 @@
         this.heap.writeTrustedFieldU32(frame, FRAME_HANDLER, handler || 0);
     };
 
-    Records.prototype.pushFrameHandler = function (frame, target, bindingSlot) {
+    Records.prototype.pushFrameHandler = function (frame, target, bindingSlot, flags) {
         var handler = this.heap.allocateRecordWords(Heap.Types.HANDLER,
             HANDLER_BYTES, this.frameHandler(frame), target, bindingSlot,
             this.frameEnvironment(frame));
+        this.heap.setFlags(handler, flags || 0);
         this.setFrameHandler(frame, handler);
         return handler;
     };
@@ -3108,7 +3132,7 @@
         } else if (type === Heap.Types.ENVIRONMENT) {
             reference(records.environmentParent(address));
             reference(records.environmentProgram(address));
-            reference(records.environmentObject(address));
+            reference(records.environmentScopeData(address));
             var environmentIndex = 0;
             while (environmentIndex < records.environmentSlotCount(address)) {
                 cell(records.environmentCell(address, environmentIndex++));

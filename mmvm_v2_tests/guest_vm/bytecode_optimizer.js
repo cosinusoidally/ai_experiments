@@ -62,7 +62,7 @@
             opcode = code[pc];
             /* Exception edges and dynamically exposed scopes need a richer
              * CFG. Leave these functions unchanged rather than guess. */
-            if (opcode === op.PUSH_CATCH || opcode === op.POP_CATCH ||
+            if (opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE || opcode === op.POP_CATCH ||
                 opcode === op.ENTER_WITH || opcode === op.LEAVE_WITH) return program;
             if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE) {
                 target = code[pc + (opcode === op.JUMP ? 1 : 2)];
@@ -286,7 +286,7 @@
         for (pc = 0; pc < output.length; pc += op.WIDTHS[output[pc]]) {
             opcode = output[pc];
             if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE ||
-                opcode === op.PUSH_CATCH) {
+                opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE) {
                 operand = pc + (opcode === op.JUMP_IF_FALSE ? 2 : 1);
                 output[operand] = relocated[output[operand]];
             }
@@ -310,7 +310,7 @@
                      code[pc + 2] >= bindingRegisterCount &&
                      code[previous + 1] === code[pc + 2] &&
                      coalescibleProducer(code[previous])) candidate = true;
-            if (opcode === op.PUSH_CATCH || opcode === op.POP_CATCH ||
+            if (opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE || opcode === op.POP_CATCH ||
                 opcode === op.ENTER_WITH || opcode === op.LEAVE_WITH) return program;
             if (opcode === op.JUMP || opcode === op.JUMP_IF_FALSE) {
                 targets[code[pc + (opcode === op.JUMP ? 1 : 2)]] = true;

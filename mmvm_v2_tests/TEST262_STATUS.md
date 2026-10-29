@@ -68,6 +68,29 @@ improvement over a larger one.
 
 ### Standalone js_runner — 3,292 authored tests
 
+- 2026-10-29, approximately 07:37 UTC, contract-71 lexical-scope and
+  permanent arguments-detachment checkpoint:
+  **3,292 executed, 3,286 passed, 6 failed, 0 not run; all 6 failures are
+  instruction-limit timeouts**. Pass rate **99.82%**; **zero non-timeout
+  failures remain**. Same command/20,000-instruction diagnostic limit as the
+  preceding run, using `artifacts/es51-scopes.snap`. Elapsed **354.71 seconds**,
+  user CPU **347.00 seconds**, peak RSS **549,676 KiB**; exit status 1 because
+  the timeouts remain failures, not skips. Exact ID/variant comparison with
+  contract 70 shows **9 new passes, zero new failures**. Every test is executed
+  unchanged; no corpus exceptions or new wrapper reclassifications are used.
+  Chapters 6 and 9–13 pass completely. The remaining six IDs are listed below.
+  Raw log: `artifacts/es51-scopes-full.log`. Final-image regression gates are
+  recorded separately after completion.
+
+Remaining diagnostic-budget timeouts (executed, not skipped):
+
+- `ch07/7.4/S7.4_A5.js`
+- `ch07/7.4/S7.4_A6.js`
+- `ch07/7.8/7.8.5/S7.8.5_A1.1_T2.js`
+- `ch07/7.8/7.8.5/S7.8.5_A1.4_T2.js`
+- `ch07/7.8/7.8.5/S7.8.5_A2.1_T2.js`
+- `ch07/7.8/7.8.5/S7.8.5_A2.4_T2.js`
+
 - 2026-10-29, approximately 00:27 UTC, contract-70 operator/prototype and
   inherited-enumeration checkpoint:
   **3,292 executed, 3,277 passed, 15 failed, 0 not run; 6 instruction-limit

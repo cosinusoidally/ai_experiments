@@ -88,6 +88,22 @@
         while (position < heap.bump) {
             var live = heap.inspectRecordHeader(position);
             if (live.type !== Heap.Types.FREE) {
+                if (live.type === Heap.Types.ENVIRONMENT) {
+                    var scopeFlags = heap.flags(position);
+                    var scopeData = records.environmentScopeData(position);
+                    if (scopeFlags & RecordLayouts.EnvironmentFlags.SINGLE_BINDING) {
+                        if (records.environmentSlotCount(position) !== 1 ||
+                                boundaries["$" + scopeData] !== Heap.Types.STRING + 1 ||
+                                records.environmentObject(position)) {
+                            throw new Error("GC stress: invalid catch environment at " + position);
+                        }
+                    } else if (scopeFlags & RecordLayouts.EnvironmentFlags.DETACHED_ARGUMENTS) {
+                        if (boundaries["$" + scopeData] !== Heap.Types.INTEGER_VECTOR + 1 ||
+                                records.environmentObject(position)) {
+                            throw new Error("GC stress: invalid arguments-map environment at " + position);
+                        }
+                    }
+                }
                 if (live.type === Heap.Types.OBJECT) {
                     var backing = records.ownPropertyStorage(position);
                     if (backing && boundaries["$" + backing] !== Heap.Types.PROPERTY_STORAGE + 1) {

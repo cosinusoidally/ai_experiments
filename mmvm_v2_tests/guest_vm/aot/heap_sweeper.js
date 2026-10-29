@@ -357,7 +357,7 @@
                     else if (referenceIndex === 1) {
                         target = environmentProgram(heapBase, address);
                     } else if (referenceIndex === 2) {
-                        target = environmentObject(heapBase, address);
+                        target = environmentScopeData(heapBase, address);
                     } else if (itemIndex < itemCount) {
                         cellAddress = address + ENVIRONMENT_CELLS +
                                       itemIndex * VALUE_CELL_BYTES;

@@ -62,7 +62,8 @@
         INVALID_ASSIGNMENT: 60,
         ADD_INT32: 61,
         SUBTRACT_INT32: 62,
-        TO_INT32: 63
+        TO_INT32: 63,
+        PUSH_CATCH_SCOPE: 64
     };
 
     op.NAMES = [];
@@ -87,7 +88,8 @@
     layout(1, 0, [op.POP_CATCH, op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
     layout(2, 0, [op.JUMP, op.RETURN, op.THROW, op.ENTER_WITH]);
     layout(2, 1, [op.MAKE_OBJECT, op.GET_THIS]);
-    layout(3, 0, [op.SET_GLOBAL, op.SET_NAME, op.JUMP_IF_FALSE, op.PUSH_CATCH]);
+    layout(3, 0, [op.SET_GLOBAL, op.SET_NAME, op.JUMP_IF_FALSE, op.PUSH_CATCH,
+        op.PUSH_CATCH_SCOPE]);
     layout(3, 1, [op.CONST, op.GET_GLOBAL, op.MOVE, op.NOT, op.NEGATE,
         op.POSITIVE, op.MAKE_FUNCTION, op.MAKE_ARRAY, op.BIT_NOT, op.TYPEOF,
         op.TYPEOF_GLOBAL, op.GET_KEYS, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME,
@@ -116,7 +118,8 @@
     inputs([], [op.CONST, op.GET_GLOBAL, op.GET_THIS, op.MAKE_FUNCTION,
         op.MAKE_OBJECT, op.MAKE_ARRAY, op.MAKE_REGEXP, op.GET_LOCAL,
         op.TYPEOF_GLOBAL, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME,
-        op.JUMP, op.PUSH_CATCH, op.POP_CATCH, op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
+        op.JUMP, op.PUSH_CATCH, op.PUSH_CATCH_SCOPE, op.POP_CATCH,
+        op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
     inputs([1], [op.RETURN, op.THROW, op.ENTER_WITH, op.JUMP_IF_FALSE]);
     inputs([2], [op.MOVE, op.NOT, op.NEGATE, op.POSITIVE, op.BIT_NOT,
         op.TYPEOF, op.GET_KEYS, op.TO_INT32, op.GET_PROPERTY_CONST,

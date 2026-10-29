@@ -12,7 +12,7 @@
     /* Immutable compiler-only markers. Handler/with regions need no
      * per-occurrence object; finalizers carry their lexical target depths. */
     var HANDLER_REGION = {kind: "handler"};
-    var WITH_REGION = {kind: "with"};
+    var LEXICAL_ENVIRONMENT_REGION = {kind: "scope"};
 
     function Compiler(scopeBindings, outerScopes, registerBindings, options) {
         this.consumeAst = !!options && options.consumeAst === true;
@@ -34,7 +34,6 @@
         this.sourceLocations = [];
         this.currentLocation = null;
         this.filename = "<source>";
-        this.withDepth = 0;
         this.scopes = [];
         if (scopeBindings) {
             this.scopes.push(makeCompileScope(this, scopeBindings,
@@ -304,6 +303,21 @@
         if (saved >= 0) this.emit(op.MOVE, this.completionRegister, saved);
     };
 
+    Compiler.prototype.enterCatchScope = function (name) {
+        var bindings = {};
+        bindings["$" + name] = {kind: "environment", slot: 0};
+        this.scopes.unshift({bindings: bindings, createsEnvironment: true});
+        this.unwindRegions.push(LEXICAL_ENVIRONMENT_REGION);
+    };
+
+    Compiler.prototype.compileCatchClause = function (statement) {
+        this.enterCatchScope(statement.parameter);
+        this.compileStatement(statement.handler);
+        this.unwindRegions.pop();
+        this.scopes.shift();
+        this.emit(op.LEAVE_WITH);
+    };
+
     Compiler.prototype.compileFinalizer = function (statement, entry) {
         if (this.completionRegister < 0) {
             this.compileStatement(statement);
@@ -340,15 +354,13 @@
         if (this.unwindRegions.length === depth) return;
         var regions = this.unwindRegions;
         var scopes = this.scopes;
-        var withDepth = this.withDepth;
         var index = regions.length;
         while (index > depth) {
             var region = regions[--index];
-            if (region.kind === "with") {
+            if (region.kind === "scope") {
                 this.emit(op.LEAVE_WITH);
                 if (this.scopes === scopes) this.scopes = scopes.slice(0);
                 this.scopes.shift();
-                this.withDepth--;
             } else {
                 this.emit(op.POP_CATCH);
                 if (region.kind === "finally") {
@@ -368,7 +380,6 @@
         }
         this.unwindRegions = regions;
         this.scopes = scopes;
-        this.withDepth = withDepth;
     };
 
     Compiler.prototype.compileStatement = function (statement) {
@@ -392,11 +403,9 @@
             this.emit(op.ENTER_WITH, withObject);
             this.scopes.unshift({bindings: {}, createsEnvironment: true,
                                  dynamic: true});
-            this.withDepth++;
-            this.unwindRegions.push(WITH_REGION);
+            this.unwindRegions.push(LEXICAL_ENVIRONMENT_REGION);
             this.compileStatement(statement.body);
             this.unwindRegions.pop();
-            this.withDepth--;
             this.scopes.shift();
             this.emit(op.LEAVE_WITH);
             return;
@@ -598,8 +607,8 @@
         if (statement.type === "TryStatement") {
             var tryCompletion = this.saveCompletionValue();
             if (!statement.finalizer) {
-                var catchPush = this.emit(op.PUSH_CATCH, 0,
-                    this.exceptionBindingOperand(statement.parameter));
+                var catchPush = this.emit(op.PUSH_CATCH_SCOPE, 0,
+                    this.constant(statement.parameter));
                 this.unwindRegions.push(HANDLER_REGION);
                 this.compileStatement(statement.block);
                 this.unwindRegions.pop();
@@ -607,12 +616,12 @@
                 var catchEnd = this.emit(op.JUMP, 0);
                 this.patch(catchPush + 1, this.code.length);
                 this.restoreCompletionValue(tryCompletion);
-                this.compileStatement(statement.handler);
+                this.compileCatchClause(statement);
                 this.patch(catchEnd + 1, this.code.length);
                 return;
             }
-            var finallyPush = this.emit(op.PUSH_CATCH, 0,
-                this.exceptionBindingOperand(statement.finallyParameter));
+            var finallyPush = this.emit(op.PUSH_CATCH_SCOPE, 0,
+                this.constant(statement.finallyParameter));
             var finalizerRegion = {kind: "finally", block: statement.finalizer,
                 completionEntry: tryCompletion,
                 breakDepth: this.breakTargets.length,
@@ -621,8 +630,8 @@
             this.unwindRegions.push(finalizerRegion);
             var userCatchPush = -1;
             if (statement.handler) {
-                userCatchPush = this.emit(op.PUSH_CATCH, 0,
-                    this.exceptionBindingOperand(statement.parameter));
+                userCatchPush = this.emit(op.PUSH_CATCH_SCOPE, 0,
+                    this.constant(statement.parameter));
                 this.unwindRegions.push(HANDLER_REGION);
             }
             this.compileStatement(statement.block);
@@ -635,7 +644,7 @@
                 skipUserCatch = this.emit(op.JUMP, 0);
                 this.patch(userCatchPush + 1, this.code.length);
                 this.restoreCompletionValue(tryCompletion);
-                this.compileStatement(statement.handler);
+                this.compileCatchClause(statement);
                 this.patch(skipUserCatch + 1, this.code.length);
             }
             this.unwindRegions.pop();
@@ -643,9 +652,12 @@
             this.compileFinalizer(statement.finalizer, tryCompletion);
             var finallyEnd = this.emit(op.JUMP, 0);
             this.patch(finallyPush + 1, this.code.length);
+            this.enterCatchScope(statement.finallyParameter);
             this.compileFinalizer(statement.finalizer, tryCompletion);
             this.emit(op.THROW, this.loadReference(
                 this.referenceForName(statement.finallyParameter)));
+            this.unwindRegions.pop();
+            this.scopes.shift();
             this.patch(finallyEnd + 1, this.code.length);
             return;
         }
@@ -841,19 +853,6 @@
             if (scope.createsEnvironment) depth++;
         }
         return {kind: "global"};
-    };
-
-    /* PUSH_CATCH stores one signed binding descriptor. Environment slots are
-     * non-negative. A top-level/global catch name is encoded as the negative
-     * constant index minus one, keeping exception dispatch independent of
-     * host-only compiler metadata. */
-    Compiler.prototype.exceptionBindingOperand = function (name) {
-        var binding = this.resolveBinding(name);
-        if (!binding) return -this.constant(name) - 1;
-        if (binding.kind === "environment" && binding.depth === 0) {
-            return binding.slot;
-        }
-        throw new Error("catch binding is not directly addressable");
     };
 
     Compiler.prototype.loadReference = function (reference, requestedTarget) {
@@ -1331,8 +1330,6 @@
                 if (statement.left && statement.left.type === "VariableStatement") visit(statement.left);
                 visit(statement.body);
             } else if (statement.type === "TryStatement") {
-                if (statement.parameter) add(statement.parameter);
-                if (statement.finallyParameter) add(statement.finallyParameter);
                 visit(statement.block);
                 if (statement.handler) visit(statement.handler);
                 if (statement.finalizer) visit(statement.finalizer);

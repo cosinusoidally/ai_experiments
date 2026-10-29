@@ -263,6 +263,8 @@
                 var target = this.runtime.heapRecords.handlerTarget(handler);
                 var handlerEnvironment =
                     this.runtime.heapRecords.handlerEnvironment(handler);
+                var lexicalBinding = this.runtime.linearHeap.flags(handler) &
+                    this.runtime.heapRecords.constructor.HandlerFlags.LEXICAL_BINDING;
                 this.runtime.linearHeap.freeRecord(handler,
                                                    "exception handler");
                 frame.environment = handlerEnvironment ?
@@ -272,7 +274,12 @@
                 this.runtime.heapRecords.setFrameEnvironment(
                     frame.heapAddress, handlerEnvironment);
                 var caughtValue = this.runtime.importCaughtException(error);
-                if (bindingSlot >= 0) {
+                if (lexicalBinding) {
+                    frame.environment = this.runtime.makeCatchEnvironment(
+                        handlerEnvironment, frame.constants[bindingSlot], caughtValue);
+                    this.runtime.heapRecords.setFrameEnvironment(
+                        frame.heapAddress, frame.environment.heapAddress);
+                } else if (bindingSlot >= 0) {
                     this.runtime.setBinding(frame.context, frame.environment,
                         frame.program.bindings[bindingSlot], caughtValue);
                 } else {
@@ -1098,9 +1105,11 @@
                     if (!this.handleException(thrownValue)) {
                         return this.finish("threw", thrownValue, used);
                     }
-                } else if (opcode === op.PUSH_CATCH) {
+                } else if (opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE) {
                     this.runtime.heapRecords.pushFrameHandler(
-                        frame.heapAddress, code[pc + 1], code[pc + 2]);
+                        frame.heapAddress, code[pc + 1], code[pc + 2],
+                        opcode === op.PUSH_CATCH_SCOPE ?
+                            this.runtime.heapRecords.constructor.HandlerFlags.LEXICAL_BINDING : 0);
                     frame.pc = pc + 3;
                 } else if (opcode === op.POP_CATCH) {
                     var poppedHandler = this.runtime.heapRecords.popFrameHandler(
