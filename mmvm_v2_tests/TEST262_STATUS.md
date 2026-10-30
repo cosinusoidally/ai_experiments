@@ -56,6 +56,13 @@ chronological ledger rather than being rewritten or silently discarded.
   demonstrated whole-suite efficiency improvement. Equal-limit collection
   comparisons remain necessary before drawing an architectural conclusion.
 
+  Follow-up with the current standalone control runtime capped at 256 MiB:
+  **1 passed / 0 failed / 0 timed out / 0 not run**, 103.165570 s test time,
+  115.41 s external, peak RSS 272,896 KiB. At comparable RSS this is within
+  1% of the earlier image, not a meaningful execution-speed gain. The separate
+  `--test-max-heap-bytes` option caps only the nested test runtime; it does
+  not constrain the control VM's heap. No default policy was changed.
+
 - 2026-10-30, native stack-home allocation and compact frame operands,
   revision `7f34bf0`, contract 79: **3,292 passed / 0 failed / 0 timed out /
   0 not run**, all 3,292 authored variants executed. Command:

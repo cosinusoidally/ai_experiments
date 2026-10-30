@@ -448,3 +448,23 @@ before attributing the change to better instruction execution. Raw logs:
 `artifacts/canonical-comparison-old-eval.log` and
 `artifacts/canonical-comparison-new-eval.log`. The significant general VM and
 snapshot-generation performance targets remain open.
+
+Follow-up distinguishes the two runtime heaps rather than treating process
+RSS as the test VM's heap usage:
+
+- `test262_runner.js --test-max-heap-bytes 268435456` caps the nested test
+  runtime, **not** the standalone control runtime running the embedding and
+  compiler. This passes in 92.523495 s test time / 104.22 s external /
+  534,920 KiB peak RSS. It is not an equal cap on both runtimes.
+- Build the current diagnostic image with
+  `node guest_vm/tools/build_profile_image.js --vm-native --vm-max-heap-mib 256 --snapshot artifacts/canonical-control-cap.snap`
+  to constrain the control runtime too. The same isolated case passes in
+  103.165570 s test time / 115.41 s external / 114.84 s CPU /
+  272,896 KiB peak RSS. The earlier image used 103.929389 s / 274,928 KiB.
+  At comparable RSS, test execution differs by less than 1%, not 10.5%.
+- These measurements are consistent with a collection/headroom space-time
+  tradeoff, rather than a demonstrated major instruction-execution gain.
+  They do not prove a leak or justify changing the default heap limit.
+  Inspect the control and test runtimes separately in further allocator/GC
+  profiling. Raw logs are `artifacts/canonical-equal-heap-new.log` and
+  `artifacts/canonical-control-cap-eval.log`; the diagnostic image is ignored.
