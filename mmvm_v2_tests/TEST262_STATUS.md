@@ -1,11 +1,9 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-29, standalone contract 77):
+Latest completed whole-suite result (2026-10-30, standalone contract 79):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 501.14 seconds. This run included an experimental inactive-word store
-omission, subsequently removed because it lost cross-host snapshot identity.
-The retained named-accessor cleanup emits native code byte-identical to the
-previous validated control. See the history below for the exact
+Elapsed 498.23 seconds. This is the retained logical-local/native-stack-home
+separation with compact frame-operand encoding. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -37,6 +35,17 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, native stack-home allocation and compact frame operands,
+  revision `7f34bf0`, contract 79: **3,292 passed / 0 failed / 0 timed out /
+  0 not run**, all 3,292 authored variants executed. Command:
+  `./artifacts/js_runner.exe artifacts/homes-short.snap test262_runner.js`.
+  Default budget; unchanged corpus. External elapsed 498.23 s, user CPU
+  494.04 s, peak RSS 575,828 KiB. Runner elapsed 497.619949 s; summed test
+  time 480.427640 s. Raw log: `artifacts/homes-short-test262.log` (ignored).
+  This is a correctness checkpoint, not proof of a substantial speedup over
+  the preceding 501.14-second observation. The next cursor change is not in
+  this image.
 
 - 2026-10-29, approximately 23:38 UTC, named value-cell writes, standalone
   contract 77: **3,292 passed / 0 failed / 0 timed out / 0 not run**, all

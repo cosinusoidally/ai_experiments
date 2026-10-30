@@ -67,6 +67,8 @@ These are neutral results, not a substantial speedup.
 
 Compact frame operands reduce native code from the original 407,634 bytes to
 375,552 bytes. The first zlib observation is 31.33 seconds; js_min construction
-takes 85.32 seconds. These do not establish the requested large gain. Whole-suite
-Test262 and broader workload validation of this checkpoint remain to be run.
+takes 85.32 seconds. These do not establish the requested large gain. Full
+Test262 passes all 3,292 authored variants with zero failures/timeouts/not-run,
+in 498.23 seconds external elapsed (494.04 s CPU, peak RSS 575,828 KiB).
+Broader live-demo validation of this checkpoint remains to be run.
 All measurements are single-threaded, serial workload runs; no cache is used.
