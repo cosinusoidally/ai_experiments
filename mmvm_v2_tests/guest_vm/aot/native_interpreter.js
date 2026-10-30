@@ -163,6 +163,21 @@
     RuntimeSupportLayout.CALLER_KEY = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.ARGUMENTS_KEY = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.ARRAY_PUSH_GENERIC = RuntimeSupportLayout.COUNT++;
+    var RUNTIME_SUPPORT_ARRAY_PUSH_GENERIC = RuntimeSupportLayout.ARRAY_PUSH_GENERIC;
+    RuntimeSupportLayout.ARRAY_SLICE_GENERIC = RuntimeSupportLayout.COUNT++;
+    var RUNTIME_SUPPORT_ARRAY_SLICE_GENERIC = RuntimeSupportLayout.ARRAY_SLICE_GENERIC;
+    RuntimeSupportLayout.OBJECT_TAG_BASE = RuntimeSupportLayout.COUNT;
+    RuntimeSupportLayout.COUNT += HeapRecords.ObjectClassNames.length;
+    var RUNTIME_SUPPORT_OBJECT_TAG_BASE = RuntimeSupportLayout.OBJECT_TAG_BASE;
+    RuntimeSupportLayout.JOIN_KEY = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.COMMA_STRING = RuntimeSupportLayout.COUNT++;
+    var RUNTIME_SUPPORT_JOIN_KEY = RuntimeSupportLayout.JOIN_KEY;
+    var RUNTIME_SUPPORT_COMMA_STRING = RuntimeSupportLayout.COMMA_STRING;
+    var INTRINSIC_ARRAY_TO_STRING = NativeIntrinsics.ARRAY_TO_STRING;
+    var NATIVE_APPLY_FUNCTION_REGISTER = 0;
+    var NATIVE_APPLY_RECEIVER_REGISTER = 1;
+    var NATIVE_APPLY_ARGUMENT_BASE = 2;
     var RUNTIME_SUPPORT_FUNCTION_COMPILER = RuntimeSupportLayout.FUNCTION_COMPILER;
     var RUNTIME_SUPPORT_BYTECODE_LAYOUT = RuntimeSupportLayout.BYTECODE_LAYOUT;
     var RUNTIME_SUPPORT_URI_ERROR_NAME = RuntimeSupportLayout.URI_ERROR_NAME;
@@ -1219,10 +1234,9 @@
                     }
                 }
                 if (arrayGetSupported === 3) {
-                    var namedGetKey = load32(
-                        arrayGetKeyCell + VALUE_CELL_LOW);
-                    if (recordType(heapBase, namedGetKey) !==
-                        HEAP_TYPE_STRING) arrayGetSupported = 0;
+                    var namedGetKey = propertyStringKeyReferenceKernel(
+                        heapBase, arrayGetKeyCell, stringSupport);
+                    if (namedGetKey === 0) arrayGetSupported = 0;
                 }
                 if (arrayGetSupported <= 2) {
                     if (arrayGetIndex < 0) arrayGetSupported = 0;
@@ -1247,7 +1261,7 @@
                                     heapBase, state, frame, indexedDescriptorCell, 0, 1,
                                     arrayGetTargetOperand, currentContext, stringSupport,
                                     arrayPrototype, bytecodeAddress, registerAddress, pc, framePC,
-                                    arrayGetObjectCell, FOUR_WORD_INSTRUCTION, 0);
+                                    arrayGetObjectCell, FOUR_WORD_INSTRUCTION, 0, 0);
                                 if (indexedGetterEntered !== 1) {
                                     return unsupportedDiagnosticExitKernel(
                                         heapBase, state, frame, pc, opcode, initialBudget - budget);
@@ -1393,6 +1407,13 @@
                             namedGetPrototype = bufferViewPrototype(
                                 heapBase, namedGetObject);
                         }
+                        if (!((namedGetType >= HEAP_TYPE_OBJECT &&
+                               namedGetType <= HEAP_TYPE_BYTECODE_FUNCTION) ||
+                              namedGetType === HEAP_TYPE_REGEXP ||
+                              namedGetType === HEAP_TYPE_BUFFER_VIEW)) {
+                            return unsupportedExitKernel(heapBase, state, frame,
+                                pc, opcode, initialBudget - budget);
+                        }
                         if (namedGetType === HEAP_TYPE_OBJECT) {
                             namedGetProperty = findCachedOwnObjectPropertyKernel(
                                 heapBase, state, namedGetObject, namedGetKey);
@@ -1432,14 +1453,13 @@
                         if (namedGetObject !== 0) namedGetObject = namedGetPrototype;
                     }
                     if (namedGetProperty === 0) {
-                        if (arrayGetOriginalObjectType === HEAP_TYPE_OBJECT) {
+                        /* Like constant-key [[Get]], exhausting a supported
+                         * chain means undefined for every object kind,
+                         * including functions, not just Objects and Arrays. */
+                        if (arrayGetSupported !== 0) {
                             setValueCellUndefined(arrayGetTarget);
                             namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                        } else if (arrayGetOriginalObjectType ===
-                                   HEAP_TYPE_ARRAY) {
-                            setValueCellUndefined(arrayGetTarget);
-                            namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                        } else arrayGetSupported = 0;
+                        }
                     } else if (namedGetProperty !== PROPERTY_FOUND_SENTINEL) {
                         var namedGetDescriptor = ownPropertyEntryDescriptorKernel(
                             heapBase, namedGetOwner, namedGetProperty);
@@ -1623,7 +1643,12 @@
                     environment = frameEnvironment(heapBase, frame);
                     pc = 0;
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
-            } else if (opcode === OP_SET_PROPERTY) {
+            } else if (opcode === OP_SET_PROPERTY &&
+                    valueCellTag(0, bytecodeRegisterCellAddress(0, registerAddress,
+                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) !==
+                    VALUE_TAG_REFERENCE) {
+                /* Numeric indexing stays on the dense/typed-array path.
+                 * Reference keys share the named-write dispatch below. */
                 var arraySetObjectIndex = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -1858,94 +1883,263 @@
                         }
                     }
                 } else if (arraySetSupported !== 3) {
-                    var dynamicPropertyValid = 1;
-                    if (load32(arraySetObjectCell) !== VALUE_TAG_REFERENCE) {
-                        dynamicPropertyValid = 0;
+                    return unsupportedExitKernel(heapBase, state, frame, pc,
+                        opcode, initialBudget - budget);
+                }
+                pc = pc + FOUR_WORD_INSTRUCTION;
+            } else if (opcode === OP_SET_PROPERTY_CONST || opcode === OP_SET_PROPERTY) {
+                var setPropertyObjectIndex = load32(
+                    bytecodeAddress +
+                    (pc + FIRST_OPERAND) * WORD_BYTES);
+                var setPropertyKeyIndex = load32(
+                    bytecodeAddress +
+                    (pc + SECOND_OPERAND) * WORD_BYTES);
+                var setPropertySourceIndex = load32(
+                    bytecodeAddress +
+                    (pc + THIRD_OPERAND) * WORD_BYTES);
+                var setPropertyObjectCell = registerAddress +
+                    setPropertyObjectIndex * VALUE_CELL_BYTES;
+                var setPropertyKeyCell = heapBase + constantCells +
+                    setPropertyKeyIndex * VALUE_CELL_BYTES;
+                if (opcode === OP_SET_PROPERTY) {
+                    setPropertyKeyCell = frameRegisterCellAddress(heapBase, frame, setPropertyKeyIndex);
+                }
+                var setPropertyOperandsValid = 1;
+                if (load32(setPropertyObjectCell) !== VALUE_TAG_REFERENCE) {
+                    setPropertyOperandsValid = 0;
+                }
+                if (load32(setPropertyKeyCell) !== VALUE_TAG_REFERENCE) {
+                    setPropertyOperandsValid = 0;
+                }
+                if (setPropertyOperandsValid === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
+                }
+                var setPropertyNamedKey = propertyStringKeyReferenceKernel(
+                    heapBase, setPropertyKeyCell, stringSupport);
+                if (setPropertyNamedKey === 0) {
+                    return unsupportedExitKernel(heapBase, state, frame, pc,
+                        opcode, initialBudget - budget);
+                }
+                var setPropertyObject = load32(
+                    setPropertyObjectCell + VALUE_CELL_LOW);
+                var setPropertyObjectType = load32(
+                    heapBase + setPropertyObject);
+                var setPropertyHead = 0;
+                var setPropertyHeadOffset = 0;
+                if (setPropertyObjectType >= HEAP_TYPE_OBJECT) {
+                    if (setPropertyObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
+                        setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
+                        setPropertyHeadOffset = OBJECT_PROPERTY_HEAD;
                     }
-                    if (arraySetKeyTag !== VALUE_TAG_REFERENCE) {
-                        dynamicPropertyValid = 0;
+                }
+                if (setPropertyObjectType === HEAP_TYPE_REGEXP) {
+                    setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
+                    setPropertyHeadOffset = REGEXP_PROPERTY_HEAD;
+                } else if (setPropertyObjectType === HEAP_TYPE_BUFFER_VIEW) {
+                    setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
+                    setPropertyHeadOffset = BUFFER_VIEW_PROPERTY_HEAD;
+                }
+                var setPropertyIgnored = 0;
+                /* Arguments objects share array storage but their length is
+                 * an ordinary property, not the virtual true-array length. */
+                if (setPropertyObjectType === HEAP_TYPE_ARRAY &&
+                        arrayReserved(heapBase, setPropertyObject) === 0 &&
+                        stringKeysEqualKernel(heapBase, setPropertyNamedKey,
+                            arrayLengthKey) === 1) {
+                    if (setArrayLengthKernel(heapBase, state, setPropertyObject,
+                            frameRegisterCellAddress(heapBase, frame,
+                                setPropertySourceIndex)) === 0) {
+                        return unsupportedExitKernel(heapBase, state, frame,
+                            pc, opcode, initialBudget - budget);
                     }
-                    var dynamicPropertyKey = load32(
-                        arraySetKeyCell + VALUE_CELL_LOW);
-                    if (dynamicPropertyValid === 1) {
-                        if (recordType(heapBase, dynamicPropertyKey) !==
-                            HEAP_TYPE_STRING) dynamicPropertyValid = 0;
-                    }
-                    var dynamicPropertyObjectType = 0;
-                    if (dynamicPropertyValid === 1) {
-                        dynamicPropertyObjectType = recordType(
-                            heapBase, arraySetObject);
-                    }
-                    var dynamicPropertyHead = 0;
-                    var dynamicPropertyHeadOffset = 0;
-                    if (dynamicPropertyObjectType >= HEAP_TYPE_OBJECT) {
-                        if (dynamicPropertyObjectType <=
-                            HEAP_TYPE_BYTECODE_FUNCTION) {
-                            dynamicPropertyHead = lastOwnPropertyEntryKernel(heapBase, arraySetObject);
-                            dynamicPropertyHeadOffset = OBJECT_PROPERTY_HEAD;
+                    pc = pc + FOUR_WORD_INSTRUCTION;
+                    setPropertyIgnored = 1;
+                }
+                /* A string primitive's length is a non-writable own
+                 * property. Sloppy PutValue ignores the write; strict code
+                 * takes the exception path rather than mutating the string. */
+                if (setPropertyObjectType === HEAP_TYPE_STRING) {
+                    var stringLengthKeyCell = vectorCellAddress(heapBase,
+                        stringSupport, RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY);
+                    if (stringKeysEqualKernel(heapBase, setPropertyNamedKey,
+                            valueCellReference(0, stringLengthKeyCell)) === 1) {
+                        if ((programFlags(heapBase, currentProgram) & PROGRAM_FLAG_STRICT) === 0) {
+                            pc = pc + FOUR_WORD_INSTRUCTION;
+                            setPropertyIgnored = 1;
                         }
                     }
-                    if (dynamicPropertyObjectType === HEAP_TYPE_REGEXP) {
-                        dynamicPropertyHead = lastOwnPropertyEntryKernel(heapBase, arraySetObject);
-                        dynamicPropertyHeadOffset = REGEXP_PROPERTY_HEAD;
-                    } else if (dynamicPropertyObjectType ===
+                }
+                if (setPropertyIgnored === 0) {
+                var setPropertyRecord = 0;
+                var setPropertyOwner = setPropertyObject;
+                var setPropertyAccessorEntered = 0;
+                var setPropertyFirst = setPropertyHead;
+                if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
+                    setPropertyRecord = findCachedOwnObjectPropertyKernel(
+                        heapBase, state, setPropertyObject, setPropertyNamedKey);
+                    setPropertyHead = 0;
+                }
+                while (setPropertyHead !== 0) {
+                    var setPropertyStoredKey = ownPropertyEntryKeyKernel(heapBase, setPropertyObject, setPropertyHead);
+                    var setPropertyKeysMatch = 1;
+                    if (setPropertyStoredKey !== setPropertyNamedKey) {
+                        setPropertyKeysMatch = stringKeysEqualKernel(
+                            heapBase, setPropertyStoredKey,
+                            setPropertyNamedKey);
+                    }
+                    if (setPropertyKeysMatch === 1) {
+                        setPropertyRecord = setPropertyHead;
+                        setPropertyHead = 0;
+                    } else {
+                        setPropertyHead = previousOwnPropertyEntryKernel(heapBase, setPropertyObject, setPropertyHead);
+                    }
+                }
+                if (setPropertyRecord === 0) {
+                    var inheritedSetObject = 0;
+                    if (setPropertyObjectType >= HEAP_TYPE_OBJECT) {
+                        if (setPropertyObjectType <=
+                            HEAP_TYPE_BYTECODE_FUNCTION) {
+                            inheritedSetObject = objectPrototype(
+                                heapBase, setPropertyObject);
+                        }
+                    }
+                    if (setPropertyObjectType === HEAP_TYPE_REGEXP) {
+                        inheritedSetObject = regexpPrototype(
+                            heapBase, setPropertyObject);
+                    } else if (setPropertyObjectType ===
                                HEAP_TYPE_BUFFER_VIEW) {
-                        dynamicPropertyHead = lastOwnPropertyEntryKernel(heapBase, arraySetObject);
-                        dynamicPropertyHeadOffset = BUFFER_VIEW_PROPERTY_HEAD;
+                        inheritedSetObject = bufferViewPrototype(
+                            heapBase, setPropertyObject);
                     }
-                    if (dynamicPropertyHeadOffset === 0) {
-                        dynamicPropertyValid = 0;
+                    while (inheritedSetObject !== 0) {
+                        var inheritedSetType = recordType(
+                            heapBase, inheritedSetObject);
+                        var inheritedSetHead = 0;
+                        var inheritedSetPrototype = 0;
+                        if (inheritedSetType >= HEAP_TYPE_OBJECT) {
+                            if (inheritedSetType <=
+                                HEAP_TYPE_BYTECODE_FUNCTION) {
+                                inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
+                                inheritedSetPrototype = objectPrototype(
+                                    heapBase, inheritedSetObject);
+                            }
+                        }
+                        if (inheritedSetType === HEAP_TYPE_REGEXP) {
+                            inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
+                            inheritedSetPrototype = regexpPrototype(
+                                heapBase, inheritedSetObject);
+                        } else if (inheritedSetType ===
+                                   HEAP_TYPE_BUFFER_VIEW) {
+                            inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
+                            inheritedSetPrototype = bufferViewPrototype(
+                                heapBase, inheritedSetObject);
+                        }
+                        while (inheritedSetHead !== 0) {
+                            var inheritedSetKey = ownPropertyEntryKeyKernel(heapBase, inheritedSetObject, inheritedSetHead);
+                            var inheritedSetMatches = 1;
+                            if (inheritedSetKey !== setPropertyNamedKey) {
+                                inheritedSetMatches = stringKeysEqualKernel(
+                                    heapBase, inheritedSetKey,
+                                    setPropertyNamedKey);
+                            }
+                            if (inheritedSetMatches === 1) {
+                                var inheritedSetAttributes =
+                                    ownPropertyEntryAttributesKernel(heapBase, inheritedSetObject, inheritedSetHead);
+                                if ((inheritedSetAttributes &
+                                     PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                                    setPropertyRecord = inheritedSetHead;
+                                    setPropertyOwner = inheritedSetObject;
+                                } else if ((inheritedSetAttributes &
+                                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                                    setPropertyRecord = inheritedSetHead;
+                                    setPropertyOwner = inheritedSetObject;
+                                }
+                                inheritedSetHead = 0;
+                                inheritedSetObject = 0;
+                            } else inheritedSetHead = previousOwnPropertyEntryKernel(heapBase, inheritedSetObject, inheritedSetHead);
+                        }
+                        if (inheritedSetObject !== 0) {
+                            inheritedSetObject = inheritedSetPrototype;
+                        }
                     }
-                    if (dynamicPropertyValid === 0) {
+                }
+                if (setPropertyRecord === 0) {
+                    if (setPropertyHeadOffset === 0) {
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                    var dynamicPropertyFirst = dynamicPropertyHead;
-                    var dynamicPropertyRecord = 0;
-                    if (dynamicPropertyObjectType === HEAP_TYPE_OBJECT) {
-                        dynamicPropertyRecord = findCachedOwnObjectPropertyKernel(
-                            heapBase, state, arraySetObject, dynamicPropertyKey);
-                        dynamicPropertyHead = 0;
-                    }
-                    while (dynamicPropertyHead !== 0) {
-                        var dynamicStoredKey = ownPropertyEntryKeyKernel(heapBase, arraySetObject, dynamicPropertyHead);
-                        var dynamicKeyMatches = 1;
-                        if (dynamicStoredKey !== dynamicPropertyKey) {
-                            dynamicKeyMatches = stringKeysEqualKernel(
-                                heapBase, dynamicStoredKey,
-                                dynamicPropertyKey);
-                        }
-                        if (dynamicKeyMatches === 1) {
-                            dynamicPropertyRecord = dynamicPropertyHead;
-                            dynamicPropertyHead = 0;
-                        } else {
-                            dynamicPropertyHead = previousOwnPropertyEntryKernel(heapBase, arraySetObject, dynamicPropertyHead);
-                        }
-                    }
-                    if (dynamicPropertyRecord === 0) {
-                        dynamicPropertyRecord = appendOwnPropertyEntryKernel(
-                            heapBase, state, arraySetObject, dynamicPropertyKey,
-                            DEFAULT_PROPERTY_ATTRIBUTES);
-                        if (dynamicPropertyRecord === 0) {
+                    /* Let the semantic path apply strict/sloppy assignment
+                     * behavior when an ordinary object rejects extension. */
+                    if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
+                        if (objectExtensible(
+                            heapBase, setPropertyObject) === 0) {
                             return unsupportedExitKernel(
                                 heapBase, state, frame, pc, opcode,
                                 (initialBudget - budget));
                         }
                     }
-                    var dynamicPropertyDescriptor = ownPropertyEntryDescriptorKernel(
-                        heapBase, arraySetObject, dynamicPropertyRecord);
-                    if ((propertyDescriptorAttributes(0, dynamicPropertyDescriptor) &
-                                PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                        dynamicPropertyValid = 0;
-                    }
-                    if (dynamicPropertyValid === 0) {
+                    setPropertyRecord = appendOwnPropertyEntryKernel(
+                        heapBase, state, setPropertyObject, setPropertyNamedKey,
+                        DEFAULT_PROPERTY_ATTRIBUTES);
+                    setPropertyOwner = setPropertyObject;
+                    if (setPropertyRecord === 0) {
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                    var dynamicPropertyDestination = propertyDescriptorValueCell(0, dynamicPropertyDescriptor);
-                    copyValueCell(dynamicPropertyDestination, arraySetSource);
                 }
-                pc = pc + FOUR_WORD_INSTRUCTION;
+                var setPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+                    heapBase, setPropertyOwner, setPropertyRecord);
+                if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
+                            PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                    var setter = propertyDescriptorSetter(0, setPropertyDescriptor);
+                    if (setter === 0) {
+                        return unsupportedExitKernel(
+                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
+                    }
+                    var setterCell = engineScratchLeftAddress(heapBase, state);
+                    setValueCellReference(setterCell, setter);
+                    var setterArgumentCell = registerAddress +
+                        setPropertySourceIndex * VALUE_CELL_BYTES;
+                    setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
+                    setPropertyAccessorEntered = bytecodeCallKernel(
+                        heapBase, state, frame, setterCell, 0, 1, -1,
+                        currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, framePC,
+                        setPropertyObjectCell, FOUR_WORD_INSTRUCTION,
+                        setterArgumentCell, 0);
+                    if (setPropertyAccessorEntered !== 1) {
+                        return unsupportedDiagnosticExitKernel(
+                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
+                    }
+                } else if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
+                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                    return unsupportedExitKernel(
+                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
+                }
+                if (setPropertyAccessorEntered === 1) {
+                    frame = engineCurrentFrame(heapBase, state);
+                    currentContext = frameContext(heapBase, frame);
+                    currentProgram = frameProgram(heapBase, frame);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
+                    globalObject = contextGlobal(heapBase, currentContext);
+                    framePC = frame + FRAME_PC;
+                    registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
+                    environment = frameEnvironment(heapBase, frame);
+                    pc = 0;
+                } else {
+                    var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
+                    var setPropertySource = registerAddress +
+                        setPropertySourceIndex * VALUE_CELL_BYTES;
+                    copyValueCell(setPropertyDestination, setPropertySource);
+                    pc = pc + FOUR_WORD_INSTRUCTION;
+                }
+                }
             } else if (opcode === OP_REMAINDER) {
                 var remainderTargetOperand = load32(
                     bytecodeAddress +
@@ -2051,6 +2245,24 @@
                             opcode);
                     }
                     if (integerArithmetic === 0) {
+                    if (opcode === OP_ADD) {
+                        if (arithmeticLeftTag === VALUE_TAG_REFERENCE &&
+                            recordType(heapBase, valueCellReference(0, arithmeticLeft)) === HEAP_TYPE_ARRAY) {
+                            if (arrayDefaultPrimitiveKernel(heapBase, state,
+                                engineScratchLeftAddress(heapBase, state), arithmeticLeft, stringSupport) === 1) {
+                                arithmeticLeft = engineScratchLeftAddress(heapBase, state);
+                                arithmeticLeftTag = VALUE_TAG_REFERENCE;
+                            }
+                        }
+                        if (arithmeticRightTag === VALUE_TAG_REFERENCE &&
+                            recordType(heapBase, valueCellReference(0, arithmeticRight)) === HEAP_TYPE_ARRAY) {
+                            if (arrayDefaultPrimitiveKernel(heapBase, state,
+                                engineScratchRightAddress(heapBase, state), arithmeticRight, stringSupport) === 1) {
+                                arithmeticRight = engineScratchRightAddress(heapBase, state);
+                                arithmeticRightTag = VALUE_TAG_REFERENCE;
+                            }
+                        }
+                    }
                     var stringConcatenation = 0;
                     var concatenationLeftIsString = 0;
                     var concatenationRightIsString = 0;
@@ -3563,7 +3775,7 @@
                         heapBase, state, frame, callFunctionCell,
                         callArgumentsCell, callOperation, callTargetIndex,
                         currentContext, stringSupport, arrayPrototype,
-                        bytecodeAddress, registerAddress, pc, framePC, 0, 0, 0);
+                        bytecodeAddress, registerAddress, pc, framePC, 0, 0, 0, 0);
                 }
                 var callFrameEntered = bytecodeCallHandled;
                 var intrinsicDispatchResult = 0;
@@ -3574,7 +3786,7 @@
                         currentContext, stringSupport, arrayPrototype,
                         bytecodeAddress, registerAddress, pc, opcode, (initialBudget - budget),
                         platformServices, load32(bytecodeAddress +
-                            (pc + THIRD_OPERAND) * WORD_BYTES));
+                            (pc + THIRD_OPERAND) * WORD_BYTES), 0);
                     if (intrinsicDispatchResult === EXIT_UNSUPPORTED) {
                         return EXIT_UNSUPPORTED;
                     }
@@ -4458,7 +4670,7 @@
                                     stringSupport, arrayPrototype,
                                     bytecodeAddress, registerAddress, pc, framePC,
                                     propertyObjectCell,
-                                    FOUR_WORD_INSTRUCTION, 0);
+                                    FOUR_WORD_INSTRUCTION, 0, 0);
                                 if (propertyAccessorEntered !== 1) {
                                     return unsupportedDiagnosticExitKernel(
                                         heapBase, state, frame, pc, opcode,
@@ -4514,252 +4726,6 @@
                     environment = frameEnvironment(heapBase, frame);
                     pc = 0;
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
-            } else if (opcode === OP_SET_PROPERTY_CONST) {
-                var setPropertyObjectIndex = load32(
-                    bytecodeAddress +
-                    (pc + FIRST_OPERAND) * WORD_BYTES);
-                var setPropertyKeyIndex = load32(
-                    bytecodeAddress +
-                    (pc + SECOND_OPERAND) * WORD_BYTES);
-                var setPropertySourceIndex = load32(
-                    bytecodeAddress +
-                    (pc + THIRD_OPERAND) * WORD_BYTES);
-                var setPropertyObjectCell = registerAddress +
-                    setPropertyObjectIndex * VALUE_CELL_BYTES;
-                var setPropertyKeyCell = heapBase + constantCells +
-                    setPropertyKeyIndex * VALUE_CELL_BYTES;
-                var setPropertyOperandsValid = 1;
-                if (load32(setPropertyObjectCell) !== VALUE_TAG_REFERENCE) {
-                    setPropertyOperandsValid = 0;
-                }
-                if (load32(setPropertyKeyCell) !== VALUE_TAG_REFERENCE) {
-                    setPropertyOperandsValid = 0;
-                }
-                if (setPropertyOperandsValid === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                }
-                var setPropertyObject = load32(
-                    setPropertyObjectCell + VALUE_CELL_LOW);
-                var setPropertyObjectType = load32(
-                    heapBase + setPropertyObject);
-                var setPropertyHead = 0;
-                var setPropertyHeadOffset = 0;
-                if (setPropertyObjectType >= HEAP_TYPE_OBJECT) {
-                    if (setPropertyObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
-                        setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
-                        setPropertyHeadOffset = OBJECT_PROPERTY_HEAD;
-                    }
-                }
-                if (setPropertyObjectType === HEAP_TYPE_REGEXP) {
-                    setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
-                    setPropertyHeadOffset = REGEXP_PROPERTY_HEAD;
-                } else if (setPropertyObjectType === HEAP_TYPE_BUFFER_VIEW) {
-                    setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
-                    setPropertyHeadOffset = BUFFER_VIEW_PROPERTY_HEAD;
-                }
-                var setPropertyConstantKey = load32(
-                    setPropertyKeyCell + VALUE_CELL_LOW);
-                var setPropertyIgnored = 0;
-                /* Arguments objects share array storage but their length is
-                 * an ordinary property, not the virtual true-array length. */
-                if (setPropertyObjectType === HEAP_TYPE_ARRAY &&
-                        arrayReserved(heapBase, setPropertyObject) === 0 &&
-                        stringKeysEqualKernel(heapBase, setPropertyConstantKey,
-                            arrayLengthKey) === 1) {
-                    if (setArrayLengthKernel(heapBase, state, setPropertyObject,
-                            frameRegisterCellAddress(heapBase, frame,
-                                setPropertySourceIndex)) === 0) {
-                        return unsupportedExitKernel(heapBase, state, frame,
-                            pc, opcode, initialBudget - budget);
-                    }
-                    pc = pc + FOUR_WORD_INSTRUCTION;
-                    setPropertyIgnored = 1;
-                }
-                /* A string primitive's length is a non-writable own
-                 * property. Sloppy PutValue ignores the write; strict code
-                 * takes the exception path rather than mutating the string. */
-                if (setPropertyObjectType === HEAP_TYPE_STRING) {
-                    var stringLengthKeyCell = vectorCellAddress(heapBase,
-                        stringSupport, RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY);
-                    if (stringKeysEqualKernel(heapBase, setPropertyConstantKey,
-                            valueCellReference(0, stringLengthKeyCell)) === 1) {
-                        if ((programFlags(heapBase, currentProgram) & PROGRAM_FLAG_STRICT) === 0) {
-                            pc = pc + FOUR_WORD_INSTRUCTION;
-                            setPropertyIgnored = 1;
-                        }
-                    }
-                }
-                if (setPropertyIgnored === 0) {
-                var setPropertyRecord = 0;
-                var setPropertyOwner = setPropertyObject;
-                var setPropertyAccessorEntered = 0;
-                var setPropertyFirst = setPropertyHead;
-                if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
-                    setPropertyRecord = findCachedOwnObjectPropertyKernel(
-                        heapBase, state, setPropertyObject, setPropertyConstantKey);
-                    setPropertyHead = 0;
-                }
-                while (setPropertyHead !== 0) {
-                    var setPropertyStoredKey = ownPropertyEntryKeyKernel(heapBase, setPropertyObject, setPropertyHead);
-                    var setPropertyKeysMatch = 1;
-                    if (setPropertyStoredKey !== setPropertyConstantKey) {
-                        setPropertyKeysMatch = stringKeysEqualKernel(
-                            heapBase, setPropertyStoredKey,
-                            setPropertyConstantKey);
-                    }
-                    if (setPropertyKeysMatch === 1) {
-                        setPropertyRecord = setPropertyHead;
-                        setPropertyHead = 0;
-                    } else {
-                        setPropertyHead = previousOwnPropertyEntryKernel(heapBase, setPropertyObject, setPropertyHead);
-                    }
-                }
-                if (setPropertyRecord === 0) {
-                    var inheritedSetObject = 0;
-                    if (setPropertyObjectType >= HEAP_TYPE_OBJECT) {
-                        if (setPropertyObjectType <=
-                            HEAP_TYPE_BYTECODE_FUNCTION) {
-                            inheritedSetObject = objectPrototype(
-                                heapBase, setPropertyObject);
-                        }
-                    }
-                    if (setPropertyObjectType === HEAP_TYPE_REGEXP) {
-                        inheritedSetObject = regexpPrototype(
-                            heapBase, setPropertyObject);
-                    } else if (setPropertyObjectType ===
-                               HEAP_TYPE_BUFFER_VIEW) {
-                        inheritedSetObject = bufferViewPrototype(
-                            heapBase, setPropertyObject);
-                    }
-                    while (inheritedSetObject !== 0) {
-                        var inheritedSetType = recordType(
-                            heapBase, inheritedSetObject);
-                        var inheritedSetHead = 0;
-                        var inheritedSetPrototype = 0;
-                        if (inheritedSetType >= HEAP_TYPE_OBJECT) {
-                            if (inheritedSetType <=
-                                HEAP_TYPE_BYTECODE_FUNCTION) {
-                                inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
-                                inheritedSetPrototype = objectPrototype(
-                                    heapBase, inheritedSetObject);
-                            }
-                        }
-                        if (inheritedSetType === HEAP_TYPE_REGEXP) {
-                            inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
-                            inheritedSetPrototype = regexpPrototype(
-                                heapBase, inheritedSetObject);
-                        } else if (inheritedSetType ===
-                                   HEAP_TYPE_BUFFER_VIEW) {
-                            inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
-                            inheritedSetPrototype = bufferViewPrototype(
-                                heapBase, inheritedSetObject);
-                        }
-                        while (inheritedSetHead !== 0) {
-                            var inheritedSetKey = ownPropertyEntryKeyKernel(heapBase, inheritedSetObject, inheritedSetHead);
-                            var inheritedSetMatches = 1;
-                            if (inheritedSetKey !== setPropertyConstantKey) {
-                                inheritedSetMatches = stringKeysEqualKernel(
-                                    heapBase, inheritedSetKey,
-                                    setPropertyConstantKey);
-                            }
-                            if (inheritedSetMatches === 1) {
-                                var inheritedSetAttributes =
-                                    ownPropertyEntryAttributesKernel(heapBase, inheritedSetObject, inheritedSetHead);
-                                if ((inheritedSetAttributes &
-                                     PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                                    setPropertyRecord = inheritedSetHead;
-                                    setPropertyOwner = inheritedSetObject;
-                                } else if ((inheritedSetAttributes &
-                                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                                    setPropertyRecord = inheritedSetHead;
-                                    setPropertyOwner = inheritedSetObject;
-                                }
-                                inheritedSetHead = 0;
-                                inheritedSetObject = 0;
-                            } else inheritedSetHead = previousOwnPropertyEntryKernel(heapBase, inheritedSetObject, inheritedSetHead);
-                        }
-                        if (inheritedSetObject !== 0) {
-                            inheritedSetObject = inheritedSetPrototype;
-                        }
-                    }
-                }
-                if (setPropertyRecord === 0) {
-                    if (setPropertyHeadOffset === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                    /* Let the semantic path apply strict/sloppy assignment
-                     * behavior when an ordinary object rejects extension. */
-                    if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
-                        if (objectExtensible(
-                            heapBase, setPropertyObject) === 0) {
-                            return unsupportedExitKernel(
-                                heapBase, state, frame, pc, opcode,
-                                (initialBudget - budget));
-                        }
-                    }
-                    setPropertyRecord = appendOwnPropertyEntryKernel(
-                        heapBase, state, setPropertyObject, setPropertyConstantKey,
-                        DEFAULT_PROPERTY_ATTRIBUTES);
-                    setPropertyOwner = setPropertyObject;
-                    if (setPropertyRecord === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                }
-                var setPropertyDescriptor = ownPropertyEntryDescriptorKernel(
-                    heapBase, setPropertyOwner, setPropertyRecord);
-                if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
-                            PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                    var setter = propertyDescriptorSetter(0, setPropertyDescriptor);
-                    if (setter === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                    var setterCell = engineScratchLeftAddress(heapBase, state);
-                    setValueCellReference(setterCell, setter);
-                    var setterArgumentCell = registerAddress +
-                        setPropertySourceIndex * VALUE_CELL_BYTES;
-                    setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
-                    setPropertyAccessorEntered = bytecodeCallKernel(
-                        heapBase, state, frame, setterCell, 0, 1, -1,
-                        currentContext, stringSupport, arrayPrototype,
-                        bytecodeAddress, registerAddress, pc, framePC,
-                        setPropertyObjectCell, FOUR_WORD_INSTRUCTION,
-                        setterArgumentCell);
-                    if (setPropertyAccessorEntered !== 1) {
-                        return unsupportedDiagnosticExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                } else if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
-                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                }
-                if (setPropertyAccessorEntered === 1) {
-                    frame = engineCurrentFrame(heapBase, state);
-                    currentContext = frameContext(heapBase, frame);
-                    currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = executionBytecodeAddressKernel(
-                        heapBase, state, currentProgram, stringSupport);
-                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
-                        heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = executionProgramConstantsKernel(
-                        heapBase, state, currentProgram) + VECTOR_CELLS;
-                    globalObject = contextGlobal(heapBase, currentContext);
-                    framePC = frame + FRAME_PC;
-                    registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
-                    environment = frameEnvironment(heapBase, frame);
-                    pc = 0;
-                } else {
-                    var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
-                    var setPropertySource = registerAddress +
-                        setPropertySourceIndex * VALUE_CELL_BYTES;
-                    copyValueCell(setPropertyDestination, setPropertySource);
-                    pc = pc + FOUR_WORD_INSTRUCTION;
-                }
-                }
             } else if (opcode === OP_DEFINE_GETTER || opcode === OP_DEFINE_SETTER) {
                 var accessorObjectIndex = load32(
                     bytecodeAddress +
@@ -5107,7 +5073,7 @@
             callOperation, callTargetIndex, currentContext, stringSupport,
             arrayPrototype, bytecodeAddress, registerAddress, pc, framePC,
             explicitReceiverCell, explicitCallerAdvance,
-            explicitArgumentCell) {
+            explicitArgumentCell, explicitArgumentRegisters) {
         var bytecodeCallHandled = 0;
         var bytecodeCallableCell = callFunctionCell;
         var bytecodeArgumentVector = 0;
@@ -5276,7 +5242,11 @@
                 if (explicitReceiverCell !== 0) {
                     bytecodeThisSource = explicitReceiverCell;
                     bytecodeArgumentsAreValues = 1;
-                    if (explicitArgumentCell !== 0) {
+                    if (explicitArgumentRegisters !== 0) {
+                        bytecodeArgumentVector = explicitArgumentRegisters;
+                        bytecodeArgumentCount = vectorLength(heapBase, bytecodeArgumentVector);
+                        bytecodeArgumentsAreValues = 0;
+                    } else if (explicitArgumentCell !== 0) {
                         bytecodeArgumentCount = 1;
                     } else bytecodeArgumentCount = 0;
                 } else if (bytecodeApplyForwarding === 0) {
@@ -6084,11 +6054,88 @@
         return 1;
     }
 
+    /* Normalize apply-to-native into the same register-descriptor protocol
+     * as an ordinary call. Temporary values remain on the guest heap; the
+     * result cell and caller frame stay those of the original instruction.
+     * No collection/user code runs before dispatch copies any continuation's
+     * arguments into its callee frame. Getter-bearing lists decline here. */
+    function applyNativeIntrinsicKernel(heapBase, state, frame,
+            argumentsVector, argumentCount, callTargetIndex, currentContext,
+            stringSupport, arrayPrototype, bytecodeAddress, registerAddress,
+            pc, opcode, instructions, platformServices, receiverIndex, targetCell) {
+        if (receiverIndex < 0) return unsupportedDiagnosticExitKernel(
+            heapBase, state, frame, pc, opcode, instructions);
+        var functionCell = bytecodeRegisterCellAddress(0, registerAddress, receiverIndex);
+        if (valueCellTag(0, functionCell) !== VALUE_TAG_REFERENCE ||
+            recordType(heapBase, valueCellReference(0, functionCell)) !== HEAP_TYPE_NATIVE_FUNCTION) {
+            return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
+        var thisCell = 0, list = 0, count = 0;
+        if (argumentCount > 0) thisCell = programArgumentCellKernel(
+            heapBase, argumentsVector, registerAddress, 0);
+        if (argumentCount > 1) {
+            var listCell = programArgumentCellKernel(heapBase, argumentsVector, registerAddress, 1);
+            var listTag = valueCellTag(0, listCell);
+            if (listTag !== VALUE_TAG_UNDEFINED && listTag !== VALUE_TAG_NULL) {
+                if (listTag !== VALUE_TAG_REFERENCE) return unsupportedDiagnosticExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+                list = valueCellReference(0, listCell);
+                if (recordType(heapBase, list) !== HEAP_TYPE_ARRAY) return unsupportedDiagnosticExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+                count = vectorLength(heapBase, arrayElements(heapBase, list));
+            }
+        }
+        var index = 0;
+        while (index < count) {
+            if (arrayPropertyHead(heapBase, list) !== 0 &&
+                indexedOwnPropertyDescriptorKernel(heapBase, state, list, index) !== 0) {
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
+            if (valueCellTag(0, vectorCellAddress(heapBase, arrayElements(heapBase, list), index)) === 0) {
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
+            index++;
+        }
+        var maximumCount = divideI32(MAX_SIGNED_INT32 - 2 * VECTOR_FIXED_BYTES,
+            2 * VALUE_CELL_BYTES) - NATIVE_APPLY_ARGUMENT_BASE;
+        if (count > maximumCount) return unsupportedDiagnosticExitKernel(
+            heapBase, state, frame, pc, opcode, instructions);
+        var valueBytes = VECTOR_FIXED_BYTES + (count + NATIVE_APPLY_ARGUMENT_BASE) * VALUE_CELL_BYTES;
+        var descriptorBytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, valueBytes + descriptorBytes) === 0) {
+            return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
+        var values = engineHeapBump(heapBase, state), descriptors = values + valueBytes;
+        initializeProgramVectorKernel(heapBase, values, count + NATIVE_APPLY_ARGUMENT_BASE, 0);
+        initializeProgramVectorKernel(heapBase, descriptors, count, 0);
+        copyValueCell(vectorCellAddress(heapBase, values, NATIVE_APPLY_FUNCTION_REGISTER), functionCell);
+        var thisTarget = vectorCellAddress(heapBase, values, NATIVE_APPLY_RECEIVER_REGISTER);
+        if (thisCell !== 0) copyValueCell(thisTarget, thisCell);
+        else setValueCellUndefined(thisTarget);
+        index = 0;
+        while (index < count) {
+            var source = argumentsMappedCellKernel(heapBase, list, index);
+            if (source === 0) source = vectorCellAddress(heapBase, arrayElements(heapBase, list), index);
+            copyValueCell(vectorCellAddress(heapBase, values, index + NATIVE_APPLY_ARGUMENT_BASE), source);
+            setValueCellInt32(vectorCellAddress(heapBase, descriptors, index), index + NATIVE_APPLY_ARGUMENT_BASE);
+            index++;
+        }
+        setEngineHeapBump(heapBase, state, descriptors + descriptorBytes);
+        var descriptorCell = engineScratchLeftAddress(heapBase, state);
+        setValueCellReference(descriptorCell, descriptors);
+        var registers = vectorCellAddress(heapBase, values, 0);
+        return intrinsicCallKernel(heapBase, state, frame,
+            vectorCellAddress(heapBase, values, NATIVE_APPLY_FUNCTION_REGISTER),
+            descriptorCell, CALL_OPERATION_CALL, callTargetIndex, currentContext,
+            stringSupport, arrayPrototype, bytecodeAddress, registers, pc, opcode,
+            instructions, platformServices, NATIVE_APPLY_RECEIVER_REGISTER, targetCell);
+    }
+
     function intrinsicCallKernel(
             heapBase, state, frame, callFunctionCell, callArgumentsCell,
             callOperation, callTargetIndex, currentContext, stringSupport,
             arrayPrototype, bytecodeAddress, registerAddress, pc, opcode,
-            instructions, platformServices, callReceiverIndex) {
+            instructions, platformServices, callReceiverIndex, explicitTargetCell) {
         var receiverIndex = -1;
         var intrinsicCallValid = 1;
         if (load32(callFunctionCell) !== VALUE_TAG_REFERENCE) {
@@ -6196,8 +6243,8 @@
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
-            var forwardedFunctionCell = frameRegisterCellAddress(
-                heapBase, frame, callReceiverIndex);
+            var forwardedFunctionCell = bytecodeRegisterCellAddress(
+                0, registerAddress, callReceiverIndex);
             if (valueCellTag(0, forwardedFunctionCell) !==
                     VALUE_TAG_REFERENCE) {
                 return unsupportedDiagnosticExitKernel(
@@ -6240,6 +6287,16 @@
                 CALL_DIAGNOSTIC_INTRINSIC_BASE + intrinsicId);
         }
         isErrorConstructor = 0;
+        if (intrinsicId === INTRINSIC_FUNCTION_APPLY) {
+            var applyTargetCell = explicitTargetCell;
+            if (applyTargetCell === 0) applyTargetCell = bytecodeRegisterCellAddress(
+                0, registerAddress, callTargetIndex);
+            return applyNativeIntrinsicKernel(heapBase, state, frame,
+                intrinsicArgumentsVector, intrinsicArgumentCount, callTargetIndex,
+                currentContext, stringSupport, arrayPrototype, bytecodeAddress,
+                registerAddress, pc, opcode, instructions, platformServices,
+                callReceiverIndex, applyTargetCell);
+        }
         if (intrinsicId >= INTRINSIC_FIRST_ERROR_CONSTRUCTOR &&
             intrinsicId <= INTRINSIC_LAST_ERROR_CONSTRUCTOR) {
             isErrorConstructor = 1;
@@ -6259,6 +6316,8 @@
         } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
             requiredIntrinsicArguments = 2;
         } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
+            requiredIntrinsicArguments = 0;
+        } else if (intrinsicId === INTRINSIC_ARRAY_TO_STRING) {
             requiredIntrinsicArguments = 0;
         } else if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
             requiredIntrinsicArguments = 0;
@@ -6412,7 +6471,18 @@
         }
         var intrinsicTarget = registerAddress +
             callTargetIndex * VALUE_CELL_BYTES;
+        if (explicitTargetCell !== 0) intrinsicTarget = explicitTargetCell;
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_ARRAY_TO_STRING && callReceiverIndex >= 0) {
+            intrinsicHandled = arrayBuiltinStringKernel(heapBase, state, intrinsicTarget,
+                bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
+            if (intrinsicHandled !== 1) return unsupportedDiagnosticExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (intrinsicId === INTRINSIC_OBJECT_TO_STRING && callReceiverIndex >= 0) {
+            intrinsicHandled = objectToStringKernel(heapBase, intrinsicTarget,
+                bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
+        }
         if (intrinsicId === INTRINSIC_TRY_COPY_INT32_ARRAY) {
             intrinsicHandled = copyInt32ArrayIntrinsicKernel(heapBase,
                 intrinsicTarget, registerAddress, intrinsicArgumentsVector,
@@ -6498,7 +6568,7 @@
         if (intrinsicId === INTRINSIC_OBJECT_IS_PROTOTYPE_OF) {
             var prototypeReceiver = 0;
             if (callReceiverIndex >= 0) {
-                prototypeReceiver = frameRegisterCellAddress(heapBase, frame, callReceiverIndex);
+                prototypeReceiver = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
             }
             var prototypeArgument = programArgumentCellKernel(
                 heapBase, intrinsicArgumentsVector, registerAddress, 0);
@@ -6651,7 +6721,7 @@
                     heapBase, state, frame, indirectEvalCompilerCell,
                     callArgumentsCell, 1, callTargetIndex, currentContext,
                     stringSupport, arrayPrototype, bytecodeAddress,
-                    registerAddress, pc, frame + FRAME_PC, 0, 0, 0);
+                    registerAddress, pc, frame + FRAME_PC, 0, 0, 0, 0);
                 if (indirectEvalCompileEntered !== 1) {
                     return unsupportedDiagnosticExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
@@ -6719,7 +6789,7 @@
                     callArgumentsCell, CALL_OPERATION_CALL, callTargetIndex,
                     currentContext, stringSupport, arrayPrototype,
                     bytecodeAddress, registerAddress, pc, frame + FRAME_PC,
-                    0, functionCallerAdvance, 0);
+                    0, functionCallerAdvance, 0, 0);
                 if (functionCompileEntered !== 1) {
                     return unsupportedDiagnosticExitKernel(
                         heapBase, state, frame, pc, opcode, instructions);
@@ -6823,8 +6893,8 @@
             var functionStringReceiverIndex = callReceiverIndex;
             var functionStringReceiverCell = 0;
             if (functionStringReceiverIndex >= 0) {
-                functionStringReceiverCell = frameRegisterCellAddress(
-                    heapBase, frame, functionStringReceiverIndex);
+                functionStringReceiverCell = bytecodeRegisterCellAddress(
+                    0, registerAddress, functionStringReceiverIndex);
             }
             intrinsicHandled = functionToStringKernel(
                 heapBase, intrinsicTarget, functionStringReceiverCell);
@@ -6998,11 +7068,35 @@
         }
         }
         if (intrinsicHandled === 0) {
+            var genericArraySupportIndex = 0;
+            if (intrinsicId === INTRINSIC_ARRAY_PUSH) genericArraySupportIndex = RUNTIME_SUPPORT_ARRAY_PUSH_GENERIC;
+            else if (intrinsicId === INTRINSIC_ARRAY_SLICE) genericArraySupportIndex = RUNTIME_SUPPORT_ARRAY_SLICE_GENERIC;
+            if (genericArraySupportIndex !== 0) {
+                var genericArrayReceiver = engineScratchRightAddress(heapBase, state);
+                if (callReceiverIndex >= 0) {
+                    genericArrayReceiver = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
+                } else setValueCellUndefined(genericArrayReceiver);
+                if (valueCellTag(0, genericArrayReceiver) !== VALUE_TAG_REFERENCE ||
+                    recordType(heapBase, valueCellReference(0, genericArrayReceiver)) !== HEAP_TYPE_ARRAY) {
+                    var genericArrayHelperCell = vectorCellAddress(heapBase, stringSupport,
+                        genericArraySupportIndex);
+                    if (valueCellTag(0, genericArrayHelperCell) === VALUE_TAG_REFERENCE) {
+                        var genericArrayEntered = bytecodeCallKernel(
+                            heapBase, state, frame, genericArrayHelperCell, 0,
+                            CALL_OPERATION_CALL, callTargetIndex, currentContext,
+                            stringSupport, arrayPrototype, bytecodeAddress,
+                            registerAddress, pc, frame + FRAME_PC,
+                            genericArrayReceiver, FIVE_WORD_INSTRUCTION, 0,
+                            intrinsicArgumentsVector);
+                        if (genericArrayEntered === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
+                    }
+                }
+            }
             var arrayIntrinsicResult = arrayIntrinsicKernel(
                 heapBase, state, intrinsicTarget, registerAddress,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 arrayPrototype, bytecodeAddress, pc, opcode, intrinsicId,
-                instructions, frame, callReceiverIndex);
+                instructions, frame, callReceiverIndex, stringSupport);
             if (arrayIntrinsicResult === EXIT_UNSUPPORTED) {
                 return EXIT_UNSUPPORTED;
             }
@@ -7055,8 +7149,8 @@
             var copyReceiverIndex = callReceiverIndex;
             var copyReceiverCell = 0;
             if (copyReceiverIndex >= 0) {
-                copyReceiverCell = frameRegisterCellAddress(
-                    heapBase, frame, copyReceiverIndex);
+                copyReceiverCell = bytecodeRegisterCellAddress(
+                    0, registerAddress, copyReceiverIndex);
             }
             intrinsicHandled = bufferCopyKernel(
                 heapBase, intrinsicTarget, copyReceiverCell,
@@ -7097,8 +7191,8 @@
             var replaceReceiverIndex = callReceiverIndex;
             var replaceReceiverCell = 0;
             if (replaceReceiverIndex >= 0) {
-                replaceReceiverCell = frameRegisterCellAddress(
-                    heapBase, frame, replaceReceiverIndex);
+                replaceReceiverCell = bytecodeRegisterCellAddress(
+                    0, registerAddress, replaceReceiverIndex);
             }
             intrinsicHandled = stringReplaceKernel(
                 heapBase, state, intrinsicTarget, replaceReceiverCell,
@@ -8066,7 +8160,7 @@
             heapBase, state, intrinsicTarget, registerAddress,
             intrinsicArgumentsVector, intrinsicArgumentCount,
             arrayPrototype, bytecodeAddress, pc, opcode, intrinsicId, instructions,
-            frame, callReceiverIndex) {
+            frame, callReceiverIndex, stringSupport) {
         var intrinsicHandled = 0;
         if (intrinsicId === INTRINSIC_ARRAY_REVERSE) {
             var reverseReceiverIndex = callReceiverIndex;
@@ -8468,220 +8562,30 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_JOIN) {
-            var joinValid = 1;
-            var joinAllocationFailed = 0;
-            if (intrinsicArgumentCount !== 1) joinValid = 0;
-            var joinReceiverIndex = callReceiverIndex;
-            if (joinReceiverIndex < 0) joinValid = 0;
-            var joinReceiverCell = registerAddress +
-                joinReceiverIndex * VALUE_CELL_BYTES;
-            if (valueCellTag(0, joinReceiverCell) !==
-                VALUE_TAG_REFERENCE) joinValid = 0;
-            var joinArray = valueCellReference(0, joinReceiverCell);
-            if (joinValid === 1) {
-                if (recordType(heapBase, joinArray) !==
-                    HEAP_TYPE_ARRAY) joinValid = 0;
-            }
-            var joinSeparator = 0;
-            if (joinValid === 1) {
-                var joinSeparatorRegisterCell = heapBase +
-                    intrinsicArgumentsVector + VECTOR_CELLS;
-                if (valueCellTag(0, joinSeparatorRegisterCell) !==
-                    VALUE_TAG_INT32) joinValid = 0;
-                var joinSeparatorRegister = load32(
-                    joinSeparatorRegisterCell + VALUE_CELL_LOW);
-                var joinSeparatorCell = registerAddress +
-                    joinSeparatorRegister * VALUE_CELL_BYTES;
-                if (valueCellTag(0, joinSeparatorCell) !==
-                    VALUE_TAG_REFERENCE) joinValid = 0;
-                joinSeparator = valueCellReference(
-                    0, joinSeparatorCell);
-                if (joinValid === 1) {
-                    if (recordType(heapBase, joinSeparator) !==
-                        HEAP_TYPE_STRING) joinValid = 0;
-                }
-            }
-            var joinVector = 0;
-            var joinLength = 0;
-            var joinSeparatorLength = 0;
-            var joinCharacterLength = 0;
-            if (joinValid === 1) {
-                joinVector = arrayElements(heapBase, joinArray);
-                joinLength = vectorLength(heapBase, joinVector);
-            }
-            var joinMaximumCharacters = 0;
-            if (joinValid === 1) {
-                joinSeparatorLength = stringLength(
-                    heapBase, joinSeparator);
-                /* Measure against the representable record size, not merely
-                 * the active arena's remaining suffix. The allocator below
-                 * can switch to another reclaimed region or the native tail;
-                 * rejecting here forced every subsequent join through host
-                 * semantics as soon as one arena became nearly full. */
-                joinMaximumCharacters = divideI32(
-                    MAX_SIGNED_INT32 - STRING_CHARS - 7, 2);
-            }
-            var joinMeasureIndex = 0;
-            while (joinMeasureIndex < joinLength) {
-                if (joinMeasureIndex > 0) {
-                    if (joinSeparatorLength >
-                        joinMaximumCharacters - joinCharacterLength) {
-                        joinValid = 0;
-                        joinAllocationFailed = 1;
-                        joinMeasureIndex = joinLength;
-                    } else {
-                        joinCharacterLength = joinCharacterLength +
-                            joinSeparatorLength;
+            if (callReceiverIndex >= 0 && intrinsicArgumentCount <= 1) {
+                var joinReceiverCell = frameRegisterCellAddress(heapBase, frame, callReceiverIndex);
+                var joinSeparator = valueCellReference(0, vectorCellAddress(
+                    heapBase, stringSupport, RUNTIME_SUPPORT_COMMA_STRING));
+                var joinArgumentValid = 1;
+                if (intrinsicArgumentCount === 1) {
+                    var joinSeparatorCell = programArgumentCellKernel(
+                        heapBase, intrinsicArgumentsVector, registerAddress, 0);
+                    if (valueCellTag(0, joinSeparatorCell) !== VALUE_TAG_UNDEFINED) {
+                        joinSeparator = propertyStringKeyReferenceKernel(heapBase,
+                            joinSeparatorCell, stringSupport);
+                        if (joinSeparator === 0) joinArgumentValid = 0;
                     }
                 }
-                var joinMeasureCell = heapBase + joinVector +
-                    VECTOR_CELLS +
-                    joinMeasureIndex * VALUE_CELL_BYTES;
-                var joinMeasureTag = 0;
-                if (joinMeasureIndex < joinLength) {
-                    joinMeasureTag = valueCellTag(0, joinMeasureCell);
-                }
-                if (joinMeasureIndex < joinLength) {
-                if (joinMeasureTag === VALUE_TAG_REFERENCE) {
-                    var joinMeasureString = valueCellReference(
-                        0, joinMeasureCell);
-                    if (recordType(heapBase, joinMeasureString) !==
-                        HEAP_TYPE_STRING) joinValid = 0;
-                    if (joinValid === 1) {
-                        var joinElementCharacters = stringLength(
-                            heapBase, joinMeasureString);
-                        if (joinElementCharacters >
-                            joinMaximumCharacters -
-                            joinCharacterLength) {
-                            joinValid = 0;
-                            joinAllocationFailed = 1;
-                        } else {
-                            joinCharacterLength =
-                                joinCharacterLength +
-                                joinElementCharacters;
-                        }
-                    }
-                } else if (joinMeasureTag === VALUE_TAG_INT32) {
-                    var integerCharacters = integerDecimalLengthKernel(
-                        valueCellInt32(0, joinMeasureCell));
-                    if (integerCharacters > joinMaximumCharacters - joinCharacterLength) {
-                        joinValid = 0;
-                        joinAllocationFailed = 1;
-                    } else joinCharacterLength = joinCharacterLength + integerCharacters;
-                } else if (joinMeasureTag !== 0) {
-                    if (joinMeasureTag !== VALUE_TAG_UNDEFINED) {
-                        if (joinMeasureTag !== VALUE_TAG_NULL) {
-                            joinValid = 0;
-                        }
+                if (joinArgumentValid === 1 && valueCellTag(0, joinReceiverCell) === VALUE_TAG_REFERENCE) {
+                    var joinStatus = arrayJoinKernel(heapBase, state, intrinsicTarget,
+                        valueCellReference(0, joinReceiverCell), joinSeparator);
+                    if (joinStatus === 1) intrinsicHandled = 1;
+                    else if (joinStatus === 2) {
+                        setEngineCallRejectReason(heapBase, state, CALL_REJECT_HEAP_SPACE);
+                        return unsupportedDiagnosticExitKernel(heapBase, state, frame,
+                            pc, opcode, instructions);
                     }
                 }
-                }
-                joinMeasureIndex = joinMeasureIndex + 1;
-            }
-            var joinBytes = 0;
-            var joinResult = 0;
-            if (joinValid === 1) {
-                joinBytes = (STRING_CHARS +
-                             joinCharacterLength * 2 + 7) & -8;
-                if (reserveNativeAllocationKernel(
-                        heapBase, state, joinBytes) === 0) {
-                    joinValid = 0;
-                    joinAllocationFailed = 1;
-                }
-                joinResult = engineHeapBump(heapBase, state);
-                if (joinResult + joinBytes >
-                    engineHeapLimit(heapBase, state)) {
-                    joinValid = 0;
-                    joinAllocationFailed = 1;
-                }
-            }
-            if (joinValid === 1) {
-                setRecordType(heapBase, joinResult, HEAP_TYPE_STRING);
-                setRecordSize(heapBase, joinResult, joinBytes);
-                setRecordMark(heapBase, joinResult, 0);
-                setRecordFlags(heapBase, joinResult, 0);
-                setStringLength(heapBase, joinResult,
-                                joinCharacterLength);
-                var joinHash = -2128831035;
-                var joinOutputIndex = 0;
-                var joinElementIndex = 0;
-                while (joinElementIndex < joinLength) {
-                    var joinCopySource = 0;
-                    var joinCopyLength = 0;
-                    if (joinElementIndex > 0) {
-                        joinCopySource = joinSeparator;
-                        joinCopyLength = joinSeparatorLength;
-                    }
-                    var joinCopyIndex = 0;
-                    while (joinCopyIndex < joinCopyLength) {
-                        var joinCode = stringCharacterCodeUnit(
-                            heapBase, joinCopySource,
-                            joinCopyIndex) & 65535;
-                        setStringCharacterByte(heapBase, joinResult,
-                            joinOutputIndex * 2, joinCode & 255);
-                        setStringCharacterByte(heapBase, joinResult,
-                            joinOutputIndex * 2 + 1,
-                            (joinCode >>> 8) & 255);
-                        joinHash = (joinHash ^ joinCode) * 16777619;
-                        joinOutputIndex = joinOutputIndex + 1;
-                        joinCopyIndex = joinCopyIndex + 1;
-                    }
-                    var joinElementCell = heapBase + joinVector +
-                        VECTOR_CELLS +
-                        joinElementIndex * VALUE_CELL_BYTES;
-                    if (valueCellTag(0, joinElementCell) ===
-                        VALUE_TAG_REFERENCE) {
-                        joinCopySource = valueCellReference(
-                            0, joinElementCell);
-                        joinCopyLength = stringLength(
-                            heapBase, joinCopySource);
-                        joinCopyIndex = 0;
-                        while (joinCopyIndex < joinCopyLength) {
-                            joinCode = stringCharacterCodeUnit(
-                                heapBase, joinCopySource,
-                                joinCopyIndex) & 65535;
-                            setStringCharacterByte(heapBase, joinResult,
-                                joinOutputIndex * 2, joinCode & 255);
-                            setStringCharacterByte(heapBase, joinResult,
-                                joinOutputIndex * 2 + 1,
-                                (joinCode >>> 8) & 255);
-                            joinHash = (joinHash ^ joinCode) * 16777619;
-                            joinOutputIndex = joinOutputIndex + 1;
-                            joinCopyIndex = joinCopyIndex + 1;
-                        }
-                    } else if (valueCellTag(0, joinElementCell) === VALUE_TAG_INT32) {
-                        var joinInteger = valueCellInt32(0, joinElementCell);
-                        var joinIntegerLength = integerDecimalLengthKernel(joinInteger);
-                        var joinIntegerIndex = 0;
-                        while (joinIntegerIndex < joinIntegerLength) {
-                            joinCode = integerDecimalCodeUnitKernel(
-                                joinInteger, joinIntegerIndex);
-                            setStringCharacterByte(heapBase, joinResult,
-                                joinOutputIndex * 2, joinCode);
-                            setStringCharacterByte(heapBase, joinResult,
-                                joinOutputIndex * 2 + 1, 0);
-                            joinHash = (joinHash ^ joinCode) * 16777619;
-                            joinOutputIndex = joinOutputIndex + 1;
-                            joinIntegerIndex = joinIntegerIndex + 1;
-                        }
-                    }
-                    joinElementIndex = joinElementIndex + 1;
-                }
-                setStringHash(heapBase, joinResult, joinHash);
-                setEngineHeapBump(heapBase, state,
-                                  joinResult + joinBytes);
-                setValueCellReference(intrinsicTarget, joinResult);
-                intrinsicHandled = 1;
-            }
-            if (joinAllocationFailed === 1) {
-                setEngineCallRejectReason(
-                    heapBase, state, CALL_REJECT_HEAP_SPACE);
-                setEngineExitReason(heapBase, state, EXIT_UNSUPPORTED);
-                setEnginePC(heapBase, state, pc);
-                setEngineResult(heapBase, state, opcode);
-                setEngineInstructions(heapBase, state, instructions);
-                setFramePC(heapBase, frame, pc);
-                return EXIT_UNSUPPORTED;
             }
         }
         }
@@ -11092,7 +10996,7 @@
         setRecordType(heapBase, errorObject, HEAP_TYPE_OBJECT);
         setRecordSize(heapBase, errorObject, OBJECT_RECORD_BYTES);
         setRecordMark(heapBase, errorObject, 0);
-        setRecordFlags(heapBase, errorObject, 0);
+        setRecordFlags(heapBase, errorObject, OBJECT_CLASS_ERROR_FLAG);
         setObjectPrototype(heapBase, errorObject,
             valueCellReference(0, prototypeCell));
         initializeOwnPropertyStorageKernel(heapBase, errorObject, errorStorage, 2);
@@ -15464,6 +15368,7 @@
             return prepareArgumentRegisterVectorKernel(heapBase, state, descriptor);
         }
         if (kind === HEAP_TYPE_ARRAY) return arrayElements(heapBase, descriptor);
+        if (kind === HEAP_TYPE_VALUE_VECTOR) return descriptor;
         return 0;
     }
 
@@ -15939,6 +15844,189 @@
         return 1;
     }
 
+    /* Shared join implementation for explicit join and guarded implicit
+     * Array string conversion. Returns 1 on success, 2 on allocation failure,
+     * and 0 when an element requires observable guest conversion. */
+    function arrayJoinKernel(heapBase, state, targetCell, joinArray, joinSeparator) {
+        if (recordType(heapBase, joinArray) !== HEAP_TYPE_ARRAY) return 0;
+        var joinValid = 1, joinAllocationFailed = 0;
+            var joinVector = 0;
+            var joinLength = 0;
+            var joinSeparatorLength = 0;
+            var joinCharacterLength = 0;
+            if (joinValid === 1) {
+                joinVector = arrayElements(heapBase, joinArray);
+                joinLength = vectorLength(heapBase, joinVector);
+            }
+            var joinMaximumCharacters = 0;
+            if (joinValid === 1) {
+                joinSeparatorLength = stringLength(
+                    heapBase, joinSeparator);
+                /* Measure against the representable record size, not merely
+                 * the active arena's remaining suffix. The allocator below
+                 * can switch to another reclaimed region or the native tail;
+                 * rejecting here forced every subsequent join through host
+                 * semantics as soon as one arena became nearly full. */
+                joinMaximumCharacters = divideI32(
+                    MAX_SIGNED_INT32 - STRING_CHARS - 7, 2);
+            }
+            var joinMeasureIndex = 0;
+            while (joinMeasureIndex < joinLength) {
+                if (joinMeasureIndex > 0) {
+                    if (joinSeparatorLength >
+                        joinMaximumCharacters - joinCharacterLength) {
+                        joinValid = 0;
+                        joinAllocationFailed = 1;
+                        joinMeasureIndex = joinLength;
+                    } else {
+                        joinCharacterLength = joinCharacterLength +
+                            joinSeparatorLength;
+                    }
+                }
+                var joinMeasureCell = heapBase + joinVector +
+                    VECTOR_CELLS +
+                    joinMeasureIndex * VALUE_CELL_BYTES;
+                var joinMeasureTag = 0;
+                if (joinMeasureIndex < joinLength) {
+                    joinMeasureTag = valueCellTag(0, joinMeasureCell);
+                }
+                if (joinMeasureIndex < joinLength) {
+                if (joinMeasureTag === VALUE_TAG_REFERENCE) {
+                    var joinMeasureString = valueCellReference(
+                        0, joinMeasureCell);
+                    if (recordType(heapBase, joinMeasureString) !==
+                        HEAP_TYPE_STRING) joinValid = 0;
+                    if (joinValid === 1) {
+                        var joinElementCharacters = stringLength(
+                            heapBase, joinMeasureString);
+                        if (joinElementCharacters >
+                            joinMaximumCharacters -
+                            joinCharacterLength) {
+                            joinValid = 0;
+                            joinAllocationFailed = 1;
+                        } else {
+                            joinCharacterLength =
+                                joinCharacterLength +
+                                joinElementCharacters;
+                        }
+                    }
+                } else if (joinMeasureTag === VALUE_TAG_INT32) {
+                    var integerCharacters = integerDecimalLengthKernel(
+                        valueCellInt32(0, joinMeasureCell));
+                    if (integerCharacters > joinMaximumCharacters - joinCharacterLength) {
+                        joinValid = 0;
+                        joinAllocationFailed = 1;
+                    } else joinCharacterLength = joinCharacterLength + integerCharacters;
+                } else if (joinMeasureTag !== 0) {
+                    if (joinMeasureTag !== VALUE_TAG_UNDEFINED) {
+                        if (joinMeasureTag !== VALUE_TAG_NULL) {
+                            joinValid = 0;
+                        }
+                    }
+                }
+                }
+                joinMeasureIndex = joinMeasureIndex + 1;
+            }
+            var joinBytes = 0;
+            var joinResult = 0;
+            if (joinValid === 1) {
+                joinBytes = (STRING_CHARS +
+                             joinCharacterLength * 2 + 7) & -8;
+                if (reserveNativeAllocationKernel(
+                        heapBase, state, joinBytes) === 0) {
+                    joinValid = 0;
+                    joinAllocationFailed = 1;
+                }
+                joinResult = engineHeapBump(heapBase, state);
+                if (joinResult + joinBytes >
+                    engineHeapLimit(heapBase, state)) {
+                    joinValid = 0;
+                    joinAllocationFailed = 1;
+                }
+            }
+            if (joinValid === 1) {
+                setRecordType(heapBase, joinResult, HEAP_TYPE_STRING);
+                setRecordSize(heapBase, joinResult, joinBytes);
+                setRecordMark(heapBase, joinResult, 0);
+                setRecordFlags(heapBase, joinResult, 0);
+                setStringLength(heapBase, joinResult,
+                                joinCharacterLength);
+                var joinHash = -2128831035;
+                var joinOutputIndex = 0;
+                var joinElementIndex = 0;
+                while (joinElementIndex < joinLength) {
+                    var joinCopySource = 0;
+                    var joinCopyLength = 0;
+                    if (joinElementIndex > 0) {
+                        joinCopySource = joinSeparator;
+                        joinCopyLength = joinSeparatorLength;
+                    }
+                    var joinCopyIndex = 0;
+                    while (joinCopyIndex < joinCopyLength) {
+                        var joinCode = stringCharacterCodeUnit(
+                            heapBase, joinCopySource,
+                            joinCopyIndex) & 65535;
+                        setStringCharacterByte(heapBase, joinResult,
+                            joinOutputIndex * 2, joinCode & 255);
+                        setStringCharacterByte(heapBase, joinResult,
+                            joinOutputIndex * 2 + 1,
+                            (joinCode >>> 8) & 255);
+                        joinHash = (joinHash ^ joinCode) * 16777619;
+                        joinOutputIndex = joinOutputIndex + 1;
+                        joinCopyIndex = joinCopyIndex + 1;
+                    }
+                    var joinElementCell = heapBase + joinVector +
+                        VECTOR_CELLS +
+                        joinElementIndex * VALUE_CELL_BYTES;
+                    if (valueCellTag(0, joinElementCell) ===
+                        VALUE_TAG_REFERENCE) {
+                        joinCopySource = valueCellReference(
+                            0, joinElementCell);
+                        joinCopyLength = stringLength(
+                            heapBase, joinCopySource);
+                        joinCopyIndex = 0;
+                        while (joinCopyIndex < joinCopyLength) {
+                            joinCode = stringCharacterCodeUnit(
+                                heapBase, joinCopySource,
+                                joinCopyIndex) & 65535;
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2, joinCode & 255);
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2 + 1,
+                                (joinCode >>> 8) & 255);
+                            joinHash = (joinHash ^ joinCode) * 16777619;
+                            joinOutputIndex = joinOutputIndex + 1;
+                            joinCopyIndex = joinCopyIndex + 1;
+                        }
+                    } else if (valueCellTag(0, joinElementCell) === VALUE_TAG_INT32) {
+                        var joinInteger = valueCellInt32(0, joinElementCell);
+                        var joinIntegerLength = integerDecimalLengthKernel(joinInteger);
+                        var joinIntegerIndex = 0;
+                        while (joinIntegerIndex < joinIntegerLength) {
+                            joinCode = integerDecimalCodeUnitKernel(
+                                joinInteger, joinIntegerIndex);
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2, joinCode);
+                            setStringCharacterByte(heapBase, joinResult,
+                                joinOutputIndex * 2 + 1, 0);
+                            joinHash = (joinHash ^ joinCode) * 16777619;
+                            joinOutputIndex = joinOutputIndex + 1;
+                            joinIntegerIndex = joinIntegerIndex + 1;
+                        }
+                    }
+                    joinElementIndex = joinElementIndex + 1;
+                }
+                setStringHash(heapBase, joinResult, joinHash);
+                setEngineHeapBump(heapBase, state,
+                                  joinResult + joinBytes);
+                setValueCellReference(targetCell, joinResult);
+                return 1;
+            }
+
+        if (joinAllocationFailed === 1) return 2;
+        return 0;
+    }
+
     function arraySliceKernel(heapBase, state, targetCell, registerAddress,
                               receiverIndex, argumentsVector, argumentCount,
                               arrayPrototype) {
@@ -16327,7 +16415,7 @@
             setRecordType(heapBase, dateObject, HEAP_TYPE_OBJECT);
             setRecordSize(heapBase, dateObject, OBJECT_RECORD_BYTES);
             setRecordMark(heapBase, dateObject, 0);
-            setRecordFlags(heapBase, dateObject, 0);
+            setRecordFlags(heapBase, dateObject, OBJECT_CLASS_DATE_FLAG);
             setObjectPrototype(heapBase, dateObject,
                 valueCellReference(0, datePrototypeCell));
             initializeOwnPropertyStorageKernel(heapBase, dateObject, dateValueStorage, 1);
@@ -17738,6 +17826,8 @@
             arrayConstructorKernel: arrayConstructorKernel,
             arrayIntrinsicKernel: arrayIntrinsicKernel,
             arraySliceKernel: arraySliceKernel,
+            arrayJoinKernel: arrayJoinKernel,
+            applyNativeIntrinsicKernel: applyNativeIntrinsicKernel,
             allocateBufferKernel: allocateBufferKernel,
             bufferAllocKernel: bufferAllocKernel,
             bufferConstructorKernel: bufferConstructorKernel,
@@ -18112,6 +18202,17 @@
                     BYTECODE_LAYOUT_STRIDE: BYTECODE_LAYOUT_STRIDE,
                     RUNTIME_SUPPORT_BYTECODE_LAYOUT: RUNTIME_SUPPORT_BYTECODE_LAYOUT,
                     RUNTIME_SUPPORT_FUNCTION_COMPILER: RUNTIME_SUPPORT_FUNCTION_COMPILER,
+                    RUNTIME_SUPPORT_ARRAY_PUSH_GENERIC: RUNTIME_SUPPORT_ARRAY_PUSH_GENERIC,
+                    RUNTIME_SUPPORT_ARRAY_SLICE_GENERIC: RUNTIME_SUPPORT_ARRAY_SLICE_GENERIC,
+                    RUNTIME_SUPPORT_OBJECT_TAG_BASE: RUNTIME_SUPPORT_OBJECT_TAG_BASE,
+                    RUNTIME_SUPPORT_JOIN_KEY: RUNTIME_SUPPORT_JOIN_KEY,
+                    RUNTIME_SUPPORT_COMMA_STRING: RUNTIME_SUPPORT_COMMA_STRING,
+                    INTRINSIC_ARRAY_TO_STRING: INTRINSIC_ARRAY_TO_STRING,
+                    NATIVE_APPLY_FUNCTION_REGISTER: NATIVE_APPLY_FUNCTION_REGISTER,
+                    NATIVE_APPLY_RECEIVER_REGISTER: NATIVE_APPLY_RECEIVER_REGISTER,
+                    NATIVE_APPLY_ARGUMENT_BASE: NATIVE_APPLY_ARGUMENT_BASE,
+                    OBJECT_CLASS_DATE_FLAG: HeapRecords.ObjectClassFlags.DATE,
+                    OBJECT_CLASS_ERROR_FLAG: HeapRecords.ObjectClassFlags.ERROR,
                     BYTECODE_EXECUTION_CACHE: kernelConstantOverrides.BYTECODE_EXECUTION_CACHE,
                     CELL_INT32: CELL_INT32,
                     CELL_DOUBLE: CELL_DOUBLE,
@@ -18187,6 +18288,11 @@
             }
             var graphLoweringStarted = runtime.nativeSnapshotWrite ?
                 new Date().getTime() : 0;
+            for (binaryConstantName in HeapRecords.ObjectClassConstants) {
+                if (Object.prototype.hasOwnProperty.call(HeapRecords.ObjectClassConstants, binaryConstantName)) {
+                    compilerOptions.constantBindings[binaryConstantName] = HeapRecords.ObjectClassConstants[binaryConstantName];
+                }
+            }
             this.ir = kernelCompiler.compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
             if (runtime.nativeSnapshotWrite) {
@@ -18364,6 +18470,17 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_KEY),
             runtime.internStringAddress("charAt"));
+        var objectClassIndex = 0;
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.JOIN_KEY), runtime.internStringAddress("join"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.COMMA_STRING), runtime.internStringAddress(","));
+        while (objectClassIndex < HeapRecords.ObjectClassNames.length) {
+            runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, RuntimeSupportLayout.OBJECT_TAG_BASE + objectClassIndex),
+                runtime.internStringAddress("[object " + HeapRecords.ObjectClassNames[objectClassIndex] + "]"));
+            objectClassIndex++;
+        }
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_FUNCTION),
             runtime.stringMethods.charAt.heapAddress);
@@ -18763,6 +18880,14 @@
                 this.stringSupportAddress,
                 RuntimeSupportLayout.FUNCTION_PROGRAM_CACHE),
             cache.heapAddress);
+    };
+
+    NativeInterpreter.prototype.setArrayMethodFallback = function (name, helper) {
+        var index = name === "push" ? RuntimeSupportLayout.ARRAY_PUSH_GENERIC :
+                    name === "slice" ? RuntimeSupportLayout.ARRAY_SLICE_GENERIC : 0;
+        if (!index) throw new Error("unknown generic array method: " + name);
+        this.runtime.writeHeapValue(this.runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, index), helper);
     };
 
     NativeInterpreter.prototype.setEvalCompilers = function (

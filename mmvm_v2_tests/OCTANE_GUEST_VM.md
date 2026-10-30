@@ -2,6 +2,16 @@
 
 ## Objective
 
+### 2026-10-30 follow-up: CodeLoad stock pass
+
+CodeLoad now passes both unchanged Closure/jQuery workloads under standalone
+js_runner: **score 96.4**, **30.07 s**, **393,216 KiB peak RSS**. All eleven
+previous standalone passes still pass quick correctness, including RegExp.
+This is a CodeLoad stock follow-up plus regression checks, not a new complete
+stock sweep. The working set of passing suites is now twelve; PdfJS,
+Mandreel and Typescript remain unresolved. See
+[CodeLoad implementation and validation](guest_vm/CODELOAD_BRINGUP.md).
+
 ### 2026-10-30: complete stock sweep including RegExp and Mandreel
 
 Latest full standalone result: **11 passed / 4 failed / 0 timed out /

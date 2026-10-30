@@ -107,5 +107,31 @@ if (standaloneLargeCopy[standaloneLargeCopy.length - 1] !== 91 ||
     throw new Error("large buffer copy/view contents or ownership are incorrect");
 }
 
+print("standalone integration: dynamic library loading");
+var standaloneIndirectEval = eval;
+var standaloneLoadedLibrary = standaloneIndirectEval(
+    "var standaloneLibrary = (function () {" +
+    "var list = {length: 0};" +
+    "Array.prototype.push.apply(list, ['a', 'b']);" +
+    "var key = (function () {return this;}).call('named'); list[key] = 'ok';" +
+    "var copied = Array.prototype.slice.call(list, 0);" +
+    "var caught = false; try {Array.prototype.slice.call(undefined);} catch (e) {caught = true;}" +
+    "return {text: copied[0] + copied[1], named: list[key], caught: caught," +
+    "arrayText: ['a'] + ['b']," +
+    "missing: (function () {})['notThere']," +
+    "errorClass: Object.prototype.toString.call(new Error('probe'))};" +
+    "}()); standaloneLibrary;");
+if (standaloneLoadedLibrary.text !== "ab" ||
+    standaloneLoadedLibrary.named !== "ok" || !standaloneLoadedLibrary.caught ||
+    standaloneLoadedLibrary.arrayText !== "ab" ||
+    standaloneLoadedLibrary.missing !== undefined ||
+    standaloneLoadedLibrary.errorClass !== "[object Error]") {
+    throw new Error("dynamic library loading/call semantics are incorrect");
+}
+if (standaloneIndirectEval("'use strict'; var standaloneStrictPrivate = 7; standaloneStrictPrivate;") !== 7 ||
+    typeof standaloneStrictPrivate !== "undefined") {
+    throw new Error("strict indirect eval completion or declaration isolation is incorrect");
+}
+
 print(require("./heap_access_test.js")(require("../heap.js")));
 print("standalone integration: passed");

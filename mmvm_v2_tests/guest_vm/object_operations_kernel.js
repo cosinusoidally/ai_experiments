@@ -1,6 +1,134 @@
 /* Shared native object operations. Representation-specific prototype fields
  * are selected here; consumers do not duplicate record offsets. */
 (function (root) {
+    /* ES5.1 [[Class]] is not inferred from an object's public prototype or
+     * constructor. Date/Error identity lives in object-record flags; wrapper
+     * primitives and Arguments already have dedicated internal storage. */
+    function objectClassIndexKernel(heapBase, receiver, stringSupport) {
+        var tag = valueCellTag(0, receiver);
+        if (tag === VALUE_TAG_UNDEFINED) return OBJECT_CLASS_UNDEFINED;
+        if (tag === VALUE_TAG_NULL) return OBJECT_CLASS_NULL;
+        if (tag === VALUE_TAG_TRUE || tag === VALUE_TAG_FALSE) return OBJECT_CLASS_BOOLEAN;
+        if (tag === VALUE_TAG_INT32 || tag === VALUE_TAG_DOUBLE) return OBJECT_CLASS_NUMBER;
+        if (tag !== VALUE_TAG_REFERENCE) return OBJECT_CLASS_OBJECT;
+        var object = valueCellReference(0, receiver), type = recordType(heapBase, object);
+        if (type === HEAP_TYPE_STRING) return OBJECT_CLASS_STRING;
+        if (type === HEAP_TYPE_ARRAY) {
+            if (arrayReserved(heapBase, object) !== 0) return OBJECT_CLASS_ARGUMENTS;
+            return OBJECT_CLASS_ARRAY;
+        }
+        if (type === HEAP_TYPE_NATIVE_FUNCTION || type === HEAP_TYPE_BYTECODE_FUNCTION) return OBJECT_CLASS_FUNCTION;
+        if (type === HEAP_TYPE_REGEXP) return OBJECT_CLASS_REGEXP;
+        if (type === HEAP_TYPE_OBJECT) {
+            var classFlags = recordFlags(heapBase, object);
+            if ((classFlags & OBJECT_CLASS_DATE_FLAG) !== 0) return OBJECT_CLASS_DATE;
+            if ((classFlags & OBJECT_CLASS_ERROR_FLAG) !== 0) return OBJECT_CLASS_ERROR;
+            var wrapped = primitiveWrapperValueCellKernel(heapBase, object, stringSupport);
+            if (wrapped !== 0) {
+                var wrappedTag = valueCellTag(0, wrapped);
+                if (wrappedTag === VALUE_TAG_INT32 || wrappedTag === VALUE_TAG_DOUBLE) return OBJECT_CLASS_NUMBER;
+                if (wrappedTag === VALUE_TAG_TRUE || wrappedTag === VALUE_TAG_FALSE) return OBJECT_CLASS_BOOLEAN;
+                if (wrappedTag === VALUE_TAG_REFERENCE &&
+                    recordType(heapBase, valueCellReference(0, wrapped)) === HEAP_TYPE_STRING) return OBJECT_CLASS_STRING;
+            }
+        }
+        return OBJECT_CLASS_OBJECT;
+    }
+
+    function objectToStringKernel(heapBase, target, receiver, stringSupport) {
+        var classIndex = objectClassIndexKernel(heapBase, receiver, stringSupport);
+        copyValueCell(target, vectorCellAddress(heapBase, stringSupport,
+            RUNTIME_SUPPORT_OBJECT_TAG_BASE + classIndex));
+        return 1;
+    }
+
+    function dataMethodIntrinsicKernel(heapBase, object, key) {
+        while (object !== 0) {
+            var entry = lastOwnPropertyEntryKernel(heapBase, object);
+            while (entry !== 0) {
+                if (stringKeysEqualKernel(heapBase,
+                    ownPropertyEntryKeyKernel(heapBase, object, entry), key) === 1) {
+                    if ((ownPropertyEntryAttributesKernel(heapBase, object, entry) &
+                         PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return -1;
+                    var cell = ownPropertyEntryValueCellKernel(heapBase, object, entry);
+                    if (valueCellTag(0, cell) !== VALUE_TAG_REFERENCE) return -1;
+                    var method = valueCellReference(0, cell);
+                    if (recordType(heapBase, method) !== HEAP_TYPE_NATIVE_FUNCTION) return -1;
+                    return nativeFunctionMetadata(heapBase, method);
+                }
+                entry = previousOwnPropertyEntryKernel(heapBase, object, entry);
+            }
+            object = objectPrototypeReferenceKernel(heapBase, object);
+        }
+        return -1;
+    }
+
+    function arrayBuiltinStringKernel(heapBase, state, target, source, stringSupport) {
+        if (valueCellTag(0, source) !== VALUE_TAG_REFERENCE) return 0;
+        var array = valueCellReference(0, source);
+        if (recordType(heapBase, array) !== HEAP_TYPE_ARRAY) return 0;
+        /* Explicit indexed descriptors and holes may invoke guest getters.
+         * Decline those rather than reading an unobservable dense shortcut. */
+        if (arrayReserved(heapBase, array) !== 0 || arrayPropertyHead(heapBase, array) !== 0) return 0;
+        var elements = arrayElements(heapBase, array), index = 0;
+        while (index < vectorLength(heapBase, elements)) {
+            if (valueCellTag(0, vectorCellAddress(heapBase, elements, index)) === 0) return 0;
+            index++;
+        }
+        var joinKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_JOIN_KEY));
+        if (dataMethodIntrinsicKernel(heapBase, array, joinKey) !== INTRINSIC_ARRAY_JOIN) return 0;
+        var separator = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_COMMA_STRING));
+        return arrayJoinKernel(heapBase, state, target, array, separator);
+    }
+
+    function arrayDefaultPrimitiveKernel(heapBase, state, target, source, stringSupport) {
+        if (valueCellTag(0, source) !== VALUE_TAG_REFERENCE) return 0;
+        var array = valueCellReference(0, source);
+        if (recordType(heapBase, array) !== HEAP_TYPE_ARRAY) return 0;
+        var valueOfKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_VALUE_OF_KEY));
+        var toStringKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_TO_STRING_KEY));
+        if (dataMethodIntrinsicKernel(heapBase, array, valueOfKey) !== INTRINSIC_OBJECT_VALUE_OF) return 0;
+        if (dataMethodIntrinsicKernel(heapBase, array, toStringKey) !== INTRINSIC_ARRAY_TO_STRING) return 0;
+        return arrayBuiltinStringKernel(heapBase, state, target, source, stringSupport);
+    }
+
+    /* Guarded string-hint conversion for String primitives/wrappers. Do not
+     * unwrap an object with a custom/getter toString: its call is observable.
+     * A zero result declines conversion without changing the key operand. */
+    function propertyStringKeyReferenceKernel(heapBase, keyCell, stringSupport) {
+        if (valueCellTag(0, keyCell) !== VALUE_TAG_REFERENCE) return 0;
+        var key = valueCellReference(0, keyCell);
+        if (recordType(heapBase, key) === HEAP_TYPE_STRING) return key;
+        var wrapped = primitiveWrapperValueCellKernel(heapBase, key, stringSupport);
+        if (wrapped === 0 || valueCellTag(0, wrapped) !== VALUE_TAG_REFERENCE) return 0;
+        var string = valueCellReference(0, wrapped);
+        if (recordType(heapBase, string) !== HEAP_TYPE_STRING) return 0;
+        var methodKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_TO_STRING_KEY));
+        while (key !== 0) {
+            var entry = lastOwnPropertyEntryKernel(heapBase, key);
+            while (entry !== 0) {
+                if (stringKeysEqualKernel(heapBase,
+                    ownPropertyEntryKeyKernel(heapBase, key, entry), methodKey) === 1) {
+                    if ((ownPropertyEntryAttributesKernel(heapBase, key, entry) &
+                         PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return 0;
+                    var methodCell = ownPropertyEntryValueCellKernel(heapBase, key, entry);
+                    if (valueCellTag(0, methodCell) !== VALUE_TAG_REFERENCE) return 0;
+                    var method = valueCellReference(0, methodCell);
+                    if (recordType(heapBase, method) !== HEAP_TYPE_NATIVE_FUNCTION) return 0;
+                    if (nativeFunctionMetadata(heapBase, method) !== INTRINSIC_STRING_VALUE_OF) return 0;
+                    return string;
+                }
+                entry = previousOwnPropertyEntryKernel(heapBase, key, entry);
+            }
+            key = objectPrototypeReferenceKernel(heapBase, key);
+        }
+        return 0;
+    }
     /* Numeric syntax must honor an explicit own descriptor before a dense
      * array cell. Resolve its insertion-order entry without allocating a
      * temporary decimal key string. The returned address is transient. */
@@ -120,6 +248,12 @@
     }
 
     var exports = {functions: {
+        objectClassIndexKernel: objectClassIndexKernel,
+        objectToStringKernel: objectToStringKernel,
+        dataMethodIntrinsicKernel: dataMethodIntrinsicKernel,
+        arrayBuiltinStringKernel: arrayBuiltinStringKernel,
+        arrayDefaultPrimitiveKernel: arrayDefaultPrimitiveKernel,
+        propertyStringKeyReferenceKernel: propertyStringKeyReferenceKernel,
         indexedOwnPropertyDescriptorKernel: indexedOwnPropertyDescriptorKernel,
         enumerationKeyVisibleKernel: enumerationKeyVisibleKernel,
         enumerationOwnCountKernel: enumerationOwnCountKernel,

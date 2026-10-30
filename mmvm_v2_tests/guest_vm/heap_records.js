@@ -298,7 +298,19 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 82;
+    Records.NativeInterpreterContractVersion = 83;
+    /* Ordinary-object header flags retain internal [[Class]] identity even
+     * after a public prototype change. Other record kinds have their own
+     * flag namespaces (strings, frames and property storage). */
+    Records.ObjectClassFlags = {DATE: 1, ERROR: 2};
+    Records.ObjectClassNames = ["Object", "Undefined", "Null", "Boolean",
+        "Number", "String", "Array", "Arguments", "Function", "RegExp", "Date", "Error"];
+    Records.ObjectClassConstants = {};
+    var objectClassIndex = 0;
+    while (objectClassIndex < Records.ObjectClassNames.length) {
+        Records.ObjectClassConstants["OBJECT_CLASS_" +
+            Records.ObjectClassNames[objectClassIndex].toUpperCase()] = objectClassIndex++;
+    }
     Records.EnvironmentFlags = {SINGLE_BINDING: 1, DETACHED_ARGUMENTS: 2};
     Records.HandlerFlags = {LEXICAL_BINDING: 1};
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};

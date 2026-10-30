@@ -77,12 +77,15 @@
 
     var quick = false;
     var setupOnly = false;
+    var diagnostics = false;
     var requested = [];
     var argumentIndex = 0;
     while (argumentIndex < runnerArguments.length) {
         var argument = String(runnerArguments[argumentIndex++]);
         if (argument === "--quick") {
             quick = true;
+        } else if (argument === "--diagnostics") {
+            diagnostics = true;
         } else if (argument === "--setup-only") {
             setupOnly = true;
         } else if (argument === "all") {
@@ -151,6 +154,14 @@
     }
     function reportError(name, error) {
         failed = true;
+        /* Print stored fields before implicit Error coercion: that coercion
+         * may itself be the unsupported operation masking the original fault.
+         * This is wrapper diagnostics, not a change to external validation. */
+        if (diagnostics && error && typeof error === "object") {
+            print(name + " failure name: " + error.name);
+            print(name + " failure message: " + error.message);
+            if (error.stack) print(error.stack);
+        }
         var location = "";
         if (error && error.fileName) {
             location = " at " + error.fileName + ":" +

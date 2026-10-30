@@ -1,8 +1,10 @@
 /* ES5.1 native Error objects and their prototype hierarchy. */
 (function (root) {
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var HeapRecords = root.GuestVMHeapRecords;
     if (typeof module !== "undefined" && module.exports) {
         NativeIntrinsics = require("./native_intrinsics.js");
+        HeapRecords = require("./heap_records.js");
     }
     function intrinsicImplementedByRuntime() {
         throw new Error("Error intrinsic must be dispatched by Runtime");
@@ -16,6 +18,7 @@
         }
         var error = runtime.makeObjectWithPrototype(
             prototype || runtime.objectPrototype);
+        runtime.linearHeap.setFlags(error.heapAddress, HeapRecords.ObjectClassFlags.ERROR);
         runtime.setProperty(error, "name", name || "Error");
         runtime.setProperty(error, "message",
             message === undefined ? "" : String(message));
@@ -23,6 +26,7 @@
     }
 
     function makeErrorConstructor(runtime, name, prototype) {
+        runtime.linearHeap.setFlags(prototype.heapAddress, HeapRecords.ObjectClassFlags.ERROR);
         /* Runtime.call/construct implement this intrinsic from the metadata.
          * Avoid a constructor-specific host closure: js_min's SpiderMonkey
          * predates modern closure fixes, and the guest operation should be

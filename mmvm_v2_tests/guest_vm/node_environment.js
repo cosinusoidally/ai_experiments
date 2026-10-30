@@ -123,6 +123,16 @@
         }
         install(this.runtime.arrayPrototype, "map", "__guestArrayMap");
         install(this.runtime.arrayPrototype, "sort", "__guestArraySort");
+        if (this.runtime.nativeInterpreter) {
+            this.runtime.nativeInterpreter.setArrayMethodFallback("push",
+                this.runtime.getGlobal(this.context, "__guestArrayPushGeneric"));
+            this.runtime.nativeInterpreter.setArrayMethodFallback("slice",
+                this.runtime.getGlobal(this.context, "__guestArraySliceGeneric"));
+        }
+        this.runtime.deleteProperty(this.context.globalObject,
+            "__guestArrayPushGeneric", false);
+        this.runtime.deleteProperty(this.context.globalObject,
+            "__guestArraySliceGeneric", false);
         install(this.runtime.getGlobal(this.context, "Buffer"),
                 "byteLength", "__guestBufferByteLength");
 

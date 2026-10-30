@@ -185,10 +185,19 @@ exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
 /* Indirect eval is global code rather than a direct-eval extension of the
  * caller's lexical environment. Keep this as a guest function so the native
  * engine enters the existing self-hosted front end through an ordinary
- * bytecode frame. The returned executable owns declaration instantiation;
- * the engine's eval continuation only has to invoke it. */
+ * bytecode frame. The returned executable carries declaration metadata;
+ * the engine's continuation instantiates it in the caller's global realm. */
 exports.compileIndirectEvalExecutable = function (source) {
-    var program = exports.compile(source, "<eval>");
+    ensureFrontend();
+    var ast = new SelfHostedParser(source, "<eval>",
+        {compactLiterals: true, shareIdentifiers: true}).parseProgram();
+    /* Eval returns the last non-empty statement completion, unlike load.
+     * A strict indirect eval additionally owns its declarations; neither
+     * form inherits the compiler module's lexical environment. */
+    var program = ast.strict ? SelfHostedCompiler.compileStrictEval(ast, null) :
+        new SelfHostedCompiler(null, null, false,
+            {consumeAst: true}).compile(ast, true);
+    selfHostedVerify(program);
     var callable = adoptProgramDescriptor(
         program, exports.compileIndirectEvalExecutable);
     callable.__guestVMGlobalDeclarations = program.globalDeclarations || [];

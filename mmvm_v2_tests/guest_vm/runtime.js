@@ -2769,6 +2769,16 @@
         this.arrayPrototype = this.makeObject();
         this.arrayMethods.push = this.makeNativeFunction("Array.push",
             function (receiver, args) {
+                if (!receiver || receiver.guestType !== "array") {
+                    var object = runtime.toObject(receiver);
+                    var length = runtime.toNumber(runtime.getProperty(object, "length")) >>> 0;
+                    var argument = 0;
+                    while (argument < args.length) {
+                        runtime.setProperty(object, String(length++), args[argument++], true);
+                    }
+                    runtime.setProperty(object, "length", length, true);
+                    return length;
+                }
                 var index = 0;
                 while (index < args.length) {
                     runtime.arraySet(receiver, runtime.arrayLength(receiver),
@@ -2840,6 +2850,26 @@
             }, "intrinsic", NativeIntrinsics.ARRAY_CONCAT);
         this.arrayMethods.slice = this.makeNativeFunction("Array.slice",
             function (receiver, args) {
+                if (!receiver || receiver.guestType !== "array") {
+                    var object = runtime.toObject(receiver);
+                    var length = runtime.toNumber(runtime.getProperty(object, "length")) >>> 0;
+                    var first = args.length ? runtime.toNumber(args[0]) : 0;
+                    first = first !== first ? 0 : first < 0 ? Math.ceil(first) : Math.floor(first);
+                    first = first < 0 ? Math.max(length + first, 0) : Math.min(first, length);
+                    var last = args.length < 2 || args[1] === undefined ? length : runtime.toNumber(args[1]);
+                    last = last !== last ? 0 : last < 0 ? Math.ceil(last) : Math.floor(last);
+                    last = last < 0 ? Math.max(length + last, 0) : Math.min(last, length);
+                    var result = runtime.makeArrayLiteral(Math.max(last - first, 0));
+                    var output = 0;
+                    while (first < last) {
+                        if (runtime.hasProperty(object, String(first))) {
+                            runtime.arraySet(result, output, runtime.getProperty(object, String(first)));
+                        }
+                        first++;
+                        output++;
+                    }
+                    return result;
+                }
                 var start = args.length ? Number(args[0]) : 0;
                 var values = runtime.arrayToHost(receiver);
                 var end = args.length > 1 ? Number(args[1]) : values.length;
@@ -2934,6 +2964,7 @@
                 if (receiver === undefined) return "[object Undefined]";
                 if (receiver === null) return "[object Null]";
                 if (receiver && receiver.guestType === "array") {
+                    if (runtime.heapRecords.arrayReserved(receiver.heapAddress)) return "[object Arguments]";
                     return "[object Array]";
                 }
                 if (receiver && receiver.guestType === "regexp") {
@@ -2944,6 +2975,11 @@
                     return "[object Function]";
                 }
                 var boxedReceiver = runtime.primitiveWrapperValue(receiver);
+                if (receiver && receiver.guestType === "object") {
+                    var classFlags = runtime.linearHeap.flags(receiver.heapAddress);
+                    if (classFlags & HeapRecords.ObjectClassFlags.DATE) return "[object Date]";
+                    if (classFlags & HeapRecords.ObjectClassFlags.ERROR) return "[object Error]";
+                }
                 if (boxedReceiver.found) {
                     if (typeof boxedReceiver.value === "string") {
                         return "[object String]";
@@ -2996,7 +3032,7 @@
                     }
                     return runtime.invokePropertyFunction(
                         runtime.objectMethods.toString, receiver, []);
-                });
+                }, "intrinsic", NativeIntrinsics.ARRAY_TO_STRING);
             this.defineBuiltinProperty(this.arrayPrototype, "toString",
                              this.arrayMethods.toString);
         }
@@ -3530,6 +3566,7 @@
         var dateValueKey = "\x00DateValue";
         this.dateValueKey = dateValueKey;
         this.datePrototype = this.makeObject();
+        this.linearHeap.setFlags(this.datePrototype.heapAddress, HeapRecords.ObjectClassFlags.DATE);
         function dateValue(receiver) {
             return Number(runtime.getProperty(receiver, dateValueKey));
         }
@@ -3618,6 +3655,7 @@
             var date = runtime.makeObject();
             runtime.heapRecords.setObjectPrototype(
                 date.heapAddress, runtime.datePrototype.heapAddress);
+            runtime.linearHeap.setFlags(date.heapAddress, HeapRecords.ObjectClassFlags.DATE);
             runtime.setProperty(date, dateValueKey, DateSupport.construct(
                 args, runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0));
             return date;

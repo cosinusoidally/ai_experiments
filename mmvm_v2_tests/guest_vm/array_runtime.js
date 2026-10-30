@@ -19,6 +19,47 @@ function __guestArrayMap(callback, thisArgument) {
     return result;
 }
 
+/* Generic ES5.1 push for array-like receivers. Dense actual arrays retain
+ * the native interpreter's existing fast path. Strict writes must invoke
+ * inherited setters and reject non-writable indexed/length properties. */
+function __guestArrayPushGeneric() {
+    "use strict";
+    if (this === null || this === undefined) {
+        throw new TypeError("Array.prototype.push receiver is null or undefined");
+    }
+    var object = Object(this);
+    var length = object.length >>> 0;
+    var index = 0;
+    while (index < arguments.length) object[length++] = arguments[index++];
+    object.length = length;
+    return length;
+}
+
+function __guestArraySliceGeneric(start, end) {
+    "use strict";
+    if (this === null || this === undefined) {
+        throw new TypeError("Array.prototype.slice receiver is null or undefined");
+    }
+    var object = Object(this);
+    var length = object.length >>> 0;
+    var first = Number(start);
+    first = first !== first ? 0 : first < 0 ? Math.ceil(first) : Math.floor(first);
+    first = first < 0 ? Math.max(length + first, 0) : Math.min(first, length);
+    var last = end === undefined ? length : Number(end);
+    last = last !== last ? 0 : last < 0 ? Math.ceil(last) : Math.floor(last);
+    last = last < 0 ? Math.max(length + last, 0) : Math.min(last, length);
+    var result = new Array(Math.max(last - first, 0)), output = 0;
+    while (first < last) {
+        if (first in object) {
+            Object.defineProperty(result, String(output), {value: object[first],
+                writable: true, enumerable: true, configurable: true});
+        }
+        first++;
+        output++;
+    }
+    return result;
+}
+
 /* Iterative merge sort: comparator calls stay in the guest, and scratch space
  * is linear rather than an unbounded recursive JavaScript/host call stack.
  * Undefined entries precede holes and are never passed to the comparator. */
