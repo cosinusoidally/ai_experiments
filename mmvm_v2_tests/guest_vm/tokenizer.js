@@ -592,11 +592,23 @@
 
     Tokenizer.prototype.next = function (allowRegexp, targetToken) {
         this.targetToken = targetToken || null;
-        var lineBefore = this.skipTrivia();
+        var code = this.index < this.length ? this.source.charCodeAt(this.index) : -1;
+        var possibleTrivia = (code >= 0 && code <= 32) || code >= 128;
+        if (code === 47) {
+            var following = this.source.charCodeAt(this.index + 1);
+            possibleTrivia = following === 47 || following === 42;
+        }
+        var lineBefore = false;
+        /* This is a conservative dispatch gate, not a second whitespace
+         * definition: all controls/Unicode still use the full scanner. Plain
+         * ASCII tokens and non-comment slashes need no trivia frame/state. */
+        if (possibleTrivia) {
+            lineBefore = this.skipTrivia();
+            code = this.index < this.length ? this.source.charCodeAt(this.index) : -1;
+        }
         var start = this.index;
         var line = this.line;
         var column = this.column;
-        var code = this.codeAt(0);
         if (code < 0) {
             return this.makeToken("eof", "", start, line, column, lineBefore);
         }

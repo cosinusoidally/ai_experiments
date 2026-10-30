@@ -58,7 +58,7 @@ if (guestRunnerIsNode) {
          * reflected in the newly compiled image. */
         GuestVM = undefined;
         GuestNodeEnvironment = undefined;
-        print("loading guest VM build sources");
+        print("loading guest VM build sources (read, parse, compile and module setup)");
         if (typeof read !== "function") {
             read = function (filename) {
                 return require("fs").readFileSync(filename).toString("utf8");

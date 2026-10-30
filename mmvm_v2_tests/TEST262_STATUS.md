@@ -2,10 +2,11 @@
 
 Latest completed whole-suite result (2026-10-30, standalone contract 82):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 502.26 seconds at source-loading checkpoint `4b1df40`. The preceding
-memory-boundary checkpoint took 467.46 seconds. Correctness is unchanged, but
-the performance difference is under investigation; the source-loading speedup
-is not evidence of unchanged execution performance. See the history below for the exact
+Elapsed 493.30 seconds with the source-loading scanner dispatch follow-up.
+An adjacent rerun of the unchanged memory-boundary image took 496.28 seconds
+(its earlier run took 467.46 seconds). Both passed the full suite; the matched
+observations do not show an overall execution regression. They do not establish
+a statistically significant execution speedup either. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -37,6 +38,25 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, unchanged memory-boundary image, matched control after the
+  source-loading follow-up: **3,292 passed / 0 failed / 0 timed out / 0 not run**.
+  Command: `./artifacts/js_runner.exe artifacts/memory-boundary.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged corpus. External elapsed
+  496.28 s, user CPU 493.62 s, peak RSS 575,816 KiB. Runner elapsed
+  495.530972 s; summed test time 479.244476 s. Heavy cases took
+  93.180198, 85.312775, 95.262245 and 90.235166 s, respectively.
+  The changed image's 493.30 s total is 0.6% lower, within ordinary timing
+  variation; individual cases vary in both directions. In particular, the
+  earlier 467.46 s result cannot alone establish a compiler regression.
+
+- 2026-10-30, source-loading scanner dispatch follow-up, contract 82:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/source-dispatch.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged external corpus.
+  External elapsed 493.30 s, user CPU 489.09 s, peak RSS 575,876 KiB.
+  Runner elapsed 492.686916 s; summed test time 476.816123 s.
+  The adjacent unchanged-image control above took 496.28 s.
 
 - 2026-10-30, source-loading checkpoint `4b1df40`, contract 82:
   **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:

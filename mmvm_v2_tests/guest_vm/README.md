@@ -10,6 +10,9 @@ both Node.js and `js_min.exe`.
 Stock Node can also cross-build the same standalone i386/Linux snapshot as
 js_min and the self-hosted builder. See [Node snapshot construction](NODE_SNAPSHOT_BUILD.md)
 for commands, the build-host/target boundary and byte-identity validation.
+For the read/parse/compile work performed while a self-hosted build loads its
+implementation, see [source-loading costs and diagnostics](SOURCE_LOADING.md)
+and [compiler-owned function analysis](FUNCTION_ANALYSIS.md).
 
 Guest garbage collection is automatic at allocation-triggered interpreter safe
 points. `VM.collect()` remains available for deterministic tests and explicit

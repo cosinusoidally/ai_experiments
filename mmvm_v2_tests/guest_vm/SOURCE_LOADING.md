@@ -23,6 +23,9 @@ and buffer handling, so their measured time is not a raw filesystem latency.
   avoid repeated classification/method calls; non-ASCII and escaped names
   continue through the same authoritative Unicode data and validation.
   No regular expressions are used for token recognition.
+  Token dispatch also avoids entering the trivia state machine for an ASCII
+  token that cannot start whitespace or a comment. The conservative gate
+  leaves controls and Unicode to the authoritative full scanner.
 - Consuming compilation uses a scope-aware function summary rather than
   repeatedly walking the same bodies for declarations, eval/arguments,
   captures, return annotations and identifier sets. See
@@ -59,6 +62,16 @@ User CPU is 97.40 s and peak RSS 519,552 KiB. Node and genuine self-hosted
 outputs compare byte-identically. These are single observations, not a claim
 of statistical confidence or a subsecond source-loading implementation.
 
+Final scanner-dispatch follow-up: an uninstrumented self-hosted rebuild loads
+the sources in **15.962222 s**, still 26.8% below the original 21.819675 s.
+Node, js_min and self-hosted outputs compare byte-identically. The js_min
+build takes 86.79 s (85.96 s user CPU; 347,524 KiB peak RSS), versus 90.63 s
+at the preceding checkpoint. The final self-hosted whole build takes 103.67 s
+(102.96 s CPU; 518,400 KiB peak RSS); runtime preparation takes 68.225 s in
+this observation and offsets the source-loading gain. Thus the repeatable
+improvement claimed here is in source loading, not in total self-hosted build
+time. Runtime preparation remains a separate large cost.
+
 ## Reproduction and diagnostics
 
 From `mmvm_v2_tests`, using a freshly built seed image:
@@ -78,6 +91,14 @@ The second command is the actual rebuild and provides the normal aggregate
 source-loading measurement. Its output must still be compared with Node and
 js_min builds. Improvements to the bootstrap compiler require a fresh seed;
 an old seed necessarily processes sources using its older compiler first.
+
+The full Test262 regression check passed all 3,292 tests (no failures,
+timeouts or unrun tests). The scanner-dispatch follow-up took 493.30 s;
+an adjacent rerun of the unchanged earlier image took 496.28 s at the same
+heap settings and effectively identical peak RSS. These are comparable
+execution times, not evidence of a significant execution speedup. The older
+467.46 s observation and an intermediate 502.26 s run are retained in
+`../TEST262_STATUS.md`, rather than being omitted from the timing history.
 
 Raw logs/images remain ignored under `artifacts/source-loading-*`,
 `artifacts/source-cursor-*` and `artifacts/source-analysis-*`. The optional
