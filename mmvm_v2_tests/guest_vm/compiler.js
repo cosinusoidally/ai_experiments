@@ -2,10 +2,12 @@
     var op = root.GuestVMBytecode;
     var optimizer = root.GuestVMBytecodeOptimizer;
     var Parser = root.GuestVMParser;
+    var FunctionAnalysis = root.GuestVMFunctionAnalysis;
     if (typeof module !== "undefined" && module.exports) {
         op = require("./bytecode.js");
         optimizer = require("./bytecode_optimizer.js");
         Parser = require("./parser.js");
+        FunctionAnalysis = require("./function_analysis.js");
     }
     var isLiteralExpression = Parser.isLiteralExpression;
     var literalExpressionValue = Parser.literalExpressionValue;
@@ -204,11 +206,15 @@
     };
 
     Compiler.prototype.compileFunction = function (expression) {
-        var locals = collectLocals(expression.body, expression.name);
+        var analysis = this.consumeAst ? FunctionAnalysis.analyze(expression) : null;
+        /* Mutable/public ASTs keep fresh analyses. With-scoped binding
+         * collection retains the existing conservative path as well. */
+        if (analysis && (!analysis.supported || analysis.hasWith)) analysis = null;
+        var locals = analysis ? analysis.locals : collectLocals(expression.body, expression.name);
         var bindings = makeFunctionBindings(expression.parameters, locals);
         var bindingMap = makeBindingMap(bindings);
-        var directEval = containsDirectEval(expression.body);
-        var usesArguments = referencesArguments(expression.body) || directEval;
+        var directEval = analysis ? analysis.directEval : containsDirectEval(expression.body);
+        var usesArguments = (analysis ? analysis.usesArguments : referencesArguments(expression.body)) || directEval;
         var argumentsSlot = bindingMap.$arguments;
         var parameterIndex = 0;
         while (parameterIndex < expression.parameters.length) {
@@ -223,7 +229,8 @@
         /* Sloppy arguments objects alias named parameter bindings.  Keep
          * those bindings in a guest environment so the mapping remains valid
          * if the arguments object escapes its activation. */
-        var useRegisters = canUseRegisterBindings(expression.body, bindingMap) &&
+        var useRegisters = (analysis ? analysisAllowsRegisters(analysis, bindingMap) :
+            canUseRegisterBindings(expression.body, bindingMap)) &&
             (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters,
             {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
@@ -244,8 +251,9 @@
                            strict: !!expression.strict};
         /* These analyses need the AST, not emitted instructions. Finish them
          * before the consuming compiler releases completed statements. */
-        var returnKind = inferReturnKind(expression.body);
-        var nonlocalBindings = describeNonlocalBindings(expression.body, nested);
+        var returnKind = analysis ? analysis.returnKind : inferReturnKind(expression.body);
+        var nonlocalBindings = analysis ? describeNonlocalNames(analysis.names, nested) :
+            describeNonlocalBindings(expression.body, nested);
         var program = nested.compile(bodyProgram);
         program.parameters = expression.parameters.slice(0);
         program.locals = locals;
@@ -1415,6 +1423,15 @@
         return !requiresEnvironmentBindings(body, bindingMap, false);
     }
 
+    function analysisAllowsRegisters(analysis, bindingMap) {
+        if (analysis.environmentRequired) return false;
+        var index = 0;
+        while (index < analysis.nestedNames.length) {
+            if (bindingMap["$" + analysis.nestedNames[index++]] !== undefined) return false;
+        }
+        return true;
+    }
+
     function containsDirectEval(node) {
         if (!node || typeof node !== "object") return false;
         if (node.type === "CallExpression" && node.callee &&
@@ -1500,6 +1517,19 @@
         while (index < names.length) {
             result[index] = map["$" + names[index]];
             index++;
+        }
+        return result;
+    }
+
+    function describeNonlocalNames(names, compiler) {
+        var result = {}, index = 0;
+        while (index < names.length) {
+            var name = names[index++];
+            var binding = compiler.resolveBinding(name);
+            if (!binding) result["$" + name] = {kind: "global"};
+            else if (binding.kind === "environment") {
+                result["$" + name] = {kind: "environment", depth: binding.depth, slot: binding.slot};
+            }
         }
         return result;
     }

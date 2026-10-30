@@ -135,50 +135,64 @@
     };
 
     Tokenizer.prototype.skipTrivia = function () {
+        var NORMAL = 0, LINE_COMMENT = 1, BLOCK_COMMENT = 2;
+        var mode = NORMAL;
+        var source = this.source, length = this.length, index = this.index;
+        var line = this.line, column = this.column;
+        var commentLine = line, commentColumn = column;
         var sawLine = false;
-        while (this.index < this.length) {
-            var code = this.codeAt(0);
+        /* Keep one cursor for whitespace and both comment forms. Commit the
+         * public position at the token boundary, not through codeAt/advance
+         * calls and field writes for every comment/indentation character. */
+        while (index < length) {
+            var code = source.charCodeAt(index);
             if (code === 32 || code === 9) {
-                /* Spaces and tabs dominate formatted source.  Neither can
-                 * affect line state, so consume a complete run directly. */
+                var spacesStart = index;
                 do {
-                    this.index++;
-                    this.column++;
-                    code = this.index < this.length ?
-                        this.source.charCodeAt(this.index) : -1;
+                    index++;
+                    code = index < length ? source.charCodeAt(index) : -1;
                 } while (code === 32 || code === 9);
-            } else if (isWhitespace(code)) {
-                this.advance();
-            } else if (isLineTerminator(code)) {
+                column += index - spacesStart;
+            } else if (code === 10 || code === 13 || code === 8232 || code === 8233) {
+                index++;
+                if (code === 13 && index < length && source.charCodeAt(index) === 10) index++;
+                line++;
+                column = 0;
                 sawLine = true;
-                this.advance();
-            } else if (code === 47 && this.codeAt(1) === 47) {
-                this.advance();
-                this.advance();
-                while (this.index < this.length &&
-                       !isLineTerminator(this.codeAt(0))) this.advance();
-            } else if (code === 47 && this.codeAt(1) === 42) {
-                var commentLine = this.line;
-                var commentColumn = this.column;
-                this.advance();
-                this.advance();
-                var closed = false;
-                while (this.index < this.length) {
-                    if (this.codeAt(0) === 42 && this.codeAt(1) === 47) {
-                        this.advance();
-                        this.advance();
-                        closed = true;
-                        break;
-                    }
-                    if (isLineTerminator(this.codeAt(0))) sawLine = true;
-                    this.advance();
+                if (mode === LINE_COMMENT) mode = NORMAL;
+            } else if (mode === LINE_COMMENT) {
+                index++;
+                column++;
+            } else if (mode === BLOCK_COMMENT) {
+                if (code === 42 && index + 1 < length && source.charCodeAt(index + 1) === 47) {
+                    index += 2;
+                    column += 2;
+                    mode = NORMAL;
+                } else {
+                    index++;
+                    column++;
                 }
-                if (!closed) this.error("unterminated block comment",
-                                        commentLine, commentColumn);
+            } else if (code === 11 || code === 12 || (code >= 128 && isWhitespace(code))) {
+                index++;
+                column++;
+            } else if (code === 47 && index + 1 < length) {
+                var next = source.charCodeAt(index + 1);
+                if (next === 47) mode = LINE_COMMENT;
+                else if (next === 42) {
+                    mode = BLOCK_COMMENT;
+                    commentLine = line;
+                    commentColumn = column;
+                } else break;
+                index += 2;
+                column += 2;
             } else {
                 break;
             }
         }
+        this.index = index;
+        this.line = line;
+        this.column = column;
+        if (mode === BLOCK_COMMENT) this.error("unterminated block comment", commentLine, commentColumn);
         return sawLine;
     };
 
@@ -222,33 +236,40 @@
     Tokenizer.prototype.scanIdentifier = function (start, line, column,
                                                     lineBefore) {
         var value = null;
-        var segmentStart = this.index;
+        var source = this.source, length = this.length, index = this.index;
+        var segmentStart = index;
         var first = true;
-        while (this.index < this.length) {
-            var code = this.codeAt(0);
+        while (index < length) {
+            var code = source.charCodeAt(index);
             if (code === 92) {
-                if (value === null) value = this.source.substring(start, this.index);
-                else value += this.source.substring(segmentStart, this.index);
+                if (value === null) value = source.substring(start, index);
+                else value += source.substring(segmentStart, index);
+                this.column += index - this.index;
+                this.index = index;
                 code = this.scanUnicodeEscape();
+                index = this.index;
                 if (first ? !isIdentifierStart(code) : !isIdentifierPart(code)) {
                     this.error("escaped character is not valid in identifier",
                                line, column);
                 }
                 value += String.fromCharCode(code);
-                segmentStart = this.index;
-            } else if (first ? isIdentifierStart(code) : isIdentifierPart(code)) {
-                /* Identifiers cannot contain line terminators, so advancing the
-                 * source position directly avoids several calls per character
-                 * in the parser's hottest tokenization path. */
-                this.index++;
-                this.column++;
+                segmentStart = index;
             } else {
-                break;
+                var alphabetic = code | 32;
+                if ((alphabetic >= 97 && alphabetic <= 122) || code === 36 || code === 95 ||
+                    (!first && code >= 48 && code <= 57)) {
+                    index++;
+                } else if (code >= 128 &&
+                           (first ? isIdentifierStart(code) : isIdentifierPart(code))) {
+                    index++;
+                } else break;
             }
             first = false;
         }
-        if (value === null) value = this.source.substring(start, this.index);
-        else value += this.source.substring(segmentStart, this.index);
+        this.column += index - this.index;
+        this.index = index;
+        if (value === null) value = source.substring(start, index);
+        else value += source.substring(segmentStart, index);
         /* The prefix makes inherited Object names impossible dictionary hits,
          * avoiding Function.call in the self-hosted tokenizer. */
         return this.makeToken(keywords["$" + value] === 1 ?

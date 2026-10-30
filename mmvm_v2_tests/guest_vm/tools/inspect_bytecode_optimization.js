@@ -21,6 +21,7 @@
         load("guest_vm/bytecode.js");
         load("guest_vm/register_allocator.js");
         load("guest_vm/bytecode_optimizer.js");
+        load("guest_vm/function_analysis.js");
         load("guest_vm/compiler.js");
         Compiler = GuestVMCompiler;
         Parser = GuestVMParser;

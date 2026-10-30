@@ -14,6 +14,7 @@
         load("guest_vm/register_allocator.js");
         load("guest_vm/bytecode_optimizer.js");
         load("guest_vm/native_intrinsics.js");
+        load("guest_vm/function_analysis.js");
         load("guest_vm/compiler.js");
         load("guest_vm/verifier.js");
         load("guest_vm/host_ffi.js");
