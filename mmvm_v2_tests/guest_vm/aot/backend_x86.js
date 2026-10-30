@@ -1067,6 +1067,15 @@
             var separator = key.indexOf(":");
             var kind = key.substring(0, separator);
             var index = Number(key.substring(separator + 1));
+            if (kind === "storage") {
+                var members = [], local = 0;
+                while (local < ir.locals.length) {
+                    if (ir.localStorage.slots[local] === index) members.push(ir.locals[local]);
+                    local++;
+                }
+                description[registerMap[key]] = "storage:" + index + " [" + members.join(", ") + "]";
+                continue;
+            }
             var name = kind === "argument" ? ir.parameters[index] : ir.locals[index];
             description[registerMap[key]] = kind + ":" + name;
         }
@@ -1139,6 +1148,7 @@
                 occupied[storageKey(Number(key.substring(LOCAL_REGISTER_KEY.length)))] = true;
             } else occupied[key] = true;
         }
+        if (index === names.length) return result;
         function group(key) {
             if (key.indexOf(LOCAL_REGISTER_KEY) === 0) {
                 key = storageKey(Number(key.substring(LOCAL_REGISTER_KEY.length)));

@@ -10,6 +10,7 @@ Backend.prototype.writeStandaloneSnapshot = function (
     if (written) fs.writeFileSync(path + ".symbols.json", JSON.stringify({
         sourceHash: metadata.sourceHash >>> 0,
         codeLength: result.length,
+        registerAllocation: result.registerAllocation,
         symbols: result.symbols
     }));
     return written;

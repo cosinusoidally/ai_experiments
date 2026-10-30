@@ -1,5 +1,28 @@
 # Native execution cursor
 
+## Experiment outcome (2026-10-30)
+
+The cursor rewrite was implemented and exercised, but is not retained in the
+production interpreter. Zlib quick correctness passed; measured variants were
+34.42 s (cursor alone), 32.78 s (general memory-operand selection), 33.38 s
+(integer operand legalization), and 33.41 s (loop-controller register priority).
+Fresh old-PC controls were approximately 31--32 s. The cursor/register-reuse
+variant also passed 12 project programs / 270 assertions and native GC stress,
+but did not earn its additional representation and boundary-conversion cost.
+Do not describe smaller machine code or a register-resident budget as proof
+of a CPU bottleneck or an execution win. An isolated old-PC/address-selection
+image took 31.36 s; the refreshed production control took 31.41 s.
+
+The uncommitted cursor, selector-rematerialization and controller-selection
+experiment is parked as an ignored `artifacts/rejected-execution-cursor.patch`.
+The independently committed stack-home/instruction-selection work remains;
+the runtime still uses its canonical word-index PC. The register-inspection
+tool and optional profile-image sidecar retain actual allocation descriptions
+to make subsequent decisions evidence-based. No failed cursor variant is
+enabled behind an implicit mode or cache.
+
+## Original design and acceptance criteria
+
 Planned next change: keep an execution-view instruction address rather than a
 word-index PC in the native interpreter's hot loop. The canonical program,
 bytecode operands, saved frame PCs, verifier, budget protocol and diagnostics

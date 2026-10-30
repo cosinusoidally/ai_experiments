@@ -30,6 +30,8 @@
     if (predecode) args = args.slice(1);
     var blocksOnly = args[0] === "--blocks";
     if (blocksOnly) args = args.slice(1);
+    var registersOnly = args[0] === "--registers";
+    if (registersOnly) args = args.slice(1);
     if (args[0] === "--numbers") {
         var conversion = nodeHost ? require("../binary64.js") : GuestVMBinary64;
         var samples = [1.7976931348623157e308, 5e-324, 16777619,
@@ -118,6 +120,17 @@
                 continue;
             }
             if (args.length && fn.name !== args[0]) continue;
+            if (registersOnly) {
+                report(fn.name);
+                var allocation = engine.nativeResult.registerAllocation[fn.name];
+                var register;
+                for (register in allocation) {
+                    if (Object.prototype.hasOwnProperty.call(allocation, register)) {
+                        report("  " + register + " = " + allocation[register]);
+                    }
+                }
+                continue;
+            }
             if (blocksOnly) {
                 var FlowCompiler = nodeHost ? require("../aot/kernel_compiler.js") :
                     GuestVMKernelCompiler;
