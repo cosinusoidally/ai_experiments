@@ -104,6 +104,13 @@
         var index = 0;
         while (index < functions.length) {
             var fn = functions[index++];
+            if (args[0] === "--storage") {
+                var storage = fn.localStorage;
+                if (storage) report(fn.name + ": " + storage.logicalCount +
+                    " logical locals, " + storage.storageCount +
+                    " storage slots, " + storage.passes + " liveness passes");
+                continue;
+            }
             if (args[0] === "--fingerprints") {
                 var fingerprintCompiler = nodeHost ?
                     require("../aot/kernel_compiler.js") : GuestVMKernelCompiler;

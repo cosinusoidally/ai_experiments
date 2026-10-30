@@ -8,6 +8,9 @@
     var REGISTER_CODES = {eax: 0, ecx: 1, edx: 2, ebx: 3,
                           esp: 4, ebp: 5, esi: 6, edi: 7};
     var ADDRESS_SCALES = {1: 0, 2: 1, 4: 2, 8: 3};
+    var MODRM_BYTE_DISPLACEMENT = 0x40;
+    var MODRM_WORD_DISPLACEMENT = 0x80;
+    var MODRM_REGISTER_SHIFT = 3;
     function Assembler(captureMacros) {
         this.bytes = [];
         this.length = 0;
@@ -127,9 +130,22 @@
         if (this.macros) this.macros.push("mov_eax_edx()");
         this.emitBytes2(0x89, 0xd0);
     };
+    /* Encode one register/memory instruction. EBP always needs an explicit
+     * displacement, including zero. Choose the signed-byte form when it fits;
+     * otherwise retain every bit of the full displacement. */
+    Assembler.prototype.emitEbpMemory = function (opcode, register, displacement) {
+        var code = REGISTER_CODES[register];
+        if (code === undefined) throw new Error("invalid frame-operand register");
+        var small = displacement >= -128 && displacement <= MAX_SIGNED_BYTE_IMMEDIATE;
+        this.emitBytes2(opcode,
+            (small ? MODRM_BYTE_DISPLACEMENT : MODRM_WORD_DISPLACEMENT) |
+            (code << MODRM_REGISTER_SHIFT) | REGISTER_CODES.ebp);
+        if (small) this.emitByte(displacement);
+        else this.word32(displacement);
+    };
     Assembler.prototype.movEdxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_edx_ptr_ebp(" + displacement + ")");
-        this.emitBytes2(0x8b, 0x95); this.word32(displacement);
+        this.emitEbpMemory(0x8b, "edx", displacement);
     };
     Assembler.prototype.pushEdx = function () {
         if (this.macros) this.macros.push("push_edx()");
@@ -180,7 +196,7 @@
     Assembler.prototype.movEaxEbpArgument = function (index) {
         var displacement = 8 + index * 4;
         if (this.macros) this.macros.push("mov_eax_ebp_arg(" + index + ")");
-        this.emitBytes3(0x8b, 0x45, displacement);
+        this.emitEbpMemory(0x8b, "eax", displacement);
     };
     Assembler.prototype.subEspImmediate = function (value) {
         if (this.macros) this.macros.push("sub_esp_i32(" + value + ")");
@@ -189,22 +205,21 @@
     Assembler.prototype.movEaxLocal = function (index) {
         var displacement = -(index + 1) * 4;
         if (this.macros) this.macros.push("mov_eax_local(" + index + ")");
-        this.emitBytes2(0x8b, 0x85); this.word32(displacement);
+        this.emitEbpMemory(0x8b, "eax", displacement);
     };
     Assembler.prototype.movEcxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_ecx_ebp(" + displacement + ")");
-        this.emitBytes2(0x8b, 0x8d);
-        this.word32(displacement);
+        this.emitEbpMemory(0x8b, "ecx", displacement);
     };
     Assembler.prototype.movLocalEax = function (index) {
         var displacement = -(index + 1) * 4;
         if (this.macros) this.macros.push("mov_local_eax(" + index + ")");
-        this.emitBytes2(0x89, 0x85); this.word32(displacement);
+        this.emitEbpMemory(0x89, "eax", displacement);
     };
     Assembler.prototype.movEbpArgumentEax = function (index) {
         var displacement = 8 + index * 4;
         if (this.macros) this.macros.push("mov_ebp_arg_eax(" + index + ")");
-        this.emitBytes3(0x89, 0x45, displacement);
+        this.emitEbpMemory(0x89, "eax", displacement);
     };
     Assembler.prototype.movEaxDwordPtrEax = function () {
         if (this.macros) this.macros.push("mov_eax_dword_ptr_eax()");
@@ -332,7 +347,7 @@
     };
     Assembler.prototype.compareEaxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("cmp_eax_ptr_ebp(" + displacement + ")");
-        this.emitBytes2(0x3b, 0x85); this.word32(displacement);
+        this.emitEbpMemory(0x3b, "eax", displacement);
     };
     Assembler.prototype.compareEcxEax = function () {
         if (this.macros) this.macros.push("cmp_ecx_eax()");
@@ -437,7 +452,7 @@
     };
     Assembler.prototype.addEaxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("add_eax_ptr_ebp(" + displacement + ")");
-        this.emitBytes2(0x03, 0x85); this.word32(displacement);
+        this.emitEbpMemory(0x03, "eax", displacement);
     };
     Assembler.prototype.subEcxEax = function () {
         if (this.macros) this.macros.push("sub_ecx_eax()");
@@ -830,15 +845,15 @@
     };
     Assembler.prototype.movEbxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_ebx_ptr_ebp(" + displacement + ")");
-        this.emitBytes3(0x8b, 0x5d, displacement);
+        this.emitEbpMemory(0x8b, "ebx", displacement);
     };
     Assembler.prototype.movEsiEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_esi_ptr_ebp(" + displacement + ")");
-        this.emitBytes3(0x8b, 0x75, displacement);
+        this.emitEbpMemory(0x8b, "esi", displacement);
     };
     Assembler.prototype.movEdiEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_edi_ptr_ebp(" + displacement + ")");
-        this.emitBytes3(0x8b, 0x7d, displacement);
+        this.emitEbpMemory(0x8b, "edi", displacement);
     };
     Assembler.prototype.movEaxEbx = function () {
         if (this.macros) this.macros.push("mov_eax_ebx()");

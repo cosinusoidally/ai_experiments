@@ -2,8 +2,10 @@
  * validated integer-function dialect and produces host-independent typed IR. */
 (function (root) {
     var Parser = root.GuestVMParser;
+    var KernelSlots = root.GuestVMKernelSlots;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("../parser.js");
+        KernelSlots = require("./kernel_slots.js");
     }
 
     function KernelCompiler() {}
@@ -332,6 +334,13 @@
         var graph = {kernelGraph: true, entry: entryName, functions: compiled,
                      signatures: signatures, preparation: preparation};
         inlineSmallCalls(graph);
+        if (!KernelSlots || typeof KernelSlots.allocate !== "function") {
+            throw new Error("kernel stack-storage allocator is not loaded");
+        }
+        var storageIndex = 0;
+        while (storageIndex < graph.functions.length) {
+            KernelSlots.allocate(graph.functions[storageIndex++], KernelCompiler.buildControlFlow);
+        }
         return graph;
     };
 
@@ -2282,6 +2291,7 @@
                 return current;
             }
             if (node.op === "block") return sequence(node.body, current);
+            if (node.op === "opcode_dispatch") return sequence(node.body, current);
             if (node.op === "return") {
                 current.terminator = {kind: "return", statement: node};
                 return null;

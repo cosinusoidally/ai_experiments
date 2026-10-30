@@ -298,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 77;
+    Records.NativeInterpreterContractVersion = 79;
     Records.EnvironmentFlags = {SINGLE_BINDING: 1, DETACHED_ARGUMENTS: 2};
     Records.HandlerFlags = {LEXICAL_BINDING: 1};
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};

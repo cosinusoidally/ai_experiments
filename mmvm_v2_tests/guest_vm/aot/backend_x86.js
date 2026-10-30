@@ -1195,6 +1195,14 @@
                node.op === "local_i32";
     }
 
+    function localStorageIndex(state, index) {
+        return state.localSlots ? state.localSlots[index] : index;
+    }
+
+    function localDisplacement(state, index) {
+        return -(localStorageIndex(state, index) + 1) * WORD_BYTES;
+    }
+
     function addSimpleOperandToEax(assembler, node, state) {
         if (node.op === "const_i32") {
             assembler.addEaxImmediate(node.value);
@@ -1208,7 +1216,7 @@
         else if (registerName === "edi") assembler.addEaxEdi();
         else {
             var displacement = node.op === "arg_i32" ?
-                8 + node.index * 4 : -(node.index + 1) * 4;
+                8 + node.index * WORD_BYTES : localDisplacement(state, node.index);
             assembler.addEaxEbpDisplacement(displacement);
         }
     }
@@ -1226,7 +1234,7 @@
         else if (registerName === "edi") assembler.compareEaxEdi();
         else {
             var displacement = node.op === "arg_i32" ?
-                8 + node.index * 4 : -(node.index + 1) * 4;
+                8 + node.index * WORD_BYTES : localDisplacement(state, node.index);
             assembler.compareEaxEbpDisplacement(displacement);
         }
     }
@@ -1239,7 +1247,7 @@
                 (argument ? "argument:" : "local:") + left.index];
             if (register) assembler.compareRegisterImmediate(register, right.value);
             else assembler.compareEbpDisplacementImmediate(argument ?
-                8 + left.index * WORD_BYTES : -(left.index + 1) * WORD_BYTES,
+                8 + left.index * WORD_BYTES : localDisplacement(state, left.index),
                 right.value);
             return;
         }
@@ -1259,10 +1267,14 @@
     }
 
     function reserveKernelLocals(assembler, ir, state) {
-        var localWords = ir.locals.length;
+        var storage = ir.localStorage;
+        state.localSlots = storage ? storage.slots.slice(0) : null;
+        var localWords = storage ? storage.storageCount : ir.locals.length;
         if ((state.dispatchStrategy === "indexed" ||
              state.dispatchStrategy === "replicated") && containsOpcodeDispatch(ir.body)) {
-            state.dispatchBaseLocal = localWords++;
+            state.dispatchBaseLocal = ir.locals.length;
+            if (state.localSlots) state.localSlots[state.dispatchBaseLocal] = localWords;
+            localWords++;
             state.dispatchBaseLabel = state.returnLabel + "_dispatch_base";
         }
         if (localWords) assembler.subEspImmediate(localWords * WORD_BYTES);
@@ -1274,7 +1286,7 @@
             assembler.label(state.dispatchBaseLabel);
             assembler.popInstructionPointerEcx();
             assembler.movEaxEcx();
-            assembler.movLocalEax(state.dispatchBaseLocal);
+            assembler.movLocalEax(localStorageIndex(state, state.dispatchBaseLocal));
         }
     }
 
@@ -1310,7 +1322,7 @@
             var argument = key.indexOf("argument:") === 0;
             var index = Number(key.substring(argument ? 9 : 6));
             assembler.movEdxEbpDisplacement(argument ?
-                8 + index * WORD_BYTES : -(index + 1) * WORD_BYTES);
+                8 + index * WORD_BYTES : localDisplacement(state, index));
             return;
         }
     }
@@ -1365,11 +1377,11 @@
                            node.index;
             if (state.registerMap[valueKey]) {
                 if (state.registerMap[valueKey] === "edx") {
-                    if (node.op === "set_local") assembler.movLocalEax(node.index);
+                    if (node.op === "set_local") assembler.movLocalEax(localStorageIndex(state, node.index));
                     else assembler.movEbpArgumentEax(node.index);
                 }
                 moveEaxToRegister(assembler, state.registerMap[valueKey]);
-            } else if (node.op === "set_local") assembler.movLocalEax(node.index);
+            } else if (node.op === "set_local") assembler.movLocalEax(localStorageIndex(state, node.index));
             else assembler.movEbpArgumentEax(node.index);
             return;
         }
@@ -1589,7 +1601,7 @@
         assembler.jumpGreater(defaultLabel);
         assembler.subtractEaxImmediate(node.minimum);
         assembler.movEcxEbpDisplacement(
-            -(state.dispatchBaseLocal + 1) * WORD_BYTES);
+            localDisplacement(state, state.dispatchBaseLocal));
         assembler.movEaxDwordPtrEcxPlusEaxTimes4LabelOffset(tableLabel, positionLabel);
         assembler.addEaxEcx();
         assembler.jumpEax();
@@ -1978,7 +1990,7 @@
         else if (node.op === "local_i32") {
             var localRegister = state.registerMap["local:" + node.index];
             if (localRegister) moveRegisterToEax(assembler, localRegister);
-            else assembler.movEaxLocal(node.index);
+            else assembler.movEaxLocal(localStorageIndex(state, node.index));
         }
         else if (node.op === "logical_and_i32" || node.op === "logical_or_i32") {
             var logicalEnd = "kernel_logical_end_" + state.nextLabel++;
