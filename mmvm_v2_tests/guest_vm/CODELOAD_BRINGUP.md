@@ -62,7 +62,17 @@ not part of ordinary execution, a benchmark shortcut, or a performance test.
   Bytecode targets retain their existing apply path. No thread, C helper,
   source substitution or host-language service is added.
 
-The native executable contract is bumped to 83. Build a new snapshot for
+The first working point uses native executable contract 83. Its whole-suite
+Test262 run exposed two object-literal definition regressions (3290 pass /
+2 fail). The shared writer had revealed the compiler's conflation of literal
+definition and ordinary assignment. Contract 84 adds DEFINE_DATA_PROPERTY,
+with distinct own-definition semantics across the portable interpreter,
+structured JS backend and native kernel. Object-literal definitions ignore
+inherited setters/read-only properties; normal assignments do not. The
+affected 39-test chapter passes in full. Default-separator join also uses the
+guarded path rather than assuming holes/indexed descriptors are unobservable.
+The complete regression history is retained in `../TEST262_STATUS.md`.
+Build a new snapshot for
 these changes; generated snapshots/logs remain ignored in `artifacts/`.
 
 ## Boundaries and validation

@@ -1,12 +1,13 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-30, standalone contract 82):
-**3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 493.30 seconds with the source-loading scanner dispatch follow-up.
-An adjacent rerun of the unchanged memory-boundary image took 496.28 seconds
-(its earlier run took 467.46 seconds). Both passed the full suite; the matched
-observations do not show an overall execution regression. They do not establish
-a statistically significant execution speedup either. See the history below for the exact
+Latest completed whole-suite result (2026-10-30, CodeLoad checkpoint `ae93c77`,
+standalone contract 83): **3,290 passed / 2 failed / 0 not run / 0 timed out**,
+out of 3,292 tests. Elapsed 490.42 seconds. The two object-literal definition
+regressions have a forward fix (distinct definition bytecode), with all 39
+tests in the affected chapter passing; the next whole-suite rerun is pending.
+The preceding contract-82 source-loading run passed all 3,292 tests in 493.30
+seconds. These are single timing observations, not statistical speedup claims.
+See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -38,6 +39,22 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, CodeLoad checkpoint `ae93c77`, contract 83:
+  **3,290 passed / 2 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/codeload-final.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged corpus. External elapsed
+  490.42 s, user CPU 487.05 s, peak RSS 576,400 KiB. Runner elapsed
+  489.815259 s; summed test time 473.451463 s.
+  Regressions: `ch11/11.1/11.1.5/11.1.5_3-3-1.js` and
+  `ch11/11.1/11.1.5/11.1.5_4-5-1.js`. Both require object literals to
+  define own data properties independently of inherited read-only properties.
+  The shared assignment writer exposed the compiler's use of SET_PROPERTY
+  for both Put and literal definition. The forward fix introduces explicit
+  DEFINE_DATA_PROPERTY semantics in all execution paths. The unchanged
+  39-test chapter passes 39/39 with contract 84; focused runner elapsed
+  12.937022 s, summed test execution 1.563530 s. A focused pass does not
+  replace the required whole-suite rerun.
 
 - 2026-10-30, unchanged memory-boundary image, matched control after the
   source-loading follow-up: **3,292 passed / 0 failed / 0 timed out / 0 not run**.

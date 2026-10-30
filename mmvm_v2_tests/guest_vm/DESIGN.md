@@ -298,6 +298,7 @@ Current instruction layouts are:
 | `MOVE` | destination, source | 3 |
 | `GET_PROPERTY` | destination, object, key | 4 |
 | `SET_PROPERTY` | object, key, value | 4 |
+| `DEFINE_DATA_PROPERTY` | object, literal key, value | 4 |
 | arithmetic/comparison | destination, left, right | 4 |
 | `NOT`, `NEGATE`, `POSITIVE` | destination, source | 3 |
 | `JUMP` | absolute target | 2 |

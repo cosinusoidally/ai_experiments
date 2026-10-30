@@ -830,6 +830,9 @@
         }
         else if (opcode === op.MAKE_REGEXP) {
             lines.push(rr(1) + "=runtime.makeRegExp(" + constant(2) + "," + constant(3) + ");");
+        } else if (opcode === op.DEFINE_DATA_PROPERTY) {
+            lines.push("runtime.defineDataProperty(" + rr(1) + "," + rr(2) + "," +
+                rr(3) + ",runtime.heapRecords.constructor.Attributes.DEFAULT);");
         } else if (opcode === op.DEFINE_GETTER ||
                    opcode === op.DEFINE_SETTER) {
             lines.push("runtime.defineLiteralAccessor(" + rr(1) + "," +

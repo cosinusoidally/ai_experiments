@@ -63,7 +63,8 @@
         ADD_INT32: 61,
         SUBTRACT_INT32: 62,
         TO_INT32: 63,
-        PUSH_CATCH_SCOPE: 64
+        PUSH_CATCH_SCOPE: 64,
+        DEFINE_DATA_PROPERTY: 65
     };
 
     op.NAMES = [];
@@ -95,7 +96,7 @@
         op.TYPEOF_GLOBAL, op.GET_KEYS, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME,
         op.TO_INT32]);
     layout(4, 0, [op.SET_PROPERTY, op.SET_LOCAL, op.SET_PROPERTY_CONST,
-        op.DEFINE_GETTER, op.DEFINE_SETTER]);
+        op.DEFINE_GETTER, op.DEFINE_SETTER, op.DEFINE_DATA_PROPERTY]);
     layout(4, 1, [op.GET_PROPERTY, op.GET_LOCAL, op.GET_PROPERTY_CONST,
         op.DELETE_PROPERTY_CONST, op.IN, op.INSTANCEOF, op.ADD, op.SUBTRACT,
         op.MULTIPLY, op.DIVIDE, op.REMAINDER, op.STRICT_EQUAL, op.EQUAL,
@@ -130,7 +131,8 @@
         op.BIT_AND, op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
         op.SHIFT_UNSIGNED_RIGHT, op.IN, op.INSTANCEOF, op.ADD_INT32,
         op.SUBTRACT_INT32, op.CALL]);
-    inputs([1, 2, 3], [op.SET_PROPERTY, op.DEFINE_GETTER, op.DEFINE_SETTER]);
+    inputs([1, 2, 3], [op.SET_PROPERTY, op.DEFINE_GETTER, op.DEFINE_SETTER,
+        op.DEFINE_DATA_PROPERTY]);
     inputs([1, 3], [op.SET_PROPERTY_CONST]);
     inputs([3], [op.SET_LOCAL]);
 

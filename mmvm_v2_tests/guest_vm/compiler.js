@@ -995,7 +995,7 @@
                     this.emit(op.DEFINE_SETTER, objectRegister, propertyKey,
                               propertyValue);
                 } else {
-                    this.emit(op.SET_PROPERTY, objectRegister, propertyKey,
+                    this.emit(op.DEFINE_DATA_PROPERTY, objectRegister, propertyKey,
                               propertyValue);
                 }
                 propertyIndex++;

@@ -202,7 +202,7 @@
         } else if (opcode === op.SET_PROPERTY_CONST) {
             this.reloadNativeOperand(frame, code[pc + 1]);
             this.reloadNativeOperand(frame, code[pc + 3]);
-        } else if (opcode === op.DEFINE_GETTER ||
+        } else if (opcode === op.DEFINE_DATA_PROPERTY || opcode === op.DEFINE_GETTER ||
                    opcode === op.DEFINE_SETTER) {
             this.reloadNativeOperand(frame, code[pc + 1]);
             this.reloadNativeOperand(frame, code[pc + 2]);
@@ -717,6 +717,11 @@
                                              registers[code[pc + 2]],
                                              registers[code[pc + 3]],
                                              !!frame.program.strict);
+                    frame.pc = pc + 4;
+                } else if (opcode === op.DEFINE_DATA_PROPERTY) {
+                    this.runtime.defineDataProperty(registers[code[pc + 1]],
+                        registers[code[pc + 2]], registers[code[pc + 3]],
+                        this.runtime.heapRecords.constructor.Attributes.DEFAULT);
                     frame.pc = pc + 4;
                 } else if (opcode === op.DEFINE_GETTER ||
                            opcode === op.DEFINE_SETTER) {

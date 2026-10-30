@@ -42,6 +42,25 @@
         return 1;
     }
 
+    /* Object-literal data initialization is [[DefineOwnProperty]], not Put.
+     * Inherited setters/read-only properties must not affect the new own
+     * definition. Duplicate literals may replace a configurable accessor. */
+    function defineLiteralDataKernel(heapBase, state, objectCell, keyCell, source) {
+        if (valueCellTag(0, objectCell) !== VALUE_TAG_REFERENCE ||
+            valueCellTag(0, keyCell) !== VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, objectCell), key = valueCellReference(0, keyCell);
+        if (recordType(heapBase, object) !== HEAP_TYPE_OBJECT ||
+            recordType(heapBase, key) !== HEAP_TYPE_STRING) return 0;
+        var entry = findCachedOwnObjectPropertyKernel(heapBase, state, object, key);
+        if (entry === 0) entry = appendOwnPropertyEntryKernel(heapBase, state,
+            object, key, DEFAULT_PROPERTY_ATTRIBUTES);
+        if (entry === 0) return 0;
+        setOwnPropertyEntryAttributesKernel(heapBase, object, entry, DEFAULT_PROPERTY_ATTRIBUTES);
+        setOwnPropertyEntrySetterKernel(heapBase, object, entry, 0);
+        copyValueCell(ownPropertyEntryValueCellKernel(heapBase, object, entry), source);
+        return 1;
+    }
+
     function dataMethodIntrinsicKernel(heapBase, object, key) {
         while (object !== 0) {
             var entry = lastOwnPropertyEntryKernel(heapBase, object);
@@ -250,6 +269,7 @@
     var exports = {functions: {
         objectClassIndexKernel: objectClassIndexKernel,
         objectToStringKernel: objectToStringKernel,
+        defineLiteralDataKernel: defineLiteralDataKernel,
         dataMethodIntrinsicKernel: dataMethodIntrinsicKernel,
         arrayBuiltinStringKernel: arrayBuiltinStringKernel,
         arrayDefaultPrimitiveKernel: arrayDefaultPrimitiveKernel,

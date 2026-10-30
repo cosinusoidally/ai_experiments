@@ -41,6 +41,7 @@
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
     var OP_PUSH_CATCH_SCOPE = Bytecode.PUSH_CATCH_SCOPE;
+    var OP_DEFINE_DATA_PROPERTY = Bytecode.DEFINE_DATA_PROPERTY;
     var OP_LAST = Bytecode.NAMES.length - 1;
     var BYTECODE_REGISTER_SCALE = ValueCells.PAYLOAD_BYTES;
     var BYTECODE_LAYOUT_WIDTH = Bytecode.NATIVE_LAYOUT.WIDTH;
@@ -198,6 +199,7 @@
             OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
             OP_TO_INT32: OP_TO_INT32,
             OP_PUSH_CATCH_SCOPE: OP_PUSH_CATCH_SCOPE,
+            OP_DEFINE_DATA_PROPERTY: OP_DEFINE_DATA_PROPERTY,
             OP_LAST: OP_LAST
         };
         overrides.CELL_INT32 = CELL_INT32;
@@ -4726,6 +4728,18 @@
                     environment = frameEnvironment(heapBase, frame);
                     pc = 0;
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
+            } else if (opcode === OP_DEFINE_DATA_PROPERTY) {
+                if (defineLiteralDataKernel(heapBase, state,
+                    frameRegisterCellAddress(heapBase, frame,
+                        load32(bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES)),
+                    frameRegisterCellAddress(heapBase, frame,
+                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES)),
+                    frameRegisterCellAddress(heapBase, frame,
+                        load32(bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES))) !== 1) {
+                    return unsupportedExitKernel(heapBase, state, frame, pc,
+                        opcode, initialBudget - budget);
+                }
+                pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_DEFINE_GETTER || opcode === OP_DEFINE_SETTER) {
                 var accessorObjectIndex = load32(
                     bytecodeAddress +
@@ -8563,10 +8577,12 @@
         if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_ARRAY_JOIN) {
             if (callReceiverIndex >= 0 && intrinsicArgumentCount <= 1) {
-                var joinReceiverCell = frameRegisterCellAddress(heapBase, frame, callReceiverIndex);
+                var joinReceiverCell = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
                 var joinSeparator = valueCellReference(0, vectorCellAddress(
                     heapBase, stringSupport, RUNTIME_SUPPORT_COMMA_STRING));
                 var joinArgumentValid = 1;
+                var joinDefaultSeparator = 0;
+                if (intrinsicArgumentCount === 0) joinDefaultSeparator = 1;
                 if (intrinsicArgumentCount === 1) {
                     var joinSeparatorCell = programArgumentCellKernel(
                         heapBase, intrinsicArgumentsVector, registerAddress, 0);
@@ -8574,10 +8590,14 @@
                         joinSeparator = propertyStringKeyReferenceKernel(heapBase,
                             joinSeparatorCell, stringSupport);
                         if (joinSeparator === 0) joinArgumentValid = 0;
-                    }
+                    } else joinDefaultSeparator = 1;
                 }
                 if (joinArgumentValid === 1 && valueCellTag(0, joinReceiverCell) === VALUE_TAG_REFERENCE) {
-                    var joinStatus = arrayJoinKernel(heapBase, state, intrinsicTarget,
+                    var joinStatus = 0;
+                    if (joinDefaultSeparator === 1) {
+                        joinStatus = arrayBuiltinStringKernel(heapBase, state, intrinsicTarget,
+                            joinReceiverCell, stringSupport);
+                    } else joinStatus = arrayJoinKernel(heapBase, state, intrinsicTarget,
                         valueCellReference(0, joinReceiverCell), joinSeparator);
                     if (joinStatus === 1) intrinsicHandled = 1;
                     else if (joinStatus === 2) {
@@ -18224,6 +18244,7 @@
                     OP_SUBTRACT_INT32: OP_SUBTRACT_INT32,
                     OP_TO_INT32: OP_TO_INT32,
                     OP_PUSH_CATCH_SCOPE: OP_PUSH_CATCH_SCOPE,
+                    OP_DEFINE_DATA_PROPERTY: OP_DEFINE_DATA_PROPERTY,
                     OP_LAST: OP_LAST,
                     PROFILE_OPCODES: runtime.profileOpcodeCounts ? 1 : 0,
                     ENGINE_OPCODE_COUNT: kernelConstantOverrides.ENGINE_OPCODE_COUNT,
