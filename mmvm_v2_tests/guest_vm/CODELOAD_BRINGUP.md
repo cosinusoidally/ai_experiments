@@ -1,7 +1,8 @@
 # CodeLoad standalone bring-up, 2026-10-30
 
 The unchanged stock CodeLoad suite now passes under i386 `js_runner`, including
-both its Closure and jQuery workloads: **score 96.4**, external elapsed
+both its Closure and jQuery workloads. The initial working point scored
+**96.4**, external elapsed
 30.07 s, user CPU 29.27 s, peak RSS 393,216 KiB. This is a stock run, not a
 quick-mode score. Current jitless Node scores 17,757 (184.2x the guest score);
 default-JIT Node scores 17,817 (184.8x). Passing does not establish acceptable
@@ -72,6 +73,42 @@ inherited setters/read-only properties; normal assignments do not. The
 affected 39-test chapter passes in full. Default-separator join also uses the
 guarded path rather than assuming holes/indexed descriptors are unobservable.
 The complete regression history is retained in `../TEST262_STATUS.md`.
+The complete contract-84 rerun passes all **3292 tests, zero failures/timeouts/
+unrun**, in **490.09 s**, CPU 486.00 s, peak RSS 576,304 KiB. This restores
+the two intermediate regressions at comparable time and memory to the prior
+493.30 s clean result.
+
+## Final image reproducibility and follow-up stock result
+
+Node, js_min and genuine self-hosted builds produce identical 6,376,920-byte
+images, SHA-256
+`aedbdf036bdbd2fe4e0c464095c8e2438ae71058e66004073cf7aabae8a2f706`.
+The first comparison found eight different bytes in two **freed string
+payloads**, not in live string contents or valid lookup hashes. Serialization
+now clears free-record payloads in the existing heap walk, through the named
+Heap accessor. Allocator headers/links/flags, live data and retained function
+source are preserved. No new startup work, hashing check or pass over source
+is introduced. The final native kernel code bytes match the contract-84
+image used for the complete Test262 run.
+
+Final js_min build: 92.07 s, CPU 91.44 s, peak RSS 338,512 KiB. Final genuine
+self-hosted build: 102.73 s, CPU 102.03 s, peak RSS 545,120 KiB; source loading
+15.343087 s. The preceding source-loading
+checkpoint measured 86.79 s for js_min and 103.67 s self-hosted. Self-hosted
+total is comparable; js_min's extra approximately five seconds is recorded,
+not described as a build speedup. Snapshot string-sharing/serialization is
+slower in these observations. These are single-run comparisons with a larger
+implementation, not confidence intervals.
+
+The final image repeats stock CodeLoad at **104**, external **28.60 s**,
+CPU 27.98 s, peak RSS **393,600 KiB**. The earlier 96.4 result above remains
+historical. Relative to the current Node scores, the final normalized score
+gap is **170.7x jitless**, **171.3x default JIT**. This is a correctness
+milestone, not interpreter/compiler performance parity.
+
+Final-image GC stress and expanded language integration pass. The structural
+GC test passes 27 audits, 87,576 edges, 221 property-index audits and 76
+embedding collections, maximum bump 4,546,840 bytes under the 8 MiB cap.
 Build a new snapshot for
 these changes; generated snapshots/logs remain ignored in `artifacts/`.
 

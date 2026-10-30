@@ -173,3 +173,19 @@ The fresh default-JIT Node results above supersede the older Node baseline
 for this comparison. There is no new `--jitless` run here and no valid full
 guest aggregate score. Per-suite score gaps remain substantial even where
 correctness passes; the suite is not yet complete or near V8 performance.
+
+## Subsequent CodeLoad bring-up (not a new full sweep)
+
+General guest eval, property and call-forwarding fixes now make CodeLoad pass
+both stock workloads. The final standalone image scores **104**, in **28.60 s**,
+CPU 27.98 s, peak RSS 393,600 KiB. Current reference scores are 17,817 for
+default-JIT Node and 17,757 for jitless Node: respective score gaps 171.3x and
+170.7x. The original failing row above remains the historical full-sweep
+result, not silently replaced with a later observation.
+
+All eleven previously passing suites also pass quick correctness following
+the initial CodeLoad fix; these are not new stock scores. There are now twelve
+known stock passes; PdfJS, Mandreel and Typescript remain unresolved. Full
+Test262 passes 3292/3292 after the literal-definition correction. See
+[CodeLoad bring-up and validation](guest_vm/CODELOAD_BRINGUP.md) for mechanisms,
+intermediate regressions, cross-host snapshot identity and follow-up checks.

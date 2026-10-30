@@ -525,6 +525,15 @@
         return this.memory.readU32Trusted(address + HEADER_MARK);
     };
 
+    Heap.prototype.clearFreeRecordPayload = function (address) {
+        /* Free-list links/region flags live in the header and remain intact.
+         * Payload is dead storage, potentially containing producer-dependent
+         * old values. Canonical snapshots must not serialize that history. */
+        var size = this.freeRecordSize(address);
+        if (size > HEADER_SIZE) this.memory.fill(address + HEADER_SIZE,
+            size - HEADER_SIZE, 0);
+    };
+
     Heap.prototype.sweepUnmarked = function (generation) {
         var address = FIRST_RECORD;
         var reclaimedRecords = 0;

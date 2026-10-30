@@ -2287,6 +2287,7 @@
         while (address < heap.bump) {
             var header = heap.inspectRecordHeader(address);
             var size = header.size;
+            if (header.type === Heap.Types.FREE) heap.clearFreeRecordPayload(address);
             if (header.type === Heap.Types.STRING &&
                     size > minimumBytes && !records.stringIsRope(address) &&
                     !records.stringIsSlice(address)) {

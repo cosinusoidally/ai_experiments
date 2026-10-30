@@ -1,10 +1,10 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-30, CodeLoad checkpoint `ae93c77`,
-standalone contract 83): **3,290 passed / 2 failed / 0 not run / 0 timed out**,
-out of 3,292 tests. Elapsed 490.42 seconds. The two object-literal definition
-regressions have a forward fix (distinct definition bytecode), with all 39
-tests in the affected chapter passing; the next whole-suite rerun is pending.
+Latest completed whole-suite result (2026-10-30, CodeLoad checkpoint `bd92dda`,
+standalone contract 84): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
+out of 3,292 tests. Elapsed 490.09 seconds. The distinct literal-definition
+opcode restores both object-literal tests which regressed in the intermediate
+contract-83 run; that run is retained in the history below.
 The preceding contract-82 source-loading run passed all 3,292 tests in 493.30
 seconds. These are single timing observations, not statistical speedup claims.
 See the history below for the exact
@@ -39,6 +39,18 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, CodeLoad/literal-definition checkpoint `bd92dda`, contract 84:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/codeload-validated.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged corpus. External elapsed
+  490.09 s, user CPU 486.00 s, peak RSS 576,304 KiB. Runner elapsed
+  489.488803 s; summed test time 472.734539 s. Both intermediate regressions
+  are fixed without weakening the assignment semantics or changing tests.
+  The preceding clean contract-82 run took 493.30 s at 575,876 KiB peak RSS;
+  this is comparable performance, not a statistically significant speedup.
+  Heavy cases took 98.888612, 92.423162, 91.844876 and 84.497181 s; their
+  individual variation is not hidden by reporting only the total.
 
 - 2026-10-30, CodeLoad checkpoint `ae93c77`, contract 83:
   **3,290 passed / 2 failed / 0 timed out / 0 not run**. Command:
