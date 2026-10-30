@@ -2,8 +2,10 @@
 
 Latest completed whole-suite result (2026-10-30, standalone contract 82):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 467.46 seconds. This run includes native scalar-memory selection,
-bulk word ingress and explicit indexed-array descriptor reads. See the history below for the exact
+Elapsed 502.26 seconds at source-loading checkpoint `4b1df40`. The preceding
+memory-boundary checkpoint took 467.46 seconds. Correctness is unchanged, but
+the performance difference is under investigation; the source-loading speedup
+is not evidence of unchanged execution performance. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -35,6 +37,19 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, source-loading checkpoint `4b1df40`, contract 82:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/source-analysis.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged external corpus.
+  External elapsed 502.26 s, user CPU 495.34 s, peak RSS 575,872 KiB.
+  Runner elapsed 501.673761 s; summed test time 479.477634 s.
+  This is 7.4% slower than the preceding whole-suite run, despite faster
+  build-source loading. A scanner dispatch follow-up and matched timing
+  comparisons are being checked before accepting the performance result.
+  Heavy cases `S7.8.5_A1.1_T2`, `S7.8.5_A1.4_T2`,
+  `S7.8.5_A2.1_T2`, `S7.8.5_A2.4_T2` took respectively
+  91.483372, 87.944490, 91.826511 and 89.457629 seconds.
 
 - 2026-10-30, approximately 10:23 UTC, memory-boundary checkpoint `1335811`,
   contract 82: **3,292 passed / 0 failed / 0 timed out / 0 not run**, all
