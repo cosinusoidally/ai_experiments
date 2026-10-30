@@ -1,9 +1,9 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-30, standalone contract 79):
+Latest completed whole-suite result (2026-10-30, standalone contract 82):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 557.68 seconds. This run includes canonical literal-int32 lowering
-and the current native instruction-selection changes. See the history below for the exact
+Elapsed 467.46 seconds. This run includes native scalar-memory selection,
+bulk word ingress and explicit indexed-array descriptor reads. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -35,6 +35,30 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, approximately 10:23 UTC, memory-boundary checkpoint `1335811`,
+  contract 82: **3,292 passed / 0 failed / 0 timed out / 0 not run**, all
+  3,292 authored variants executed. Command:
+  `./artifacts/js_runner.exe artifacts/memory-boundary.snap test262_runner.js`.
+  Default instruction budget and normal heap configuration; external corpus
+  unchanged. External elapsed 467.46 s, user CPU 465.31 s, peak RSS
+  576,000 KiB. Runner elapsed 466.825134 s; summed test time 450.742685 s.
+  Previous run: 557.68 s external, 550.27 s CPU, 575,936 KiB peak RSS.
+  Total elapsed is 16.2% lower at effectively unchanged peak RSS. These are
+  single complete runs, not statistical confidence intervals.
+
+  Four heavy Unicode/eval cases, test execution times:
+
+  - `S7.8.5_A1.1_T2.js`: 88.695055 s, previously 108.164996 s.
+  - `S7.8.5_A1.4_T2.js`: 85.942491 s, previously 106.896180 s.
+  - `S7.8.5_A2.1_T2.js`: 89.034650 s, previously 99.070673 s.
+  - `S7.8.5_A2.4_T2.js`: 85.479511 s, previously 97.836462 s.
+
+  Combined heavy-case time: 349.151707 s versus 411.968311 s (15.2% lower).
+  Remaining 3,288 tests: 101.590978 s versus 125.477195 s (19.0% lower).
+  Raw log: `artifacts/memory-boundary-test262.log` (ignored). No test-specific
+  cache, instruction-budget exception, thread or host language implementation
+  was added. The new raw-memory primitive is compiled from kernel-dialect JS.
 
 - 2026-10-30, approximately 09:15 UTC, canonical literal-int32 lowering and
   current native operand selection, contract 79: **3,292 passed / 0 failed /
