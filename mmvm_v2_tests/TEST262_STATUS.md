@@ -40,7 +40,7 @@ chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
 
-- 2026-10-30, CodeLoad/literal-definition checkpoint `bd92dda`, contract 84:
+- 2026-10-30, approximately 19:11 UTC, CodeLoad/literal-definition checkpoint `bd92dda`, contract 84:
   **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
   `./artifacts/js_runner.exe artifacts/codeload-validated.snap test262_runner.js`.
   Default budget and heap configuration, unchanged corpus. External elapsed
@@ -52,7 +52,7 @@ chronological ledger rather than being rewritten or silently discarded.
   Heavy cases took 98.888612, 92.423162, 91.844876 and 84.497181 s; their
   individual variation is not hidden by reporting only the total.
 
-- 2026-10-30, CodeLoad checkpoint `ae93c77`, contract 83:
+- 2026-10-30, approximately 18:57 UTC, CodeLoad checkpoint `ae93c77`, contract 83:
   **3,290 passed / 2 failed / 0 timed out / 0 not run**. Command:
   `./artifacts/js_runner.exe artifacts/codeload-final.snap test262_runner.js`.
   Default budget and heap configuration, unchanged corpus. External elapsed

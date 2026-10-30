@@ -1,12 +1,14 @@
 # CodeLoad standalone bring-up, 2026-10-30
 
 The unchanged stock CodeLoad suite now passes under i386 `js_runner`, including
-both its Closure and jQuery workloads. The initial working point scored
-**96.4**, external elapsed
-30.07 s, user CPU 29.27 s, peak RSS 393,216 KiB. This is a stock run, not a
-quick-mode score. Current jitless Node scores 17,757 (184.2x the guest score);
-default-JIT Node scores 17,817 (184.8x). Passing does not establish acceptable
+both its Closure and jQuery workloads: **score 104**, elapsed **28.60 s**, CPU
+27.98 s, peak RSS **393,600 KiB**. This is a stock run, not quick correctness.
+Current jitless Node scores 17,757 (170.7x the guest score); default-JIT Node
+scores 17,817 (171.3x). Passing does not establish acceptable
 compiler throughput. No external benchmark or demo source was changed.
+
+The initial working point scored 96.4 in 30.07 s, CPU 29.27 s, peak RSS
+393,216 KiB. It remains a historical observation, not the latest score.
 
 ## Original diagnostics were masking the cause
 
@@ -133,9 +135,34 @@ also pass serial quick correctness, including RegExp (73.31 s) and zlib
 (33.67 s). These quick runs are not stock score measurements.
 The measured stock image SHA-256 is
 `fac263379fbb0a55f49ddbadc1a492f4f57597b7583a844a5fd2a92c042bf4b9`.
-Broader regression/build results will be recorded after
-their serial runs complete. Raw logs use the ignored `artifacts/codeload-*`
-prefix. Reproduction:
+Final regression checks (serial, no concurrent benchmark workloads):
+
+- All twelve working Octane suites pass final-image quick correctness:
+  Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, RegExp, Splay,
+  NavierStokes, Gameboy, Box2D, zlib and CodeLoad. Final RegExp quick time
+  68.80 s; zlib quick 31.00 s. No new stock scores are claimed for the other
+  eleven suites. PdfJS, Mandreel and Typescript remain outside this bring-up.
+- Node and js_min project/CLI/context suites pass 270 guest assertions.
+  The final Node suite is repeated after serialization cleanup. js_min's
+  complete project/CLI/context run takes 164.11 s, peak RSS 195,176 KiB.
+- Final native GC workload: 24 rounds / 47 collections; final expanded
+  standalone language integration passes. Both Node and js_min structural
+  GC runs pass 27 audits, 87,576 edges, 221 property-index audits and 76
+  embedding collections under the 8 MiB cap. js_min's maximum observed
+  bump is 4,570,552 bytes and workload/check time is 34,572 ms.
+- Live demos 1--7 run at 320x240 for about 15 seconds after window creation
+  and exit through their input path. Their measured rates stay in the prior
+  low-single-digit range; this is not a claim of 20 FPS for these paths.
+- Demo8 runs rolling, garage and free-drive auto-pilot, then exits via its
+  menu. Garage/free-drive frames are captured and inspected. After an initial
+  16.9 FPS transition sample it reports 19.7--19.9 FPS at the 20 FPS limit.
+  These are bounded interaction checks plus separate GC stress, not a
+  long-duration stability or sustained-frame-rate certification.
+- Both net.js and node_web.js serve the default index, a directory listing,
+  text and a byte-identical binary file over loopback. Fixtures are ignored
+  temporary files below artifacts, not new tracked assets.
+
+Raw logs use the ignored `artifacts/codeload-*` prefix. Reproduction:
 
 ```sh
 artifacts/js_runner.exe artifacts/snap octane_runner.js CodeLoad
