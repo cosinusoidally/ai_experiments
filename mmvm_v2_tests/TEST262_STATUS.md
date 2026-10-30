@@ -2,8 +2,8 @@
 
 Latest completed whole-suite result (2026-10-30, standalone contract 79):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Elapsed 498.23 seconds. This is the retained logical-local/native-stack-home
-separation with compact frame-operand encoding. See the history below for the exact
+Elapsed 557.68 seconds. This run includes canonical literal-int32 lowering
+and the current native instruction-selection changes. See the history below for the exact
 command, budget, memory use and historical comparisons.
 
 This is the chronological ledger for ECMAScript 5.1 Test262 work. The corpus
@@ -35,6 +35,26 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-30, approximately 09:15 UTC, canonical literal-int32 lowering and
+  current native operand selection, contract 79: **3,292 passed / 0 failed /
+  0 timed out / 0 not run**, all 3,292 authored variants executed. Command:
+  `./artifacts/js_runner.exe artifacts/canonical-final.snap test262_runner.js`.
+  Default instruction budget and unchanged external corpus. External elapsed
+  557.68 s, user CPU 550.27 s, peak RSS 575,936 KiB. Runner elapsed
+  556.993725 s; summed test time 537.445506 s. This is slower than the
+  historical 498.23-second observation; a substantial performance improvement
+  is not established. A fresh unchanged zlib control is also slower than its
+  earlier measurement (33.99 versus 31.41 s), so historical whole-suite
+  timings alone cannot isolate the cause. Raw log:
+  `artifacts/canonical-test262.log` (ignored).
+
+  Serial isolated follow-up for `S7.8.5_A1.1_T2.js`: earlier `homes-short`
+  image passes in 103.929389 s test time / 116.17 s external / 274,928 KiB
+  peak RSS; current image passes in 93.049536 s / 104.58 s / 529,644 KiB.
+  This is 10.5% lower test time with substantially higher peak RSS, not a
+  demonstrated whole-suite efficiency improvement. Equal-limit collection
+  comparisons remain necessary before drawing an architectural conclusion.
 
 - 2026-10-30, native stack-home allocation and compact frame operands,
   revision `7f34bf0`, contract 79: **3,292 passed / 0 failed / 0 timed out /

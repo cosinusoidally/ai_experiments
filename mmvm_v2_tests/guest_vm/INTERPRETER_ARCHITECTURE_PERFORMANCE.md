@@ -403,3 +403,48 @@ the unoptimized function. Output is plain text and requires no host JSON API.
 No fixture source or parsed program is cached. Raw measurements remain in
 ignored `artifacts/bitsets-*`, `packed-analysis-*`, `canonical-*` and
 `current-control-zlib.log`.
+
+### Checkpoint validation
+
+- Both bootstrap hosts pass the project suite: 12 guest programs / 270
+  assertions, plus command-line and three-context multiplexing checks.
+- The standalone native image passes all 3,292 authored Test262 cases:
+  zero failures, timeouts or not-run tests. External elapsed 557.68 s,
+  CPU 550.27 s, peak RSS 575,936 KiB. This is slower than the older
+  498.23-second observation, not a claimed suite speedup. See the result
+  ledger in `../TEST262_STATUS.md`.
+- Ten supported Octane selections pass quick correctness in separate
+  processes: Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay,
+  NavierStokes, Box2D, Gameboy and zlib. These are not stock score runs.
+  The RegExp benchmark remains outside this optimization task.
+- Bounded native GC stress passes 24 rounds / 47 collections. Demos 1--7
+  each render for 15 seconds after readiness and close through Escape.
+  Demo8 visits garage and free-drive autopilot and closes via its menu;
+  samples are 19--20 FPS after mode entry, with one 17.0 FPS sample. No
+  long demo8 soak or general 20-FPS claim for demos 1--7 is implied.
+- `net.js` and `node_web.js` serve byte-identical text and binary downloads
+  and a directory listing over localhost.
+- Current-source Node, js_min and genuine self-hosted rebuilds produce
+  byte-identical images, SHA-256
+  `86c82db9e3e44dcbbf877a4c33028a600fd735210d3efec4312941f69e45f446`.
+  Node reports 2.968 s through construction/preparation/writing. js_min
+  external elapsed is 95.29 s / CPU 94.45 s / peak RSS 342,760 KiB;
+  self-hosted external elapsed is 113.27 s / CPU 112.05 s / peak RSS
+  543,488 KiB. Historical observations were approximately 85 / 100 s;
+  these results do not demonstrate the requested build-speed improvement.
+- The new inspection tool runs on js_min and the standalone guest shell,
+  not just Node. All heavy validation runs were serial. No C, demo or
+  external-suite sources changed, and generated files remain ignored.
+
+An isolated, serial follow-up runs unchanged
+`ch07/7.8/7.8.5/S7.8.5_A1.1_T2.js` on the earlier `homes-short.snap` and
+current `canonical-release.snap`. Both pass. Earlier: 103.929389 s test time,
+116.17 s external, 115.42 s CPU, peak RSS 274,928 KiB. Current: 93.049536 s
+test time, 104.58 s external, 103.50 s CPU, peak RSS 529,644 KiB. Test time is
+10.5% lower, but peak RSS is approximately 93% higher. Do not present this as
+a clean architectural efficiency win or as a matched whole-suite result.
+The different memory/collection behavior needs an equal-heap-limit comparison
+before attributing the change to better instruction execution. Raw logs:
+`artifacts/canonical-comparison-old-eval.log` and
+`artifacts/canonical-comparison-new-eval.log`. The significant general VM and
+snapshot-generation performance targets remain open.
