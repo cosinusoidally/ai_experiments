@@ -1826,7 +1826,7 @@
                 type: "i32"};
     }
 
-    function indexedLoadAddress(node, state) {
+    function registerMemoryAddress(node, state) {
         var terms = [];
         function collect(expression) {
             if (expression.op === "add_i32") {
@@ -1854,7 +1854,17 @@
             }
             index++;
         }
-        if (baseIndex < 0) return null;
+        if (baseIndex < 0) {
+            /* A single computed pointer also admits a displacement. Evaluate
+             * it once into scratch EAX; do not build a second address tree. */
+            for (index = 0; index < terms.length; index++) {
+                if (terms[index].op !== "const_i32") {
+                    if (baseIndex >= 0) return null;
+                    baseIndex = index;
+                }
+            }
+            if (baseIndex < 0) return null;
+        }
         var displacement = 0;
         var dynamic = null;
         index = 0;
@@ -1869,11 +1879,8 @@
             }
             index++;
         }
-        /* A base plus immediate already has a compact ordinary lowering. The
-         * indexed form pays off when EAX carries a genuine guest offset. */
-        if (dynamic === null) return null;
         return {register: baseRegister, index: dynamic,
-                displacement: displacement};
+                base: terms[baseIndex], displacement: displacement};
     }
 
     /* Recognize only pure affine register expressions. Distributing a word
@@ -1908,6 +1915,34 @@
             while (value > 1) { value = value >>> 1; shift++; }
             if (shift) assembler.shiftLeftEaxImmediate(shift);
         } else assembler.multiplyEaxImmediate(value);
+    }
+
+    function emitIntegerLoad(assembler, node, state) {
+        var byteLoad = node.op === "load_u8" || node.op === "load_raw_u8";
+        var address = registerMemoryAddress(node.address, state);
+        if (address && address.index === null) {
+            var base = address.register;
+            if (!base) {
+                emitControlExpression(assembler, address.base, state);
+                base = "eax";
+            }
+            if (byteLoad) assembler.movzxEaxBytePtrRegisterDisplacement(base, address.displacement);
+            else assembler.movEaxDwordPtrRegisterDisplacement(base, address.displacement);
+        } else if (address && !byteLoad) {
+            var scaledIndex = scaledRegisterIndex(address.index, state);
+            if (scaledIndex) {
+                assembler.movEaxDwordPtrScaledRegisters(address.register,
+                    scaledIndex.register, scaledIndex.scale,
+                    (address.displacement + scaledIndex.displacement) | 0);
+            } else {
+                emitControlExpression(assembler, address.index, state);
+                assembler.movEaxDwordPtrRegisterPlusEax(address.register, address.displacement);
+            }
+        } else {
+            emitControlExpression(assembler, node.address, state);
+            if (byteLoad) assembler.movzxEaxBytePtrEax();
+            else assembler.movEaxDwordPtrEax();
+        }
     }
 
     function emitControlExpression(assembler, node, state) {
@@ -2052,27 +2087,9 @@
                 assembler.movzxEaxAl();
             }
         }
-        else if (node.op === "load_u32") {
-            var indexedAddress = indexedLoadAddress(node.address, state);
-            if (indexedAddress) {
-                var scaledIndex = scaledRegisterIndex(indexedAddress.index, state);
-                if (scaledIndex) {
-                    assembler.movEaxDwordPtrScaledRegisters(indexedAddress.register,
-                        scaledIndex.register, scaledIndex.scale,
-                        (indexedAddress.displacement + scaledIndex.displacement) | 0);
-                } else {
-                    emitControlExpression(assembler, indexedAddress.index, state);
-                    assembler.movEaxDwordPtrRegisterPlusEax(
-                        indexedAddress.register, indexedAddress.displacement);
-                }
-            } else {
-                emitControlExpression(assembler, node.address, state);
-                assembler.movEaxDwordPtrEax();
-            }
-        } else if (node.op === "load_u8" || node.op === "load_raw_u8" || node.op === "load_raw_u32") {
-            emitControlExpression(assembler, node.address, state);
-            if (node.op !== "load_raw_u32") assembler.movzxEaxBytePtrEax();
-            else assembler.movEaxDwordPtrEax();
+        else if (node.op === "load_u32" || node.op === "load_raw_u32" ||
+                 node.op === "load_u8" || node.op === "load_raw_u8") {
+            emitIntegerLoad(assembler, node, state);
         } else if (node.op === "neg_i32" || node.op === "not_i32" ||
                    node.op === "as_i32" || node.op === "logical_not_i32") {
             emitControlExpression(assembler, node.value, state);
@@ -2083,10 +2100,17 @@
                 assembler.setEqualAl();
                 assembler.movzxEaxAl();
             }
-        } else if (node.op === "add_i32" && indexedLoadAddress(node, state)) {
-            var address = indexedLoadAddress(node, state);
-            var addressIndex = scaledRegisterIndex(address.index, state);
-            if (addressIndex) {
+        } else if (node.op === "add_i32" && registerMemoryAddress(node, state)) {
+            var address = registerMemoryAddress(node, state);
+            var addressIndex = address.index ? scaledRegisterIndex(address.index, state) : null;
+            if (address.index === null) {
+                var addressBase = address.register;
+                if (!addressBase) {
+                    emitControlExpression(assembler, address.base, state);
+                    addressBase = "eax";
+                }
+                assembler.leaEaxRegisterDisplacement(addressBase, address.displacement);
+            } else if (addressIndex) {
                 assembler.leaEaxScaledRegisters(address.register, addressIndex.register,
                     addressIndex.scale, (address.displacement + addressIndex.displacement) | 0);
             } else {

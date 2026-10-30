@@ -134,14 +134,40 @@
      * displacement, including zero. Choose the signed-byte form when it fits;
      * otherwise retain every bit of the full displacement. */
     Assembler.prototype.emitEbpMemory = function (opcode, register, displacement) {
+        this.emitRegisterMemory(opcode, register, "ebp", displacement);
+    };
+    Assembler.prototype.emitRegisterMemory = function (opcode, register, base, displacement) {
         var code = REGISTER_CODES[register];
-        if (code === undefined) throw new Error("invalid frame-operand register");
+        var baseCode = REGISTER_CODES[base];
+        if (code === undefined || baseCode === undefined) {
+            throw new Error("invalid memory-operand register");
+        }
+        var hasOffset = displacement !== 0 || base === "ebp";
         var small = displacement >= -128 && displacement <= MAX_SIGNED_BYTE_IMMEDIATE;
         this.emitBytes2(opcode,
-            (small ? MODRM_BYTE_DISPLACEMENT : MODRM_WORD_DISPLACEMENT) |
-            (code << MODRM_REGISTER_SHIFT) | REGISTER_CODES.ebp);
-        if (small) this.emitByte(displacement);
-        else this.word32(displacement);
+            (hasOffset ? (small ? MODRM_BYTE_DISPLACEMENT : MODRM_WORD_DISPLACEMENT) : 0) |
+            (code << MODRM_REGISTER_SHIFT) | baseCode);
+        if (base === "esp") {
+            /* Scale one, no index, ESP base. */
+            this.emitByte((REGISTER_CODES.esp << MODRM_REGISTER_SHIFT) | baseCode);
+        }
+        if (hasOffset) {
+            if (small) this.emitByte(displacement);
+            else this.word32(displacement);
+        }
+    };
+    Assembler.prototype.movEaxDwordPtrRegisterDisplacement = function (base, displacement) {
+        if (this.macros) this.macros.push("mov_eax_ptr_" + base + "(" + displacement + ")");
+        this.emitRegisterMemory(0x8b, "eax", base, displacement);
+    };
+    Assembler.prototype.movzxEaxBytePtrRegisterDisplacement = function (base, displacement) {
+        if (this.macros) this.macros.push("movzx_eax_byte_ptr_" + base + "(" + displacement + ")");
+        this.emitByte(0x0f);
+        this.emitRegisterMemory(0xb6, "eax", base, displacement);
+    };
+    Assembler.prototype.leaEaxRegisterDisplacement = function (base, displacement) {
+        if (this.macros) this.macros.push("lea_eax_" + base + "(" + displacement + ")");
+        this.emitRegisterMemory(0x8d, "eax", base, displacement);
     };
     Assembler.prototype.movEdxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_edx_ptr_ebp(" + displacement + ")");

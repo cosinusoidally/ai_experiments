@@ -72,3 +72,25 @@ Test262 passes all 3,292 authored variants with zero failures/timeouts/not-run,
 in 498.23 seconds external elapsed (494.04 s CPU, peak RSS 575,828 KiB).
 Broader live-demo validation of this checkpoint remains to be run.
 All measurements are single-threaded, serial workload runs; no cache is used.
+
+## Address selection follow-up
+
+Native address selection now describes a base expression/register, optional
+index and displacement. A single computed pointer is evaluated once into EAX
+when it has no allocated register. Loads can then consume its displacement
+directly, rather than emitting an add followed by a dereference. Existing
+scaled-register addressing remains available for genuinely indexed accesses.
+Trusted and raw integer loads retain their distinct shared IR operations;
+native code can use the same machine addressing modes for both. The JS backend
+keeps the original memory-adapter operations.
+
+The assembler's general register/memory encoder also covers the mandatory EBP
+displacement and ESP SIB cases. Named move/zero-extension/LEA macros expose
+these encodings; no instruction byte sequences appear in backend code.
+This follows the ordinary i386 instruction set and does not identify guest
+functions, programs or benchmark names.
+
+Initial project checks pass 12 programs / 270 assertions and the native
+24-round / 47-collection workload. The execution-cursor candidate is still a
+separate unaccepted change; a smaller instruction stream alone is not proof
+that either change meets the performance target.
