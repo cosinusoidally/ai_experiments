@@ -1,6 +1,21 @@
 /* Shared native object operations. Representation-specific prototype fields
  * are selected here; consumers do not duplicate record offsets. */
 (function (root) {
+    /* Numeric syntax must honor an explicit own descriptor before a dense
+     * array cell. Resolve its insertion-order entry without allocating a
+     * temporary decimal key string. The returned address is transient. */
+    function indexedOwnPropertyDescriptorKernel(heapBase, state, owner, index) {
+        var digits = integerDecimalLengthKernel(index);
+        var hash = STRING_HASH_OFFSET_BASIS, digit = 0;
+        while (digit < digits) {
+            hash = stringHashStep(hash, integerDecimalCodeUnitKernel(index, digit));
+            digit = digit + 1;
+        }
+        var entry = numericOwnPropertyEntryKernel(heapBase, state, owner, index, digits, hash);
+        if (entry === 0) return 0;
+        return ownPropertyEntryDescriptorKernel(heapBase, owner, entry);
+    }
+
     function objectPrototypeReferenceKernel(heapBase, object) {
         var type = recordType(heapBase, object);
         if (type >= HEAP_TYPE_OBJECT && type <= HEAP_TYPE_BYTECODE_FUNCTION) {
@@ -105,6 +120,7 @@
     }
 
     var exports = {functions: {
+        indexedOwnPropertyDescriptorKernel: indexedOwnPropertyDescriptorKernel,
         enumerationKeyVisibleKernel: enumerationKeyVisibleKernel,
         enumerationOwnCountKernel: enumerationOwnCountKernel,
         objectPrototypeReferenceKernel: objectPrototypeReferenceKernel,

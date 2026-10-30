@@ -13,6 +13,7 @@
     var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
     var NumberFormatKernels = root.GuestVMNumberFormatKernel;
     var ObjectOperationKernels = root.GuestVMObjectOperationsKernel;
+    var MemoryTransferKernels = root.GuestVMMemoryTransferKernel;
     var LexicalEnvironmentKernels = root.GuestVMLexicalEnvironmentKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
@@ -27,6 +28,7 @@
         PropertyStorageKernels = require("../property_storage_kernel.js");
         NumberFormatKernels = require("../number_format_kernel.js");
         ObjectOperationKernels = require("../object_operations_kernel.js");
+        MemoryTransferKernels = require("../memory_transfer_kernel.js");
         LexicalEnvironmentKernels = require("../lexical_environment_kernel.js");
     }
 
@@ -77,6 +79,7 @@
     var INTRINSIC_ARRAY_IS_ARRAY = NativeIntrinsics.ARRAY_IS_ARRAY;
     var INTRINSIC_THROW_TYPE_ERROR = NativeIntrinsics.THROW_TYPE_ERROR;
     var INTRINSIC_OBJECT_IS_PROTOTYPE_OF = NativeIntrinsics.OBJECT_IS_PROTOTYPE_OF;
+    var INTRINSIC_TRY_COPY_INT32_ARRAY = NativeIntrinsics.TRY_COPY_INT32_ARRAY;
     var FRAME_FLAG_FUNCTION_COMPILE = 4;
     var CALL_OPERATION_CALL = 1;
     var CALL_OPERATION_CONSTRUCT = 2;
@@ -226,6 +229,7 @@
         overrides.INTRINSIC_GC_STRESS_CONTROL = NativeIntrinsics.GC_STRESS_CONTROL;
         overrides.INTRINSIC_THROW_TYPE_ERROR = INTRINSIC_THROW_TYPE_ERROR;
         overrides.INTRINSIC_OBJECT_IS_PROTOTYPE_OF = INTRINSIC_OBJECT_IS_PROTOTYPE_OF;
+        overrides.INTRINSIC_TRY_COPY_INT32_ARRAY = INTRINSIC_TRY_COPY_INT32_ARRAY;
         overrides.INTRINSIC_LAST_ID = NativeIntrinsics.LAST_ID;
         overrides.INTRINSIC_BUFFER_IS_BUFFER = NativeIntrinsics.BUFFER_IS_BUFFER;
         overrides.INTRINSIC_TYPED_ARRAY_SUBARRAY = NativeIntrinsics.TYPED_ARRAY_SUBARRAY;
@@ -1225,6 +1229,39 @@
                 }
                 var arrayGetTarget = bytecodeRegisterCellAddress(
                     0, registerAddress, arrayGetTargetOperand);
+                var indexedGetterEntered = 0;
+                if (arrayGetSupported === 1 &&
+                    arrayGetOriginalObjectType === HEAP_TYPE_ARRAY &&
+                    arrayGetIndex >= 0 && arrayPropertyHead(heapBase, arrayGetObject) !== 0) {
+                    var indexedDescriptor = indexedOwnPropertyDescriptorKernel(
+                        heapBase, state, arrayGetObject, arrayGetIndex);
+                    if (indexedDescriptor !== 0) {
+                        var indexedDescriptorCell = propertyDescriptorValueCell(0, indexedDescriptor);
+                        if ((propertyDescriptorAttributes(0, indexedDescriptor) &
+                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                            if (valueCellTag(0, indexedDescriptorCell) === VALUE_TAG_UNDEFINED) {
+                                setValueCellUndefined(arrayGetTarget);
+                            } else {
+                                setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
+                                indexedGetterEntered = bytecodeCallKernel(
+                                    heapBase, state, frame, indexedDescriptorCell, 0, 1,
+                                    arrayGetTargetOperand, currentContext, stringSupport,
+                                    arrayPrototype, bytecodeAddress, registerAddress, pc, framePC,
+                                    arrayGetObjectCell, FOUR_WORD_INSTRUCTION, 0);
+                                if (indexedGetterEntered !== 1) {
+                                    return unsupportedDiagnosticExitKernel(
+                                        heapBase, state, frame, pc, opcode, initialBudget - budget);
+                                }
+                            }
+                        } else {
+                            var indexedMappedCell = argumentsMappedCellKernel(
+                                heapBase, arrayGetObject, arrayGetIndex);
+                            if (indexedMappedCell !== 0) indexedDescriptorCell = indexedMappedCell;
+                            copyValueCell(arrayGetTarget, indexedDescriptorCell);
+                        }
+                        arrayGetSupported = 4;
+                    }
+                }
                 if (arrayGetSupported === 5) {
                     arrayGetSupported = numericPropertyGetKernel(
                         heapBase, state, arrayGetTarget, arrayGetObject,
@@ -1570,7 +1607,22 @@
                     }
                 }
                 }
-                pc = pc + FOUR_WORD_INSTRUCTION;
+                if (indexedGetterEntered === 1) {
+                    frame = engineCurrentFrame(heapBase, state);
+                    currentContext = frameContext(heapBase, frame);
+                    currentProgram = frameProgram(heapBase, frame);
+                    bytecodeAddress = executionBytecodeAddressKernel(
+                        heapBase, state, currentProgram, stringSupport);
+                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
+                        heapBase, state, frame, initialBudget - budget + 1);
+                    constantCells = executionProgramConstantsKernel(
+                        heapBase, state, currentProgram) + VECTOR_CELLS;
+                    globalObject = contextGlobal(heapBase, currentContext);
+                    framePC = frame + FRAME_PC;
+                    registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
+                    environment = frameEnvironment(heapBase, frame);
+                    pc = 0;
+                } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === OP_SET_PROPERTY) {
                 var arraySetObjectIndex = load32(
                     bytecodeAddress +
@@ -6198,6 +6250,7 @@
                 heapBase, state, CALL_REJECT_INTRINSIC_CALL_FORM);
         }
         var requiredIntrinsicArguments = 1;
+        if (intrinsicId === INTRINSIC_TRY_COPY_INT32_ARRAY) requiredIntrinsicArguments = 0;
         if (intrinsicId === INTRINSIC_OBJECT_IS_PROTOTYPE_OF) requiredIntrinsicArguments = 0;
         if (isErrorConstructor === 1) {
             requiredIntrinsicArguments = 0;
@@ -6360,6 +6413,11 @@
         var intrinsicTarget = registerAddress +
             callTargetIndex * VALUE_CELL_BYTES;
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_TRY_COPY_INT32_ARRAY) {
+            intrinsicHandled = copyInt32ArrayIntrinsicKernel(heapBase,
+                intrinsicTarget, registerAddress, intrinsicArgumentsVector,
+                intrinsicArgumentCount);
+        }
         if (intrinsicId === INTRINSIC_OPCODE_COUNTER_WORD) {
             /* A raw signed counter word; callers use >>> 0 and modulo-2^32
              * deltas. Disabled profiling and invalid indices yield undefined.
@@ -17833,6 +17891,11 @@
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var propertyKernelName;
+        for (propertyKernelName in MemoryTransferKernels.functions) {
+            if (Object.prototype.hasOwnProperty.call(MemoryTransferKernels.functions, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = MemoryTransferKernels.functions[propertyKernelName];
+            }
+        }
         for (propertyKernelName in LexicalEnvironmentKernels.functions) {
             if (Object.prototype.hasOwnProperty.call(LexicalEnvironmentKernels.functions, propertyKernelName)) {
                 kernelDependencies[propertyKernelName] = LexicalEnvironmentKernels.functions[propertyKernelName];
@@ -17956,6 +18019,7 @@
                     ARGUMENTS_UNMAPPED_ENVIRONMENT: kernelConstantOverrides.ARGUMENTS_UNMAPPED_ENVIRONMENT,
                     INTRINSIC_THROW_TYPE_ERROR: INTRINSIC_THROW_TYPE_ERROR,
                     INTRINSIC_OBJECT_IS_PROTOTYPE_OF: INTRINSIC_OBJECT_IS_PROTOTYPE_OF,
+                    INTRINSIC_TRY_COPY_INT32_ARRAY: INTRINSIC_TRY_COPY_INT32_ARRAY,
                     RUNTIME_SUPPORT_STRICT_ARGUMENTS_THROWER: RuntimeSupportLayout.STRICT_ARGUMENTS_THROWER,
                     RUNTIME_SUPPORT_CALLER_KEY: RuntimeSupportLayout.CALLER_KEY,
                     RUNTIME_SUPPORT_ARGUMENTS_KEY: RuntimeSupportLayout.ARGUMENTS_KEY,

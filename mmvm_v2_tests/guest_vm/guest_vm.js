@@ -26,6 +26,7 @@
         load("guest_vm/heap_records.js");
         load("guest_vm/property_storage_kernel.js");
         load("guest_vm/object_operations_kernel.js");
+        load("guest_vm/memory_transfer_kernel.js");
         load("guest_vm/lexical_environment_kernel.js");
         load("guest_vm/aot/kernel_slots.js");
         load("guest_vm/aot/kernel_compiler.js");

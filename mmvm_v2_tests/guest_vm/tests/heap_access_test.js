@@ -35,6 +35,54 @@
             try { first.readFieldU32(object, 0, Heap.Types.ARRAY); }
             catch (wrongTypeError) { rejected = true; }
             if (!rejected) throw new Error("wrong record type was accepted");
+            /* Exercise the same scalar-memory contract on sparse and native
+             * storage, including unaligned words and ToInt32 edge values. */
+            var wordValues = [0, 0x80000000, 0xffffffff, 4294967297,
+                              -1.75, Infinity, NaN];
+            var wordAddress = object + Heap.HEADER_SIZE + 1, index;
+            for (index = 0; index < wordValues.length; index++) {
+                var expected = wordValues[index] >>> 0;
+                first.memory.writeU32(wordAddress, wordValues[index]);
+                if (first.memory.readU32(wordAddress) !== expected ||
+                    first.memory.readU8(wordAddress) !== (expected & 255)) {
+                    throw new Error("checked scalar-memory word contract failed");
+                }
+                first.memory.writeU32Trusted(wordAddress, wordValues[index]);
+                if (first.memory.readU32Trusted(wordAddress) !== expected) {
+                    throw new Error("trusted scalar-memory word contract failed");
+                }
+            }
+            first.memory.writeWords32LE(wordAddress, [17, -17, 42]);
+            if (first.memory.readU32(wordAddress) !== 17 ||
+                first.memory.readU32(wordAddress + Heap.WORD_BYTES) !== (-17 >>> 0) ||
+                first.memory.readU32(wordAddress + 2 * Heap.WORD_BYTES) !== 42) {
+                throw new Error("bulk scalar-memory ingress failed");
+            }
+            var observedReads = 0;
+            var accessorWords = [7, 0];
+            var readAccessorWord = function () {
+                observedReads++;
+                return -9;
+            };
+            if (Object.defineProperty) {
+                Object.defineProperty(accessorWords, "1", {get: readAccessorWord});
+            } else accessorWords.__defineGetter__("1", readAccessorWord);
+            if (first.memory.allocation.isNative &&
+                typeof __guestVMTryCopyInt32Array === "function") {
+                var copied = __guestVMTryCopyInt32Array(
+                    first.memory.nativeAddress(wordAddress) | 0, accessorWords);
+                if (copied || observedReads || first.memory.readU32(wordAddress) !== 17) {
+                    throw new Error("declined bulk ingress made observable changes");
+                }
+            }
+            first.memory.writeWords32LE(wordAddress, accessorWords);
+            if (observedReads !== 1 ||
+                first.memory.readU32(wordAddress) !== 7 ||
+                first.memory.readU32(wordAddress + Heap.WORD_BYTES) !== (-9 >>> 0)) {
+                throw new Error("bulk ingress fallback changed observable reads: count=" +
+                    observedReads + " first=" + first.memory.readU32(wordAddress) +
+                    " second=" + first.memory.readU32(wordAddress + Heap.WORD_BYTES));
+            }
             return "linear heap access and runtime isolation passed on " +
                    first.memory.host.hostName();
         } finally {

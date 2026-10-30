@@ -7,6 +7,8 @@
         HostMemory = require("./host_memory.js");
         Binary64 = require("./binary64.js");
     }
+    var WORD_BYTES = HostMemory.WORD_BYTES;
+    LinearMemory.WORD_BYTES = WORD_BYTES;
 
     function LinearMemory(byteLength) {
         byteLength = Number(byteLength);
@@ -21,6 +23,65 @@
         this.destroyed = false;
         this.nativeCaller = null;
         this.nativeF64Caller = null;
+        if (this.allocation.isNative) selectNativeScalarAccess(this);
+    }
+
+    /* Select the storage implementation once, not at every field access.
+     * Both paths keep the same checked/trusted interface. Native operations
+     * read the current allocation pointer rather than closing over an address:
+     * allocation ownership and destruction remain with this memory instance.
+     * The sparse Node backend continues through HostMemory unchanged. */
+    function selectNativeScalarAccess(memory) {
+        memory.readU8 = nativeReadU8;
+        memory.writeU8 = nativeWriteU8;
+        memory.readU32 = nativeReadU32;
+        memory.writeU32 = nativeWriteU32;
+        memory.readU8Trusted = nativeReadU8Trusted;
+        memory.writeU8Trusted = nativeWriteU8Trusted;
+        memory.readU32Trusted = nativeReadU32Trusted;
+        memory.writeU32Trusted = nativeWriteU32Trusted;
+        memory.readRawU8Trusted = nativeReadU8Trusted;
+        memory.writeRawU8Trusted = nativeWriteU8Trusted;
+        memory.readRawU32Trusted = nativeReadU32Trusted;
+        memory.writeRawU32Trusted = nativeWriteU32Trusted;
+    }
+
+    function nativeReadU8(address) {
+        this.checkRange(address, 1);
+        return peek8(this.allocation.pointer + address);
+    }
+
+    function nativeWriteU8(address, value) {
+        this.checkRange(address, 1);
+        poke8(this.allocation.pointer + address, value & 255);
+    }
+
+    function nativeReadU32(address) {
+        this.checkRange(address, 4);
+        return peek32(this.allocation.pointer + address) >>> 0;
+    }
+
+    function nativeWriteU32(address, value) {
+        this.checkRange(address, 4);
+        /* Pass the low word through the signed range: the old shell's
+         * native-argument conversion can saturate an unsigned Number. */
+        poke32(this.allocation.pointer + address, value | 0);
+    }
+
+    function nativeReadU8Trusted(address) {
+        return peek8(this.allocation.pointer + address);
+    }
+
+    function nativeWriteU8Trusted(address, value) {
+        poke8(this.allocation.pointer + address, value & 255);
+    }
+
+    function nativeReadU32Trusted(address) {
+        return peek32(this.allocation.pointer + address) >>> 0;
+    }
+
+    function nativeWriteU32Trusted(address, value) {
+        poke32(this.allocation.pointer + address, value | 0);
     }
 
     LinearMemory.prototype.setNativeCaller = function (caller) {
@@ -122,6 +183,17 @@
     LinearMemory.prototype.writeU32 = function (address, value) {
         this.checkRange(address, 4);
         this.host.write32LE(this.allocation, address, value);
+    };
+
+    /* Validate the complete destination once. Storage backends preserve
+     * ordered ToInt32 stores when a source needs ordinary property reads. */
+    LinearMemory.prototype.writeWords32LE = function (address, words) {
+        var length = words.length;
+        if (length < 0 || length !== Math.floor(length)) {
+            throw new RangeError("invalid word-array length");
+        }
+        this.checkRange(address, length * WORD_BYTES);
+        this.host.writeWords32LETrusted(this.allocation, address, words, length);
     };
 
     LinearMemory.prototype.writeStringLatin1 = function (address, text) {

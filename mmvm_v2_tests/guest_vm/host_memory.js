@@ -16,6 +16,8 @@
         this.frees = 0;
     }
 
+    var WORD_BYTES = 4;
+    HostMemory.WORD_BYTES = WORD_BYTES;
     var NODE_PAGE_SHIFT = 16;
     var NODE_PAGE_SIZE = 1 << NODE_PAGE_SHIFT;
     var NODE_PAGE_MASK = NODE_PAGE_SIZE - 1;
@@ -141,7 +143,7 @@
     HostMemory.prototype.writeStringLatin1 = function (allocation, offset, text) {
         if (!allocation || allocation.freed) throw new Error("backing store is freed");
         if (typeof text !== "string") throw new TypeError("expected a string");
-        var WORD_BYTES = 4, BYTE_BITS = 8, LATIN1_MAX = 255;
+        var BYTE_BITS = 8, LATIN1_MAX = 255;
         var length = text.length, index = 0, first, second, third, fourth, word;
         if (offset < 0 || offset !== Math.floor(offset) || offset + length > allocation.length) {
             throw new RangeError("Latin-1 write is out of bounds");
@@ -241,14 +243,12 @@
         if (offset < 0 || offset + 4 > allocation.length) {
             throw new RangeError("32-bit write is out of bounds");
         }
-        value = Number(value) % 4294967296;
-        if (value < 0) value += 4294967296;
+        value = value | 0;
         if (allocation.isNative) {
             if (((allocation.pointer + offset) & 3) === 0) {
                 /* Old SpiderMonkey saturates some uint32-to-native-int argument
                  * conversions. Pass the identical bits through the signed range. */
-                poke32(allocation.pointer + offset,
-                       value >= 2147483648 ? value - 4294967296 : value);
+                poke32(allocation.pointer + offset, value);
                 return;
             }
             this.write8(allocation, offset, value);
@@ -268,14 +268,33 @@
     };
 
     HostMemory.prototype.write32LETrusted = function (allocation, offset, value) {
-        value = Number(value) % 4294967296;
-        if (value < 0) value += 4294967296;
+        /* Word stores use ToInt32's low bits on both backends. Normalizing
+         * negative fractions by adding 2^32 before truncation loses one bit
+         * of value; signed normalization also avoids old-shell saturation. */
+        value = value | 0;
         if (allocation.isNative) {
-            poke32(allocation.pointer + offset,
-                   value >= 2147483648 ? value - 4294967296 : value);
+            poke32(allocation.pointer + offset, value);
             return;
         }
         writePagedWordLE(allocation, offset, value);
+    };
+
+    HostMemory.prototype.writeWords32LETrusted = function (allocation, offset, words, length) {
+        var index = 0;
+        if (allocation.isNative) {
+            var pointer = allocation.pointer + offset;
+            if (typeof __guestVMTryCopyInt32Array === "function" &&
+                __guestVMTryCopyInt32Array(pointer | 0, words)) return;
+            while (index < length) {
+                poke32(pointer + index * WORD_BYTES, words[index] | 0);
+                index++;
+            }
+        } else {
+            while (index < length) {
+                writePagedWordLE(allocation, offset + index * WORD_BYTES, words[index] | 0);
+                index++;
+            }
+        }
     };
 
     HostMemory.prototype.free = function (allocation) {

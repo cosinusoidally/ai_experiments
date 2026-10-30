@@ -298,7 +298,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 79;
+    Records.NativeInterpreterContractVersion = 82;
     Records.EnvironmentFlags = {SINGLE_BINDING: 1, DETACHED_ARGUMENTS: 2};
     Records.HandlerFlags = {LEXICAL_BINDING: 1};
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};
@@ -1349,6 +1349,19 @@
             Heap.Types.INTEGER_VECTOR);
     };
 
+    Records.prototype.allocateIntegerVectorFromValues = function (values) {
+        var length = values.length, index = 0;
+        while (index < length) {
+            var value = values[index++];
+            if (value !== (value | 0)) throw new RangeError("invalid integer-vector value");
+        }
+        var vector = this.allocateIntegerVector(length);
+        var destination = this.heap.trustedPayloadAddress(vector,
+            INTEGER_VECTOR_VALUES, length * Heap.WORD_BYTES, Heap.Types.INTEGER_VECTOR);
+        this.heap.memory.writeWords32LE(destination, values);
+        return vector;
+    };
+
     Records.prototype.integerVectorValue = function (vector, index) {
         if (index < 0 || index >= this.integerVectorLength(vector) ||
                 index !== Math.floor(index)) throw new RangeError("invalid integer-vector index");
@@ -2011,12 +2024,7 @@
         }
         var address = this.heap.allocateRecordWords(Heap.Types.BYTECODE,
             BYTECODE_WORDS + code.length * 4, code.length, 0, 0, 0);
-        var index = 0;
-        while (index < code.length) {
-            this.heap.writeTrustedFieldU32(address, BYTECODE_WORDS + index * 4,
-                                    code[index] >>> 0, Heap.Types.BYTECODE);
-            index++;
-        }
+        this.heap.memory.writeWords32LE(this.bytecodeWordsAddress(address), code);
         return address;
     };
 

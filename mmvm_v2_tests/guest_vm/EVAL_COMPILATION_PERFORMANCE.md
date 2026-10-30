@@ -217,3 +217,44 @@ phase-timing implementation had been added when work was paused. Future
 changes need completed long-case comparisons, full-suite correctness, separate
 non-outlier timings and the existing workload/build regression gates before
 being accepted. There are no active investigation processes at this checkpoint.
+
+## Memory-boundary implementation, 2026-10-30
+
+A fresh bounded 64-frame sample has 139 samples after 13 seconds, none
+truncated: 73 include `compileEval`, 39 include program registration, and 22
+include record allocation. Scalar memory normalization/forwarding is visible
+among the leaf samples. These are small, overlapping, perturbed samples,
+not exclusive phase timings. The deliberately capped run times out; it is
+not a conformance pass (`artifacts/heavy-eval-stacks-1.jsonl`).
+
+The new storage-boundary candidate selects native scalar methods once per
+memory instance, and provides general word-array ingress for wide bytecode
+and integer-vector metadata. Dense int32 copies use a kernel-dialect raw
+memory operation; unsupported sources retain ordered JS reads/conversions.
+See `MEMORY_BOUNDARY.md` for guards, ownership, reference behavior and
+snapshot constraints. No benchmark/test source is recognized or cached.
+
+Completed isolated `S7.8.5_A1.1_T2.js` observations, all using a 256 MiB
+control-runtime cap and the same instruction budget:
+
+- Control: **103.165570 s** test time / 115.41 s external / 272,896 KiB RSS.
+- Native scalar selection: **98.416643 s** / 110.74 s / 272,912 KiB.
+- Scalar selection plus bulk ingress: **86.950431 s** / 99.47 s /
+  273,000 KiB. All pass. This is 15.7% lower test execution time than the
+  control at essentially the same peak RSS, not a larger-heap tradeoff.
+
+These single-case observations precede a subsequent numeric-array descriptor
+fix. The new standalone integration check exposed an existing problem: an
+explicit indexed getter was ignored in favor of its old dense cell. The
+unchanged image reproduces it. Explicit own numeric descriptors now precede
+dense reads, and a bytecode getter enters through the ordinary native call
+mechanism with the original receiver. The memory fallback is not specialized
+to work around that language bug. Existing heap-access checks now also run
+inside the standalone integration check, including declined-copy atomicity
+and observable accessor reads.
+
+Node and js_min project suites pass at the initial boundary checkpoint;
+standalone hello, 24-round/47-collection bounded GC stress, and the expanded
+standalone integration check pass. Full-suite, remaining workloads and
+three-way rebuild validation are still pending at this intermediate point.
+Do not infer whole-suite/build speedups from the isolated result above.

@@ -107,4 +107,5 @@ if (standaloneLargeCopy[standaloneLargeCopy.length - 1] !== 91 ||
     throw new Error("large buffer copy/view contents or ownership are incorrect");
 }
 
+print(require("./heap_access_test.js")(require("../heap.js")));
 print("standalone integration: passed");

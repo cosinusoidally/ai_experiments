@@ -13,7 +13,7 @@
     var HEADER_FLAGS = 12;
     var FIRST_RECORD = 64;
     var RECORD_ALIGNMENT = 8;
-    var WORD_BYTES = 4;
+    var WORD_BYTES = LinearMemory.WORD_BYTES;
 
     var Types = {
         FREE: 0,

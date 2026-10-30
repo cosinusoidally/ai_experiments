@@ -1798,12 +1798,7 @@
         var key = "$map:" + normalized.join(",");
         var address = pool[key];
         if (address) return address;
-        address = this.heapRecords.allocateIntegerVector(length);
-        index = 0;
-        while (index < length) {
-            this.heapRecords.setIntegerVectorValue(address, index, normalized[index]);
-            index++;
-        }
+        address = this.heapRecords.allocateIntegerVectorFromValues(normalized);
         this.linearHeap.setFlags(address,
             HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG);
         pool[key] = address;
@@ -3698,6 +3693,12 @@
         this.setGlobal("poke32", this.makeNativeFunction("poke32",
             function (receiver, args) { return bridge.poke32(args[0], args[1]); },
             "intrinsic", NativeIntrinsics.POKE32));
+        /* Optional raw-memory acceleration. The portable implementation may
+         * decline; the caller then performs its ordinary ordered stores.
+         * Native execution validates dense int32 cells before any write. */
+        this.setGlobal("__guestVMTryCopyInt32Array", this.makeNativeFunction(
+            "__guestVMTryCopyInt32Array", function () { return false; },
+            "intrinsic", NativeIntrinsics.TRY_COPY_INT32_ARRAY));
         this.setGlobal("quit", this.makeHostFunction("quit",
             function (receiver, args) {
                 quit(args.length ? Number(args[0]) : 0);
