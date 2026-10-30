@@ -11,6 +11,11 @@
     var MODRM_BYTE_DISPLACEMENT = 0x40;
     var MODRM_WORD_DISPLACEMENT = 0x80;
     var MODRM_REGISTER_SHIFT = 3;
+    var INTEGER_BINARY_ENCODINGS = {
+        add: {opcode: 0x03}, subtract: {opcode: 0x2b},
+        and: {opcode: 0x23}, or: {opcode: 0x0b}, xor: {opcode: 0x33},
+        multiply: {prefix: 0x0f, opcode: 0xaf}, compare: {opcode: 0x3b}
+    };
     function Assembler(captureMacros) {
         this.bytes = [];
         this.length = 0;
@@ -168,6 +173,31 @@
     Assembler.prototype.leaEaxRegisterDisplacement = function (base, displacement) {
         if (this.macros) this.macros.push("lea_eax_" + base + "(" + displacement + ")");
         this.emitRegisterMemory(0x8d, "eax", base, displacement);
+    };
+    Assembler.prototype.integerBinaryEaxRegister = function (operation, register) {
+        var encoding = INTEGER_BINARY_ENCODINGS[operation];
+        var code = REGISTER_CODES[register];
+        if (!encoding || code === undefined) throw new Error("invalid integer register operand");
+        if (this.macros) this.macros.push(operation + "_eax_register(" + register + ")");
+        if (encoding.prefix !== undefined) this.emitByte(encoding.prefix);
+        this.emitBytes2(encoding.opcode, 0xc0 | code);
+    };
+    Assembler.prototype.integerBinaryEaxEbpDisplacement = function (operation, displacement) {
+        var encoding = INTEGER_BINARY_ENCODINGS[operation];
+        if (!encoding) throw new Error("invalid integer frame operand");
+        if (this.macros) this.macros.push(operation + "_eax_frame(" + displacement + ")");
+        if (encoding.prefix !== undefined) this.emitByte(encoding.prefix);
+        this.emitEbpMemory(encoding.opcode, "eax", displacement);
+    };
+    Assembler.prototype.movEcxImmediate = function (value) {
+        if (this.macros) this.macros.push("mov_ecx_i32(" + (value | 0) + ")");
+        this.emitByte(0xb9); this.word32(value);
+    };
+    Assembler.prototype.movRegisterRegister = function (target, source) {
+        var targetCode = REGISTER_CODES[target], sourceCode = REGISTER_CODES[source];
+        if (targetCode === undefined || sourceCode === undefined) throw new Error("invalid move register");
+        if (this.macros) this.macros.push("mov_register_register(" + target + ", " + source + ")");
+        this.emitBytes2(0x8b, 0xc0 | (targetCode << MODRM_REGISTER_SHIFT) | sourceCode);
     };
     Assembler.prototype.movEdxEbpDisplacement = function (displacement) {
         if (this.macros) this.macros.push("mov_edx_ptr_ebp(" + displacement + ")");

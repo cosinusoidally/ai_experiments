@@ -94,3 +94,15 @@ Initial project checks pass 12 programs / 270 assertions and the native
 24-round / 47-collection workload. The execution-cursor candidate is still a
 separate unaccepted change; a smaller instruction stream alone is not proof
 that either change meets the performance target.
+
+Integer second operands now share one legalization path for immediates,
+allocated registers and canonical frame homes. Native subtraction, bitwise
+operations and multiplication can consume an existing home without saving the
+left value on the machine stack. Variable shifts load their count into ECX
+without disturbing EAX. Complex operands retain ordered expression evaluation
+and the existing temporary-stack fallback. Add/compare handling uses the same
+location helpers, including mapped stack homes and temporary EDX borrowing.
+
+This instruction-selection checkpoint passes the Node project suite and
+native bounded GC workload. Its cursor-based zlib candidate does not yet show
+a significant gain; broader conformance/build validation remains necessary.

@@ -2,6 +2,10 @@
  * optionally installs the result in executable memory on an MMVM host. */
 (function (root) {
     var WORD_BYTES = 4;
+    var SIMPLE_BINARY_OPERATIONS = {sub_i32: "subtract", and_i32: "and",
+        or_i32: "or", xor_i32: "xor", mul_i32: "multiply"};
+    var LOCAL_REGISTER_KEY = "local:";
+    var STORAGE_REGISTER_KEY = "storage:";
     var Assembler = root.GuestVMX86Assembler;
     var KernelCompiler = root.GuestVMKernelCompiler;
     var HostFFI = root.GuestVMHostFFI;
@@ -1076,6 +1080,9 @@
     function allocateKernelRegisters(ir, registerCount) {
         var counts = {};
         countStatementUses(ir.body, counts);
+        if (ir.localStorage && containsOpcodeDispatch(ir.body)) {
+            return allocateDispatchRegisters(ir, registerCount, counts);
+        }
         var values = [];
         var key;
         for (key in counts) {
@@ -1111,6 +1118,66 @@
                     " assigned to both " + occupied[result[key]] + " and " + key);
             }
             occupied[result[key]] = key;
+        }
+        return result;
+    }
+
+    /* Dispatch alternatives have many disjoint temporary lifetimes. Reuse
+     * their proven storage groups as register candidates without renaming
+     * logical locals or emitting runtime boundary transfers. */
+    function allocateDispatchRegisters(ir, registerCount, reads) {
+        var names = ["ebx", "esi", "edi", "edx"].slice(0, registerCount);
+        var result = {}, occupied = {}, groups = {}, key, index = 0;
+        var preferences = ir.registerPreferences || [];
+        function storageKey(local) {
+            return STORAGE_REGISTER_KEY + ir.localStorage.slots[local];
+        }
+        while (index < names.length && index < preferences.length) {
+            key = preferences[index];
+            result[key] = names[index++];
+            if (key.indexOf(LOCAL_REGISTER_KEY) === 0) {
+                occupied[storageKey(Number(key.substring(LOCAL_REGISTER_KEY.length)))] = true;
+            } else occupied[key] = true;
+        }
+        function group(key) {
+            if (key.indexOf(LOCAL_REGISTER_KEY) === 0) {
+                key = storageKey(Number(key.substring(LOCAL_REGISTER_KEY.length)));
+            }
+            if (!groups[key]) groups[key] = {reads: 0, writes: 0};
+            return groups[key];
+        }
+        for (key in reads) {
+            if (Object.prototype.hasOwnProperty.call(reads, key)) group(key).reads += reads[key];
+        }
+        function countWrites(node) {
+            if (!node || typeof node !== "object") return;
+            if (typeof node.length === "number") {
+                var item = 0;
+                while (item < node.length) countWrites(node[item++]);
+                return;
+            }
+            if (node.op === "set_local") group(LOCAL_REGISTER_KEY + node.index).writes++;
+            var field;
+            for (field in node) {
+                if (Object.prototype.hasOwnProperty.call(node, field)) countWrites(node[field]);
+            }
+        }
+        countWrites(ir.body);
+        while (index < names.length) {
+            var best = null, bestScore = -1;
+            for (key in groups) {
+                if (!Object.prototype.hasOwnProperty.call(groups, key) || occupied[key]) continue;
+                /* EDX remains write-through while it doubles as scratch.
+                 * Other registers save both local stores and later reads. */
+                var score = groups[key].reads + (names[index] === "edx" ? 0 : groups[key].writes);
+                if (score > bestScore || (score === bestScore && (best === null || key < best))) {
+                    best = key;
+                    bestScore = score;
+                }
+            }
+            if (best === null) break;
+            result[best] = names[index++];
+            occupied[best] = true;
         }
         return result;
     }
@@ -1203,39 +1270,57 @@
         return -(localStorageIndex(state, index) + 1) * WORD_BYTES;
     }
 
+    function kernelRegister(state, kind, index) {
+        var register = state.registerMap[kind + ":" + index];
+        if (!register && kind === "local" && state.localSlots) {
+            register = state.registerMap[STORAGE_REGISTER_KEY + state.localSlots[index]];
+        }
+        return register;
+    }
+
     function addSimpleOperandToEax(assembler, node, state) {
-        if (node.op === "const_i32") {
-            assembler.addEaxImmediate(node.value);
-            return;
-        }
-        var key = (node.op === "arg_i32" ? "argument:" : "local:") + node.index;
-        var registerName = state.registerMap[key];
-        if (registerName === "ebx") assembler.addEaxEbx();
-        else if (registerName === "esi") assembler.addEaxEsi();
-        else if (registerName === "edx") assembler.addEaxEdx();
-        else if (registerName === "edi") assembler.addEaxEdi();
-        else {
-            var displacement = node.op === "arg_i32" ?
-                8 + node.index * WORD_BYTES : localDisplacement(state, node.index);
-            assembler.addEaxEbpDisplacement(displacement);
-        }
+        emitSimpleIntegerBinary(assembler, "add", node, state);
     }
 
     function compareEaxWithSimpleOperand(assembler, node, state) {
+        emitSimpleIntegerBinary(assembler, "compare", node, state);
+    }
+
+    function simpleOperandRegister(node, state) {
+        return kernelRegister(state, node.op === "arg_i32" ? "argument" : "local", node.index);
+    }
+
+    function simpleOperandDisplacement(node, state) {
+        return node.op === "arg_i32" ?
+            8 + node.index * WORD_BYTES : localDisplacement(state, node.index);
+    }
+
+    /* Legalize the second operand of an ordinary two-address instruction.
+     * No push/pop pair is needed for an existing register or frame home. */
+    function emitSimpleIntegerBinary(assembler, operation, node, state) {
         if (node.op === "const_i32") {
-            assembler.compareEaxImmediate(node.value);
+            if (operation === "add") assembler.addEaxImmediate(node.value);
+            else if (operation === "subtract") assembler.subtractEaxImmediate(node.value);
+            else if (operation === "and") assembler.andEaxImmediate(node.value);
+            else if (operation === "or") assembler.orEaxImmediate(node.value);
+            else if (operation === "xor") assembler.xorEaxImmediate(node.value);
+            else if (operation === "multiply") multiplyEaxByConstant(assembler, node.value);
+            else if (operation === "compare") assembler.compareEaxImmediate(node.value);
+            else throw new Error("unsupported immediate integer operation " + operation);
             return;
         }
-        var key = (node.op === "arg_i32" ? "argument:" : "local:") + node.index;
-        var registerName = state.registerMap[key];
-        if (registerName === "ebx") assembler.compareEaxEbx();
-        else if (registerName === "esi") assembler.compareEaxEsi();
-        else if (registerName === "edx") assembler.compareEaxEdx();
-        else if (registerName === "edi") assembler.compareEaxEdi();
+        var register = simpleOperandRegister(node, state);
+        if (register) assembler.integerBinaryEaxRegister(operation, register);
+        else assembler.integerBinaryEaxEbpDisplacement(operation,
+            simpleOperandDisplacement(node, state));
+    }
+
+    function loadSimpleOperandToEcx(assembler, node, state) {
+        if (node.op === "const_i32") assembler.movEcxImmediate(node.value);
         else {
-            var displacement = node.op === "arg_i32" ?
-                8 + node.index * WORD_BYTES : localDisplacement(state, node.index);
-            assembler.compareEaxEbpDisplacement(displacement);
+            var register = simpleOperandRegister(node, state);
+            if (register) assembler.movRegisterRegister("ecx", register);
+            else assembler.movEcxEbpDisplacement(simpleOperandDisplacement(node, state));
         }
     }
 
@@ -1243,8 +1328,7 @@
         if (right.op === "const_i32" &&
             (left.op === "local_i32" || left.op === "arg_i32")) {
             var argument = left.op === "arg_i32";
-            var register = state.registerMap[
-                (argument ? "argument:" : "local:") + left.index];
+            var register = kernelRegister(state, argument ? "argument" : "local", left.index);
             if (register) assembler.compareRegisterImmediate(register, right.value);
             else assembler.compareEbpDisplacementImmediate(argument ?
                 8 + left.index * WORD_BYTES : localDisplacement(state, left.index),
@@ -1320,9 +1404,12 @@
             if (!Object.prototype.hasOwnProperty.call(original, key) ||
                 original[key] !== "edx") continue;
             var argument = key.indexOf("argument:") === 0;
-            var index = Number(key.substring(argument ? 9 : 6));
+            var storage = key.indexOf(STORAGE_REGISTER_KEY) === 0;
+            var index = Number(key.substring(storage ? STORAGE_REGISTER_KEY.length :
+                argument ? "argument:".length : LOCAL_REGISTER_KEY.length));
             assembler.movEdxEbpDisplacement(argument ?
-                8 + index * WORD_BYTES : localDisplacement(state, index));
+                8 + index * WORD_BYTES : storage ? -(index + 1) * WORD_BYTES :
+                localDisplacement(state, index));
             return;
         }
     }
@@ -1373,14 +1460,14 @@
         }
         if (node.op === "set_local" || node.op === "set_argument") {
             emitControlExpression(assembler, node.value, state);
-            var valueKey = (node.op === "set_local" ? "local:" : "argument:") +
-                           node.index;
-            if (state.registerMap[valueKey]) {
-                if (state.registerMap[valueKey] === "edx") {
+            var valueRegister = kernelRegister(state,
+                node.op === "set_local" ? "local" : "argument", node.index);
+            if (valueRegister) {
+                if (valueRegister === "edx") {
                     if (node.op === "set_local") assembler.movLocalEax(localStorageIndex(state, node.index));
                     else assembler.movEbpArgumentEax(node.index);
                 }
-                moveEaxToRegister(assembler, state.registerMap[valueKey]);
+                moveEaxToRegister(assembler, valueRegister);
             } else if (node.op === "set_local") assembler.movLocalEax(localStorageIndex(state, node.index));
             else assembler.movEbpArgumentEax(node.index);
             return;
@@ -1842,9 +1929,9 @@
             var term = terms[index];
             var register = null;
             if (term.op === "arg_i32") {
-                register = state.registerMap["argument:" + term.index];
+                register = kernelRegister(state, "argument", term.index);
             } else if (term.op === "local_i32") {
-                register = state.registerMap["local:" + term.index];
+                register = kernelRegister(state, "local", term.index);
             }
             if (register === "ebx" || register === "esi" ||
                 register === "edi" || register === "edx") {
@@ -1901,8 +1988,7 @@
             node = node.left;
         }
         if (node.op !== "local_i32" && node.op !== "arg_i32") return null;
-        var register = state.registerMap[
-            (node.op === "local_i32" ? "local:" : "argument:") + node.index];
+        var register = kernelRegister(state, node.op === "local_i32" ? "local" : "argument", node.index);
         if (!register) return null;
         return {register: register, scale: scale, displacement: displacement};
     }
@@ -2018,12 +2104,12 @@
             assembler.releaseStackBytes(8);
         }
         else if (node.op === "arg_i32") {
-            var argumentRegister = state.registerMap["argument:" + node.index];
+            var argumentRegister = kernelRegister(state, "argument", node.index);
             if (argumentRegister) moveRegisterToEax(assembler, argumentRegister);
             else assembler.movEaxEbpArgument(node.index);
         }
         else if (node.op === "local_i32") {
-            var localRegister = state.registerMap["local:" + node.index];
+            var localRegister = kernelRegister(state, "local", node.index);
             if (localRegister) moveRegisterToEax(assembler, localRegister);
             else assembler.movEaxLocal(localStorageIndex(state, node.index));
         }
@@ -2144,6 +2230,20 @@
         } else if (node.op === "mul_i32" && node.left.op === "const_i32") {
             emitControlExpression(assembler, node.right, state);
             multiplyEaxByConstant(assembler, node.left.value);
+        } else if (SIMPLE_BINARY_OPERATIONS[node.op] && isSimpleIntegerOperand(node.right)) {
+            emitControlExpression(assembler, node.left, state);
+            emitSimpleIntegerBinary(assembler, SIMPLE_BINARY_OPERATIONS[node.op], node.right, state);
+        } else if (SIMPLE_BINARY_OPERATIONS[node.op] && node.op !== "sub_i32" &&
+                   isSimpleIntegerOperand(node.left)) {
+            emitControlExpression(assembler, node.right, state);
+            emitSimpleIntegerBinary(assembler, SIMPLE_BINARY_OPERATIONS[node.op], node.left, state);
+        } else if ((node.op === "shl_i32" || node.op === "shr_i32" ||
+                    node.op === "ushr_i32") && isSimpleIntegerOperand(node.right)) {
+            emitControlExpression(assembler, node.left, state);
+            loadSimpleOperandToEcx(assembler, node.right, state);
+            if (node.op === "shl_i32") assembler.shiftLeftEaxCl();
+            else if (node.op === "shr_i32") assembler.shiftRightEaxCl();
+            else assembler.shiftUnsignedRightEaxCl();
         } else {
             emitControlExpression(assembler, node.left, state);
             assembler.pushEax();
