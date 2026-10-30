@@ -313,3 +313,48 @@ pass is not justified for an execution optimization that did not pay off.
 
 The substantial execution-performance target remains open. Neither smaller
 source nor this maintenance checkpoint should be reported as meeting it.
+
+### Retained checkpoint validation, 2026-10-30 approximately 00:03 UTC
+
+- Revision `88f94d5`, executable contract 77. Node/js_min/genuine self-hosted
+  rebuilds produce byte-identical 5.8 MiB images. SHA-256 for all three:
+  `d6d62044aebbcf75668ab588fef6898cd052b49f8cbdb173d42fa0ad188b5ad3`.
+  Node reports 2.737 s for construction/preparation/writing (not external
+  elapsed). js_min external elapsed 81.19 s, CPU 80.48 s, peak RSS 356,420
+  KiB. Genuine self-hosted external elapsed 97.07 s, CPU 96.30 s, peak RSS
+  508,800 KiB. These single observations are consistent with the existing
+  build baseline, not evidence of a substantial build-speed improvement.
+- Project suites pass on both hosts: 12 guest programs / 270 assertions,
+  plus compiler, command-line and context-multiplexing checks.
+- Native bounded GC workload: 24 rounds / 47 native-counter collections.
+  Structural audits on both hosts: 27 audits / 87,198 references / 221
+  property-index audits / 76 embedding collections, within an 8 MiB guest
+  cap. Maximum observed bump: 4,546,016 bytes on Node, 4,569,728 on js_min.
+- Ten supported Octane selections pass in fresh processes: Richards,
+  DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay, NavierStokes, Box2D,
+  Gameboy and zlib. These are quick-correctness checks, not stock scores.
+  Zlib takes 31.14 s external / 30.93 s CPU / 126,464 KiB peak RSS, matching
+  the current-session unchanged control's 31.14 s external / 30.88 s CPU.
+- A combined process loading all ten selections fails during zlib at the
+  512 MiB guest allocation limit, after the first nine pass. The unchanged
+  control reproduces the same opcode/PC/allocation failure. This is an
+  existing cumulative-run limitation, not a new regression or a passing
+  combined run. Keep it separate from the fresh-process checks above.
+- Actual demos 1--7 render for 15 seconds after readiness and close via
+  Escape, at 320x240 / a requested 20 FPS limit. Demo8 visits garage and
+  free-drive autopilot and closes via the menu. Its samples are around
+  19--20 FPS outside the garage-entry interval (one 16.9 FPS sample).
+  These bounded smoke checks do not assert 20 FPS for the slower JS demos
+  or constitute a long stability soak. No demo source changed.
+- Both `net.js` and `node_web.js` serve byte-identical text and binary image
+  downloads plus a directory listing over localhost.
+- Latest complete Test262 result is recorded in `../TEST262_STATUS.md`:
+  3,292 passes, zero failures/timeouts/not-run, for the subsequently rejected
+  inactive-word experiment. The retained implementation's entire native
+  code section matches the earlier validated control byte-for-byte; no new
+  full-suite result is claimed for the final image.
+- Raw logs/images are ignored `artifacts/accessors-*` and
+  `artifacts/value-*`. All heavy workloads ran serially, except for one
+  accidental brief overlap of the first zlib candidate with the Node project
+  suite; that contaminated zlib timing was discarded. No threads, C changes,
+  external-corpus changes or generated tracked files were introduced.
