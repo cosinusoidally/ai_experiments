@@ -63,11 +63,13 @@
         return false;
     }
 
-    function redundantInt32Coercion(expression) {
+    function isInt32Coercion(expression) {
+        /* Lower a literal coercion without requiring CFG/type analysis.
+         * The left operand is still evaluated and converted exactly once;
+         * numeric zero has no side effects or additional conversion hooks. */
         return expression && expression.type === "BinaryExpression" &&
             expression.operator === "|" && isLiteralExpression(expression.right) &&
-            literalExpressionValue(expression.right) === 0 &&
-            producesInt32(expression.left);
+            literalExpressionValue(expression.right) === 0;
     }
 
     Compiler.prototype.allocate = function () {
@@ -902,8 +904,12 @@
      * produce a value followed by a MOVE. */
     Compiler.prototype.compileExpressionInto = function (expression, target) {
         if (isLiteralExpression(expression)) return false;
-        if (redundantInt32Coercion(expression)) {
-            return this.compileExpressionInto(expression.left, target);
+        if (isInt32Coercion(expression)) {
+            if (producesInt32(expression.left)) {
+                return this.compileExpressionInto(expression.left, target);
+            }
+            this.emit(op.TO_INT32, target, this.compileExpression(expression.left));
+            return true;
         }
         if (expression.type === "BinaryExpression" &&
             expression.operator !== "&&" && expression.operator !== "||") {
@@ -948,8 +954,14 @@
         if (isLiteralExpression(expression)) {
             return this.emitConstant(literalExpressionValue(expression));
         }
-        if (redundantInt32Coercion(expression)) {
-            return this.compileExpression(expression.left, future);
+        if (isInt32Coercion(expression)) {
+            if (producesInt32(expression.left)) {
+                return this.compileExpression(expression.left, future);
+            }
+            var coercionSource = this.compileExpression(expression.left);
+            var coercionTarget = this.allocate();
+            this.emit(op.TO_INT32, coercionTarget, coercionSource);
+            return coercionTarget;
         }
         if (expression.type === "FunctionExpression") {
             var functionRegister = this.allocate();

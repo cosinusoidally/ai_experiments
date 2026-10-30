@@ -51,7 +51,8 @@
         /* Most implementation functions have no literal |0 conversion. Avoid
          * building a CFG at all unless this transformation can be useful. */
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
-            if (code[pc] === op.BIT_OR && zeroRegisters[code[pc + 3]]) {
+            if (code[pc] === op.TO_INT32 ||
+                (code[pc] === op.BIT_OR && zeroRegisters[code[pc + 3]])) {
                 candidate = true;
                 break;
             }
@@ -81,7 +82,12 @@
                 blocks.push(block);
             }
         }
-        if (blocks.length * program.registerCount > MAX_STATE_ENTRIES) return program;
+        program.optimizationStats = {int32AnalysisBlocks: blocks.length,
+            int32AnalysisRegisters: program.registerCount};
+        if (blocks.length * program.registerCount > MAX_STATE_ENTRIES) {
+            program.optimizationStats.int32AnalysisStateBudgetExceeded = true;
+            return program;
+        }
         var occurrences = [], definitions = [];
         if (!countRegisterUses(program, occurrences, definitions)) return program;
         var immutable = [];
@@ -123,13 +129,13 @@
                     blocks, queue, byPC[block.end], state, immutable);
             }
             if (analysisWork > MAX_ANALYSIS_WORK) {
-                program.optimizationStats = {int32AnalysisBudgetExceeded: true};
+                program.optimizationStats.int32AnalysisBudgetExceeded = true;
                 return program;
             }
         }
 
         var replacements = {}, removed = 0, fused = 0, conversions = 0;
-        var next, temporary;
+        var next, temporary, coercion;
         for (index = 0; index < blocks.length; index++) {
             block = blocks[index];
             if (!block.input) continue;
@@ -137,12 +143,14 @@
             for (pc = block.start; pc < block.end; pc += op.WIDTHS[code[pc]]) {
                 next = pc + op.WIDTHS[code[pc]];
                 temporary = code[pc + 1];
+                coercion = next < block.end && (code[next] === op.TO_INT32 ||
+                    (code[next] === op.BIT_OR && code[next + 3] !== temporary &&
+                     state[code[next + 3]] === ZERO));
                 if ((code[pc] === op.ADD || code[pc] === op.SUBTRACT) &&
                     state[code[pc + 2]] && state[code[pc + 3]] &&
-                    next < block.end && code[next] === op.BIT_OR &&
+                    coercion &&
                     code[next + 2] === temporary &&
-                    code[next + 3] !== temporary &&
-                    state[code[next + 3]] === ZERO && occurrences[temporary] === 2) {
+                    occurrences[temporary] === 2) {
                     /* int32 sums/differences are exact in binary64. Truncating
                      * their result is therefore exactly wrapping word math.
                      * No observer can see the single-use intermediate value. */
@@ -150,6 +158,11 @@
                         op.SUBTRACT_INT32, code[next + 1], code[pc + 2], code[pc + 3]];
                     replacements[next] = [];
                     fused++;
+                } else if (replacements[pc] === undefined &&
+                    code[pc] === op.TO_INT32 && state[code[pc + 2]]) {
+                    replacements[pc] = code[pc + 1] === code[pc + 2] ? [] :
+                        [op.MOVE, code[pc + 1], code[pc + 2]];
+                    removed++;
                 } else if (replacements[pc] === undefined &&
                     code[pc] === op.BIT_OR && state[code[pc + 3]] === ZERO) {
                     if (state[code[pc + 2]]) {
@@ -167,9 +180,9 @@
         }
         if (!removed && !fused && !conversions) return program;
         rewriteInstructions(program, replacements);
-        program.optimizationStats = {redundantInt32Conversions: removed,
-                                    fusedInt32Arithmetic: fused,
-                                    unaryInt32Conversions: conversions};
+        program.optimizationStats.redundantInt32Conversions = removed;
+        program.optimizationStats.fusedInt32Arithmetic = fused;
+        program.optimizationStats.unaryInt32Conversions = conversions;
         return program;
     }
 
@@ -367,7 +380,6 @@
         }
         return program;
     }
-
     function optimize(program, bindingRegisterCount) {
         bindingRegisterCount = bindingRegisterCount || 0;
         return registerAllocator.pack(

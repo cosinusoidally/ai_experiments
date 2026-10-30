@@ -358,3 +358,48 @@ source nor this maintenance checkpoint should be reported as meeting it.
   accidental brief overlap of the first zlib candidate with the Node project
   suite; that contaminated zlib timing was discarded. No threads, C changes,
   external-corpus changes or generated tracked files were introduced.
+
+## Integer-analysis investigation, 2026-10-30 morning
+
+Three candidates were measured serially, without threads or corpus changes.
+The following are diagnostic observations, not accepted substantial speedups.
+
+- A derived backing-data pointer in each typed-buffer view took 31.59 s for
+  zlib quick correctness against the nearby 31.41 s control. The extra record
+  fields, pointer invalidation and snapshot handling are removed: their
+  maintenance/lifetime cost was not justified by a measured benefit.
+- Dense integer-analysis state prevents some large generated functions from
+  being analyzed. One zlib function has 7,295 virtual registers before packing
+  and 850 afterward. A compact two-bitset representation increased static
+  fused arithmetic sites from 408 to 629, removed conversions from 168 to 376,
+  and unary conversions from 590 to 1,160. It did not deliver faster complete
+  execution: quick correctness took 33.53 s. A retry after register packing
+  took 34.02 s. Neither experiment is retained.
+- In a separate output-verifying monitor comparison, the unchanged control
+  initializes zlib in 7.232 s and executes its 60-round batch in 26.055 s.
+  The packed-analysis candidate initializes in 8.043 s and executes in
+  25.494 s. Both match Node's 100,000 decompressed and 25,906 compressed
+  reference bytes. Extra compilation cost outweighs this small execution
+  difference. Increasing optional analysis budgets is not the next answer.
+
+The simpler retained candidate lowers a literal `x | 0` to the existing
+`TO_INT32` bytecode directly during ordinary compilation. It does not need a
+CFG, an inferred type, a zero constant register or a second bytecode scan.
+Existing redundant-conversion and exact wrapping-arithmetic analysis accepts
+this canonical form. The left operand's evaluation, conversion hooks and
+exceptions remain observable; no conversion is speculatively removed.
+
+A subsequent matched unchanged control takes 33.99 s external / 33.73 s CPU;
+the canonical-lowering candidate takes 34.05 s external / 33.67 s CPU. Treat
+this as parity, not a gain, and do not compare it only with the earlier
+31-second observation. The requested significant throughput improvement
+remains unresolved.
+
+`tools/inspect_bytecode_optimization.js [--functions] source-file` reports
+current-source compiler optimization coverage on Node, js_min or the standalone
+guest shell. It compiles but does not execute the inspected program. State
+budget exhaustion is now reported explicitly, rather than silently returning
+the unoptimized function. Output is plain text and requires no host JSON API.
+No fixture source or parsed program is cached. Raw measurements remain in
+ignored `artifacts/bitsets-*`, `packed-analysis-*`, `canonical-*` and
+`current-control-zlib.log`.
