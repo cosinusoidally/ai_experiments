@@ -2,6 +2,26 @@
 
 ## Objective
 
+### 2026-10-30: complete stock sweep including RegExp and Mandreel
+
+Latest full standalone result: **11 passed / 4 failed / 0 timed out /
+0 crashed / 0 skipped**, all 15 suites attempted in fresh serial processes.
+The current Node v24.14.1 default-JIT reference passes all 15. All ten
+previous standalone passes remain passing; RegExp additionally passes stock
+correctness with score **2.66** in **618.63 s**. PdfJS, Mandreel, CodeLoad
+and Typescript remain failing. Mandreel now takes **629.95 s** to reach its
+allocation failure, versus 63.38 s previously; this is a negative result,
+not a benchmark improvement.
+
+Current stock scores are Richards 98.5, DeltaBlue 91.1, Crypto 190,
+RayTrace 247, EarleyBoyer 445, RegExp 2.66, Splay 669 combined,
+NavierStokes 281, Gameboy 1051, Box2D 376 and zlib 588. zlib peak RSS is
+115,968 KiB; EarleyBoyer peak RSS is higher than in the previous sweep.
+No engine or external benchmark changes were made for these measurements.
+See [the complete October 30 comparison](OCTANE_SCORES_2026-10-30.md) for
+Node score ratios, historical changes, memory/timing data, exact image
+identity and failure diagnostics. Older entries below remain historical.
+
 ### 2026-10-27 evening: large-backing memory follow-up
 
 The general native Buffer/ArrayBuffer allocator now uses GC-owned calloc
