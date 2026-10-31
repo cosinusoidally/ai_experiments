@@ -3,6 +3,23 @@
  * lists. Entry IDs are owner-relative slots, never persistent cell addresses.
  * Every function is ordinary kernel-dialect JS compiled by the shared pipeline. */
 (function (root) {
+    /* Entry representations differ: ordinary objects use packed owner-local
+     * slots and their optional index/cache; functions and other kinds retain
+     * linked descriptors. Never feed a linked descriptor address to a packed
+     * storage cache hint, even when a previous lookup happened to work. */
+    function findOwnPropertyEntryKernel(heapBase, state, owner, key) {
+        if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
+            return findCachedOwnObjectPropertyKernel(heapBase, state, owner, key);
+        }
+        var entry = lastOwnPropertyEntryKernel(heapBase, owner);
+        while (entry !== 0) {
+            if (stringKeysEqualKernel(heapBase,
+                    ownPropertyEntryKeyKernel(heapBase, owner, entry), key) === 1) return entry;
+            entry = previousOwnPropertyEntryKernel(heapBase, owner, entry);
+        }
+        return 0;
+    }
+
     function ownPropertyEpochKernel(heapBase, owner) {
         if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
             var storage = objectPropertyHead(heapBase, owner);
@@ -413,6 +430,7 @@
         nextPropertyStorageEpochKernel: nextPropertyStorageEpochKernel,
         ownPropertyEntryDescriptorKernel: ownPropertyEntryDescriptorKernel,
         ownPropertyEpochKernel: ownPropertyEpochKernel,
+        findOwnPropertyEntryKernel: findOwnPropertyEntryKernel,
         ownPropertyEntryAttributesKernel: ownPropertyEntryAttributesKernel,
         ownPropertyEntryValueCellKernel: ownPropertyEntryValueCellKernel,
         ownPropertyEntryKeyKernel: ownPropertyEntryKeyKernel,

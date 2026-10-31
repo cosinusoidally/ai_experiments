@@ -179,11 +179,12 @@
     var INTRINSIC_FUNCTION_BIND = NativeIntrinsics.FUNCTION_BIND;
     var INTRINSIC_MATH_TAN = NativeIntrinsics.MATH_TAN;
     var INTRINSIC_OBJECT_KEYS = NativeIntrinsics.OBJECT_KEYS;
+    var INTRINSIC_PROGRAM_SET_BINDING_NAME = NativeIntrinsics.PROGRAM_SET_BINDING_NAME;
     var INTRINSIC_BOUND_FUNCTION = NativeIntrinsics.BOUND_FUNCTION;
     /* Bound function closure vectors contain target, this, then arguments. */
-    var BOUND_FUNCTION_TARGET = 0;
-    var BOUND_FUNCTION_THIS = 1;
-    var BOUND_FUNCTION_ARGUMENT_BASE = 2;
+    var BOUND_FUNCTION_TARGET = NativeIntrinsics.BoundFunctionLayout.TARGET;
+    var BOUND_FUNCTION_THIS = NativeIntrinsics.BoundFunctionLayout.THIS;
+    var BOUND_FUNCTION_ARGUMENT_BASE = NativeIntrinsics.BoundFunctionLayout.ARGUMENT_BASE;
     RuntimeSupportLayout.BYTE_LENGTH_KEY = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.BYTE_OFFSET_KEY = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_BYTE_LENGTH_KEY = RuntimeSupportLayout.BYTE_LENGTH_KEY;
@@ -982,7 +983,7 @@
                     getThisTargetIndex * VALUE_CELL_BYTES;
                 setValueCellReference(getThisTarget, globalObject);
                 pc = pc + TWO_WORD_INSTRUCTION;
-            } else if (opcode === OP_GET_GLOBAL) {
+            } else if (opcode === OP_GET_GLOBAL || opcode === OP_GET_NAME) {
                 var globalTargetIndex = load32(
                     bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES);
                 var globalConstantIndex = load32(
@@ -994,7 +995,17 @@
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
                 var globalKey = load32(globalKeyCell + VALUE_CELL_LOW);
-                var globalProperty = findCachedOwnObjectPropertyKernel(
+                var globalProperty = 0;
+                var namedBindingCell = 0;
+                if (opcode === OP_GET_NAME) {
+                    namedBindingCell = resolveNamedBindingCellKernel(heapBase, environment, globalKey);
+                    if (namedBindingCell === LEXICAL_LOOKUP_UNSUPPORTED) return unsupportedDiagnosticExitKernel(
+                        heapBase, state, frame, pc, opcode, initialBudget - budget);
+                }
+                if (namedBindingCell !== 0) {
+                    copyValueCell(bytecodeRegisterCellAddress(0, registerAddress, globalTargetIndex), namedBindingCell);
+                    globalProperty = PROPERTY_FOUND_SENTINEL;
+                } else globalProperty = findCachedOwnObjectPropertyKernel(
                     heapBase, state, globalObject, globalKey);
                 var globalAccessor = 0;
                 if (globalProperty > 0) {
@@ -6005,7 +6016,7 @@
         var lengthKey = valueCellReference(0, lengthKeyCell);
         var owner = callable, entry = 0;
         while (owner !== 0 && entry === 0) {
-            entry = findCachedOwnObjectPropertyKernel(heapBase, state, owner, lengthKey);
+            entry = findOwnPropertyEntryKernel(heapBase, state, owner, lengthKey);
             if (entry === 0) owner = objectPrototypeReferenceKernel(heapBase, owner);
         }
         var length = 0;
@@ -6640,6 +6651,8 @@
             requiredIntrinsicArguments = 12;
         } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
             requiredIntrinsicArguments = 3;
+        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_BINDING_NAME) {
+            requiredIntrinsicArguments = 3;
         } else if (intrinsicId ===
                    INTRINSIC_PROGRAM_SET_CONSTANT) {
             requiredIntrinsicArguments = 3;
@@ -6969,6 +6982,12 @@
             intrinsicHandled = programSetVectorKernel(
                 heapBase, state, intrinsicTarget, registerAddress,
                 intrinsicArgumentsVector);
+        }
+        if (intrinsicId === INTRINSIC_PROGRAM_SET_BINDING_NAME) {
+            intrinsicHandled = programSetBindingNameKernel(heapBase, intrinsicTarget,
+                registerAddress, intrinsicArgumentsVector);
+            if (intrinsicHandled !== 1) return unsupportedDiagnosticExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
         }
         if (intrinsicId >= INTRINSIC_PROGRAM_CREATE) {
         if (intrinsicId <= INTRINSIC_PROGRAM_SET_VECTOR) {
@@ -8107,15 +8126,23 @@
         if (intrinsicId === INTRINSIC_OBJECT_HAS_OWN_PROPERTY) {
             var ownReceiverIndex = callReceiverIndex;
             var ownValid = 1;
-            if (ownReceiverIndex < 0) ownValid = 0;
+            if (ownReceiverIndex < 0) return 0;
             var ownReceiverCell = registerAddress +
                 ownReceiverIndex * VALUE_CELL_BYTES;
-            if (valueCellTag(0, ownReceiverCell) !==
-                VALUE_TAG_REFERENCE) ownValid = 0;
-            var ownObject = valueCellReference(0, ownReceiverCell);
-            var ownObjectType = recordType(heapBase, ownObject);
+            var ownReceiverTag = valueCellTag(0, ownReceiverCell);
+            if (ownReceiverTag === VALUE_TAG_NULL || ownReceiverTag === VALUE_TAG_UNDEFINED) return 0;
+            var ownObject = 0, ownObjectType = HEAP_TYPE_FREE;
+            if (ownReceiverTag === VALUE_TAG_REFERENCE) {
+                ownObject = valueCellReference(0, ownReceiverCell);
+                ownObjectType = recordType(heapBase, ownObject);
+            }
             var ownProperty = 0;
-            if (ownObjectType >= HEAP_TYPE_OBJECT) {
+            if (ownObjectType === HEAP_TYPE_STRING || ownObject === 0) {
+                /* ToObject creates a conceptual primitive wrapper. Strings
+                 * expose their own length/character indices; other primitive
+                 * wrappers have no own properties. No allocation is needed. */
+                ownProperty = 0;
+            } else if (ownObjectType >= HEAP_TYPE_OBJECT) {
                 if (ownObjectType <= HEAP_TYPE_BYTECODE_FUNCTION) {
                     ownProperty = lastOwnPropertyEntryKernel(heapBase, ownObject);
                 } else ownValid = 0;
@@ -8127,13 +8154,13 @@
             var ownKeyRegisterCell = heapBase +
                 intrinsicArgumentsVector + VECTOR_CELLS;
             if (valueCellTag(0, ownKeyRegisterCell) !==
-                VALUE_TAG_INT32) ownValid = 0;
+                VALUE_TAG_INT32) return 0;
             var ownKeyRegister = load32(
                 ownKeyRegisterCell + VALUE_CELL_LOW);
             var ownKeyCell = registerAddress +
                 ownKeyRegister * VALUE_CELL_BYTES;
             if (valueCellTag(0, ownKeyCell) !==
-                VALUE_TAG_REFERENCE) ownValid = 0;
+                VALUE_TAG_REFERENCE) return 0;
             var ownKey = valueCellReference(0, ownKeyCell);
             if (ownValid === 1) {
                 if (recordType(heapBase, ownKey) !== HEAP_TYPE_STRING) {
@@ -8141,6 +8168,16 @@
                 }
             }
             var ownFound = 0;
+            if (ownValid === 1 && (ownObjectType === HEAP_TYPE_STRING || ownObject === 0)) {
+                if (ownObjectType === HEAP_TYPE_STRING) {
+                    var ownStringLengthKey = valueCellReference(0, vectorCellAddress(
+                        heapBase, stringSupport, RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY));
+                    var ownStringIndex = propertyKeyIndexKernel(heapBase, ownKey);
+                    if (stringKeysEqualKernel(heapBase, ownKey, ownStringLengthKey) === 1 ||
+                            (ownStringIndex >= 0 && ownStringIndex < stringLength(heapBase, ownObject))) ownFound = 1;
+                }
+                ownValid = 2;
+            }
             if (ownValid === 1 && ownObjectType === HEAP_TYPE_OBJECT) {
                 /* Weak-table cleanup performs own checks for every entry.
                  * Use the ordinary packed-object index rather than turning
@@ -8792,7 +8829,7 @@
                         joinStatus = arrayBuiltinStringKernel(heapBase, state, intrinsicTarget,
                             joinReceiverCell, stringSupport);
                     } else joinStatus = arrayJoinKernel(heapBase, state, intrinsicTarget,
-                        valueCellReference(0, joinReceiverCell), joinSeparator);
+                        valueCellReference(0, joinReceiverCell), joinSeparator, stringSupport);
                     if (joinStatus === 1) intrinsicHandled = 1;
                     else if (joinStatus === 2) {
                         setEngineCallRejectReason(heapBase, state, CALL_REJECT_HEAP_SPACE);
@@ -15860,9 +15897,14 @@
         var constantMapBytes = integerVectorRecordBytesKernel(constantLength);
         var bindingBytes = integerVectorRecordBytesKernel(bindingLength);
         var parameterBytes = integerVectorRecordBytesKernel(parameterLength);
+        var bindingNamesLength = 0;
+        if (bindingLength === 0) bindingNamesLength = bindingCount;
+        var bindingNamesBytes = 0;
+        if (bindingNamesLength > 0) bindingNamesBytes =
+            VECTOR_FIXED_BYTES + bindingNamesLength * VALUE_CELL_BYTES;
         var callableBytes = programCallableRecordBytesKernel(strictProgram);
         var programAllocationBytes = bytecodeBytes + constantBytes + constantMapBytes +
-            bindingBytes + parameterBytes + PROGRAM_RECORD_BYTES +
+            bindingBytes + parameterBytes + bindingNamesBytes + PROGRAM_RECORD_BYTES +
             callableBytes;
         if (programAllocationBytes < bytecodeBytes) return 0;
         if (reserveNativeAllocationKernel(
@@ -15872,7 +15914,8 @@
         var constantRegisters = constants + constantBytes;
         var bindingRegisters = constantRegisters + constantMapBytes;
         var parameters = bindingRegisters + bindingBytes;
-        var program = parameters + parameterBytes;
+        var bindingNames = parameters + parameterBytes;
+        var program = bindingNames + bindingNamesBytes;
         var callable = program + PROGRAM_RECORD_BYTES;
         var end = callable + callableBytes;
         if (end < callable) return 0;
@@ -15896,6 +15939,8 @@
             heapBase, bindingRegisters, bindingLength, -1);
         initializedBytes = initializeIntegerVectorKernel(
             heapBase, parameters, parameterLength, -1);
+        if (bindingNamesLength > 0) initializedBytes = initializeProgramVectorKernel(
+            heapBase, bindingNames, bindingNamesLength, 0);
         setRecordType(heapBase, program, HEAP_TYPE_PROGRAM);
         setRecordSize(heapBase, program, PROGRAM_RECORD_BYTES);
         setRecordMark(heapBase, program, 0);
@@ -15916,6 +15961,8 @@
             strictProgram * 2 | evalProgram * 4);
         setProgramBindingCount(heapBase, program, bindingCount);
         setProgramSource(heapBase, program, sourceProgram);
+        if (bindingNamesLength === 0) setProgramBindingNames(heapBase, program, 0);
+        else setProgramBindingNames(heapBase, program, bindingNames);
         initializedBytes = initializeProgramCallableKernel(
             heapBase, callable, program, context, stringSupport);
         setEngineHeapBump(heapBase, state, end);
@@ -16115,6 +16162,23 @@
         return 1;
     }
 
+    function programSetBindingNameKernel(heapBase, target, registers, argumentsVector) {
+        var callable = programCallableKernel(heapBase, argumentsVector, registers);
+        if (callable === 0) return 0;
+        var indexCell = programArgumentCellKernel(heapBase, argumentsVector, registers, 1);
+        var nameCell = programArgumentCellKernel(heapBase, argumentsVector, registers, 2);
+        if (indexCell === 0 || nameCell === 0) return 0;
+        if (valueCellTag(0, indexCell) !== VALUE_TAG_INT32 ||
+                valueCellTag(0, nameCell) !== VALUE_TAG_REFERENCE) return 0;
+        var name = valueCellReference(0, nameCell), index = valueCellInt32(0, indexCell);
+        if (recordType(heapBase, name) !== HEAP_TYPE_STRING) return 0;
+        var names = programBindingNames(heapBase, functionMetadata(heapBase, callable));
+        if (names === 0 || index < 0 || index >= vectorLength(heapBase, names)) return 0;
+        copyValueCell(vectorCellAddress(heapBase, names, index), nameCell);
+        setValueCellReference(target, callable);
+        return 1;
+    }
+
     function programSetVectorKernel(heapBase, state, targetCell, registerAddress,
                                    argumentsVector) {
         var callable = programCallableKernel(
@@ -16164,7 +16228,42 @@
     /* Shared join implementation for explicit join and guarded implicit
      * Array string conversion. Returns 1 on success, 2 on allocation failure,
      * and 0 when an element requires observable guest conversion. */
-    function arrayJoinKernel(heapBase, state, targetCell, joinArray, joinSeparator) {
+    /* Convert only primitive values, without mutating the source array or
+     * running user code. Ordinary integer/string joins never allocate this
+     * temporary vector. Allocation cannot collect inline; a failed conversion
+     * returns before the caller retries at an ordinary GC safe point. */
+    function joinPrimitiveVectorKernel(heapBase, state, source, stringSupport) {
+        var count = vectorLength(heapBase, source), index = 0;
+        while (index < count) {
+            var sourceCell = vectorCellAddress(heapBase, source, index);
+            if (valueCellTag(0, sourceCell) === VALUE_TAG_REFERENCE &&
+                    recordType(heapBase, valueCellReference(0, sourceCell)) !== HEAP_TYPE_STRING) return 0;
+            index = index + 1;
+        }
+        var bytes = VECTOR_FIXED_BYTES + count * VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        var result = engineHeapBump(heapBase, state);
+        initializeProgramVectorKernel(heapBase, result, count, 0);
+        setEngineHeapBump(heapBase, state, result + bytes);
+        index = 0;
+        while (index < count) {
+            var target = vectorCellAddress(heapBase, result, index);
+            sourceCell = vectorCellAddress(heapBase, source, index);
+            var tag = valueCellTag(0, sourceCell);
+            if (tag === VALUE_TAG_DOUBLE) {
+                if (numberCellToStringKernel(heapBase, state, target, sourceCell,
+                        tag, enginePlatformServices(heapBase, state)) !== 1) return 0;
+            } else if (tag === VALUE_TAG_TRUE || tag === VALUE_TAG_FALSE) {
+                var supportIndex = RUNTIME_SUPPORT_FALSE_STRING;
+                if (tag === VALUE_TAG_TRUE) supportIndex = RUNTIME_SUPPORT_TRUE_STRING;
+                copyValueCell(target, vectorCellAddress(heapBase, stringSupport, supportIndex));
+            } else copyValueCell(target, sourceCell);
+            index = index + 1;
+        }
+        return result;
+    }
+
+    function arrayJoinKernel(heapBase, state, targetCell, joinArray, joinSeparator, stringSupport) {
         if (recordType(heapBase, joinArray) !== HEAP_TYPE_ARRAY) return 0;
         var joinValid = 1, joinAllocationFailed = 0;
             var joinVector = 0;
@@ -16206,6 +16305,17 @@
                 var joinMeasureTag = 0;
                 if (joinMeasureIndex < joinLength) {
                     joinMeasureTag = valueCellTag(0, joinMeasureCell);
+                    if (joinMeasureTag === VALUE_TAG_DOUBLE ||
+                            joinMeasureTag === VALUE_TAG_TRUE || joinMeasureTag === VALUE_TAG_FALSE) {
+                        var primitiveVector = joinPrimitiveVectorKernel(heapBase, state, joinVector, stringSupport);
+                        if (primitiveVector === 0) {
+                            if (engineAllocationFailed(heapBase, state) !== 0) return 2;
+                            return 0;
+                        }
+                        joinVector = primitiveVector;
+                        joinMeasureCell = vectorCellAddress(heapBase, joinVector, joinMeasureIndex);
+                        joinMeasureTag = valueCellTag(0, joinMeasureCell);
+                    }
                 }
                 if (joinMeasureIndex < joinLength) {
                 if (joinMeasureTag === VALUE_TAG_REFERENCE) {
@@ -18144,6 +18254,7 @@
             arrayIntrinsicKernel: arrayIntrinsicKernel,
             arraySliceKernel: arraySliceKernel,
             arrayJoinKernel: arrayJoinKernel,
+            joinPrimitiveVectorKernel: joinPrimitiveVectorKernel,
             applyNativeIntrinsicKernel: applyNativeIntrinsicKernel,
             functionBindKernel: functionBindKernel,
             boundFunctionCallKernel: boundFunctionCallKernel,
@@ -18248,6 +18359,7 @@
             programBooleanArgumentKernel: programBooleanArgumentKernel,
             programCallableKernel: programCallableKernel,
             programCreateKernel: programCreateKernel,
+            programSetBindingNameKernel: programSetBindingNameKernel,
             programIntArgumentKernel: programIntArgumentKernel,
             bufferIsBufferKernel: bufferIsBufferKernel,
             programSetCodeKernel: programSetCodeKernel,
@@ -18527,6 +18639,8 @@
                     RUNTIME_SUPPORT_ARRAY_SLICE_GENERIC: RUNTIME_SUPPORT_ARRAY_SLICE_GENERIC,
                     RUNTIME_SUPPORT_OBJECT_TAG_BASE: RUNTIME_SUPPORT_OBJECT_TAG_BASE,
                     RUNTIME_SUPPORT_JOIN_KEY: RUNTIME_SUPPORT_JOIN_KEY,
+                    RUNTIME_SUPPORT_TRUE_STRING: RuntimeSupportLayout.TRUE_STRING,
+                    RUNTIME_SUPPORT_FALSE_STRING: RuntimeSupportLayout.FALSE_STRING,
                     RUNTIME_SUPPORT_BYTE_LENGTH_KEY: RUNTIME_SUPPORT_BYTE_LENGTH_KEY,
                     RUNTIME_SUPPORT_BYTE_OFFSET_KEY: RUNTIME_SUPPORT_BYTE_OFFSET_KEY,
                     RUNTIME_SUPPORT_COMMA_STRING: RUNTIME_SUPPORT_COMMA_STRING,
@@ -18534,6 +18648,7 @@
                     INTRINSIC_FUNCTION_BIND: INTRINSIC_FUNCTION_BIND,
                     INTRINSIC_MATH_TAN: INTRINSIC_MATH_TAN,
                     INTRINSIC_OBJECT_KEYS: INTRINSIC_OBJECT_KEYS,
+                    INTRINSIC_PROGRAM_SET_BINDING_NAME: INTRINSIC_PROGRAM_SET_BINDING_NAME,
                     INTRINSIC_BOUND_FUNCTION: INTRINSIC_BOUND_FUNCTION,
                     BOUND_FUNCTION_TARGET: BOUND_FUNCTION_TARGET,
                     BOUND_FUNCTION_THIS: BOUND_FUNCTION_THIS,
@@ -18597,7 +18712,9 @@
             var binaryConstantName;
             var lexicalConstantNames = ["ENVIRONMENT_SINGLE_BINDING_FLAG",
                 "ENVIRONMENT_DETACHED_ARGUMENTS_FLAG", "HANDLER_LEXICAL_BINDING_FLAG",
-                "ENVIRONMENT_FIXED_BYTES", "ARGUMENT_MAPPING_WORD_BITS"];
+                "ENVIRONMENT_FIXED_BYTES", "ARGUMENT_MAPPING_WORD_BITS",
+                "PROGRAM_BINDING_NAMES", "PROGRAM_BINDING_NAMES_EDGE",
+                "LEXICAL_LOOKUP_UNSUPPORTED"];
             var lexicalConstantIndex = 0;
             while (lexicalConstantIndex < lexicalConstantNames.length) {
                 var lexicalConstantName = lexicalConstantNames[lexicalConstantIndex++];

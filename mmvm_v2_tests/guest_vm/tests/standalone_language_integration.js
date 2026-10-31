@@ -169,5 +169,20 @@ if (Object.keys(standaloneKeySource).join(",") !== "first,second" ||
     throw new Error("own enumeration/string/numeric library operations are incorrect");
 }
 
+function standaloneNamedClosure() {
+    var privateState = {value: 42};
+    /* Direct eval makes descendant free-name resolution dynamic even though
+     * this empty evaluation does not itself change the environment. */
+    eval("");
+    return function () { return privateState.value; };
+}
+if (standaloneNamedClosure()() !== 42 ||
+        Object.prototype.hasOwnProperty.call("abc", "length") !== true ||
+        Object.prototype.hasOwnProperty.call("abc", "1") !== true ||
+        Object.prototype.hasOwnProperty.call("abc", "type") !== false ||
+        [0.5, true, false, -0, NaN, Infinity].join("|") !== "0.5|true|false|0|NaN|Infinity") {
+    throw new Error("dynamic closure lookup or primitive string conversion is incorrect");
+}
+
 print(require("./heap_access_test.js")(require("../heap.js")));
 print("standalone integration: passed");

@@ -93,8 +93,10 @@
                       FUNCTION_BIND: 126,
                       BOUND_FUNCTION: 127,
                       MATH_TAN: 128,
-                      OBJECT_KEYS: 129};
-    Intrinsics.LAST_ID = Intrinsics.OBJECT_KEYS;
+                      OBJECT_KEYS: 129,
+                      PROGRAM_SET_BINDING_NAME: 130};
+    Intrinsics.LAST_ID = Intrinsics.PROGRAM_SET_BINDING_NAME;
+    Intrinsics.BoundFunctionLayout = {TARGET: 0, THIS: 1, ARGUMENT_BASE: 2};
     /* This order is the shared mapping from constructor names to IDs and
      * native runtime-support slots. Do not repeat it in either backend. */
     Intrinsics.ERROR_CONSTRUCTOR_NAMES = ["Error", "EvalError", "RangeError",

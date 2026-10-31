@@ -76,6 +76,47 @@ passed 24 rounds / 47 collections; CodeLoad quick correctness passed.
 These are checkpoint checks, not a replacement for the final full Test262,
 cross-host/self-hosted snapshot and demo regression runs.
 
-Stock correctness and wider regression validation are still in progress. The
-historical failing scores in the Octane ledger are deliberately unchanged
-until a stock pass has actually been measured.
+## 2026-10-31: stock correctness pass
+
+The unchanged stock suite now passes under js_runner: score **800**, wall
+**18.75 s**, CPU **18.45 s**, peak RSS **261140 KiB**. The quick run passed
+in 15.21 s including source loading and compilation. These are distinct
+stock/quick observations, not a full new Octane sweep.
+The final portable-adapter checkpoint rerun scores **813**, wall **18.60 s**,
+CPU **18.31 s**, peak RSS **305632 KiB**; CodeLoad quick correctness also
+passes. The preceding observation is retained rather than silently replaced.
+
+The remaining general changes were:
+
+- Environment-backed programs now own an optional slot-to-binding-name value
+  vector. A previously unused program payload word stores its reference, so
+  program records stay the same size. Register-only programs need no vector.
+  Bootstrap registration and self-hosted adoption populate it; both collectors
+  trace it, and the portable adapter reconstructs names from it. Native
+  GET_NAME walks declarative/catch environments before global lookup. It
+  declines object environments that require unsupported observable handling
+  rather than silently skipping them. This is not a claim that with/direct
+  eval support is now complete in the native interpreter.
+- hasOwnProperty handles primitive-wrapper ownership, including strings'
+  length/character indices, without allocating a temporary wrapper. Primitive
+  payloads are no longer treated as heap references before tag validation.
+- Join lazily converts doubles/booleans into a temporary guest vector using
+  the existing number formatter and canonical boolean strings. It preserves
+  the source array and retains the no-temporary integer/string-only path.
+- Native-created bound functions can be adopted by portable/embedding code
+  without retaining their target/receiver/arguments in host-only closures or
+  pinning every dynamic function as a permanent bootstrap root.
+
+An intermediate stock run crashed in bind's length lookup: the packed-object
+cache was incorrectly used with a function's linked descriptors. A new
+representation-aware own-property lookup selects packed caching only for
+ordinary objects and linked traversal for other owners. The stock rerun above
+validates that fix; the earlier quick pass alone was insufficient.
+
+The strengthened bounded GC workload retains both bound-function state and
+dynamically resolved closures. Checkpoint results: 24 rounds / 48 native
+collections; structural driver 27 audits / 102049 edges / 221 property-index
+audits / 76 embedding collections, maximum bump 4570856 bytes within an
+8 MiB cap, 11.542 s. Node project suite still passes 12 programs / 270
+assertions and standalone language integration passes. Full Test262, wider
+Octane/demo regression and cross-host/self-hosted build validation follow.

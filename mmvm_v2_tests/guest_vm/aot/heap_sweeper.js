@@ -27,6 +27,8 @@
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
     var markLayoutBindings = {
+        PROGRAM_BINDING_NAMES: HeapRecords.KernelConstants.PROGRAM_BINDING_NAMES,
+        PROGRAM_BINDING_NAMES_EDGE: HeapRecords.KernelConstants.PROGRAM_BINDING_NAMES_EDGE,
         HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
         OBJECT_PROPERTY_INDEX: HeapRecords.KernelConstants.OBJECT_PROPERTY_INDEX,
         HEAP_TYPE_PROPERTY_STORAGE: Heap.Types.PROPERTY_STORAGE,
@@ -483,6 +485,7 @@
                     else if (referenceIndex === 3) target = programBindingRegisters(heapBase, address);
                     else if (referenceIndex === 4) target = programParameterSlots(heapBase, address);
                     else if (referenceIndex === 5) target = programSource(heapBase, address);
+                    else if (referenceIndex === PROGRAM_BINDING_NAMES_EDGE) target = programBindingNames(heapBase, address);
                     else referenceIndex = -2;
                 } else if (type === HEAP_TYPE_CONTEXT) {
                     if (referenceIndex === 0) target = contextGlobal(heapBase, address);

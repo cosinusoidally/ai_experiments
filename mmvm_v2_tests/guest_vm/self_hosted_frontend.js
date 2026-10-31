@@ -77,6 +77,14 @@ function adoptProgramDescriptor(program, contextAnchor) {
             program.source || null);
         retainAdoptionRoot(callable);
         try {
+            if (!bindingRegisters) {
+                var bindingIndex = 0;
+                while (bindingIndex < bindings.length) {
+                    __guestVMProgramSetBindingName(callable, bindingIndex,
+                        bindings[bindingIndex]);
+                    bindingIndex++;
+                }
+            }
             __guestVMProgramSetCode(callable, 0, program.code);
             var index = 0;
             while (index < program.constants.length) {

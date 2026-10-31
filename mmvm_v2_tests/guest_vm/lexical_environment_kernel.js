@@ -3,6 +3,40 @@
  * object. Header flags distinguish the two uses without widening every
  * function environment. Both references are traced by the collector. */
 (function (root) {
+    /* Return a binding's value-cell address, zero for an unresolved name, or
+     * LEXICAL_LOOKUP_UNSUPPORTED if an object environment requires ordinary
+     * HasProperty/Get processing. Never silently skip an unknown scope. */
+    function resolveNamedBindingCellKernel(heapBase, environment, name) {
+        while (environment !== 0) {
+            var catchName = environmentBindingNameKernel(heapBase, environment);
+            if (catchName !== 0) {
+                if (stringKeysEqualKernel(heapBase, catchName, name) === 1) {
+                    return environmentCellAddress(heapBase, environment, 0);
+                }
+            } else {
+                if (environmentObjectKernel(heapBase, environment) !== 0) return LEXICAL_LOOKUP_UNSUPPORTED;
+                var count = environmentCount(heapBase, environment);
+                if (count > 0) {
+                    var program = environmentProgram(heapBase, environment);
+                    if (program === 0) return LEXICAL_LOOKUP_UNSUPPORTED;
+                    var names = programBindingNames(heapBase, program);
+                    if (names === 0 || vectorLength(heapBase, names) !== count) return LEXICAL_LOOKUP_UNSUPPORTED;
+                    var index = 0;
+                    while (index < count) {
+                        var keyCell = vectorCellAddress(heapBase, names, index);
+                        if (valueCellTag(0, keyCell) !== VALUE_TAG_REFERENCE) return LEXICAL_LOOKUP_UNSUPPORTED;
+                        if (stringKeysEqualKernel(heapBase, valueCellReference(0, keyCell), name) === 1) {
+                            return environmentCellAddress(heapBase, environment, index);
+                        }
+                        index = index + 1;
+                    }
+                }
+            }
+            environment = environmentParent(heapBase, environment);
+        }
+        return 0;
+    }
+
     function environmentBindingNameKernel(heapBase, environment) {
         if ((recordFlags(heapBase, environment) & ENVIRONMENT_SINGLE_BINDING_FLAG) !== 0) {
             return environmentScopeData(heapBase, environment);
@@ -78,6 +112,7 @@
     }
 
     var exports = {functions: {
+        resolveNamedBindingCellKernel: resolveNamedBindingCellKernel,
         argumentMappingDetachedKernel: argumentMappingDetachedKernel,
         detachArgumentMappingKernel: detachArgumentMappingKernel,
         environmentBindingNameKernel: environmentBindingNameKernel,

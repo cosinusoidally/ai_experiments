@@ -31,6 +31,13 @@
             root.dictionary["field-" + index] = seed + index * 3;
         }
         root.read = function () { return root.values[1]; };
+        root.readBound = (function (adjustment) {
+            return this.seed + adjustment.delta;
+        }).bind({seed: seed}, {delta: 3});
+        root.readNamed = (function (retained) {
+            eval("");
+            return function () { return retained.seed; };
+        }(root));
         try {
             throw {seed: seed, parent: root};
         } catch (caught) {
@@ -54,6 +61,8 @@
         if (root.self !== root || root.child.parent !== root ||
                 root.child.shared !== root.values ||
                 root.read() !== root.seed + 0.25 ||
+                root.readBound() !== root.seed + 3 ||
+                root.readNamed() !== root.seed ||
                 root.readCaught().seed !== root.seed ||
                 root.readCaught().parent !== root ||
                 root.detachedArguments.saved[0] !== root.seed + 1 ||

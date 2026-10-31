@@ -158,6 +158,9 @@
     var PROGRAM_FLAGS = 40;
     var PROGRAM_BINDING_COUNT = 44;
     var PROGRAM_SOURCE = 48;
+    /* Use the existing final payload word; the program record does not grow.
+     * Only environment-backed programs need a slot-to-name vector. */
+    var PROGRAM_BINDING_NAMES = 52;
     var PROGRAM_BYTES = 56;
 
     var CONTEXT_GLOBAL = 0;
@@ -298,7 +301,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 85;
+    Records.NativeInterpreterContractVersion = 86;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
@@ -329,6 +332,9 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        PROGRAM_BINDING_NAMES: Heap.HEADER_SIZE + PROGRAM_BINDING_NAMES,
+        PROGRAM_BINDING_NAMES_EDGE: 6,
+        LEXICAL_LOOKUP_UNSUPPORTED: -1,
         ENVIRONMENT_SINGLE_BINDING_FLAG: Records.EnvironmentFlags.SINGLE_BINDING,
         ENVIRONMENT_DETACHED_ARGUMENTS_FLAG: Records.EnvironmentFlags.DETACHED_ARGUMENTS,
         HANDLER_LEXICAL_BINDING_FLAG: Records.HandlerFlags.LEXICAL_BINDING,
@@ -2405,6 +2411,8 @@
             layout.bindingCount || 0, Heap.Types.PROGRAM);
         this.heap.writeTrustedFieldU32(address, PROGRAM_SOURCE,
             layout.source || 0, Heap.Types.PROGRAM);
+        this.heap.writeTrustedFieldU32(address, PROGRAM_BINDING_NAMES,
+            layout.bindingNames || 0, Heap.Types.PROGRAM);
         return address;
     };
 
@@ -2444,6 +2452,16 @@
     Records.prototype.programBindingCount = function (program) {
         return this.heap.readTrustedFieldU32(
             program, PROGRAM_BINDING_COUNT, Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.programBindingNames = function (program) {
+        return this.heap.readTrustedFieldU32(program, PROGRAM_BINDING_NAMES,
+            Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.setProgramBindingNames = function (program, names) {
+        this.heap.writeTrustedFieldU32(program, PROGRAM_BINDING_NAMES, names,
+            Heap.Types.PROGRAM);
     };
 
     Records.prototype.programSource = function (program) {
@@ -3242,6 +3260,7 @@
             reference(records.programConstants(address));
             reference(records.programConstantRegisters(address));
             reference(records.programBindingRegisters(address));
+            reference(records.programBindingNames(address));
             reference(records.programParameterSlots(address));
             reference(records.programSource(address));
         } else if (type === Heap.Types.CONTEXT) {

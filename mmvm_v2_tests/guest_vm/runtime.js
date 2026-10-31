@@ -1175,6 +1175,10 @@
             if (recordType === Heap.Types.BYTECODE_FUNCTION) {
                 return this.adoptBytecodeFunction(address);
             }
+            if (recordType === Heap.Types.NATIVE_FUNCTION &&
+                    this.heapRecords.functionMetadata(address) === NativeIntrinsics.BOUND_FUNCTION) {
+                return this.adoptBoundFunction(address);
+            }
             var guestType = recordType === Heap.Types.OBJECT ? "object" :
                 recordType === Heap.Types.ARRAY ? "array" :
                 recordType === Heap.Types.REGEXP ? "regexp" :
@@ -1193,6 +1197,49 @@
             this.noteAllocation(1);
         }
         return handle;
+    };
+
+    /* A native-created bound function needs no host handle during native
+     * execution. Reconstruct a portable adapter only when an embedding read
+     * or semantic fallback asks for one. Its state remains on the guest heap;
+     * unlike bootstrap callbacks it is not pinned as a permanent native root. */
+    Runtime.prototype.boundFunctionCallState = function (address, args) {
+        var layout = NativeIntrinsics.BoundFunctionLayout;
+        var closure = this.heapRecords.functionClosure(address);
+        var target = this.readHeapValue(this.heapRecords.vectorCell(closure, layout.TARGET));
+        var receiver = this.readHeapValue(this.heapRecords.vectorCell(closure, layout.THIS));
+        var combined = [], index = layout.ARGUMENT_BASE;
+        while (index < this.heapRecords.vectorLength(closure)) {
+            combined.push(this.readHeapValue(this.heapRecords.vectorCell(closure, index++)));
+        }
+        index = 0;
+        while (index < args.length) combined.push(args[index++]);
+        return {target: target, receiver: receiver, args: combined};
+    };
+
+    Runtime.prototype.adoptBoundFunction = function (address) {
+        var callable = this.makeHeapHandle(address, "function"), runtime = this;
+        callable.name = "bound";
+        callable.callMode = "intrinsic";
+        callable.nativeIntrinsic = NativeIntrinsics.BOUND_FUNCTION;
+        callable.callback = function (ignoredReceiver, args) {
+            var state = runtime.boundFunctionCallState(address, args);
+            return runtime.invokePropertyFunction(state.target, state.receiver, state.args);
+        };
+        callable.constructCallback = function (args, context) {
+            var state = runtime.boundFunctionCallState(address, args);
+            if (state.target.guestType !== "bytecodeFunction") {
+                return runtime.construct(state.target, state.args, context);
+            }
+            var prototype = runtime.getProperty(state.target, "prototype");
+            var receiver = runtime.makeObjectWithPrototype(prototype && prototype.guestType ?
+                prototype : runtime.objectPrototype);
+            var result = runtime.invokePropertyFunction(state.target, receiver, state.args);
+            return result && result.guestType ? result : receiver;
+        };
+        this.functionMetadata["$" + address] = callable;
+        this.heapObjects.push(callable);
+        return callable;
     };
 
     /* Functions created by the native MAKE_FUNCTION opcode acquire a host
@@ -1728,6 +1775,19 @@
         this.programAddresses[metadataIndex] = address;
         program.heapAddress = address;
         this.programMetadata["$" + address] = program;
+        if (!program.bindingRegisters && program.bindings && program.bindings.length) {
+            var bindingNames = this.heapRecords.allocateValueVector(program.bindings.length);
+            this.heapRecords.setProgramBindingNames(address, bindingNames);
+            var bindingIndex = 0;
+            while (bindingIndex < program.bindings.length) {
+                var bindingName = program.bindings[bindingIndex];
+                if (typeof bindingName === "string") {
+                    this.valueCells.writeReferenceAt(this.heapRecords.vectorCell(
+                        bindingNames, bindingIndex), this.internStringAddress(bindingName));
+                }
+                bindingIndex++;
+            }
+        }
         var argumentConstants = this.programArgumentConstants(program);
         index = 0;
         while (program.constants && index < program.constants.length) {
@@ -2154,6 +2214,17 @@
             source: records.programSource(address) ?
                 this.readHeapString(records.programSource(address)) : null
         };
+        var bindingNames = records.programBindingNames(address);
+        if (bindingNames !== 0 && program.bindings) {
+            for (var bindingIndex = 0; bindingIndex < bindingCount; bindingIndex++) {
+                var bindingCell = records.vectorCell(bindingNames, bindingIndex);
+                if (this.valueCells.tagAt(bindingCell) === ValueCells.Tags.REFERENCE) {
+                    var bindingName = this.readHeapString(this.valueCells.referenceAddressAt(bindingCell));
+                    program.bindings[bindingIndex] = bindingName;
+                    program.bindingSlots["$" + bindingName] = bindingIndex;
+                }
+            }
+        }
         this.programMetadata[key] = program;
         return program;
     };
@@ -3884,6 +3955,18 @@
                     contextAnchor.homeContext : null;
                 return runtime.makeGuestFunction(program, null, homeContext);
             }, "intrinsic", NativeIntrinsics.PROGRAM_CREATE));
+        this.setGlobal("__guestVMProgramSetBindingName", this.makeNativeFunction(
+            "__guestVMProgramSetBindingName", function (receiver, args) {
+                var program = programFor(args[0]);
+                var index = integer(args[1], "binding index");
+                var names = runtime.heapRecords.programBindingNames(program.heapAddress);
+                if (!names || index < 0 || index >= program.bindings.length ||
+                        typeof args[2] !== "string") throw new TypeError("invalid program binding name");
+                runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(names, index),
+                    runtime.internStringAddress(args[2]));
+                program.bindings[index] = args[2];
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_BINDING_NAME));
         this.setGlobal("__guestVMProgramSetCode", this.makeNativeFunction(
             "__guestVMProgramSetCode", function (receiver, args) {
                 var program = programFor(args[0]);
@@ -4338,6 +4421,11 @@
     Runtime.prototype.instanceOf = function (value, constructor) {
         this.assertOwned(value);
         this.assertOwned(constructor);
+        while (constructor && constructor.nativeIntrinsic === NativeIntrinsics.BOUND_FUNCTION) {
+            var closure = this.heapRecords.functionClosure(constructor.heapAddress);
+            constructor = this.readHeapValue(this.heapRecords.vectorCell(
+                closure, NativeIntrinsics.BoundFunctionLayout.TARGET));
+        }
         if (!constructor ||
             (constructor.guestType !== "function" &&
              constructor.guestType !== "bytecodeFunction")) {
@@ -5519,6 +5607,7 @@
                 this.heapRecords.programConstantRegisters(address);
             result.bindingRegisters =
                 this.heapRecords.programBindingRegisters(address);
+            result.bindingNames = this.heapRecords.programBindingNames(address);
             result.parameterSlots =
                 this.heapRecords.programParameterSlots(address);
             result.registerCount =

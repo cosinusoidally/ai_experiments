@@ -99,7 +99,7 @@
         if (dataMethodIntrinsicKernel(heapBase, array, joinKey) !== INTRINSIC_ARRAY_JOIN) return 0;
         var separator = valueCellReference(0, vectorCellAddress(heapBase,
             stringSupport, RUNTIME_SUPPORT_COMMA_STRING));
-        return arrayJoinKernel(heapBase, state, target, array, separator);
+        return arrayJoinKernel(heapBase, state, target, array, separator, stringSupport);
     }
 
     function arrayDefaultPrimitiveKernel(heapBase, state, target, source, stringSupport) {
