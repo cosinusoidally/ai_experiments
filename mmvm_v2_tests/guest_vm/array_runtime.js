@@ -1,6 +1,23 @@
 /* ES5 Array algorithms expressed as ordinary guest JavaScript. These methods
  * remain portable between the Node and js_min hosts and execute as bytecode
  * inside a standalone guest image. */
+function __guestArrayForEach(callback, thisArgument) {
+    "use strict";
+    if (this === null || this === undefined) {
+        throw new TypeError("Array.prototype.forEach receiver is null or undefined");
+    }
+    var source = Object(this);
+    var length = source.length >>> 0;
+    if (typeof callback !== "function") {
+        throw new TypeError("Array.prototype.forEach callback is not callable");
+    }
+    for (var index = 0; index < length; index++) {
+        if (index in source) {
+            callback.call(thisArgument, source[index], index, source);
+        }
+    }
+}
+
 function __guestArrayMap(callback, thisArgument) {
     if (typeof callback !== "function") {
         throw new TypeError("Array.prototype.map callback is not callable");

@@ -122,6 +122,7 @@
                 environment.context.globalObject, globalName, false);
         }
         install(this.runtime.arrayPrototype, "map", "__guestArrayMap");
+        install(this.runtime.arrayPrototype, "forEach", "__guestArrayForEach");
         install(this.runtime.arrayPrototype, "sort", "__guestArraySort");
         if (this.runtime.nativeInterpreter) {
             this.runtime.nativeInterpreter.setArrayMethodFallback("push",
@@ -149,6 +150,7 @@
         install(this.runtime.stringPrototype, "replace", "__guestStringReplace");
         install(this.runtime.stringPrototype, "split", "__guestStringSplit");
         install(this.runtime.stringPrototype, "search", "__guestStringSearch");
+        install(this.runtime.stringPrototype, "trim", "__guestStringTrim");
         install(this.runtime.numberPrototype, "toFixed", "__guestNumberToFixed");
     };
 

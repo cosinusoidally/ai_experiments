@@ -133,5 +133,41 @@ if (standaloneIndirectEval("'use strict'; var standaloneStrictPrivate = 7; stand
     throw new Error("strict indirect eval completion or declaration isolation is incorrect");
 }
 
+print("standalone integration: callbacks and typed views");
+var standaloneView = new Uint16Array(new ArrayBuffer(24), 4, 3);
+var standaloneViewByteKey = "byte" + "Length";
+if (standaloneView.byteLength !== 6 || standaloneView[standaloneViewByteKey] !== 6 ||
+        standaloneView.byteOffset !== 4 || standaloneView.buffer.byteLength !== 24) {
+    throw new Error("typed view byte metadata is incorrect");
+}
+function StandaloneBoundExample(left, right) { this.sum = left + right; return this.sum; }
+var standaloneBoundReceiver = {};
+var standaloneBoundCall = StandaloneBoundExample.bind(standaloneBoundReceiver, 7);
+if (standaloneBoundCall(5) !== 12 || standaloneBoundReceiver.sum !== 12 ||
+        standaloneBoundCall.length !== 1) throw new Error("bound call is incorrect");
+var standaloneBoundInstance = new standaloneBoundCall(9);
+if (standaloneBoundInstance.sum !== 16 ||
+        !(standaloneBoundInstance instanceof StandaloneBoundExample) ||
+        !(standaloneBoundInstance instanceof standaloneBoundCall)) {
+    throw new Error("bound construction is incorrect");
+}
+var standaloneCallbackSource = [1, , 3], standaloneCallbackTotal = 0;
+standaloneCallbackSource.forEach(function (value, index, source) {
+    if (source !== standaloneCallbackSource || this !== standaloneBoundReceiver) {
+        throw new Error("forEach callback arguments are incorrect");
+    }
+    standaloneCallbackTotal += value;
+    if (index === 0) source.push(9);
+}, standaloneBoundReceiver);
+if (standaloneCallbackTotal !== 4) throw new Error("forEach visitation is incorrect");
+var standaloneKeySource = Object.create({inherited: true});
+standaloneKeySource.first = 1;
+standaloneKeySource.second = 2;
+Object.defineProperty(standaloneKeySource, "hidden", {value: 3});
+if (Object.keys(standaloneKeySource).join(",") !== "first,second" ||
+        " \ttext\u00a0".trim() !== "text" || Math.tan(0) !== 0) {
+    throw new Error("own enumeration/string/numeric library operations are incorrect");
+}
+
 print(require("./heap_access_test.js")(require("../heap.js")));
 print("standalone integration: passed");

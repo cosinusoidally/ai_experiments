@@ -3228,7 +3228,7 @@
                     throw new TypeError("Object.keys target is not an object");
                 }
                 return runtime.keys(args[0]);
-            }));
+            }, "intrinsic", NativeIntrinsics.OBJECT_KEYS));
         this.setGlobal("Object", objectConstructor);
         this.functionMethods = {};
         this.functionMethods.call = this.makeNativeFunction("Function.call",
@@ -3274,7 +3274,7 @@
                         runtime.arrayLength(boundArguments), 0), 0);
                 runtime.poisonFunctionProperties(boundFunction);
                 return boundFunction;
-            });
+            }, "intrinsic", NativeIntrinsics.FUNCTION_BIND);
         this.functionMethods.toString = this.makeNativeFunction("Function.toString",
             function (receiver) {
                 if (receiver.guestType === "bytecodeFunction" && receiver.source) {
@@ -3558,7 +3558,8 @@
         mathMethod("max", function (receiver, args) {
             return Math.max.apply(Math, args);
         }, NativeIntrinsics.MATH_MAX);
-        mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); });
+        mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); },
+            NativeIntrinsics.MATH_TAN);
         this.setGlobal("Math", math);
     };
 

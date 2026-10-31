@@ -1236,4 +1236,15 @@
     this.__guestStringReplace = guestStringReplace;
     this.__guestStringSplit = guestStringSplit;
     this.__guestStringSearch = guestStringSearch;
+    this.__guestStringTrim = function () {
+        "use strict";
+        if (this === null || this === undefined) {
+            throw new TypeError("String.prototype.trim receiver is null or undefined");
+        }
+        var text = stringReceiver(this);
+        var start = 0, end = text.length;
+        while (start < end && white(text.charCodeAt(start))) start++;
+        while (end > start && white(text.charCodeAt(end - 1))) end--;
+        return text.substring(start, end);
+    };
 }());

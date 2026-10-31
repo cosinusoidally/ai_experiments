@@ -91,6 +91,10 @@ inspectExitNative.prototype.run = function () {
     inspectExitPrint("native exit: " + inspectExitBytecode.NAMES[result.opcode] +
         " pc=" + result.pc + " function=" + (program && program.name || "<anonymous>") +
         " file=" + (program && program.filename || "<unknown>"));
+    if (program && (result.opcode === inspectExitBytecode.GET_NAME ||
+                    result.opcode === inspectExitBytecode.TYPEOF_NAME)) {
+        inspectExitPrint("binding: " + program.constants[program.code[result.pc + 2]]);
+    }
     if (program && (result.opcode === inspectExitBytecode.ADD ||
                     result.opcode === inspectExitBytecode.GET_PROPERTY ||
                     result.opcode === inspectExitBytecode.SET_PROPERTY)) {
@@ -101,13 +105,16 @@ inspectExitNative.prototype.run = function () {
         inspectExitPrint("right: " + inspectExitCell(this.runtime,
             records.frameRegisterCell(result.frame, program.code[result.pc + rightOffset])));
     }
-    if (program && result.opcode === inspectExitBytecode.CALL) {
+    if (program && (result.opcode === inspectExitBytecode.CALL ||
+                    result.opcode === inspectExitBytecode.CONSTRUCT)) {
         inspectExitPrint("callable: " + inspectExitCell(this.runtime,
             records.frameRegisterCell(result.frame, program.code[result.pc + 2])));
-        var receiverRegister = program.code[result.pc + 3];
+        var receiverRegister = result.opcode === inspectExitBytecode.CALL ?
+            program.code[result.pc + 3] : -1;
         if (receiverRegister >= 0) inspectExitPrint("receiver: " + inspectExitCell(this.runtime,
             records.frameRegisterCell(result.frame, receiverRegister)));
-        var argumentRegisters = program.constants[program.code[result.pc + 4]];
+        var argumentOffset = result.opcode === inspectExitBytecode.CALL ? 4 : 3;
+        var argumentRegisters = program.constants[program.code[result.pc + argumentOffset]];
         var argumentIndex = 0;
         while (argumentRegisters && argumentIndex < argumentRegisters.length) {
             var argumentRegister = argumentRegisters[argumentIndex];

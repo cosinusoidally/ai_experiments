@@ -89,8 +89,12 @@
                       THROW_TYPE_ERROR: 122,
                       OBJECT_IS_PROTOTYPE_OF: 123,
                       TRY_COPY_INT32_ARRAY: 124,
-                      ARRAY_TO_STRING: 125};
-    Intrinsics.LAST_ID = Intrinsics.ARRAY_TO_STRING;
+                      ARRAY_TO_STRING: 125,
+                      FUNCTION_BIND: 126,
+                      BOUND_FUNCTION: 127,
+                      MATH_TAN: 128,
+                      OBJECT_KEYS: 129};
+    Intrinsics.LAST_ID = Intrinsics.OBJECT_KEYS;
     /* This order is the shared mapping from constructor names to IDs and
      * native runtime-support slots. Do not repeat it in either backend. */
     Intrinsics.ERROR_CONSTRUCTOR_NAMES = ["Error", "EvalError", "RangeError",

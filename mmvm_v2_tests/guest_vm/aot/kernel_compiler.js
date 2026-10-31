@@ -754,6 +754,7 @@
         setFunctionClosure: "FUNCTION_CLOSURE",
         setFunctionMetadata: "FUNCTION_METADATA",
         setFunctionHomeContext: "FUNCTION_HOME_CONTEXT",
+        setFunctionGCNext: "FUNCTION_GC_NEXT",
         setStringLength: "STRING_LENGTH",
         setStringHash: "STRING_HASH",
         setStringRopeLeft: "STRING_ROPE_LEFT",
