@@ -3,6 +3,12 @@
 For a side-by-side table of exact KiB, converted MiB and memory ratios for
 all fifteen suites, see [the peak RSS report](OCTANE_RSS_2026-10-31.md).
 
+Later follow-up: Typescript now passes stock under js_runner (score 1003,
+437468 KiB peak RSS), versus a fresh Node --jitless score 10428 and
+218124 KiB. See [the Typescript report](guest_vm/TYPESCRIPT_BRINGUP.md).
+The full-sweep table below remains the earlier checkpoint, not a mixed-image
+sweep. Fourteen suites are now known to pass; Mandreel remains unresolved.
+
 ## Measurement contract
 
 This comparison runs the unchanged stock Octane workloads, not quick

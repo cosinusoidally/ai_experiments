@@ -5,7 +5,9 @@
 ### 2026-10-31 follow-up: Typescript stock pass
 
 The unchanged Typescript benchmark now passes standalone stock validation:
-initial score **889**, wall **156.23 s**, peak RSS **532060 KiB**. General
+latest score **1003**, wall **138.73 s**, peak RSS **437468 KiB**; fresh
+Node --jitless score **10428**, wall **12.42 s**, peak RSS **218124 KiB**.
+The earlier checkpoint scored 889 with 532060 KiB peak RSS. General
 fixes expose module search paths, install locale case methods on the existing
 case intrinsics, and handle signed ordinary-object property names without a
 host transition. There are now fourteen known stock-passing suites; Mandreel

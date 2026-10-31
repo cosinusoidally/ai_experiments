@@ -95,3 +95,31 @@ the corresponding run completes.
   audits, 76 embedding collections, maximum observed bump 4573704 bytes
   under an 8388608-byte cap; workload/check time 12.442 s.
 - Standalone GC workload passes: 24 rounds, 48 native collections, 0.49 s.
+
+### Fresh final-image stock comparison
+
+Run 2026-10-31 11:23–11:25 UTC, serial fresh processes, unchanged stock
+workload, 900-second per-process bound. Source working point `6aadc41`;
+image identity is the final-source hash above. Node is v24.14.1 x86-64 with
+`--jitless`; standalone js_runner is i386.
+
+| Engine | Status | Score | Wall seconds | User CPU seconds | Peak RSS KiB | Peak RSS MiB |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| js_runner | Pass | 1003 | 138.73 | 137.52 | 437468 | 427.2 |
+| Node --jitless | Pass | 10428 | 12.42 | 12.50 | 218124 | 213.0 |
+
+Node's score is 10.40x the guest score; guest peak RSS is 2.01x Node's.
+Scores are not wall-time ratios. RSS is whole-process peak, not live heap.
+The earlier 889 / 532060 KiB observation is retained above: these are single
+observations with different image layouts, not evidence of a separate
+optimization or a reliably bounded 427 MiB working set. The guest still has
+substantial performance and memory-efficiency headroom.
+
+Reproduce the paired Typescript-only measurement using a fresh output path:
+
+```sh
+node octane_compare.js --node-jitless --snapshot artifacts/typescript-final.snap --exclude Richards,DeltaBlue,Crypto,RayTrace,EarleyBoyer,RegExp,Splay,NavierStokes,PdfJS,Mandreel,Gameboy,CodeLoad,Box2D,zlib --output artifacts/typescript-jitless-final --timeout 900
+```
+
+There are now fourteen known stock-passing Octane suites. This measurement
+does not claim Mandreel has been fixed or that all fifteen suites were rerun.

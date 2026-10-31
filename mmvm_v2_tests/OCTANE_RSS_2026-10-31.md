@@ -1,5 +1,16 @@
 # Octane peak RSS: js_runner versus Node --jitless
 
+## Later Typescript follow-up
+
+Typescript now completes successfully on both engines. A fresh serial pair
+at 11:23–11:25 UTC measures **437468 KiB (427.2 MiB)** for js_runner versus
+**218124 KiB (213.0 MiB)** for Node --jitless: **2.01x guest / Node RSS**.
+The guest scores 1003 versus Node's 10428. See
+[the Typescript bring-up report](guest_vm/TYPESCRIPT_BRINGUP.md) for image
+identity, timings and the earlier higher-memory successful observation.
+The all-suite table below is retained as the original full-sweep checkpoint;
+its Typescript failure row is historical, not the latest state.
+
 ## Measurement basis — 2026-10-31
 
 This report extracts the peak resident-set measurements from the completed
