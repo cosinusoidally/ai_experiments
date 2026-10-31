@@ -1,8 +1,9 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-31, PdfJS/GC checkpoint `4e0745e`,
+Latest completed whole-suite result (2026-10-31, Typescript checkpoint `6aadc41`,
 standalone contract 87): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
-out of 3,292 tests. Elapsed 497.68 seconds. The preceding CodeLoad checkpoint
+out of 3,292 tests. Elapsed 491.30 seconds. The preceding PdfJS/GC checkpoint
+passed in 497.68 seconds. The preceding CodeLoad checkpoint
 passed the same complete corpus in 490.09 seconds; these are comparable
 single-run timings, not a significant speedup claim. The distinct
 literal-definition opcode continues to preserve the two object-literal tests
@@ -41,6 +42,18 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-31, approximately 11:35 UTC, Typescript checkpoint `6aadc41`,
+  contract 87:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/typescript-final.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged corpus. External elapsed
+  491.30 s, user CPU 483.88 s, peak RSS 576496 KiB. Runner elapsed
+  490.724332 s; summed test time 469.944786 s. The four heavy cases took
+  96.541555, 87.505601, 85.631652 and 92.991628 s. Signed ordinary-object
+  property keys and locale-method/module installation introduce no failures,
+  skips or weaker expectations. Prior run: 497.68 s; single observations
+  do not establish a causal performance improvement.
 
 - 2026-10-31, approximately 01:17 UTC, PdfJS/collector-ownership checkpoint
   `4e0745e`, contract 87:

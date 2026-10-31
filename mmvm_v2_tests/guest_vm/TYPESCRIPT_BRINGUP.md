@@ -123,3 +123,18 @@ node octane_compare.js --node-jitless --snapshot artifacts/typescript-final.snap
 
 There are now fourteen known stock-passing Octane suites. This measurement
 does not claim Mandreel has been fixed or that all fifteen suites were rerun.
+
+### Standalone language/benchmark regression sweep
+
+- All twelve other selected stock-passing benchmarks pass quick correctness
+  on the final image: Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer,
+  Splay, NavierStokes, PdfJS, Gameboy, CodeLoad, Box2D and zlib. Each ran in
+  its own serial process with a 300-second bound. These are correctness
+  runs, not new stock performance scores. RegExp and Mandreel were not rerun
+  in this follow-up; their last complete-sweep observations remain historical.
+- Complete Test262 passes **3292 / 3292**, zero failures, not run or timeouts.
+  External wall 491.30 s, user CPU 483.88 s, peak RSS 576496 KiB; runner
+  490.724332 s, summed per-test 469.944786 s. Same default budgets, authored
+  strict/sloppy modes and unchanged corpus. Prior clean checkpoint: 497.68 s.
+  These timings do not demonstrate a statistically established speedup.
+  See [the chronological ledger](../TEST262_STATUS.md).
