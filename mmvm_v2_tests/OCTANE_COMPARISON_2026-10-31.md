@@ -1,5 +1,8 @@
 # Octane: standalone guest versus Node --jitless, 2026-10-31
 
+For a side-by-side table of exact KiB, converted MiB and memory ratios for
+all fifteen suites, see [the peak RSS report](OCTANE_RSS_2026-10-31.md).
+
 ## Measurement contract
 
 This comparison runs the unchanged stock Octane workloads, not quick
