@@ -37,6 +37,10 @@
     var BUFFER_BACKING_EXTERNAL_FLAG = HeapRecords.KernelConstants.BUFFER_BACKING_EXTERNAL_FLAG;
     var LARGE_BUFFER_BYTES = HeapRecords.KernelConstants.LARGE_BUFFER_BYTES;
     var PREFERRED_NATIVE_REGION_BYTES = HeapRecords.KernelConstants.PREFERRED_NATIVE_REGION_BYTES;
+    var NATIVE_LARGE_SPAN_RESERVE_SHIFT = HeapRecords.KernelConstants.NATIVE_LARGE_SPAN_RESERVE_SHIFT;
+    /* Internal transition, consumed by executeInterpreterTransitionsKernel;
+     * unlike observable exits this never returns to the embedder. */
+    var NATIVE_INTERNAL_RESUME = 4;
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
@@ -164,6 +168,7 @@
     RuntimeSupportLayout.CALLER_KEY = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.ARGUMENTS_KEY = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.NULL_PROPERTY_MESSAGE = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.ARRAY_PUSH_GENERIC = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_ARRAY_PUSH_GENERIC = RuntimeSupportLayout.ARRAY_PUSH_GENERIC;
     RuntimeSupportLayout.ARRAY_SLICE_GENERIC = RuntimeSupportLayout.COUNT++;
@@ -1134,6 +1139,11 @@
                     0, registerAddress, arrayGetKeyOperand);
                 var arrayGetSupported = 1;
                 var arrayGetObjectTag = load32(arrayGetObjectCell);
+                if (arrayGetObjectTag === VALUE_TAG_UNDEFINED ||
+                        arrayGetObjectTag === VALUE_TAG_NULL) {
+                    return propertyAccessTypeErrorKernel(heapBase, state, frame,
+                        pc, opcode, initialBudget - budget, stringSupport);
+                }
                 if (arrayGetObjectTag !== VALUE_TAG_REFERENCE) {
                     if (arrayGetObjectTag !== VALUE_TAG_INT32) {
                         if (arrayGetObjectTag !== VALUE_TAG_DOUBLE) {
@@ -4469,6 +4479,11 @@
                     propertyKeyIndex * VALUE_CELL_BYTES;
                 var propertyOperandsValid = 1;
                 var propertyObjectTag = load32(propertyObjectCell);
+                if (propertyObjectTag === VALUE_TAG_UNDEFINED ||
+                        propertyObjectTag === VALUE_TAG_NULL) {
+                    return propertyAccessTypeErrorKernel(heapBase, state, frame,
+                        pc, opcode, initialBudget - budget, stringSupport);
+                }
                 if (propertyObjectTag !== VALUE_TAG_REFERENCE) {
                     if (propertyObjectTag !== VALUE_TAG_INT32) {
                         if (propertyObjectTag !== VALUE_TAG_DOUBLE) {
@@ -11392,6 +11407,26 @@
             RUNTIME_SUPPORT_TYPE_ERROR_NAME, stringSupport);
     }
 
+    function propertyAccessTypeErrorKernel(heapBase, state, frame, pc, opcode,
+                                           instructions, stringSupport) {
+        /* A private tagged scratch cell leaves the original operands intact
+         * if error/catch-environment allocation needs a collection and retry. */
+        var errorCell = engineScratchLeftAddress(heapBase, state);
+        if (allocateErrorKernel(heapBase, state, errorCell,
+                valueCellReference(0, vectorCellAddress(heapBase, stringSupport,
+                    RUNTIME_SUPPORT_NULL_PROPERTY_MESSAGE)),
+                RUNTIME_SUPPORT_TYPE_ERROR_PROTOTYPE,
+                RUNTIME_SUPPORT_TYPE_ERROR_NAME, stringSupport) === 0) {
+            return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (unwindExceptionKernel(heapBase, state, frame, errorCell) === 0) {
+            return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
+        setEngineInstructions(heapBase, state, instructions + 1);
+        setEngineExitReason(heapBase, state, NATIVE_INTERNAL_RESUME);
+        return NATIVE_INTERNAL_RESUME;
+    }
+
     function objectCreateKernel(
             heapBase, state, targetCell, registerAddress,
             argumentsVector, argumentCount) {
@@ -14777,6 +14812,24 @@
      * violates the self-hosting boundary and forces unnecessary collections.
      * Free records use their otherwise-unused mark word as a transient next
      * link while ownership belongs to this dispatcher. */
+    function executeInterpreterTransitionsKernel(heapBase, frame, platformServices,
+            arrayLengthKey, arrayPrototype, stringSupport, budget, state) {
+        var reason = NATIVE_INTERNAL_RESUME;
+        var completed = 0;
+        /* Reload dispatch locals only for a cold exceptional transition. No
+         * per-opcode flag, host callback or recursive native stack growth. */
+        while (reason === NATIVE_INTERNAL_RESUME) {
+            reason = interpreterKernel(heapBase, frame, platformServices,
+                arrayLengthKey, arrayPrototype, stringSupport, budget, state);
+            var count = engineInstructions(heapBase, state);
+            completed = completed + count;
+            budget = budget - count;
+            frame = engineCurrentFrame(heapBase, state);
+        }
+        setEngineInstructions(heapBase, state, completed);
+        return reason;
+    }
+
     function nativeExecutionKernel(heapBase, frame, platformServices,
                                    arrayLengthKey, arrayPrototype,
                                    stringSupport, budget, state) {
@@ -14828,7 +14881,7 @@
                     freeRegionEnd - FREE_RECORD_HEADER_BYTES);
             }
         }
-        var reason = interpreterKernel(
+        var reason = executeInterpreterTransitionsKernel(
             heapBase, frame, platformServices, arrayLengthKey,
             arrayPrototype, stringSupport, budget, state);
         var instructionsCompleted = engineInstructions(heapBase, state);
@@ -14854,15 +14907,23 @@
                     var maximumTailLimit = engineNativeMaximumLimit(
                         heapBase, state);
                     shouldCollect = 0;
-                    if (currentTailLimit >= maximumTailLimit) {
+                    if (currentTailLimit >= maximumTailLimit &&
+                            engineLargeReserveReleased(heapBase, state) !== 0) {
                         collectionCanResume = 0;
                     } else {
-                        var retryLimitGrowth = growNativeHeapLimitKernel(
-                            heapBase, state);
+                        if (currentTailLimit >= maximumTailLimit) {
+                            /* The reserve is placement policy, not a reduced
+                             * heap cap. After collection and a failed retry,
+                             * genuine small-object pressure may consume it. */
+                            setEngineLargeReserveReleased(heapBase, state, 1);
+                        } else {
+                            var retryLimitGrowth = growNativeHeapLimitKernel(
+                                heapBase, state);
+                        }
                         setEngineAllocationFailed(heapBase, state, 0);
                         collectionJustRan = 0;
                         frame = engineCurrentFrame(heapBase, state);
-                        reason = interpreterKernel(
+                        reason = executeInterpreterTransitionsKernel(
                             heapBase, frame, platformServices, arrayLengthKey,
                             arrayPrototype, stringSupport, budget, state);
                         instructionsCompleted = instructionsCompleted +
@@ -15072,7 +15133,7 @@
                 setEngineAllocationFailed(heapBase, state, 0);
                 collectionJustRan = 1;
                 frame = engineCurrentFrame(heapBase, state);
-                reason = interpreterKernel(
+                reason = executeInterpreterTransitionsKernel(
                     heapBase, frame, platformServices, arrayLengthKey,
                     arrayPrototype, stringSupport, budget, state);
                 instructionsCompleted = instructionsCompleted +
@@ -15134,11 +15195,32 @@
         return address;
     }
 
+    /* Keep the final eighth of the existing reservation unfragmented by
+     * sub-arena requests. Larger records can use it normally. Reclaimed
+     * interior regions remain available to every size class, and exhaustion
+     * after a full collection releases the preference rather than lowering
+     * usable capacity. This is nonmoving placement, not another allocation. */
+    function nativeTailAllocationLimitKernel(heapBase, state, bytes, limit) {
+        if (bytes >= PREFERRED_NATIVE_REGION_BYTES) return limit;
+        if (engineLargeReserveReleased(heapBase, state) !== 0) return limit;
+        var maximum = engineNativeMaximumLimit(heapBase, state);
+        /* Portable embedding owns growth/collection and has no standalone
+         * reservation bound. Do not turn its zero sentinel into a zero cap. */
+        if (maximum === 0) return limit;
+        var smallLimit = maximum - (maximum >> NATIVE_LARGE_SPAN_RESERVE_SHIFT);
+        if (limit > smallLimit) return smallLimit;
+        return limit;
+    }
+
     function reserveNativeAllocationKernel(heapBase, state, bytes) {
         var MINIMUM_RECORD_BYTES = 16;
         var RECORD_ALIGNMENT_MASK = 7;
         var current = engineHeapBump(heapBase, state);
         var currentLimit = engineHeapLimit(heapBase, state);
+        if (engineNativeRegionActive(heapBase, state) === 0) {
+            currentLimit = nativeTailAllocationLimitKernel(
+                heapBase, state, bytes, currentLimit);
+        }
 
         /* Validate the allocation before doing address arithmetic.  The old
          * `current + bytes <= limit` test could itself overflow and accept a
@@ -15241,6 +15323,8 @@
         var tailLimit = engineNativeTailLimit(heapBase, state);
         setEngineHeapBump(heapBase, state, tailBump);
         setEngineHeapLimit(heapBase, state, tailLimit);
+        tailLimit = nativeTailAllocationLimitKernel(
+            heapBase, state, bytes, tailLimit);
         if (tailBump >= HEAP_FIRST_RECORD) {
             if (tailBump <= tailLimit) {
                 if (bytes <= tailLimit - tailBump) return 1;
@@ -18314,6 +18398,8 @@
                 allocateObjectWithPrototypeKernel,
             allocateReferenceErrorKernel: allocateReferenceErrorKernel,
             allocateTypeErrorKernel: allocateTypeErrorKernel,
+            propertyAccessTypeErrorKernel: propertyAccessTypeErrorKernel,
+            executeInterpreterTransitionsKernel: executeInterpreterTransitionsKernel,
             allocateRegexpKernel: allocateRegexpKernel,
             allocateTypedArrayViewKernel: allocateTypedArrayViewKernel,
             arrayConcatKernel: arrayConcatKernel,
@@ -18446,6 +18532,7 @@
                 restoreContextActiveFrameKernel,
             returnFromBytecodeKernel: returnFromBytecodeKernel,
             reserveNativeAllocationKernel: reserveNativeAllocationKernel,
+            nativeTailAllocationLimitKernel: nativeTailAllocationLimitKernel,
             reservePortableRecordKernel: reservePortableRecordKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
@@ -18615,6 +18702,10 @@
                     RUNTIME_SUPPORT_ARGUMENTS_KEY: RuntimeSupportLayout.ARGUMENTS_KEY,
                     RUNTIME_SUPPORT_RESTRICTED_PROPERTY_MESSAGE: RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE,
                     PREFERRED_NATIVE_REGION_BYTES: PREFERRED_NATIVE_REGION_BYTES,
+                    NATIVE_LARGE_SPAN_RESERVE_SHIFT: NATIVE_LARGE_SPAN_RESERVE_SHIFT,
+                    ENGINE_LARGE_RESERVE_RELEASED: kernelConstantOverrides.ENGINE_LARGE_RESERVE_RELEASED,
+                    NATIVE_INTERNAL_RESUME: NATIVE_INTERNAL_RESUME,
+                    RUNTIME_SUPPORT_NULL_PROPERTY_MESSAGE: RuntimeSupportLayout.NULL_PROPERTY_MESSAGE,
                     INITIAL_ARRAY_CAPACITY: kernelConstantOverrides.INITIAL_ARRAY_CAPACITY,
                     MAX_VECTOR_LENGTH: kernelConstantOverrides.MAX_VECTOR_LENGTH,
                     BYTECODE_COMPACT8_FLAG: kernelConstantOverrides.BYTECODE_COMPACT8_FLAG,
@@ -19039,6 +19130,9 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.RESTRICTED_PROPERTY_MESSAGE),
             runtime.internStringAddress("restricted arguments property"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.NULL_PROPERTY_MESSAGE),
+            runtime.internStringAddress("cannot read property of null or undefined"));
         var typeofNames = ["undefined", "object", "boolean", "number",
                            "string", "function"];
         var typeofNameIndex = 0;

@@ -234,7 +234,8 @@
     var ENGINE_GC_STRESS_INTERVAL = ENGINE_GC_LIVE_BYTES + 4;
     var GC_STRESS_DEFAULT_INTERVAL = 1000000;
     var ENGINE_GC_STRESS_REMAINING = ENGINE_GC_STRESS_INTERVAL + 4;
-    var ENGINE_STATE_BYTES = ENGINE_GC_STRESS_REMAINING + 4;
+    var ENGINE_LARGE_RESERVE_RELEASED = ENGINE_GC_STRESS_REMAINING + 4;
+    var ENGINE_STATE_BYTES = ENGINE_LARGE_RESERVE_RELEASED + 4;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -301,7 +302,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 88;
+    Records.NativeInterpreterContractVersion = 90;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
@@ -471,10 +472,12 @@
         ENGINE_GC_LIVE_BYTES: ENGINE_GC_LIVE_BYTES,
         ENGINE_GC_STRESS_INTERVAL: ENGINE_GC_STRESS_INTERVAL,
         ENGINE_GC_STRESS_REMAINING: ENGINE_GC_STRESS_REMAINING,
+        ENGINE_LARGE_RESERVE_RELEASED: ENGINE_LARGE_RESERVE_RELEASED,
         GC_STRESS_DEFAULT_INTERVAL: GC_STRESS_DEFAULT_INTERVAL,
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
         MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
         PREFERRED_NATIVE_REGION_BYTES: 64 * 1024,
+        NATIVE_LARGE_SPAN_RESERVE_SHIFT: 3,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
         STRING_LATIN1_FLAG: STRING_LATIN1_FLAG,
         VECTOR_SHARED_METADATA_FLAG: VECTOR_SHARED_METADATA_FLAG,

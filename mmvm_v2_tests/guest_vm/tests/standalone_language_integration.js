@@ -203,6 +203,28 @@ if (standaloneNamedClosure()() !== 42 ||
 }
 
 print("standalone integration: compiler platform services");
+/* Browser/platform probes routinely catch property-access errors across call
+ * frames. Both computed and constant keys must throw in the guest, including
+ * under finally, rather than request host-language semantic support. */
+function standaloneProbeProperty(base, key) { return base[key]; }
+var standalonePropertyErrors = 0, standaloneProbeFinalized = false;
+try {
+    standaloneProbeProperty(undefined, "prototype");
+} catch (standaloneComputedError) {
+    if (!(standaloneComputedError instanceof TypeError)) throw standaloneComputedError;
+    standalonePropertyErrors++;
+} finally {
+    standaloneProbeFinalized = true;
+}
+try {
+    (function () { return null.prototype; }());
+} catch (standaloneConstantError) {
+    if (!(standaloneConstantError instanceof TypeError)) throw standaloneConstantError;
+    standalonePropertyErrors++;
+}
+if (standalonePropertyErrors !== 2 || !standaloneProbeFinalized) {
+    throw new Error("native property exception/catch/finally transition is incorrect");
+}
 var standaloneSignedKeys = Object.create({"-7": "inherited"});
 var standaloneSignedIndex = -1;
 standaloneSignedKeys[standaloneSignedIndex] = "own";

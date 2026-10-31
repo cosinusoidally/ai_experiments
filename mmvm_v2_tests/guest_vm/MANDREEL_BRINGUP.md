@@ -200,3 +200,62 @@ diagnostic wall time was 663.16 s. This is still not a Mandreel pass.
 Executable program records require contiguous storage, so bounded compiler
 metadata alone is insufficient: allocation policy must preserve large spans
 against fragmentation by small records, within the same nonmoving heap cap.
+
+### Native large-span placement policy (validation in progress)
+
+Small tail allocations now prefer the first seven eighths of the existing
+maximum reservation. Requests at least as large as the normal 64 KiB native
+arena may use the final eighth normally. Interior reclaimed free regions
+remain available regardless of request size. This keeps one tail span from
+being filled with small, interleaved AST/object records before later code and
+buffer allocations need contiguous storage. It allocates no extra memory,
+does not relocate live objects, and does not change the 512 MiB default cap.
+
+This is a preference, not an artificial capacity limit. If an instruction
+still cannot allocate immediately after collection at the maximum logical
+limit, the dispatcher releases the preference once and retries. It therefore
+does not repeatedly collect just to enforce placement, or reject otherwise
+usable space for a genuinely large small-object graph. Portable embedders
+with no standalone reservation bound retain their previous allocation path.
+The release state is a named engine field; contract 89 rejects stale kernels.
+
+The first build check caught the portable zero-limit sentinel being treated
+as a cap. That was fixed before acceptance: the fresh Node image then wrote
+in 3.824 s. Standalone integration, 24-round/48-collection GC stress, five
+quick Octane checks and all 751 selected ch12/ch13 Test262 cases pass (runner
+elapsed 45.907 s). The full unchanged Mandreel run and final broad regression
+gate are still pending; no score or complete-suite pass is claimed yet.
+
+### Allocation barrier passed; catchable property errors
+
+The placement-policy run compiles and adopts `global_init` successfully
+(35.585 s within the diagnostic wrapper). It then executes far enough to
+reach the benchmark's browser feature probe. That probe intentionally reads
+`prototype` from an undefined value inside a try/catch. The native engine
+incorrectly reports unsupported GET_PROPERTY instead of throwing the guest
+TypeError. No browser API stub or benchmark change is appropriate.
+
+This run exits for semantics, not allocation: allocation flag zero, thirteen
+collections, last-GC live 127777696 bytes, tail 480568312 of 536870912 bytes.
+Diagnostic wall 833.08 s, user CPU 817.74 s, debugger-tree RSS 503808 KiB.
+The slower compilation versus the previous 663.16 s allocation failure is
+recorded explicitly; successful placement is not a loading-speed win. The
+latest heap still contains much uncollected temporary storage, so occupied
+record bytes must not be mistaken for reachable/live bytes.
+
+Both computed and constant-key null/undefined reads now allocate a guest
+TypeError and unwind guest handlers. A cold internal transition restarts
+dispatch at the caught frame entirely inside native execution. It preserves
+instruction accounting, does not recurse on the native stack, and adds no
+per-opcode exception flag or host-language callback. A private scratch value
+leaves source operands intact if allocation must collect and retry. The
+existing integration workload checks cross-frame catch/finally and TypeError
+identity. Contract 90 covers the new support-table/transition contract.
+
+Working-point validation: integration passes; GC stress passes 24 rounds /
+48 native collections; Richards/DeltaBlue/Crypto/RayTrace/EarleyBoyer pass
+quick correctness; selected Test262 ch11/ch12/ch13 passes 2071/2071 with
+zero failures, not run or timeouts. Runner elapsed 109.405 s versus 97.63 s
+at the earlier packed-word checkpoint. The fresh Node image writes in
+3.903 s. The next full unchanged Mandreel attempt and final broad gate remain
+pending. There is still no stock Mandreel score at this checkpoint.
