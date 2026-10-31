@@ -2825,6 +2825,17 @@
         this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
             function (receiver) { return runtime.toString(receiver).toUpperCase(); },
             "intrinsic", NativeIntrinsics.STRING_TO_UPPER_CASE);
+        /* ES5.1 permits the locale methods to use the ordinary case mapping.
+         * Keep them distinct callable objects but share the native
+         * implementation; no host locale service or Intl API is required. */
+        this.stringMethods.toLocaleLowerCase = this.makeNativeFunction(
+            "String.toLocaleLowerCase",
+            function (receiver) { return runtime.toString(receiver).toLowerCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_LOWER_CASE);
+        this.stringMethods.toLocaleUpperCase = this.makeNativeFunction(
+            "String.toLocaleUpperCase",
+            function (receiver) { return runtime.toString(receiver).toUpperCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_UPPER_CASE);
         this.stringMethods.trim = this.makeNativeFunction("String.trim",
             function (receiver) { return runtime.toString(receiver).replace(/^\s+|\s+$/g, ""); });
         if (this.stringPrototype) {

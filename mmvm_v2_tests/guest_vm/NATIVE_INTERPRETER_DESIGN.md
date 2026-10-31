@@ -197,7 +197,13 @@ remaining-stress count remains in shared engine state and is not cached.
 Callable diagnostic state is meaningful on an unsupported exit, not on every
 successful instruction. Generic exits clear that state on their cold path;
 call entry and accessor-call entry initialize it before invoking helpers.
-Explicit numeric failures and call failures use a detail-preserving exit.
+Explicit numeric failures, computed-property failures and call failures use
+a detail-preserving exit. Rejected computed reads encode the receiver and
+key kinds using the named property-pair base and value-kind radix. Reference
+kinds additionally encode the heap record type. This distinguishes, for
+example, an ordinary object's signed numeric key from an array offset without
+requiring a slower hosted replay. The encoding is diagnostic only; it does
+not change property semantics or add writes to successful reads.
 This avoids a diagnostic write per ordinary opcode without attributing a stale
 call rejection to a later unrelated failure.
 

@@ -97,6 +97,7 @@ function guestStandaloneNormalize(path) {
 var GuestStandalonePath = {
     sep: "/",
     delimiter: ":",
+    dirname: guestStandaloneDirname,
     normalize: guestStandaloneNormalize,
     join: function () {
         var value = "";
@@ -120,11 +121,35 @@ var GuestStandalonePath = {
     }
 };
 
+/* Node's ancestor search paths, exposed separately from module loading so
+ * tools can construct a module's lookup paths without loading a package. */
+var GuestStandaloneModule = {
+    _nodeModulePaths: function (directory) {
+        if (typeof directory !== "string") {
+            throw new TypeError("module search directory must be a string");
+        }
+        var current = GuestStandalonePath.resolve(directory);
+        var paths = [];
+        while (true) {
+            var slash = current.lastIndexOf("/");
+            var basename = current.substring(slash + 1);
+            if (basename !== "node_modules") {
+                paths.push((current === "/" ? "" : current) +
+                           "/node_modules");
+            }
+            if (current === "/") break;
+            current = guestStandaloneDirname(current);
+        }
+        return paths;
+    }
+};
+
 function guestStandaloneBuiltin(request) {
     if (request === "fs") return GuestStandaloneFs;
     if (request === "net") return NodeNet;
     if (request === "http") return NodeHttp;
     if (request === "path") return GuestStandalonePath;
+    if (request === "module") return GuestStandaloneModule;
     return null;
 }
 

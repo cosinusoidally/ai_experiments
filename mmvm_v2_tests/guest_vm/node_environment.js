@@ -1058,13 +1058,60 @@
         return path;
     };
 
+    GuestNodeEnvironment.prototype.makeModule = function () {
+        var environment = this;
+        var moduleApi = this.object({});
+        this.runtime.setProperty(moduleApi, "_nodeModulePaths",
+            this.makeFunction("module._nodeModulePaths", function (receiver, args) {
+                if (typeof args[0] !== "string") {
+                    throw new TypeError("module search directory must be a string");
+                }
+                var cwd = environment.nodeHost ? environment.hostProcess.cwd() :
+                    environment.environmentValue("PWD") || ".";
+                var directory = String(args[0]);
+                var current = normalizePosixPath(directory.charAt(0) === "/" ?
+                    directory : cwd + "/" + directory);
+                var paths = [];
+                while (true) {
+                    var slash = current.lastIndexOf("/");
+                    if (current.substring(slash + 1) !== "node_modules") {
+                        paths.push((current === "/" ? "" : current) +
+                                   "/node_modules");
+                    }
+                    if (current === "/") break;
+                    current = environment.dirname(current);
+                }
+                var result = environment.runtime.makeArray(paths.length);
+                var index = 0;
+                while (index < paths.length) {
+                    environment.runtime.arraySet(result, index, paths[index]);
+                    index++;
+                }
+                return result;
+            }));
+        return moduleApi;
+    };
+
     GuestNodeEnvironment.prototype.installGlobals = function () {
         var environment = this;
         var fs = this.makeFs();
         var http = this.makeHttp();
         var net = this.makeNet();
         var path = this.makePath();
-        this.builtinModules = {fs: fs, http: http, net: net, path: path};
+        var moduleApi = this.makeModule();
+        this.builtinModules = {fs: fs, http: http, net: net, path: path,
+                              module: moduleApi};
+        /* The module cache is embedder-owned. Its exports must remain roots
+         * even before the guest first requires them. Bootstrap services are
+         * replaced by guest services before snapshotting: retaining their
+         * host objects would leave stale root slots in the standalone image. */
+        if (!this.snapshotBootstrap) {
+            this.keep(fs);
+            this.keep(http);
+            this.keep(net);
+            this.keep(path);
+            this.keep(moduleApi);
+        }
 
         function publish(name, value) {
             environment.runtime.setGlobal(name, value);

@@ -2,6 +2,16 @@
 
 ## Objective
 
+### 2026-10-31 follow-up: Typescript stock pass
+
+The unchanged Typescript benchmark now passes standalone stock validation:
+initial score **889**, wall **156.23 s**, peak RSS **532060 KiB**. General
+fixes expose module search paths, install locale case methods on the existing
+case intrinsics, and handle signed ordinary-object property names without a
+host transition. There are now fourteen known stock-passing suites; Mandreel
+remains unresolved. This is a follow-up, not a new full fifteen-suite sweep.
+See [Typescript bring-up and validation](guest_vm/TYPESCRIPT_BRINGUP.md).
+
 ### 2026-10-31 follow-up: PdfJS stock pass
 
 PdfJS now passes its unchanged stock canvas-log length/hash checks under

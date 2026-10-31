@@ -1,16 +1,19 @@
 /* Compile a source file without executing it, reporting optimization coverage.
  * Run from mmvm_v2_tests on Node, js_min, or the standalone guest shell:
  *   node guest_vm/tools/inspect_bytecode_optimization.js [--functions] file.js
+ *   node guest_vm/tools/inspect_bytecode_optimization.js --instruction ADD 169 file.js
+ * The instruction search reports candidates, not an execution trace.
  * Use /dev/stdin to inspect source extracted by another trusted JS tool.
  * This inspects current compiler source, not a snapshot's embedded compiler.
  */
 (function (shellArguments) {
     var nodeHost = typeof module !== "undefined" && module.exports;
-    var args, Compiler, Parser, readSource, report;
+    var args, Compiler, Parser, Bytecode, readSource, report;
     if (nodeHost) {
         args = process.argv.slice(2);
         Compiler = require("../compiler.js");
         Parser = require("../parser.js");
+        Bytecode = require("../bytecode.js");
         readSource = function (name) { return require("fs").readFileSync(name, "utf8"); };
         report = function (line) { console.log(line); };
     } else {
@@ -25,12 +28,24 @@
         load("guest_vm/compiler.js");
         Compiler = GuestVMCompiler;
         Parser = GuestVMParser;
+        Bytecode = GuestVMBytecode;
         readSource = read;
         report = print;
     }
     var detailed = args[0] === "--functions";
     if (detailed) args = args.slice(1);
-    if (args.length !== 1) throw new Error("expected [--functions] source-file");
+    var instructionName = null, instructionPC = -1;
+    if (args[0] === "--instruction") {
+        instructionName = args[1];
+        instructionPC = Number(args[2]);
+        if (!Bytecode[instructionName] || instructionPC < 0 ||
+                instructionPC !== Math.floor(instructionPC)) {
+            throw new Error("expected --instruction OPCODE PC source-file");
+        }
+        args = args.slice(3);
+    }
+    if (args.length !== 1) throw new Error(
+        "expected [--functions] [--instruction OPCODE PC] source-file");
     var totals = {programs: 0, analyzed: 0, stateLimited: 0, workLimited: 0,
                   fused: 0, redundant: 0, conversions: 0};
     function describe(record) {
@@ -43,6 +58,15 @@
         return fields.join(" ");
     }
     function inspect(program) {
+        if (instructionName && program.code[instructionPC] === Bytecode[instructionName]) {
+            var locationPC = instructionPC;
+            while (locationPC >= 0 && !program.sourceLocations[locationPC]) locationPC--;
+            var location = program.sourceLocations[locationPC];
+            report("instruction candidate " + (program.name || "<script/anonymous>") +
+                " pc=" + instructionPC + " location=" +
+                (location ? location.filename + ":" + location.line + ":" +
+                    location.column : "<unknown>"));
+        }
         var stats = program.optimizationStats || {};
         totals.programs++;
         if (stats.int32AnalysisBlocks) totals.analyzed++;

@@ -10,6 +10,18 @@ The source trees under `../../js_tests` are read-only inputs.  Generated
 snapshots, logs, executables, and temporary web roots belong in the ignored
 `artifacts/` directory and are never checked in.
 
+## 2026-10-31 Typescript follow-up
+
+The unchanged stock Typescript suite now passes under standalone js_runner
+(initial score 889). The earlier missing `module` import is resolved with a
+guest-owned ancestor module-search-path API. Missing locale case methods use
+the existing native case-conversion intrinsics, and signed ordinary-object
+property keys use the existing canonical decimal/hash lookup rather than
+falling back to a JavaScript host. No benchmark source is patched. See
+[Typescript bring-up and validation](guest_vm/TYPESCRIPT_BRINGUP.md) for the
+original failure chain, scope limitations and measured validation. Mandreel
+remains unresolved; this follow-up is not a new full boundary audit.
+
 ## 2026-10-31 PdfJS follow-up
 
 The unchanged stock PdfJS suite now runs to its original checksum validation

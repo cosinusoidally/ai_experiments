@@ -640,6 +640,7 @@
         var CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE = 6000;
         var CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE = 7000;
         var CALL_DIAGNOSTIC_GC_TYPE_RADIX = 256;
+        var CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE = 15000;
 
         var RECORD_TYPE = 0;
         var RECORD_SIZE = 4;
@@ -1506,7 +1507,21 @@
                     if (arrayGetSupported === 3) arrayGetSupported = 4;
                 }
                 if (arrayGetSupported === 0) {
-                    return unsupportedExitKernel(
+                    var rejectedReceiverKind = arrayGetObjectTag;
+                    var rejectedKeyKind = arrayGetKeyTag;
+                    if (rejectedReceiverKind === VALUE_TAG_REFERENCE) {
+                        rejectedReceiverKind = CALL_DIAGNOSTIC_REFERENCE_KIND_BASE +
+                            recordType(heapBase, valueCellReference(0, arrayGetObjectCell));
+                    }
+                    if (rejectedKeyKind === VALUE_TAG_REFERENCE) {
+                        rejectedKeyKind = CALL_DIAGNOSTIC_REFERENCE_KIND_BASE +
+                            recordType(heapBase, valueCellReference(0, arrayGetKeyCell));
+                    }
+                    setEngineCallRejectReason(heapBase, state,
+                        CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE +
+                        rejectedReceiverKind * CALL_DIAGNOSTIC_VALUE_KIND_RADIX +
+                        rejectedKeyKind);
+                    return unsupportedDiagnosticExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
                 if (arrayGetSupported === 4) {
@@ -1737,7 +1752,12 @@
                         } else arraySetSupported = 0;
                     }
                 }
-                if (arraySetIndex < 0) arraySetSupported = 0;
+                /* Ordinary-object writes above have already converted the
+                 * signed integer to a property name. Only indexed storage
+                 * must reject a negative offset. */
+                if (arraySetSupported <= 2 && arraySetIndex < 0) {
+                    arraySetSupported = 0;
+                }
                 var arraySetVector = 0;
                 if (arraySetSupported === 1) {
                     arraySetVector = arrayElements(heapBase, arraySetObject);
@@ -18170,7 +18190,9 @@
 
     function numericPropertyGetKernel(heapBase, state, targetCell, object,
                                       index, sourceCell, operation) {
-        if (index < 0) return 0;
+        /* These are ordinary property names, not dense-array offsets. Signed
+         * integers, including INT32_MIN, have canonical decimal names too;
+         * the shared decimal helpers deliberately handle the negative domain. */
         var digitCount = integerDecimalLengthKernel(index);
         var hash = STRING_HASH_OFFSET_BASIS;
         var digitIndex = 0;

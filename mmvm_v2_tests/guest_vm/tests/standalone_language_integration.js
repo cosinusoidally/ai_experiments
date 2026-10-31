@@ -184,5 +184,25 @@ if (standaloneNamedClosure()() !== 42 ||
     throw new Error("dynamic closure lookup or primitive string conversion is incorrect");
 }
 
+print("standalone integration: compiler platform services");
+var standaloneSignedKeys = Object.create({"-7": "inherited"});
+var standaloneSignedIndex = -1;
+standaloneSignedKeys[standaloneSignedIndex] = "own";
+standaloneSignedKeys[-2147483648] = "minimum";
+if (standaloneSignedKeys[standaloneSignedIndex] !== "own" ||
+        standaloneSignedKeys[-7] !== "inherited" ||
+        standaloneSignedKeys[-2147483648] !== "minimum" ||
+        standaloneSignedKeys[-9] !== undefined) {
+    throw new Error("signed ordinary-object property keys are incorrect");
+}
+var standaloneModulePaths = require("module")._nodeModulePaths("/one/node_modules/two");
+if (standaloneModulePaths.join("|") !==
+        "/one/node_modules/two/node_modules|/one/node_modules|/node_modules" ||
+        "compiler_input.ts".toLocaleUpperCase() !== "COMPILER_INPUT.TS" ||
+        "COMPILER_INPUT.TS".toLocaleLowerCase() !== "compiler_input.ts" ||
+        String.prototype.toLocaleUpperCase === String.prototype.toUpperCase) {
+    throw new Error("module search paths or locale case method installation is incorrect");
+}
+
 print(require("./heap_access_test.js")(require("../heap.js")));
 print("standalone integration: passed");
