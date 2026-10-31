@@ -281,20 +281,20 @@
 
     function rewriteInstructions(program, replacements) {
         var code = program.code, pc, opcode, operand;
-        var output = [], locations = [], relocated = {}, replacement;
+        var builder = new op.WordBuffer(program.packedWords);
+        var locations = [], relocated = {}, replacement;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
-            relocated[pc] = output.length;
+            relocated[pc] = builder.length;
             replacement = replacements[pc];
             if (!replacement) {
-                replacement = code.slice(pc, pc + op.WIDTHS[code[pc]]);
+                replacement = op.copyWords(code, pc, pc + op.WIDTHS[code[pc]]);
             }
             if (replacement.length && program.sourceLocations) {
-                locations[output.length] = program.sourceLocations[pc];
+                locations[builder.length] = program.sourceLocations[pc];
             }
-            for (operand = 0; operand < replacement.length; operand++) {
-                output.push(replacement[operand]);
-            }
+            builder.append(replacement);
         }
+        var output = builder.finish();
         relocated[code.length] = output.length;
         for (pc = 0; pc < output.length; pc += op.WIDTHS[output[pc]]) {
             opcode = output[pc];
@@ -359,7 +359,7 @@
                     (producerSnapshotsInputs(producer) ||
                      (destination !== code[previous + 2] && destination !== code[previous + 3]))) {
                     var rewritten = replacements[previous] ||
-                        code.slice(previous, previous + op.WIDTHS[producer]);
+                        op.copyWords(code, previous, previous + op.WIDTHS[producer]);
                     rewritten[1] = destination;
                     replacements[previous] = rewritten;
                     if (opcode === op.MOVE) replacements[pc] = [];

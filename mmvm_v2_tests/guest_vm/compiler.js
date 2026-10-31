@@ -20,7 +20,17 @@
         this.consumeAst = !!options && options.consumeAst === true;
         this.finishFunction = options && options.finishFunction || null;
         this.captureLocations = !options || options.captureLocations !== false;
-        this.code = [];
+        this.packedWords = !!options && options.packedWords === true;
+        this.captureHints = !options || options.captureHints !== false;
+        this.reuseStatementTemps = !!options && options.reuseStatementTemps === true;
+        if (this.reuseStatementTemps && this.captureHints) {
+            throw new Error("temporary reuse requires hint capture to be disabled");
+        }
+        this.temporaryScopeActive = false;
+        this.statementTemporaries = this.reuseStatementTemps ? [] : null;
+        this.freeTemporaryRegisters = this.reuseStatementTemps ? [] : null;
+        if (this.reuseStatementTemps) this.allocate = this.allocateReusable;
+        this.code = new op.WordBuffer(this.packedWords);
         this.constants = [];
         this.primitiveConstantIndexes = {};
         this.emptyArgumentConstant = -1;
@@ -78,6 +88,25 @@
         var register = this.registerCount;
         this.registerCount++;
         return register;
+    };
+    Compiler.prototype.allocatePersistentRegister = Compiler.prototype.allocate;
+
+    /* Only whole statements release temporaries. Loop/handler/switch state
+     * remains live throughout its containing statement. Named bindings and
+     * preloaded constants always receive persistent, non-reused slots. */
+    Compiler.prototype.allocateReusable = function () {
+        if (!this.temporaryScopeActive) return this.allocatePersistentRegister();
+        var register = this.freeTemporaryRegisters.length ?
+            this.freeTemporaryRegisters.pop() : this.allocatePersistentRegister();
+        this.statementTemporaries.push(register);
+        return register;
+    };
+
+    Compiler.prototype.releaseStatementTemporaries = function () {
+        this.temporaryScopeActive = false;
+        while (this.statementTemporaries.length) {
+            this.freeTemporaryRegisters.push(this.statementTemporaries.pop());
+        }
     };
 
     Compiler.prototype.allocateBlock = function (count) {
@@ -143,16 +172,12 @@
         if (this.captureLocations && this.currentLocation) {
             this.sourceLocations[position] = this.currentLocation;
         }
-        var index = 0;
-        while (index < arguments.length) {
-            this.code.push(arguments[index]);
-            index++;
-        }
+        this.code.append(arguments);
         return position;
     };
 
     Compiler.prototype.patch = function (position, value) {
-        this.code[position] = value;
+        this.code.words[position] = value;
     };
 
     Compiler.prototype.compile = function (program, preserveCompletionValue) {
@@ -184,7 +209,9 @@
         }
         while (index < program.body.length) {
             var statement = program.body[index];
+            if (this.reuseStatementTemps) this.temporaryScopeActive = true;
             this.compileStatement(statement);
+            if (this.reuseStatementTemps) this.releaseStatementTemporaries();
             /* All whole-body analyses precede lowering. Release completed
              * root statements only; nested finally bodies may be replayed
              * along multiple control-flow paths and must remain intact. */
@@ -193,7 +220,8 @@
         }
         this.emit(op.RETURN, this.completionRegister < 0 ?
                   this.emitConstant(undefined) : this.completionRegister);
-        return optimizer.optimize({code: this.code, constants: this.constants,
+        return optimizer.optimize({code: this.code.finish(), constants: this.constants,
+                packedWords: this.packedWords,
                 constantRegisters: this.constantRegisters,
                 registerHints: this.registerHints,
                 registerCount: this.registerCount, parameters: [], locals: [],
@@ -234,6 +262,9 @@
             (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters,
             {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
+             packedWords: this.packedWords,
+             captureHints: this.captureHints,
+             reuseStatementTemps: this.reuseStatementTemps,
              captureLocations: this.captureLocations});
         if (directEval) {
             /* Sloppy eval may introduce a new var binding in this activation
@@ -294,7 +325,7 @@
         var constant = this.constant(value);
         var target = this.constantRegisters[constant];
         if (target === undefined) {
-            target = this.allocate();
+            target = this.allocatePersistentRegister();
             this.constantRegisters[constant] = target;
         }
         return target;
@@ -870,7 +901,9 @@
             this.allocate() : requestedTarget;
         if (reference.kind === "global") {
             this.emit(op.GET_GLOBAL, target, reference.name);
-            this.registerHints[target] = "global:" + this.constants[reference.name];
+            if (this.captureHints) {
+                this.registerHints[target] = "global:" + this.constants[reference.name];
+            }
         } else if (reference.kind === "local") {
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
         } else if (reference.kind === "register") {
@@ -879,10 +912,12 @@
             this.emit(op.GET_NAME, target, reference.name);
         } else if (reference.kind === "constantProperty") {
             this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
-            var objectHint = this.registerHints[reference.object];
-            var propertyName = this.constants[reference.key];
-            this.registerHints[target] = objectHint === "global:Math" ?
-                "math:" + propertyName : "property:" + propertyName;
+            if (this.captureHints) {
+                var objectHint = this.registerHints[reference.object];
+                var propertyName = this.constants[reference.key];
+                this.registerHints[target] = objectHint === "global:Math" ?
+                    "math:" + propertyName : "property:" + propertyName;
+            }
         } else {
             this.emit(op.GET_PROPERTY, target, reference.object, reference.key);
         }

@@ -162,6 +162,50 @@
         op.NATIVE_REGISTER_MASKS[offsetOpcode] = registerMask;
     }
 
+    /* Compiler-owned integer streams. Public descriptors keep ordinary arrays
+     * by default; self-hosted compilation can request compact word storage.
+     * The builder's logical length is independent of its backing capacity. */
+    var INITIAL_WORD_CAPACITY = 32;
+    function WordBuffer(packed) {
+        this.packed = !!packed && typeof Int32Array === "function";
+        this.words = this.packed ? null : [];
+        this.length = 0;
+        this.capacity = 0;
+    }
+    WordBuffer.prototype.append = function (values) {
+        var index = 0;
+        if (!this.packed) {
+            while (index < values.length) this.words.push(values[index++]);
+            this.length = this.words.length;
+            return;
+        }
+        var required = this.length + values.length;
+        if (required > this.capacity) {
+            var capacity = this.capacity || INITIAL_WORD_CAPACITY;
+            while (capacity < required) capacity *= 2;
+            var replacement = new Int32Array(capacity);
+            if (this.length) replacement.set(this.words.subarray(0, this.length));
+            this.words = replacement;
+            this.capacity = capacity;
+        }
+        while (index < values.length) {
+            var value = values[index++];
+            if (value !== (value | 0)) throw new RangeError("invalid bytecode word");
+            this.words[this.length++] = value;
+        }
+    };
+    WordBuffer.prototype.finish = function () {
+        if (!this.packed) return this.words;
+        return this.words ? this.words.subarray(0, this.length) : new Int32Array(0);
+    };
+    op.WordBuffer = WordBuffer;
+    op.copyWords = function (words, start, end) {
+        if (typeof words.slice === "function") return words.slice(start, end);
+        var result = [], index = start;
+        while (index < end) result.push(words[index++]);
+        return result;
+    };
+
     root.GuestVMBytecode = op;
     if (typeof module !== "undefined" && module.exports) module.exports = op;
 }(this));

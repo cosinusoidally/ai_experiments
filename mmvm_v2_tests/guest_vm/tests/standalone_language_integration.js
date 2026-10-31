@@ -141,6 +141,24 @@ if (standaloneView.byteLength !== 6 || standaloneView[standaloneViewByteKey] !==
     throw new Error("typed view byte metadata is incorrect");
 }
 function StandaloneBoundExample(left, right) { this.sum = left + right; return this.sum; }
+var standaloneWordView = new Int32Array([1, 2, 3, 4, 5, 6]);
+standaloneWordView.set(standaloneWordView.subarray(0, 4), 2);
+if (standaloneWordView[2] !== 1 || standaloneWordView[5] !== 4) {
+    throw new Error("overlapping rightward typed copy is incorrect");
+}
+standaloneWordView.set(standaloneWordView.subarray(2, 6), 0);
+if (standaloneWordView[0] !== 1 || standaloneWordView[3] !== 4) {
+    throw new Error("overlapping leftward typed copy is incorrect");
+}
+var standaloneFloatBits = new ArrayBuffer(16);
+new Int32Array(standaloneFloatBits).set([0x1234, 0x7ff80000, 0, -2147483648]);
+var standaloneCopiedFloatBits = new ArrayBuffer(16);
+new Float64Array(standaloneCopiedFloatBits).set(new Float64Array(standaloneFloatBits));
+var standaloneCopiedWords = new Int32Array(standaloneCopiedFloatBits);
+if (standaloneCopiedWords[0] !== 0x1234 || standaloneCopiedWords[1] !== 0x7ff80000 ||
+        standaloneCopiedWords[2] !== 0 || standaloneCopiedWords[3] !== -2147483648) {
+    throw new Error("typed copy changed NaN payload or negative-zero bits");
+}
 var standaloneBoundReceiver = {};
 var standaloneBoundCall = StandaloneBoundExample.bind(standaloneBoundReceiver, 7);
 if (standaloneBoundCall(5) !== 12 || standaloneBoundReceiver.sum !== 12 ||

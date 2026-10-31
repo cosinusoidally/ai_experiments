@@ -38,6 +38,8 @@ exports.compile = function (source, filename, options) {
          captureLocations: captureLocations}).parseProgram();
     return selfHostedVerify(new SelfHostedCompiler(null, null, false,
         {consumeAst: true, captureLocations: captureLocations,
+         packedWords: true,
+         captureHints: false, reuseStatementTemps: true,
          finishFunction: options && options.finishFunction}).compile(ast));
 };
 

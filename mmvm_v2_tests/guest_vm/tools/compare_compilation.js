@@ -1,6 +1,7 @@
 /* Compare public mutable-AST compilation with consuming compilation using
  * current real source files. No golden bytecode, fixture edits or generated
- * files. This is a refactoring diagnostic, not a mandated optimizer shape.
+ * files. Consuming compilation also exercises packed words when typed arrays
+ * are available. This is a refactoring diagnostic, not a mandated optimizer shape.
  * Run from mmvm_v2_tests under Node or js_min, followed by source filenames. */
 (function (shellArguments) {
     var node = typeof module !== "undefined" && module.exports;
@@ -79,7 +80,8 @@
         var ast = new Parser(source, filename,
             {compactLiterals: true, shareIdentifiers: true, captureLocations: false}).parseProgram();
         return releaseAst(new Compiler(null, null, null,
-            {consumeAst: consume, captureLocations: false}).compile(ast));
+            {consumeAst: consume, captureLocations: false,
+             packedWords: consume && typeof Int32Array === "function"}).compile(ast));
     }
     var index = 0;
     while (index < args.length) {

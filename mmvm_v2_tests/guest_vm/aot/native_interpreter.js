@@ -8362,16 +8362,27 @@
         var targetKind = bufferViewKind(heapBase, targetView);
         if (targetKind === BUFFER_KIND_NATIVE) return 0;
         if (targetKind === BUFFER_KIND_ARRAY_BUFFER) return 0;
-        if (targetKind === BUFFER_KIND_FLOAT32) return 0;
-        if (targetKind === BUFFER_KIND_FLOAT64) return 0;
         var sourceCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 0);
         if (sourceCell === 0) return 0;
         if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) return 0;
         var sourceArray = valueCellReference(0, sourceCell);
-        if (recordType(heapBase, sourceArray) !== HEAP_TYPE_ARRAY) return 0;
-        var sourceVector = arrayElements(heapBase, sourceArray);
-        var sourceLength = vectorLength(heapBase, sourceVector);
+        var sourceVector = 0;
+        var sourceLength = 0;
+        var sourcePointer = 0;
+        if (recordType(heapBase, sourceArray) === HEAP_TYPE_BUFFER_VIEW) {
+            if (bufferViewKind(heapBase, sourceArray) !== targetKind) return 0;
+            sourceLength = bufferViewLength(heapBase, sourceArray);
+            sourcePointer = bufferBackingPointer(heapBase,
+                bufferViewBacking(heapBase, sourceArray));
+            if (sourcePointer === 0) return 0;
+            sourcePointer = sourcePointer + bufferViewOffset(heapBase, sourceArray);
+        } else {
+            if (recordType(heapBase, sourceArray) !== HEAP_TYPE_ARRAY) return 0;
+            if (targetKind === BUFFER_KIND_FLOAT32 || targetKind === BUFFER_KIND_FLOAT64) return 0;
+            sourceVector = arrayElements(heapBase, sourceArray);
+            sourceLength = vectorLength(heapBase, sourceVector);
+        }
         var targetOffset = 0;
         if (argumentCount > 1) {
             var offsetCell = programArgumentCellKernel(
@@ -8393,11 +8404,29 @@
         var pointer = bufferBackingPointer(heapBase, backing);
         if (pointer === 0) return 0;
         pointer = pointer + bufferViewOffset(heapBase, targetView);
-        var bytes = 1;
-        if (targetKind === BUFFER_KIND_UINT16) bytes = 2;
-        else if (targetKind === BUFFER_KIND_INT16) bytes = 2;
-        else if (targetKind === BUFFER_KIND_UINT32) bytes = 4;
-        else if (targetKind === BUFFER_KIND_INT32) bytes = 4;
+        var bytes = typedArrayElementBytesKernel(targetKind);
+        if (sourcePointer !== 0) {
+            /* Equal element kinds preserve exact bits, including float NaN
+             * payloads. Copy backwards for overlapping rightward moves. */
+            var copyTarget = pointer + targetOffset * bytes;
+            var copyBytes = sourceLength * bytes;
+            var copyIndex = 0;
+            var copyDistance = copyTarget - sourcePointer;
+            if (copyDistance > 0 && copyDistance < copyBytes) {
+                copyIndex = copyBytes;
+                while (copyIndex > 0) {
+                    copyIndex = copyIndex - 1;
+                    storeRaw8(copyTarget + copyIndex, loadRaw8(sourcePointer + copyIndex));
+                }
+            } else {
+                while (copyIndex < copyBytes) {
+                    storeRaw8(copyTarget + copyIndex, loadRaw8(sourcePointer + copyIndex));
+                    copyIndex = copyIndex + 1;
+                }
+            }
+            setValueCellUndefined(intrinsicTarget);
+            return 1;
+        }
         var index = 0;
         while (index < sourceLength) {
             var elementCell = vectorCellAddress(
@@ -16088,22 +16117,31 @@
         var sourceCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 2);
         var sourceVector = 0;
+        var sourceWordPointer = 0;
         var writeCount = 1;
         if (callable === 0) return 0;
         if (index < 0) return 0;
         if (sourceCell !== 0 && valueCellTag(0, sourceCell) === VALUE_TAG_REFERENCE) {
             var sourceArray = valueCellReference(0, sourceCell);
-            if (recordType(heapBase, sourceArray) !== HEAP_TYPE_ARRAY) return 0;
-            sourceVector = arrayElements(heapBase, sourceArray);
-            writeCount = vectorLength(heapBase, sourceVector);
-            /* This internal builder accepts dense integer arrays, not
-             * arbitrary array-like objects or coercing/accessor reads. Check
-             * the entire range before modifying the executable program. */
-            var checkedWord = 0;
-            while (checkedWord < writeCount) {
-                if (valueCellTag(0, vectorCellAddress(heapBase, sourceVector,
-                        checkedWord)) !== VALUE_TAG_INT32) return 0;
-                checkedWord = checkedWord + 1;
+            if (recordType(heapBase, sourceArray) === HEAP_TYPE_BUFFER_VIEW) {
+                if (bufferViewKind(heapBase, sourceArray) !== BUFFER_KIND_INT32) return 0;
+                sourceWordPointer = bufferBackingPointer(heapBase,
+                    bufferViewBacking(heapBase, sourceArray));
+                if (sourceWordPointer === 0) return 0;
+                sourceWordPointer = sourceWordPointer + bufferViewOffset(heapBase, sourceArray);
+                writeCount = bufferViewLength(heapBase, sourceArray);
+            } else {
+                if (recordType(heapBase, sourceArray) !== HEAP_TYPE_ARRAY) return 0;
+                sourceVector = arrayElements(heapBase, sourceArray);
+                writeCount = vectorLength(heapBase, sourceVector);
+                /* Dense integer arrays need validation; typed word views
+                 * already guarantee integer elements without coercion. */
+                var checkedWord = 0;
+                while (checkedWord < writeCount) {
+                    if (valueCellTag(0, vectorCellAddress(heapBase, sourceVector,
+                            checkedWord)) !== VALUE_TAG_INT32) return 0;
+                    checkedWord = checkedWord + 1;
+                }
             }
         } else if (value === INVALID_PROGRAM_INTEGER) return 0;
         var program = functionMetadata(heapBase, callable);
@@ -16138,7 +16176,14 @@
             setProgramBytecode(heapBase, program, writable);
             bytecode = writable;
         }
-        if (sourceVector === 0) {
+        if (sourceWordPointer !== 0) {
+            var copiedPackedWord = 0;
+            while (copiedPackedWord < writeCount) {
+                store32(bytecodeWordAddress(heapBase, bytecode, index + copiedPackedWord),
+                    loadRaw32(sourceWordPointer + copiedPackedWord * HEAP_WORD_BYTES));
+                copiedPackedWord = copiedPackedWord + 1;
+            }
+        } else if (sourceVector === 0) {
             store32(bytecodeWordAddress(heapBase, bytecode, index), value);
         } else {
             var copiedWord = 0;

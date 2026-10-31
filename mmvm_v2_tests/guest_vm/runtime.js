@@ -3994,8 +3994,13 @@
                 var program = programFor(args[0]);
                 var index = integer(args[1], "code index");
                 var source = args[2];
-                var isRange = source && source.guestType === "array";
-                var count = isRange ? runtime.arrayLength(source) : 1;
+                var isArrayRange = source && source.guestType === "array";
+                var isTypedRange = source && source.guestType === "typedArray" &&
+                    runtime.typedArraySupport.viewKind(source) ===
+                        runtime.typedArraySupport.constructor.Kinds.INT32;
+                var isRange = isArrayRange || isTypedRange;
+                var count = isArrayRange ? runtime.arrayLength(source) :
+                    isTypedRange ? runtime.typedArraySupport.viewLength(source) : 1;
                 if (index < 0 || index > program.code.length ||
                         count > program.code.length - index) {
                     throw new RangeError("bytecode index is out of bounds");

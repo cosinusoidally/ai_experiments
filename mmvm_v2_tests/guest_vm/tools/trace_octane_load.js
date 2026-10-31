@@ -2,7 +2,8 @@
  * Run with Node, js_min, or a standalone image, followed by octane_runner
  * arguments, for example: IMAGE guest_vm/tools/trace_octane_load.js Mandreel.
  * File-load timing includes guest parse/compile/top-level execution, not the
- * subsequently timed benchmark iterations. No per-operation hooks are added.
+ * subsequently timed benchmark iterations. Optional --compile-progress logs
+ * guest function compilation boundaries, never individual bytecode operations.
  */
 var traceOctaneGlobal = this;
 if (typeof load === "undefined") {
@@ -15,6 +16,31 @@ if (typeof load === "undefined") {
         traceOctaneVM.runInThisContext(
             traceOctaneFS.readFileSync(filename, "utf8"), {filename: filename});
     };
+}
+var traceOctaneArgs = traceOctaneGlobal.arguments;
+var traceOctaneArgumentIndex = 0;
+while (traceOctaneArgumentIndex < traceOctaneArgs.length) {
+    if (traceOctaneArgs[traceOctaneArgumentIndex] === "--compile-progress") {
+        traceOctaneArgs.splice(traceOctaneArgumentIndex, 1);
+        if (typeof GuestVMCompiler !== "function" ||
+                typeof GuestStandaloneFrontend === "undefined") {
+            throw new Error("compile progress requires the standalone frontend");
+        }
+        /* The snapshot frontend is primed with this constructor. Requiring
+         * compiler.js would create another module, not observe the seed. */
+        var traceOctaneCompiler = GuestVMCompiler;
+        var traceOctaneCompileFunction = traceOctaneCompiler.prototype.compileFunction;
+        traceOctaneCompiler.prototype.compileFunction = function (expression) {
+            var name = expression.name || "<anonymous>";
+            var started = new Date().getTime();
+            print("compile begin: " + name + "; statements=" + expression.body.body.length);
+            var result = traceOctaneCompileFunction.call(this, expression);
+            print("compile end: " + name + "; elapsed ms: " +
+                (new Date().getTime() - started));
+            return result;
+        };
+        print("guest compiler progress enabled");
+    } else traceOctaneArgumentIndex++;
 }
 var traceOctaneOriginalLoad = traceOctaneGlobal.load;
 traceOctaneGlobal.load = function (filename) {
