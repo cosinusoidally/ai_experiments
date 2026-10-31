@@ -5,12 +5,15 @@
 ### 2026-10-31 follow-up: PdfJS stock pass
 
 PdfJS now passes its unchanged stock canvas-log length/hash checks under
-standalone js_runner. Latest collector-corrected checkpoint score **738**,
-wall **20.97 s**, CPU **20.65 s**, peak RSS **254760 KiB**. Earlier
-checkpoints scored 800 and 813; the lower latest score is recorded rather
-than presenting the earlier high observation as current. This is a
-PdfJS follow-up, not a new full stock sweep. There are now thirteen known
-stock-passing suites; Mandreel and Typescript remain unresolved.
+standalone js_runner. In the fresh complete sweep it scores **776**,
+wall **19.45 s**, peak RSS **254752 KiB**. Earlier checkpoints scored
+800, 813 and 738; these remain historical observations, not the current
+comparison. All fifteen suites were attempted serially: **13 pass / 2 fail /
+0 timeout / 0 crash / 0 skip**. Node v24.14.1 with `--jitless` passes all
+fifteen. Mandreel reaches an allocation failure; Typescript requires the
+unimplemented platform module `module`. See the
+[complete October 31 jitless comparison](OCTANE_COMPARISON_2026-10-31.md)
+for every score, resource measurement and exact failure diagnostics.
 
 The fixes are general guest operations: typed-view byte metadata/copying,
 guest forEach/trim, heap-backed bound calls, native own-key enumeration,

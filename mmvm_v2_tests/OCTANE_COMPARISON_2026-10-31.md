@@ -41,11 +41,15 @@ Splay's suite score combines throughput and latency.
 
 ## Results
 
-The first batch completed at 10:09:22 UTC: **guest 13 passed / 1 semantic
-exit**, **Node --jitless 14 passed**. All thirteen previously working guest
-suites, including the newly brought-up PdfJS, pass the original stock checks.
-Mandreel's separate measurement is in progress; no aggregate guest Octane
-score is valid while suites remain failing or unfinished.
+The first batch completed at 10:09:22 UTC; the separate Mandreel batch ran
+10:11:16–10:21:38 UTC. All **30 engine/suite runs** completed:
+
+- **Guest: 13 passed / 2 failed / 0 timed out / 0 crashed / 0 skipped.**
+- **Node --jitless: 15 passed / 0 failed / 0 timed out / 0 crashed / 0 skipped.**
+
+All twelve previously working guest suites, plus the newly brought-up
+PdfJS, pass the original stock checks. No valid full guest Octane aggregate
+score exists while Mandreel and Typescript remain failing.
 
 | Suite | js_runner score/status | Node --jitless score | Node score advantage |
 | --- | ---: | ---: | ---: |
@@ -58,7 +62,7 @@ score is valid while suites remain failing or unfinished.
 | Splay, combined | 665 | 3840 | 5.77x |
 | NavierStokes | 280 | 923 | 3.30x |
 | PdfJS | 776 | 5042 | 6.50x |
-| Mandreel | measurement pending | 1489 | -- |
+| Mandreel | allocation exit at heap ceiling | 1489 | -- |
 | Gameboy | 1012 | 3824 | 3.78x |
 | CodeLoad | 96.6 | 19058 | 197.29x |
 | Box2D | 378 | 2089 | 5.53x |
@@ -76,6 +80,14 @@ Per-suite wall time / peak RSS (guest versus Node --jitless):
 - Splay: 4.10 s / 396672 KiB versus 2.37 s / 279284 KiB.
 - NavierStokes: 9.97 s / 24576 KiB versus 4.44 s / 49304 KiB.
 - PdfJS: 19.45 s / 254752 KiB versus 1.24 s / 104748 KiB.
+- Mandreel failure: 606.78 s / 532696 KiB versus the passing reference's
+  15.58 s / 92596 KiB. The guest reports CALL pc 112, intrinsic Array.push,
+  allocation failure set, 15 collections, live 106403568 bytes, tail
+  536688608, limit/maximum 536870912. This is an allocation failure, not
+  an absent CALL or Array.push implementation. Reported live data is only
+  about 101.5 MiB, so the observation alone does not establish that the live
+  JavaScript data inherently requires 512 MiB; large contiguous allocations,
+  representation cost and allocator pressure remain outstanding work.
 - Gameboy: 14.33 s / 111480 KiB versus 2.87 s / 78652 KiB.
 - CodeLoad: 31.12 s / 395008 KiB versus 2.14 s / 158392 KiB.
 - Box2D: 15.07 s / 113792 KiB versus 2.24 s / 65976 KiB.
@@ -112,3 +124,23 @@ now passes; comparison with a previous failing time is not a speedup ratio.
   (about 4.6% longer); self-hosted rebuild 110.05 s. No build-speed
   improvement is claimed. See guest_vm/PDFJS_BRINGUP.md for mechanisms and
   intermediate failures as well as successful checks.
+- Live standalone X11 validation completed serially at 320x240 with a
+  requested 20 FPS cap. Demos 1–7 each rendered for at least 15 seconds after
+  initialization, then closed cleanly through Escape. Their logged rates
+  were approximately 2.6–2.8, 2.3–2.6, 4.0–4.1, 3.8–3.9, 2.0–2.4,
+  1.6–1.8 and 2.7–2.9 FPS respectively. These are correctness/stability
+  checks, not evidence that those demos attain 20 FPS.
+- Demo8 initialized its game in 2058.5 ms, then ran rolling mode, garage and
+  free-drive auto pilot. Each latter mode rendered for 15 seconds before
+  proceeding. Garage logged 16.3, 19.6 and 20.0 FPS; auto-drive logged 19.4,
+  19.6 and 20.0 FPS. Captured garage and auto-drive frames were inspected;
+  the garage floor and car were present, with no observed missing-floor
+  artifact. Menu quit closed the connection and exited successfully.
+  These bounded observations are not a claim of indefinite crash freedom.
+- `net.js` and `node_web.js` each passed live localhost requests for an HTML
+  index, binary executable, directory listing and text file. File responses
+  were compared byte-for-byte with their temporary fixtures. Both servers
+  were then deliberately stopped; no server remains running.
+- No demo, external corpus, C source or generated artifact was changed or
+  checked in for this validation. All workloads ran serially; no threads or
+  additional parallel benchmark processes were introduced.

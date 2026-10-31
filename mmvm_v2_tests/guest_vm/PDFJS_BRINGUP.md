@@ -188,3 +188,23 @@ zero not run, zero timeouts. External wall 497.68 s, CPU 494.82 s, peak
 RSS 576552 KiB; runner 497.095636 s, summed per-test time 480.131866 s.
 The complete earlier contract-86 pass is retained above. No corpus, demo or
 C source was modified to obtain these results.
+
+### Final stock sweep and live regression checks (2026-10-31)
+
+The final unchanged stock PdfJS run scores **776**, wall **19.45 s**, peak
+RSS **254752 KiB**, versus Node v24.14.1 `--jitless` score **5042**. Its
+original canvas-log length and hash checks pass. The full fifteen-suite
+Octane comparison completes with thirteen guest passes and two known
+failures (Mandreel allocation pressure; Typescript's missing `module`
+platform module); the jitless reference passes all fifteen. The complete
+scores, negative observations, resources and reproduction command are in
+[the October 31 comparison](../OCTANE_COMPARISON_2026-10-31.md).
+
+Final live standalone checks also passed demos 1–7 (at least fifteen
+seconds of active rendering each), demo8 rolling/garage/free-drive auto
+pilot, and byte-checked text/binary/index/listing requests through both
+HTTP servers. Demo8 garage reached 20.0 FPS and auto-drive logged
+19.4–20.0 FPS at 320x240; the earlier demos remained low-single-digit FPS.
+All windows closed cleanly through their normal controls. These are bounded
+regression checks, not a claim of long-duration stability or universal
+20 FPS performance. No changes to demos were needed.

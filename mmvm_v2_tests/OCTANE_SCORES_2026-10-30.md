@@ -1,5 +1,9 @@
 # Octane: standalone guest versus Node, 2026-10-30
 
+Historical default-JIT comparison. The newer complete stock sweep, including
+the PdfJS pass and a Node `--jitless` reference, is recorded in
+[the October 31 comparison](OCTANE_COMPARISON_2026-10-31.md).
+
 ## Measurement contract
 
 This is a stock Octane sweep, not quick correctness. All 15 suites are in
