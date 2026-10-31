@@ -1,5 +1,11 @@
 # Octane peak RSS: js_runner versus Node --jitless
 
+Mandreel follow-up: [the heap investigation](guest_vm/MANDREEL_MEMORY_INVESTIGATION.md)
+identifies compilation-time fragmentation in the bytecode-emission buffer,
+not 512 MiB of live benchmark data. A fresh Node --jitless full stock run
+peaks at 97796 KiB (95.5 MiB); the earlier full-sweep measurement below remains
+the historical 92596 KiB (90.4 MiB) observation.
+
 ## Later Typescript follow-up
 
 Typescript now completes successfully on both engines. A fresh serial pair

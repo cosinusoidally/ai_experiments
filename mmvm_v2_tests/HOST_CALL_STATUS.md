@@ -10,6 +10,16 @@ The source trees under `../../js_tests` are read-only inputs.  Generated
 snapshots, logs, executables, and temporary web roots belong in the ignored
 `artifacts/` directory and are never checked in.
 
+## 2026-10-31 Mandreel memory investigation
+
+Mandreel memory follow-up: the allocation barrier is now identified in
+`Compiler.prototype.emit` while compiling `global_init`, before benchmark
+execution. An 8 MiB code-vector growth fails with 410.3 MiB free but a largest
+free extent of only 5.2 MiB. This is compilation-time fragmentation, not a
+missing CALL/Array.push implementation or 512 MiB of live game state. See
+[the memory investigation](guest_vm/MANDREEL_MEMORY_INVESTIGATION.md) for the
+captured heap breakdown, fresh Node reference and proposed general solutions.
+
 ## 2026-10-31 Typescript follow-up
 
 The unchanged stock Typescript suite now passes under standalone js_runner

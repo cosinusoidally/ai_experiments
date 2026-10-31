@@ -181,6 +181,15 @@
         var cells = new Cells(inspectedHeap);
         var records = inspectionRecordsFor(inspectedHeap, cells);
         var bytecodes = nodeHost ? require("../bytecode.js") : GuestVMBytecode;
+        function stringPreview(address, limit) {
+            var length = Math.min(records.stringLength(address), limit);
+            var result = "", index = 0;
+            while (index < length) {
+                result += String.fromCharCode(
+                    records.stringCharacterCodeUnit(address, index++));
+            }
+            return result;
+        }
         function describeCell(cell) {
             var tag = cells.tagAt(cell);
             if (tag === Cells.Tags.REFERENCE) {
@@ -202,8 +211,38 @@
                 if (kind === Heap.Types.BUFFER_VIEW) description +=
                     " viewKind=" + records.bufferViewKind(address) +
                     " length=" + records.bufferViewLength(address);
+                if (kind === Heap.Types.ARRAY) {
+                    var elements = records.arrayElements(address);
+                    description += " length=" + records.vectorLength(elements) +
+                        " capacity=" + records.vectorCapacity(elements) +
+                        " elements=" + elements +
+                        " element-record bytes=" + inspectedHeap.recordSize(elements);
+                    var following = elements + inspectedHeap.recordSize(elements);
+                    if (following < inspectedHeap.bump) {
+                        var followingHeader = inspectedHeap.inspectRecordHeader(following);
+                        description += " following-record type=" +
+                            followingHeader.type + " bytes=" + followingHeader.size;
+                    }
+                }
+                if (kind === Heap.Types.OBJECT) {
+                    var ownEntry = records.lastOwnPropertyEntry(address);
+                    while (ownEntry) {
+                        var ownKey = records.readString(
+                            records.ownPropertyEntryKey(address, ownEntry));
+                        if (ownKey === "name" || ownKey === "type") {
+                            var ownCell = records.ownPropertyEntryValueCell(address, ownEntry);
+                            if (cells.tagAt(ownCell) === Cells.Tags.REFERENCE) {
+                                var ownValue = cells.referenceAddressAt(ownCell);
+                                if (inspectedHeap.recordType(ownValue) === Heap.Types.STRING) {
+                                    description += " " + ownKey + "=" + stringPreview(ownValue, 160);
+                                }
+                            }
+                        }
+                        ownEntry = records.previousOwnPropertyEntry(address, ownEntry);
+                    }
+                }
                 if (kind === Heap.Types.STRING) description += " " +
-                    records.readString(address).substring(0, 160);
+                    stringPreview(address, 160);
                 return description;
             }
             return "tag=" + tag + " payload=" + cells.payloadLowAt(cell);
@@ -224,7 +263,7 @@
             output("frame=" + frame + " program=" + program + " pc=" + pc +
                 " opcode=" + bytecodes.NAMES[opcode]);
             var source = records.programSource(program);
-            if (source) output("source: " + records.readString(source).substring(0, 240));
+            if (source) output("source: " + stringPreview(source, 240));
             var parameters = records.programParameterSlots(program);
             var bindingRegisters = records.programBindingRegisters(program);
             var parameterCount = parameters ? records.integerVectorLength(parameters) : 0;
@@ -519,6 +558,8 @@
         var position = Heap.FIRST_RECORD;
         var totalLiveBytes = 0, totalFreeBytes = 0, protectedFreeBytes = 0;
         var largestFree = 0;
+        var indexedFreeBytes = 0, indexedFreeCount = 0;
+        var smallFreeBytes = 0, smallFreeCount = 0;
         var engineRecord = 0;
         var typeBytes = {}, typeCounts = {};
         var packedLive = 0, packedCapacity = 0;
@@ -541,7 +582,16 @@
             if (record.type === Heap.Types.FREE) {
                 totalFreeBytes += record.size;
                 if (record.flags) protectedFreeBytes += record.size;
-                else if (record.size > largestFree) largestFree = record.size;
+                else {
+                    if (record.size > largestFree) largestFree = record.size;
+                    if (record.size >= Records.KernelConstants.MIN_NATIVE_REGION_BYTES) {
+                        indexedFreeBytes += record.size;
+                        indexedFreeCount++;
+                    } else {
+                        smallFreeBytes += record.size;
+                        smallFreeCount++;
+                    }
+                }
             } else totalLiveBytes += record.size;
             typeBytes[record.type] = (typeBytes[record.type] || 0) + record.size;
             typeCounts[record.type] = (typeCounts[record.type] || 0) + 1;
@@ -593,7 +643,11 @@
         output("heap bytes: " + inspectedHeap.bump + "; occupied: " +
             totalLiveBytes + "; free: " + totalFreeBytes +
             "; protected free: " + protectedFreeBytes +
-            "; largest reusable region: " + largestFree);
+            "; largest ordinary free record: " + largestFree);
+        output("native arena free regions: count=" + indexedFreeCount +
+            "; bytes=" + indexedFreeBytes + "; below minimum=" +
+            Records.KernelConstants.MIN_NATIVE_REGION_BYTES + ": count=" +
+            smallFreeCount + "; bytes=" + smallFreeBytes);
         output("packed properties: live=" + packedLive + "; capacity=" +
             packedCapacity + "; unused/tombstone slot bytes=" +
             (packedCapacity - packedLive) * Records.PropertyStorageLayout.ENTRY_BYTES);
@@ -611,6 +665,8 @@
         if (engineRecord) {
             var inspectionRecords = inspectionRecordsFor(
                 inspectedHeap, new Cells(inspectedHeap));
+            output("native engine: record=" + engineRecord +
+                "; current frame=" + inspectionRecords.engineCurrentFrame(engineRecord));
             output("native GC: collections=" +
                 inspectionRecords.engineGCCollections(engineRecord) +
                 "; post-GC occupied=" +
