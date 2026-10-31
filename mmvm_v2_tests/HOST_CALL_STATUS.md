@@ -10,6 +10,25 @@ The source trees under `../../js_tests` are read-only inputs.  Generated
 snapshots, logs, executables, and temporary web roots belong in the ignored
 `artifacts/` directory and are never checked in.
 
+## 2026-10-31 PdfJS follow-up
+
+The unchanged stock PdfJS suite now runs to its original checksum validation
+under standalone js_runner. General guest-library/native-kernel fixes replace
+the earlier CALL/metadata-zero blockers; native lexical lookup also uses
+guest-owned binding-name vectors. No Node/SpiderMonkey semantic callback is
+available in that standalone process. See
+[PdfJS bring-up and validation](guest_vm/PDFJS_BRINGUP.md) for observations,
+including a multi-iteration crash found and fixed before the stock pass.
+
+The follow-up also separates explicitly rooted host-created callbacks from
+collectible guest-created native callables. Hosted i386 collection previously
+pinned all NATIVE_FUNCTION records, retaining discarded bound-call graphs.
+The collector now follows the explicit callback-root list, not a type-wide
+root rule. The short structural driver accepts `--trace-host-calls` to show
+its intentional embedding checkpoint calls and native fallback diagnostics.
+This is a PdfJS/GC follow-up, not a new complete host-boundary audit of all
+workloads; historical observations below remain dated observations.
+
 ## How to audit the host boundary
 
 The hosted runner accepts `--vm-log-host-calls`.  With `--vm-native`, it logs

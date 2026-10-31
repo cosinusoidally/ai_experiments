@@ -1,5 +1,36 @@
 # Native kernel interpreter design
 
+## Callable ownership and lexical metadata (2026-10-31)
+
+Native contract 87 distinguishes a native *record representation* from an
+embedding registration. `Runtime.makeNativeFunction` explicitly links its
+host-created callback into the runtime's callback-root list. The engine owns
+the same head in its state record. Hosted marking seeds this list; standalone
+marking receives it as an explicit root. The collector does not root every
+NATIVE_FUNCTION record merely because of its type. Guest-created bound
+functions own traced closure vectors and are collected normally. A portable
+adapter is materialized only if an embedding read/fallback needs one; that
+adapter is not a new permanent callback registration.
+
+Environment-backed programs have an optional value vector mapping slots to
+identifier strings. A previously unused program payload word holds its
+reference, with named accessors and marking edges on both backends; program
+record size is unchanged. Bootstrap registration and self-hosted adoption
+populate the same representation. Native dynamic reads search declarative
+and catch environments before global lookup. Object environments requiring
+unsupported observable operations decline rather than being skipped.
+
+Ordinary-object property caches accept owner-local packed entry IDs, not
+linked function descriptors. `findOwnPropertyEntryKernel` selects the
+appropriate representation; a caller that may receive a function must not
+call the packed-only cache directly. Stock multi-iteration PdfJS exposed
+this distinction in bind's length lookup.
+
+The bounded structural GC driver checks both root-head agreement and that
+discarded guest bound functions disappear after execution. Its optional
+`--trace-host-calls` reports phase/audit progress and semantic transitions.
+See [PdfJS bring-up](PDFJS_BRINGUP.md) for mechanisms and validation history.
+
 ## Portable conversion paths (2026-10-28)
 
 Native `Number` uses the shared `convertValueToNumberKernel` rather than a

@@ -297,8 +297,18 @@ For a method call, `receiver` is the guest object before the dot or brackets.
 For a plain call it is currently `undefined`. Arguments are guest values.
 Callbacks may return guest primitives or guest objects created by the runtime.
 With the resumable API the call yields before this callback runs. A callback
-failure is injected when the execution resumes; because guest `try`/`catch` is
-not implemented yet, it currently becomes a terminal `threw` result.
+failure is injected when execution resumes and follows normal guest
+exception handling. An uncaught exception
+becomes a terminal `threw` result.
+
+Host-created callback records are explicit embedding registrations retained
+for the runtime's lifetime. The callback root list lives on the guest heap;
+hosted and standalone collectors use the same ownership distinction. A
+guest-created callable implemented with a native-function record, such as a
+bound function, is not an embedding registration and remains collectible.
+Native record type alone is therefore not a lifetime policy. Guest values
+captured only in a host closure still need explicit `retain`/`release`; the
+collector cannot inspect arbitrary host-language closures.
 
 Native callbacks are trusted. They must use runtime property operations rather
 than reading arbitrary implementation fields when implementing guest-visible
@@ -532,7 +542,8 @@ entry before clearing the host timer, so a stale callback cannot invoke a
 cancelled guest function. Unknown IDs are ignored. Environment destruction
 cancels pending timers and releases their callback roots.
 
-When adding a language feature, add a small guest source file or focused
-assertion that demonstrates that feature. When adding a runtime representation
-or lifetime invariant that guest syntax cannot yet express, add a portable
-implementation-level test that runs identically under both hosts.
+Prefer the existing Test262 corpus and end-to-end demos/integration workloads
+for language coverage rather than creating a new micro-test per syntax
+feature. Representation and lifetime invariants not covered by guest-level
+tests need portable structural checks on both hosts, with useful diagnostics
+when a higher-level workload fails.

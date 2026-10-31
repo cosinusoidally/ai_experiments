@@ -189,3 +189,36 @@ known stock passes; PdfJS, Mandreel and Typescript remain unresolved. Full
 Test262 passes 3292/3292 after the literal-definition correction. See
 [CodeLoad bring-up and validation](guest_vm/CODELOAD_BRINGUP.md) for mechanisms,
 intermediate regressions, cross-host snapshot identity and follow-up checks.
+
+## 2026-10-31 PdfJS follow-up (not a new full sweep)
+
+The unchanged stock PdfJS benchmark now passes under js_runner. Initial
+stock pass: score 800, wall 18.75 s, CPU 18.45 s, peak RSS 261140 KiB.
+Final portable-adapter checkpoint: **813**, **18.60 s**, CPU **18.31 s**,
+peak RSS **305632 KiB**. The initial quick pass was 15.21 s and is not used
+as a stock score. An intermediate multi-iteration crash in bind's property
+lookup was diagnosed and corrected before either stock pass.
+
+That image is 6538504 bytes, standalone contract 86, SHA-256
+`e229d1f35444b68fca80b893d85a349d7d549be3c3f79a41124ac8738d1126f1`.
+Reproduce with:
+
+```
+./artifacts/js_runner.exe artifacts/pdfjs-final.snap octane_runner.js PdfJS
+```
+
+The old failing PdfJS row remains the historical full-sweep observation.
+There are now thirteen known stock passes, with Mandreel and Typescript
+still unresolved. See [PdfJS bring-up](guest_vm/PDFJS_BRINGUP.md) for the
+general VM fixes and regression validation.
+
+The subsequent collector-ownership correction (contract 87, `4e0745e`)
+scores **738**, wall **20.97 s**, CPU **20.65 s**, peak RSS **254760 KiB**.
+The lower observation is not hidden by retaining the earlier 813 as the
+"current" score. Its image is 6538776 bytes, SHA-256
+`8816444bc3c279687fd583efd372ef2d5dd92c7c88dd7d558816a5a39005cab8`.
+The fix removes type-wide rooting of all native-function records in hosted
+i386 GC; host-created callbacks instead have an explicit root list, and
+guest-created bound functions are collectible. A repeated short GC audit
+passes the final bound-function ownership assertion in 38.723 s of
+workload/check time after 18.795 s construction, under an 8 MiB cap.

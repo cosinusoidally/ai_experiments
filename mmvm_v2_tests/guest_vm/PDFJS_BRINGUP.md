@@ -161,3 +161,22 @@ collections, standalone integration passes, and stock PdfJS scores 738 in
 20.97 s, CPU 20.65 s, peak RSS 254760 KiB. This lower score is retained;
 the earlier 813 is not presented as the latest observation. Broader final
 checks below use the collector-corrected image.
+
+### Cross-host snapshot builds
+
+The contract-87 Node, js_min and genuine self-hosted builds are bit-identical,
+6538776 bytes, SHA-256
+`8816444bc3c279687fd583efd372ef2d5dd92c7c88dd7d558816a5a39005cab8`.
+The self-hosted log includes source loading, parsing/fingerprinting, lowering
+and assembly; this is a rebuild, not copying an existing image.
+
+- Node cross-build: 3.728 s reported by the builder.
+- js_min: 99.05 s external wall, 97.49 s user CPU, 331876 KiB peak RSS.
+- Self-hosted: 110.05 s external wall, 108.33 s user CPU, 545448 KiB peak RSS.
+- A matched control extracted from pre-work commit `6b5703f` into ignored
+  artifacts rebuilt the old 6376920-byte snapshot with its exact recorded
+  hash (`aedbdf036bdbd2fe4e0c464095c8e2438ae71058e66004073cf7aabae8a2f706`).
+  It took 94.72 s, CPU 93.81 s, 338792 KiB peak RSS. Thus the new js_min
+  build observation is about 4.6% longer; no build-speed improvement is claimed.
+  These are single serial observations, not confidence intervals. The image
+  also now includes the lexical metadata and general operations described above.

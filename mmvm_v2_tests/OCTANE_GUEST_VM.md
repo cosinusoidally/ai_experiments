@@ -2,6 +2,25 @@
 
 ## Objective
 
+### 2026-10-31 follow-up: PdfJS stock pass
+
+PdfJS now passes its unchanged stock canvas-log length/hash checks under
+standalone js_runner. Latest collector-corrected checkpoint score **738**,
+wall **20.97 s**, CPU **20.65 s**, peak RSS **254760 KiB**. Earlier
+checkpoints scored 800 and 813; the lower latest score is recorded rather
+than presenting the earlier high observation as current. This is a
+PdfJS follow-up, not a new full stock sweep. There are now thirteen known
+stock-passing suites; Mandreel and Typescript remain unresolved.
+
+The fixes are general guest operations: typed-view byte metadata/copying,
+guest forEach/trim, heap-backed bound calls, native own-key enumeration,
+heap-owned lexical binding names/dynamic reads, primitive ownership checks
+and primitive joins. A stock-only bind cache/representation crash was found
+and fixed before recording the pass. Hosted i386 GC validation also exposed
+and fixed blanket rooting of guest-created native callables; host callbacks
+now use an explicit heap-linked root list. See
+[PdfJS implementation and validation](guest_vm/PDFJS_BRINGUP.md).
+
 ### 2026-10-30 follow-up: CodeLoad stock pass
 
 CodeLoad now passes both unchanged Closure/jQuery workloads under standalone

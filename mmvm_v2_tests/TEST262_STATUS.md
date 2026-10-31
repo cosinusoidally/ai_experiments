@@ -1,10 +1,12 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-30, CodeLoad checkpoint `bd92dda`,
-standalone contract 84): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
-out of 3,292 tests. Elapsed 490.09 seconds. The distinct literal-definition
-opcode restores both object-literal tests which regressed in the intermediate
-contract-83 run; that run is retained in the history below.
+Latest completed whole-suite result (2026-10-31, PdfJS checkpoint `ead65d4`,
+standalone contract 86): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
+out of 3,292 tests. Elapsed 494.46 seconds. The preceding CodeLoad checkpoint
+passed the same complete corpus in 490.09 seconds; these are comparable
+single-run timings, not a significant speedup claim. The distinct
+literal-definition opcode continues to preserve the two object-literal tests
+which regressed in the historical contract-83 run retained below.
 The preceding contract-82 source-loading run passed all 3,292 tests in 493.30
 seconds. These are single timing observations, not statistical speedup claims.
 See the history below for the exact
@@ -39,6 +41,17 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-31, approximately 00:37 UTC, PdfJS checkpoint `ead65d4`, contract 86:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/pdfjs-final.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged corpus. External elapsed
+  494.46 s, user CPU 489.63 s, peak RSS 576524 KiB. Runner elapsed
+  493.888339 s; summed test time 477.015331 s. The four heavy cases took
+  89.792969, 85.882411, 95.409553 and 95.576881 s. No conformance skips,
+  corpus edits or weaker assertions. Native lexical binding metadata, bound
+  calls, primitive joins and the PdfJS library bring-up introduce no failures
+  in this complete rerun. The previous clean run was 490.09 s.
 
 - 2026-10-30, approximately 19:11 UTC, CodeLoad/literal-definition checkpoint `bd92dda`, contract 84:
   **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
