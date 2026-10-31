@@ -177,3 +177,26 @@ Working-point checks:
   runner elapsed 45.779 s. This is not a new full-suite result.
 - A fresh full Mandreel attempt is running with function progress and fatal
   heap capture. Stock completion and the final regression gate remain pending.
+
+### 2026-10-31, later evening — optimizer metadata and adoption
+
+The paged-constant attempt finished lowering `global_init` but failed in
+register packing's liveness metadata at index 65536. The old vector occupied
+1048600 bytes; the required next vector could not fit the largest free span
+of 2026456 bytes. Live storage was 82061392 bytes. The allocator's inability
+to satisfy a large contiguous request remained the problem, not live capacity.
+
+Register packing now uses the same bounded-page tables for its per-register
+metadata in executable compilation. Public-array compilation remains
+supported. Both Richards/TypeScript compiler comparisons agree, standalone
+integration and the five quick Octane checks pass, and focused Test262
+ch12/ch13 passes all 751 cases (zero failures/not run/timeouts, 42.723 s).
+
+The subsequent unchanged Mandreel attempt gets through lowering and register
+packing, then fails in `adoptProgramDescriptor`'s native program constructor.
+The captured heap has 75505504 occupied bytes, 461247256 free bytes and a
+largest ordinary free record of 3108272 bytes. Twelve collections ran;
+diagnostic wall time was 663.16 s. This is still not a Mandreel pass.
+Executable program records require contiguous storage, so bounded compiler
+metadata alone is insufficient: allocation policy must preserve large spans
+against fragmentation by small records, within the same nonmoving heap cap.

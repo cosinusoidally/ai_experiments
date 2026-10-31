@@ -9,12 +9,19 @@
     /* Packing is optional. Its per-register liveness vectors must not consume
      * an unbounded fraction of the heap for very large generated functions. */
     var MAX_PACKING_REGISTERS = 262144;
+    var read = op.tableGet, write = op.tableSet;
+    function analysisTable(program) {
+        return program.constants.pages ? new op.PagedTable() : [];
+    }
 
     function pack(program, bindingCount) {
         var code = program.code, count = program.registerCount;
         if (count > MAX_PACKING_REGISTERS) return program;
-        var boundaries = {0: true}, first = [], last = [], blocks = [];
-        var definitions = [], firstDefinition = [], firstRead = [], pinned = [];
+        var boundaries = {0: true};
+        var first = analysisTable(program), last = analysisTable(program);
+        var blocks = analysisTable(program), definitions = analysisTable(program);
+        var firstDefinition = analysisTable(program), firstRead = analysisTable(program);
+        var pinned = analysisTable(program);
         var pc, opcode, index, reads, destination, vector, argument;
         /* These constructs require exceptional/dynamic scope liveness. Leave
          * them unchanged until that analysis is available, not approximately
@@ -57,36 +64,36 @@
                 }
                 /* Negative CALL receiver sentinels are not storage. */
                 if (register < 0) continue;
-                if (first[register] === undefined) {
-                    first[register] = pc;
-                    blocks[register] = block;
-                } else if (blocks[register] !== block) blocks[register] = -1;
-                last[register] = pc;
+                if (read(first, register) === undefined) {
+                    write(first, register, pc);
+                    write(blocks, register, block);
+                } else if (read(blocks, register) !== block) write(blocks, register, -1);
+                write(last, register, pc);
                 if (isDefinition) {
-                    definitions[register] = (definitions[register] || 0) + 1;
-                    if (firstDefinition[register] === undefined) firstDefinition[register] = pc;
-                } else if (firstRead[register] === undefined) firstRead[register] = pc;
+                    write(definitions, register, (read(definitions, register) || 0) + 1);
+                    if (read(firstDefinition, register) === undefined) write(firstDefinition, register, pc);
+                } else if (read(firstRead, register) === undefined) write(firstRead, register, pc);
             }
         }
         var constantRegisters = program.constantRegisters || [];
         var hints = program.registerHints || [];
-        for (index = 0; index < bindingCount; index++) pinned[index] = true;
+        for (index = 0; index < bindingCount; index++) write(pinned, index, true);
         for (index = 0; index < constantRegisters.length; index++) {
             argument = op.tableGet(constantRegisters, index);
-            if (typeof argument === "number" && argument >= 0) pinned[argument] = true;
+            if (typeof argument === "number" && argument >= 0) write(pinned, argument, true);
         }
-        var mapping = [], privateCount = 0;
+        var mapping = analysisTable(program), privateCount = 0;
         for (index = 0; index < count; index++) {
             /* Preserve compiler hints without assigning a hint to another
              * temporary which later reuses the same slot. */
-            if (pinned[index] || hints[index] !== undefined ||
-                    (first[index] !== undefined && (blocks[index] < 0 ||
-                     definitions[index] !== 1 ||
-                     (firstRead[index] !== undefined &&
-                      firstRead[index] <= firstDefinition[index])))) {
-                mapping[index] = privateCount++;
-            } else if (first[index] !== undefined) {
-                mapping[index] = -1;
+            if (read(pinned, index) || hints[index] !== undefined ||
+                    (read(first, index) !== undefined && (read(blocks, index) < 0 ||
+                     read(definitions, index) !== 1 ||
+                     (read(firstRead, index) !== undefined &&
+                      read(firstRead, index) <= read(firstDefinition, index))))) {
+                write(mapping, index, privateCount++);
+            } else if (read(first, index) !== undefined) {
+                write(mapping, index, -1);
             }
         }
         /* Each eligible interval starts at its sole definition, and an
@@ -99,54 +106,54 @@
             destination = op.DESTINATION_OPERANDS[opcode];
             if (destination) {
                 register = code[pc + destination];
-                if (mapping[register] === -1) {
+                if (read(mapping, register) === -1) {
                     activeIndex = 0;
                     while (activeIndex < active.length) {
                         /* Strictly before, never an input/output alias. */
-                        if (last[active[activeIndex]] < pc) {
-                            available.push(mapping[active[activeIndex]]);
+                        if (read(last, active[activeIndex]) < pc) {
+                            available.push(read(mapping, active[activeIndex]));
                             active[activeIndex] = active[active.length - 1];
                             active.pop();
                         } else activeIndex++;
                     }
-                    mapping[register] = available.length ? available.pop() :
-                        privateCount + temporaryCount++;
+                    write(mapping, register, available.length ? available.pop() :
+                        privateCount + temporaryCount++);
                     active.push(register);
                 }
             }
         }
         var packedCount = privateCount + temporaryCount;
         if (packedCount >= count) return program;
-        var remappedVectors = {};
+        var remappedVectors = analysisTable(program);
         for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
             opcode = code[pc];
             reads = op.SOURCE_OPERANDS[opcode];
             for (index = 0; index < reads.length; index++) {
                 var operand = pc + reads[index];
-                if (code[operand] >= 0) code[operand] = mapping[code[operand]];
+                if (code[operand] >= 0) code[operand] = read(mapping, code[operand]);
             }
             destination = op.DESTINATION_OPERANDS[opcode];
-            if (destination) code[pc + destination] = mapping[code[pc + destination]];
+            if (destination) code[pc + destination] = read(mapping, code[pc + destination]);
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
                 var constantIndex = code[pc + (opcode === op.CALL ? 4 : 3)];
-                if (!remappedVectors[constantIndex]) {
+                if (!read(remappedVectors, constantIndex)) {
                     vector = op.tableGet(program.constants, constantIndex);
                     var remapped = [];
-                    for (argument = 0; argument < vector.length; argument++) remapped.push(mapping[vector[argument]]);
+                    for (argument = 0; argument < vector.length; argument++) remapped.push(read(mapping, vector[argument]));
                     op.tableSet(program.constants, constantIndex, remapped);
-                    remappedVectors[constantIndex] = true;
+                    write(remappedVectors, constantIndex, true);
                 }
             }
         }
         for (index = 0; index < constantRegisters.length; index++) {
             argument = op.tableGet(constantRegisters, index);
             if (typeof argument === "number" && argument >= 0) {
-                op.tableSet(constantRegisters, index, mapping[argument]);
+                op.tableSet(constantRegisters, index, read(mapping, argument));
             }
         }
         var remappedHints = [];
         for (index = 0; index < hints.length; index++) {
-            if (hints[index] !== undefined) remappedHints[mapping[index]] = hints[index];
+            if (hints[index] !== undefined) remappedHints[read(mapping, index)] = hints[index];
         }
         program.registerHints = remappedHints;
         program.registerCount = packedCount;
