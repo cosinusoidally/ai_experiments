@@ -33,12 +33,18 @@ exports.compileAst = function (ast, consumeAst) {
 exports.compile = function (source, filename, options) {
     ensureFrontend();
     var captureLocations = !options || options.captureLocations !== false;
+    /* Reserve bounded scratch before AST churn fragments the heap. Nested
+     * functions release their stack slices only after the adoption sink has
+     * copied the final words. No arena is used for retained public products. */
+    var wordArena = options && options.finishFunction ?
+        SelfHostedCompiler.createWordArena(source.length) : null;
     var ast = new SelfHostedParser(source, filename,
         {compactLiterals: true, shareIdentifiers: true,
          captureLocations: captureLocations}).parseProgram();
     return selfHostedVerify(new SelfHostedCompiler(null, null, false,
         {consumeAst: true, captureLocations: captureLocations,
          packedWords: true,
+         wordArena: wordArena,
          captureHints: false, reuseStatementTemps: true,
          finishFunction: options && options.finishFunction}).compile(ast));
 };

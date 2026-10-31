@@ -281,7 +281,7 @@
 
     function rewriteInstructions(program, replacements) {
         var code = program.code, pc, opcode, operand;
-        var builder = new op.WordBuffer(program.packedWords);
+        var builder = new op.WordBuffer(program.packedWords, program.wordArena);
         var locations = [], relocated = {}, replacement;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
             relocated[pc] = builder.length;

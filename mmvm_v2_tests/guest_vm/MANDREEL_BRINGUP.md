@@ -96,6 +96,43 @@ Working-point gates:
 Mandreel itself and the full final regression/build gate remain pending at
 this checkpoint. No claim of a stock Mandreel pass is made here.
 
+### Bounded pre-parse word workspace
+
+The next diagnostic reached `global_init` but failed in WordBuffer.append's
+Int32Array constructor: 13 collections, live 71087920 bytes, tail 536854328,
+limit/maximum 536870912, largest free record 3583640. Occupied storage fell
+to about 67.8 MiB, but a typed buffer still required a contiguous span. GDB
+completed the raw heap dump, then crashed internally during inferior shutdown;
+that debugger crash is not a guest segmentation fault. No pass is inferred.
+
+The frontend now reserves a bounded private word workspace before parsing.
+It estimates one word per source character, capped at 4 million words
+(16 MiB), with a small minimum. This is scratch memory, not a source/program
+cache. Nested compiler streams take stack slices; the optimizer can append
+rewrite streams without overwriting its input. A function's workspace mark
+is restored only after the adoption sink has copied and validated its code.
+Parent streams therefore survive nested compilation. Retained public products
+do not use this arena. Underestimation falls back to a separately growing
+typed buffer rather than introducing a language/program-size limit.
+
+The reservation uses existing guest-owned typed-array backing and ordinary
+memory accounting, at the unchanged heap cap. Its purpose is to avoid placing
+growing compiler buffers among already-fragmented AST records, not to move
+live heap objects or hide allocations outside the budget. The outer source
+compilation releases the arena normally after adoption; no persistent cache
+or special recognition of Mandreel/global_init is involved.
+
+Workspace working-point validation:
+
+- Fresh image passes standalone integration and Richards/DeltaBlue/Crypto
+  quick correctness. Node image construction reports 3.513 s.
+- Focused Test262 ch12/ch13: 751 passed, zero failures, not run or timeouts;
+  wall 43.24 s, user CPU 41.54 s, RSS 273492 KiB. This is a selected scope,
+  not an updated full-suite total.
+- Standalone GC workload passes 24 rounds / 48 native collections.
+- Mandreel load/setup is rerunning with function-boundary diagnostics and a
+  fatal heap capture. Full stock and final regression gates remain pending.
+
 Validation commands from `mmvm_v2_tests`:
 
 ```sh

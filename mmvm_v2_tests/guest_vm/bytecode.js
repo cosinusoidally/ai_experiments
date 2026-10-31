@@ -166,11 +166,21 @@
      * by default; self-hosted compilation can request compact word storage.
      * The builder's logical length is independent of its backing capacity. */
     var INITIAL_WORD_CAPACITY = 32;
-    function WordBuffer(packed) {
+    var MAX_WORKSPACE_WORDS = 4 * 1024 * 1024;
+    op.createWordArena = function (sourceLength) {
+        if (typeof Int32Array !== "function") return null;
+        var capacity = Math.max(INITIAL_WORD_CAPACITY,
+            Math.min(sourceLength, MAX_WORKSPACE_WORDS));
+        return {words: new Int32Array(capacity), used: 0};
+    };
+    function WordBuffer(packed, arena) {
         this.packed = !!packed && typeof Int32Array === "function";
-        this.words = this.packed ? null : [];
+        this.arena = this.packed ? arena || null : null;
+        this.arenaStart = this.arena ? this.arena.used : 0;
+        this.words = this.arena ? this.arena.words.subarray(this.arenaStart) :
+            this.packed ? null : [];
         this.length = 0;
-        this.capacity = 0;
+        this.capacity = this.arena ? this.words.length : 0;
     }
     WordBuffer.prototype.append = function (values) {
         var index = 0;
@@ -187,16 +197,23 @@
             if (this.length) replacement.set(this.words.subarray(0, this.length));
             this.words = replacement;
             this.capacity = capacity;
+            /* An underestimated workspace is not a language limit. Keep the
+             * private prefix reserved until its function sink completes. */
+            this.arena = null;
         }
         while (index < values.length) {
             var value = values[index++];
             if (value !== (value | 0)) throw new RangeError("invalid bytecode word");
             this.words[this.length++] = value;
         }
+        if (this.arena) this.arena.used = this.arenaStart + this.length;
     };
     WordBuffer.prototype.finish = function () {
         if (!this.packed) return this.words;
         return this.words ? this.words.subarray(0, this.length) : new Int32Array(0);
+    };
+    WordBuffer.prototype.releaseWorkspace = function (arena) {
+        if (arena) arena.used = this.arenaStart;
     };
     op.WordBuffer = WordBuffer;
     op.copyWords = function (words, start, end) {

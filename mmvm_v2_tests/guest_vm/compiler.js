@@ -30,7 +30,8 @@
         this.statementTemporaries = this.reuseStatementTemps ? [] : null;
         this.freeTemporaryRegisters = this.reuseStatementTemps ? [] : null;
         if (this.reuseStatementTemps) this.allocate = this.allocateReusable;
-        this.code = new op.WordBuffer(this.packedWords);
+        this.wordArena = this.packedWords && options && options.wordArena || null;
+        this.code = new op.WordBuffer(this.packedWords, this.wordArena);
         this.constants = [];
         this.primitiveConstantIndexes = {};
         this.emptyArgumentConstant = -1;
@@ -222,6 +223,7 @@
                   this.emitConstant(undefined) : this.completionRegister);
         return optimizer.optimize({code: this.code.finish(), constants: this.constants,
                 packedWords: this.packedWords,
+                wordArena: this.wordArena,
                 constantRegisters: this.constantRegisters,
                 registerHints: this.registerHints,
                 registerCount: this.registerCount, parameters: [], locals: [],
@@ -263,6 +265,7 @@
         var nested = new Compiler(bindings, this.scopes, useRegisters,
             {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
              packedWords: this.packedWords,
+             wordArena: this.wordArena,
              captureHints: this.captureHints,
              reuseStatementTemps: this.reuseStatementTemps,
              captureLocations: this.captureLocations});
@@ -318,7 +321,12 @@
         /* A frontend sink can adopt a completed nested program immediately.
          * Its parent then retains only the executable template rather than
          * every child's temporary bytecode and analysis arrays. */
-        return this.finishFunction ? this.finishFunction(program) : program;
+        if (this.finishFunction) {
+            var adopted = this.finishFunction(program);
+            nested.code.releaseWorkspace(nested.wordArena);
+            return adopted;
+        }
+        return program;
     };
 
     Compiler.prototype.emitConstant = function (value) {
@@ -1787,6 +1795,7 @@
         return program;
     };
 
+    Compiler.createWordArena = op.createWordArena;
     root.GuestVMCompiler = Compiler;
     if (typeof module !== "undefined" && module.exports) module.exports = Compiler;
 }(this));
