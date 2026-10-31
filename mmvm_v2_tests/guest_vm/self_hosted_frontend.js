@@ -33,18 +33,14 @@ exports.compileAst = function (ast, consumeAst) {
 exports.compile = function (source, filename, options) {
     ensureFrontend();
     var captureLocations = !options || options.captureLocations !== false;
-    /* Reserve bounded scratch before AST churn fragments the heap. Nested
-     * functions release their stack slices only after the adoption sink has
-     * copied the final words. No arena is used for retained public products. */
-    var wordArena = options && options.finishFunction ?
-        SelfHostedCompiler.createWordArena(source.length) : null;
     var ast = new SelfHostedParser(source, filename,
         {compactLiterals: true, shareIdentifiers: true,
          captureLocations: captureLocations}).parseProgram();
     return selfHostedVerify(new SelfHostedCompiler(null, null, false,
         {consumeAst: true, captureLocations: captureLocations,
          packedWords: true,
-         wordArena: wordArena,
+         pagedTables: !!options && !!options.wordArena,
+         wordArena: options && options.wordArena || null,
          captureHints: false, reuseStatementTemps: true,
          finishFunction: options && options.finishFunction}).compile(ast));
 };
@@ -96,7 +92,7 @@ function adoptProgramDescriptor(program, contextAnchor) {
             __guestVMProgramSetCode(callable, 0, program.code);
             var index = 0;
             while (index < program.constants.length) {
-                var constant = program.constants[index];
+                var constant = SelfHostedCompiler.constantAt(program, index);
                 if (constant && typeof constant === "object" &&
                     constant.code && constant.constants) {
                     constant = adoptProgramDescriptor(
@@ -107,7 +103,7 @@ function adoptProgramDescriptor(program, contextAnchor) {
             }
             index = 0;
             while (index < program.constantRegisters.length) {
-                var constantRegister = program.constantRegisters[index];
+                var constantRegister = SelfHostedCompiler.constantRegisterAt(program, index);
                 __guestVMProgramSetVector(callable, 0, index,
                     constantRegister === undefined ? -1 : constantRegister);
                 index++;
@@ -150,11 +146,15 @@ exports.adoptProgram = adoptProgramDescriptor;
 
 exports.compileExecutable = function (source, filename, contextAnchor,
                                       owningGlobal) {
+    ensureFrontend();
     /* Adoption retains exact function source, but has no location-table input.
      * Do not build/retain a second, unused source-position graph here. Public
      * descriptor compilation still captures locations by default. */
     var program = exports.compile(source, filename, {
         captureLocations: false,
+        /* This sink consumes word views synchronously. A generic frontend
+         * callback may retain its descriptor, so scratch reuse is opt-in. */
+        wordArena: SelfHostedCompiler.createWordArena(source.length),
         finishFunction: function (nestedProgram) {
             return adoptProgramDescriptor(selfHostedVerify(nestedProgram), contextAnchor);
         }

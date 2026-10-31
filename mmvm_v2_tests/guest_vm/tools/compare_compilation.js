@@ -1,7 +1,9 @@
 /* Compare public mutable-AST compilation with consuming compilation using
  * current real source files. No golden bytecode, fixture edits or generated
  * files. Consuming compilation also exercises packed words when typed arrays
- * are available. This is a refactoring diagnostic, not a mandated optimizer shape.
+ * are available, including paged constant tables. Retained products do not
+ * use the synchronous-adoption workspace.
+ * This is a refactoring diagnostic, not a mandated optimizer shape.
  * Run from mmvm_v2_tests under Node or js_min, followed by source filenames. */
 (function (shellArguments) {
     var node = typeof module !== "undefined" && module.exports;
@@ -29,7 +31,7 @@
     }
     if (!args.length) throw new Error("expected source filenames");
     var own = Object.prototype.hasOwnProperty;
-    var fields = ["code", "constantRegisters", "registerCount", "parameters", "locals",
+    var fields = ["code", "registerCount", "parameters", "locals",
         "bindings", "bindingSlots", "bindingRegisters", "parameterSlots", "argumentsSlot",
         "thisSlot", "functionNameSlot", "usesArguments", "strict", "evalCode", "name",
         "source", "returnKind", "nonlocalBindings", "globalDeclarations", "evalDeclarations",
@@ -65,13 +67,24 @@
             var field = fields[index++];
             compare(left[field], right[field], path + "." + field);
         }
-        compare(left.constants, right.constants, path + ".constants");
+        compareTable(left, right, "constants", Compiler.constantAt, path);
+        compareTable(left, right, "constantRegisters", Compiler.constantRegisterAt, path);
+    }
+    function compareTable(left, right, field, get, path) {
+        if (left[field].length !== right[field].length) {
+            throw new Error(path + "." + field + ": table lengths differ");
+        }
+        var index = 0;
+        while (index < left[field].length) {
+            compare(get(left, index), get(right, index), path + "." + field + "." + index);
+            index++;
+        }
     }
     function releaseAst(program) {
         delete program.astBody;
         var index = 0;
         while (index < program.constants.length) {
-            var child = program.constants[index++];
+            var child = Compiler.constantAt(program, index++);
             if (child && typeof child === "object" && child.code && child.constants) releaseAst(child);
         }
         return program;
@@ -81,7 +94,8 @@
             {compactLiterals: true, shareIdentifiers: true, captureLocations: false}).parseProgram();
         return releaseAst(new Compiler(null, null, null,
             {consumeAst: consume, captureLocations: false,
-             packedWords: consume && typeof Int32Array === "function"}).compile(ast));
+             packedWords: consume && typeof Int32Array === "function",
+             pagedTables: consume}).compile(ast));
     }
     var index = 0;
     while (index < args.length) {

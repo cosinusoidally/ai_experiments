@@ -25,7 +25,7 @@
         var destination = op.DESTINATION_OPERANDS[opcode];
         if (!destination) return;
         var kind = UNKNOWN;
-        if (opcode === op.CONST) kind = numberKind(program.constants[code[pc + 2]]);
+        if (opcode === op.CONST) kind = numberKind(op.tableGet(program.constants, code[pc + 2]));
         else if (opcode === op.MOVE || opcode === op.POSITIVE) {
             kind = state[code[pc + 2]];
         } else if (opcode === op.TO_INT32 ||
@@ -43,9 +43,9 @@
         var pc, opcode, index, block, target, candidate = false;
         var constantRegisters = program.constantRegisters || [], zeroRegisters = {};
         for (index = 0; index < constantRegisters.length; index++) {
-            if (typeof constantRegisters[index] === "number" &&
-                numberKind(program.constants[index]) === ZERO) {
-                zeroRegisters[constantRegisters[index]] = true;
+            if (typeof op.tableGet(constantRegisters, index) === "number" &&
+                numberKind(op.tableGet(program.constants, index)) === ZERO) {
+                zeroRegisters[op.tableGet(constantRegisters, index)] = true;
             }
         }
         /* Most implementation functions have no literal |0 conversion. Avoid
@@ -94,9 +94,9 @@
         var initial = [];
         for (index = 0; index < program.registerCount; index++) initial[index] = UNKNOWN;
         for (index = 0; index < constantRegisters.length; index++) {
-            if (typeof constantRegisters[index] === "number") {
-                var constantRegister = constantRegisters[index];
-                initial[constantRegister] = numberKind(program.constants[index]);
+            if (typeof op.tableGet(constantRegisters, index) === "number") {
+                var constantRegister = op.tableGet(constantRegisters, index);
+                initial[constantRegister] = numberKind(op.tableGet(program.constants, index));
                 if (!definitions[constantRegister]) immutable[constantRegister] = true;
             }
         }
@@ -270,7 +270,7 @@
                 definitions[index] = (definitions[index] || 0) + 1;
             }
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
-                vector = program.constants[code[pc + (opcode === op.CALL ? 4 : 3)]];
+                vector = op.tableGet(program.constants, code[pc + (opcode === op.CALL ? 4 : 3)]);
                 for (index = 0; index < vector.length; index++) {
                     countRegisterOccurrence(occurrences, vector[index], registerCount);
                 }
@@ -333,7 +333,7 @@
         if (!candidate) return program;
         var preloadedRegisters = program.constantRegisters || [];
         for (index = 0; index < preloadedRegisters.length; index++) {
-            var constantRegister = preloadedRegisters[index];
+            var constantRegister = op.tableGet(preloadedRegisters, index);
             if (typeof constantRegister === "number") constantRegisters[constantRegister] = true;
         }
         if (!countRegisterUses(program, occurrences, definitions)) return program;

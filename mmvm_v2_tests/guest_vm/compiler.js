@@ -21,6 +21,7 @@
         this.finishFunction = options && options.finishFunction || null;
         this.captureLocations = !options || options.captureLocations !== false;
         this.packedWords = !!options && options.packedWords === true;
+        this.pagedTables = !!options && options.pagedTables === true;
         this.captureHints = !options || options.captureHints !== false;
         this.reuseStatementTemps = !!options && options.reuseStatementTemps === true;
         if (this.reuseStatementTemps && this.captureHints) {
@@ -32,7 +33,7 @@
         if (this.reuseStatementTemps) this.allocate = this.allocateReusable;
         this.wordArena = this.packedWords && options && options.wordArena || null;
         this.code = new op.WordBuffer(this.packedWords, this.wordArena);
-        this.constants = [];
+        this.constants = this.pagedTables ? new op.PagedTable() : [];
         this.primitiveConstantIndexes = {};
         this.emptyArgumentConstant = -1;
         this.smallIntegerConstantIndexes = [];
@@ -42,7 +43,7 @@
         this.labelTargets = [];
         this.unwindRegions = [];
         this.completionRegister = -1;
-        this.constantRegisters = [];
+        this.constantRegisters = this.pagedTables ? new op.PagedTable() : [];
         this.registerHints = [];
         this.sourceLocations = [];
         this.currentLocation = null;
@@ -265,6 +266,7 @@
         var nested = new Compiler(bindings, this.scopes, useRegisters,
             {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
              packedWords: this.packedWords,
+             pagedTables: this.pagedTables,
              wordArena: this.wordArena,
              captureHints: this.captureHints,
              reuseStatementTemps: this.reuseStatementTemps,
@@ -331,10 +333,10 @@
 
     Compiler.prototype.emitConstant = function (value) {
         var constant = this.constant(value);
-        var target = this.constantRegisters[constant];
+        var target = op.tableGet(this.constantRegisters, constant);
         if (target === undefined) {
             target = this.allocatePersistentRegister();
-            this.constantRegisters[constant] = target;
+            op.tableSet(this.constantRegisters, constant, target);
         }
         return target;
     };
@@ -910,7 +912,7 @@
         if (reference.kind === "global") {
             this.emit(op.GET_GLOBAL, target, reference.name);
             if (this.captureHints) {
-                this.registerHints[target] = "global:" + this.constants[reference.name];
+                this.registerHints[target] = "global:" + op.tableGet(this.constants, reference.name);
             }
         } else if (reference.kind === "local") {
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
@@ -922,7 +924,7 @@
             this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
             if (this.captureHints) {
                 var objectHint = this.registerHints[reference.object];
-                var propertyName = this.constants[reference.key];
+                var propertyName = op.tableGet(this.constants, reference.key);
                 this.registerHints[target] = objectHint === "global:Math" ?
                     "math:" + propertyName : "property:" + propertyName;
             }
@@ -1796,6 +1798,12 @@
     };
 
     Compiler.createWordArena = op.createWordArena;
+    Compiler.constantAt = function (program, index) {
+        return op.tableGet(program.constants, index);
+    };
+    Compiler.constantRegisterAt = function (program, index) {
+        return op.tableGet(program.constantRegisters, index);
+    };
     root.GuestVMCompiler = Compiler;
     if (typeof module !== "undefined" && module.exports) module.exports = Compiler;
 }(this));

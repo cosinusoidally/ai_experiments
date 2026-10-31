@@ -145,3 +145,35 @@ node guest_vm/tools/build_profile_image.js --vm-native --snapshot artifacts/mand
 The pending regression gate includes the existing project/integration and GC
 checks, Test262, prior Octane passes, live demos and cross-host/self-hosted
 snapshot identity and build timing. Generated images and logs remain ignored.
+
+### 2026-10-31, about 19:50 — paged compiler tables
+
+The workspace attempt reached `global_init` and failed in `emitConstant`, not
+the word buffer. The failing write expanded `constantRegisters` beyond index
+131071: its old tagged element vector occupied 2097176 bytes and doubling
+needed approximately 4 MiB contiguously. The captured heap contained
+428217464 free bytes, 106186336 post-GC occupied bytes and the reserved
+16 MiB word backing. Thirteen collections had run. The unchanged program
+still did not complete load; this is not a benchmark pass.
+
+Executable compilation now uses compiler-private paged constant and
+constant-register tables. A page holds at most 1024 entries. Shared table
+accessors are used by lowering, verification, optimization, register packing
+and adoption; consumers do not depend on the backing layout. Logical length
+and undefined holes are preserved. Public descriptors retain ordinary arrays;
+no guest heap format, collector movement or heap-cap change is involved.
+Scratch word reuse is now explicitly requested only by `compileExecutable`,
+whose adoption sink consumes descriptors synchronously, rather than inferred
+from the presence of an arbitrary frontend callback.
+
+Working-point checks:
+
+- Node image write completes in 3.999 s as reported by the build diagnostic.
+- Standalone integration passes.
+- Richards, DeltaBlue, Crypto, RayTrace and EarleyBoyer pass quick correctness.
+- Richards and TypeScript-compiler public/consuming compilation comparisons
+  agree, including paged constant/register tables and packed code.
+- Focused Test262 ch12/ch13: 751 passed, zero failed/not run/timed out;
+  runner elapsed 45.779 s. This is not a new full-suite result.
+- A fresh full Mandreel attempt is running with function progress and fatal
+  heap capture. Stock completion and the final regression gate remain pending.

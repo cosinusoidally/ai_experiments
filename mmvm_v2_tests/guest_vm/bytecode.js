@@ -167,6 +167,39 @@
      * The builder's logical length is independent of its backing capacity. */
     var INITIAL_WORD_CAPACITY = 32;
     var MAX_WORKSPACE_WORDS = 4 * 1024 * 1024;
+    /* Compiler-only tables must not demand a geometrically growing contiguous
+     * tagged vector. Pages preserve indexed/sparse semantics while bounding
+     * each allocation. Public descriptors still use ordinary arrays. */
+    var TABLE_PAGE_SHIFT = 10;
+    var TABLE_PAGE_SIZE = 1 << TABLE_PAGE_SHIFT;
+    var TABLE_PAGE_MASK = TABLE_PAGE_SIZE - 1;
+    function PagedTable() {
+        this.pages = [];
+        this.length = 0;
+    }
+    PagedTable.prototype.get = function (index) {
+        var page = this.pages[index >>> TABLE_PAGE_SHIFT];
+        return page ? page[index & TABLE_PAGE_MASK] : undefined;
+    };
+    PagedTable.prototype.set = function (index, value) {
+        var pageIndex = index >>> TABLE_PAGE_SHIFT;
+        var page = this.pages[pageIndex];
+        if (!page) page = this.pages[pageIndex] = [];
+        page[index & TABLE_PAGE_MASK] = value;
+        if (index >= this.length) this.length = index + 1;
+    };
+    PagedTable.prototype.push = function (value) {
+        this.set(this.length, value);
+        return this.length;
+    };
+    op.PagedTable = PagedTable;
+    op.tableGet = function (table, index) {
+        return table.pages ? table.get(index) : table[index];
+    };
+    op.tableSet = function (table, index, value) {
+        if (table.pages) table.set(index, value);
+        else table[index] = value;
+    };
     op.createWordArena = function (sourceLength) {
         if (typeof Int32Array !== "function") return null;
         var capacity = Math.max(INITIAL_WORD_CAPACITY,

@@ -40,7 +40,7 @@
             reads = op.SOURCE_OPERANDS[opcode];
             callCount = 0;
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
-                vector = program.constants[code[pc + (opcode === op.CALL ? 4 : 3)]];
+                vector = op.tableGet(program.constants, code[pc + (opcode === op.CALL ? 4 : 3)]);
                 callCount = vector.length;
             }
             destination = op.DESTINATION_OPERANDS[opcode];
@@ -72,7 +72,7 @@
         var hints = program.registerHints || [];
         for (index = 0; index < bindingCount; index++) pinned[index] = true;
         for (index = 0; index < constantRegisters.length; index++) {
-            argument = constantRegisters[index];
+            argument = op.tableGet(constantRegisters, index);
             if (typeof argument === "number" && argument >= 0) pinned[argument] = true;
         }
         var mapping = [], privateCount = 0;
@@ -130,17 +130,19 @@
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
                 var constantIndex = code[pc + (opcode === op.CALL ? 4 : 3)];
                 if (!remappedVectors[constantIndex]) {
-                    vector = program.constants[constantIndex];
+                    vector = op.tableGet(program.constants, constantIndex);
                     var remapped = [];
                     for (argument = 0; argument < vector.length; argument++) remapped.push(mapping[vector[argument]]);
-                    program.constants[constantIndex] = remapped;
+                    op.tableSet(program.constants, constantIndex, remapped);
                     remappedVectors[constantIndex] = true;
                 }
             }
         }
         for (index = 0; index < constantRegisters.length; index++) {
-            argument = constantRegisters[index];
-            if (typeof argument === "number" && argument >= 0) constantRegisters[index] = mapping[argument];
+            argument = op.tableGet(constantRegisters, index);
+            if (typeof argument === "number" && argument >= 0) {
+                op.tableSet(constantRegisters, index, mapping[argument]);
+            }
         }
         var remappedHints = [];
         for (index = 0; index < hints.length; index++) {

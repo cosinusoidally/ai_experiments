@@ -54,7 +54,7 @@
                        opcode === op.GET_KEYS) {
                 requireRegister(program, code[pc + 1], pc);
                 requireRegister(program, code[pc + 2], pc);
-                if (opcode === op.MAKE_FUNCTION) verify(program.constants[code[pc + 2]]);
+                if (opcode === op.MAKE_FUNCTION) verify(op.tableGet(program.constants, code[pc + 2]));
             } else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
                        opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
                        (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
@@ -95,7 +95,7 @@
                 jumps.push(code[pc + 1]);
                 var scopeName = code[pc + 2];
                 if (scopeName < 0 || scopeName >= program.constants.length ||
-                        typeof program.constants[scopeName] !== "string") {
+                        typeof op.tableGet(program.constants, scopeName) !== "string") {
                     throw new Error("invalid catch name at bytecode " + pc);
                 }
             } else if (opcode === op.PUSH_CATCH) {
@@ -170,7 +170,7 @@
         if (constantIndex < 0 || constantIndex >= program.constants.length) {
             throw new Error("invalid argument-list constant at bytecode " + pc);
         }
-        var registers = program.constants[constantIndex];
+        var registers = op.tableGet(program.constants, constantIndex);
         if (!registers || typeof registers.length !== "number") {
             throw new Error("invalid argument list at bytecode " + pc);
         }
