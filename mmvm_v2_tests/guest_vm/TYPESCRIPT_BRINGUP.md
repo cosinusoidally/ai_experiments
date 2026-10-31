@@ -138,3 +138,51 @@ does not claim Mandreel has been fixed or that all fifteen suites were rerun.
   strict/sloppy modes and unchanged corpus. Prior clean checkpoint: 497.68 s.
   These timings do not demonstrate a statistically established speedup.
   See [the chronological ledger](../TEST262_STATUS.md).
+
+### Build reproducibility and timing
+
+Node, js_min and genuine self-hosted builds all produce the same
+6548264-byte image with SHA-256
+`5ad9b4e0210f7f1b88b82d1767cec8c407596a3304e0dee4eaafb22815a67bcb`.
+The Node diagnostic builder reports 3.496 s to write the image; js_min takes
+94.60 s external wall / 93.50 s user CPU / 324936 KiB peak RSS. The genuine
+self-hosted rebuild takes 100.35 s wall / 99.30 s user CPU / 545520 KiB.
+It loads, parses, lowers and assembles the actual build sources. Both outputs
+were compared byte-for-byte against the Node-built image, not just by size.
+The preceding recorded js_min/self-hosted observations were 99.05/110.05 s;
+these checks show no observed build-time regression, not a statistically
+established speedup. No executable was rebuilt except the unchanged C
+launcher; the existing js_min binary uses its normal LD_LIBRARY_PATH.
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib ../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native --snapshot artifacts/typescript-min.snap
+./artifacts/js_runner.exe artifacts/typescript-final.snap guest_runner.js --vm-native --snapshot artifacts/typescript-self.snap
+cmp artifacts/typescript-final.snap artifacts/typescript-min.snap
+cmp artifacts/typescript-final.snap artifacts/typescript-self.snap
+```
+
+### Final live demo and HTTP checks
+
+All checks used the final image and ran serially. Demos and external inputs
+remain unchanged; fixtures, screenshots and logs stay in ignored artifacts.
+
+- Demos 1–7 each rendered for at least fifteen seconds after initialization
+  at 320x240 with a requested 20 FPS cap, then exited successfully through
+  Escape. Their logged rates were respectively 2.8–3.0, 2.4–2.8, 4.3,
+  3.9–4.0, 2.2–2.6, 1.6–1.8 and 2.5–2.7 FPS. These remain the earlier
+  low-single-digit workloads, not 20 FPS demos; this is a bounded
+  correctness/stability check, not a controlled performance comparison.
+- Demo8 game initialization logged 2245.6 ms. Rolling mode, fifteen seconds
+  of garage rendering and fifteen seconds of free-drive auto pilot completed,
+  followed by normal menu quit. Garage logged 17.0, 19.8 and 20.1 FPS;
+  auto-drive logged 19.2, 19.9 and 20.1 FPS. Garage and auto-drive screenshots
+  were inspected, including the garage floor/car. No observed rendering
+  regression or crash; these bounded checks do not prove indefinite stability.
+- `net.js` and `node_web.js` each served localhost requests for an HTML index,
+  binary executable, directory listing and text file. File responses matched
+  temporary fixtures byte-for-byte. Servers were deliberately stopped after
+  their requests; all test windows and servers closed.
+- The bytecode instruction-candidate tool ran on both Node and js_min
+  against the unchanged compiler source. Both reported the same candidates
+  and optimization totals; it requires no JSON implementation in the old
+  js_min shell. These diagnostic runs do not execute the benchmark.
