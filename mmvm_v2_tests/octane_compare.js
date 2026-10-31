@@ -4,8 +4,11 @@
  * JavaScript support. GNU time/timeout measure and bound both engines.
  *
  * node octane_compare.js --snapshot artifacts/snap --output artifacts/run
+ * node octane_compare.js --node-jitless --snapshot artifacts/snap --output artifacts/run-jitless
  * Generated logs/results go exclusively in the requested artifact directory.
- * This harness does not modify the external Octane checkout or VM sources.
+ * --node-jitless changes only the reference Node process. Exclusions and
+ * reference flags are recorded explicitly in results.json. This harness does
+ * not modify the external Octane checkout or VM sources.
  */
 (function () {
     var fs = require("fs");
@@ -17,10 +20,14 @@
         "EarleyBoyer", "RegExp", "Splay", "NavierStokes", "PdfJS",
         "Mandreel", "Gameboy", "CodeLoad", "Box2D", "zlib", "Typescript"];
     var options = {snapshot: "artifacts/snap", runner: "artifacts/js_runner.exe",
-        output: null, timeout: 900, exclude: ""};
+        output: null, timeout: 900, exclude: "", nodeJitless: false};
     var argumentIndex = 2;
     while (argumentIndex < process.argv.length) {
         var argument = process.argv[argumentIndex++];
+        if (argument === "--node-jitless") {
+            options.nodeJitless = true;
+            continue;
+        }
         if (argument !== "--snapshot" && argument !== "--runner" &&
                 argument !== "--output" && argument !== "--timeout" &&
                 argument !== "--exclude") {
@@ -63,6 +70,7 @@
     fs.mkdirSync(outputDirectory);
     var report = {started: new Date().toISOString(), finished: null,
         nodeVersion: process.version, nodeArchitecture: process.arch,
+        nodeFlags: options.nodeJitless ? ["--jitless"] : [],
         platform: os.type() + " " + os.release(), cpu: os.cpus()[0].model,
         timeoutSeconds: options.timeout, mode: "stock", snapshotBytes: snapshotBytes,
         snapshotSHA256: snapshotHash, excludedSuites: excluded, results: []};
@@ -96,7 +104,8 @@
         var logFile = path.join(outputDirectory, stem + ".log");
         var metricsFile = path.join(outputDirectory, stem + ".time.json");
         var command = job.host === "node" ?
-            [process.execPath, "octane_node_runner.js", job.suite] :
+            [process.execPath].concat(options.nodeJitless ? ["--jitless"] : [],
+                ["octane_node_runner.js", job.suite]) :
             [options.runner, options.snapshot, "octane_runner.js", job.suite];
         job.started = new Date().toISOString();
         console.log(job.started + " START " + job.host + " " + job.suite);

@@ -1,8 +1,8 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-31, PdfJS checkpoint `ead65d4`,
-standalone contract 86): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
-out of 3,292 tests. Elapsed 494.46 seconds. The preceding CodeLoad checkpoint
+Latest completed whole-suite result (2026-10-31, PdfJS/GC checkpoint `4e0745e`,
+standalone contract 87): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
+out of 3,292 tests. Elapsed 497.68 seconds. The preceding CodeLoad checkpoint
 passed the same complete corpus in 490.09 seconds; these are comparable
 single-run timings, not a significant speedup claim. The distinct
 literal-definition opcode continues to preserve the two object-literal tests
@@ -41,6 +41,18 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-10-31, approximately 01:17 UTC, PdfJS/collector-ownership checkpoint
+  `4e0745e`, contract 87:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/pdfjs-gc-fixed.snap test262_runner.js`.
+  Default budget and heap configuration, unchanged corpus. External elapsed
+  497.68 s, user CPU 494.82 s, peak RSS 576552 KiB. Runner elapsed
+  497.095636 s; summed test time 480.131866 s. This rerun follows the explicit
+  host-callback root-list correction: guest-created native callables are no
+  longer permanent type-wide roots. All prior passes remain passing, with
+  no skips or weaker expectations. Prior clean runs were 494.46 s and
+  490.09 s; these observations do not demonstrate a speedup.
 
 - 2026-10-31, approximately 00:37 UTC, PdfJS checkpoint `ead65d4`, contract 86:
   **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:

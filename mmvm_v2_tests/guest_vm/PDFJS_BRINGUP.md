@@ -180,3 +180,11 @@ and assembly; this is a rebuild, not copying an existing image.
   build observation is about 4.6% longer; no build-speed improvement is claimed.
   These are single serial observations, not confidence intervals. The image
   also now includes the lexical metadata and general operations described above.
+
+### Collector-corrected conformance rerun
+
+The complete contract-87 Test262 run passes **3292 / 3292**, zero failures,
+zero not run, zero timeouts. External wall 497.68 s, CPU 494.82 s, peak
+RSS 576552 KiB; runner 497.095636 s, summed per-test time 480.131866 s.
+The complete earlier contract-86 pass is retained above. No corpus, demo or
+C source was modified to obtain these results.
