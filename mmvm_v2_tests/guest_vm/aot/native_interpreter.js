@@ -18842,23 +18842,8 @@
         }
         runtime.heapRecords.setEngineGCContextHead(
             this.stateAddress, contextHead);
-        var nativeFunctionHead = 0;
-        var nativeFunctionKey;
-        for (nativeFunctionKey in runtime.functionMetadata) {
-            if (Object.prototype.hasOwnProperty.call(
-                    runtime.functionMetadata, nativeFunctionKey)) {
-                var nativeFunction =
-                    runtime.functionMetadata[nativeFunctionKey];
-                if (nativeFunction &&
-                        nativeFunction.guestType === "function") {
-                    runtime.heapRecords.setFunctionGCNext(
-                        nativeFunction.heapAddress, nativeFunctionHead);
-                    nativeFunctionHead = nativeFunction.heapAddress;
-                }
-            }
-        }
         runtime.heapRecords.setEngineGCNativeFunctionHead(
-            this.stateAddress, nativeFunctionHead);
+            this.stateAddress, runtime.nativeCallbackRootHead);
         this.persistentRootSlots = {};
         var retainedProgramKey;
         for (retainedProgramKey in runtime.retainedProgramAddresses) {
@@ -19266,10 +19251,7 @@
 
     NativeInterpreter.prototype.registerNativeFunctionRoot = function (
             address) {
-        var records = this.runtime.heapRecords;
-        records.setFunctionGCNext(address,
-            records.engineGCNativeFunctionHead(this.stateAddress));
-        records.setEngineGCNativeFunctionHead(this.stateAddress, address);
+        this.runtime.registerNativeCallbackRoot(address);
     };
 
     NativeInterpreter.prototype.registerPersistentRoot = function (address) {

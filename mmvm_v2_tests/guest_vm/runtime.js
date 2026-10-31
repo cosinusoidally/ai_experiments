@@ -317,6 +317,10 @@
         this.heapHandles = {};
         this.nextHeapIdentity = 1;
         this.functionMetadata = {};
+        /* Only host-created callbacks need permanent embedding roots. The
+         * linked records are also the native engine's callback root list;
+         * guest-created native callables are ordinary collectible objects. */
+        this.nativeCallbackRootHead = 0;
         this.environmentMetadata = {};
         this.programObjects = [];
         this.programAddresses = [];
@@ -479,10 +483,17 @@
         callable.callMode = callMode || "intrinsic";
         callable.nativeIntrinsic = intrinsicId || NativeIntrinsics.NONE;
         this.functionMetadata["$" + address] = callable;
-        if (this.nativeInterpreter) {
-            this.nativeInterpreter.registerNativeFunctionRoot(address);
-        }
+        this.registerNativeCallbackRoot(address);
         return callable;
+    };
+
+    Runtime.prototype.registerNativeCallbackRoot = function (address) {
+        this.heapRecords.setFunctionGCNext(address, this.nativeCallbackRootHead);
+        this.nativeCallbackRootHead = address;
+        if (this.nativeInterpreter) {
+            this.heapRecords.setEngineGCNativeFunctionHead(
+                this.nativeInterpreter.stateAddress, address);
+        }
     };
 
     Runtime.prototype.makeHostFunction = function (name, callback) {
@@ -4971,6 +4982,7 @@
             }
         });
         enqueue(this.globalObject ? this.globalObject.heapAddress : 0);
+        enqueue(this.nativeCallbackRootHead);
         var index = 0;
         while (index < this.contexts.length) {
             enqueue(this.contexts[index++].heapAddress);
@@ -5067,6 +5079,9 @@
             }
         }
         value(this.globalObject);
+        if (this.nativeCallbackRootHead) {
+            this.linearHeap.setMark(this.nativeCallbackRootHead, generation);
+        }
         value(this.bufferSupport.prototype);
         value(this.typedArraySupport.arrayBufferPrototype,
               "typedArraySupport.arrayBufferPrototype");

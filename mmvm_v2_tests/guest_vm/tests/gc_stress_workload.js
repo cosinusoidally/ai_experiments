@@ -34,8 +34,11 @@
         root.readBound = (function (adjustment) {
             return this.seed + adjustment.delta;
         }).bind({seed: seed}, {delta: 3});
-        root.readNamed = (function (retained) {
-            eval("");
+        root.readNamed = (function (retained, dynamicSource) {
+            /* Syntactic direct eval keeps free-name resolution dynamic. The
+             * normal stress run needs no repeated parser/compiler workload;
+             * it tests the retained environment's lifetime instead. */
+            if (dynamicSource) eval(dynamicSource);
             return function () { return retained.seed; };
         }(root));
         try {

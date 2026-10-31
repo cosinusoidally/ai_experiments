@@ -1,13 +1,14 @@
 /* Run from mmvm_v2_tests with node or js_min.exe. No npm/Python dependencies.
  * The guest heap is capped at 8 MiB; compilation uses the host's own heap. */
-(function () {
+(function (shellArguments) {
     var nodeHost = typeof module !== "undefined" && module.exports;
-    var VM, Heap, Cells, RecordLayouts, source, output;
+    var VM, Heap, Cells, RecordLayouts, NativeIntrinsics, source, output;
     if (nodeHost) {
         VM = require("../vm.js");
         Heap = require("../heap.js");
         Cells = require("../value_cell.js");
         RecordLayouts = require("../heap_records.js");
+        NativeIntrinsics = require("../native_intrinsics.js");
         source = require("fs").readFileSync(
             require("path").join(__dirname, "gc_stress_workload.js"), "utf8");
         output = function (text) { console.log(text); };
@@ -17,13 +18,24 @@
         Heap = GuestVMHeap;
         Cells = GuestVMValueCells;
         RecordLayouts = GuestVMHeapRecords;
+        NativeIntrinsics = GuestVMNativeIntrinsics;
         source = read("guest_vm/tests/gc_stress_workload.js");
         output = print;
     }
     var heapCap = 8 * 1024 * 1024;
-    var vm = new VM({nativeInterpreter: true, verifyNativeHeap: true,
+    var diagnosticArguments = nodeHost ? process.argv.slice(2) : shellArguments;
+    var trace = false;
+    for (var option = 0; option < diagnosticArguments.length; option++) {
+        if (diagnosticArguments[option] === "--trace-host-calls") trace = true;
+        else throw new Error("unknown GC stress option: " + diagnosticArguments[option]);
+    }
+    var constructionStarted = new Date().getTime();
+    output("GC structural checks: constructing runtime");
+    var vm = new VM({nativeInterpreter: true, verifyNativeHeap: true, logHostCalls: trace,
         compactProgramStorage: true,
         heapBytes: 512 * 1024, maxHeapBytes: heapCap, gcThreshold: 256});
+    output("GC structural checks: runtime constructed in " +
+        (new Date().getTime() - constructionStarted) + " ms");
     var audits = 0, edges = 0, indexAudits = 0, maximumBump = 0;
     var started = new Date().getTime();
 
@@ -37,10 +49,15 @@
                 engine.platformServicesAddress + ", found " +
                 records.enginePlatformServices(engine.stateAddress));
         }
+        if (records.engineGCNativeFunctionHead(engine.stateAddress) !==
+                vm.runtime.nativeCallbackRootHead) {
+            throw new Error("GC stress: native callback root lists disagree");
+        }
     }
     function auditHeap() {
         var heap = vm.runtime.linearHeap, records = vm.runtime.heapRecords;
         checkEngineLinks();
+        var boundFunctions = 0;
         var boundaries = {}, position = Heap.FIRST_RECORD;
         var freeCount = 0, freeIndex = {}, index;
         while (position < heap.bump) {
@@ -147,6 +164,10 @@
                     }
                 }
             }
+            if (live.type === Heap.Types.NATIVE_FUNCTION &&
+                    records.functionMetadata(position) === NativeIntrinsics.BOUND_FUNCTION) {
+                boundFunctions++;
+            }
             position += live.size;
         }
         for (index = 0; index < heap.freeBlocks.length; index++) {
@@ -161,6 +182,9 @@
         }
         if (heap.bump > maximumBump) maximumBump = heap.bump;
         audits++;
+        if (trace) output("GC structural audit " + audits + "; elapsed " +
+            (new Date().getTime() - started) + " ms; edges " + edges);
+        return boundFunctions;
     }
     try {
         vm.installGlobal("__gcStressCheckpoint", vm.makeNativeFunction(
@@ -172,11 +196,11 @@
         auditHeap();
         vm.run(source, "guest_vm/tests/gc_stress_workload.js");
         vm.collect();
-        auditHeap();
+        if (auditHeap() !== 0) throw new Error("GC stress: discarded bound functions remain rooted");
         output("GC structural checks passed: audits=" + audits + ", edges=" + edges +
             ", property-index audits=" + indexAudits +
             ", embedding collections=" + vm.runtime.collectionCount +
             ", maximum observed bump=" + maximumBump + ", guest heap cap=" + heapCap +
             ", workload/check time=" + (new Date().getTime() - started) + " ms");
     } finally { vm.destroy(); }
-}());
+}(typeof arguments === "undefined" ? [] : arguments));

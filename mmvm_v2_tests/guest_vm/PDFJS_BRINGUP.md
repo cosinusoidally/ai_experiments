@@ -118,5 +118,46 @@ dynamically resolved closures. Checkpoint results: 24 rounds / 48 native
 collections; structural driver 27 audits / 102049 edges / 221 property-index
 audits / 76 embedding collections, maximum bump 4570856 bytes within an
 8 MiB cap, 11.542 s. Node project suite still passes 12 programs / 270
-assertions and standalone language integration passes. Full Test262, wider
-Octane/demo regression and cross-host/self-hosted build validation follow.
+assertions and standalone language integration passes.
+
+Full Test262 rerun at `ead65d4`, contract 86: **3292 passed / 0 failed /
+0 not run / 0 timed out**, 494.46 s external wall, 489.63 s user CPU,
+576524 KiB peak RSS. Runner time 493.888339 s, summed per-test time
+477.015331 s. The preceding clean checkpoint took 490.09 s; no substantive
+timing improvement is claimed. See TEST262_STATUS.md for the permanent
+whole-suite ledger. Wider Octane/demo and build validation follow.
+
+### Hosted i386 collector ownership correction
+
+Cross-host GC validation exposed a legacy root-scanning assumption: the
+hosted i386 marker treated every NATIVE_FUNCTION record as an embedding root.
+That is wrong now that guest bound functions use that record kind. Their
+targets retained discarded graphs; audits grew with every round and the
+js_min check was interrupted after exceeding seven minutes. That run is not
+reported as a pass. Merely removing repeated eval from the new lifetime
+fixture did not resolve the retention; tracing identified the root rule.
+
+Host-created callbacks now join an explicit heap-linked callback-root list
+at creation. The runtime seeds that head for hosted collection, and the
+native engine owns the same head for standalone collection. Dynamically
+created bound functions do not join it. The old type-wide structural-root
+rule is removed, without a bound-function-ID exception in the collector.
+Portable marking follows the same callback list. The native constructor
+also no longer rebuilds roots by scanning a mixed metadata cache.
+
+The corrected js_min audit completed 27 audits / 101999 edges / 221 index
+checks / 76 embedding collections in 38.538 s of workload/check time, after
+18.859 s runtime construction, maximum bump 4602832 bytes under the same
+8 MiB cap. Live edges plateau instead of growing each round. The driver
+now reports construction separately, accepts optional `--trace-host-calls`
+for diagnostic transitions/audit progress and asserts discarded guest bound
+functions are collected after execution. The lifetime fixture retains
+dynamic lookup without repeatedly benchmarking eval compilation.
+
+Contract 87 checkpoint: Node structural audit including the final ownership
+assertion passes (27 audits / 101999 edges / 76 collections, 12.131 s,
+maximum bump 4573544 bytes), native workload passes 24 rounds / 48
+collections, standalone integration passes, and stock PdfJS scores 738 in
+20.97 s, CPU 20.65 s, peak RSS 254760 KiB. This lower score is retained;
+the earlier 813 is not presented as the latest observation. Broader final
+checks below use the collector-corrected image.
