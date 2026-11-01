@@ -101,6 +101,56 @@
      * native runtime-support slots. Do not repeat it in either backend. */
     Intrinsics.ERROR_CONSTRUCTOR_NAMES = ["Error", "EvalError", "RangeError",
         "ReferenceError", "SyntaxError", "TypeError", "URIError"];
+
+    /* Minimum argument counts accepted by native handlers, not the public
+     * Function.length values. A handler may accept fewer than its advertised
+     * arity, or decline a call so the normal semantic path can handle it.
+     * Build once per runtime; native execution reads the guest-owned table
+     * instead of reclassifying the ID through a comparison chain each call. */
+    Intrinsics.createMinimumCallArguments = function () {
+        var counts = [], index;
+        for (index = 0; index <= Intrinsics.LAST_ID; index++) counts[index] = 1;
+        function assign(ids, count) {
+            for (var item = 0; item < ids.length; item++) counts[ids[item]] = count;
+        }
+        assign([Intrinsics.TRY_COPY_INT32_ARRAY, Intrinsics.OBJECT_IS_PROTOTYPE_OF,
+            Intrinsics.GET_DLSYM, Intrinsics.ARRAY_PUSH, Intrinsics.ARRAY_TO_STRING,
+            Intrinsics.ARRAY_UNSHIFT, Intrinsics.ARRAY_INDEX_OF, Intrinsics.ARRAY_SPLICE,
+            Intrinsics.BOOLEAN_CONSTRUCTOR, Intrinsics.DATE_NOW, Intrinsics.PARSE_FLOAT,
+            Intrinsics.PARSE_INT, Intrinsics.IS_NAN, Intrinsics.ARRAY_BUFFER_CONSTRUCTOR,
+            Intrinsics.ARRAY_REVERSE, Intrinsics.NUMBER_TO_PRECISION,
+            Intrinsics.NUMBER_TO_FIXED, Intrinsics.MATH_RANDOM, Intrinsics.OBJECT_CONSTRUCTOR,
+            Intrinsics.OBJECT_TO_STRING, Intrinsics.OBJECT_VALUE_OF, Intrinsics.ARRAY_IS_ARRAY,
+            Intrinsics.STRING_VALUE_OF, Intrinsics.STRING_TO_UPPER_CASE,
+            Intrinsics.STRING_TO_LOWER_CASE, Intrinsics.NUMBER_TO_STRING,
+            Intrinsics.GC_STRESS_CONTROL, Intrinsics.OPCODE_COUNTER_WORD,
+            Intrinsics.ARRAY_POP, Intrinsics.ARRAY_CONSTRUCTOR, Intrinsics.ARRAY_SHIFT,
+            Intrinsics.ARRAY_SLICE, Intrinsics.ARRAY_CONCAT, Intrinsics.NUMBER_CONSTRUCTOR,
+            Intrinsics.DATE_CONSTRUCTOR, Intrinsics.DATE_GET_TIME,
+            Intrinsics.DATE_GET_TIMEZONE_OFFSET, Intrinsics.FUNCTION_CONSTRUCTOR,
+            Intrinsics.REGEXP_CONSTRUCTOR, Intrinsics.STRING_CONSTRUCTOR,
+            Intrinsics.BUFFER_SLICE, Intrinsics.TYPED_ARRAY_SUBARRAY,
+            Intrinsics.BUFFER_TO_STRING, Intrinsics.BUFFER_IS_BUFFER,
+            Intrinsics.FUNCTION_TO_STRING, Intrinsics.STRING_CHAR_AT,
+            Intrinsics.STRING_CHAR_CODE_AT, Intrinsics.STRING_SUBSTR,
+            Intrinsics.STRING_SUBSTRING, Intrinsics.STRING_FROM_CHAR_CODE,
+            Intrinsics.STRING_SPLIT], 0);
+        for (index = Intrinsics.FIRST_ERROR_CONSTRUCTOR;
+                index <= Intrinsics.LAST_ERROR_CONSTRUCTOR; index++) counts[index] = 0;
+        for (index = Intrinsics.UINT8_ARRAY_CONSTRUCTOR;
+                index <= Intrinsics.INT16_ARRAY_CONSTRUCTOR; index++) counts[index] = 0;
+        for (index = Intrinsics.DATE_GET_DATE;
+                index <= Intrinsics.DATE_GET_DAY; index++) counts[index] = 0;
+        assign([Intrinsics.MATH_ATAN2, Intrinsics.STRING_REPLACE, Intrinsics.FUNCTION_APPLY,
+            Intrinsics.MATH_POW, Intrinsics.POKE8, Intrinsics.POKE32,
+            Intrinsics.BUFFER_WRITE_U32_LE, Intrinsics.BUFFER_WRITE_U8,
+            Intrinsics.BUFFER_WRITE_U16_LE, Intrinsics.BUFFER_WRITE_I16_LE], 2);
+        assign([Intrinsics.OBJECT_DEFINE_PROPERTY, Intrinsics.PROGRAM_SET_CODE,
+            Intrinsics.PROGRAM_SET_BINDING_NAME, Intrinsics.PROGRAM_SET_CONSTANT], 3);
+        counts[Intrinsics.PROGRAM_SET_VECTOR] = 4;
+        counts[Intrinsics.PROGRAM_CREATE] = 12;
+        return counts;
+    };
     root.GuestVMNativeIntrinsics = Intrinsics;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Intrinsics;

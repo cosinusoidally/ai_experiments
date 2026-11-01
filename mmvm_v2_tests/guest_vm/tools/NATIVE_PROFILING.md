@@ -55,8 +55,8 @@ instructions between case labels can be charged to the preceding case.
 Compare elapsed times and completed correctness workloads before drawing a
 performance conclusion from changing sample percentages.
 
-The entry currently uses `load` and passes the remaining global `arguments`
-to the target. It is intended for shell-style workloads such as the Octane
-wrapper; it does not recreate an application's direct-entry CommonJS/process
-argument environment. Loading the diagnostic entry and its dependencies also
-changes the starting heap, so use ordinary launches for final measurements.
+The entry starts the target through `guestStandaloneExecute`, passing the
+remaining arguments and establishing the target's own require base and
+process arguments. It can profile either the Octane wrapper or a directly
+launched demo. Loading the diagnostic entry and its dependencies changes the
+starting heap, so use ordinary launches for final measurements.

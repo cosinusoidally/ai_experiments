@@ -1,9 +1,11 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-11-01, indexed nonmoving allocator
-and flat compiler-table checkpoint, standalone contract 92):
+Latest completed whole-suite result (2026-11-01, guest-owned native call-policy
+metadata, standalone contract 93):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
-Runner elapsed 442.94 seconds. The pre-Mandreel Typescript checkpoint
+Runner elapsed 430.38 seconds (431.01 seconds externally), versus 442.94
+runner seconds at the preceding contract-92 checkpoint.
+The pre-Mandreel Typescript checkpoint
 `6aadc41` recorded 491.30 seconds externally (490.72 runner seconds).
 The preceding PdfJS/GC checkpoint
 passed in 497.68 seconds. The preceding CodeLoad checkpoint
@@ -45,6 +47,17 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-11-01, approximately 12:05 UTC, native built-in minimum argument
+  counts materialized once as guest-heap metadata, contract 93:
+  **3,292 passed / 0 failed / 0 timed out / 0 not run**. Command:
+  `./artifacts/js_runner.exe artifacts/call-policy.snap test262_runner.js`.
+  Default budget/heap, unchanged complete corpus. Runner elapsed 430.384625 s;
+  summed test time 415.968833 s; external wall 431.01 s, user CPU 427.83 s,
+  peak RSS 511028 KiB. About 2.8% less runner time than contract 92 and
+  12.3% less than the pre-Mandreel checkpoint, comparing these individual
+  completed observations. No tests were skipped or weakened. Remaining
+  build/demo/performance gates are recorded separately.
 
 - 2026-11-01, approximately 11:31 UTC, nonmoving size-index allocator,
   shared owned frontend and direct flat/paged compiler-table access,

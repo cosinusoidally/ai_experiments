@@ -180,3 +180,63 @@ summed test time 425.934102 s. The pre-Mandreel checkpoint recorded
 490.724332 runner seconds: about 9.7% more time is removed in this observation.
 See `../TEST262_STATUS.md` for the full chronological ledger. This closes the
 whole-Test262 correctness gate, not the remaining Octane/build/demo gates.
+
+## Built-in call classification
+
+The contract-92 project gate passed on both bootstrap hosts (12 guest
+programs and 270 assertions per host plus embedding, compiler, CLI and
+context checks), taking 179.16 s combined. The program/environment-independent
+snapshot gate passed js_min/Node byte identity and a genuine self-compiled
+fixed point in 275.44 s combined. A separate uninstrumented self-build took
+76.84 s (76.23 user seconds, 480304 KiB RSS), versus the fresh pre-Mandreel
+control's 98.55 s. Both structural and standalone GC stress passed, including
+102242 checked edges and 48 standalone collections respectively.
+
+Paired live demos1--7 rendered and closed through X11 input on both images.
+The simpler blitting workloads exposed a remaining throughput difference:
+alternating demo3 runs at 320x240/20 FPS limit measured about 4.0--4.1 FPS
+on contract 92 versus about 4.3 on the control. These demos are not claimed
+to achieve their requested cap under either interpreter. No demo source was
+changed. The existing thread-free libc `profil` diagnostic attributed about
+28--30% of demo3's native samples to built-in call handling, while collection
+and allocator functions were minor in the sampled interval.
+
+Native built-in calls classified minimum argument counts through a long
+intrinsic-ID comparison chain on every call. `native_intrinsics.js` now owns
+the declarative minimum-count policy, materialized once per runtime as a
+GC-traced guest value vector. Validated native IDs index that table directly.
+These counts describe handler acceptance, not public `Function.length` or
+new restrictions on ES5.1 calls. Invalid IDs are rejected before indexing;
+forwarding, receiver handling, argument conversion and exceptions are
+unchanged. An exhaustive refactoring comparison agreed for all 131 IDs.
+Contract 93 identifies the new runtime-support table.
+
+Initial alternating demo3 observations with this change are about 4.1--4.2
+FPS on each image. Integration and 48-collection native stress pass. The
+complete conformance, Mandreel, build, demo and stock-performance rechecks
+for this newer working point remain pending; the contract-92 results above
+are deliberately not relabeled as contract-93 results.
+
+### Contract-93 completed conformance and Mandreel checks
+
+The unchanged complete Test262 suite passes: 3292 passed, zero failed/not
+run/timeouts; runner elapsed 430.384625 s, external wall 431.01 s, user CPU
+427.83 s, RSS 511028 KiB. This is about 2.8% less runner time than contract
+92 and 12.3% less than the pre-Mandreel observation. Stock Mandreel passes
+at throughput 202, latency 1322 and combined score 517; wall 102.81 s,
+user 101.74 s, RSS 486616 KiB. The preceding indexed-image observation was
+combined 488 and wall 112.37 s. These are completed ordinary runs, not
+profiling windows or benchmark-specific substitutes.
+
+Final contract-93 project tests pass on both Node and js_min: all 270
+guest assertions per host, compiler/embedding checks, CLI paths and the
+three-context demo. Combined wall 186.82 s, user 185.25 s, RSS 271444 KiB;
+the earlier contract-92 run was 179.16 s, so this single observation does not
+establish a project-gate speedup. Cross-host/program/environment-independent
+snapshots and the genuine self-built byte-identical fixed point pass in
+282.17 s combined (278.35 user seconds, 480320 KiB RSS). The preceding
+contract-92 combined gate was 275.44 s; these totals include multiple builds,
+not just one self-build. The bounded structural GC audit passes 27 audits,
+102269 edges, 221 property-index audits and 74 embedding collections, with
+maximum bump 3523240 bytes under the unchanged 8 MiB cap. Its full wall time
+is 15.35 s. Stock-performance and live-demo wrap-up results follow separately.

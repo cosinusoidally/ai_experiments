@@ -196,6 +196,9 @@
     RuntimeSupportLayout.BYTE_OFFSET_KEY = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_BYTE_LENGTH_KEY = RuntimeSupportLayout.BYTE_LENGTH_KEY;
     var RUNTIME_SUPPORT_BYTE_OFFSET_KEY = RuntimeSupportLayout.BYTE_OFFSET_KEY;
+    RuntimeSupportLayout.MINIMUM_INTRINSIC_ARGUMENTS = RuntimeSupportLayout.COUNT++;
+    var RUNTIME_SUPPORT_MINIMUM_INTRINSIC_ARGUMENTS =
+        RuntimeSupportLayout.MINIMUM_INTRINSIC_ARGUMENTS;
     var NATIVE_APPLY_FUNCTION_REGISTER = 0;
     var NATIVE_APPLY_RECEIVER_REGISTER = 1;
     var NATIVE_APPLY_ARGUMENT_BASE = 2;
@@ -6551,160 +6554,11 @@
             setEngineCallRejectReason(
                 heapBase, state, CALL_REJECT_INTRINSIC_CALL_FORM);
         }
-        var requiredIntrinsicArguments = 1;
-        if (intrinsicId === INTRINSIC_TRY_COPY_INT32_ARRAY) requiredIntrinsicArguments = 0;
-        if (intrinsicId === INTRINSIC_OBJECT_IS_PROTOTYPE_OF) requiredIntrinsicArguments = 0;
-        if (isErrorConstructor === 1) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_GET_DLSYM) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_MATH_ATAN2) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_ARRAY_PUSH) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_TO_STRING) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_UNSHIFT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_INDEX_OF) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_SPLICE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_DATE_NOW) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_PARSE_FLOAT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_PARSE_INT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_IS_NAN) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_BUFFER_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if ((intrinsicId >=
-                    INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) &
-                   (intrinsicId <=
-                    INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR)) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_REVERSE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_NUMBER_TO_PRECISION) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_NUMBER_TO_FIXED) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_MATH_RANDOM) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_OBJECT_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_OBJECT_CREATE) {
-            requiredIntrinsicArguments = 1;
-        } else if (intrinsicId === INTRINSIC_OBJECT_TO_STRING ||
-                   intrinsicId === INTRINSIC_OBJECT_VALUE_OF) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_IS_ARRAY) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_VALUE_OF) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_TO_UPPER_CASE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_TO_LOWER_CASE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_NUMBER_TO_STRING) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_GC_STRESS_CONTROL) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_OPCODE_COUNTER_WORD) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
-            requiredIntrinsicArguments = 3;
-        } else if (intrinsicId === INTRINSIC_ARRAY_POP) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_SHIFT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_SLICE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_ARRAY_CONCAT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_NUMBER_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_DATE_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_DATE_GET_TIME) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_DATE_GET_TIMEZONE_OFFSET) {
-            requiredIntrinsicArguments = 0;
-        } else if ((intrinsicId >= INTRINSIC_DATE_GET_DATE) &
-                   (intrinsicId <= INTRINSIC_DATE_GET_DAY)) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_FUNCTION_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_REGEXP_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_CONSTRUCTOR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_BUFFER_SLICE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_TYPED_ARRAY_SUBARRAY) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_BUFFER_TO_STRING) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_BUFFER_IS_BUFFER) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_FUNCTION_TO_STRING) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_CHAR_AT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_CHAR_CODE_AT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_SUBSTR) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_SUBSTRING) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId ===
-                   INTRINSIC_STRING_FROM_CHAR_CODE) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_STRING_INDEX_OF) {
-            requiredIntrinsicArguments = 1;
-        } else if (intrinsicId === INTRINSIC_STRING_LAST_INDEX_OF) {
-            requiredIntrinsicArguments = 1;
-        } else if (intrinsicId === INTRINSIC_STRING_SPLIT) {
-            requiredIntrinsicArguments = 0;
-        } else if (intrinsicId === INTRINSIC_REGEXP_TEST) {
-            requiredIntrinsicArguments = 1;
-        } else if (intrinsicId === INTRINSIC_STRING_REPLACE) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_FUNCTION_APPLY) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_MATH_POW) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_POKE8) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_POKE32) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_PROGRAM_CREATE) {
-            requiredIntrinsicArguments = 12;
-        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_CODE) {
-            requiredIntrinsicArguments = 3;
-        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_BINDING_NAME) {
-            requiredIntrinsicArguments = 3;
-        } else if (intrinsicId ===
-                   INTRINSIC_PROGRAM_SET_CONSTANT) {
-            requiredIntrinsicArguments = 3;
-        } else if (intrinsicId === INTRINSIC_PROGRAM_SET_VECTOR) {
-            requiredIntrinsicArguments = 4;
-        } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U32_LE) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId === INTRINSIC_BUFFER_WRITE_U8) {
-            requiredIntrinsicArguments = 2;
-        } else if (intrinsicId >= INTRINSIC_BUFFER_WRITE_U16_LE) {
-            if (intrinsicId <= INTRINSIC_BUFFER_WRITE_I16_LE) {
-                requiredIntrinsicArguments = 2;
-            }
-        }
         if (intrinsicCallValid === 1) {
+            var minimumArguments = valueCellReference(0, vectorCellAddress(
+                heapBase, stringSupport, RUNTIME_SUPPORT_MINIMUM_INTRINSIC_ARGUMENTS));
+            var requiredIntrinsicArguments = valueCellInt32(0, vectorCellAddress(
+                heapBase, minimumArguments, intrinsicId));
             if (intrinsicArgumentCount < requiredIntrinsicArguments) {
                 intrinsicCallValid = 0;
                 setEngineCallRejectReason(
@@ -18687,6 +18541,8 @@
                     RUNTIME_SUPPORT_FALSE_STRING: RuntimeSupportLayout.FALSE_STRING,
                     RUNTIME_SUPPORT_BYTE_LENGTH_KEY: RUNTIME_SUPPORT_BYTE_LENGTH_KEY,
                     RUNTIME_SUPPORT_BYTE_OFFSET_KEY: RUNTIME_SUPPORT_BYTE_OFFSET_KEY,
+                    RUNTIME_SUPPORT_MINIMUM_INTRINSIC_ARGUMENTS:
+                        RUNTIME_SUPPORT_MINIMUM_INTRINSIC_ARGUMENTS,
                     RUNTIME_SUPPORT_COMMA_STRING: RUNTIME_SUPPORT_COMMA_STRING,
                     INTRINSIC_ARRAY_TO_STRING: INTRINSIC_ARRAY_TO_STRING,
                     INTRINSIC_FUNCTION_BIND: INTRINSIC_FUNCTION_BIND,
@@ -18958,6 +18814,16 @@
             Bytecode.NAMES.length * BYTECODE_LAYOUT_STRIDE);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.BYTECODE_LAYOUT), bytecodeLayout);
+        var minimumArguments = NativeIntrinsics.createMinimumCallArguments();
+        var minimumArgumentTable = runtime.heapRecords.allocateValueVector(minimumArguments.length);
+        for (var intrinsicIndex = 0; intrinsicIndex < minimumArguments.length; intrinsicIndex++) {
+            runtime.valueCells.writePrimitiveAt(runtime.heapRecords.vectorCell(
+                minimumArgumentTable, intrinsicIndex), minimumArguments[intrinsicIndex]);
+        }
+        runtime.heapRecords.setVectorLength(minimumArgumentTable, minimumArguments.length);
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.MINIMUM_INTRINSIC_ARGUMENTS),
+            minimumArgumentTable);
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_KEY),
             runtime.internStringAddress("charAt"));
