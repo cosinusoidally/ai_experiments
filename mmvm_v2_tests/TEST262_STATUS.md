@@ -1,8 +1,11 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-10-31, Typescript checkpoint `6aadc41`,
-standalone contract 87): **3,292 passed / 0 failed / 0 not run / 0 timed out**,
-out of 3,292 tests. Elapsed 491.30 seconds. The preceding PdfJS/GC checkpoint
+Latest completed whole-suite result (2026-11-01, indexed nonmoving allocator
+and flat compiler-table checkpoint, standalone contract 92):
+**3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
+Runner elapsed 442.94 seconds. The pre-Mandreel Typescript checkpoint
+`6aadc41` recorded 491.30 seconds externally (490.72 runner seconds).
+The preceding PdfJS/GC checkpoint
 passed in 497.68 seconds. The preceding CodeLoad checkpoint
 passed the same complete corpus in 490.09 seconds; these are comparable
 single-run timings, not a significant speedup claim. The distinct
@@ -42,6 +45,18 @@ file and are therefore not Test262 conformance totals. They remain in the
 chronological ledger rather than being rewritten or silently discarded.
 
 ## Result history
+
+- 2026-11-01, approximately 11:31 UTC, nonmoving size-index allocator,
+  shared owned frontend and direct flat/paged compiler-table access,
+  contract 92: **3,292 passed / 0 failed / 0 timed out / 0 not run**.
+  Command: `./artifacts/js_runner.exe artifacts/flat-fast.snap test262_runner.js`.
+  Default budget/heap, unchanged complete corpus. Runner elapsed 442.941048 s;
+  summed test time 425.934102 s. The four heavy cases took 89.002979,
+  83.269284, 83.369422 and 80.444910 s. This is about 9.7% less runner
+  time than the pre-Mandreel checkpoint's 490.724332 s, with no weakened
+  expectations, skips or external-source changes. Both are single completed
+  observations; broader performance/build/demo gates are tracked separately
+  in `guest_vm/PERFORMANCE_RECOVERY.md`.
 
 - 2026-10-31, approximately 11:35 UTC, Typescript checkpoint `6aadc41`,
   contract 87:

@@ -143,3 +143,40 @@ needs repetition/component measurement before claiming parity. Optional
 per-benchmark means, without wrapping timed benchmark callbacks or modifying
 the external inputs. Complete tests, builds, demos and final full Octane
 performance parity remain pending.
+
+## Flat compiler tables and phase measurements
+
+Compiler products use either ordinary arrays or explicitly paged tables. The
+compiler, optimizer, register packer, verifier and descriptor adopter now
+select the representation at the enclosing operation and access it directly,
+rather than calling the generic table dispatcher for each constant access.
+This does not change the public representation or compilation algorithm.
+
+`tools/profile_frontend.js` is an optional guest-side phase diagnostic using
+the seeded parser/compiler constructors. It reports parsing, outermost
+compilation, function analysis, optimization and register packing for each
+stock benchmark component. Compilation includes optimization, which includes
+packing: these are overlapping measurements, not additive phases. Timed
+benchmark functions and external input files are not replaced. Instrumented
+scores must not substitute for clean benchmark runs.
+
+One paired diagnostic run of CodeLoad measured 18 Closure loads and 16 jQuery
+loads on each image:
+
+- Closure: candidate/control parse 946.79/924.63 ms; compile
+  1144.27/1044.71 ms; packing 208.57/164.44 ms.
+- jQuery: candidate/control parse 11245.11/11415.80 ms; compile
+  13049.87/16315.29 ms; packing 2280.28/2710.33 ms.
+
+Thus the small-source packing overhead is not a general parsing regression;
+the larger source compiles appreciably faster. Clean CodeLoad repetitions
+still vary, and neither this instrumented result nor improved whole-process
+time establishes score parity. The complete final regression/performance
+gate remains outstanding.
+
+The complete unchanged Test262 corpus passes on this working point:
+3,292 passed, zero failed/not run/timeouts, runner time 442.941048 s and
+summed test time 425.934102 s. The pre-Mandreel checkpoint recorded
+490.724332 runner seconds: about 9.7% more time is removed in this observation.
+See `../TEST262_STATUS.md` for the full chronological ledger. This closes the
+whole-Test262 correctness gate, not the remaining Octane/build/demo gates.

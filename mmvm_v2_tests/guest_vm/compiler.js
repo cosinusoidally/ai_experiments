@@ -333,10 +333,12 @@
 
     Compiler.prototype.emitConstant = function (value) {
         var constant = this.constant(value);
-        var target = op.tableGet(this.constantRegisters, constant);
+        var registers = this.constantRegisters;
+        var target = this.pagedTables ? registers.get(constant) : registers[constant];
         if (target === undefined) {
             target = this.allocatePersistentRegister();
-            op.tableSet(this.constantRegisters, constant, target);
+            if (this.pagedTables) registers.set(constant, target);
+            else registers[constant] = target;
         }
         return target;
     };
@@ -912,7 +914,8 @@
         if (reference.kind === "global") {
             this.emit(op.GET_GLOBAL, target, reference.name);
             if (this.captureHints) {
-                this.registerHints[target] = "global:" + op.tableGet(this.constants, reference.name);
+                this.registerHints[target] = "global:" + (this.pagedTables ?
+                    this.constants.get(reference.name) : this.constants[reference.name]);
             }
         } else if (reference.kind === "local") {
             this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
@@ -924,7 +927,8 @@
             this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
             if (this.captureHints) {
                 var objectHint = this.registerHints[reference.object];
-                var propertyName = op.tableGet(this.constants, reference.key);
+                var propertyName = this.pagedTables ? this.constants.get(reference.key) :
+                    this.constants[reference.key];
                 this.registerHints[target] = objectHint === "global:Math" ?
                     "math:" + propertyName : "property:" + propertyName;
             }

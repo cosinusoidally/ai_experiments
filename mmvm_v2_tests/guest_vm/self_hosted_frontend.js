@@ -97,9 +97,11 @@ function adoptProgramDescriptor(program, contextAnchor) {
                 }
             }
             __guestVMProgramSetCode(callable, 0, program.code);
+            var constants = program.constants, constantRegisters = program.constantRegisters;
+            var pagedConstants = !!constants.pages, pagedRegisters = !!constantRegisters.pages;
             var index = 0;
-            while (index < program.constants.length) {
-                var constant = SelfHostedCompiler.constantAt(program, index);
+            while (index < constants.length) {
+                var constant = pagedConstants ? constants.get(index) : constants[index];
                 if (constant && typeof constant === "object" &&
                     constant.code && constant.constants) {
                     constant = adoptProgramDescriptor(
@@ -109,8 +111,8 @@ function adoptProgramDescriptor(program, contextAnchor) {
                 index++;
             }
             index = 0;
-            while (index < program.constantRegisters.length) {
-                var constantRegister = SelfHostedCompiler.constantRegisterAt(program, index);
+            while (index < constantRegisters.length) {
+                var constantRegister = pagedRegisters ? constantRegisters.get(index) : constantRegisters[index];
                 __guestVMProgramSetVector(callable, 0, index,
                     constantRegister === undefined ? -1 : constantRegister);
                 index++;

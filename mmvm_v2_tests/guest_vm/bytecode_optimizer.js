@@ -25,7 +25,11 @@
         var destination = op.DESTINATION_OPERANDS[opcode];
         if (!destination) return;
         var kind = UNKNOWN;
-        if (opcode === op.CONST) kind = numberKind(op.tableGet(program.constants, code[pc + 2]));
+        if (opcode === op.CONST) {
+            var constantTable = program.constants;
+            kind = numberKind(constantTable.pages ? constantTable.get(code[pc + 2]) :
+                constantTable[code[pc + 2]]);
+        }
         else if (opcode === op.MOVE || opcode === op.POSITIVE) {
             kind = state[code[pc + 2]];
         } else if (opcode === op.TO_INT32 ||
@@ -42,10 +46,13 @@
         var code = program.code, boundaries = {}, blocks = [], byPC = {};
         var pc, opcode, index, block, target, candidate = false;
         var constantRegisters = program.constantRegisters || [], zeroRegisters = {};
+        var constants = program.constants, pagedConstants = !!constants.pages;
+        var pagedRegisters = !!constantRegisters.pages;
         for (index = 0; index < constantRegisters.length; index++) {
-            if (typeof op.tableGet(constantRegisters, index) === "number" &&
-                numberKind(op.tableGet(program.constants, index)) === ZERO) {
-                zeroRegisters[op.tableGet(constantRegisters, index)] = true;
+            var preloaded = pagedRegisters ? constantRegisters.get(index) : constantRegisters[index];
+            if (typeof preloaded === "number" &&
+                numberKind(pagedConstants ? constants.get(index) : constants[index]) === ZERO) {
+                zeroRegisters[preloaded] = true;
             }
         }
         /* Most implementation functions have no literal |0 conversion. Avoid
@@ -94,9 +101,9 @@
         var initial = [];
         for (index = 0; index < program.registerCount; index++) initial[index] = UNKNOWN;
         for (index = 0; index < constantRegisters.length; index++) {
-            if (typeof op.tableGet(constantRegisters, index) === "number") {
-                var constantRegister = op.tableGet(constantRegisters, index);
-                initial[constantRegister] = numberKind(op.tableGet(program.constants, index));
+            var constantRegister = pagedRegisters ? constantRegisters.get(index) : constantRegisters[index];
+            if (typeof constantRegister === "number") {
+                initial[constantRegister] = numberKind(pagedConstants ? constants.get(index) : constants[index]);
                 if (!definitions[constantRegister]) immutable[constantRegister] = true;
             }
         }
@@ -256,6 +263,7 @@
      * Both analyses use the canonical bytecode operand description. */
     function countRegisterUses(program, occurrences, definitions) {
         var code = program.code, pc, opcode, reads, operand, index, vector;
+        var constants = program.constants, pagedConstants = !!constants.pages;
         var registerCount = program.registerCount;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
             opcode = code[pc];
@@ -270,7 +278,8 @@
                 definitions[index] = (definitions[index] || 0) + 1;
             }
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
-                vector = op.tableGet(program.constants, code[pc + (opcode === op.CALL ? 4 : 3)]);
+                var argumentsIndex = code[pc + (opcode === op.CALL ? 4 : 3)];
+                vector = pagedConstants ? constants.get(argumentsIndex) : constants[argumentsIndex];
                 for (index = 0; index < vector.length; index++) {
                     countRegisterOccurrence(occurrences, vector[index], registerCount);
                 }
@@ -332,8 +341,9 @@
         }
         if (!candidate) return program;
         var preloadedRegisters = program.constantRegisters || [];
+        var pagedPreloads = !!preloadedRegisters.pages;
         for (index = 0; index < preloadedRegisters.length; index++) {
-            var constantRegister = op.tableGet(preloadedRegisters, index);
+            var constantRegister = pagedPreloads ? preloadedRegisters.get(index) : preloadedRegisters[index];
             if (typeof constantRegister === "number") constantRegisters[constantRegister] = true;
         }
         if (!countRegisterUses(program, occurrences, definitions)) return program;

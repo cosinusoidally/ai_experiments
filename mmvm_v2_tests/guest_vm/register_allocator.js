@@ -57,6 +57,7 @@
             }
         }
         metadata = scratchPages(count, ANALYSIS_WORDS);
+        var constants = program.constants, pagedConstants = !!constants.pages;
         var block = -1;
         var register, isDefinition, callCount, accessCount;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
@@ -65,7 +66,8 @@
             reads = op.SOURCE_OPERANDS[opcode];
             callCount = 0;
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
-                vector = op.tableGet(program.constants, code[pc + (opcode === op.CALL ? 4 : 3)]);
+                var argumentConstant = code[pc + (opcode === op.CALL ? 4 : 3)];
+                vector = pagedConstants ? constants.get(argumentConstant) : constants[argumentConstant];
                 callCount = vector.length;
             }
             destination = op.DESTINATION_OPERANDS[opcode];
@@ -96,12 +98,13 @@
             }
         }
         var constantRegisters = program.constantRegisters || [];
+        var pagedRegisters = !!constantRegisters.pages;
         var hints = program.registerHints || [];
         for (index = 0; index < bindingCount; index++) {
             metadata[index >>> PAGE_SHIFT][(index & PAGE_MASK) * ANALYSIS_WORDS + PINNED] = 1;
         }
         for (index = 0; index < constantRegisters.length; index++) {
-            argument = op.tableGet(constantRegisters, index);
+            argument = pagedRegisters ? constantRegisters.get(index) : constantRegisters[index];
             if (typeof argument === "number" && argument >= 0) {
                 metadata[argument >>> PAGE_SHIFT][(argument & PAGE_MASK) * ANALYSIS_WORDS + PINNED] = 1;
             }
@@ -176,23 +179,26 @@
                 var flagPage = remappedVectors[constantIndex >>> PAGE_SHIFT];
                 var flagIndex = constantIndex & PAGE_MASK;
                 if (!flagPage[flagIndex]) {
-                    vector = op.tableGet(program.constants, constantIndex);
+                    vector = pagedConstants ? constants.get(constantIndex) : constants[constantIndex];
                     var remapped = [];
                     for (argument = 0; argument < vector.length; argument++) {
                         register = vector[argument];
                         remapped.push(metadata[register >>> PAGE_SHIFT][
                             (register & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP]);
                     }
-                    op.tableSet(program.constants, constantIndex, remapped);
+                    if (pagedConstants) constants.set(constantIndex, remapped);
+                    else constants[constantIndex] = remapped;
                     flagPage[flagIndex] = 1;
                 }
             }
         }
         for (index = 0; index < constantRegisters.length; index++) {
-            argument = op.tableGet(constantRegisters, index);
+            argument = pagedRegisters ? constantRegisters.get(index) : constantRegisters[index];
             if (typeof argument === "number" && argument >= 0) {
-                op.tableSet(constantRegisters, index,
-                    metadata[argument >>> PAGE_SHIFT][(argument & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP]);
+                var mappedConstantRegister = metadata[argument >>> PAGE_SHIFT][
+                    (argument & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP];
+                if (pagedRegisters) constantRegisters.set(index, mappedConstantRegister);
+                else constantRegisters[index] = mappedConstantRegister;
             }
         }
         var remappedHints = [];
