@@ -32,8 +32,47 @@
         readSource = read;
         report = print;
     }
-    var detailed = args[0] === "--functions";
-    if (detailed) args = args.slice(1);
+    var detailed = false, traceErrors = false;
+    while (args[0] === "--functions" || args[0] === "--trace-errors") {
+        if (args[0] === "--functions") detailed = true;
+        else traceErrors = true;
+        args = args.slice(1);
+    }
+    if (traceErrors) {
+        function traceMethod(label, original) {
+            return function () {
+                try { return original.apply(this, arguments); }
+                catch (error) {
+                    var input = arguments[0];
+                    /* Preserve the original diagnostic even if the guest's
+                     * generic Error-to-string conversion is incomplete. */
+                    var message = error && typeof error.message === "string" ?
+                        error.message : typeof error === "string" ? error : "<thrown value>";
+                    report("frontend error in " + label +
+                        (input && input.type ? " (" + input.type + ")" : "") +
+                        ": " + message);
+                    throw error;
+                }
+            };
+        }
+        function traceOwner(owner, label) {
+            var name;
+            for (name in owner) {
+                if (Object.prototype.hasOwnProperty.call(owner, name) &&
+                    typeof owner[name] === "function") {
+                    owner[name] = traceMethod(label + "." + name, owner[name]);
+                }
+            }
+        }
+        traceOwner(Parser.prototype, "Parser");
+        traceOwner(Compiler.prototype, "Compiler");
+        traceOwner(nodeHost ? require("../function_analysis.js") :
+            GuestVMFunctionAnalysis, "FunctionAnalysis");
+        traceOwner(nodeHost ? require("../register_allocator.js") :
+            GuestVMRegisterAllocator, "RegisterAllocator");
+        traceOwner(nodeHost ? require("../bytecode_optimizer.js") :
+            GuestVMBytecodeOptimizer, "BytecodeOptimizer");
+    }
     var instructionName = null, instructionPC = -1;
     if (args[0] === "--instruction") {
         instructionName = args[1];
@@ -45,7 +84,7 @@
         args = args.slice(3);
     }
     if (args.length !== 1) throw new Error(
-        "expected [--functions] [--instruction OPCODE PC] source-file");
+        "expected [--functions] [--trace-errors] [--instruction OPCODE PC] source-file");
     var totals = {programs: 0, analyzed: 0, stateLimited: 0, workLimited: 0,
                   fused: 0, redundant: 0, conversions: 0};
     function describe(record) {

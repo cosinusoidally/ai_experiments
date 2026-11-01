@@ -18,6 +18,7 @@
 
     function Compiler(scopeBindings, outerScopes, registerBindings, options) {
         this.consumeAst = !!options && options.consumeAst === true;
+        this.retainAst = !!options && options.retainAst === true;
         this.finishFunction = options && options.finishFunction || null;
         this.captureLocations = !options || options.captureLocations !== false;
         this.packedWords = !!options && options.packedWords === true;
@@ -217,7 +218,7 @@
             /* All whole-body analyses precede lowering. Release completed
              * root statements only; nested finally bodies may be replayed
              * along multiple control-flow paths and must remain intact. */
-            if (this.consumeAst) program.body[index] = null;
+            if (this.consumeAst && !this.retainAst) program.body[index] = null;
             index++;
         }
         this.emit(op.RETURN, this.completionRegister < 0 ?
@@ -264,7 +265,8 @@
             canUseRegisterBindings(expression.body, bindingMap)) &&
             (!!expression.strict || !usesArguments);
         var nested = new Compiler(bindings, this.scopes, useRegisters,
-            {consumeAst: this.consumeAst, finishFunction: this.finishFunction,
+            {consumeAst: this.consumeAst, retainAst: this.retainAst,
+             finishFunction: this.finishFunction,
              packedWords: this.packedWords,
              pagedTables: this.pagedTables,
              wordArena: this.wordArena,
@@ -319,7 +321,7 @@
          * so a large compilation need not retain every AST beside every
          * emitted program. The default API remains non-destructive for the
          * structured backend and embedders which retain their ASTs. */
-        if (this.consumeAst) expression.body = null;
+        if (this.consumeAst && !this.retainAst) expression.body = null;
         /* A frontend sink can adopt a completed nested program immediately.
          * Its parent then retains only the executable template rather than
          * every child's temporary bytecode and analysis arrays. */
@@ -372,16 +374,27 @@
     };
 
     Compiler.prototype.compileFinalizer = function (statement, entry) {
-        if (this.completionRegister < 0) {
+        /* Cleanup is replayed at each abrupt edge and on normal/exceptional
+         * fallthrough. Its nested functions must keep their ASTs until the
+         * enclosing try statement is finished, including function bodies
+         * lowered by child compilers. Ownership-based analyses remain valid;
+         * only destructive release is deferred for this borrowed subtree. */
+        var previousRetention = this.retainAst;
+        this.retainAst = true;
+        try {
+            if (this.completionRegister < 0) {
+                this.compileStatement(statement);
+                return;
+            }
+            var pending = this.saveCompletionValue();
+            this.restoreCompletionValue(entry);
             this.compileStatement(statement);
-            return;
+            /* Abrupt completions leave this path before the restore. A normal
+             * finally completion never replaces the pending try/catch value. */
+            this.restoreCompletionValue(pending);
+        } finally {
+            this.retainAst = previousRetention;
         }
-        var pending = this.saveCompletionValue();
-        this.restoreCompletionValue(entry);
-        this.compileStatement(statement);
-        /* Abrupt completions leave this path before the restore. A normal
-         * finally completion never replaces the pending try/catch value. */
-        this.restoreCompletionValue(pending);
     };
 
     Compiler.prototype.makeJumpTarget = function (position) {

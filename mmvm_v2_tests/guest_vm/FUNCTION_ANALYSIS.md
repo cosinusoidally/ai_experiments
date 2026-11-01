@@ -23,6 +23,24 @@ are used only for capture analysis, not as references in the enclosing body.
 Bindings are resolved later against each compiler's actual lexical scope
 stack. The summary therefore cannot capture a stale catch/with/finally scope.
 
+Owned ASTs can still contain replayable subtrees: a finally body is emitted
+at abrupt exits as well as normal and exceptional fallthrough. While lowering
+such a body, the compiler's `retainAst` guard defers destructive release and
+is inherited by nested function compilers. Ownership-based analysis remains
+enabled. The guard is restored on exit, and the enclosing consumed statement
+eventually releases the original subtree. In particular, do not detach a
+nested function body on its first emission or cache its compiled program
+for subsequent emissions: cleanup copies can have different enclosing
+catch/finally environment depths. The ordinary consuming path still drops
+completed statements and function bodies immediately.
+
+This case arose while compiling the ECMA runner's sampling cleanup: its
+finally body contains a nested sorting callback. The consuming compiler
+failed on the second cleanup emission although non-consuming compilation
+succeeded. `tools/inspect_bytecode_optimization.js --trace-errors file.js`
+can identify the failing frontend phase without changing the source or
+adding a language-specific test fixture.
+
 The traversal follows explicit AST child fields. It ignores source locations,
 cached program descriptors and other non-syntax metadata. Unknown node shapes
 decline the optimized path. Functions with a with statement in their own body
