@@ -1,4 +1,4 @@
-/* Shell logging only: do not pretend to implement version(), gc(), uneval(),
- * load(), JIT controls or other engine extensions. */
+/* Shell logging only. The backends provide a real script loader; version(),
+ * gc(), uneval(), JIT controls and other engine extensions are not faked. */
 function print() {}
 function dump() {}

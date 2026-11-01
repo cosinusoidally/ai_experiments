@@ -122,6 +122,10 @@ exit status or signal; line/column zero means the process returned no JS
 exception location. SIGSYS stops the guest supervisor for environment
 investigation rather than being worked around.
 
+On Linux, `ulimit -c 0` before a batch also prevents large core files from a
+fatal Node worker; the guest worker disables its own core dumps. These resource
+guards are not a security sandbox for executing an untrusted corpus.
+
 ## Interpreting results
 
 Raw corpus pass rate is not a pure ES5.1 compliance score. These historical

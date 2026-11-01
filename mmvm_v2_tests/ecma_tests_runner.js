@@ -88,6 +88,12 @@
         files.push("ecma_tests_capture.js");
         return files;
     }
+    function display(value) {
+        return String(value).replace(/[\x00-\x1f\x7f]/g, function (character) {
+            var hex = "0000" + character.charCodeAt(0).toString(16);
+            return "\\u" + hex.substring(hex.length - 4);
+        });
+    }
     try {
         for (index = 0; index < tests.length; index++) {
             var relative = tests[index], filename = root + "/" + relative;
@@ -118,7 +124,7 @@
             else if (!summaryOnly) console.error("FAIL " + relative + ": " +
                 (negative && result.status === "completed" ? "expected exception" :
                 (result.filename || filename) + ":" + (result.line || 0) + ":" + (result.column || 0) +
-                ": " + (result.name || result.status) + ": " + result.message + " [" + result.phase + "]") + timing);
+                ": " + (result.name || result.status) + ": " + display(result.message) + " [" + result.phase + "]") + timing);
             if (!passed && failFast) { stopped = true; break; }
         }
     } finally { backend.destroy(); }
