@@ -292,7 +292,7 @@
             if (replacement.length && program.sourceLocations) {
                 locations[builder.length] = program.sourceLocations[pc];
             }
-            builder.append(replacement);
+            builder.appendKnownWords(replacement);
         }
         var output = builder.finish();
         relocated[code.length] = output.length;

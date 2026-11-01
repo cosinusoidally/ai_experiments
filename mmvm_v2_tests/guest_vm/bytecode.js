@@ -214,7 +214,19 @@
             this.packed ? null : [];
         this.length = 0;
         this.capacity = this.arena ? this.words.length : 0;
+        if (!this.packed) this.appendKnownWords = this.append;
     }
+    WordBuffer.prototype.grow = function (required) {
+        var capacity = this.capacity || INITIAL_WORD_CAPACITY;
+        while (capacity < required) capacity *= 2;
+        var replacement = new Int32Array(capacity);
+        if (this.length) replacement.set(this.words.subarray(0, this.length));
+        this.words = replacement;
+        this.capacity = capacity;
+        /* An underestimated workspace is not a language limit. Keep the
+         * private prefix reserved until its function sink completes. */
+        this.arena = null;
+    };
     WordBuffer.prototype.append = function (values) {
         var index = 0;
         if (!this.packed) {
@@ -223,22 +235,24 @@
             return;
         }
         var required = this.length + values.length;
-        if (required > this.capacity) {
-            var capacity = this.capacity || INITIAL_WORD_CAPACITY;
-            while (capacity < required) capacity *= 2;
-            var replacement = new Int32Array(capacity);
-            if (this.length) replacement.set(this.words.subarray(0, this.length));
-            this.words = replacement;
-            this.capacity = capacity;
-            /* An underestimated workspace is not a language limit. Keep the
-             * private prefix reserved until its function sink completes. */
-            this.arena = null;
-        }
+        if (required > this.capacity) this.grow(required);
         while (index < values.length) {
             var value = values[index++];
             if (value !== (value | 0)) throw new RangeError("invalid bytecode word");
             this.words[this.length++] = value;
         }
+        if (this.arena) this.arena.used = this.arenaStart + this.length;
+    };
+    /* Instruction producers already supply canonical signed words (opcode,
+     * allocated register/constant indices and bounded PCs). Batch those words
+     * through the normal typed-array API rather than reinterpreting a JS loop
+     * per word. Keep append's checked behavior for non-producer callers. */
+    WordBuffer.prototype.appendKnownWords = function (values) {
+        if (!values.length) return;
+        var required = this.length + values.length;
+        if (required > this.capacity) this.grow(required);
+        this.words.set(values, this.length);
+        this.length = required;
         if (this.arena) this.arena.used = this.arenaStart + this.length;
     };
     WordBuffer.prototype.finish = function () {

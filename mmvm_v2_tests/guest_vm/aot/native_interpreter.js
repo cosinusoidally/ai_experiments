@@ -1141,12 +1141,12 @@
                     0, registerAddress, arrayGetKeyOperand);
                 var arrayGetSupported = 1;
                 var arrayGetObjectTag = load32(arrayGetObjectCell);
-                if (arrayGetObjectTag === VALUE_TAG_UNDEFINED ||
-                        arrayGetObjectTag === VALUE_TAG_NULL) {
-                    return propertyAccessTypeErrorKernel(heapBase, state, frame,
-                        pc, opcode, initialBudget - budget, stringSupport);
-                }
                 if (arrayGetObjectTag !== VALUE_TAG_REFERENCE) {
+                    if (arrayGetObjectTag === VALUE_TAG_UNDEFINED ||
+                            arrayGetObjectTag === VALUE_TAG_NULL) {
+                        return propertyAccessTypeErrorKernel(heapBase, state, frame,
+                            pc, opcode, initialBudget - budget, stringSupport);
+                    }
                     if (arrayGetObjectTag !== VALUE_TAG_INT32) {
                         if (arrayGetObjectTag !== VALUE_TAG_DOUBLE) {
                             if (arrayGetObjectTag !== VALUE_TAG_TRUE) {
@@ -4481,12 +4481,12 @@
                     propertyKeyIndex * VALUE_CELL_BYTES;
                 var propertyOperandsValid = 1;
                 var propertyObjectTag = load32(propertyObjectCell);
-                if (propertyObjectTag === VALUE_TAG_UNDEFINED ||
-                        propertyObjectTag === VALUE_TAG_NULL) {
-                    return propertyAccessTypeErrorKernel(heapBase, state, frame,
-                        pc, opcode, initialBudget - budget, stringSupport);
-                }
                 if (propertyObjectTag !== VALUE_TAG_REFERENCE) {
+                    if (propertyObjectTag === VALUE_TAG_UNDEFINED ||
+                            propertyObjectTag === VALUE_TAG_NULL) {
+                        return propertyAccessTypeErrorKernel(heapBase, state, frame,
+                            pc, opcode, initialBudget - budget, stringSupport);
+                    }
                     if (propertyObjectTag !== VALUE_TAG_INT32) {
                         if (propertyObjectTag !== VALUE_TAG_DOUBLE) {
                             if (propertyObjectTag !== VALUE_TAG_TRUE) {

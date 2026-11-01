@@ -174,7 +174,7 @@
         if (this.captureLocations && this.currentLocation) {
             this.sourceLocations[position] = this.currentLocation;
         }
-        this.code.append(arguments);
+        this.code.appendKnownWords(arguments);
         return position;
     };
 
@@ -1759,7 +1759,7 @@
         return scopes;
     };
 
-    Compiler.compileSloppyDirectEval = function (ast, outerScopes) {
+    Compiler.compileSloppyDirectEval = function (ast, outerScopes, options) {
         var declarations = [];
         collectVariableDeclarations(ast.body, declarations);
         /* A direct sloppy eval can introduce bindings into the caller's
@@ -1770,18 +1770,18 @@
         while (outerScopes && outerIndex < outerScopes.length) {
             scopes.push(outerScopes[outerIndex++]);
         }
-        var compiler = new Compiler(null, scopes);
+        var compiler = new Compiler(null, scopes, false, options);
         compiler.evalThis = true;
         var program = compiler.compile(ast, true);
         program.evalDeclarations = declarations;
         return program;
     };
 
-    Compiler.compileStrictEval = function (ast, outerScopes) {
+    Compiler.compileStrictEval = function (ast, outerScopes, options) {
         var block = {type: "BlockStatement", body: ast.body};
         var locals = collectLocals(block, null);
         var bindings = locals.slice(0);
-        var compiler = new Compiler(bindings, outerScopes, false);
+        var compiler = new Compiler(bindings, outerScopes, false, options);
         var program = compiler.compile(ast, true);
         program.parameters = [];
         program.locals = locals;

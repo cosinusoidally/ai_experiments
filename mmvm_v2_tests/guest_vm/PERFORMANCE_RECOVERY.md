@@ -104,3 +104,42 @@ than the 135.50 s packed/linear-index candidate and 18% faster than the fresh
 98.55 s pre-Mandreel control. Runtime preparation is 36.777 s instead of
 83.962 / 55.702 s respectively. Final diagnostics and broad regressions are
 pending; these working-point results are not an all-suite completion claim.
+
+## Native frontend consistency and bulk word appends
+
+The initial indexed-image sweep completed twelve paired suites before being
+deliberately stopped at the start of zlib. All completed jobs passed; zlib
+and RegExp have no completed result in that partial sweep. It identified a
+CodeLoad slowdown (103 versus 94.1) despite the larger TypeScript improvement
+(998 versus 1386). Small score differences elsewhere require repetitions,
+not treating a single result as an exact performance guarantee.
+
+Instruction producers now batch already-canonical integer words through
+ordinary `Int32Array.set`. WordBuffer's checked append remains available;
+only compiler/optimizer-owned words use the trusted producer method. The ES3
+plain-array path retains its existing append algorithm. Empty appends remain
+no-ops, capacity grows through one shared method, and no new VM intrinsic or
+benchmark-specific instruction is added. Compilation products for Richards,
+TypeScript and Mandreel continue to agree. Bulk append by itself did not
+establish CodeLoad parity (98 versus 94.6 in a subsequent pair).
+
+Inspection showed that native eval and Function frontends still retained
+private ASTs and built hint/location graphs discarded by native adoption.
+They now share the existing native frontend's owned-AST/packed-word policy,
+including whole-statement temporary reuse. Public AST/structured compilation
+keeps its defaults. Strict/sloppy eval declaration rules and exact function
+source remain unchanged. Parser errors retain their token filename/position;
+only metadata which adoption does not store is omitted. Object property
+TypeError checks are also placed inside primitive-receiver handling rather
+than repeated on the reference fast path. The native contract is 92.
+
+This working point passes integration, 24-round/48-collection GC stress and
+2071 selected ch11/ch12/ch13 Test262 cases, with zero failures/not run/timeouts.
+Runner elapsed is 73.849 s versus the prior 109.405 s selected observation.
+CodeLoad passes at 97.1 versus a fresh 99.3 control; whole-process wall improves
+to 28.66 versus 30.16 s and RSS to 266368 versus 308480 KiB. The score still
+needs repetition/component measurement before claiming parity. Optional
+`octane_runner.js --diagnostics` now prints the stock harness's completed
+per-benchmark means, without wrapping timed benchmark callbacks or modifying
+the external inputs. Complete tests, builds, demos and final full Octane
+performance parity remain pending.

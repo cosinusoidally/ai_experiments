@@ -30,6 +30,17 @@ exports.compileAst = function (ast, consumeAst) {
         {consumeAst: !!consumeAst}).compile(ast));
 };
 
+/* Native adoption consumes descriptors, not AST/hint/location graphs. Keep
+ * this policy shared by load, eval and Function; public AST compilation and
+ * the structured backend retain their default metadata behavior. Source text
+ * is still retained exactly for Function.prototype.toString and diagnostics. */
+function nativeCompilerOptions(captureLocations, wordArena, finishFunction) {
+    return {consumeAst: true, captureLocations: captureLocations,
+        packedWords: true, pagedTables: !!wordArena, wordArena: wordArena || null,
+        captureHints: false, reuseStatementTemps: true,
+        finishFunction: finishFunction};
+}
+
 exports.compile = function (source, filename, options) {
     ensureFrontend();
     var captureLocations = !options || options.captureLocations !== false;
@@ -37,12 +48,8 @@ exports.compile = function (source, filename, options) {
         {compactLiterals: true, shareIdentifiers: true,
          captureLocations: captureLocations}).parseProgram();
     return selfHostedVerify(new SelfHostedCompiler(null, null, false,
-        {consumeAst: true, captureLocations: captureLocations,
-         packedWords: true,
-         pagedTables: !!options && !!options.wordArena,
-         wordArena: options && options.wordArena || null,
-         captureHints: false, reuseStatementTemps: true,
-         finishFunction: options && options.finishFunction}).compile(ast));
+        nativeCompilerOptions(captureLocations, options && options.wordArena,
+            options && options.finishFunction)).compile(ast));
 };
 
 function adoptProgramDescriptor(program, contextAnchor) {
@@ -185,13 +192,16 @@ exports.compileExecutable = function (source, filename, contextAnchor,
 exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
     ensureFrontend();
     var ast = new SelfHostedParser(source, filename,
-        {strict: !!inheritedStrict, compactLiterals: true}).parseProgram();
+        {strict: !!inheritedStrict, compactLiterals: true,
+         shareIdentifiers: true, captureLocations: false}).parseProgram();
     var dynamicOuter = [
         {bindings: {}, createsEnvironment: false, dynamic: true}
     ];
     var program = ast.strict ?
-        SelfHostedCompiler.compileStrictEval(ast, dynamicOuter) :
-        SelfHostedCompiler.compileSloppyDirectEval(ast, null);
+        SelfHostedCompiler.compileStrictEval(ast, dynamicOuter,
+            nativeCompilerOptions(false)) :
+        SelfHostedCompiler.compileSloppyDirectEval(ast, null,
+            nativeCompilerOptions(false));
     selfHostedVerify(program);
     var callable = adoptProgramDescriptor(program);
     callable.__guestVMEvalDeclarations = program.evalDeclarations || [];
@@ -206,13 +216,15 @@ exports.compileEvalExecutable = function (source, filename, inheritedStrict) {
 exports.compileIndirectEvalExecutable = function (source) {
     ensureFrontend();
     var ast = new SelfHostedParser(source, "<eval>",
-        {compactLiterals: true, shareIdentifiers: true}).parseProgram();
+        {compactLiterals: true, shareIdentifiers: true,
+         captureLocations: false}).parseProgram();
     /* Eval returns the last non-empty statement completion, unlike load.
      * A strict indirect eval additionally owns its declarations; neither
      * form inherits the compiler module's lexical environment. */
-    var program = ast.strict ? SelfHostedCompiler.compileStrictEval(ast, null) :
+    var program = ast.strict ? SelfHostedCompiler.compileStrictEval(ast, null,
+        nativeCompilerOptions(false)) :
         new SelfHostedCompiler(null, null, false,
-            {consumeAst: true}).compile(ast, true);
+            nativeCompilerOptions(false)).compile(ast, true);
     selfHostedVerify(program);
     var callable = adoptProgramDescriptor(
         program, exports.compileIndirectEvalExecutable);
@@ -253,11 +265,12 @@ exports.compileFunctionExecutable = function () {
     }
     var source = "function anonymous(" + parameterSource + "\n) {\n" + body + "\n}";
     var ast = new SelfHostedParser(source, "<Function>",
-        {compactLiterals: true, shareIdentifiers: true}).parseProgram();
+        {compactLiterals: true, shareIdentifiers: true,
+         captureLocations: false}).parseProgram();
     if (ast.body.length !== 1 || ast.body[0].type !== "FunctionDeclaration") {
         throw new SyntaxError("invalid Function constructor source");
     }
-    var compiler = new SelfHostedCompiler(null, null, false, {consumeAst: true});
+    var compiler = new SelfHostedCompiler(null, null, false, nativeCompilerOptions(false));
     compiler.filename = "<Function>";
     return adoptProgramDescriptor(selfHostedVerify(compiler.compileFunction(ast.body[0])));
 };

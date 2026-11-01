@@ -151,6 +151,20 @@
     function reportResult(name, result) {
         if (quick) print(name + ": passed (quick correctness)");
         else print(name + ": " + result);
+        if (diagnostics && !quick) {
+            /* Read the stock harness's completed measurements. No timed
+             * callback or benchmark function is wrapped/replaced. */
+            for (var suiteIndex = 0; suiteIndex < BenchmarkSuite.suites.length; suiteIndex++) {
+                var suite = BenchmarkSuite.suites[suiteIndex];
+                if (suite.name !== name) continue;
+                for (var resultIndex = 0; resultIndex < suite.results.length; resultIndex++) {
+                    var measurement = suite.results[resultIndex];
+                    print("benchmark " + measurement.benchmark.name +
+                        ": mean_us=" + measurement.time +
+                        "; latency=" + measurement.latency);
+                }
+            }
+        }
     }
     function reportError(name, error) {
         failed = true;
