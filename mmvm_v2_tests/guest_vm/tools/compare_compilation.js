@@ -4,7 +4,9 @@
  * are available, including paged constant tables. Retained products do not
  * use the synchronous-adoption workspace.
  * This is a refactoring diagnostic, not a mandated optimizer shape.
- * Run from mmvm_v2_tests under Node or js_min, followed by source filenames. */
+ * Run from mmvm_v2_tests under Node or js_min, followed by source filenames.
+ * --reuse-temporaries selects the executable frontend's conservative
+ * whole-statement reuse, on both paths, without retaining unused hints. */
 (function (shellArguments) {
     var node = typeof module !== "undefined" && module.exports;
     var Parser, Compiler, args, readSource, report;
@@ -28,6 +30,11 @@
         args = shellArguments;
         readSource = read;
         report = print;
+    }
+    var reuseTemporaries = false;
+    if (args[0] === "--reuse-temporaries") {
+        args = args.slice(1);
+        reuseTemporaries = true;
     }
     if (!args.length) throw new Error("expected source filenames");
     var own = Object.prototype.hasOwnProperty;
@@ -94,6 +101,8 @@
             {compactLiterals: true, shareIdentifiers: true, captureLocations: false}).parseProgram();
         return releaseAst(new Compiler(null, null, null,
             {consumeAst: consume, captureLocations: false,
+             captureHints: !reuseTemporaries,
+             reuseStatementTemps: reuseTemporaries,
              packedWords: consume && typeof Int32Array === "function",
              pagedTables: consume}).compile(ast));
     }

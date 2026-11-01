@@ -9,19 +9,36 @@
     /* Packing is optional. Its per-register liveness vectors must not consume
      * an unbounded fraction of the heap for very large generated functions. */
     var MAX_PACKING_REGISTERS = 262144;
-    var read = op.tableGet, write = op.tableSet;
-    function analysisTable(program) {
-        return program.constants.pages ? new op.PagedTable() : [];
+    /* Integer scratch records, not guest-heap object layouts. Resolve a page
+     * once per register visit instead of dispatching a generic table accessor
+     * for every field. Pages bound allocations even for generated functions.
+     * First-PC fields store pc+1: zero (or an ES3 fallback hole) means unseen. */
+    var PAGE_SHIFT = 10;
+    var PAGE_ENTRIES = 1 << PAGE_SHIFT;
+    var PAGE_MASK = PAGE_ENTRIES - 1;
+    var FIRST_ACCESS = 0, LAST_ACCESS = 1, BLOCK_NUMBER = 2;
+    var DEFINITION_COUNT = 3, FIRST_DEFINITION = 4, FIRST_READ = 5;
+    var PINNED = 6, REGISTER_MAP = 7, ANALYSIS_WORDS = 8;
+
+    function scratchPages(count, wordsPerEntry) {
+        var pages = [], first = 0;
+        while (first < count) {
+            var words = Math.min(PAGE_ENTRIES, count - first) * wordsPerEntry;
+            var page;
+            if (typeof Int32Array === "function") page = new Int32Array(words);
+            else page = new Array(words);
+            pages.push(page);
+            first += PAGE_ENTRIES;
+        }
+        return pages;
     }
 
     function pack(program, bindingCount) {
         var code = program.code, count = program.registerCount;
         if (count > MAX_PACKING_REGISTERS) return program;
         var boundaries = {0: true};
-        var first = analysisTable(program), last = analysisTable(program);
-        var blocks = analysisTable(program), definitions = analysisTable(program);
-        var firstDefinition = analysisTable(program), firstRead = analysisTable(program);
-        var pinned = analysisTable(program);
+        var metadata;
+        var data, entry;
         var pc, opcode, index, reads, destination, vector, argument;
         /* These constructs require exceptional/dynamic scope liveness. Leave
          * them unchanged until that analysis is available, not approximately
@@ -39,6 +56,7 @@
                 boundaries[pc + op.WIDTHS[opcode]] = true;
             }
         }
+        metadata = scratchPages(count, ANALYSIS_WORDS);
         var block = -1;
         var register, isDefinition, callCount, accessCount;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
@@ -64,36 +82,44 @@
                 }
                 /* Negative CALL receiver sentinels are not storage. */
                 if (register < 0) continue;
-                if (read(first, register) === undefined) {
-                    write(first, register, pc);
-                    write(blocks, register, block);
-                } else if (read(blocks, register) !== block) write(blocks, register, -1);
-                write(last, register, pc);
+                data = metadata[register >>> PAGE_SHIFT];
+                entry = (register & PAGE_MASK) * ANALYSIS_WORDS;
+                if (!data[entry + FIRST_ACCESS]) {
+                    data[entry + FIRST_ACCESS] = pc + 1;
+                    data[entry + BLOCK_NUMBER] = block;
+                } else if (data[entry + BLOCK_NUMBER] !== block) data[entry + BLOCK_NUMBER] = -1;
+                data[entry + LAST_ACCESS] = pc;
                 if (isDefinition) {
-                    write(definitions, register, (read(definitions, register) || 0) + 1);
-                    if (read(firstDefinition, register) === undefined) write(firstDefinition, register, pc);
-                } else if (read(firstRead, register) === undefined) write(firstRead, register, pc);
+                    data[entry + DEFINITION_COUNT] = (data[entry + DEFINITION_COUNT] || 0) + 1;
+                    if (!data[entry + FIRST_DEFINITION]) data[entry + FIRST_DEFINITION] = pc + 1;
+                } else if (!data[entry + FIRST_READ]) data[entry + FIRST_READ] = pc + 1;
             }
         }
         var constantRegisters = program.constantRegisters || [];
         var hints = program.registerHints || [];
-        for (index = 0; index < bindingCount; index++) write(pinned, index, true);
+        for (index = 0; index < bindingCount; index++) {
+            metadata[index >>> PAGE_SHIFT][(index & PAGE_MASK) * ANALYSIS_WORDS + PINNED] = 1;
+        }
         for (index = 0; index < constantRegisters.length; index++) {
             argument = op.tableGet(constantRegisters, index);
-            if (typeof argument === "number" && argument >= 0) write(pinned, argument, true);
+            if (typeof argument === "number" && argument >= 0) {
+                metadata[argument >>> PAGE_SHIFT][(argument & PAGE_MASK) * ANALYSIS_WORDS + PINNED] = 1;
+            }
         }
-        var mapping = analysisTable(program), privateCount = 0;
+        var privateCount = 0;
         for (index = 0; index < count; index++) {
             /* Preserve compiler hints without assigning a hint to another
              * temporary which later reuses the same slot. */
-            if (read(pinned, index) || hints[index] !== undefined ||
-                    (read(first, index) !== undefined && (read(blocks, index) < 0 ||
-                     read(definitions, index) !== 1 ||
-                     (read(firstRead, index) !== undefined &&
-                      read(firstRead, index) <= read(firstDefinition, index))))) {
-                write(mapping, index, privateCount++);
-            } else if (read(first, index) !== undefined) {
-                write(mapping, index, -1);
+            data = metadata[index >>> PAGE_SHIFT];
+            entry = (index & PAGE_MASK) * ANALYSIS_WORDS;
+            if (data[entry + PINNED] || hints[index] !== undefined ||
+                    (data[entry + FIRST_ACCESS] && (data[entry + BLOCK_NUMBER] < 0 ||
+                     data[entry + DEFINITION_COUNT] !== 1 ||
+                     (data[entry + FIRST_READ] &&
+                      data[entry + FIRST_READ] <= data[entry + FIRST_DEFINITION])))) {
+                data[entry + REGISTER_MAP] = privateCount++;
+            } else if (data[entry + FIRST_ACCESS]) {
+                data[entry + REGISTER_MAP] = -1;
             }
         }
         /* Each eligible interval starts at its sole definition, and an
@@ -106,54 +132,75 @@
             destination = op.DESTINATION_OPERANDS[opcode];
             if (destination) {
                 register = code[pc + destination];
-                if (read(mapping, register) === -1) {
+                data = metadata[register >>> PAGE_SHIFT];
+                entry = (register & PAGE_MASK) * ANALYSIS_WORDS;
+                if (data[entry + REGISTER_MAP] === -1) {
                     activeIndex = 0;
                     while (activeIndex < active.length) {
                         /* Strictly before, never an input/output alias. */
-                        if (read(last, active[activeIndex]) < pc) {
-                            available.push(read(mapping, active[activeIndex]));
+                        var activeRegister = active[activeIndex];
+                        var activeData = metadata[activeRegister >>> PAGE_SHIFT];
+                        var activeEntry = (activeRegister & PAGE_MASK) * ANALYSIS_WORDS;
+                        if (activeData[activeEntry + LAST_ACCESS] < pc) {
+                            available.push(activeData[activeEntry + REGISTER_MAP]);
                             active[activeIndex] = active[active.length - 1];
                             active.pop();
                         } else activeIndex++;
                     }
-                    write(mapping, register, available.length ? available.pop() :
-                        privateCount + temporaryCount++);
+                    data[entry + REGISTER_MAP] = available.length ? available.pop() :
+                        privateCount + temporaryCount++;
                     active.push(register);
                 }
             }
         }
         var packedCount = privateCount + temporaryCount;
         if (packedCount >= count) return program;
-        var remappedVectors = analysisTable(program);
+        var remappedVectors = scratchPages(program.constants.length, 1);
         for (pc = 0; pc < code.length; pc += op.WIDTHS[opcode]) {
             opcode = code[pc];
             reads = op.SOURCE_OPERANDS[opcode];
             for (index = 0; index < reads.length; index++) {
                 var operand = pc + reads[index];
-                if (code[operand] >= 0) code[operand] = read(mapping, code[operand]);
+                register = code[operand];
+                if (register >= 0) code[operand] =
+                    metadata[register >>> PAGE_SHIFT][(register & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP];
             }
             destination = op.DESTINATION_OPERANDS[opcode];
-            if (destination) code[pc + destination] = read(mapping, code[pc + destination]);
+            if (destination) {
+                register = code[pc + destination];
+                code[pc + destination] =
+                    metadata[register >>> PAGE_SHIFT][(register & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP];
+            }
             if (opcode === op.CALL || opcode === op.CONSTRUCT) {
                 var constantIndex = code[pc + (opcode === op.CALL ? 4 : 3)];
-                if (!read(remappedVectors, constantIndex)) {
+                var flagPage = remappedVectors[constantIndex >>> PAGE_SHIFT];
+                var flagIndex = constantIndex & PAGE_MASK;
+                if (!flagPage[flagIndex]) {
                     vector = op.tableGet(program.constants, constantIndex);
                     var remapped = [];
-                    for (argument = 0; argument < vector.length; argument++) remapped.push(read(mapping, vector[argument]));
+                    for (argument = 0; argument < vector.length; argument++) {
+                        register = vector[argument];
+                        remapped.push(metadata[register >>> PAGE_SHIFT][
+                            (register & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP]);
+                    }
                     op.tableSet(program.constants, constantIndex, remapped);
-                    write(remappedVectors, constantIndex, true);
+                    flagPage[flagIndex] = 1;
                 }
             }
         }
         for (index = 0; index < constantRegisters.length; index++) {
             argument = op.tableGet(constantRegisters, index);
             if (typeof argument === "number" && argument >= 0) {
-                op.tableSet(constantRegisters, index, read(mapping, argument));
+                op.tableSet(constantRegisters, index,
+                    metadata[argument >>> PAGE_SHIFT][(argument & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP]);
             }
         }
         var remappedHints = [];
         for (index = 0; index < hints.length; index++) {
-            if (hints[index] !== undefined) remappedHints[read(mapping, index)] = hints[index];
+            if (hints[index] !== undefined) {
+                register = metadata[index >>> PAGE_SHIFT][(index & PAGE_MASK) * ANALYSIS_WORDS + REGISTER_MAP];
+                remappedHints[register] = hints[index];
+            }
         }
         program.registerHints = remappedHints;
         program.registerCount = packedCount;

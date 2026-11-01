@@ -5,6 +5,9 @@
  *
  * node octane_compare.js --snapshot artifacts/snap --output artifacts/run
  * node octane_compare.js --node-jitless --snapshot artifacts/snap --output artifacts/run-jitless
+ * --reference-snapshot IMAGE compares two guest images, paired by suite,
+ * instead of using Node as the reference. --include A,B selects a diagnostic
+ * subset; the exact selection and both image identities are recorded.
  * Generated logs/results go exclusively in the requested artifact directory.
  * --node-jitless changes only the reference Node process. Exclusions and
  * reference flags are recorded explicitly in results.json. This harness does
@@ -20,7 +23,8 @@
         "EarleyBoyer", "RegExp", "Splay", "NavierStokes", "PdfJS",
         "Mandreel", "Gameboy", "CodeLoad", "Box2D", "zlib", "Typescript"];
     var options = {snapshot: "artifacts/snap", runner: "artifacts/js_runner.exe",
-        output: null, timeout: 900, exclude: "", nodeJitless: false};
+        output: null, timeout: 900, exclude: "", include: "",
+        referenceSnapshot: null, nodeJitless: false};
     var argumentIndex = 2;
     while (argumentIndex < process.argv.length) {
         var argument = process.argv[argumentIndex++];
@@ -30,13 +34,16 @@
         }
         if (argument !== "--snapshot" && argument !== "--runner" &&
                 argument !== "--output" && argument !== "--timeout" &&
-                argument !== "--exclude") {
+                argument !== "--exclude" && argument !== "--include" &&
+                argument !== "--reference-snapshot") {
             throw new Error("unknown option: " + argument);
         }
         if (argumentIndex >= process.argv.length) {
             throw new Error("missing value for " + argument);
         }
-        options[argument.substring(2)] = process.argv[argumentIndex++];
+        var value = process.argv[argumentIndex++];
+        if (argument === "--reference-snapshot") options.referenceSnapshot = value;
+        else options[argument.substring(2)] = value;
     }
     options.timeout = Number(options.timeout);
     if (!(options.timeout >= 1 && options.timeout <= 3600) ||
@@ -44,6 +51,9 @@
         throw new Error("--timeout must be an integer from 1 to 3600 seconds");
     }
     if (!options.output) throw new Error("--output is required");
+    if (options.referenceSnapshot && options.nodeJitless) {
+        throw new Error("--node-jitless cannot select a guest-image reference");
+    }
     var excluded = options.exclude ? options.exclude.split(",") : [];
     var exclusionIndex = 0;
     while (exclusionIndex < excluded.length) {
@@ -51,6 +61,18 @@
             throw new Error("unknown excluded suite: " + options.exclude);
         }
     }
+    var included = options.include ? options.include.split(",") : suites.slice(0);
+    var selected = [], selectionIndex = 0;
+    while (selectionIndex < included.length) {
+        var selectedSuite = included[selectionIndex++];
+        if (suites.indexOf(selectedSuite) === -1) {
+            throw new Error("unknown included suite: " + selectedSuite);
+        }
+        if (excluded.indexOf(selectedSuite) === -1 && selected.indexOf(selectedSuite) === -1) {
+            selected.push(selectedSuite);
+        }
+    }
+    if (!selected.length) throw new Error("no suites selected");
     process.chdir(__dirname);
     var outputDirectory = path.resolve(options.output);
     var artifactDirectory = path.resolve("artifacts") + path.sep;
@@ -67,25 +89,42 @@
     var snapshotHash = crypto.createHash("sha256").update(snapshot).digest("hex");
     var snapshotBytes = snapshot.length;
     snapshot = null;
+    var referenceMetadata = null;
+    if (options.referenceSnapshot) {
+        options.referenceSnapshot = path.resolve(options.referenceSnapshot);
+        var referenceBytes = fs.readFileSync(options.referenceSnapshot);
+        referenceMetadata = {
+            snapshotBytes: referenceBytes.length,
+            snapshotSHA256: crypto.createHash("sha256").update(referenceBytes).digest("hex")
+        };
+        referenceBytes = null;
+    }
     fs.mkdirSync(outputDirectory);
     var report = {started: new Date().toISOString(), finished: null,
         nodeVersion: process.version, nodeArchitecture: process.arch,
         nodeFlags: options.nodeJitless ? ["--jitless"] : [],
         platform: os.type() + " " + os.release(), cpu: os.cpus()[0].model,
         timeoutSeconds: options.timeout, mode: "stock", snapshotBytes: snapshotBytes,
-        snapshotSHA256: snapshotHash, excludedSuites: excluded, results: []};
+        snapshotSHA256: snapshotHash, referenceSnapshot: referenceMetadata,
+        selectedSuites: selected, excludedSuites: excluded, results: []};
     var jobs = [];
     var hostIndex = 0;
-    var hosts = ["node", "js_runner"];
-    while (hostIndex < hosts.length) {
-        var suiteIndex = 0;
-        while (suiteIndex < suites.length) {
-            var suite = suites[suiteIndex++];
-            if (excluded.indexOf(suite) === -1) {
+    var hosts = options.referenceSnapshot ? ["reference_js_runner", "js_runner"] :
+        ["node", "js_runner"];
+    if (options.referenceSnapshot) {
+        for (selectionIndex = 0; selectionIndex < selected.length; selectionIndex++) {
+            jobs.push({host: hosts[0], suite: selected[selectionIndex]});
+            jobs.push({host: hosts[1], suite: selected[selectionIndex]});
+        }
+    } else {
+        while (hostIndex < hosts.length) {
+            var suiteIndex = 0;
+            while (suiteIndex < selected.length) {
+                var suite = selected[suiteIndex++];
                 jobs.push({host: hosts[hostIndex], suite: suite});
             }
+            hostIndex++;
         }
-        hostIndex++;
     }
     var totalJobs = jobs.length;
     function save() {
@@ -106,7 +145,8 @@
         var command = job.host === "node" ?
             [process.execPath].concat(options.nodeJitless ? ["--jitless"] : [],
                 ["octane_node_runner.js", job.suite]) :
-            [options.runner, options.snapshot, "octane_runner.js", job.suite];
+            [options.runner, job.host === "reference_js_runner" ?
+                options.referenceSnapshot : options.snapshot, "octane_runner.js", job.suite];
         job.started = new Date().toISOString();
         console.log(job.started + " START " + job.host + " " + job.suite);
         var logDescriptor = fs.openSync(logFile, "wx");
