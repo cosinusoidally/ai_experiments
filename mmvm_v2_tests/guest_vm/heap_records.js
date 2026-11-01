@@ -235,7 +235,31 @@
     var GC_STRESS_DEFAULT_INTERVAL = 1000000;
     var ENGINE_GC_STRESS_REMAINING = ENGINE_GC_STRESS_INTERVAL + 4;
     var ENGINE_LARGE_RESERVE_RELEASED = ENGINE_GC_STRESS_REMAINING + 4;
-    var ENGINE_STATE_BYTES = ENGINE_LARGE_RESERVE_RELEASED + 4;
+    /* Free-only intrusive links are scratch, never object references. Exact
+     * small classes avoid scanning the many common aligned fragment sizes;
+     * larger classes divide each power-of-two range into eight intervals. */
+    var MIN_NATIVE_REGION_BYTES = 256 + Heap.HEADER_SIZE;
+    var NATIVE_FREE_SMALL_MAX = 4096;
+    var NATIVE_FREE_SMALL_COUNT =
+        (NATIVE_FREE_SMALL_MAX - MIN_NATIVE_REGION_BYTES) / Heap.RECORD_ALIGNMENT + 1;
+    var NATIVE_FREE_LARGE_MIN_SHIFT = 12;
+    var NATIVE_FREE_LARGE_MAX_SHIFT = 30;
+    var NATIVE_FREE_SUBCLASS_BITS = 3;
+    var NATIVE_FREE_SUBCLASS_COUNT = 1 << NATIVE_FREE_SUBCLASS_BITS;
+    var NATIVE_FREE_BIN_COUNT = NATIVE_FREE_SMALL_COUNT +
+        (NATIVE_FREE_LARGE_MAX_SHIFT - NATIVE_FREE_LARGE_MIN_SHIFT + 1) *
+        NATIVE_FREE_SUBCLASS_COUNT;
+    var NATIVE_FREE_BITMAP_WORDS = (NATIVE_FREE_BIN_COUNT + 31) >>> 5;
+    var FREE_REGION_PREVIOUS = Heap.HEADER_SIZE;
+    var FREE_BIN_NEXT = FREE_REGION_PREVIOUS + Heap.WORD_BYTES;
+    var FREE_BIN_PREVIOUS = FREE_BIN_NEXT + Heap.WORD_BYTES;
+    var ENGINE_FREE_INDEX_VALID = ENGINE_LARGE_RESERVE_RELEASED + Heap.WORD_BYTES;
+    var ENGINE_FREE_BIN_SUMMARY = ENGINE_FREE_INDEX_VALID + Heap.WORD_BYTES;
+    var ENGINE_FREE_BIN_BITMAP = ENGINE_FREE_BIN_SUMMARY + Heap.WORD_BYTES;
+    var ENGINE_FREE_BIN_HEADS = ENGINE_FREE_BIN_BITMAP +
+        NATIVE_FREE_BITMAP_WORDS * Heap.WORD_BYTES;
+    var ENGINE_STATE_BYTES = ENGINE_FREE_BIN_HEADS +
+        NATIVE_FREE_BIN_COUNT * Heap.WORD_BYTES;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -302,7 +326,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 90;
+    Records.NativeInterpreterContractVersion = 91;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
@@ -473,9 +497,23 @@
         ENGINE_GC_STRESS_INTERVAL: ENGINE_GC_STRESS_INTERVAL,
         ENGINE_GC_STRESS_REMAINING: ENGINE_GC_STRESS_REMAINING,
         ENGINE_LARGE_RESERVE_RELEASED: ENGINE_LARGE_RESERVE_RELEASED,
+        ENGINE_FREE_INDEX_VALID: ENGINE_FREE_INDEX_VALID,
+        ENGINE_FREE_BIN_SUMMARY: ENGINE_FREE_BIN_SUMMARY,
+        ENGINE_FREE_BIN_BITMAP: ENGINE_FREE_BIN_BITMAP,
+        ENGINE_FREE_BIN_HEADS: ENGINE_FREE_BIN_HEADS,
+        FREE_REGION_PREVIOUS: FREE_REGION_PREVIOUS,
+        FREE_BIN_NEXT: FREE_BIN_NEXT,
+        FREE_BIN_PREVIOUS: FREE_BIN_PREVIOUS,
+        NATIVE_FREE_SMALL_MAX: NATIVE_FREE_SMALL_MAX,
+        NATIVE_FREE_SMALL_COUNT: NATIVE_FREE_SMALL_COUNT,
+        NATIVE_FREE_LARGE_MIN_SHIFT: NATIVE_FREE_LARGE_MIN_SHIFT,
+        NATIVE_FREE_SUBCLASS_BITS: NATIVE_FREE_SUBCLASS_BITS,
+        NATIVE_FREE_SUBCLASS_COUNT: NATIVE_FREE_SUBCLASS_COUNT,
+        NATIVE_FREE_BIN_COUNT: NATIVE_FREE_BIN_COUNT,
+        NATIVE_FREE_BITMAP_WORDS: NATIVE_FREE_BITMAP_WORDS,
         GC_STRESS_DEFAULT_INTERVAL: GC_STRESS_DEFAULT_INTERVAL,
         HEAP_FIRST_RECORD: Heap.FIRST_RECORD,
-        MIN_NATIVE_REGION_BYTES: 256 + Heap.HEADER_SIZE,
+        MIN_NATIVE_REGION_BYTES: MIN_NATIVE_REGION_BYTES,
         PREFERRED_NATIVE_REGION_BYTES: 64 * 1024,
         NATIVE_LARGE_SPAN_RESERVE_SHIFT: 3,
         STRING_ROPE_FLAG: STRING_ROPE_FLAG,
@@ -3032,6 +3070,8 @@
     Records.prototype.setEngineNativeAllocator = function (
             state, regionEnd, freeRegion, tailBump, tailLimit, regionActive,
             retiredRegion) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_FREE_INDEX_VALID, 0,
+            Heap.Types.ENGINE_STATE);
         this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_REGION_END,
             regionEnd, Heap.Types.ENGINE_STATE);
         this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_FREE_REGION,
@@ -3049,6 +3089,94 @@
     Records.prototype.setEngineNativeFreeRegion = function (state, region) {
         this.heap.writeTrustedFieldU32(state, ENGINE_NATIVE_FREE_REGION,
             region, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.engineFreeIndexValid = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_FREE_INDEX_VALID);
+    };
+    Records.prototype.engineFreeBinHead = function (state, bin) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_FREE_BIN_HEADS + bin * Heap.WORD_BYTES);
+    };
+    Records.prototype.engineFreeBinBitmap = function (state, word) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_FREE_BIN_BITMAP + word * Heap.WORD_BYTES);
+    };
+    Records.prototype.engineFreeBinSummary = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_FREE_BIN_SUMMARY);
+    };
+    Records.prototype.freeRegionPrevious = function (region) {
+        return this.heap.readTrustedFieldU32(region, FREE_REGION_PREVIOUS - Heap.HEADER_SIZE);
+    };
+    Records.prototype.freeBinNext = function (region) {
+        return this.heap.readTrustedFieldU32(region, FREE_BIN_NEXT - Heap.HEADER_SIZE);
+    };
+    Records.prototype.freeBinPrevious = function (region) {
+        return this.heap.readTrustedFieldU32(region, FREE_BIN_PREVIOUS - Heap.HEADER_SIZE);
+    };
+
+    /* Optional structural audit, shared by --vm-verify-heap and inspectors.
+     * This checks derived ownership, not a particular allocation choice. */
+    Records.prototype.verifyNativeFreeIndex = function (state) {
+        if (!this.engineFreeIndexValid(state)) return {valid: false, regions: 0, bins: 0};
+        var globalRegions = {}, binRegions = {}, globalCount = 0, binCount = 0;
+        var region = this.engineNativeFreeRegion(state), previous = 0;
+        while (region) {
+            var header = this.heap.inspectRecordHeader(region);
+            if (header.type !== Heap.Types.FREE || header.flags !== 0 ||
+                    header.size < MIN_NATIVE_REGION_BYTES || globalRegions["$" + region] ||
+                    this.freeRegionPrevious(region) !== previous) {
+                throw new Error("corrupt native free-region chain at " + region);
+            }
+            globalRegions["$" + region] = true;
+            globalCount++;
+            previous = region;
+            region = this.heap.freeRecordNext(region);
+        }
+        var expectedWords = [], expectedSummary = 0, usedBins = 0;
+        for (var bin = 0; bin < NATIVE_FREE_BIN_COUNT; bin++) {
+            var lower, width;
+            if (bin < NATIVE_FREE_SMALL_COUNT) {
+                lower = MIN_NATIVE_REGION_BYTES + bin * Heap.RECORD_ALIGNMENT;
+                width = Heap.RECORD_ALIGNMENT;
+            } else {
+                var large = bin - NATIVE_FREE_SMALL_COUNT;
+                var level = (large >>> NATIVE_FREE_SUBCLASS_BITS) + NATIVE_FREE_LARGE_MIN_SHIFT;
+                width = 1 << (level - NATIVE_FREE_SUBCLASS_BITS);
+                lower = (1 << level) + (large & (NATIVE_FREE_SUBCLASS_COUNT - 1)) * width;
+            }
+            region = this.engineFreeBinHead(state, bin);
+            previous = 0;
+            if (region) {
+                var word = bin >>> 5;
+                expectedWords[word] = (expectedWords[word] || 0) | (1 << (bin & 31));
+                expectedSummary |= 1 << word;
+                usedBins++;
+            }
+            while (region) {
+                if (!globalRegions["$" + region] || binRegions["$" + region] ||
+                        this.freeBinPrevious(region) !== previous) {
+                    throw new Error("corrupt native free bin " + bin + " at " + region);
+                }
+                var size = this.heap.freeRecordSize(region);
+                if (size < lower || size >= lower + width ||
+                        (bin >= NATIVE_FREE_SMALL_COUNT && size <= NATIVE_FREE_SMALL_MAX)) {
+                    throw new Error("native free region " + region + " in wrong size class " + bin);
+                }
+                binRegions["$" + region] = true;
+                binCount++;
+                previous = region;
+                region = this.freeBinNext(region);
+            }
+        }
+        if (globalCount !== binCount) throw new Error("native free-bin coverage mismatch");
+        for (var bitmapWord = 0; bitmapWord < NATIVE_FREE_BITMAP_WORDS; bitmapWord++) {
+            if (this.engineFreeBinBitmap(state, bitmapWord) !== ((expectedWords[bitmapWord] || 0) >>> 0)) {
+                throw new Error("native free-bin bitmap mismatch at word " + bitmapWord);
+            }
+        }
+        if (this.engineFreeBinSummary(state) !== (expectedSummary >>> 0)) {
+            throw new Error("native free-bin summary mismatch");
+        }
+        return {valid: true, regions: globalCount, bins: usedBins};
     };
 
     Records.prototype.engineNativeRetiredRegion = function (state) {

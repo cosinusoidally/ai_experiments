@@ -691,6 +691,11 @@
         engineNativeTailLimit: "ENGINE_NATIVE_TAIL_LIMIT",
         engineNativeMaximumLimit: "ENGINE_NATIVE_MAX_LIMIT",
         engineLargeReserveReleased: "ENGINE_LARGE_RESERVE_RELEASED",
+        engineFreeIndexValid: "ENGINE_FREE_INDEX_VALID",
+        engineFreeBinSummary: "ENGINE_FREE_BIN_SUMMARY",
+        freeRegionPrevious: "FREE_REGION_PREVIOUS",
+        freeBinNext: "FREE_BIN_NEXT",
+        freeBinPrevious: "FREE_BIN_PREVIOUS",
         engineNativeRegionActive: "ENGINE_NATIVE_REGION_ACTIVE",
         engineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
         engineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION",
@@ -840,6 +845,11 @@
         setEngineNativeTailBump: "ENGINE_NATIVE_TAIL_BUMP",
         setEngineNativeTailLimit: "ENGINE_NATIVE_TAIL_LIMIT",
         setEngineLargeReserveReleased: "ENGINE_LARGE_RESERVE_RELEASED",
+        setEngineFreeIndexValid: "ENGINE_FREE_INDEX_VALID",
+        setEngineFreeBinSummary: "ENGINE_FREE_BIN_SUMMARY",
+        setFreeRegionPrevious: "FREE_REGION_PREVIOUS",
+        setFreeBinNext: "FREE_BIN_NEXT",
+        setFreeBinPrevious: "FREE_BIN_PREVIOUS",
         setEngineNativeRegionActive: "ENGINE_NATIVE_REGION_ACTIVE",
         setEngineAllocationFailed: "ENGINE_ALLOCATION_FAILED",
         setEngineNativeRetiredRegion: "ENGINE_NATIVE_RETIRED_REGION",
@@ -870,6 +880,8 @@
     };
 
     var READ_INDEXED_FIELD_ACCESSORS = {
+        engineFreeBinHead: {field: "ENGINE_FREE_BIN_HEADS", stride: "HEAP_WORD_BYTES"},
+        engineFreeBinBitmap: {field: "ENGINE_FREE_BIN_BITMAP", stride: "HEAP_WORD_BYTES"},
         constantPoolLowWord: {fieldValue: 0, stride: "CONSTANT_POOL_PAYLOAD_BYTES"},
         constantPoolHighWord: {fieldValue: 0, stride: "HEAP_WORD_BYTES"},
         integerVectorValue: {field: "INTEGER_VECTOR_VALUES", stride: "HEAP_WORD_BYTES"},
@@ -894,6 +906,8 @@
     };
 
     var WRITE_INDEXED_FIELD_ACCESSORS = {
+        setEngineFreeBinHead: READ_INDEXED_FIELD_ACCESSORS.engineFreeBinHead,
+        setEngineFreeBinBitmap: READ_INDEXED_FIELD_ACCESSORS.engineFreeBinBitmap,
         setIntegerVectorValue: READ_INDEXED_FIELD_ACCESSORS.integerVectorValue,
         setRecordPayloadWord: {field: "HEAP_HEADER_BYTES", stride: "HEAP_WORD_BYTES"},
         setPropertyStorageKeyAt: READ_INDEXED_FIELD_ACCESSORS.propertyStorageKeyAt,

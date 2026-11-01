@@ -88,3 +88,19 @@ Replace repeated linear searches with a bounded size-class index while
 retaining an authoritative region chain for ownership transfer and inspection.
 Keep named field accessors, deterministic indexing, full-capacity fallback,
 nonmoving references and the large-span protection required by Mandreel.
+
+## Indexed allocator working point
+
+The [nonmoving size-class index](NATIVE_FREE_INDEX.md) is implemented. The
+initial image passes stock Mandreel through the ordinary runner: throughput
+190, latency 1254, combined score 488, wall 112.37 s, user CPU 110.70 s,
+peak RSS 486704 KiB. The previous passing observation was 844.18 s under the
+diagnostic loader, combined score 476. These are not paired repetitions,
+but the large loading improvement is distinct from the small score change.
+
+The genuine self-build now completes in 80.80 s (user 79.97 s, RSS 480096
+KiB) and is byte-identical to its Node-built input. This is about 40% faster
+than the 135.50 s packed/linear-index candidate and 18% faster than the fresh
+98.55 s pre-Mandreel control. Runtime preparation is 36.777 s instead of
+83.962 / 55.702 s respectively. Final diagnostics and broad regressions are
+pending; these working-point results are not an all-suite completion claim.

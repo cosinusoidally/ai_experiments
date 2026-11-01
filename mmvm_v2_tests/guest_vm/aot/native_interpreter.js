@@ -10,6 +10,7 @@
     var Binary64 = root.GuestVMBinary64;
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
+    var NativeFreeIndexKernels = root.GuestVMNativeFreeIndexKernel;
     var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
     var NumberFormatKernels = root.GuestVMNumberFormatKernel;
     var ObjectOperationKernels = root.GuestVMObjectOperationsKernel;
@@ -25,6 +26,7 @@
         Binary64 = require("../binary64.js");
         ValueCells = require("../value_cell.js");
         HeapRecords = require("../heap_records.js");
+        NativeFreeIndexKernels = require("../native_free_index_kernel.js");
         PropertyStorageKernels = require("../property_storage_kernel.js");
         NumberFormatKernels = require("../number_format_kernel.js");
         ObjectOperationKernels = require("../object_operations_kernel.js");
@@ -14553,73 +14555,10 @@
         return releasedFrames;
     }
 
-    /* Allocation-free bottom-up merge sort of reclaimed arenas. Keeping
-     * small holes first makes first-fit selection preserve large extents
-     * without a full best-fit search on every small allocation. */
-    function sortNativeFreeRegionsKernel(heapBase, head) {
-        var runLength = 1;
-        var finished = 0;
-        while (finished === 0) {
-            var left = head;
-            var output = 0;
-            var tail = 0;
-            var merges = 0;
-            while (left !== 0) {
-                merges = merges + 1;
-                var right = left;
-                var leftCount = 0;
-                while (leftCount < runLength && right !== 0) {
-                    leftCount = leftCount + 1;
-                    right = recordMark(heapBase, right);
-                }
-                var rightCount = runLength;
-                while (leftCount > 0 || (rightCount > 0 && right !== 0)) {
-                    var selected = 0;
-                    if (leftCount === 0) {
-                        selected = right;
-                        right = recordMark(heapBase, right);
-                        rightCount = rightCount - 1;
-                    } else if (rightCount === 0 || right === 0 ||
-                            recordSize(heapBase, left) <= recordSize(heapBase, right)) {
-                        selected = left;
-                        left = recordMark(heapBase, left);
-                        leftCount = leftCount - 1;
-                    } else {
-                        selected = right;
-                        right = recordMark(heapBase, right);
-                        rightCount = rightCount - 1;
-                    }
-                    if (tail === 0) output = selected;
-                    else setRecordMark(heapBase, tail, selected);
-                    tail = selected;
-                }
-                left = right;
-            }
-            if (tail !== 0) setRecordMark(heapBase, tail, 0);
-            head = output;
-            if (merges <= 1) finished = 1;
-            else runLength = runLength * 2;
-        }
-        return head;
-    }
-
-    function insertNativeFreeRegionKernel(heapBase, state, region) {
-        var size = recordSize(heapBase, region);
-        var current = engineNativeFreeRegion(heapBase, state);
-        var previous = 0;
-        while (current !== 0 && recordSize(heapBase, current) < size) {
-            previous = current;
-            current = recordMark(heapBase, current);
-        }
-        setRecordMark(heapBase, region, current);
-        if (previous === 0) setEngineNativeFreeRegion(heapBase, state, region);
-        else setRecordMark(heapBase, previous, region);
-        return 0;
-    }
-
     function rebuildNativeAllocatorKernel(heapBase, state, heapBump) {
         var address = HEAP_FIRST_RECORD;
-        var freeHead = 0;
+        var clearedIndex = clearNativeFreeIndexKernel(heapBase, state);
+        setEngineNativeFreeRegion(heapBase, state, 0);
         var tailBump = heapBump;
         var liveBytes = 0;
         while (address < heapBump) {
@@ -14629,8 +14568,7 @@
                     if (address + size === heapBump) {
                         tailBump = address;
                     } else if (size >= MIN_NATIVE_REGION_BYTES) {
-                        setRecordMark(heapBase, address, freeHead);
-                        freeHead = address;
+                        var insertedRegion = insertNativeFreeRegionKernel(heapBase, state, address);
                     }
                 }
             } else {
@@ -14639,8 +14577,6 @@
             address = address + size;
         }
         setEngineNativeRegionEnd(heapBase, state, 0);
-        setEngineNativeFreeRegion(heapBase, state,
-            sortNativeFreeRegionsKernel(heapBase, freeHead));
         setEngineNativeTailBump(heapBase, state, tailBump);
         setEngineNativeRegionActive(heapBase, state, 0);
         setEngineNativeRetiredRegion(heapBase, state, 0);
@@ -14868,17 +14804,9 @@
         var RECORD_HEADER_BYTES = 16;
         var EXIT_UNSUPPORTED = 3;
         if (engineNativeRegionActive(heapBase, state) === 0) {
-            var freeRegion = engineNativeFreeRegion(heapBase, state);
-            if (freeRegion !== 0) {
-                var nextFreeRegion = recordMark(heapBase, freeRegion);
-                var freeRegionEnd = freeRegion +
-                    recordSize(heapBase, freeRegion);
-                setEngineNativeFreeRegion(heapBase, state, nextFreeRegion);
-                setEngineNativeRegionEnd(heapBase, state, freeRegionEnd);
-                setEngineNativeRegionActive(heapBase, state, 1);
-                setEngineHeapBump(heapBase, state, freeRegion);
-                setEngineHeapLimit(heapBase, state,
-                    freeRegionEnd - FREE_RECORD_HEADER_BYTES);
+            if (engineNativeFreeRegion(heapBase, state) !== 0) {
+                var entryArena = activateNativeFreeRegionKernel(
+                    heapBase, state, FREE_RECORD_HEADER_BYTES);
             }
         }
         var reason = executeInterpreterTransitionsKernel(
@@ -15273,52 +15201,7 @@
         } else {
             setEngineNativeTailBump(heapBase, state, current);
         }
-        var freeRegion = engineNativeFreeRegion(heapBase, state);
-        var previousFreeRegion = 0;
-        while (freeRegion !== 0) {
-            var nextFreeRegion = recordMark(heapBase, freeRegion);
-            var freeRegionSize = recordSize(heapBase, freeRegion);
-            var usableFreeBytes = 0;
-            if (freeRegion >= HEAP_FIRST_RECORD) {
-                if (freeRegionSize >= FREE_RECORD_HEADER_BYTES) {
-                    usableFreeBytes =
-                        freeRegionSize - FREE_RECORD_HEADER_BYTES;
-                }
-            }
-            if (bytes <= usableFreeBytes) {
-                if (previousFreeRegion === 0) {
-                    setEngineNativeFreeRegion(heapBase, state, nextFreeRegion);
-                } else {
-                    setRecordMark(heapBase, previousFreeRegion, nextFreeRegion);
-                }
-                /* Do not hand a whole large extent to small bump allocations.
-                 * Retain an arena-sized window and publish the untouched
-                 * suffix immediately, in size order, for future large data. */
-                var arenaBytes = bytes + FREE_RECORD_HEADER_BYTES;
-                if (arenaBytes < PREFERRED_NATIVE_REGION_BYTES) {
-                    arenaBytes = PREFERRED_NATIVE_REGION_BYTES;
-                }
-                var freeRegionEnd = freeRegion + freeRegionSize;
-                if (freeRegionSize - arenaBytes >= MIN_NATIVE_REGION_BYTES) {
-                    var suffix = freeRegion + arenaBytes;
-                    setRecordType(heapBase, suffix, HEAP_TYPE_FREE);
-                    setRecordSize(heapBase, suffix, freeRegionSize - arenaBytes);
-                    setRecordMark(heapBase, suffix, 0);
-                    setRecordFlags(heapBase, suffix, 0);
-                    var insertedSuffix = insertNativeFreeRegionKernel(
-                        heapBase, state, suffix);
-                    freeRegionEnd = suffix;
-                }
-                setEngineNativeRegionEnd(heapBase, state, freeRegionEnd);
-                setEngineNativeRegionActive(heapBase, state, 1);
-                setEngineHeapBump(heapBase, state, freeRegion);
-                setEngineHeapLimit(heapBase, state,
-                    freeRegionEnd - FREE_RECORD_HEADER_BYTES);
-                return 1;
-            }
-            previousFreeRegion = freeRegion;
-            freeRegion = nextFreeRegion;
-        }
+        if (activateNativeFreeRegionKernel(heapBase, state, bytes) === 1) return 1;
         var tailBump = engineNativeTailBump(heapBase, state);
         var tailLimit = engineNativeTailLimit(heapBase, state);
         setEngineHeapBump(heapBase, state, tailBump);
@@ -18524,8 +18407,6 @@
             regexpTestKernel: regexpTestKernel,
             regexpConstructorKernel: regexpConstructorKernel,
             rebuildNativeAllocatorKernel: rebuildNativeAllocatorKernel,
-            sortNativeFreeRegionsKernel: sortNativeFreeRegionsKernel,
-            insertNativeFreeRegionKernel: insertNativeFreeRegionKernel,
             nativeCollectorClockKernel: nativeCollectorClockKernel,
             releaseNativeCachedFramesKernel: releaseNativeCachedFramesKernel,
             restoreContextActiveFrameKernel:
@@ -18568,6 +18449,11 @@
             nonIntegerCellToInt32Kernel: nonIntegerCellToInt32Kernel
         };
         var propertyKernelName;
+        for (propertyKernelName in NativeFreeIndexKernels) {
+            if (Object.prototype.hasOwnProperty.call(NativeFreeIndexKernels, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = NativeFreeIndexKernels[propertyKernelName];
+            }
+        }
         for (propertyKernelName in MemoryTransferKernels.functions) {
             if (Object.prototype.hasOwnProperty.call(MemoryTransferKernels.functions, propertyKernelName)) {
                 kernelDependencies[propertyKernelName] = MemoryTransferKernels.functions[propertyKernelName];
@@ -18868,6 +18754,20 @@
                 constantOverrides: kernelConstantOverrides
             };
             var binaryConstantName;
+            var freeIndexConstant;
+            for (freeIndexConstant in HeapRecords.KernelConstants) {
+                if (Object.prototype.hasOwnProperty.call(HeapRecords.KernelConstants, freeIndexConstant) &&
+                        (freeIndexConstant.indexOf("ENGINE_FREE_") === 0 ||
+                         freeIndexConstant.indexOf("FREE_BIN_") === 0 ||
+                         freeIndexConstant.indexOf("FREE_REGION_") === 0 ||
+                         freeIndexConstant.indexOf("NATIVE_FREE_") === 0 ||
+                         freeIndexConstant === "MIN_NATIVE_REGION_BYTES" ||
+                         freeIndexConstant === "HEAP_WORD_BYTES" ||
+                         freeIndexConstant === "HEAP_RECORD_ALIGNMENT")) {
+                    compilerOptions.constantBindings[freeIndexConstant] =
+                        HeapRecords.KernelConstants[freeIndexConstant];
+                }
+            }
             var lexicalConstantNames = ["ENVIRONMENT_SINGLE_BINDING_FLAG",
                 "ENVIRONMENT_DETACHED_ARGUMENTS_FLAG", "HANDLER_LEXICAL_BINDING_FLAG",
                 "ENVIRONMENT_FIXED_BYTES", "ARGUMENT_MAPPING_WORD_BITS",
@@ -19628,11 +19528,9 @@
         this.borrowedFreeCollections = this.runtime.heapRecords.engineGCCollections(this.stateAddress);
         heap.freeBlocks = [];
         heap.freeBlocksAreMaxHeap = false;
-        /* Keep large compound allocations on the constant-time head path.
-         * An unsorted fragmented list can make each such allocation walk and
-         * restore thousands of smaller regions. Sorting happens once when
-         * ownership crosses into native execution; consumption thereafter is
-         * entirely inside the compiled allocator. */
+        /* Canonicalize ownership-transfer order across hosts. Native size
+         * bins do not require a sorted region chain, but deterministic ties
+         * keep equivalent rebuilds independent of host sorting stability. */
         nativeRegions.sort(function (left, right) {
             /* ES5 does not require a stable sort. Equal-sized regions must
              * have an explicit order across hosts, or logically equivalent
@@ -19851,6 +19749,7 @@
             heap.bump = nativeTailBump;
             this.runtime.noteNativeHeapBump(nativeTailBump);
         }
+        if (this.runtime.verifyNativeHeap) records.verifyNativeFreeIndex(this.stateAddress);
         /* Internal native collection can coalesce portable free records too.
          * Reconcile the derived index before returning to any portable code,
          * not merely on a later CALL. No pre-collection index may allocate. */
