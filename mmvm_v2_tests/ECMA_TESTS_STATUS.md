@@ -1,5 +1,106 @@
 # Historical ECMA test bring-up
 
+## VM parity work: built-in initialization
+
+2026-11-01: the repeated uncapped Node control remains **1218 passed / 111
+failed / 0 timed out / 4 skipped / 0 not run**, in **130.489515 seconds**.
+The parity target is the set of Node-passing files, not merely the same total
+pass count. ES5.1 semantics take precedence over modern Node differences and
+historical SpiderMonkey extensions; the external corpus remains unchanged.
+
+The first runtime changes address shared initialization rather than adding
+test-specific execution paths:
+
+- Standard native function formal lengths have explicit ES5.1 metadata,
+  separate from the native interpreter's minimum supported argument counts
+  and the embedding callback's implementation signature.
+- Built-in constructor `prototype` properties are immutable and
+  non-enumerable. Prototype `constructor` properties and static methods use
+  the ordinary writable/configurable, non-enumerable built-in attributes.
+- String, Number and Boolean prototypes carry the same internal primitive
+  value slot as their respective wrappers. Date.prototype carries NaN.
+- Date, Math, Object, JSON and Error method installation consistently uses
+  built-in property attributes instead of ordinary assignment attributes.
+
+These changes leave dispatch, object lookup, allocation and GC algorithms
+unchanged. Frozen before/after images are compared serially with identical
+default limits (10-second watchdog, 20 million instructions):
+
+- Before: **811 passed / 518 failed / 10 timed out / 4 skipped / 0 not run**,
+  569.218517 seconds; 1333 selected, 1329 executed.
+- Initialization candidate: **868 passed / 461 failed / 32 timed out / 4
+  skipped / 0 not run**, 767.432632 seconds; the same selection.
+- **57 new passes, zero lost passes**, checked by filename. Node-only passes
+  decrease from **417 to 366**; the candidate passes 852 files also passed by
+  Node and 16 files failed by Node. This is progress, not parity.
+- For the **811 files passing in both guest images**, summed per-file time
+  is **279.830 seconds before / 272.572 seconds after**. One pair is not
+  statistically conclusive, but does not show a common-work slowdown.
+- The 22 additional timeouts are all descriptor-combination tests under
+  `ecma_5/Object/15.2.3.6`: eight dictionary-redefinition, eight
+  middle-redefinition, four redefinition, function-length and new-definition.
+  They formerly stopped at an early assertion (whose error formatting then
+  referenced missing `uneval`); they now get farther and reach the unchanged
+  watchdog. Their failure classifications and total runtime increase are
+  retained, not hidden by a timeout/skip-policy change.
+
+The first project regression gate also caught portable Date construction
+writing an internal slot through ordinary assignment. The slot now uses the
+internal-value accessor for construction and setters. The small internal
+two-runtime isolation fixture uses fixed 64 KiB heaps instead of 32 KiB to
+fit the new standard descriptors; its isolation checks and fixed-capacity
+behavior are unchanged. No production or benchmark heap ceiling is raised.
+The full candidate counts above precede that portable Date-write follow-up;
+subsequent regression gates are recorded separately.
+
+Follow-up checks on the Date-write correction:
+
+- Node and js_min project runners pass: 12 guest programs / 270 assertions
+  each, compiler/embedding checks, unchanged server/demo CLI entry points,
+  and three-context multiplexing.
+- Structural GC stress passes on both hosts: 27 audits, 110018 checked edges,
+  221 property-index audits and 74 embedding collections each. Maximum
+  observed bumps are 3530056 / 3530496 bytes under the unchanged 8 MiB cap.
+- The final standalone image passes 24 GC workload rounds / 48 native
+  collections. Node construction of that image takes 8.00 seconds wall.
+- Full standalone Test262 passes **3292 / 3292**, with zero failures,
+  timeouts or not-run files: **424.389549 seconds** runner elapsed versus
+  430.384625 seconds at the preceding checkpoint. These are single runs.
+- Cross-host snapshot gate passes: program/environment-independent js_min
+  images, identical Node output and a genuine self-hosted byte-identical
+  rebuild. The complete serial gate takes 289.90 seconds; this includes
+  multiple builds and is not an individual build-time measurement.
+- Eight paired stock Octane workloads pass on both frozen images, serially.
+  Scores before / after: Richards **101 / 102**, DeltaBlue **95.4 / 96.1**,
+  RayTrace **248 / 252**, NavierStokes **273 / 271**, Box2D **364 / 367**,
+  Gameboy **1061 / 1063**, TypeScript **1315 / 1309**, Mandreel **492 / 491**.
+  TypeScript wall time is 108.23 / 108.46 seconds; Mandreel 107.38 / 107.60.
+  These matched observations show no clear regression, not proof of a
+  speedup or a new measurement of the remaining Octane suites. Command:
+  `node octane_compare.js --reference-snapshot artifacts/ecma-before.snap --snapshot artifacts/ecma-final.snap --include Richards,DeltaBlue,RayTrace,NavierStokes,Box2D,Gameboy,Typescript,Mandreel --output artifacts/ecma-initialization-octane --timeout 600`.
+  Snapshot bytes increase from 6686024 to 6719976 (33952 bytes, about 0.51%).
+- Live unchanged demos1--7 render at 320x240, emit multiple FPS samples,
+  have their window captures inspected and close cleanly through X11 input.
+  Demo8 passes attract, garage, mouse dragging, free-drive auto pilot and
+  manual acceleration/steering, then menu quit. Steady sampled rates are
+  19.8--20.0 FPS in the garage and 19.5--20.1 in free drive; a transition
+  sample is 16.9. These are bounded smoke checks, not long GC soaks.
+- Both unchanged HTTP programs pass localhost directory listing, exact text
+  and PNG binary comparisons, automatic index.html selection, HEAD length
+  and missing-file 404 checks. All demo/server processes exit or are stopped.
+  Captures, fixtures and raw logs remain ignored artifacts, not tracked data.
+
+Next architectural step: separate guest-written standard-library bootstrap
+from the Node-compatible embedding. Currently `GuestNodeEnvironment` installs
+the owned Array/RegExp/String/Number algorithms, whereas a bare embedded VM
+does not. Provide one VM installation API with an explicit source-reader
+callback, use it from both embeddings, and install once before preparing
+isolated test contexts. This must not introduce a Node dependency into the VM
+or a second implementation of the algorithms. Then use the new corpus to
+drive generic descriptor, coercion and sparse-array support, preserving the
+existing native fast paths rather than replacing them with test-specific
+behavior. Per-file pass preservation remains a regression gate.
+
 ## Default-policy update
 
 The four pathological Array/RegExp cases from the initial Node timeout list

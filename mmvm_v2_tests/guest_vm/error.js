@@ -37,8 +37,8 @@
             name, intrinsicImplementedByRuntime, "intrinsic",
             NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR + index);
         constructor.errorConstructorName = name;
-        runtime.setProperty(constructor, "prototype", prototype);
-        runtime.setProperty(prototype, "constructor", constructor);
+        runtime.defineDataProperty(constructor, "prototype", prototype, 0);
+        runtime.defineBuiltinProperty(prototype, "constructor", constructor);
         return constructor;
     }
 
@@ -46,45 +46,45 @@
         runtime.errorPrototypes = {};
         var errorPrototype = runtime.makeObjectWithPrototype(
             runtime.objectPrototype);
-        runtime.setProperty(errorPrototype, "name", "Error");
-        runtime.setProperty(errorPrototype, "message", "");
+        runtime.defineBuiltinProperty(errorPrototype, "name", "Error");
+        runtime.defineBuiltinProperty(errorPrototype, "message", "");
         runtime.errorPrototypes.$Error = errorPrototype;
         runtime.setGlobal("Error",
             makeErrorConstructor(runtime, "Error", errorPrototype));
         var subtypePrototype = runtime.makeObjectWithPrototype(errorPrototype);
-        runtime.setProperty(subtypePrototype, "name", "EvalError");
+        runtime.defineBuiltinProperty(subtypePrototype, "name", "EvalError");
         runtime.errorPrototypes.$EvalError = subtypePrototype;
         runtime.setGlobal("EvalError",
             makeErrorConstructor(runtime, "EvalError", subtypePrototype));
         subtypePrototype = runtime.makeObjectWithPrototype(errorPrototype);
-        runtime.setProperty(subtypePrototype, "name", "RangeError");
+        runtime.defineBuiltinProperty(subtypePrototype, "name", "RangeError");
         runtime.errorPrototypes.$RangeError = subtypePrototype;
         runtime.setGlobal("RangeError",
             makeErrorConstructor(runtime, "RangeError", subtypePrototype));
         subtypePrototype = runtime.makeObjectWithPrototype(errorPrototype);
-        runtime.setProperty(subtypePrototype, "name", "ReferenceError");
+        runtime.defineBuiltinProperty(subtypePrototype, "name", "ReferenceError");
         runtime.errorPrototypes.$ReferenceError = subtypePrototype;
         runtime.setGlobal("ReferenceError",
             makeErrorConstructor(runtime, "ReferenceError", subtypePrototype));
         subtypePrototype = runtime.makeObjectWithPrototype(errorPrototype);
-        runtime.setProperty(subtypePrototype, "name", "SyntaxError");
+        runtime.defineBuiltinProperty(subtypePrototype, "name", "SyntaxError");
         runtime.errorPrototypes.$SyntaxError = subtypePrototype;
         runtime.setGlobal("SyntaxError",
             makeErrorConstructor(runtime, "SyntaxError", subtypePrototype));
         subtypePrototype = runtime.makeObjectWithPrototype(errorPrototype);
-        runtime.setProperty(subtypePrototype, "name", "TypeError");
+        runtime.defineBuiltinProperty(subtypePrototype, "name", "TypeError");
         runtime.errorPrototypes.$TypeError = subtypePrototype;
         runtime.setGlobal("TypeError",
             makeErrorConstructor(runtime, "TypeError", subtypePrototype));
         subtypePrototype = runtime.makeObjectWithPrototype(errorPrototype);
-        runtime.setProperty(subtypePrototype, "name", "URIError");
+        runtime.defineBuiltinProperty(subtypePrototype, "name", "URIError");
         runtime.errorPrototypes.$URIError = subtypePrototype;
         runtime.setGlobal("URIError",
             makeErrorConstructor(runtime, "URIError", subtypePrototype));
         var toStringFunction = runtime.makeNativeFunction(
             "Error.toString", intrinsicImplementedByRuntime);
         toStringFunction.errorToString = true;
-        runtime.setProperty(errorPrototype, "toString", toStringFunction);
+        runtime.defineBuiltinProperty(errorPrototype, "toString", toStringFunction);
     }
 
     var api = {install: install, makeErrorObject: makeErrorObject};

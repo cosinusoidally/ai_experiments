@@ -63,11 +63,11 @@
     JSONSupport.prototype.install = function () {
         var support = this;
         var json = this.runtime.makeObject();
-        this.runtime.setProperty(json, "parse",
+        this.runtime.defineBuiltinProperty(json, "parse",
             this.runtime.makeNativeFunction("JSON.parse", function (receiver, args) {
                 return support.parse(String(args[0]));
             }));
-        this.runtime.setProperty(json, "stringify",
+        this.runtime.defineBuiltinProperty(json, "stringify",
             this.runtime.makeNativeFunction("JSON.stringify", function (receiver, args) {
                 return support.stringify(args[0]);
             }));

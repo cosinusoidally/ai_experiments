@@ -1,6 +1,14 @@
 # Test262 status
 
-Latest completed whole-suite result (2026-11-01, guest-owned native call-policy
+2026-11-01, ECMA built-in initialization follow-up: the complete standalone
+run passes **3292 / 3292; 0 failed / 0 timed out / 0 not run**, in
+**424.389549 seconds** runner elapsed (407.089305 seconds summed test time).
+This preserves the passing set after adding standard native function arity,
+correct built-in descriptors and primitive prototype slots. The preceding
+430.384625-second result below is a single-run control, not a statistical
+speedup claim. No external corpus files or instruction limits changed.
+
+Preceding completed whole-suite result (2026-11-01, guest-owned native call-policy
 metadata, standalone contract 93):
 **3,292 passed / 0 failed / 0 not run / 0 timed out**, out of 3,292 tests.
 Runner elapsed 430.38 seconds (431.01 seconds externally), versus 442.94
