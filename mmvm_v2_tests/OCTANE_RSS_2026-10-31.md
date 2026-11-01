@@ -8,6 +8,11 @@ the historical 92596 KiB (90.4 MiB) observation.
 
 ## Later Typescript follow-up
 
+Mandreel also subsequently passes with a nonmoving collector and unchanged
+heap cap. See [the bring-up report](guest_vm/MANDREEL_BRINGUP.md) for scores,
+loading time and diagnostic RSS limitations. Its original failure row below
+is historical; there is not yet a replacement clean, uninstrumented RSS pair.
+
 Typescript now completes successfully on both engines. A fresh serial pair
 at 11:23–11:25 UTC measures **437468 KiB (427.2 MiB)** for js_runner versus
 **218124 KiB (213.0 MiB)** for Node --jitless: **2.01x guest / Node RSS**.

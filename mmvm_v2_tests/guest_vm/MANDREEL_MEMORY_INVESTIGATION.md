@@ -1,5 +1,9 @@
 # Mandreel memory investigation — 2026-10-31
 
+Follow-up: [the nonmoving bring-up report](MANDREEL_BRINGUP.md) records the
+successful stock run on 2026-11-01. The capture below is the original failure
+diagnosis, retained as evidence rather than a statement of the current status.
+
 ## Finding
 
 The reproduced allocation failure is **external fragmentation while compiling

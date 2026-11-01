@@ -1,5 +1,40 @@
 # Mandreel bring-up: non-moving implementation work
 
+## Current result — 2026-11-01, about 00:03 GMT
+
+**The unchanged stock Mandreel benchmark passes under standalone js_runner.**
+Contract 90, source checkpoint `6f2b295`. Both throughput and latency scores
+complete and the process exits normally:
+
+- Mandreel: **186**.
+- MandreelLatency: **1216**.
+- Combined Octane version-9 score for this suite: **476**.
+- Source load/parse/compile/top-level execution: **800.217 s**.
+- Whole diagnostic invocation: **844.18 s** wall, **837.55 s** user CPU.
+- GNU time's debugger-tree peak: **499376 KiB**; a live target RSS sample
+  reached 499672 KiB. These are not presented as a clean uninstrumented RSS
+  measurement or as live guest heap size.
+
+The generic loader logs compilation boundaries and then invokes the original
+Octane harness and benchmark. No external benchmark source or correctness
+check is edited. A prior fresh Node --jitless stock reference scored Mandreel
+508, latency 4117, combined 1446 (16.09 s including 0.248 s file loading).
+This establishes correctness, not competitive source-loading performance:
+the guest's compilation remains much too slow.
+
+Reproduction from this directory (an ordinary run needs no diagnostic hook):
+
+```sh
+node guest_runner.js --vm-native --snapshot artifacts/snap
+./artifacts/js_runner.exe artifacts/snap octane_runner.js Mandreel
+```
+
+The successful diagnostic command used the same image with
+`guest_vm/tools/trace_octane_load.js --compile-progress Mandreel`, under a
+bounded debugger for fatal heap capture. Raw log/image/dumps remain ignored.
+Full project, build-identity, complete Test262, prior Octane and live-demo
+regression checks are now running serially; their final results follow below.
+
 ## Scope
 
 Bring up the unchanged stock Octane Mandreel benchmark under standalone
