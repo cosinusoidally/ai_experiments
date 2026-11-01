@@ -12,6 +12,11 @@ guide. It includes a regexp-free tokenizer, parser/compiler/verifier, register
 bytecode interpreter, explicit guest roots and collection, and guest Buffer
 views backed by native memory under `js_min.exe`.
 
+The [historical ECMAScript coverage runners](ECMA_TESTS.md) run the external
+ES1--ES5.1-era `ecma*` tests either in the standalone guest VM or directly in
+Node. Their [bring-up status](ECMA_TESTS_STATUS.md) records pass/fail totals
+and distinguishes standard coverage from SpiderMonkey-specific assumptions.
+
 ## Required checkout layout
 
 The build scripts use relative paths. Arrange the repositories and Firefox
