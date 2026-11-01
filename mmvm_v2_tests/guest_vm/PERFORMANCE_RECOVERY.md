@@ -240,3 +240,83 @@ not just one self-build. The bounded structural GC audit passes 27 audits,
 102269 edges, 221 property-index audits and 74 embedding collections, with
 maximum bump 3523240 bytes under the unchanged 8 MiB cap. Its full wall time
 is 15.35 s. Stock-performance and live-demo wrap-up results follow separately.
+
+## 2026-11-01 afternoon: checked-in call-policy comparison
+
+Implementation checkpoint: `29d432c`, contract 93. The following ordinary
+stock runs compare two native guest images, **not** Node or Node-jitless.
+Reference `6aadc41` and candidate use the same launcher, working directory
+and unchanged external inputs. Runs are serial and paired by suite,
+reference first. All 24 runs pass; the measured child wall times sum to
+547.53 s. No timed benchmark callback is wrapped.
+
+```sh
+node octane_compare.js --reference-snapshot artifacts/pre-mandreel.snap \
+  --snapshot artifacts/call-policy.snap --exclude Mandreel,RegExp,zlib \
+  --output artifacts/octane-call-policy-final --timeout 600
+```
+
+Scores are higher-is-better. Wall seconds include loading and harness work;
+they are not simply the reciprocal of the score.
+
+| Suite | Pre-Mandreel score | Contract-93 score | Score change | Wall seconds, control / candidate |
+| --- | ---: | ---: | ---: | ---: |
+| Richards | 96.9 | 102 | +5.3% | 3.37 / 3.31 |
+| DeltaBlue | 92.4 | 96.2 | +4.1% | 4.31 / 4.44 |
+| Crypto | 185 | 191 | +3.2% | 24.96 / 23.37 |
+| RayTrace | 250 | 245 | -2.0% | 11.09 / 11.13 |
+| EarleyBoyer | 451 | 458 | +1.6% | 27.50 / 26.78 |
+| Splay | 693 | 709 | +2.3% | 3.93 / 3.94 |
+| NavierStokes | 280 | 280 | 0.0% | 9.84 / 9.81 |
+| PdfJS | 794 | 921 | +16.0% | 19.38 / 17.66 |
+| Gameboy | 1026 | 1143 | +11.4% | 14.13 / 12.99 |
+| CodeLoad | 101 | 106 | +5.0% | 29.68 / 26.69 |
+| Box2D | 395 | 407 | +3.0% | 14.49 / 14.13 |
+| Typescript | 1056 | 1448 | +37.1% | 132.18 / 98.42 |
+
+Image SHA-256 identities:
+
+- Control: `5ad9b4e0210f7f1b88b82d1767cec8c407596a3304e0dee4eaafb22815a67bcb`.
+- Candidate: `5aa7f3a8f837676eaac5073e736b5e1f68c0c74b95ced3ba613e6f0419668cf0`.
+
+This is one paired observation per suite, not a confidence interval. The
+RayTrace score is 2% lower with essentially unchanged wall time; retain that
+negative result rather than claiming every score improved. Mandreel is
+excluded only from this control comparison because the control did not pass
+it; the separate current stock run passes at 517 as recorded above. Long
+RegExp and zlib runs were not repeated for this wrap-up. Consequently this
+checkpoint does **not** establish performance parity for every benchmark;
+the complete all-benchmark parity gate remains open when work is paused.
+
+### Final live checks and pause, approximately 15:28 UTC
+
+All eight unchanged demos were exercised on contract 93 through the native
+standalone launcher at 320x240 with a 20 FPS limit. Demos1--7 each reached
+active rendering, produced multiple five-second FPS samples, were captured
+for inspection and closed through X11 key input. The final demo3 samples
+were 4.2--4.4 FPS and demo4 4.1--4.2, recovering the earlier simple-blitting
+slowdown in these observations. These are short smoke measurements, not
+proof of identical performance at every scene position or resolution.
+
+Demo8 initialized the game in 2001.303 ms, then exercised attract mode,
+garage, mouse camera dragging, free-drive auto pilot, manual acceleration
+and steering, and menu quit. Sampled rates included 19.8--20.0 FPS after
+the garage transition, 18.8--20.2 during auto drive and 20.0 during manual
+driving. The transition interval included a 16.9-FPS sample. Garage and
+auto-drive captures were inspected; the floor and vehicle rendered normally.
+The process exited cleanly. No long demo soak is claimed; the dedicated
+bounded structural/native GC workloads provide the separate collector checks.
+
+Both unchanged HTTP examples, `net.js` and `node_web.js`, pass live localhost
+requests under the same snapshot: directory listing, exact text and binary
+content comparisons, index.html selection, HEAD and a missing-file 404.
+Fixtures, downloads, screenshots, snapshots and detailed benchmark JSON/logs
+remain ignored temporary artifacts; none are checked in. No C, demo or
+external test source was changed. All test/demo/server processes were stopped
+or exited before pausing. The temporary detached baseline worktree was removed
+after preserving its diagnostic images; it remains reproducible from `6aadc41`.
+
+Work is paused at the user's request after this validated checkpoint. No
+further optimization round was started. Remaining performance work is the
+long RegExp/zlib rerun and any repetitions needed to establish all-suite
+parity rather than infer it from small single-run differences.
