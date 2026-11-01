@@ -24,6 +24,21 @@ node guest_runner.js --vm-native --snapshot artifacts/snap
 
 Selectors are corpus-relative paths or directory prefixes. Overlapping
 selectors execute each file only once. With no selector, all four trees run.
+Four known pathological cases are skipped by default on both engines:
+
+- `ecma_3/Array/regress-322135-03.js`
+- `ecma_3/Array/regress-322135-04.js`
+- `ecma_3/RegExp/regress-307456.js`
+- `ecma_3/RegExp/regress-330684.js`
+
+Use `--include-slow` to run them, including when selecting one explicitly.
+With Node's uncapped default, doing so can hang indefinitely; use an explicit
+`--timeout-ms` if you want a bounded diagnostic of those cases.
+Default full runs therefore execute 1329 of the 1333 selected files and
+report four skips. Skips are separate from failures and from files not run
+because of `--fail-fast`. `--list` lists runnable files and reports the
+selected/skipped totals. A selection containing only skipped files needs no
+test runtime or worker.
 
 ```sh
 ./artifacts/js_runner.exe artifacts/snap ecma_tests_runner.js ecma/Array
@@ -37,11 +52,17 @@ By default each completed file prints PASS/FAIL and elapsed milliseconds.
 `--verbose` also prints RUN before execution. `--fail-fast` is optional:
 normally failures, native worker exits and timeouts do not stop the suite.
 The summary gives per-tree and total pass/fail counts, timeout subsets,
-executed/not-run counts and elapsed time. A failure produces exit status 1;
+executed/skipped/not-run counts and elapsed time. A failure produces exit status 1;
 timeouts are failures, never passes or skips. Invalid selections are errors.
 
-Both runners accept `--timeout-ms COUNT`, default 10000. The Node worker
-also has a one-second startup/transport grace outside its VM-script timeout.
+Node has **no timeout by default**, either for VM scripts or the external
+worker. `--timeout-ms COUNT` optionally enables both limits; a positive Node
+limit also has a one-second startup/transport grace for the worker. Explicit
+`--timeout-ms 0` disables Node timeouts again. The 128 MiB V8 old-space limit
+and serial worker isolation remain in effect.
+
+The guest runner retains its 10000 ms default watchdog; its `--timeout-ms`
+must be positive. Removing Node's timeout does not remove the guest limits.
 The guest runner additionally accepts `--instruction-limit COUNT`, default
 20000000; Node rejects this flag because V8 has no equivalent counter.
 Instruction and wall-clock limits measure different resources. Specify them
@@ -70,9 +91,10 @@ The shared controller is `ecma_tests_runner.js`. It discovers JavaScript
 files dynamically: no generated manifest is checked in. The infrastructure
 files `shell.js`, `browser.js`, `jsref.js`, `template.js`, and
 `ecma_5/Object/defineProperty-setup.js` (explicitly marked "not a test")
-are not standalone tests. All other discovered files run, including
-`extensions/` and files annotated as slow or skipped by Mozilla's driver.
-Currently this selects 1333 files. Browser harnesses are not loaded.
+are not standalone tests. Discovery selects 1333 files, including extensions
+and tests Mozilla's driver marks skipped. Only the four explicit default
+exclusions listed above are skipped by this runner, unless `--include-slow`
+is supplied. Browser harnesses are not loaded.
 
 Execution preserves separate script boundaries, filenames, and authored
 sloppy/strict directives:
@@ -103,8 +125,9 @@ Tests mutate fundamental prototypes, and some currently terminate native
 guest execution or spend uninterruptible time in Node built-ins. Consequently
 both backends isolate tests in **serial child processes**, not threads:
 
-- Node starts one memory-bounded worker per file, with a fresh bare realm,
-  a 128 MiB V8 old-space limit and an external kill/reap watchdog.
+- Node starts one memory-bounded worker per file, with a fresh bare realm
+  and a 128 MiB V8 old-space limit. Its kill/reap watchdog and VM-script timer
+  are enabled only when a positive `--timeout-ms` is supplied.
 - The Linux/i386 guest supervisor prepares one test runtime, then uses libc
   `fork` and copy-on-write isolation. There is at most one worker executing a
   test. Each inherits the pristine parent state; test mutations never return

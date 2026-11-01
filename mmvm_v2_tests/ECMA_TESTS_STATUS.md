@@ -1,6 +1,51 @@
 # Historical ECMA test bring-up
 
-## Latest completed full baselines
+## Default-policy update
+
+The four pathological Array/RegExp cases from the initial Node timeout list
+are now skipped by default on both engines. `--include-slow` restores them.
+Default full runs select 1333 files, execute 1329, and report four skips
+separately from failures and not-run files. Node now has no timeout by default;
+positive `--timeout-ms` enables its optional cap, and zero disables it.
+The guest's existing watchdog and instruction budgets remain unchanged.
+
+Default PASS/FAIL/elapsed output remains enabled. Node now writes these lines
+synchronously so redirected/pipe output does not wait for event-loop callbacks
+while the supervisor is blocked in a worker. `--quiet` and `--summary-only`
+remain explicit opt-outs. Historical full-corpus results below retain their
+original all-tests/no-skips policy and bounded-run settings; they have not
+been silently reclassified as new default-run measurements.
+
+### Completed uncapped Node default run
+
+2026-11-01, approximately 16:59 UTC:
+`TZ=UTC node ecma_tests_runner_node.js` (no timeout option).
+**1218 passed / 111 failed / 0 timed out / 4 skipped / 0 not run**;
+1333 selected files, 1329 executed; runner elapsed **139.106478 seconds**.
+Default per-file PASS/FAIL/timing lines were emitted during execution.
+
+- `ecma`: 598 passed / 22 failed / 0 skipped.
+- `ecma_2`: 163 passed / 9 failed / 0 skipped.
+- `ecma_3`: 203 passed / 22 failed / 4 skipped.
+- `ecma_5`: 254 passed / 58 failed / 0 skipped.
+
+The four fewer failures than the original five-second run are exactly the
+four configured skips, not fixes to test expectations or VM language support.
+The original failure review retains its four timeout entries as historical
+results. A new full guest baseline has not been substituted for the earlier
+one; guest default selection and mixed skipped/positive/negative behavior are
+checked separately.
+
+Policy validation: default Node/guest `--list` output agrees (1329 runnable,
+1333 selected, four skipped); `--include-slow --list` restores 1333 runnable.
+A guest mixed selection executes its positive and negative tests successfully
+and reports all four skips. Explicit Node `--timeout-ms 0` passes the same
+positive/negative pair. Re-enabling the four slow cases with a 50 ms explicit
+Node cap reports four timeouts and zero skips, demonstrating that optional
+limits still work. Fail-fast accounting keeps four configured skips separate
+from one executed failure and one not-run file. No corpus or VM code changed.
+
+## Original all-tests bounded baselines
 
 2026-11-01, approximately 16:22--16:25 UTC. Both engines execute all
 **1333 files, zero not run and zero skipped**. Timeout counts below are
@@ -71,10 +116,11 @@ SpiderMonkey APIs.
 
 ## Scope
 
-All 1333 standalone test files in the unchanged external `ecma`, `ecma_2`,
-`ecma_3` and `ecma_5` directories execute. Infrastructure/helper files are
-handled as described in [ECMA_TESTS.md](ECMA_TESTS.md). Extensions and slow
-tests are included, not silently skipped. This ledger measures raw coverage
+The original baseline executed all 1333 standalone test files in the unchanged
+external `ecma`, `ecma_2`, `ecma_3` and `ecma_5` directories. Infrastructure/helper files are
+handled as described in [ECMA_TESTS.md](ECMA_TESTS.md). Current defaults exclude
+only the four explicitly reported cases above; `--include-slow` restores
+all-test execution. This ledger measures raw coverage
 for the ES1--ES5.1 VM project, not a claim that every historical expectation
 is standard ES5.1 behavior. No VM, C, demo or external-test source changes
 are part of this bring-up.

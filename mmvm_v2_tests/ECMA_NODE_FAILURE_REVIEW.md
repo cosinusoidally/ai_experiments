@@ -5,6 +5,12 @@ Source review for the completed 2026-11-01 five-second run: **1218 pass,
 below covers every failed file in that run. Paths are relative to
 `../../js_tests/tests`. Nothing in the corpus has been edited or waived.
 
+Subsequent default-policy change: the four timeout cases listed here are now
+explicitly skipped unless `--include-slow` is requested. The uncapped default
+Node rerun has 1218 passes, 111 failures and four skips. This inventory retains
+the original 115-failure bounded-run record; the remaining 111 failures are
+still covered by the source review below.
+
 These are file outcomes, not assertion counts. A file can mix useful standard
 assertions with one proprietary or outdated assertion. A Node failure is not
 automatically a SpiderMonkeyism, nor is Node's current behavior automatically

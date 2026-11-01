@@ -3,15 +3,15 @@
 (function () {
     var fs = require("fs"), path = require("path"), vm = require("vm");
     var childProcess = require("child_process");
-    var args = [], timeout = 10000, scripts = {};
+    var args = [], timeout = 0, scripts = {};
     var worker = process.argv[2] === "--worker";
     var request = worker ? JSON.parse(fs.readFileSync(0, "utf8")) : null;
     if (worker) timeout = request.timeout;
     for (var index = worker ? process.argv.length : 2; index < process.argv.length; index++) {
         if (process.argv[index] === "--timeout-ms") {
             timeout = Number(process.argv[++index]);
-            if (!(timeout >= 1) || timeout !== Math.floor(timeout) || timeout > 2147483647) {
-                throw new Error("--timeout-ms requires a positive integer <= 2147483647");
+            if (!(timeout >= 0) || timeout !== Math.floor(timeout) || timeout > 2147483647) {
+                throw new Error("--timeout-ms requires an integer from 0 to 2147483647 (0 disables timeouts)");
             }
         } else if (process.argv[index] === "--instruction-limit") {
             throw new Error("Node uses --timeout-ms, not --instruction-limit");
@@ -29,12 +29,12 @@
     var backend = {
         runTest: function (filename, source, harnessFiles, negative) {
             if (!worker) {
-                var child = childProcess.spawnSync(process.execPath,
-                    process.execArgv.concat(["--max-old-space-size=128", __filename, "--worker"]),
-                    {input: JSON.stringify({filename: filename, source: source,
+                var spawnOptions = {input: JSON.stringify({filename: filename, source: source,
                         harnessFiles: harnessFiles, negative: negative, timeout: timeout}),
-                     encoding: "utf8", timeout: timeout + 1000, killSignal: "SIGKILL",
-                     maxBuffer: 1024 * 1024});
+                     encoding: "utf8", killSignal: "SIGKILL", maxBuffer: 1024 * 1024};
+                if (timeout > 0) spawnOptions.timeout = timeout + 1000;
+                var child = childProcess.spawnSync(process.execPath,
+                    process.execArgv.concat(["--max-old-space-size=128", __filename, "--worker"]), spawnOptions);
                 if (child.error || child.status !== 0) {
                     return {status: child.error && child.error.code === "ETIMEDOUT" ? "timeout" : "threw",
                         phase: "worker", name: child.error && child.error.code === "ETIMEDOUT" ?
@@ -63,7 +63,10 @@
             function harness(file) {
                 current = file;
                 if (!scripts[file]) scripts[file] = new vm.Script(read(file), {filename: file});
-                scripts[file].runInContext(context, {timeout: timeout});
+                runScript(scripts[file]);
+            }
+            function runScript(script) {
+                return script.runInContext(context, timeout > 0 ? {timeout: timeout} : {});
             }
             try {
                 harness("ecma_tests_harness.js");
@@ -73,7 +76,7 @@
                 phase = "compile";
                 var script = new vm.Script(source, {filename: filename});
                 phase = "runtime";
-                script.runInContext(context, {timeout: timeout});
+                runScript(script);
                 if (!negative) { phase = "assertions"; harness("ecma_tests_verify.js"); }
                 return {status: "completed", phase: phase, name: "", message: ""};
             } catch (error) { return errorResult(error, phase, current); }
@@ -85,7 +88,13 @@
             request.source, request.harnessFiles, request.negative)));
         return;
     }
-    var control = vm.createContext({arguments: args, console: console, process: process,
+    /* spawnSync blocks the event loop. Synchronous progress writes also work
+     * when stdout is a pipe, without waiting for buffered console callbacks. */
+    var progressConsole = {
+        log: function (message) { fs.writeSync(1, String(message) + "\n"); },
+        error: function (message) { fs.writeSync(2, String(message) + "\n"); }
+    };
+    var control = vm.createContext({arguments: args, console: progressConsole, process: process,
         EcmaTestsBackend: backend,
         EcmaTestsClock: function () { var time = process.hrtime(); return time[0] * 1000 + time[1] / 1000000; },
         require: function (name) {
