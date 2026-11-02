@@ -67,9 +67,80 @@ Completed regression gates at this checkpoint:
 - Snapshot gate: program/environment independence, Node/js_min byte identity
   and a genuine self-hosted byte-identical fixed point; passes.
 
-The serial paired Octane comparison and live demo/HTTP validation are still
-in progress at the initial code check-in. Their completed observations will
-be added before pausing; no result is being inferred from an unfinished run.
+The core working point is committed as `3a4b8f7`. The remaining gates below
+completed afterwards on the same VM source; no VM implementation changed
+during validation.
+
+### Completed final validation, 2026-11-02, approximately 13:36 UTC
+
+All 28 stock Octane runs pass: 14 suites on the preceding stable image and
+14 on contract 94. RegExp's expensive standalone stock benchmark remains
+explicitly excluded under the existing deferred priority; the full ECMA and
+Test262 RegExp correctness coverage above is still executed. Each engine/suite
+runs serially in a fresh process, with the unchanged external workloads and
+their stock correctness checks. No quick-mode scores are substituted.
+
+Command:
+`node octane_compare.js --reference-snapshot artifacts/ecma-final.snap --snapshot artifacts/ecma-contract94.snap --exclude RegExp --output artifacts/ecma-stable-octane --timeout 600`.
+The sweep ran approximately 13:05--13:27 UTC. Scores below are
+**preceding stable image / current image**, higher is better:
+
+- Richards: 95 / 88.
+- DeltaBlue: 71 / 80.2.
+- Crypto: 178 / 185.
+- RayTrace: 240 / 234.
+- EarleyBoyer: 425 / 423.
+- Splay: 641 / 648.
+- NavierStokes: 266 / 269.
+- PdfJS: 867 / 855.
+- Mandreel: 481 / 486 (110.20 / 109.22 seconds process elapsed).
+- Gameboy: 1002 / 1006.
+- CodeLoad: 93.8 / 96.2.
+- Box2D: 352 / 350.
+- zlib: 562 / 574 (272.56 / 266.59 seconds process elapsed).
+- Typescript: 1362 / 1266 (104.84 / 112.36 seconds process elapsed).
+
+Richards and Typescript were repeated in reverse image order to investigate
+the larger downward observations. All four additional stock runs pass:
+
+- Richards: current 101 / preceding 104; process elapsed 3.28 / 3.27 seconds.
+- Typescript: current 1314 / preceding 1331; elapsed 107.56 / 107.07 seconds.
+
+Reverse command:
+`node octane_compare.js --reference-snapshot artifacts/ecma-contract94.snap --snapshot artifacts/ecma-final.snap --include Richards,Typescript --output artifacts/ecma-stable-octane-reverse --timeout 600`.
+These repeats do not reproduce the original roughly 7% score gaps. They
+support broadly similar performance, not a statistically established speedup
+or proof that every path has identical cost. The slower full-Test262 elapsed
+observation above is retained rather than hidden by the Octane results.
+
+Snapshot identities (raw images/results remain ignored build artifacts):
+
+- Preceding: 6719976 bytes, SHA-256
+  `1178e462645ce2596a15e4762303df66c32feddd7c219236cbc8c6d1b685770a`.
+- Current: 6822592 bytes, SHA-256
+  `fe33774feb8122adb701d02d27899c05c9ebe3c55c453043196aa81aec57460b`.
+
+Live standalone checks, sequential at 320x240 with a 20-FPS cap:
+
+- Demos 1--7: live windows/framebuffers captured and inspected; all exit
+  cleanly through Escape. The older JS rasterizers remain slow, consistent
+  with preceding logs; the cap is not a claim of 20 FPS achieved by each demo.
+- Demo8: attract, garage, mouse camera drag, manual free drive, acceleration
+  and steering/powerslide, then auto drive; clean menu/Q exit. Steady-state
+  log samples approximately 19.5--20.1 FPS, with one 16.4-FPS garage-transition
+  sample. Captures show the garage floor, vehicle, sky and field rendering.
+  This is a short interactive check, complemented by the separate bounded
+  structural GC stress, not a claim of a long-duration soak test.
+- `net.js` and `node_web.js`: directory listing, text body, byte-identical
+  binary PNG, default index, HEAD and 404 all pass using ignored fixtures.
+- Native-exit introspection: the standalone diagnostic reports the known
+  unsupported Math CALL with filename, bytecode PC, callable, receiver and
+  argument values, then deliberately stops before semantic reconciliation.
+
+No demos, external corpus files, C implementation or Test262 harness files
+were modified. No concurrent heavy workloads, downloads or emulation were
+used. Work pauses here; the 250 non-Date-directory Node-only passes remain
+the next parity target, not completed work.
 
 ### Preceding complete comparison
 

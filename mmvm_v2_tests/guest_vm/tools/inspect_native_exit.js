@@ -2,6 +2,9 @@
  * Diagnostic only: run with Node or js_min, followed by guest_runner options.
  * Prints heap record types and bounded string previews without guest coercion.
  * Example: node guest_vm/tools/inspect_native_exit.js --opcode ADD --vm-native octane_runner.js CodeLoad
+ * Standalone: artifacts/js_runner.exe artifacts/snap guest_vm/tools/inspect_native_exit.js --opcode CALL program.js
+ * The standalone image is already native: supply the program and its arguments,
+ * not guest_runner's --vm-native option, after the diagnostic filters.
  */
 var inspectExitNode = typeof module !== "undefined" && module.exports;
 var inspectExitStandalone = typeof guestStandaloneExecute === "function" &&
