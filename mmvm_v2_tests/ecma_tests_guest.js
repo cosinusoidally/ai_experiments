@@ -26,7 +26,37 @@ exports.create = function (fs) {
     /* Prepare only trusted common harness code before workers are forked.
      * No test or directory-specific shell has executed in the supervisor. */
     var preparationFailure = embedding.prepareTest262Harness(base, 20000000);
+    var harnessSources = {};
+    function readHarness(filename) {
+        var key = "$" + filename;
+        return Object.prototype.hasOwnProperty.call(harnessSources, key) ?
+            harnessSources[key] : fs.readFileSync(filename, "utf8");
+    }
     return {
+        /* Compile only shared support scripts, before fork. Do not execute
+         * directory setup here: its side effects still belong to each test.
+         * Retention keeps immutable programs alive across baseline restore.
+         * A failed warmup is retried/reported normally inside each worker. */
+        prepareHarnesses: function (filenames) {
+            var compiled = 0;
+            if (preparationFailure) return compiled;
+            var context = embedding.test262HarnessTemplate.context;
+            for (var index = 0; index < filenames.length; index++) {
+                var filename = filenames[index], key = "$" + filename;
+                if (Object.prototype.hasOwnProperty.call(harnessSources, key)) continue;
+                try {
+                    var source = fs.readFileSync(filename, "utf8");
+                    var program = context.compile(source, filename);
+                    vm.runtime.retainProgram(program);
+                    embedding.test262ProgramCache[key] = program;
+                    harnessSources[key] = source;
+                    compiled++;
+                } catch (error) {
+                    /* Preserve per-file harness failure accounting. */
+                }
+            }
+            return compiled;
+        },
         runTest: function (filename, source, harnessFiles, negative, limit) {
             if (preparationFailure) return visible(preparationFailure);
             /* Match Test262's baseline-restore path: merely creating another
@@ -74,14 +104,14 @@ exports.create = function (fs) {
                 var index, path, result;
                 for (index = 0; index < harnessFiles.length; index++) {
                     path = harnessFiles[index];
-                    result = execute(fs.readFileSync(path, "utf8"), path, "harness", true);
+                    result = execute(readHarness(path), path, "harness", true);
                     if (result.status !== "completed") return result;
                 }
                 result = execute(source, filename, "test", false);
                 if (loadTimeout) return loadTimeout;
                 if (result.status !== "completed" || negative) return result;
                 path = "ecma_tests_verify.js";
-                return execute(fs.readFileSync(path, "utf8"), path, "assertions", true);
+                return execute(readHarness(path), path, "assertions", true);
             } finally {
                 context.execution = null;
                 vm.runtime.heapRecords.setContextActiveFrame(context.heapAddress, 0);

@@ -158,3 +158,11 @@ ECMAScript editions. Modern Node is a useful control, not an ES5.1 mode.
 Review source rather than teaching the guest VM nonstandard behavior to
 match every Node failure. The bring-up ledger and reviewed discrepancies
 are recorded in [ECMA_TESTS_STATUS.md](ECMA_TESTS_STATUS.md).
+
+## Harness preparation performance
+
+The guest supervisor prepares shared support-script bytecode before forking;
+each worker still executes that setup and its original test independently.
+Use `--no-harness-preload` to disable this preparation for comparisons.
+See [ECMA_HARNESS_PERFORMANCE.md](ECMA_HARNESS_PERFORMANCE.md) for the design,
+measured gains and the distinction between runner overhead and test execution.

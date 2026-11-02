@@ -9,6 +9,7 @@
     var selectors = [], tests = [], quiet = false, summaryOnly = false;
     var failFast = false, list = false, verbose = false, limit = 20000000, timeoutMs = 10000;
     var includeSlow = false;
+    var preloadHarnesses = true;
     var slowTests = [
         "ecma_3/Array/regress-322135-03.js",
         "ecma_3/Array/regress-322135-04.js",
@@ -20,7 +21,7 @@
     function usage(message) {
         if (message) console.error(message);
         console.log("usage: ecma_tests_runner.js / ecma_tests_runner_node.js [--fail-fast] [--verbose] [--quiet] " +
-            "[--summary-only] [--list] [--include-slow] [--instruction-limit COUNT] [--timeout-ms COUNT] [all|ecma/path ...]");
+            "[--summary-only] [--list] [--include-slow] [--no-harness-preload] [--instruction-limit COUNT] [--timeout-ms COUNT] [all|ecma/path ...]");
         if (message) process.exit(2);
     }
     for (var index = 0; index < args.length; index++) {
@@ -32,6 +33,7 @@
         else if (argument === "--summary-only") { quiet = true; summaryOnly = true; }
         else if (argument === "--list") list = true;
         else if (argument === "--include-slow") includeSlow = true;
+        else if (argument === "--no-harness-preload") preloadHarnesses = false;
         else if (argument === "--instruction-limit") {
             limit = Number(args[++index]);
             if (!(limit >= 1 && limit <= 2147483647) || limit !== Math.floor(limit)) usage("invalid instruction limit");
@@ -97,12 +99,34 @@
         }
     }
     var started = clock();
+    var testHarnessFiles = [], sharedHarnessFiles = ["ecma_tests_verify.js"];
+    var sharedHarnessSeen = {"$ecma_tests_verify.js": true};
+    for (index = 0; index < tests.length; index++) {
+        var files = null;
+        try { files = harnessFiles(tests[index]); }
+        catch (discoveryError) { /* Retry inside the per-file failure handler. */ }
+        testHarnessFiles.push(files);
+        if (!files) continue;
+        for (var support = 0; support < files.length; support++) {
+            var supportFile = files[support];
+            if (!sharedHarnessSeen["$" + supportFile]) {
+                sharedHarnessSeen["$" + supportFile] = true;
+                sharedHarnessFiles.push(supportFile);
+            }
+        }
+    }
     var backend = null;
     if (tests.length) {
         if (typeof EcmaTestsBackend !== "undefined") backend = EcmaTestsBackend;
         else {
             var guestBackend = require("./ecma_tests_guest.js").create(fs);
             backend = require("./ecma_tests_process.js").create(guestBackend, timeoutMs);
+            if (preloadHarnesses) {
+                var preloadStarted = clock();
+                var preloaded = guestBackend.prepareHarnesses(sharedHarnessFiles);
+                if (verbose) console.log("Prepared " + preloaded +
+                    " shared harness programs in " + (clock() - preloadStarted).toFixed(3) + " ms");
+            }
         }
     }
     var total = {passed: 0, failed: 0, timedOut: 0, executed: 0};
@@ -133,7 +157,8 @@
             var before = clock();
             if (verbose) console.log("RUN " + relative);
             var result;
-            try { result = backend.runTest(filename, source, harnessFiles(relative), negative, limit); }
+            try { result = backend.runTest(filename, source,
+                testHarnessFiles[index] || harnessFiles(relative), negative, limit); }
             catch (error) {
                 if (String(error && error.message || error).indexOf("i386 worker received SIGSYS") >= 0) throw error;
                 result = {status: "threw", phase: "service", name: String(error && error.name || "Error"),
