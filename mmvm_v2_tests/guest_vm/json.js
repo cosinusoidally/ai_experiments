@@ -11,7 +11,21 @@
     /* One parser/serializer, with only the value representation abstracted.
      * When this module executes inside the VM, ordinary JS objects already
      * are guest-heap values and none of these operations crosses to a host. */
+    var objectClass = Object.prototype.toString;
+    var booleanValue = Boolean.prototype.valueOf;
     var ordinaryValues = {
+        toString: function (value) { return String(value); },
+        toNumber: function (value) { return Number(value); },
+        callable: function (value) { return typeof value === "function"; },
+        call: function (fn, receiver, args) { return fn.apply(receiver, args); },
+        remove: function (object, key) { delete object[key]; },
+        unbox: function (value) {
+            var kind = objectClass.call(value);
+            if (kind === "[object Number]") return Number(value);
+            if (kind === "[object String]") return String(value);
+            if (kind === "[object Boolean]") return booleanValue.call(value);
+            return value;
+        },
         makeObject: function () { return {}; },
         makeArray: function () { return []; },
         arrayLength: function (array) { return array.length; },
@@ -39,6 +53,18 @@
     function runtimeValues(runtime) {
         var dataAttributes = runtime.heapRecords.constructor.Attributes.DEFAULT;
         return {
+            toString: function (value) { return runtime.toString(value); },
+            toNumber: function (value) { return runtime.toNumber(value); },
+            callable: function (value) { return runtime.typeOf(value) === "function"; },
+            call: function (fn, receiver, args) { return runtime.invokePropertyFunction(fn, receiver, args); },
+            remove: function (object, key) { runtime.deleteProperty(object, key, false); },
+            unbox: function (value) {
+                var boxed = runtime.primitiveWrapperValue(value);
+                if (!boxed.found) return value;
+                if (typeof boxed.value === "number") return runtime.toNumber(value);
+                if (typeof boxed.value === "string") return runtime.toString(value);
+                return boxed.value;
+            },
             makeObject: function () { return runtime.makeObject(); },
             makeArray: function () { return runtime.makeArray(); },
             arrayLength: function (array) { return runtime.arrayLength(array); },
@@ -65,17 +91,18 @@
         var json = this.runtime.makeObject();
         this.runtime.defineBuiltinProperty(json, "parse",
             this.runtime.makeNativeFunction("JSON.parse", function (receiver, args) {
-                return support.parse(String(args[0]));
+                return support.parse(args[0], args[1]);
             }));
         this.runtime.defineBuiltinProperty(json, "stringify",
             this.runtime.makeNativeFunction("JSON.stringify", function (receiver, args) {
-                return support.stringify(args[0]);
+                return support.stringify(args[0], args[1], args[2]);
             }));
         this.runtime.setGlobal("JSON", json);
     };
 
-    JSONSupport.prototype.parse = function (text) {
+    JSONSupport.prototype.parse = function (text, reviver) {
         var support = this;
+        text = support.values.toString(text);
         var position = 0;
         function fail() {
             throw new SyntaxError("invalid JSON at character " + position);
@@ -212,12 +239,62 @@
         var result = value();
         space();
         if (position !== text.length) fail();
+        if (support.values.callable(reviver)) {
+            var holder = support.values.makeObject();
+            support.values.defineProperty(holder, "", result);
+            function walk(object, key) {
+                var item = support.values.getProperty(object, key);
+                var kind = support.values.kind(item), index, child, replacement;
+                if (item !== null && typeof item === "object" && kind !== "unsupported") {
+                    if (kind === "array") {
+                        var length = support.values.arrayLength(item);
+                        for (index = 0; index < length; index++) {
+                            child = String(index);
+                            replacement = walk(item, child);
+                            if (replacement === undefined) support.values.remove(item, child);
+                            else support.values.defineProperty(item, child, replacement);
+                        }
+                    } else {
+                        var list = support.values.keys(item);
+                        for (index = 0; index < support.values.arrayLength(list); index++) {
+                            child = support.values.arrayGet(list, index);
+                            replacement = walk(item, child);
+                            if (replacement === undefined) support.values.remove(item, child);
+                            else support.values.defineProperty(item, child, replacement);
+                        }
+                    }
+                }
+                return support.values.call(reviver, object, [key, item]);
+            }
+            return walk(holder, "");
+        }
         return result;
     };
 
-    JSONSupport.prototype.stringify = function (value) {
+    JSONSupport.prototype.stringify = function (value, replacer, space) {
         var support = this;
         var active = [];
+        var replacerFunction = support.values.callable(replacer);
+        var propertyList = null, gap = "", indent = "";
+        if (!replacerFunction && replacer !== null && support.values.kind(replacer) === "array") {
+            propertyList = [];
+            var length = support.values.arrayLength(replacer);
+            for (var listIndex = 0; listIndex < length; listIndex++) {
+                var entry = support.values.unbox(support.values.arrayGet(replacer, listIndex));
+                if (typeof entry !== "string" && typeof entry !== "number") continue;
+                entry = support.values.toString(entry);
+                var duplicate = false;
+                for (var earlier = 0; earlier < propertyList.length; earlier++) {
+                    if (propertyList[earlier] === entry) duplicate = true;
+                }
+                if (!duplicate) propertyList.push(entry);
+            }
+        }
+        space = support.values.unbox(space);
+        if (typeof space === "number") {
+            var spaces = Math.min(10, Math.max(0, Math.floor(space)));
+            for (var gapIndex = 0; gapIndex < spaces; gapIndex++) gap += " ";
+        } else if (typeof space === "string") gap = space.substring(0, 10);
         function quote(text) {
             text = String(text);
             var result = '"';
@@ -239,15 +316,22 @@
             }
             return result + '"';
         }
-        function encode(item, inArray) {
+        function encode(holder, key) {
+            var item = support.values.getProperty(holder, key);
+            if (item !== null && (typeof item === "object" || typeof item === "function")) {
+                var toJSON = support.values.getProperty(item, "toJSON");
+                if (support.values.callable(toJSON)) item = support.values.call(toJSON, item, [key]);
+            }
+            if (replacerFunction) item = support.values.call(replacer, holder, [key, item]);
+            item = support.values.unbox(item);
             if (item === null) return "null";
             if (typeof item === "string") return quote(item);
             if (typeof item === "number") return item === item && item !== Infinity && item !== -Infinity ? String(item) : "null";
             if (typeof item === "boolean") return item ? "true" : "false";
-            if (item === undefined) return inArray ? "null" : undefined;
+            if (item === undefined) return undefined;
             var kind = support.values.kind(item);
             if (kind === "function") {
-                return inArray ? "null" : undefined;
+                return undefined;
             }
             if (kind === "unsupported") return undefined;
             var identity = support.values.identity(item);
@@ -258,27 +342,40 @@
                 }
             }
             active.push(identity);
+            var previousIndent = indent;
+            indent += gap;
             var parts = [];
             var index;
             if (kind === "array") {
                 index = 0;
-                while (index < support.values.arrayLength(item)) {
-                    parts.push(encode(support.values.arrayGet(item, index++), true));
+                var arrayLength = support.values.arrayLength(item);
+                while (index < arrayLength) {
+                    var element = encode(item, String(index++));
+                    parts.push(element === undefined ? "null" : element);
                 }
                 active.pop();
-                return "[" + parts.join(",") + "]";
+                var arrayText = !parts.length ? "[]" : gap ?
+                    "[\n" + indent + parts.join(",\n" + indent) + "\n" + previousIndent + "]" : "[" + parts.join(",") + "]";
+                indent = previousIndent;
+                return arrayText;
             }
-            var keys = support.values.keys(item);
+            var keys = propertyList || support.values.keys(item);
+            var keyCount = propertyList ? keys.length : support.values.arrayLength(keys);
             index = 0;
-            while (index < support.values.arrayLength(keys)) {
-                var key = support.values.arrayGet(keys, index++);
-                var encoded = encode(support.values.getProperty(item, key), false);
-                if (encoded !== undefined) parts.push(quote(key) + ":" + encoded);
+            while (index < keyCount) {
+                var propertyKey = propertyList ? keys[index++] : support.values.arrayGet(keys, index++);
+                var encoded = encode(item, propertyKey);
+                if (encoded !== undefined) parts.push(quote(propertyKey) + (gap ? ": " : ":") + encoded);
             }
             active.pop();
-            return "{" + parts.join(",") + "}";
+            var objectText = !parts.length ? "{}" : gap ?
+                "{\n" + indent + parts.join(",\n" + indent) + "\n" + previousIndent + "}" : "{" + parts.join(",") + "}";
+            indent = previousIndent;
+            return objectText;
         }
-        return encode(value, false);
+        var rootHolder = support.values.makeObject();
+        support.values.defineProperty(rootHolder, "", value);
+        return encode(rootHolder, "");
     };
 
     root.GuestVMJSONSupport = JSONSupport;

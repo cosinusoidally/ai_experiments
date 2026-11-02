@@ -112,6 +112,23 @@ function inspectExitWrapRun(originalRun) {
     if (program && (result.opcode === inspectExitBytecode.GET_NAME ||
                     result.opcode === inspectExitBytecode.TYPEOF_NAME)) {
         inspectExitPrint("binding: " + program.constants[program.code[result.pc + 2]]);
+        var environment = records.frameEnvironment(result.frame), environmentDepth = 0;
+        var maximumEnvironments = 8, maximumBindings = 16;
+        while (environment && environmentDepth++ < maximumEnvironments) {
+            var environmentProgram = records.environmentProgram(environment);
+            var bindingNames = environmentProgram ? records.programBindingNames(environmentProgram) : 0;
+            inspectExitPrint("environment " + environment + " program=" + environmentProgram +
+                " parent=" + records.environmentParent(environment) +
+                " count=" + records.environmentSlotCount(environment));
+            for (var bindingIndex = 0; bindingIndex < records.environmentSlotCount(environment) &&
+                    bindingIndex < maximumBindings; bindingIndex++) {
+                var bindingName = bindingNames ? this.runtime.readHeapValue(
+                    records.vectorCellWithinLength(bindingNames, bindingIndex)) : "<scope binding>";
+                inspectExitPrint("  " + bindingName + ": " + inspectExitCell(this.runtime,
+                    records.environmentCell(environment, bindingIndex), 1));
+            }
+            environment = records.environmentParent(environment);
+        }
     }
     if (program && (result.opcode === inspectExitBytecode.ADD ||
                     result.opcode === inspectExitBytecode.GET_PROPERTY ||

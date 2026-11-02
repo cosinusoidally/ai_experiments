@@ -326,11 +326,14 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 94;
+    Records.NativeInterpreterContractVersion = 97;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
     Records.ObjectClassFlags = {DATE: 1, ERROR: 2};
+    /* Non-ordinary object records have no extensibility payload word. This
+     * bit belongs only to their header namespace, never ordinary objects. */
+    Records.ExoticObjectFlags = {NON_EXTENSIBLE: 0x40000000};
     Records.ObjectClassNames = ["Object", "Undefined", "Null", "Boolean",
         "Number", "String", "Array", "Arguments", "Function", "RegExp", "Date", "Error"];
     Records.ObjectClassConstants = {};
@@ -357,6 +360,7 @@
      * independently parseable. The compiler substitutes these authoritative
      * record-layout values, avoiding duplicated offsets in the dispatcher. */
     Records.KernelConstants = {
+        EXOTIC_OBJECT_NON_EXTENSIBLE: Records.ExoticObjectFlags.NON_EXTENSIBLE,
         PROGRAM_BINDING_NAMES: Heap.HEADER_SIZE + PROGRAM_BINDING_NAMES,
         PROGRAM_BINDING_NAMES_EDGE: 6,
         LEXICAL_LOOKUP_UNSUPPORTED: -1,
@@ -833,17 +837,14 @@
             return !!this.heap.readTrustedFieldU32(
                 address, OBJECT_EXTENSIBLE, Heap.Types.OBJECT);
         }
-        /* The older layouts have no spare per-object word. Until those
-         * layouts are unified, their ordinary ES object state remains
-         * extensible. */
-        return true;
+        return !(this.heap.flags(address) & Records.ExoticObjectFlags.NON_EXTENSIBLE);
     };
 
     Records.prototype.preventObjectExtensions = function (address) {
         var type = this.heap.recordType(address);
         if (type !== Heap.Types.OBJECT) {
-            throw new TypeError(
-                "non-ordinary object extensibility is not implemented");
+            this.heap.setFlags(address, this.heap.flags(address) | Records.ExoticObjectFlags.NON_EXTENSIBLE);
+            return;
         }
         this.heap.writeTrustedFieldU32(
             address, OBJECT_EXTENSIBLE, 0, Heap.Types.OBJECT);
@@ -1877,6 +1878,15 @@
         return this.heap.readTrustedFieldU32(address, FUNCTION_METADATA, type);
     };
 
+    Records.prototype.setFunctionClosure = function (address, closure) {
+        var type = this.heap.recordType(address);
+        if (type !== Heap.Types.NATIVE_FUNCTION && type !== Heap.Types.BYTECODE_FUNCTION) {
+            throw new TypeError("record is not a function");
+        }
+        if (closure) this.heap.requireRecord(closure);
+        this.heap.writeTrustedFieldU32(address, FUNCTION_CLOSURE, closure, type);
+    };
+
     Records.prototype.functionHomeContext = function (address) {
         var type = this.heap.recordType(address);
         if (type !== Heap.Types.NATIVE_FUNCTION &&
@@ -2503,6 +2513,28 @@
     Records.prototype.setProgramBindingNames = function (program, names) {
         this.heap.writeTrustedFieldU32(program, PROGRAM_BINDING_NAMES, names,
             Heap.Types.PROGRAM);
+    };
+
+    Records.prototype.verifyProgramBindingNames = function (program) {
+        var names = this.programBindingNames(program);
+        var expected = this.programBindingCount(program);
+        if (!names) {
+            if (expected && !this.programBindingRegisters(program)) {
+                throw new Error("program " + program + " is missing its binding-name table");
+            }
+            return;
+        }
+        if (this.vectorLength(names) !== expected) {
+            throw new Error("program " + program + " binding-name length " +
+                this.vectorLength(names) + " does not match binding count " + expected);
+        }
+        for (var index = 0; index < expected; index++) {
+            var cell = this.vectorCellWithinLength(names, index);
+            if (this.cells.tagAt(cell) !== ValueCells.Tags.REFERENCE) {
+                throw new Error("program " + program + " has a non-string binding name at " + index);
+            }
+            this.heap.requireRecord(this.cells.referenceAddressAt(cell), Heap.Types.STRING);
+        }
     };
 
     Records.prototype.programSource = function (program) {

@@ -2,6 +2,144 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Binding-name lifetime and library checkpoint, 2026-11-02
+
+Complete default standalone run (native interpreter contract 97):
+
+- Selected: 1333 files; executed: 1329; not run: 0.
+- Passed: **963**; failed: **366**, including **39 watchdog timeouts**.
+- Skipped: the same four documented cases; no new exclusions.
+- Elapsed: **664.163363 seconds**. A fresh contract-94 control took
+  **661.972992 seconds**, with 906 passes / 423 failures / 38 timeouts.
+- `ecma`: 458 passed / 162 failed / 11 timed out.
+- `ecma_2`: 148 passed / 24 failed / 0 timed out.
+- `ecma_3`: 173 passed / 52 failed / 1 timed out / 4 skipped.
+- `ecma_5`: 184 passed / 128 failed / 27 timed out.
+- Specific-file comparison: **906 preserved / 57 gained / 0 lost**.
+
+Summed test time for those same 906 passing files is **177.274921 seconds
+before / 172.081522 seconds after**. This single pair is a small observation,
+not evidence of a general speedup. Full elapsed time remains dominated by
+watchdog waits and is essentially unchanged; the additional timeout is not
+hidden by the higher pass count.
+
+Command: `TZ=UTC ./artifacts/js_runner.exe artifacts/ecma-stable97.snap ecma_tests_runner.js --verbose`.
+Timeouts are included in failures, not an additional category. The ten-second
+watchdog and the existing four default skips are unchanged; Test262's harness
+has not been modified.
+
+The fresh direct-Node control completed in **140.469850 seconds**, with
+1218 passes / 111 failures / zero timeouts / four skips / zero not run.
+Comparing the **specific filenames** that pass:
+
+- **934 / 1218 Node passes matched (76.68%)**, previously 884 / 1218.
+- **284 Node-passing files remain failing**, previously 334.
+- Of that gap, **84** are in Date directories and **200** are outside them.
+- Outside Date directories: **843 / 1043 matched (80.82%)**, previously
+  793 / 1043 (76.03%). Date implementation work remains deferred.
+- **29 guest-only passes** do not compensate for any Node-only failure.
+
+The batch therefore gains 57 guest passes and closes 50 specific Node-parity
+gaps, not 100. Work was frozen for the requested stabilisation and check-in.
+Directory classification is provisional: files outside Date may exercise Date.
+
+The control has one explicit heap-reference-error file. An intermediate,
+unaccepted candidate had 27 and lost seven previously passing files. The
+completed fixed run has **zero explicit heap/reference-error files** and
+restores all seven. The shared defect was an unpublished live length on the
+program binding-name vector, allowing its strings to be reclaimed; subsequent
+frame cleanup masked that first error. See [the lifetime investigation](ECMA_HEAP_LIFETIME.md)
+for the evidence, diagnostics and structural invariant checks. This is not a
+claim that every remaining failure has been proved free of memory defects.
+
+Feature changes use guest bytecode for composite Object, Array and JSON
+operations, behind native-shaped public builtins and retained fast paths.
+They also fix prototype-sensitive Array reads and wrapper coercions. The
+algorithms execute inside the guest; they are not delegated to host JavaScript.
+
+Completed regression gates for this batch:
+
+- Project suite on Node and js_min: 12 programs / 270 guest assertions on
+  each host, runner/HTTP CLI checks and the three-context demo; all pass.
+- Bounded structural GC stress on both hosts: 27 audits, 111888 checked
+  edges, 221 property-index audits and 74 embedding collections each.
+  Maximum observed bumps: 3531120 / 3531472 bytes, under the 8388608-byte cap.
+  The binding-name vector invariant is included in those existing audits.
+- Standalone GC workload: 24 rounds / 48 native collections; passes.
+- Full unchanged Test262: **3292 passed / 0 failed / 0 timed out / 0 not run**,
+  **449.266334 seconds** elapsed, versus 470.868855 seconds at the preceding
+  committed checkpoint. This is a single-run observation, not a general
+  speedup claim.
+- Snapshot gate: program/environment-independent builds, Node/js_min byte
+  identity, arbitrary-program execution, live launch-environment reads and a
+  genuine self-hosted byte-identical fixed point; all pass.
+
+The portable js_min CLI gate initially exposed a host call-object cleanup
+crash and then incorrect compiled `typeof` behaviour for undeclared names.
+Centralising builtin callback installation and using the existing lexical
+`typeOfBinding` operation fixes both. The final project suite above includes
+the previously crashing unchanged `hello.js`, with exactly its expected stdout.
+
+Octane correctness coverage for contract 97:
+
+- All 14 non-deferred suites pass separate-process quick correctness runs:
+  Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay, NavierStokes,
+  PdfJS, Mandreel, Gameboy, CodeLoad, Box2D, zlib and Typescript.
+- These are explicitly quick correctness results, **not stock scores**.
+  The expensive standalone RegExp performance benchmark remains deferred;
+  ECMA and Test262 RegExp correctness tests are not excluded.
+- Eight suites also complete paired **stock** runs on contract 94 and 97:
+  all 16 runs pass. Scores below are **contract 94 / contract 97**:
+  - Richards: 92.5 / 92.7.
+  - RayTrace: 237 / 231.
+  - Splay: 649 / 661.
+  - NavierStokes: 275 / 256.
+  - Box2D: 364 / 358.
+  - Gameboy: 1033 / 1040.
+  - CodeLoad: 99.3 / 92.3.
+  - PdfJS: 864 / 824.
+
+Command:
+`node octane_compare.js --reference-snapshot artifacts/ecma-start.snap --snapshot artifacts/ecma-stable97-fixed.snap --include Richards,RayTrace,Splay,NavierStokes,Box2D,Gameboy,CodeLoad,PdfJS --output artifacts/ecma-stable97-octane-paired --timeout 600`.
+This is a selected performance comparison, not a new full stock sweep.
+Reverse-order stock repeats also pass, but confirm a modest performance cost:
+
+- NavierStokes: current 267 / control 284 (10.38 / 9.70 seconds elapsed).
+- CodeLoad: current 95 / control 101 (30.42 / 27.78 seconds elapsed).
+
+Command:
+`node octane_compare.js --reference-snapshot artifacts/ecma-stable97-fixed.snap --snapshot artifacts/ecma-start.snap --include NavierStokes,CodeLoad --output artifacts/ecma-stable97-octane-reverse --timeout 600`.
+These repeats leave both current scores about 6% lower. That is an outstanding
+performance regression in this correctness/stabilisation checkpoint, not
+noise to discard and not a claim of restored performance parity. The broader
+Array/property semantics and their fast-path guard costs need a subsequent
+controlled investigation; no benchmark-specific workaround was added.
+
+Live standalone checks, serial at 320x240 with a 20-FPS cap:
+
+- Demos 1--7 render live framebuffers and exit cleanly through Escape.
+  The older JS rasterizers remain slow, consistent with the previous
+  checkpoint; the requested cap is not a claim of 20 FPS for those demos.
+- Demo8 runs attract, garage, mouse camera drag, manual free drive,
+  acceleration/steering, then auto drive and a clean menu/Q exit.
+  Samples span 19.4--20.2 FPS in steady state, with a 16.2-FPS transition
+  sample. Inspected captures show the garage floor/car and free-drive track,
+  sky, vehicle and skid marks. This is a bounded live check, complemented
+  by structural GC stress, not a long-duration stability proof.
+- No demo source was changed.
+- Live `net.js` and `node_web.js`: directory listings, exact text and binary
+  responses, default `index.html`, HEAD and missing-file 404 checks pass on
+  both unchanged servers. Fixtures and captures remain ignored artifacts.
+
+The tested fixed image is 7036912 bytes, SHA-256
+`a1a83f6fe84bd25e0b1ddc6bd88c06ed9f6e4d0a5d18c0b9e28bcfba0160b334`.
+The fresh contract-94 control is 6822592 bytes, SHA-256
+`fe33774feb8122adb701d02d27899c05c9ebe3c55c453043196aa81aec57460b`.
+An earlier contract-97 image supplied the complete ECMA run above. The final
+callback-factory/portable-`typeof` corrections were then validated by the
+project, GC, Test262, snapshot, Octane and live application gates. They do not
+change the native interpreter kernel used for that ECMA pass-set comparison.
+
 ### Stabilisation checkpoint, 2026-11-02, approximately 12:48 UTC
 
 Complete default standalone run (native interpreter contract 94):

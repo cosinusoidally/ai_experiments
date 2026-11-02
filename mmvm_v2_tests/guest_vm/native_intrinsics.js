@@ -95,8 +95,14 @@
                       MATH_TAN: 128,
                       OBJECT_KEYS: 129,
                       PROGRAM_SET_BINDING_NAME: 130,
-                      OBJECT_GET_OWN_PROPERTY_DESCRIPTOR: 131};
-    Intrinsics.LAST_ID = Intrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
+                      OBJECT_GET_OWN_PROPERTY_DESCRIPTOR: 131,
+                      GUEST_BUILTIN: 132,
+                      OBJECT_PREVENT_EXTENSIONS: 133,
+                      OBJECT_IS_EXTENSIBLE: 134};
+    Intrinsics.LAST_ID = Intrinsics.OBJECT_IS_EXTENSIBLE;
+    /* A non-constructible native-shaped public function delegates to guest
+     * bytecode through a traced closure vector, never a host callback. */
+    Intrinsics.GuestBuiltinLayout = {IMPLEMENTATION: 0, LENGTH: 1};
     /* ES5.1 public function lengths, not the native dispatcher's minimum
      * accepted argument counts. Callbacks all have the embedding signature
      * (receiver, args, context), which must never leak into this metadata.
@@ -207,7 +213,7 @@
             Intrinsics.FUNCTION_TO_STRING, Intrinsics.STRING_CHAR_AT,
             Intrinsics.STRING_CHAR_CODE_AT, Intrinsics.STRING_SUBSTR,
             Intrinsics.STRING_SUBSTRING, Intrinsics.STRING_FROM_CHAR_CODE,
-            Intrinsics.STRING_SPLIT], 0);
+            Intrinsics.STRING_SPLIT, Intrinsics.GUEST_BUILTIN], 0);
         for (index = Intrinsics.FIRST_ERROR_CONSTRUCTOR;
                 index <= Intrinsics.LAST_ERROR_CONSTRUCTOR; index++) counts[index] = 0;
         for (index = Intrinsics.UINT8_ARRAY_CONSTRUCTOR;

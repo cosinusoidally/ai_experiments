@@ -493,6 +493,26 @@
         return callable;
     };
 
+    Runtime.prototype.makeGuestBuiltin = function (name, implementation) {
+        var callable = this.makeNativeFunction(name, null,
+            "intrinsic", NativeIntrinsics.GUEST_BUILTIN);
+        this.setGuestBuiltinImplementation(callable, implementation);
+        return callable;
+    };
+
+    Runtime.prototype.setGuestBuiltinImplementation = function (callable, implementation) {
+        var runtime = this;
+        var layout = NativeIntrinsics.GuestBuiltinLayout;
+        var closure = this.heapRecords.allocateValueVector(layout.LENGTH);
+        this.writeHeapValue(this.heapRecords.vectorCell(closure, layout.IMPLEMENTATION), implementation);
+        this.heapRecords.setVectorLength(closure, layout.LENGTH);
+        this.heapRecords.setFunctionClosure(callable.heapAddress, closure);
+        callable.callback = function (receiver, args) {
+            return runtime.invokePropertyFunction(implementation, receiver, args);
+        };
+        return callable;
+    };
+
     Runtime.prototype.registerNativeCallbackRoot = function (address) {
         this.heapRecords.setFunctionGCNext(address, this.nativeCallbackRootHead);
         this.nativeCallbackRootHead = address;
@@ -1075,6 +1095,20 @@
         if (bindingName) {
             bindingSlots = {};
             bindingSlots["$" + this.heapRecords.readString(bindingName)] = 0;
+        } else {
+            /* A native-created parent need not have a portable activation
+             * cache. Recover its own layout, never the caller's layout or
+             * an empty map supplied while adopting a closure. */
+            var program = this.heapRecords.environmentProgram(address);
+            if (program) {
+                bindingSlots = {};
+                var names = this.heapRecords.programBindingNames(program);
+                var count = this.heapRecords.environmentSlotCount(address);
+                for (var slot = 0; names && slot < count; slot++) {
+                    var name = this.readHeapValue(this.heapRecords.vectorCellWithinLength(names, slot));
+                    bindingSlots["$" + name] = slot;
+                }
+            }
         }
         var handle = {heapAddress: address, ownerRuntime: this};
         metadata = {handle: handle, bindingSlots: bindingSlots || {}};
@@ -1442,6 +1476,15 @@
                 !this.isArgumentsObject(object)) {
                 return this.defineArrayLength(object, desc);
             }
+            var indexedArray = object.guestType === "array" && isArrayIndex(key);
+            var elementIndex = indexedArray ? Number(key) : -1;
+            if (indexedArray) {
+                if (elementIndex >= this.arrayLength(object) && !this.isArgumentsObject(object) &&
+                    !this.isArrayLengthWritable(object)) throw new TypeError("array length is not writable");
+                if (!this.heapOwnProperty(object, key, false) && this.arrayHas(object, elementIndex)) {
+                    this.defineDataProperty(object, key, this.arrayGet(object, elementIndex), HeapRecords.Attributes.DEFAULT);
+                }
+            }
             var keyAddress = this.internStringAddress(key);
             var entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
             var attributes = entry ? this.heapRecords.ownPropertyEntryAttributes(
@@ -1453,8 +1496,7 @@
                 object.heapAddress, entry) : 0;
             var oldSetter = oldSetterAddress ? this.readHeapReference(oldSetterAddress) : undefined;
             if (!entry) {
-                if (object.guestType === "object" &&
-                    !this.heapRecords.objectIsExtensible(object.heapAddress)) {
+                if (!this.heapRecords.objectIsExtensible(object.heapAddress)) {
                     throw new TypeError("object is not extensible");
                 }
             } else if (!(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
@@ -1504,6 +1546,16 @@
                     own(desc, "value") ? desc.value : oldValue, attributes);
                 entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
                 this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, entry, 0);
+            }
+            if (indexedArray) {
+                var mapped = this.argumentsMappedCell(object, elementIndex);
+                if (mapped && own(desc, "value")) this.writeHeapValue(mapped, desc.value);
+                if (mapped && (accessor || desc.writable === false)) this.detachArgumentMapping(object, elementIndex);
+                if (elementIndex >= this.arrayLength(object)) {
+                    this.ensureArrayCapacity(object, elementIndex + 1);
+                    this.heapRecords.setArrayLength(object.heapAddress, elementIndex + 1);
+                }
+                this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(object.heapAddress, elementIndex));
             }
             return object;
         } finally {
@@ -1598,7 +1650,7 @@
                 if (strict) throw new TypeError("array length is not writable");
                 return value;
             }
-            this.defineArrayLength(object, {value: value});
+            this.defineArrayLength(object, {value: value}, !!strict);
             return value;
         }
         var property = this.heapOwnProperty(object, key, false);
@@ -1676,7 +1728,7 @@
         array.valueVersion++;
     };
 
-    Runtime.prototype.defineArrayLength = function (array, desc) {
+    Runtime.prototype.defineArrayLength = function (array, desc, throwOnReject) {
         var oldLength = this.arrayLength(array);
         var oldWritable = this.isArrayLengthWritable(array);
         var length = oldLength;
@@ -1705,6 +1757,7 @@
                 index--;
                 if (!this.deleteProperty(array, String(index), false)) {
                     this.publishArrayLength(array, index + 1, writable);
+                    if (throwOnReject === false) return false;
                     throw new TypeError("cannot truncate a non-configurable array element");
                 }
             }
@@ -1776,15 +1829,29 @@
     };
 
     Runtime.prototype.arrayHas = function (array, index) {
+        if (this.heapRecords.objectPropertyHead(array.heapAddress) && this.heapOwnProperty(array, String(index), false)) return true;
         if (index < 0 || index >= this.arrayLength(array)) return false;
         return this.valueCells.tagAt(
             this.heapRecords.arrayElementCell(array.heapAddress, index)) !== 0;
     };
 
-    Runtime.prototype.arrayGet = function (array, index) {
+    Runtime.prototype.arrayGet = function (array, index, receiver) {
         if (index < 0 || index !== Math.floor(index)) return undefined;
+        var entry = this.heapRecords.objectPropertyHead(array.heapAddress) ?
+            this.heapOwnProperty(array, String(index), false) : 0;
+        if (entry) {
+            var attributes = this.heapRecords.ownPropertyEntryAttributes(array.heapAddress, entry);
+            var mapped = this.argumentsMappedCell(array, index);
+            if (mapped && !(attributes & HeapRecords.Attributes.ACCESSOR)) return this.readHeapValue(mapped);
+            return this.readPropertyEntry(array, entry, receiver === undefined ? array : receiver);
+        }
         var vector = this.heapRecords.arrayElements(array.heapAddress);
-        if (index >= this.heapRecords.vectorLength(vector)) return undefined;
+        if (index >= this.heapRecords.vectorLength(vector) || this.valueCells.tagAt(
+                this.heapRecords.vectorCellWithinLength(vector, index)) === 0) {
+            var prototype = this.heapRecords.objectPrototype(array.heapAddress);
+            return prototype ? this.getProperty(this.readHeapReference(prototype), String(index),
+                receiver === undefined ? array : receiver) : undefined;
+        }
         var cell = this.heapRecords.vectorCellWithinLength(vector, index);
         if (this.valueCells.tagAt(cell) === 0) return undefined;
         var mappedCell = this.argumentsMappedCell(array, index);
@@ -1821,11 +1888,37 @@
         return newVector;
     };
 
-    Runtime.prototype.arraySet = function (array, index, value) {
+    Runtime.prototype.arraySet = function (array, index, value, strict) {
         this.assertOwned(value);
         index = Number(index);
         if (index < 0 || index >= 4294967295 || index !== Math.floor(index)) {
             throw new RangeError("invalid array index");
+        }
+        var property = this.heapRecords.objectPropertyHead(array.heapAddress) ? this.heapOwnProperty(array, String(index), false) : 0;
+        if (property) {
+            this.writePropertyEntry(array, property, array, value, strict);
+            var propertyAttributes = this.heapRecords.ownPropertyEntryAttributes(array.heapAddress, property);
+            var mappedProperty = this.argumentsMappedCell(array, index);
+            if (mappedProperty && (propertyAttributes & HeapRecords.Attributes.WRITABLE)) this.writeHeapValue(mappedProperty, value);
+            return value;
+        }
+        if (!this.arrayHas(array, index)) {
+            var inheritedOwner = this.findPrototypePropertyOwner(array, String(index));
+            if (inheritedOwner) {
+                var inherited = this.heapOwnProperty(inheritedOwner, String(index), false);
+                var inheritedAttributes = this.heapRecords.ownPropertyEntryAttributes(inheritedOwner.heapAddress, inherited);
+                if ((inheritedAttributes & HeapRecords.Attributes.ACCESSOR) || !(inheritedAttributes & HeapRecords.Attributes.WRITABLE)) {
+                    return this.writePropertyEntry(inheritedOwner, inherited, array, value, strict);
+                }
+            }
+            if (!this.heapRecords.objectIsExtensible(array.heapAddress)) {
+                if (strict) throw new TypeError("array is not extensible");
+                return value;
+            }
+        }
+        if (index >= this.arrayLength(array) && !this.isArgumentsObject(array) && !this.isArrayLengthWritable(array)) {
+            if (strict) throw new TypeError("array length is not writable");
+            return value;
         }
         var mappingEnvironment = this.heapRecords.arrayReserved(array.heapAddress);
         if (mappingEnvironment && mappingEnvironment !== HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT &&
@@ -1997,6 +2090,10 @@
                 }
                 bindingIndex++;
             }
+            /* Capacity is not live length. Without this publication the
+             * collector traces none of the binding-name strings, and native
+             * name lookup rejects the table as an incomplete layout. */
+            this.heapRecords.setVectorLength(bindingNames, program.bindings.length);
         }
         var argumentConstants = this.programArgumentConstants(program);
         index = 0;
@@ -3069,9 +3166,12 @@
         this.defineBuiltinProperty(this.stringPrototype, "valueOf",
                          this.stringMethods.valueOf);
         this.arrayMethods = {};
-        /* Array.prototype is observable through instanceof even on the
-         * structured JS backend; it cannot be a host-only virtual method bag. */
-        this.arrayPrototype = this.makeObject();
+        /* ES5.1 15.4.4: the prototype itself has Array internal methods and
+         * a writable length, with Object.prototype as its parent. */
+        this.arrayPrototype = null;
+        this.arrayPrototype = this.makeArray(0);
+        this.heapRecords.setObjectPrototype(this.arrayPrototype.heapAddress,
+            this.objectPrototype.heapAddress);
         this.arrayMethods.push = this.makeNativeFunction("Array.push",
             function (receiver, args) {
                 if (!receiver || receiver.guestType !== "array") {
@@ -3404,6 +3504,7 @@
                             "property descriptor target is not an object");
                     }
                     var descriptor = runtime.makeObject();
+                    var property = runtime.heapOwnProperty(object, key, false);
                     if (object.guestType === "array" && key === "length" &&
                         !runtime.isArgumentsObject(object)) {
                         runtime.defineDataProperty(descriptor, "value",
@@ -3418,6 +3519,7 @@
                          object.guestType === "buffer" ||
                          object.guestType === "typedArray") &&
                         isArrayIndex(key) &&
+                        !property &&
                         runtime.hasOwnProperty(object, key)) {
                         runtime.defineDataProperty(descriptor, "value",
                             runtime.getProperty(object, key), HeapRecords.Attributes.DEFAULT);
@@ -3426,7 +3528,6 @@
                         runtime.defineDataProperty(descriptor, "configurable", true, HeapRecords.Attributes.DEFAULT);
                         return descriptor;
                     }
-                    var property = runtime.heapOwnProperty(object, key, false);
                     if (!property) return undefined;
                     var attributes = runtime.heapRecords.ownPropertyEntryAttributes(
                         object.heapAddress, property);
@@ -3464,7 +3565,7 @@
                     runtime.heapRecords.preventObjectExtensions(
                         object.heapAddress);
                     return object;
-                }));
+                }, "intrinsic", NativeIntrinsics.OBJECT_PREVENT_EXTENSIONS));
         this.defineBuiltinProperty(objectConstructor, "isExtensible",
             this.makeNativeFunction("Object.isExtensible",
                 function (receiver, args) {
@@ -3475,7 +3576,7 @@
                     }
                     return runtime.heapRecords.objectIsExtensible(
                         object.heapAddress);
-                }));
+                }, "intrinsic", NativeIntrinsics.OBJECT_IS_EXTENSIBLE));
         this.defineBuiltinProperty(objectConstructor, "getOwnPropertyNames",
             this.makeNativeFunction("Object.getOwnPropertyNames",
                 function (receiver, args) {
@@ -4509,12 +4610,12 @@
             return this.typedArraySupport.getProperty(object, key);
         }
         if (object.guestType === "array") {
-            if (isDirectArrayIndex(key)) return this.arrayGet(object, key);
+            if (isDirectArrayIndex(key)) return this.arrayGet(object, key, accessReceiver);
             key = this.propertyKey(key);
             if (key === "length" && !this.isArgumentsObject(object)) {
                 return this.arrayLength(object);
             }
-            if (isArrayIndex(key)) return this.arrayGet(object, Number(key));
+            if (isArrayIndex(key)) return this.arrayGet(object, Number(key), accessReceiver);
             var arrayProperty = this.heapOwnProperty(object, key, false);
             if (arrayProperty) {
                 return this.readPropertyEntry(object, arrayProperty, accessReceiver);
@@ -4727,7 +4828,11 @@
         var index;
         if (object && object.guestType === "array") {
             for (index = 0; index < this.arrayLength(object); index++) {
-                if (this.arrayHas(object, index)) values.push(String(index));
+                if (this.arrayHas(object, index)) {
+                    var indexedProperty = this.heapOwnProperty(object, String(index), false);
+                    if (!indexedProperty || (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress,
+                            indexedProperty) & HeapRecords.Attributes.ENUMERABLE)) values.push(String(index));
+                }
             }
         }
         var key;
@@ -4737,8 +4842,9 @@
             while (property) {
                 if (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property) &
                         HeapRecords.Attributes.ENUMERABLE) {
-                    heapKeys.push(this.heapRecords.readString(
-                        this.heapRecords.ownPropertyEntryKey(object.heapAddress, property)));
+                    var namedKey = this.heapRecords.readString(this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
+                    if (!(object.guestType === "array" && isArrayIndex(namedKey) &&
+                            Number(namedKey) < this.arrayLength(object))) heapKeys.push(namedKey);
                 }
                 property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
             }
@@ -4803,8 +4909,9 @@
         while (property) {
             var name = this.heapRecords.readString(
                 this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
-            if (!(name === "length" && object.guestType === "array" &&
-                  !this.isArgumentsObject(object))) reversed.push(name);
+            if (!(object.guestType === "array" && ((name === "length" &&
+                  !this.isArgumentsObject(object)) || (isArrayIndex(name) &&
+                  Number(name) < this.arrayLength(object))))) reversed.push(name);
             property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
         }
         index = reversed.length - 1;
@@ -4895,8 +5002,6 @@
 
     Runtime.prototype.toPrimitive = function (value, preferredType) {
         if (!value || !value.guestType) return value;
-        var boxed = this.primitiveWrapperValue(value);
-        if (boxed.found) return boxed.value;
         var stringFirst = preferredType === "string";
         if (!preferredType && this.dateValueKey !== undefined &&
             this.hasOwnProperty(value, this.dateValueKey)) stringFirst = true;
@@ -4962,10 +5067,10 @@
         }
         if (object.guestType === "array") {
             if (isDirectArrayIndex(key)) {
-                return this.arraySet(object, key, value);
+                return this.arraySet(object, key, value, strict);
             }
             key = this.propertyKey(key);
-            if (isArrayIndex(key)) return this.arraySet(object, Number(key), value);
+            if (isArrayIndex(key)) return this.arraySet(object, Number(key), value, strict);
             return this.setNamedProperty(object, key, value, strict);
         }
         key = this.propertyKey(key);

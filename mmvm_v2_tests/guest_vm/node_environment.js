@@ -132,8 +132,8 @@
                 "\"./guest_vm/self_hosted_frontend.js\");",
             "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);",
             "var GuestStandaloneJSON = GuestVMJSONSupport.forValues();",
-            "JSON.parse = function (text) { return GuestStandaloneJSON.parse(String(text)); };",
-            "JSON.stringify = function (value) { return GuestStandaloneJSON.stringify(value); };"
+            "JSON.parse = function (text, reviver) { return GuestStandaloneJSON.parse(text, reviver); };",
+            "JSON.stringify = function (value, replacer, space) { return GuestStandaloneJSON.stringify(value, replacer, space); };"
         ].join("\n"), "<standalone-runtime-bootstrap>");
     };
 

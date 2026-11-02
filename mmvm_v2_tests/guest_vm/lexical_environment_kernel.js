@@ -6,7 +6,7 @@
     /* Return a binding's value-cell address, zero for an unresolved name, or
      * LEXICAL_LOOKUP_UNSUPPORTED if an object environment requires ordinary
      * HasProperty/Get processing. Never silently skip an unknown scope. */
-    function resolveNamedBindingCellKernel(heapBase, environment, name) {
+    function resolveNamedBindingCellKernel(heapBase, state, environment, name) {
         while (environment !== 0) {
             var catchName = environmentBindingNameKernel(heapBase, environment);
             if (catchName !== 0) {
@@ -14,7 +14,19 @@
                     return environmentCellAddress(heapBase, environment, 0);
                 }
             } else {
-                if (environmentObjectKernel(heapBase, environment) !== 0) return LEXICAL_LOOKUP_UNSUPPORTED;
+                var bindingObject = environmentObjectKernel(heapBase, environment);
+                while (bindingObject !== 0) {
+                    /* Ordinary data-only object environments cover eval's
+                     * added variables and common with scopes. Accessors and
+                     * exotic virtual properties require the full operation. */
+                    if (recordType(heapBase, bindingObject) !== HEAP_TYPE_OBJECT) return LEXICAL_LOOKUP_UNSUPPORTED;
+                    var entry = findOwnPropertyEntryKernel(heapBase, state, bindingObject, name);
+                    if (entry !== 0) {
+                        if ((ownPropertyEntryAttributesKernel(heapBase, bindingObject, entry) & PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return LEXICAL_LOOKUP_UNSUPPORTED;
+                        return ownPropertyEntryValueCellKernel(heapBase, bindingObject, entry);
+                    }
+                    bindingObject = objectPrototypeReferenceKernel(heapBase, bindingObject);
+                }
                 var count = environmentCount(heapBase, environment);
                 if (count > 0) {
                     var program = environmentProgram(heapBase, environment);

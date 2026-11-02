@@ -201,21 +201,64 @@
             runtime.defineBuiltinProperty(prototype, name, callable);
             runtime.deleteProperty(context.globalObject, globalName, false);
         }
+        function installBuiltin(prototype, name, globalName, builtinName) {
+            var implementation = runtime.getGlobal(context, globalName);
+            runtime.defineBuiltinProperty(prototype, name,
+                runtime.makeGuestBuiltin(builtinName, implementation));
+            runtime.deleteProperty(context.globalObject, globalName, false);
+        }
+        function installFallback(prototype, name, globalName) {
+            var implementation = runtime.getGlobal(context, globalName);
+            var callable = runtime.getProperty(prototype, name);
+            runtime.setGuestBuiltinImplementation(callable, implementation);
+            runtime.deleteProperty(context.globalObject, globalName, false);
+        }
         loadLibrary("guest_vm/array_runtime.js");
         loadLibrary("guest_vm/buffer_runtime.js");
-        install(runtime.arrayPrototype, "map", "__guestArrayMap", "Array.map");
-        install(runtime.arrayPrototype, "forEach", "__guestArrayForEach", "Array.forEach");
-        install(runtime.arrayPrototype, "sort", "__guestArraySort", "Array.sort");
+        installBuiltin(runtime.arrayPrototype, "map", "__guestArrayMap", "Array.map");
+        installBuiltin(runtime.arrayPrototype, "forEach", "__guestArrayForEach", "Array.forEach");
+        installBuiltin(runtime.arrayPrototype, "sort", "__guestArraySort", "Array.sort");
+        var arrayAlgorithms = ["every", "some", "filter", "reduce", "reduceRight", "lastIndexOf"];
+        for (var arrayAlgorithmIndex = 0; arrayAlgorithmIndex < arrayAlgorithms.length; arrayAlgorithmIndex++) {
+            var arrayName = arrayAlgorithms[arrayAlgorithmIndex];
+            installBuiltin(runtime.arrayPrototype, arrayName, "__guestArray" +
+                arrayName.charAt(0).toUpperCase() + arrayName.substring(1), "Array." + arrayName);
+        }
         if (runtime.nativeInterpreter) {
             runtime.nativeInterpreter.setArrayMethodFallback("push",
                 runtime.getGlobal(context, "__guestArrayPushGeneric"));
             runtime.nativeInterpreter.setArrayMethodFallback("slice",
                 runtime.getGlobal(context, "__guestArraySliceGeneric"));
         }
+        var arrayFallbacks = ["push", "slice", "pop", "shift", "unshift", "reverse", "splice", "join", "toString"];
+        for (var arrayFallbackIndex = 0; arrayFallbackIndex < arrayFallbacks.length; arrayFallbackIndex++) {
+            var fallbackName = arrayFallbacks[arrayFallbackIndex];
+            installFallback(runtime.arrayPrototype, fallbackName, "__guestArray" +
+                fallbackName.charAt(0).toUpperCase() + fallbackName.substring(1) + "Generic");
+        }
+        installBuiltin(runtime.arrayPrototype, "toLocaleString", "__guestArrayToLocaleString", "Array.toLocaleString");
         runtime.deleteProperty(context.globalObject, "__guestArrayPushGeneric", false);
         runtime.deleteProperty(context.globalObject, "__guestArraySliceGeneric", false);
         install(runtime.getGlobal(context, "Buffer"), "byteLength",
             "__guestBufferByteLength", "Buffer.byteLength");
+        loadLibrary("guest_vm/object_runtime.js");
+        var objectConstructor = runtime.getGlobal(context, "Object");
+        installBuiltin(runtime.objectPrototype, "toLocaleString", "__guestObjectToLocaleString", "Object.toLocaleString");
+        installBuiltin(runtime.numberPrototype, "toLocaleString", "__guestNumberToLocaleString", "Number.toLocaleString");
+        installBuiltin(objectConstructor, "defineProperties", "__guestObjectDefineProperties", "Object.defineProperties");
+        installBuiltin(objectConstructor, "create", "__guestObjectCreate", "Object.create");
+        installBuiltin(objectConstructor, "seal", "__guestObjectSeal", "Object.seal");
+        installBuiltin(objectConstructor, "freeze", "__guestObjectFreeze", "Object.freeze");
+        installBuiltin(objectConstructor, "isSealed", "__guestObjectIsSealed", "Object.isSealed");
+        installBuiltin(objectConstructor, "isFrozen", "__guestObjectIsFrozen", "Object.isFrozen");
+        loadLibrary("guest_vm/json.js");
+        context.run("var __guestJSON = GuestVMJSONSupport.forValues();\n" +
+            "this.__guestJSONParse = function (text, reviver) { return __guestJSON.parse(text, reviver); };\n" +
+            "this.__guestJSONStringify = function (value, replacer, space) { return __guestJSON.stringify(value, replacer, space); };",
+            "<guest-json-library>");
+        var jsonObject = runtime.getGlobal(context, "JSON");
+        installBuiltin(jsonObject, "parse", "__guestJSONParse", "JSON.parse");
+        installBuiltin(jsonObject, "stringify", "__guestJSONStringify", "JSON.stringify");
         if (runtime.regexpPrototype && runtime.numberPrototype) {
             loadLibrary("guest_vm/number_runtime.js");
             loadLibrary("guest_vm/regexp_runtime.js");

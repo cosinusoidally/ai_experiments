@@ -1,5 +1,18 @@
 # Test262 status
 
+2026-11-02, approximately 18:34 UTC, ECMA binding-name lifetime and
+guest-builtin checkpoint (native contract 97): complete standalone run
+**3292 / 3292 passed; 0 failed / 0 timed out / 0 not run**. Runner elapsed
+**449.266334 seconds**; summed test time **433.777377 seconds**. The preceding
+committed checkpoint took 470.868855 seconds; this single run does not show
+a correctness or elapsed-time regression, but is not a controlled general
+performance claim. The Test262 harness, corpus, selection and limits are
+unchanged. Command:
+`./artifacts/js_runner.exe artifacts/ecma-stable97-fixed.snap test262_runner.js`.
+See [ECMA_TESTS_STATUS.md](ECMA_TESTS_STATUS.md) for the separate historical
+ECMA pass-set comparison and [ECMA_HEAP_LIFETIME.md](ECMA_HEAP_LIFETIME.md)
+for the collector lifetime defect and diagnostics.
+
 2026-11-02, approximately 12:59 UTC, ECMA stabilisation checkpoint (native
 contract 94): complete standalone run **3292 / 3292 passed; 0 failed /
 0 timed out / 0 not run**. Runner elapsed **470.868855 seconds**; summed test

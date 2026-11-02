@@ -204,6 +204,10 @@
     RuntimeSupportLayout.COUNT += ObjectOperationKernels.descriptorFieldNames.length;
     var RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE;
     var INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
+    var INTRINSIC_GUEST_BUILTIN = NativeIntrinsics.GUEST_BUILTIN;
+    var INTRINSIC_OBJECT_PREVENT_EXTENSIONS = NativeIntrinsics.OBJECT_PREVENT_EXTENSIONS;
+    var INTRINSIC_OBJECT_IS_EXTENSIBLE = NativeIntrinsics.OBJECT_IS_EXTENSIBLE;
+    var GUEST_BUILTIN_IMPLEMENTATION = NativeIntrinsics.GuestBuiltinLayout.IMPLEMENTATION;
     var NATIVE_APPLY_FUNCTION_REGISTER = 0;
     var NATIVE_APPLY_RECEIVER_REGISTER = 1;
     var NATIVE_APPLY_ARGUMENT_BASE = 2;
@@ -1015,7 +1019,7 @@
                 var globalProperty = 0;
                 var namedBindingCell = 0;
                 if (opcode === OP_GET_NAME) {
-                    namedBindingCell = resolveNamedBindingCellKernel(heapBase, environment, globalKey);
+                    namedBindingCell = resolveNamedBindingCellKernel(heapBase, state, environment, globalKey);
                     if (namedBindingCell === LEXICAL_LOOKUP_UNSUPPORTED) return unsupportedDiagnosticExitKernel(
                         heapBase, state, frame, pc, opcode, initialBudget - budget);
                 }
@@ -1291,11 +1295,34 @@
                 var arrayGetTarget = bytecodeRegisterCellAddress(
                     0, registerAddress, arrayGetTargetOperand);
                 var indexedGetterEntered = 0;
-                if (arrayGetSupported === 1 &&
-                    arrayGetOriginalObjectType === HEAP_TYPE_ARRAY &&
-                    arrayGetIndex >= 0 && arrayPropertyHead(heapBase, arrayGetObject) !== 0) {
-                    var indexedDescriptor = indexedOwnPropertyDescriptorKernel(
+                var arrayGetVector = 0, arrayGetLength = 0;
+                if (arrayGetSupported === 1 && arrayGetOriginalObjectType === HEAP_TYPE_ARRAY && arrayGetIndex >= 0) {
+                    arrayGetVector = arrayElements(heapBase, arrayGetObject);
+                    arrayGetLength = vectorLength(heapBase, arrayGetVector);
+                    var indexedOwner = arrayGetObject, indexedDescriptor = 0, inheritedIndexedCell = 0;
+                    if (arrayPropertyHead(heapBase, arrayGetObject) !== 0) indexedDescriptor = indexedOwnPropertyDescriptorKernel(
                         heapBase, state, arrayGetObject, arrayGetIndex);
+                    var indexedDensePresent = 0;
+                    if (arrayGetIndex < arrayGetLength && valueCellTag(0,
+                            vectorCellAddress(heapBase, arrayGetVector, arrayGetIndex)) !== 0) indexedDensePresent = 1;
+                    if (indexedDescriptor === 0 && indexedDensePresent === 0) {
+                        indexedOwner = objectPrototypeReferenceKernel(heapBase, arrayGetObject);
+                        while (indexedOwner !== 0 && indexedDescriptor === 0 && inheritedIndexedCell === 0) {
+                            indexedDescriptor = indexedOwnPropertyDescriptorKernel(heapBase, state, indexedOwner, arrayGetIndex);
+                            if (indexedDescriptor === 0 && recordType(heapBase, indexedOwner) === HEAP_TYPE_ARRAY) {
+                                var inheritedElements = arrayElements(heapBase, indexedOwner);
+                                if (arrayGetIndex < vectorLength(heapBase, inheritedElements)) {
+                                    var inheritedCell = vectorCellAddress(heapBase, inheritedElements, arrayGetIndex);
+                                    if (valueCellTag(0, inheritedCell) !== 0) inheritedIndexedCell = inheritedCell;
+                                }
+                            }
+                            if (indexedDescriptor === 0 && inheritedIndexedCell === 0) indexedOwner = objectPrototypeReferenceKernel(heapBase, indexedOwner);
+                        }
+                    }
+                    if (inheritedIndexedCell !== 0) {
+                        copyValueCell(arrayGetTarget, inheritedIndexedCell);
+                        arrayGetSupported = 4;
+                    }
                     if (indexedDescriptor !== 0) {
                         var indexedDescriptorCell = propertyDescriptorValueCell(0, indexedDescriptor);
                         if ((propertyDescriptorAttributes(0, indexedDescriptor) &
@@ -1315,8 +1342,9 @@
                                 }
                             }
                         } else {
-                            var indexedMappedCell = argumentsMappedCellKernel(
-                                heapBase, arrayGetObject, arrayGetIndex);
+                            var indexedMappedCell = 0;
+                            if (recordType(heapBase, indexedOwner) === HEAP_TYPE_ARRAY) indexedMappedCell = argumentsMappedCellKernel(
+                                heapBase, indexedOwner, arrayGetIndex);
                             if (indexedMappedCell !== 0) indexedDescriptorCell = indexedMappedCell;
                             copyValueCell(arrayGetTarget, indexedDescriptorCell);
                         }
@@ -1667,8 +1695,6 @@
                         }
                     }
                 } else {
-                var arrayGetVector = arrayElements(heapBase, arrayGetObject);
-                var arrayGetLength = vectorLength(heapBase, arrayGetVector);
                 if (arrayGetIndex >= arrayGetLength) {
                     setValueCellUndefined(arrayGetTarget);
                 } else {
@@ -1780,6 +1806,18 @@
                     arraySetSupported = 0;
                 }
                 var arraySetVector = 0;
+                if (arraySetSupported === 1) {
+                    if (objectIsExtensibleKernel(heapBase, arraySetObject) === 0) arraySetSupported = 0;
+                    else if (arrayPropertyHead(heapBase, arraySetObject) !== 0) {
+                        if (indexedOwnPropertyDescriptorKernel(heapBase, state, arraySetObject, arraySetIndex) !== 0) arraySetSupported = 0;
+                        else if (arrayReserved(heapBase, arraySetObject) === 0 &&
+                                arraySetIndex >= vectorLength(heapBase, arrayElements(heapBase, arraySetObject))) {
+                            var setLengthEntry = findOwnPropertyEntryKernel(heapBase, state, arraySetObject, arrayLengthKey);
+                            if (setLengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase,
+                                    arraySetObject, setLengthEntry) & PROPERTY_ATTRIBUTE_WRITABLE) === 0) arraySetSupported = 0;
+                        }
+                    }
+                }
                 if (arraySetSupported === 1) {
                     arraySetVector = arrayElements(heapBase, arraySetObject);
                     var arraySetCapacity = vectorCapacity(
@@ -2022,7 +2060,7 @@
                             arrayLengthKey) === 1) {
                     if (setArrayLengthKernel(heapBase, state, setPropertyObject,
                             frameRegisterCellAddress(heapBase, frame,
-                                setPropertySourceIndex)) === 0) {
+                                setPropertySourceIndex), arrayLengthKey) === 0) {
                         return unsupportedExitKernel(heapBase, state, frame,
                             pc, opcode, initialBudget - budget);
                     }
@@ -2144,13 +2182,10 @@
                     }
                     /* Let the semantic path apply strict/sloppy assignment
                      * behavior when an ordinary object rejects extension. */
-                    if (setPropertyObjectType === HEAP_TYPE_OBJECT) {
-                        if (objectExtensible(
-                            heapBase, setPropertyObject) === 0) {
+                    if (objectIsExtensibleKernel(heapBase, setPropertyObject) === 0) {
                             return unsupportedExitKernel(
                                 heapBase, state, frame, pc, opcode,
                                 (initialBudget - budget));
-                        }
                     }
                     setPropertyRecord = appendOwnPropertyEntryKernel(
                         heapBase, state, setPropertyObject, setPropertyNamedKey,
@@ -6357,6 +6392,21 @@
             instructions, platformServices, NATIVE_APPLY_RECEIVER_REGISTER, targetCell);
     }
 
+    function enterGuestBuiltinKernel(heapBase, state, frame, callable, targetIndex,
+            currentContext, stringSupport, arrayPrototype, bytecodeAddress,
+            registerAddress, pc, receiverIndex, argumentsVector) {
+        var closure = functionClosure(heapBase, callable);
+        if (closure === 0) return 0;
+        var implementation = vectorCellAddress(heapBase, closure, GUEST_BUILTIN_IMPLEMENTATION);
+        var receiver = engineScratchRightAddress(heapBase, state);
+        if (receiverIndex >= 0) receiver = bytecodeRegisterCellAddress(0, registerAddress, receiverIndex);
+        else setValueCellUndefined(receiver);
+        return bytecodeCallKernel(heapBase, state, frame, implementation, 0,
+            CALL_OPERATION_CALL, targetIndex, currentContext, stringSupport,
+            arrayPrototype, bytecodeAddress, registerAddress, pc, frame + FRAME_PC,
+            receiver, FIVE_WORD_INSTRUCTION, 0, argumentsVector);
+    }
+
     function intrinsicCallKernel(
             heapBase, state, frame, callFunctionCell, callArgumentsCell,
             callOperation, callTargetIndex, currentContext, stringSupport,
@@ -6567,6 +6617,10 @@
             var requiredIntrinsicArguments = valueCellInt32(0, vectorCellAddress(
                 heapBase, minimumArguments, intrinsicId));
             if (intrinsicArgumentCount < requiredIntrinsicArguments) {
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
                 intrinsicCallValid = 0;
                 setEngineCallRejectReason(
                     heapBase, state,
@@ -6581,11 +6635,16 @@
             callTargetIndex * VALUE_CELL_BYTES;
         if (explicitTargetCell !== 0) intrinsicTarget = explicitTargetCell;
         var intrinsicHandled = 0;
+        if (intrinsicId === INTRINSIC_GUEST_BUILTIN) {
+            if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                    callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                    bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                    intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
+            return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
         if (intrinsicId === INTRINSIC_ARRAY_TO_STRING && callReceiverIndex >= 0) {
             intrinsicHandled = arrayBuiltinStringKernel(heapBase, state, intrinsicTarget,
                 bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
-            if (intrinsicHandled !== 1) return unsupportedDiagnosticExitKernel(
-                heapBase, state, frame, pc, opcode, instructions);
         }
         if (intrinsicId === INTRINSIC_OBJECT_TO_STRING && callReceiverIndex >= 0) {
             intrinsicHandled = objectToStringKernel(heapBase, intrinsicTarget,
@@ -6695,6 +6754,19 @@
                 keysSource, arrayPrototype, keysLengthKey, 0);
             if (intrinsicHandled !== 1) return unsupportedDiagnosticExitKernel(
                 heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (intrinsicId === INTRINSIC_OBJECT_PREVENT_EXTENSIONS || intrinsicId === INTRINSIC_OBJECT_IS_EXTENSIBLE) {
+            var extensibilityArgument = programArgumentCellKernel(heapBase, intrinsicArgumentsVector, registerAddress, 0);
+            var preventExtensions = 0;
+            if (intrinsicId === INTRINSIC_OBJECT_PREVENT_EXTENSIONS) preventExtensions = 1;
+            intrinsicHandled = objectExtensibilityKernel(heapBase, intrinsicTarget, extensibilityArgument, preventExtensions);
+            if (intrinsicHandled === 0) {
+                var extensibilityError = engineScratchRightAddress(heapBase, state);
+                if (allocateTypeErrorKernel(heapBase, state, extensibilityError, stringSupport) === 1) {
+                    if (unwindExceptionKernel(heapBase, state, frame, extensibilityError) === 1) return INTRINSIC_RESULT_EXCEPTION_HANDLED;
+                }
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
         }
         if (intrinsicId === INTRINSIC_BOOLEAN_CONSTRUCTOR) {
             var booleanValue = 0;
@@ -7248,11 +7320,14 @@
         }
         if (intrinsicHandled === 0) {
         var isMathIntrinsic = 0;
-        if (intrinsicId >= INTRINSIC_MATH_SQRT) {
-            if (intrinsicId <= INTRINSIC_MATH_COS) {
-                isMathIntrinsic = 1;
-            }
-        }
+        /* IDs are not a Math-only interval: ARRAY_PUSH lies between ABS and
+         * FLOOR. Classify explicitly so a declined array fast path can never
+         * enter a numeric kernel with an unrelated calling convention. */
+        if (intrinsicId === INTRINSIC_MATH_SQRT || intrinsicId === INTRINSIC_MATH_MIN ||
+            intrinsicId === INTRINSIC_MATH_ABS || intrinsicId === INTRINSIC_MATH_MAX ||
+            intrinsicId === INTRINSIC_MATH_FLOOR || intrinsicId === INTRINSIC_MATH_CEIL ||
+            intrinsicId === INTRINSIC_MATH_ROUND || intrinsicId === INTRINSIC_MATH_SIN ||
+            intrinsicId === INTRINSIC_MATH_COS) isMathIntrinsic = 1;
         if (intrinsicId === INTRINSIC_MATH_POW) {
             isMathIntrinsic = 1;
         }
@@ -7398,6 +7473,10 @@
             }
         }
         if (intrinsicHandled === 0) {
+            if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                    callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                    bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                    intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
             intrinsicHandled = bufferIntrinsicKernel(
                 heapBase, state, intrinsicTarget, registerAddress,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
@@ -8213,9 +8292,14 @@
     /* Plain dense arrays have an implicit writable length. Descriptor-bearing
      * arrays require the full property algorithm rather than silently storing
      * a shadow property which the indexed-array reader would ignore. */
-    function setArrayLengthKernel(heapBase, state, array, source) {
+    function setArrayLengthKernel(heapBase, state, array, source, lengthKey) {
         if (arrayReserved(heapBase, array) !== 0) return 0;
-        if (lastOwnPropertyEntryKernel(heapBase, array) !== 0) return 0;
+        var property = lastOwnPropertyEntryKernel(heapBase, array);
+        if (property !== 0) {
+            var lengthEntry = findOwnPropertyEntryKernel(heapBase, state, array, lengthKey);
+            if (lengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase,
+                    array, lengthEntry) & PROPERTY_ATTRIBUTE_WRITABLE) === 0) return 0;
+        }
         var tag = valueCellTag(0, source);
         var length = 0;
         if (tag === VALUE_TAG_INT32) {
@@ -8229,6 +8313,11 @@
             length = 1;
         } else if (tag !== VALUE_TAG_FALSE && tag !== VALUE_TAG_NULL) return 0;
         if (length < 0 || length > MAX_VECTOR_LENGTH) return 0;
+        while (property !== 0) {
+            var propertyIndex = propertyKeyIndexKernel(heapBase, ownPropertyEntryKeyKernel(heapBase, array, property));
+            if (propertyIndex >= length) return 0;
+            property = previousOwnPropertyEntryKernel(heapBase, array, property);
+        }
         if (ensureArrayCapacityKernel(heapBase, state, array, length) === 0) return 0;
         var vector = arrayElements(heapBase, array);
         var previousLength = vectorLength(heapBase, vector);
@@ -8354,6 +8443,15 @@
             arrayPrototype, bytecodeAddress, pc, opcode, intrinsicId, instructions,
             frame, callReceiverIndex, stringSupport) {
         var intrinsicHandled = 0;
+        if (callReceiverIndex >= 0) {
+            var guardedReceiver = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
+            if (valueCellTag(0, guardedReceiver) === VALUE_TAG_REFERENCE) {
+                var guardedArray = valueCellReference(0, guardedReceiver);
+                if (recordType(heapBase, guardedArray) === HEAP_TYPE_ARRAY &&
+                    (arrayPropertyHead(heapBase, guardedArray) !== 0 ||
+                     objectIsExtensibleKernel(heapBase, guardedArray) === 0)) return 0;
+            }
+        }
         if (intrinsicId === INTRINSIC_ARRAY_REVERSE) {
             var reverseReceiverIndex = callReceiverIndex;
             if (reverseReceiverIndex < 0) return 0;
@@ -10816,13 +10914,13 @@
             store32(intrinsicTarget, VALUE_TAG_INT32);
             store32(intrinsicTarget + VALUE_CELL_LOW, roundingValue);
             store32(intrinsicTarget + VALUE_CELL_HIGH, 0);
-        } else {
+        } else if (selectExtreme === 1 && minimumCell !== 0) {
             store32(intrinsicTarget, load32(minimumCell));
             store32(intrinsicTarget + VALUE_CELL_LOW,
                     load32(minimumCell + VALUE_CELL_LOW));
             store32(intrinsicTarget + VALUE_CELL_HIGH,
                     load32(minimumCell + VALUE_CELL_HIGH));
-        }
+        } else return 0;
         store32(intrinsicTarget + VALUE_CELL_AUX, 0);
         return 1;
     }
@@ -14181,6 +14279,7 @@
         if (recordType(heapBase, key) !== HEAP_TYPE_STRING) return 0;
         if (objectType === HEAP_TYPE_ARRAY && arrayReserved(heapBase, object) === 0 &&
             stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return 0;
+        if (objectType === HEAP_TYPE_ARRAY && propertyKeyIndexKernel(heapBase, key) >= 0) return 0;
 
         var descriptorOwner = descriptor;
         var descriptorProperty = 0;
@@ -14264,12 +14363,7 @@
         }
         var attributes = 0;
         if (existingProperty === 0) {
-            /* Only ordinary objects have the extensibility payload field.
-             * In a function that slot holds its closure, not an extensible
-             * bit. Non-ordinary integrity operations still need their own
-             * state representation; do not reinterpret a null closure. */
-            if (objectType === HEAP_TYPE_OBJECT &&
-                objectExtensible(heapBase, object) === 0) return DEFINE_PROPERTY_REJECTED;
+            if (objectIsExtensibleKernel(heapBase, object) === 0) return DEFINE_PROPERTY_REJECTED;
         } else {
             attributes = ownPropertyEntryAttributesKernel(heapBase, object, existingProperty);
             var wasAccessor = attributes & PROPERTY_ATTRIBUTE_ACCESSOR;
@@ -18373,6 +18467,7 @@
             executionBytecodeAddressKernel: executionBytecodeAddressKernel,
             bytecodePreparationExitKernel: bytecodePreparationExitKernel,
             intrinsicCallKernel: intrinsicCallKernel,
+            enterGuestBuiltinKernel: enterGuestBuiltinKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
             typedArrayMetadataGetKernel: typedArrayMetadataGetKernel,
@@ -18684,6 +18779,11 @@
                     DEFINE_PROPERTY_REJECTED: DEFINE_PROPERTY_REJECTED,
                     RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE: RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE,
                     INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR: INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR,
+                    INTRINSIC_GUEST_BUILTIN: INTRINSIC_GUEST_BUILTIN,
+                    EXOTIC_OBJECT_NON_EXTENSIBLE: kernelConstantOverrides.EXOTIC_OBJECT_NON_EXTENSIBLE,
+                    INTRINSIC_OBJECT_PREVENT_EXTENSIONS: INTRINSIC_OBJECT_PREVENT_EXTENSIONS,
+                    INTRINSIC_OBJECT_IS_EXTENSIBLE: INTRINSIC_OBJECT_IS_EXTENSIBLE,
+                    GUEST_BUILTIN_IMPLEMENTATION: GUEST_BUILTIN_IMPLEMENTATION,
                     VECTOR_SHARED_METADATA_FLAG: kernelConstantOverrides.VECTOR_SHARED_METADATA_FLAG,
                     STRING_SLICE_FLAG: kernelConstantOverrides.STRING_SLICE_FLAG,
                     STRING_SLICE_RECORD_BYTES: kernelConstantOverrides.STRING_SLICE_RECORD_BYTES,

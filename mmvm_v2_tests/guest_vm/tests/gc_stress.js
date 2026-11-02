@@ -75,6 +75,7 @@
                     throw new Error("GC stress: corrupt vector bounds at " + position);
                 }
             }
+            if (header.type === Heap.Types.PROGRAM) records.verifyProgramBindingNames(position);
             if (header.type === Heap.Types.PROPERTY_INDEX) {
                 indexAudits++;
                 var indexCapacity = records.propertyIndexCapacity(position);

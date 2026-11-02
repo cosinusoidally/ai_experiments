@@ -5,6 +5,25 @@
     var DESCRIPTOR_RESULT_FIELDS = 4;
     var descriptorFieldNames = ["value", "writable", "enumerable", "configurable", "get", "set"];
 
+    function objectIsExtensibleKernel(heapBase, object) {
+        if (recordType(heapBase, object) === HEAP_TYPE_OBJECT) return objectExtensible(heapBase, object);
+        if ((recordFlags(heapBase, object) & EXOTIC_OBJECT_NON_EXTENSIBLE) !== 0) return 0;
+        return 1;
+    }
+
+    function objectExtensibilityKernel(heapBase, target, source, prevent) {
+        if (source === 0 || valueCellTag(0, source) !== VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, source);
+        if (objectReferenceIsObjectKernel(heapBase, object) === 0) return 0;
+        if (prevent !== 0) {
+            if (recordType(heapBase, object) === HEAP_TYPE_OBJECT) setObjectExtensible(heapBase, object, 0);
+            else setRecordFlags(heapBase, object, recordFlags(heapBase, object) | EXOTIC_OBJECT_NON_EXTENSIBLE);
+            copyValueCell(target, source);
+        } else if (objectIsExtensibleKernel(heapBase, object) !== 0) setValueCellTrue(target);
+        else setValueCellFalse(target);
+        return 1;
+    }
+
     /* Build an ordinary descriptor object directly on the guest heap. Dense
      * indexed/exotic properties remain with their specialized semantic path;
      * ordinary objects and function named properties share this operation. */
@@ -337,6 +356,8 @@
     var exports = {descriptorFieldNames: descriptorFieldNames,
       constants: {DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
                   DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
+        objectIsExtensibleKernel: objectIsExtensibleKernel,
+        objectExtensibilityKernel: objectExtensibilityKernel,
         objectOwnPropertyDescriptorKernel: objectOwnPropertyDescriptorKernel,
         objectClassIndexKernel: objectClassIndexKernel,
         objectToStringKernel: objectToStringKernel,

@@ -1,5 +1,24 @@
 # Guest VM bootstrap
 
+The ECMA composite-builtin and binding-name lifetime checkpoint is described in
+[`../ECMA_HEAP_LIFETIME.md`](../ECMA_HEAP_LIFETIME.md), with whole-corpus parity
+and validation results in [`../ECMA_TESTS_STATUS.md`](../ECMA_TESTS_STATUS.md).
+
+Composite standard-library algorithms are ordinary guest bytecode, installed
+once in a private context. Public builtin functions retain native-shaped
+metadata (including their specified `length` and non-constructor behaviour).
+Their traced closure vector holds the bytecode implementation. The native
+dispatcher enters that implementation using an ordinary guest call frame,
+not a host-language callback. Existing Array intrinsics retain their fast
+paths and delegate descriptor-sensitive cases to the same guest algorithms.
+The portable backend uses one runtime-owned callback factory for this
+delegation; context installation does not create its own escaping callbacks.
+
+Program binding-name vectors must publish their live length after their cells
+are populated. Capacity alone does not make cells visible to GC or lexical
+lookup. `verifyProgramBindingNames` checks that invariant during the existing
+bounded structural GC stress test.
+
 This directory contains the interpreter-first JavaScript guest VM described in
 [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md). It is intentionally a bootstrap,
 not yet a complete ECMAScript 5.1 implementation. ECMAScript 5.1 is the fixed

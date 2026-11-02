@@ -1308,7 +1308,17 @@
                    this.expression(node.alternate) + ")";
         }
         if (node.type === "UnaryExpression") {
-            if (node.operator === "typeof") return "runtime.typeOf(" + this.expression(node.argument) + ")";
+            if (node.operator === "typeof") {
+                if (node.argument.type === "Identifier" && !this.local(node.argument.name)) {
+                    /* An unresolvable name is the one typeof operand that
+                     * must not be evaluated with an ordinary throwing read.
+                     * Resolve through the same lexical operation as bytecode,
+                     * including captured and object environments. */
+                    return "runtime.typeOfBinding(context,env," +
+                        quote(node.argument.name) + ")";
+                }
+                return "runtime.typeOf(" + this.expression(node.argument) + ")";
+            }
             if (node.operator === "delete") {
                 var deleted = this.reference(node.argument);
                 return deleted.kind === "member" ? "runtime.deleteProperty(" + deleted.object +
