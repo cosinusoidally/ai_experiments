@@ -3901,50 +3901,54 @@
         this.defineDataProperty(math, "SQRT1_2", Math.SQRT1_2, 0);
         this.defineDataProperty(math, "SQRT2", Math.SQRT2, 0);
         mathMethod("abs", function (receiver, args) {
-            return Math.abs(Number(args[0]));
+            return Math.abs(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_ABS);
-        mathMethod("acos", function (receiver, args) { return Math.acos(Number(args[0])); });
-        mathMethod("asin", function (receiver, args) { return Math.asin(Number(args[0])); });
+        mathMethod("acos", function (receiver, args) { return Math.acos(runtime.toNumber(args[0])); });
+        mathMethod("asin", function (receiver, args) { return Math.asin(runtime.toNumber(args[0])); });
         mathMethod("atan", function (receiver, args) {
-            return Math.atan(Number(args[0]));
+            return Math.atan(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_ATAN);
         mathMethod("atan2", function (receiver, args) {
-            return Math.atan2(Number(args[0]), Number(args[1]));
+            return Math.atan2(runtime.toNumber(args[0]), runtime.toNumber(args[1]));
         }, NativeIntrinsics.MATH_ATAN2);
         mathMethod("ceil", function (receiver, args) {
-            return Math.ceil(Number(args[0]));
+            return Math.ceil(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_CEIL);
         mathMethod("floor", function (receiver, args) {
-            return Math.floor(Number(args[0]));
+            return Math.floor(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_FLOOR);
         mathMethod("round", function (receiver, args) {
-            return Math.round(Number(args[0]));
+            return Math.round(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_ROUND);
         mathMethod("sqrt", function (receiver, args) {
-            return Math.sqrt(Number(args[0]));
+            return Math.sqrt(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_SQRT);
         mathMethod("sin", function (receiver, args) {
-            return Math.sin(Number(args[0]));
+            return Math.sin(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_SIN);
         mathMethod("cos", function (receiver, args) {
-            return Math.cos(Number(args[0]));
+            return Math.cos(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_COS);
-        mathMethod("exp", function (receiver, args) { return Math.exp(Number(args[0])); });
+        mathMethod("exp", function (receiver, args) { return Math.exp(runtime.toNumber(args[0])); });
         mathMethod("log", function (receiver, args) {
-            return Math.log(Number(args[0]));
+            return Math.log(runtime.toNumber(args[0]));
         }, NativeIntrinsics.MATH_LOG);
         mathMethod("pow", function (receiver, args) {
-            return Math.pow(Number(args[0]), Number(args[1]));
+            return Math.pow(runtime.toNumber(args[0]), runtime.toNumber(args[1]));
         }, NativeIntrinsics.MATH_POW);
         mathMethod("random", function () { return Math.random(); },
                    NativeIntrinsics.MATH_RANDOM);
         mathMethod("min", function (receiver, args) {
-            return Math.min.apply(Math, args);
+            var numbers = [], index = 0;
+            while (index < args.length) numbers.push(runtime.toNumber(args[index++]));
+            return Math.min.apply(Math, numbers);
         }, NativeIntrinsics.MATH_MIN);
         mathMethod("max", function (receiver, args) {
-            return Math.max.apply(Math, args);
+            var numbers = [], index = 0;
+            while (index < args.length) numbers.push(runtime.toNumber(args[index++]));
+            return Math.max.apply(Math, numbers);
         }, NativeIntrinsics.MATH_MAX);
-        mathMethod("tan", function (receiver, args) { return Math.tan(Number(args[0])); },
+        mathMethod("tan", function (receiver, args) { return Math.tan(runtime.toNumber(args[0])); },
             NativeIntrinsics.MATH_TAN);
         this.setGlobal("Math", math);
     };
@@ -4630,7 +4634,7 @@
                     return inheritedArrayValue;
                 }
             }
-            return own(this.arrayMethods, key) ? this.arrayMethods[key] : undefined;
+            return !this.arrayPrototype && own(this.arrayMethods, key) ? this.arrayMethods[key] : undefined;
         }
         key = this.propertyKey(key);
         this.internStringAddress(key);
@@ -4644,7 +4648,7 @@
                  object.guestType === "bytecodeFunction") && key === "length") {
                 return this.callableLength(object);
             }
-            if (object.guestType === "regexp" &&
+            if (object.guestType === "regexp" && !this.regexpPrototype &&
                 own(this.regexpMethods, key)) return this.regexpMethods[key];
             var prototypeAddress = this.heapRecords.objectPrototype(object.heapAddress);
             if (prototypeAddress) {
@@ -4653,14 +4657,17 @@
                     accessReceiver);
                 if (inherited !== undefined) return inherited;
             }
-            if ((object.guestType === "function" ||
+            if (!this.functionPrototype && (object.guestType === "function" ||
                  object.guestType === "bytecodeFunction") &&
                 own(this.functionMethods, key)) return this.functionMethods[key];
-            return guestMethod(this.objectMethods, key);
+            /* Once intrinsics are installed, the actual prototype graph is
+             * authoritative. A method table must not resurrect a deleted
+             * property or invent inherited members on a null prototype. */
+            return this.objectPrototype ? undefined : guestMethod(this.objectMethods, key);
         }
         if (typeof object === "string") {
             if (key === "length") return object.length;
-            if (isArrayIndex(key)) return object.charAt(Number(key));
+            if (isArrayIndex(key) && Number(key) < object.length) return object.charAt(Number(key));
             if (this.stringPrototype) {
                 return this.getProperty(
                     this.stringPrototype, key, accessReceiver);
@@ -4734,7 +4741,7 @@
                     this.readHeapReference(prototypeAddress), key);
             }
         }
-        return guestMethod(this.objectMethods, key) !== undefined;
+        return !this.objectPrototype && guestMethod(this.objectMethods, key) !== undefined;
     };
 
     Runtime.prototype.instanceOf = function (value, constructor) {
@@ -4776,7 +4783,14 @@
     Runtime.prototype.deleteProperty = function (object, key, strict) {
         this.assertOwned(object);
         key = this.propertyKey(key);
-        if (!object || !object.guestType) return true;
+        if (!object || !object.guestType) {
+            if (typeof object === "string" && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < object.length))) {
+                if (strict) throw new TypeError("String property is not configurable");
+                return false;
+            }
+            return true;
+        }
         if (object.guestType === "array" && key === "length" &&
             !this.isArgumentsObject(object)) {
             if (strict) throw new TypeError("property is not configurable");

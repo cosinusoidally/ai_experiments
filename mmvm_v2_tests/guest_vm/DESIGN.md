@@ -355,23 +355,27 @@ rather than invoking dispatch internals.
 
 ## Guest values and properties
 
-Guest primitive values currently use host `undefined`, null, booleans, numbers,
-and strings. Guest heap values are implementation records identified by
-`guestType`:
+Authoritative guest values live in tagged linear-heap value cells, with
+separate payload words rather than NaN boxing. The portable semantic adapter
+decodes primitives and uses short-lived handles identified by `guestType`;
+those handles are not the object model or the collector's ownership graph.
+The native interpreter accesses the same records through named field helpers.
 
-| `guestType` | Important fields |
+| Semantic handle kind | Authoritative representation |
 | --- | --- |
-| `object` | `properties`, `gcMark` |
-| `function` | `callback`, `properties`, name |
-| `bytecodeFunction` | nested program, captured environment, properties, name |
-| `array` | indexed elements, named properties, `gcMark` |
-| `regexp` | pattern, flags, named properties, `gcMark` |
-| `buffer` | `properties`, prototype, backing, offset, length, `gcMark` |
+| `object` | Prototype, extensibility/class flags, packed own-property storage |
+| `function` | Intrinsic ID, traced closure, home context, named descriptors |
+| `bytecodeFunction` | Program, captured environment, home context, descriptors |
+| `array` | Dense value vector, explicit descriptors, argument-mapping metadata |
+| `regexp` | Pattern, flags, prototype and named descriptors |
+| `buffer` | Shared backing record, view offset/length, prototype and descriptors |
 
-Named own properties are stored as `$` plus the guest property key. This avoids
-collisions with the host object's prototype without requiring `Object.create`,
-which the old host cannot be assumed to provide. All lookup uses an explicit
-own-property check. Buffer numeric keys bypass this map.
+Ordinary own-property entries are stored in a growable packed array with an
+optional hash index. Keys are guest strings; cached owner/entry references are
+guarded against storage changes. Other record kinds retain their descriptor
+storage adapters. Host dictionaries and decoded strings are derived metadata,
+not authoritative property storage. See [`../PROPERTY_STORAGE.md`](../PROPERTY_STORAGE.md) for the packed
+layout, ordering, mutation and lifetime contracts.
 
 Every spilled string primitive has an authoritative linear-heap string record.
 Property keys, atoms, and other explicitly interned strings are strong runtime
@@ -392,11 +396,38 @@ have runtime-owned prototype objects on the guest heap. In particular, both
 host-created and native-dispatch-created guest functions inherit from the same
 function prototype, which owns `call`, `apply`, and `toString`. Native property
 lookup therefore follows the ordinary guest prototype chain for these methods;
-it does not require a host-side special case. Property descriptors are not yet
-implemented. Native functions are trusted implementation records whose
+it does not require a host-side special case. Data/accessor descriptors and
+their writable/enumerable/configurable flags participate in lookup and
+mutation. Native functions are trusted implementation records whose
 callbacks receive `(receiver, argumentsArray)` on the semantic path.
 
+The prototype graph is authoritative after intrinsic installation. Legacy
+method tables may support bootstrap modes without a corresponding prototype,
+but must never resurrect a deleted builtin or invent a member on an object
+whose prototype is null. Numeric ordinary-object accesses obey the same
+descriptor rules as named accesses: getters are not raw data, read-only
+properties cannot be overwritten, and an inherited setter/read-only property
+must be considered before creating an own property. Array indexed deletion
+must likewise consult explicit descriptors before clearing dense storage.
+
 ## Guest standard-library runtime
+
+`math_runtime.js` supplies guest-bytecode argument conversion and ES5 special
+cases while existing numeric intrinsics remain the common fast path. The
+private primitive callables have no fallback closures, preventing unsupported
+numeric cases from recursively entering a public wrapper. Power's native
+positive-finite path declines negative/nonfinite inputs to the guest rules;
+rounding preserves signed zero. Inverse trig and exponential functions reuse
+the existing binary64 sqrt/atan2/power primitives, with the
+implementation-dependent approximations permitted by ES5.1. Very large finite
+trigonometric arguments beyond the existing x87 range remain unsupported;
+this checkpoint does not claim full mathematical-library conformance.
+
+`Object.defineProperties` snapshots all own names, rechecks enumerability as
+descriptor getters execute, and completes descriptor conversion before target
+mutation. JSON replacer names apply ToString to the original Number/String
+wrapper; unboxing via ToNumber first would incorrectly change observable
+method order. These algorithms execute in the private guest-library context.
 
 The current application-driven subset includes `String`,
 `String.fromCharCode`, the String methods used by `net.js`, `parseInt`, array

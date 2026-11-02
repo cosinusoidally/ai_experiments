@@ -213,6 +213,34 @@
             runtime.setGuestBuiltinImplementation(callable, implementation);
             runtime.deleteProperty(context.globalObject, globalName, false);
         }
+        /* Public Math functions keep their existing numeric entry points.
+         * Separate, private primitive callables prevent a fallback from
+         * recursively invoking itself on an unsupported numeric case. */
+        var mathObject = runtime.getGlobal(context, "Math");
+        var mathPrimitives = runtime.makeObject();
+        var mathAlgorithms = ["abs", "atan", "atan2", "ceil", "floor", "round",
+            "sqrt", "log", "sin", "cos", "tan", "min", "max", "pow"];
+        for (var mathIndex = 0; mathIndex < mathAlgorithms.length; mathIndex++) {
+            var mathName = mathAlgorithms[mathIndex];
+            var numericMethod = runtime.getProperty(mathObject, mathName);
+            runtime.defineBuiltinProperty(mathPrimitives, mathName,
+                runtime.makeNativeFunction("Math." + mathName, numericMethod.callback,
+                    "intrinsic", numericMethod.nativeIntrinsic));
+        }
+        context.installGlobal("__guestMathPrimitives", mathPrimitives);
+        loadLibrary("guest_vm/math_runtime.js");
+        for (mathIndex = 0; mathIndex < mathAlgorithms.length; mathIndex++) {
+            mathName = mathAlgorithms[mathIndex];
+            installFallback(mathObject, mathName, "__guestMath" +
+                mathName.charAt(0).toUpperCase() + mathName.substring(1));
+        }
+        var compositeMath = ["acos", "asin", "exp"];
+        for (mathIndex = 0; mathIndex < compositeMath.length; mathIndex++) {
+            mathName = compositeMath[mathIndex];
+            installBuiltin(mathObject, mathName, "__guestMath" +
+                mathName.charAt(0).toUpperCase() + mathName.substring(1), "Math." + mathName);
+        }
+        runtime.deleteProperty(context.globalObject, "__guestMathPrimitives", false);
         loadLibrary("guest_vm/array_runtime.js");
         loadLibrary("guest_vm/buffer_runtime.js");
         installBuiltin(runtime.arrayPrototype, "map", "__guestArrayMap", "Array.map");

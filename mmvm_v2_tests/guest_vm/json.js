@@ -19,6 +19,14 @@
         callable: function (value) { return typeof value === "function"; },
         call: function (fn, receiver, args) { return fn.apply(receiver, args); },
         remove: function (object, key) { delete object[key]; },
+        propertyName: function (value) {
+            if (typeof value === "string" || typeof value === "number") return String(value);
+            if (value !== null && typeof value === "object") {
+                var kind = objectClass.call(value);
+                if (kind === "[object Number]" || kind === "[object String]") return String(value);
+            }
+            return undefined;
+        },
         unbox: function (value) {
             var kind = objectClass.call(value);
             if (kind === "[object Number]") return Number(value);
@@ -58,6 +66,14 @@
             callable: function (value) { return runtime.typeOf(value) === "function"; },
             call: function (fn, receiver, args) { return runtime.invokePropertyFunction(fn, receiver, args); },
             remove: function (object, key) { runtime.deleteProperty(object, key, false); },
+            propertyName: function (value) {
+                if (typeof value === "string" || typeof value === "number") return runtime.toString(value);
+                var boxed = runtime.primitiveWrapperValue(value);
+                if (boxed.found && (typeof boxed.value === "string" || typeof boxed.value === "number")) {
+                    return runtime.toString(value);
+                }
+                return undefined;
+            },
             unbox: function (value) {
                 var boxed = runtime.primitiveWrapperValue(value);
                 if (!boxed.found) return value;
@@ -280,9 +296,11 @@
             propertyList = [];
             var length = support.values.arrayLength(replacer);
             for (var listIndex = 0; listIndex < length; listIndex++) {
-                var entry = support.values.unbox(support.values.arrayGet(replacer, listIndex));
-                if (typeof entry !== "string" && typeof entry !== "number") continue;
-                entry = support.values.toString(entry);
+                /* Replacer names use ToString on the original boxed value,
+                 * not ToNumber followed by ToString. Overrides of toString
+                 * and valueOf must therefore retain their normal ordering. */
+                var entry = support.values.propertyName(support.values.arrayGet(replacer, listIndex));
+                if (entry === undefined) continue;
                 var duplicate = false;
                 for (var earlier = 0; earlier < propertyList.length; earlier++) {
                     if (propertyList[earlier] === entry) duplicate = true;

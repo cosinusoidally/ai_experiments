@@ -2,6 +2,114 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Math and authoritative property semantics, 2026-11-02
+
+Complete default standalone run (native interpreter contract 98):
+
+- Selected: 1333 files; executed: 1329; not run: 0.
+- Passed: **990**; failed: **339**, including **39 watchdog timeouts**.
+- Skipped: the same four documented slow cases; no new exclusions.
+- Elapsed: **654.715865 seconds**. The fresh contract-97 control reproduces
+  963 passes / 366 failures / 39 timeouts in **659.500597 seconds**.
+- `ecma`: 472 passed / 148 failed / 11 timed out.
+- `ecma_2`: 148 passed / 24 failed / 0 timed out.
+- `ecma_3`: 175 passed / 50 failed / 1 timed out / 4 skipped.
+- `ecma_5`: 195 passed / 117 failed / 27 timed out.
+- Specific-file comparison: **963 preserved / 27 gained / 0 lost**.
+
+Command: `TZ=UTC ./artifacts/js_runner.exe artifacts/ecma-next-candidate2.snap ecma_tests_runner.js --verbose`.
+The full Test262 run on this candidate also passes **3292 / 3292**, with zero
+failures, timeouts or not-run tests, in **429.199536 seconds**. Summed test time
+is **410.997373 seconds**. The corpus, Test262 harness and limits are unchanged.
+
+Fresh direct-Node UTC control: **1218 passed / 111 failed / 0 timed out /
+4 skipped / 0 not run**, **124.292810 seconds** elapsed. An earlier control
+without explicit UTC had different historical Date results; it is not used
+for this parity comparison. The comparison uses specific filenames:
+
+- **961 / 1218 Node passes matched (78.90%)**, previously 934 / 1218.
+- **257 Node-passing files remain failing**, previously 284.
+- **176** of that gap are outside Date directories, previously 200.
+- **81** are in Date directories, previously 84.
+- Outside Date directories: **867 / 1043 matched (83.13%)**.
+- The same **29 guest-only passes** do not offset any Node-only failure.
+
+The gains come from shared operations, not corpus-specific exceptions:
+
+- All 38 `ecma/Math` files pass, gaining the 12 previously failing files.
+  Guest-owned argument conversion and special-value rules retain existing
+  numeric intrinsics as the common path. Private primitive callables avoid
+  recursive public fallbacks. Power rejects negative/nonfinite inputs from
+  its positive-finite native approximation; rounding preserves signed zero.
+- Prototype lookup no longer resurrects deleted methods from old method
+  tables. This fixes JSON boxed-primitive conversion and other shared cases.
+- JSON replacer names use ToString on the original wrapper, not premature
+  Number unboxing; both boxed-primitive/replacer failures now pass.
+- Numeric ordinary-object writes check descriptor flags, inherited
+  restrictions and extensibility. Accessor reads are not treated as raw data.
+  Indexed Array deletion checks explicit descriptors before dense storage.
+  Four strict Array reverse/shift/splice files now pass.
+- Primitive String length/index deletion respects immutable own properties;
+  both strict String deletion files now pass, without allocating per-character
+  descriptors. Out-of-range portable String reads no longer manufacture an
+  empty character.
+- `Object.defineProperties` snapshots all own names and rechecks enumerability
+  as descriptor getters run. Its larger corpus file still fails on missing
+  boxed-String indexed properties; this is not counted as a new pass.
+
+Three Date-directory passes improve incidentally through shared operations;
+there is no new Date implementation in this batch. Remaining descriptor
+stress watchdog failures are still failures, not waived or skipped tests.
+
+Cross-host validation initially caught an old-shell `Function.toString()`
+defect in the new numeric-property creation helper: its `prototype` and
+`type` locals were merged in the compiler input. Node's candidate remained
+correct, but js_min generated a four-byte-different function. The helper now
+uses distinct ancestor bindings, with the type local declared before the
+loop. This is ordinary equivalent JavaScript, not extra kernel semantics.
+The build diagnostic can show function offsets on both hosts and inspect an
+individual function's input source without serializing an image:
+
+```sh
+node guest_vm/tools/build_profile_image.js --kernel-source numericPropertyCanCreateKernel
+js_min.exe guest_vm/tools/build_profile_image.js --kernel-source numericPropertyCanCreateKernel
+```
+
+The portable ECMA diagnostic additionally supports bounded exception call
+chains and debug-only single-step comparisons for `in`/`instanceof`, without
+rewriting the corpus. See `guest_vm/tools/run_ecma_diagnostic.js` for options.
+These are introspection tools, not additional language micro-tests.
+
+The corrected helper passes the complete snapshot gate: independent js_min
+builds with different programs/environment values, Node/js_min byte identity,
+arbitrary program execution and a genuine self-hosted byte-identical fixed
+point. No environment/program copying or generated-file check-in is involved.
+
+The final renamed-helper image repeats a broader 155-file Math, JSON, strict,
+Array, Function and selected Object run: **138 passed / 17 failed**, including
+one existing timeout, zero skipped and zero not run, in **62.826594 seconds**.
+Every selected file that passed in the complete 990-pass run remains passing.
+This is a selected regression check, not a replacement whole-suite metric.
+
+The final cross-host-identical image repeats full Test262: **3292 passed /
+0 failed / 0 timed out / 0 not run**, **489.537720 seconds** elapsed and
+468.463964 summed test seconds. This is slower than both the earlier
+429.199536-second candidate and the preceding committed 449.266334-second
+image. The variation is recorded honestly; no general speedup or restored
+performance parity is claimed from these runs. The harness and limits remain
+unchanged.
+
+Other completed gates on the final image/source:
+
+- Project suite on both Node and js_min: 12 guest programs / 270 assertions
+  per host, plus CLI and three-context checks; all pass.
+- Bounded structural GC stress on both hosts: 27 audits, 111888 checked
+  edges, 221 property-index audits and 74 collections each. Maximum observed
+  bumps remain 3531120 / 3531472 bytes under the 8388608-byte cap.
+- Standalone GC workload: 24 rounds / 48 native collections; passes.
+- Final image: 7082992 bytes; SHA-256
+  `64797ec1df9d1373589759f032c8d0a7fcc9328b57d691052c00678868651a5c`.
+
 ### Binding-name lifetime and library checkpoint, 2026-11-02
 
 Complete default standalone run (native interpreter contract 97):

@@ -2,7 +2,7 @@
  * public method must not replace another algorithm's internal operations. */
 (function () {
     var define = Object.defineProperty, descriptor = Object.getOwnPropertyDescriptor;
-    var names = Object.getOwnPropertyNames, keys = Object.keys;
+    var names = Object.getOwnPropertyNames;
     var create = Object.create, prevent = Object.preventExtensions;
     var extensible = Object.isExtensible;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
@@ -34,7 +34,7 @@
     function defineProperties(object, properties) {
         requireObject(object);
         if (properties === null || properties === undefined) throw new TypeError("properties is null or undefined");
-        var source = Object(properties), list = keys(source), descriptions = [], index;
+        var source = Object(properties), list = names(source), descriptions = [], index;
         /* All conversions precede any target mutation, including getters and
          * validation. Re-read enumerability after earlier getters run. */
         for (index = 0; index < list.length; index++) {

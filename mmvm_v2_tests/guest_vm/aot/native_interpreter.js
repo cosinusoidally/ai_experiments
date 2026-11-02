@@ -208,6 +208,9 @@
     var INTRINSIC_OBJECT_PREVENT_EXTENSIONS = NativeIntrinsics.OBJECT_PREVENT_EXTENSIONS;
     var INTRINSIC_OBJECT_IS_EXTENSIBLE = NativeIntrinsics.OBJECT_IS_EXTENSIBLE;
     var GUEST_BUILTIN_IMPLEMENTATION = NativeIntrinsics.GuestBuiltinLayout.IMPLEMENTATION;
+    var STRING_PROPERTY_KEY_UNSUPPORTED = ObjectOperationKernels.constants.STRING_PROPERTY_KEY_UNSUPPORTED;
+    var NUMERIC_PROPERTY_READ = 0;
+    var NUMERIC_PROPERTY_WRITE = 1;
     var NATIVE_APPLY_FUNCTION_REGISTER = 0;
     var NATIVE_APPLY_RECEIVER_REGISTER = 1;
     var NATIVE_APPLY_ARGUMENT_BASE = 2;
@@ -1352,9 +1355,9 @@
                     }
                 }
                 if (arrayGetSupported === 5) {
-                    arrayGetSupported = numericPropertyGetKernel(
+                    arrayGetSupported = numericPropertyAccessKernel(
                         heapBase, state, arrayGetTarget, arrayGetObject,
-                        arrayGetIndex, 0, 0);
+                        arrayGetIndex, 0, NUMERIC_PROPERTY_READ);
                     if (arrayGetSupported === 1) arrayGetSupported = 4;
                     else arrayGetSupported = 0;
                 }
@@ -1788,11 +1791,11 @@
                         } else arraySetSupported = 0;
                     } else if (arraySetObjectType !== HEAP_TYPE_ARRAY) {
                         if (arraySetObjectType === HEAP_TYPE_OBJECT) {
-                            var numericSetResult = numericPropertyGetKernel(
+                            var numericSetResult = numericPropertyAccessKernel(
                                 heapBase, state, 0, arraySetObject,
                                 arraySetIndex, registerAddress +
                                     arraySetSourceIndex * VALUE_CELL_BYTES,
-                                1);
+                                NUMERIC_PROPERTY_WRITE);
                             if (numericSetResult === 1) {
                                 arraySetSupported = 3;
                             } else arraySetSupported = 0;
@@ -10476,6 +10479,21 @@
         return 1;
     }
 
+    /* The x87 logarithm/exponential primitive is suitable for positive,
+     * finite bases and finite exponents. ES signed-zero, negative-base and
+     * nonfinite rules belong to the guest power algorithm. */
+    function mathPowerNumericInputsKernel(base, exponent) {
+        if (valueCellTag(0, base) === VALUE_TAG_INT32) {
+            if (valueCellInt32(0, base) < 0) return 0;
+        } else {
+            var high = valueCellDoubleHigh(0, base);
+            if (high < 0 || (high & IEEE754_ABSOLUTE_MASK) >= IEEE754_EXPONENT_MASK) return 0;
+        }
+        if (valueCellTag(0, exponent) === VALUE_TAG_DOUBLE &&
+            (valueCellDoubleHigh(0, exponent) & IEEE754_ABSOLUTE_MASK) >= IEEE754_EXPONENT_MASK) return 0;
+        return 1;
+    }
+
     function mathIntrinsicKernel(heapBase, state, intrinsicTarget,
                                  registerAddress, intrinsicArgumentsVector,
                                  intrinsicArgumentCount, intrinsicId) {
@@ -10590,6 +10608,8 @@
         if (mathArgumentsValid === 0) {
             return 0;
         }
+        if (intrinsicId === INTRINSIC_MATH_POW &&
+            mathPowerNumericInputsKernel(unaryMathCell, powerExponentCell) === 0) return 0;
         if (intrinsicId === INTRINSIC_MATH_ATAN) {
             var atanTag = load32(unaryMathCell);
             /* loadI32F64 consumes an address, not an immediate. Materialize
@@ -10861,6 +10881,11 @@
         } else if (intrinsicId >= INTRINSIC_MATH_FLOOR) {
             var roundingTag = load32(unaryMathCell);
             if (roundingTag === VALUE_TAG_DOUBLE) {
+                if ((valueCellDoubleHigh(0, unaryMathCell) & IEEE754_ABSOLUTE_MASK) === 0 &&
+                    valueCellDoubleLow(0, unaryMathCell) === 0) {
+                    copyValueCell(intrinsicTarget, unaryMathCell);
+                    return 1;
+                }
                 if (roundLargeNumberKernel(heapBase, state, intrinsicTarget,
                         unaryMathCell, intrinsicId) === 1) return 1;
             }
@@ -10910,6 +10935,12 @@
             }
             if (roundingSafe === 0) {
                 return 0;
+            }
+            if (intrinsicId === INTRINSIC_MATH_CEIL && roundingValue === 0 &&
+                lessF64(loadNumberF64(unaryMathCell + VALUE_CELL_LOW, roundingTag),
+                    loadI32F64(engineScratchRightAddress(heapBase, state))) === 1) {
+                setValueCellDoubleBits(intrinsicTarget, 0, IEEE754_SIGN_BIT);
+                return 1;
             }
             store32(intrinsicTarget, VALUE_TAG_INT32);
             store32(intrinsicTarget + VALUE_CELL_LOW, roundingValue);
@@ -15287,6 +15318,15 @@
         var object = valueCellReference(0, objectCell);
         var objectType = recordType(heapBase, object);
         var keyTag = valueCellTag(0, keyCell);
+        if (objectType === HEAP_TYPE_STRING) {
+            var stringOwn = stringOwnPropertyKeyKernel(heapBase, object, keyCell, arrayLengthKey);
+            if (stringOwn === STRING_PROPERTY_KEY_UNSUPPORTED) return 0;
+            if (stringOwn !== 0) {
+                if (strictMode !== 0) return 0;
+                setValueCellFalse(targetCell);
+            } else setValueCellTrue(targetCell);
+            return 1;
+        }
         if (objectType === HEAP_TYPE_ARRAY) {
             if (arrayReserved(heapBase, object) === 0 && keyTag === VALUE_TAG_REFERENCE) {
                 var deleteArrayKey = valueCellReference(0, keyCell);
@@ -15307,7 +15347,8 @@
                     elementIndex = propertyKeyIndexKernel(heapBase, indexedDeleteKey);
                 }
             }
-            if (elementIndex >= 0) {
+            if (elementIndex >= 0 && (arrayPropertyHead(heapBase, object) === 0 ||
+                indexedOwnPropertyDescriptorKernel(heapBase, state, object, elementIndex) === 0)) {
                 var elements = arrayElements(heapBase, object);
                 if (elementIndex < vectorLength(heapBase, elements)) {
                     if (detachArgumentMappingKernel(heapBase, state, object, elementIndex) === 0) return 0;
@@ -15385,6 +15426,13 @@
         }
         var removedEntry = removeOwnPropertyEntryKernel(
             heapBase, state, object, found, previous);
+        if (objectType === HEAP_TYPE_ARRAY && elementIndex >= 0) {
+            if (detachArgumentMappingKernel(heapBase, state, object, elementIndex) === 0) return 0;
+            var deletedElements = arrayElements(heapBase, object);
+            if (elementIndex < vectorLength(heapBase, deletedElements)) {
+                setValueCellTag(0, vectorCellAddress(heapBase, deletedElements, elementIndex), 0);
+            }
+        }
         setValueCellTrue(targetCell);
         return 1;
     }
@@ -18308,7 +18356,27 @@
         return 0;
     }
 
-    function numericPropertyGetKernel(heapBase, state, targetCell, object,
+    function numericPropertyCanCreateKernel(heapBase, state, object, index, digits, hash) {
+        if (objectIsExtensibleKernel(heapBase, object) === 0) return 0;
+        var ancestorObject = objectPrototypeReferenceKernel(heapBase, object);
+        var ancestorType = 0;
+        while (ancestorObject !== 0) {
+            ancestorType = recordType(heapBase, ancestorObject);
+            if (ancestorType !== HEAP_TYPE_OBJECT && ancestorType !== HEAP_TYPE_NATIVE_FUNCTION &&
+                ancestorType !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+            var entry = numericOwnPropertyEntryKernel(heapBase, state, ancestorObject, index, digits, hash);
+            if (entry !== 0) {
+                var attributes = ownPropertyEntryAttributesKernel(heapBase, ancestorObject, entry);
+                if ((attributes & (PROPERTY_ATTRIBUTE_ACCESSOR | PROPERTY_ATTRIBUTE_WRITABLE)) !==
+                    PROPERTY_ATTRIBUTE_WRITABLE) return 0;
+                return 1;
+            }
+            ancestorObject = objectPrototypeReferenceKernel(heapBase, ancestorObject);
+        }
+        return 1;
+    }
+
+    function numericPropertyAccessKernel(heapBase, state, targetCell, object,
                                       index, sourceCell, operation) {
         /* These are ordinary property names, not dense-array offsets. Signed
          * integers, including INT32_MIN, have canonical decimal names too;
@@ -18329,16 +18397,22 @@
             var property = numericOwnPropertyEntryKernel(
                 heapBase, state, currentObject, index, digitCount, hash);
             if (property !== 0) {
+                var attributes = ownPropertyEntryAttributesKernel(heapBase, currentObject, property);
+                if ((attributes & PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return 0;
                 var propertyCell = ownPropertyEntryValueCellKernel(
                     heapBase, currentObject, property);
-                if (operation === 1) copyValueCell(propertyCell, sourceCell);
+                if (operation === NUMERIC_PROPERTY_WRITE) {
+                    if ((attributes & PROPERTY_ATTRIBUTE_WRITABLE) === 0) return 0;
+                    copyValueCell(propertyCell, sourceCell);
+                }
                 else copyValueCell(targetCell, propertyCell);
                 return 1;
             }
-            if (operation === 1) currentObject = 0;
+            if (operation === NUMERIC_PROPERTY_WRITE) currentObject = 0;
             else currentObject = objectPrototype(heapBase, currentObject);
         }
-        if (operation === 1) {
+        if (operation === NUMERIC_PROPERTY_WRITE) {
+            if (numericPropertyCanCreateKernel(heapBase, state, object, index, digitCount, hash) === 0) return 0;
             var stringBytes = (STRING_CHARS + digitCount +
                 HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT);
             if (reserveNativeAllocationKernel(
@@ -18476,8 +18550,10 @@
             doubleCellToInt32Kernel: doubleCellToInt32Kernel,
             canonicalizeNumberCellKernel: canonicalizeNumberCellKernel,
             mathIntrinsicKernel: mathIntrinsicKernel,
+            mathPowerNumericInputsKernel: mathPowerNumericInputsKernel,
             roundLargeNumberKernel: roundLargeNumberKernel,
-            numericPropertyGetKernel: numericPropertyGetKernel,
+            numericPropertyAccessKernel: numericPropertyAccessKernel,
+            numericPropertyCanCreateKernel: numericPropertyCanCreateKernel,
             numericOwnPropertyEntryKernel: numericOwnPropertyEntryKernel,
             numericStringKeyMatchesKernel: numericStringKeyMatchesKernel,
             numberCellToStringKernel: numberCellToStringKernel,
@@ -18780,6 +18856,8 @@
                     RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE: RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE,
                     INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR: INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR,
                     INTRINSIC_GUEST_BUILTIN: INTRINSIC_GUEST_BUILTIN,
+                    NUMERIC_PROPERTY_READ: NUMERIC_PROPERTY_READ,
+                    NUMERIC_PROPERTY_WRITE: NUMERIC_PROPERTY_WRITE,
                     EXOTIC_OBJECT_NON_EXTENSIBLE: kernelConstantOverrides.EXOTIC_OBJECT_NON_EXTENSIBLE,
                     INTRINSIC_OBJECT_PREVENT_EXTENSIONS: INTRINSIC_OBJECT_PREVENT_EXTENSIONS,
                     INTRINSIC_OBJECT_IS_EXTENSIBLE: INTRINSIC_OBJECT_IS_EXTENSIBLE,

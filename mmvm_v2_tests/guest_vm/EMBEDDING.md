@@ -244,6 +244,34 @@ guest profile supports
 modules. It is sufficient for `node_web.js` and the X11 module chains used by
 `demo1.js` and `demo2.js`; embedders must not assume general Node compatibility.
 
+## Guest standard-library source delivery
+
+`JSRuntime.installStandardLibrary(readSource)` installs the shared guest-bytecode
+algorithms once per runtime. The one-context `VM` facade exposes the same
+method. Install before application execution or capturing an isolation baseline.
+For example, in the shell:
+
+```js
+vm.installStandardLibrary(function (filename) { return read(filename); });
+```
+
+The callback receives a repository-relative module name and must return its
+source string. Node embedders can supply `fs.readFileSync(filename, "utf8")`;
+embedded applications can instead serve strings from their own source bundle.
+The VM API itself does not require Node, a filesystem or a CommonJS loader.
+Include `guest_vm/math_runtime.js`, `array_runtime.js`, `buffer_runtime.js`,
+`object_runtime.js`, `json.js`, `number_runtime.js` and `regexp_runtime.js` under
+the same `guest_vm/` prefix in that source bundle. The last two are installed
+when the corresponding native prototypes are available.
+
+Installation owns a private context for lexical captures, keeps implementation
+functions reachable through traced builtin closures, and retains the ordinary
+numeric fast paths. Composite algorithms execute as guest bytecode, not host
+callbacks in the standalone runtime. The CLI and Node-compatibility embedding
+already perform this installation. See `DESIGN.md` for the private Math
+primitive boundary and descriptor/property rules; this API does not imply
+complete ES5.1 conformance.
+
 ## Compile, execute, and run
 
 `VM.run(source, filename)` is the backwards-compatible convenience path. It

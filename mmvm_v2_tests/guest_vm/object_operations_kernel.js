@@ -3,7 +3,23 @@
 (function (root) {
     var DESCRIPTOR_KIND_FIELDS = 2;
     var DESCRIPTOR_RESULT_FIELDS = 4;
+    var STRING_PROPERTY_KEY_UNSUPPORTED = -1;
     var descriptorFieldNames = ["value", "writable", "enumerable", "configurable", "get", "set"];
+
+    /* String primitives expose immutable virtual own properties without
+     * allocating a boxed object or one descriptor per character. */
+    function stringOwnPropertyKeyKernel(heapBase, string, keyCell, lengthKey) {
+        var tag = valueCellTag(0, keyCell), index = -1;
+        if (tag === VALUE_TAG_INT32) index = valueCellInt32(0, keyCell);
+        else if (tag === VALUE_TAG_REFERENCE) {
+            var key = valueCellReference(0, keyCell);
+            if (recordType(heapBase, key) !== HEAP_TYPE_STRING) return STRING_PROPERTY_KEY_UNSUPPORTED;
+            if (stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return 1;
+            index = propertyKeyIndexKernel(heapBase, key);
+        } else return STRING_PROPERTY_KEY_UNSUPPORTED;
+        if (index >= 0 && index < stringLength(heapBase, string)) return 1;
+        return 0;
+    }
 
     function objectIsExtensibleKernel(heapBase, object) {
         if (recordType(heapBase, object) === HEAP_TYPE_OBJECT) return objectExtensible(heapBase, object);
@@ -354,9 +370,11 @@
     }
 
     var exports = {descriptorFieldNames: descriptorFieldNames,
-      constants: {DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
+      constants: {STRING_PROPERTY_KEY_UNSUPPORTED: STRING_PROPERTY_KEY_UNSUPPORTED,
+                  DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
                   DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
         objectIsExtensibleKernel: objectIsExtensibleKernel,
+        stringOwnPropertyKeyKernel: stringOwnPropertyKeyKernel,
         objectExtensibilityKernel: objectExtensibilityKernel,
         objectOwnPropertyDescriptorKernel: objectOwnPropertyDescriptorKernel,
         objectClassIndexKernel: objectClassIndexKernel,

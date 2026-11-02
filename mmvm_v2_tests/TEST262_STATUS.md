@@ -1,5 +1,20 @@
 # Test262 status
 
+2026-11-02, Math and property-semantics checkpoint (native contract 98):
+the final cross-host-identical image completes **3292 / 3292 passed;
+0 failed / 0 timed out / 0 not run**. Runner elapsed **489.537720 seconds**;
+summed test time **468.463964 seconds**. An earlier same-batch Node-built
+candidate completed in **429.199536 seconds** (410.997373 summed test seconds).
+The preceding committed image completed in 449.266334 seconds. The slower
+final elapsed observation is retained, not described as a performance gain
+or dismissed without a controlled comparison. The final helper-source rewrite
+fixes old-shell decompilation and snapshot identity; it does not add language
+features. The Test262 harness, corpus, selection and instruction limits are
+unchanged. Command:
+`./artifacts/js_runner.exe artifacts/ecma-next-final.snap test262_runner.js`.
+See [ECMA_TESTS_STATUS.md](ECMA_TESTS_STATUS.md) for ECMA filename parity and
+the complete validation checkpoint.
+
 2026-11-02, approximately 18:34 UTC, ECMA binding-name lifetime and
 guest-builtin checkpoint (native contract 97): complete standalone run
 **3292 / 3292 passed; 0 failed / 0 timed out / 0 not run**. Runner elapsed
