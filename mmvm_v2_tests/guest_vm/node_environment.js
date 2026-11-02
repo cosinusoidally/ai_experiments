@@ -106,52 +106,10 @@
     }
 
     GuestNodeEnvironment.prototype.installGuestRuntimeLibraries = function () {
-        this.context.run(
-            "load(\"guest_vm/array_runtime.js\");\n" +
-            "load(\"guest_vm/buffer_runtime.js\");",
-            "<guest-array-runtime>");
-        var methodAttributes =
-            this.runtime.heapRecords.constructor.Attributes.WRITABLE |
-            this.runtime.heapRecords.constructor.Attributes.CONFIGURABLE;
         var environment = this;
-        function install(prototype, name, globalName) {
-            environment.runtime.defineDataProperty(prototype, name,
-                environment.runtime.getGlobal(environment.context, globalName),
-                methodAttributes);
-            environment.runtime.deleteProperty(
-                environment.context.globalObject, globalName, false);
-        }
-        install(this.runtime.arrayPrototype, "map", "__guestArrayMap");
-        install(this.runtime.arrayPrototype, "forEach", "__guestArrayForEach");
-        install(this.runtime.arrayPrototype, "sort", "__guestArraySort");
-        if (this.runtime.nativeInterpreter) {
-            this.runtime.nativeInterpreter.setArrayMethodFallback("push",
-                this.runtime.getGlobal(this.context, "__guestArrayPushGeneric"));
-            this.runtime.nativeInterpreter.setArrayMethodFallback("slice",
-                this.runtime.getGlobal(this.context, "__guestArraySliceGeneric"));
-        }
-        this.runtime.deleteProperty(this.context.globalObject,
-            "__guestArrayPushGeneric", false);
-        this.runtime.deleteProperty(this.context.globalObject,
-            "__guestArraySliceGeneric", false);
-        install(this.runtime.getGlobal(this.context, "Buffer"),
-                "byteLength", "__guestBufferByteLength");
-
-        if (!this.runtime.regexpPrototype || !this.runtime.numberPrototype) {
-            return;
-        }
-        this.context.run([
-            "load(\"guest_vm/number_runtime.js\");",
-            "load(\"guest_vm/regexp_runtime.js\");"
-        ].join("\n"), "<guest-runtime-libraries>");
-        install(this.runtime.regexpPrototype, "exec", "__guestRegExpExec");
-        install(this.runtime.regexpPrototype, "test", "__guestRegExpTest");
-        install(this.runtime.stringPrototype, "match", "__guestStringMatch");
-        install(this.runtime.stringPrototype, "replace", "__guestStringReplace");
-        install(this.runtime.stringPrototype, "split", "__guestStringSplit");
-        install(this.runtime.stringPrototype, "search", "__guestStringSearch");
-        install(this.runtime.stringPrototype, "trim", "__guestStringTrim");
-        install(this.runtime.numberPrototype, "toFixed", "__guestNumberToFixed");
+        this.vm.installStandardLibrary(function (filename) {
+            return environment.hostFs.readFileSync(filename).toString("utf8");
+        });
     };
 
     GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
@@ -545,6 +503,7 @@
                 used += result.instructions || 0;
                 if (result.status === "budget") {
                     this.runtime.gcSafePoint();
+                    if (this.test262Sample) this.test262Sample(execution);
                     if (this.test262Progress) {
                         var progressNow = new Date().getTime();
                         if (progressNow - progressReported >= 5000) {

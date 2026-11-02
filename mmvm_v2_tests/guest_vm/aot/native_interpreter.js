@@ -62,6 +62,7 @@
     var DECIMAL_RADIX = 10;
     var ASCII_MINUS = 45;
     var ASCII_ZERO = 48;
+    var DEFINE_PROPERTY_REJECTED = 3;
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var FREE_RECORD_HEADER_BYTES = 16;
@@ -199,6 +200,10 @@
     RuntimeSupportLayout.MINIMUM_INTRINSIC_ARGUMENTS = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_MINIMUM_INTRINSIC_ARGUMENTS =
         RuntimeSupportLayout.MINIMUM_INTRINSIC_ARGUMENTS;
+    RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.COUNT;
+    RuntimeSupportLayout.COUNT += ObjectOperationKernels.descriptorFieldNames.length;
+    var RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE;
+    var INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
     var NATIVE_APPLY_FUNCTION_REGISTER = 0;
     var NATIVE_APPLY_RECEIVER_REGISTER = 1;
     var NATIVE_APPLY_ARGUMENT_BASE = 2;
@@ -234,6 +239,7 @@
         overrides.DECIMAL_RADIX = DECIMAL_RADIX;
         overrides.ASCII_MINUS = ASCII_MINUS;
         overrides.ASCII_ZERO = ASCII_ZERO;
+        overrides.DEFINE_PROPERTY_REJECTED = DEFINE_PROPERTY_REJECTED;
         var name;
         for (name in recordConstants) {
             if (Object.prototype.hasOwnProperty.call(recordConstants, name)) {
@@ -4919,8 +4925,9 @@
                         ownPropertyEntryValueCellKernel(heapBase, accessorObject, accessorFound),
                         accessorCallableCell);
                 }
-                var accessorCacheClear = clearNativePropertyCacheKernel(
-                    heapBase, state);
+                /* Cached entries identify own slots, not cached descriptor
+                 * values or attributes. Appends already advance the storage
+                 * epoch; replacing this slot does not invalidate other owners. */
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else {
                 return unsupportedExitKernel(
@@ -7043,11 +7050,31 @@
         }
         }
         if (intrinsicHandled === 0) {
+        if (intrinsicId === INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR) {
+            intrinsicHandled = objectOwnPropertyDescriptorKernel(heapBase, state,
+                intrinsicTarget, registerAddress, intrinsicArgumentsVector,
+                intrinsicArgumentCount, stringSupport, RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE);
+            if (intrinsicHandled === 0) return unsupportedDiagnosticExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        }
+        if (intrinsicHandled === 0) {
         if (intrinsicId === INTRINSIC_OBJECT_DEFINE_PROPERTY) {
             var definePropertyResult = objectDefinePropertyKernel(
                 heapBase, state, intrinsicTarget, registerAddress,
-                intrinsicArgumentsVector);
+                intrinsicArgumentsVector, valueCellReference(0, vectorCellAddress(
+                    heapBase, stringSupport, RUNTIME_SUPPORT_ARGUMENTS_LENGTH_KEY)));
             if (definePropertyResult === 1) intrinsicHandled = 1;
+            else if (definePropertyResult === DEFINE_PROPERTY_REJECTED) {
+                var descriptorError = engineScratchRightAddress(heapBase, state);
+                if (allocateTypeErrorKernel(heapBase, state, descriptorError, stringSupport) === 1) {
+                    if (unwindExceptionKernel(heapBase, state, frame, descriptorError) === 1) {
+                        return INTRINSIC_RESULT_EXCEPTION_HANDLED;
+                    }
+                }
+                return unsupportedDiagnosticExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
             else if (definePropertyResult === 2) {
                 setEngineCallRejectReason(
                     heapBase, state, CALL_REJECT_HEAP_SPACE);
@@ -13601,6 +13628,27 @@
         return 0;
     }
 
+    function isNegativeZeroCellKernel(cell) {
+        var IEEE754_NEGATIVE_ZERO_HIGH = -2147483648;
+        if (valueCellTag(0, cell) !== VALUE_TAG_DOUBLE) return 0;
+        if (valueCellDoubleLow(0, cell) !== 0) return 0;
+        if (valueCellDoubleHigh(0, cell) !== IEEE754_NEGATIVE_ZERO_HIGH) return 0;
+        return 1;
+    }
+
+    function sameValueCellsKernel(heapBase, left, right) {
+        if (strictValueCellsEqualKernel(heapBase, left, right) === 1) {
+            if (isNegativeZeroCellKernel(left) !== isNegativeZeroCellKernel(right)) return 0;
+            return 1;
+        }
+        if (valueCellTag(0, left) !== VALUE_TAG_DOUBLE ||
+            valueCellTag(0, right) !== VALUE_TAG_DOUBLE) return 0;
+        /* Strict equality rejects NaN, whereas SameValue accepts two NaNs. */
+        if (equalF64(loadF64(left + VALUE_CELL_LOW), loadF64(left + VALUE_CELL_LOW)) !== 0) return 0;
+        if (equalF64(loadF64(right + VALUE_CELL_LOW), loadF64(right + VALUE_CELL_LOW)) !== 0) return 0;
+        return 1;
+    }
+
     /* Work in the negative domain so INT32_MIN never needs an overflowing
      * absolute value. Decimal digits are ASCII UTF-16 code units. */
     function integerDecimalLengthKernel(number) {
@@ -14107,7 +14155,7 @@
     }
 
     function objectDefinePropertyKernel(
-            heapBase, state, target, registerAddress, argumentsVector) {
+            heapBase, state, target, registerAddress, argumentsVector, lengthKey) {
         var objectCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 0);
         var keyCell = programArgumentCellKernel(
@@ -14131,66 +14179,75 @@
         if (descriptorType < HEAP_TYPE_OBJECT) return 0;
         if (descriptorType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
         if (recordType(heapBase, key) !== HEAP_TYPE_STRING) return 0;
+        if (objectType === HEAP_TYPE_ARRAY && arrayReserved(heapBase, object) === 0 &&
+            stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return 0;
 
-        var descriptorProperty = lastOwnPropertyEntryKernel(heapBase, descriptor);
+        var descriptorOwner = descriptor;
+        var descriptorProperty = 0;
         var valueCell = 0;
         var writableCell = 0;
         var enumerableCell = 0;
         var configurableCell = 0;
         var getterCell = 0;
         var setterCell = 0;
-        while (descriptorProperty !== 0) {
+        while (descriptorOwner !== 0) {
+          var ownerType = recordType(heapBase, descriptorOwner);
+          if (ownerType < HEAP_TYPE_OBJECT || ownerType > HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+          descriptorProperty = lastOwnPropertyEntryKernel(heapBase, descriptorOwner);
+          while (descriptorProperty !== 0) {
             var fieldKind = descriptorFieldKindKernel(
-                heapBase, ownPropertyEntryKeyKernel(heapBase, descriptor, descriptorProperty));
+                heapBase, ownPropertyEntryKeyKernel(heapBase, descriptorOwner, descriptorProperty));
             /* ToPropertyDescriptor reads field values, so an accessor on
              * the descriptor itself needs a guest call rather than treating
              * its getter function cell as the descriptor value. */
             if (fieldKind !== 0) {
-                if ((ownPropertyEntryAttributesKernel(heapBase, descriptor,
+                if ((ownPropertyEntryAttributesKernel(heapBase, descriptorOwner,
                         descriptorProperty) & PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return 0;
             }
             if (fieldKind === 1) {
-                valueCell = ownPropertyEntryValueCellKernel(heapBase, descriptor, descriptorProperty);
+                if (valueCell === 0) valueCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
             } else if (fieldKind === 2) {
-                writableCell = ownPropertyEntryValueCellKernel(heapBase, descriptor, descriptorProperty);
+                if (writableCell === 0) writableCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
             } else if (fieldKind === 3) {
-                enumerableCell = ownPropertyEntryValueCellKernel(heapBase, descriptor, descriptorProperty);
+                if (enumerableCell === 0) enumerableCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
             } else if (fieldKind === 4) {
-                configurableCell = ownPropertyEntryValueCellKernel(heapBase, descriptor, descriptorProperty);
+                if (configurableCell === 0) configurableCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
             } else if (fieldKind === 5) {
-                getterCell = ownPropertyEntryValueCellKernel(heapBase, descriptor, descriptorProperty);
+                if (getterCell === 0) getterCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
             } else if (fieldKind === 6) {
-                setterCell = ownPropertyEntryValueCellKernel(heapBase, descriptor, descriptorProperty);
+                if (setterCell === 0) setterCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
             }
-            descriptorProperty = previousOwnPropertyEntryKernel(heapBase, descriptor, descriptorProperty);
+            descriptorProperty = previousOwnPropertyEntryKernel(heapBase, descriptorOwner, descriptorProperty);
+          }
+          descriptorOwner = objectPrototype(heapBase, descriptorOwner);
         }
 
         var accessorDescriptor = 0;
         if (getterCell !== 0) accessorDescriptor = 1;
         if (setterCell !== 0) accessorDescriptor = 1;
         if (accessorDescriptor !== 0) {
-            if (valueCell !== 0) return 0;
-            if (writableCell !== 0) return 0;
+            if (valueCell !== 0) return DEFINE_PROPERTY_REJECTED;
+            if (writableCell !== 0) return DEFINE_PROPERTY_REJECTED;
         }
         var getter = 0;
         var setter = 0;
         if (getterCell !== 0) {
             if (valueCellTag(0, getterCell) !== VALUE_TAG_UNDEFINED) {
-                if (valueCellTag(0, getterCell) !== VALUE_TAG_REFERENCE) return 0;
+                if (valueCellTag(0, getterCell) !== VALUE_TAG_REFERENCE) return DEFINE_PROPERTY_REJECTED;
                 getter = valueCellReference(0, getterCell);
                 var getterType = recordType(heapBase, getter);
                 if (getterType !== HEAP_TYPE_NATIVE_FUNCTION) {
-                    if (getterType !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+                    if (getterType !== HEAP_TYPE_BYTECODE_FUNCTION) return DEFINE_PROPERTY_REJECTED;
                 }
             }
         }
         if (setterCell !== 0) {
             if (valueCellTag(0, setterCell) !== VALUE_TAG_UNDEFINED) {
-                if (valueCellTag(0, setterCell) !== VALUE_TAG_REFERENCE) return 0;
+                if (valueCellTag(0, setterCell) !== VALUE_TAG_REFERENCE) return DEFINE_PROPERTY_REJECTED;
                 setter = valueCellReference(0, setterCell);
                 var setterType = recordType(heapBase, setter);
                 if (setterType !== HEAP_TYPE_NATIVE_FUNCTION) {
-                    if (setterType !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+                    if (setterType !== HEAP_TYPE_BYTECODE_FUNCTION) return DEFINE_PROPERTY_REJECTED;
                 }
             }
         }
@@ -14207,16 +14264,40 @@
         }
         var attributes = 0;
         if (existingProperty === 0) {
-            if (objectExtensible(heapBase, object) === 0) return 0;
+            /* Only ordinary objects have the extensibility payload field.
+             * In a function that slot holds its closure, not an extensible
+             * bit. Non-ordinary integrity operations still need their own
+             * state representation; do not reinterpret a null closure. */
+            if (objectType === HEAP_TYPE_OBJECT &&
+                objectExtensible(heapBase, object) === 0) return DEFINE_PROPERTY_REJECTED;
         } else {
             attributes = ownPropertyEntryAttributesKernel(heapBase, object, existingProperty);
-            /* Leave the non-configurable validation/exception path to the
-             * semantic implementation until all SameValue cases are native. */
-            if ((attributes & PROPERTY_ATTRIBUTE_CONFIGURABLE) === 0) return 0;
             var wasAccessor = attributes & PROPERTY_ATTRIBUTE_ACCESSOR;
             var dataDescriptor = 0;
             if (valueCell !== 0) dataDescriptor = 1;
             if (writableCell !== 0) dataDescriptor = 1;
+            if ((attributes & PROPERTY_ATTRIBUTE_CONFIGURABLE) === 0) {
+                if (configurableCell !== 0 && valueCellTruthyKernel(heapBase, configurableCell) === 1) return DEFINE_PROPERTY_REJECTED;
+                if (enumerableCell !== 0) {
+                    var wasEnumerable = 0;
+                    if ((attributes & PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) wasEnumerable = 1;
+                    if (valueCellTruthyKernel(heapBase, enumerableCell) !== wasEnumerable) return DEFINE_PROPERTY_REJECTED;
+                }
+                if (wasAccessor !== 0) {
+                    if (dataDescriptor !== 0) return DEFINE_PROPERTY_REJECTED;
+                    if (getterCell !== 0 && sameValueCellsKernel(heapBase, getterCell,
+                        ownPropertyEntryValueCellKernel(heapBase, object, existingProperty)) === 0) return DEFINE_PROPERTY_REJECTED;
+                    if (setterCell !== 0 && setter !==
+                        ownPropertyEntrySetterKernel(heapBase, object, existingProperty)) return DEFINE_PROPERTY_REJECTED;
+                } else {
+                    if (accessorDescriptor !== 0) return DEFINE_PROPERTY_REJECTED;
+                    if ((attributes & PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                        if (writableCell !== 0 && valueCellTruthyKernel(heapBase, writableCell) === 1) return DEFINE_PROPERTY_REJECTED;
+                        if (valueCell !== 0 && sameValueCellsKernel(heapBase, valueCell,
+                            ownPropertyEntryValueCellKernel(heapBase, object, existingProperty)) === 0) return DEFINE_PROPERTY_REJECTED;
+                    }
+                }
+            }
             if (accessorDescriptor !== 0) {
                 if (wasAccessor === 0) attributes = attributes & ~PROPERTY_ATTRIBUTE_WRITABLE;
             } else if (dataDescriptor !== 0) {
@@ -14271,7 +14352,9 @@
             }
             if (setterCell !== 0) setOwnPropertyEntrySetterKernel(heapBase, object, property, setter);
         } else if (valueCell !== 0) copyValueCell(destination, valueCell);
-        var cacheClearResult = clearNativePropertyCacheKernel(heapBase, state);
+        /* Lookup caches hold owner/entry references and read current flags
+         * and values on use. Appending invalidates through the storage epoch;
+         * redefining an existing slot needs no global cache flush. */
         copyValueCell(target, objectCell);
         return 1;
     }
@@ -17719,6 +17802,19 @@
         return 1;
     }
 
+    function scanDecimalDigitsKernel(heapBase, source, cursor, length) {
+        while (cursor < length && isASCIIDecimalDigitKernel(
+                stringCharacterCodeUnit(heapBase, source, cursor) & 65535) === 1) {
+            cursor = cursor + 1;
+        }
+        return cursor;
+    }
+
+    function isASCIIDecimalDigitKernel(code) {
+        if (code < ASCII_ZERO || code >= ASCII_ZERO + DECIMAL_RADIX) return 0;
+        return 1;
+    }
+
     function parseFloatIntrinsicKernel(
             heapBase, targetCell, registerAddress, argumentsVector,
             argumentCount, platformServices) {
@@ -17730,13 +17826,81 @@
         var sourceCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 0);
         if (sourceCell === 0) return 0;
-        if (valueCellTag(0, sourceCell) !== VALUE_TAG_REFERENCE) {
-            return convertValueToNumberKernel(
-                heapBase, targetCell, sourceCell, platformServices, 0);
+        var sourceTag = valueCellTag(0, sourceCell);
+        if (sourceTag !== VALUE_TAG_REFERENCE) {
+            /* parseFloat first converts to a string, not to a number.
+             * Boolean/null/undefined strings have no decimal prefix. Numeric
+             * input round-trips, except that String(-0) is the string "0". */
+            if (sourceTag === VALUE_TAG_INT32) {
+                copyValueCell(targetCell, sourceCell);
+            } else if (sourceTag === VALUE_TAG_DOUBLE) {
+                if (isNegativeZeroCellKernel(sourceCell) === 1) {
+                    setValueCellInt32(targetCell, 0);
+                } else copyValueCell(targetCell, sourceCell);
+            } else setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
+            return 1;
         }
         var source = valueCellReference(0, sourceCell);
         if (recordType(heapBase, source) !== HEAP_TYPE_STRING) return 0;
         var length = stringLength(heapBase, source);
+        var start = 0;
+        while (start < length && isESWhiteSpaceKernel(
+                stringCharacterCodeUnit(heapBase, source, start) & 65535) === 1) {
+            start = start + 1;
+        }
+        var cursor = start;
+        var character = -1;
+        if (cursor < length) {
+            character = stringCharacterCodeUnit(heapBase, source, cursor) & 65535;
+            if (character === 43 || character === ASCII_MINUS) cursor = cursor + 1;
+        }
+        /* Only the exact, case-sensitive Infinity word is accepted. libc's
+         * strtod also recognizes inf/nan and hexadecimal floats, which are
+         * not part of parseFloat's decimal-prefix grammar. ASCII code units
+         * below spell Infinity; the optional sign was consumed above. */
+        var infinity = 0;
+        if (length - cursor >= 8) {
+            if ((stringCharacterCodeUnit(heapBase, source, cursor) & 65535) === 73 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 1) & 65535) === 110 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 2) & 65535) === 102 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 3) & 65535) === 105 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 4) & 65535) === 110 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 5) & 65535) === 105 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 6) & 65535) === 116 &&
+                (stringCharacterCodeUnit(heapBase, source, cursor + 7) & 65535) === 121) infinity = 1;
+        }
+        if (infinity === 1) cursor = cursor + 8;
+        else {
+            var digitStart = cursor;
+            cursor = scanDecimalDigitsKernel(heapBase, source, cursor, length);
+            var digits = cursor - digitStart;
+            if (cursor < length &&
+                (stringCharacterCodeUnit(heapBase, source, cursor) & 65535) === 46) {
+                cursor = cursor + 1;
+                digitStart = cursor;
+                cursor = scanDecimalDigitsKernel(heapBase, source, cursor, length);
+                digits = digits + cursor - digitStart;
+            }
+            if (digits === 0) {
+                setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
+                return 1;
+            }
+            if (cursor < length) {
+                character = stringCharacterCodeUnit(heapBase, source, cursor) & 65535;
+                if (character === 69 || character === 101) {
+                    var exponentStart = cursor;
+                    cursor = cursor + 1;
+                    if (cursor < length) {
+                        character = stringCharacterCodeUnit(heapBase, source, cursor) & 65535;
+                        if (character === 43 || character === ASCII_MINUS) cursor = cursor + 1;
+                    }
+                    var exponentDigits = cursor;
+                    cursor = scanDecimalDigitsKernel(heapBase, source, cursor, length);
+                    if (cursor === exponentDigits) cursor = exponentStart;
+                }
+            }
+        }
+        var prefixLength = cursor - start;
         var mallocPointer = platformMallocPointer(
             heapBase, platformServices);
         var freePointer = platformFreePointer(heapBase, platformServices);
@@ -17744,24 +17908,20 @@
         if (mallocPointer === 0) return 0;
         if (freePointer === 0) return 0;
         if (strtodPointer === 0) return 0;
-        var nativeBuffer = callNativeI32(mallocPointer, length + 8);
+        var nativeBuffer = callNativeI32(mallocPointer, prefixLength + 1);
         if (nativeBuffer === 0) return 0;
-        var valid = copyStringToNativeASCIIBufferKernel(
-            heapBase, source, nativeBuffer);
-        var endSlot = (nativeBuffer + length + 4) & -4;
-        storeRaw32(endSlot, nativeBuffer);
-        if (valid === 1) {
-            storeF64(targetCell + VALUE_CELL_LOW,
-                callNativeF64(strtodPointer, nativeBuffer, endSlot));
-            if (loadRaw32(endSlot) === nativeBuffer) valid = 0;
+        var index = 0;
+        while (index < prefixLength) {
+            storeRaw8(nativeBuffer + index,
+                stringCharacterCodeUnit(heapBase, source, start + index) & 65535);
+            index = index + 1;
         }
+        storeRaw8(nativeBuffer + prefixLength, 0);
+        storeF64(targetCell + VALUE_CELL_LOW,
+            callNativeF64(strtodPointer, nativeBuffer, 0));
         length = callNativeI32(freePointer, nativeBuffer);
-        if (valid === 0) {
-            setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
-        } else {
-            store32(targetCell, VALUE_TAG_DOUBLE);
-            store32(targetCell + VALUE_CELL_AUX, 0);
-        }
+        store32(targetCell, VALUE_TAG_DOUBLE);
+        store32(targetCell + VALUE_CELL_AUX, 0);
         return 1;
     }
 
@@ -18239,6 +18399,8 @@
             objectUsesDefaultPrimitiveConversionKernel:
                 objectUsesDefaultPrimitiveConversionKernel,
             parseFloatIntrinsicKernel: parseFloatIntrinsicKernel,
+            scanDecimalDigitsKernel: scanDecimalDigitsKernel,
+            isASCIIDecimalDigitKernel: isASCIIDecimalDigitKernel,
             isNaNIntrinsicKernel: isNaNIntrinsicKernel,
             parseIntIntrinsicKernel: parseIntIntrinsicKernel,
             propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
@@ -18282,6 +18444,8 @@
             descriptorFieldKindKernel: descriptorFieldKindKernel,
             stringReplaceKernel: stringReplaceKernel,
             strictValueCellsEqualKernel: strictValueCellsEqualKernel,
+            sameValueCellsKernel: sameValueCellsKernel,
+            isNegativeZeroCellKernel: isNegativeZeroCellKernel,
             valueCellTruthyKernel: valueCellTruthyKernel,
             typeofValueKernel: typeofValueKernel,
             typedArrayConstructorKernel: typedArrayConstructorKernel,
@@ -18517,6 +18681,9 @@
                     DECIMAL_RADIX: DECIMAL_RADIX,
                     ASCII_MINUS: ASCII_MINUS,
                     ASCII_ZERO: ASCII_ZERO,
+                    DEFINE_PROPERTY_REJECTED: DEFINE_PROPERTY_REJECTED,
+                    RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE: RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE,
+                    INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR: INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR,
                     VECTOR_SHARED_METADATA_FLAG: kernelConstantOverrides.VECTOR_SHARED_METADATA_FLAG,
                     STRING_SLICE_FLAG: kernelConstantOverrides.STRING_SLICE_FLAG,
                     STRING_SLICE_RECORD_BYTES: kernelConstantOverrides.STRING_SLICE_RECORD_BYTES,
@@ -18634,6 +18801,18 @@
                 var lexicalConstantName = lexicalConstantNames[lexicalConstantIndex++];
                 compilerOptions.constantBindings[lexicalConstantName] =
                     HeapRecords.KernelConstants[lexicalConstantName];
+            }
+            for (binaryConstantName in ObjectOperationKernels.constants) {
+                if (Object.prototype.hasOwnProperty.call(ObjectOperationKernels.constants, binaryConstantName)) {
+                    compilerOptions.constantBindings[binaryConstantName] =
+                        ObjectOperationKernels.constants[binaryConstantName];
+                }
+            }
+            for (binaryConstantName in HeapSweeper.MarkConstants) {
+                if (Object.prototype.hasOwnProperty.call(HeapSweeper.MarkConstants, binaryConstantName)) {
+                    compilerOptions.constantBindings[binaryConstantName] =
+                        HeapSweeper.MarkConstants[binaryConstantName];
+                }
             }
             for (binaryConstantName in Binary64.KernelConstants) {
                 if (Object.prototype.hasOwnProperty.call(
@@ -18828,6 +19007,13 @@
             this.stringSupportAddress, RuntimeSupportLayout.CHAR_AT_KEY),
             runtime.internStringAddress("charAt"));
         var objectClassIndex = 0;
+        var descriptorKeyIndex = 0;
+        while (descriptorKeyIndex < ObjectOperationKernels.descriptorFieldNames.length) {
+            runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+                this.stringSupportAddress, RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE + descriptorKeyIndex),
+                runtime.internStringAddress(ObjectOperationKernels.descriptorFieldNames[descriptorKeyIndex]));
+            descriptorKeyIndex++;
+        }
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.BYTE_LENGTH_KEY), runtime.internStringAddress("byteLength"));
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(

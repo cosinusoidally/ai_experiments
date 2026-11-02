@@ -1,11 +1,18 @@
 /* Guest-executed embedding, reusing the Test262 realm lifecycle and bounded
  * execution primitives. No host Node engine supplies test semantics. */
-exports.create = function (fs) {
+exports.create = function (fs, options) {
+    options = options || {};
     if (typeof GuestVM !== "function" || typeof GuestNodeEnvironment !== "function") {
         throw new Error("ECMA guest tests require a generic standalone snapshot");
     }
+    if (typeof GuestVM.prototype.installStandardLibrary !== "function") {
+        throw new Error("ECMA guest tests need the shared standard-library API; rebuild the snapshot");
+    }
     var vm = new GuestVM({rawFFI: true, nativeInterpreter: true, gcThreshold: 16384,
         heapBytes: 8 * 1024 * 1024, maxHeapBytes: 128 * 1024 * 1024});
+    vm.installStandardLibrary(function (filename) {
+        return fs.readFileSync(filename, "utf8");
+    });
     var embedding = Object.create(GuestNodeEnvironment.prototype);
     embedding.vm = vm;
     embedding.runtime = vm.runtime;
@@ -14,6 +21,28 @@ exports.create = function (fs) {
     embedding.test262ProgramCache = {};
     embedding.test262HarnessTemplate = null;
     embedding.test262Progress = null;
+    var functionSamples = {};
+    var sampleReported = 0;
+    if (options.sampleFunctions) {
+        embedding.test262Sample = function (execution) {
+            var frames = vm.inspectNativeFrames(1);
+            if (!frames.length) return;
+            var frame = frames[0], key = "$" + frame.program + ":" + frame.sourcePreview;
+            if (!functionSamples[key]) functionSamples[key] = {
+                source: frame.sourcePreview || frame.name || "<script>", count: 0, pcs: {}};
+            functionSamples[key].count++;
+            var pcKey = "$" + frame.pc;
+            functionSamples[key].pcs[pcKey] = (functionSamples[key].pcs[pcKey] || 0) + 1;
+            var now = new Date().getTime();
+            if (now - sampleReported >= 5000) {
+                sampleReported = now;
+                console.log("  progress: instructions=" + execution.totalInstructions +
+                    " collections=" + vm.runtime.collectionCount +
+                    " heap=" + vm.runtime.linearHeap.bump +
+                    " pc=" + frame.pc + " source=" + frame.sourcePreview.replace(/[\r\n]+/g, " "));
+            }
+        };
+    }
     var base = ["ecma_tests_harness.js", "../../js_tests/tests/shell.js"];
     function visible(result) {
         var value = {}, fields = ["status", "phase", "name", "message", "filename",
@@ -58,6 +87,8 @@ exports.create = function (fs) {
             return compiled;
         },
         runTest: function (filename, source, harnessFiles, negative, limit) {
+            functionSamples = {};
+            sampleReported = new Date().getTime();
             if (preparationFailure) return visible(preparationFailure);
             /* Match Test262's baseline-restore path: merely creating another
              * context in this VM shares intrinsic objects and would let an
@@ -113,6 +144,30 @@ exports.create = function (fs) {
                 path = "ecma_tests_verify.js";
                 return execute(readHarness(path), path, "assertions", true);
             } finally {
+                if (options.sampleFunctions) {
+                    var samples = [], key;
+                    for (key in functionSamples) {
+                        if (Object.prototype.hasOwnProperty.call(functionSamples, key)) {
+                            samples.push(functionSamples[key]);
+                        }
+                    }
+                    samples.sort(function (a, b) { return b.count - a.count; });
+                    var reportLimit = 10;
+                    for (var sample = 0; sample < samples.length && sample < reportLimit; sample++) {
+                        console.log("  function samples " + samples[sample].count + ": " +
+                            samples[sample].source.replace(/[\r\n]+/g, " "));
+                        var pcRows = [], pc;
+                        for (pc in samples[sample].pcs) {
+                            if (Object.prototype.hasOwnProperty.call(samples[sample].pcs, pc)) {
+                                pcRows.push({pc: pc.substring(1), count: samples[sample].pcs[pc]});
+                            }
+                        }
+                        pcRows.sort(function (a, b) { return b.count - a.count; });
+                        for (var row = 0; row < pcRows.length && row < reportLimit; row++) {
+                            console.log("    pc " + pcRows[row].pc + ": " + pcRows[row].count);
+                        }
+                    }
+                }
                 context.execution = null;
                 vm.runtime.heapRecords.setContextActiveFrame(context.heapAddress, 0);
             }

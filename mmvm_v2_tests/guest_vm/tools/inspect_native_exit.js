@@ -4,8 +4,15 @@
  * Example: node guest_vm/tools/inspect_native_exit.js --opcode ADD --vm-native octane_runner.js CodeLoad
  */
 var inspectExitNode = typeof module !== "undefined" && module.exports;
+var inspectExitStandalone = typeof guestStandaloneExecute === "function" &&
+    typeof GuestVMNativeInterpreter === "function";
 var inspectExitNative, inspectExitBytecode, inspectExitHeap, inspectExitCells;
-if (inspectExitNode) {
+if (inspectExitStandalone) {
+    inspectExitNative = GuestVMNativeInterpreter;
+    inspectExitBytecode = GuestVMBytecode;
+    inspectExitHeap = GuestVMHeap;
+    inspectExitCells = GuestVMValueCells;
+} else if (inspectExitNode) {
     inspectExitNative = require("../aot/native_interpreter.js");
     inspectExitBytecode = require("../bytecode.js");
     inspectExitHeap = require("../heap.js");
@@ -53,6 +60,13 @@ function inspectExitCell(runtime, cell, depth) {
     if (type === inspectExitHeap.Types.NATIVE_FUNCTION) {
         result += " intrinsic=" + records.functionMetadata(reference);
     }
+    if (type === inspectExitHeap.Types.BUFFER_VIEW) {
+        var backing = records.bufferViewBacking(reference);
+        result += " kind=" + records.bufferViewKind(reference) +
+            " length=" + records.bufferViewLength(reference) +
+            " offset=" + records.bufferViewOffset(reference) +
+            " backing=" + backing + " pointer=" + records.bufferBackingPointer(backing);
+    }
     if (type === inspectExitHeap.Types.ARRAY && !depth) {
         var elements = records.arrayElements(reference);
         result += " length=" + records.vectorLength(elements);
@@ -80,13 +94,14 @@ function inspectExitCell(runtime, cell, depth) {
     }
     return result;
 }
-inspectExitNative.prototype.run = function () {
-    var result = inspectExitOriginalRun.apply(this, arguments);
+function inspectExitWrapRun(originalRun) {
+  return function () {
+    var result = originalRun.apply(this, arguments);
     if (result.reason !== inspectExitNative.Exit.UNSUPPORTED) return result;
     if (inspectExitOpcode !== null && result.opcode !== inspectExitOpcode) return result;
     if (inspectExitPC !== null && result.pc !== inspectExitPC) return result;
     var records = this.runtime.heapRecords;
-    var program = this.runtime.programMetadata["$" + records.frameProgram(result.frame)];
+    var program = this.runtime.adoptHeapProgram(records.frameProgram(result.frame));
     if (inspectExitFilename !== null && (!program || program.filename !== inspectExitFilename)) return result;
     inspectExitPrint("native exit: " + inspectExitBytecode.NAMES[result.opcode] +
         " pc=" + result.pc + " function=" + (program && program.name || "<anonymous>") +
@@ -126,6 +141,26 @@ inspectExitNative.prototype.run = function () {
      * yet been reconciled with its portable wrapper. This is a stop tool. */
     if (inspectExitNode) process.exit(70);
     else quit(70);
-};
-if (inspectExitNode) require("../../guest_runner.js");
+  };
+}
+inspectExitNative.prototype.run = inspectExitWrapRun(inspectExitOriginalRun);
+if (inspectExitStandalone) {
+    /* CommonJS loading can create another implementation class inside the
+     * snapshot. Attach to the actual engine, not just a global constructor
+     * whose prototype that runtime may never use. Context creation is the
+     * first public boundary after an engine has been constructed. */
+    var inspectExitCreateContext = GuestVM.JSRuntime.prototype.createContext;
+    GuestVM.JSRuntime.prototype.createContext = function () {
+        var engine = this.runtime.nativeInterpreter;
+        if (engine && !engine.inspectExitAttached) {
+            if (engine.run !== inspectExitNative.prototype.run) {
+                engine.run = inspectExitWrapRun(engine.run);
+            }
+            engine.inspectExitAttached = true;
+        }
+        return inspectExitCreateContext.apply(this, arguments);
+    };
+}
+if (inspectExitStandalone) guestStandaloneExecute(inspectExitArguments[0], inspectExitArguments.slice(1));
+else if (inspectExitNode) require("../../guest_runner.js");
 else load("guest_runner.js");

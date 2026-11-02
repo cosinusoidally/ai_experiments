@@ -29,10 +29,14 @@
         this.emptyEvalPrograms = {};
         this.destroyed = false;
         var semanticRuntime = this.runtime;
+        var jsRuntime = this;
+        semanticRuntime.adoptContext = function (address) {
+            return new JSContext(jsRuntime, address);
+        };
         this.runtime.interpretGuest = function (callable, receiver, args,
                                                 context) {
             var execution = Execution.fromFunction(callable, semanticRuntime,
-                callable.homeContext || context, receiver, args || []);
+                semanticRuntime.functionHomeContext(callable, context), receiver, args || []);
             execution.compiledEntry = null;
             semanticRuntime.activeExecutions.push(execution);
             try {
@@ -168,6 +172,66 @@
         return context;
     };
 
+    /* Install portable bytecode implementations once per runtime, before
+     * application code or per-test realm preparation. Source delivery is an
+     * embedding concern: no Node module, filesystem or shell load() is
+     * required by this API. A private context keeps bootstrap bindings out
+     * of application globals and owns the functions' lexical environment. */
+    JSRuntime.prototype.installStandardLibrary = function (readSource) {
+        if (this.destroyed) throw new Error("runtime has been destroyed");
+        if (typeof readSource !== "function") {
+            throw new TypeError("standard library installation needs a source reader");
+        }
+        if (this.standardLibraryInstalled) return;
+        var runtime = this.runtime;
+        var context = this.createContext();
+        function loadLibrary(filename) {
+            var source = readSource(filename);
+            if (typeof source !== "string") {
+                throw new TypeError("standard library source must be a string: " + filename);
+            }
+            context.run(source, filename);
+        }
+        function install(prototype, name, globalName, builtinName) {
+            var callable = runtime.getGlobal(context, globalName);
+            if (own(NativeIntrinsics.formalLengths, builtinName)) {
+                runtime.defineDataProperty(callable, "length",
+                    NativeIntrinsics.formalLengths[builtinName], 0);
+            }
+            runtime.defineBuiltinProperty(prototype, name, callable);
+            runtime.deleteProperty(context.globalObject, globalName, false);
+        }
+        loadLibrary("guest_vm/array_runtime.js");
+        loadLibrary("guest_vm/buffer_runtime.js");
+        install(runtime.arrayPrototype, "map", "__guestArrayMap", "Array.map");
+        install(runtime.arrayPrototype, "forEach", "__guestArrayForEach", "Array.forEach");
+        install(runtime.arrayPrototype, "sort", "__guestArraySort", "Array.sort");
+        if (runtime.nativeInterpreter) {
+            runtime.nativeInterpreter.setArrayMethodFallback("push",
+                runtime.getGlobal(context, "__guestArrayPushGeneric"));
+            runtime.nativeInterpreter.setArrayMethodFallback("slice",
+                runtime.getGlobal(context, "__guestArraySliceGeneric"));
+        }
+        runtime.deleteProperty(context.globalObject, "__guestArrayPushGeneric", false);
+        runtime.deleteProperty(context.globalObject, "__guestArraySliceGeneric", false);
+        install(runtime.getGlobal(context, "Buffer"), "byteLength",
+            "__guestBufferByteLength", "Buffer.byteLength");
+        if (runtime.regexpPrototype && runtime.numberPrototype) {
+            loadLibrary("guest_vm/number_runtime.js");
+            loadLibrary("guest_vm/regexp_runtime.js");
+            install(runtime.regexpPrototype, "exec", "__guestRegExpExec", "RegExp.exec");
+            install(runtime.regexpPrototype, "test", "__guestRegExpTest", "RegExp.test");
+            install(runtime.regexpPrototype, "toString", "__guestRegExpToString", "RegExp.toString");
+            install(runtime.stringPrototype, "match", "__guestStringMatch", "String.match");
+            install(runtime.stringPrototype, "replace", "__guestStringReplace", "String.replace");
+            install(runtime.stringPrototype, "split", "__guestStringSplit", "String.split");
+            install(runtime.stringPrototype, "search", "__guestStringSearch", "String.search");
+            install(runtime.stringPrototype, "trim", "__guestStringTrim", "String.trim");
+            install(runtime.numberPrototype, "toFixed", "__guestNumberToFixed", "Number.toFixed");
+        }
+        this.standardLibraryInstalled = true;
+    };
+
     JSRuntime.prototype.internString = function (value) {
         return this.runtime.internString(value);
     };
@@ -196,6 +260,10 @@
         return this.runtime.inspectExecution(execution);
     };
 
+    JSRuntime.prototype.inspectNativeFrames = function (maximumFrames) {
+        return this.runtime.inspectNativeFrames(maximumFrames);
+    };
+
     JSRuntime.prototype.destroy = function () {
         if (this.destroyed) return;
         while (this.contexts.length) this.contexts[0].destroy();
@@ -203,16 +271,24 @@
         this.destroyed = true;
     };
 
-    function JSContext(jsRuntime) {
+    function JSContext(jsRuntime, retainedAddress) {
         this.jsRuntime = jsRuntime;
         this.runtime = jsRuntime.runtime;
-        this.globalObject = this.runtime.makeObject();
-        this.heapAddress = this.runtime.heapRecords.allocateContext(
-            this.globalObject.heapAddress);
+        if (retainedAddress) {
+            this.heapAddress = retainedAddress;
+            this.globalObject = this.runtime.readHeapReference(
+                this.runtime.heapRecords.contextGlobal(retainedAddress));
+        } else {
+            this.globalObject = this.runtime.makeObject();
+            this.heapAddress = this.runtime.heapRecords.allocateContext(
+                this.globalObject.heapAddress);
+        }
         this.execution = null;
         this.destroyed = false;
-        this.runtime.cloneOwnProperties(
-            this.runtime.globalObject, this.globalObject);
+        if (!retainedAddress) {
+            this.runtime.cloneOwnProperties(
+                this.runtime.globalObject, this.globalObject);
+        }
     }
 
     JSContext.prototype.compile = function (source, filename) {
@@ -417,6 +493,10 @@
         return this.context.run(source, filename);
     };
 
+    VM.prototype.installStandardLibrary = function (readSource) {
+        return this.jsRuntime.installStandardLibrary(readSource);
+    };
+
     VM.prototype.execute = function (program) {
         return this.context.runProgram(program);
     };
@@ -446,6 +526,10 @@
     };
     VM.prototype.inspectExecution = function (execution) {
         return this.jsRuntime.inspectExecution(execution);
+    };
+
+    VM.prototype.inspectNativeFrames = function (maximumFrames) {
+        return this.jsRuntime.inspectNativeFrames(maximumFrames);
     };
     VM.prototype.destroy = function () { this.jsRuntime.destroy(); };
 

@@ -1,5 +1,118 @@
 # Historical ECMA test bring-up
 
+## Current target: all Node-passing files except Date first
+
+### Stabilisation checkpoint, 2026-11-02, approximately 12:48 UTC
+
+Complete default standalone run (native interpreter contract 94):
+
+- Selected: 1333 files; executed: 1329; not run: 0.
+- Passed: **906**; failed: **423**, including **38 watchdog timeouts**.
+- Skipped: 4, the same previously documented slow cases; no new exclusions.
+- Runner elapsed: **661.264714 seconds**.
+- `ecma`: 456 passed / 164 failed / 11 timed out.
+- `ecma_2`: 148 passed / 24 failed / 0 timed out.
+- `ecma_3`: 167 passed / 58 failed / 1 timed out / 4 skipped.
+- `ecma_5`: 135 passed / 177 failed / 26 timed out.
+
+Command: `TZ=UTC ./artifacts/js_runner.exe artifacts/ecma-contract94.snap ecma_tests_runner.js --verbose`.
+As explicitly approved, the ECMA default no longer imposes a total instruction
+cap. Finite execution slices and the 10-second worker watchdog remain;
+`--instruction-limit COUNT` still allows an explicit total cap. Test262's
+policy and harness are unchanged. Earlier capped runs below remain historical
+measurements, not equivalent-policy performance controls.
+
+Filename-set comparison with the preceding complete 890-pass guest run:
+**890 preserved / 16 gained / 0 lost**. The gained files include decimal
+parsing, Array length conversion and descriptor handling, sparse-array sort,
+function-length definitions and RegExp instance-property introspection.
+Two Date files also now pass; Date implementation work remains deferred.
+The summed elapsed time of the 890 common passing files is 163.527321 seconds
+versus 301.301653 seconds previously. This is a single-run observation that
+also includes the separately committed harness-preparation improvement,
+not a controlled VM-only speedup claim.
+
+Specific-file parity against the completed direct-Node control (1218 passes):
+
+- **884** files pass on both engines: **72.58%** of Node's passing set.
+- **334** Node-passing files remain failing in the guest (previously 346).
+- **84** of those files are in Date directories (previously 86).
+- **250** are outside Date directories (previously 260).
+- Outside Date directories: **793 / 1043 Node passes matched (76.03%)**.
+- **22** additional guest-only passes do not offset any Node-only failures.
+
+Directory names are only a provisional feature classification: some files
+outside Date also exercise Date. The remaining non-Date-directory gaps
+include extensions (49), Object (33), Array (25), strict (20), JSON (16),
+String (16), RegExp (13), Math (12), FunctionObjects (9), and other smaller
+groups. No claim of non-Date parity is made. The authoritative comparison is
+the individual filename pass set, not the difference between total passes.
+
+This checkpoint adds guest-owned shared-library installation, retained-context
+recovery, precise collector failure diagnostics, rooted descriptor conversion,
+ordinary native descriptor operations, Array-length fixes and RegExp matcher
+improvements. Dense/sparse Array descriptor semantics, object integrity,
+legacy Function behaviour, coercions and Math edge cases remain incomplete.
+Completed regression gates at this checkpoint:
+
+- Project suite on Node and js_min: 12 programs / 270 guest assertions on
+  each host, plus the runner/HTTP CLI and three-context checks; all pass.
+- Bounded structural GC stress on both hosts: 27 audits, 110585 checked
+  edges, 221 property-index audits and 74 embedding collections each;
+  maximum observed bumps 3530632 / 3531072 bytes under the 8388608-byte cap.
+- Standalone GC workload: 24 rounds / 48 native collections; passes.
+- Full Test262: 3292 passed / 0 failed / 0 timed out / 0 not run;
+  470.868855 seconds elapsed. The preceding candidate took 445.004271
+  seconds; this run is 5.8% slower, not evidence of a performance gain.
+- Snapshot gate: program/environment independence, Node/js_min byte identity
+  and a genuine self-hosted byte-identical fixed point; passes.
+
+The serial paired Octane comparison and live demo/HTTP validation are still
+in progress at the initial code check-in. Their completed observations will
+be added before pausing; no result is being inferred from an unfinished run.
+
+### Preceding complete comparison
+
+2026-11-02: parity is a filename-set requirement, not a matching pass total.
+The last complete comparison has 1218 Node passes and 890 guest passes:
+872 common passes, 18 guest-only passes and **346 Node-only passes**. Of
+those Node-only files, **86 are under Date directories and 260 are outside
+them**. Date implementation work is deferred until the other features work.
+Some files outside Date directories also exercise Date; those require source
+review rather than silently treating the directory count as a feature count.
+Date tests remain in full-suite reports, and existing Date passes must not
+regress. No new exclusion or corpus modification accompanies this priority.
+
+Current focused work, not yet a new full-suite result:
+
+- The guest `parseFloat` fast path now recognizes the ES decimal prefix
+  before calling libc for binary64 conversion. Boolean/null inputs no longer
+  use numeric coercion; hexadecimal, libc-only spellings and incomplete
+  exponents follow the JS grammar. Signed zero and Unicode leading whitespace
+  are handled on the guest side. Both historical GlobalObject parseFloat
+  tests and `ecma_5/Global/parseFloat-01.js` pass; the second historical test
+  previously reported 44 failing cases.
+- Ordinary property descriptors now read inherited fields in the ES5.1
+  order, preserve absent attributes, validate getters/setters and enforce
+  non-configurable properties using SameValue (including NaN and signed zero).
+  Descriptor getter results are rooted across subsequent guest callbacks.
+- Valid/rejected ordinary definitions and ordinary/function descriptor reads
+  have native kernel paths. Descriptor result objects are ordinary guest-heap
+  objects with normal property attributes, not benchmark-specific objects.
+  Exotic/dense indexed properties still need their separate semantic work.
+- `15.2.3.6-function-length.js` and `15.2.3.6-new-definition.js` now pass
+  focused checks under the normal limits. Dictionary redefinition part 1
+  progresses to the instruction limit in about 5.7 seconds rather than
+  exhausting the wall-clock watchdog; it is still counted as outstanding.
+- The portable array own-property check no longer reports holes as present
+  or detaches argument mappings merely by reading ownership. Property-key
+  conversion now uses guest ToString instead of stringifying a VM facade.
+
+The project/regression gates for these additions are in progress. The
+Test262 harness is not being changed for this work. The separately committed
+ECMA preparation optimization and its measurements are described in
+[ECMA_HARNESS_PERFORMANCE.md](ECMA_HARNESS_PERFORMANCE.md).
+
 ## VM parity work: built-in initialization
 
 2026-11-01: the repeated uncapped Node control remains **1218 passed / 111
@@ -100,6 +213,80 @@ or a second implementation of the algorithms. Then use the new corpus to
 drive generic descriptor, coercion and sparse-array support, preserving the
 existing native fast paths rather than replacing them with test-specific
 behavior. Per-file pass preservation remains a regression gate.
+
+## Shared guest-library migration (in progress)
+
+2026-11-01, approximately 22:15 UTC:
+
+- The next complete candidate run executes the same 1329 files: **888
+  passed / 441 failed / 40 timed out / 4 skipped / 0 not run**, in
+  **832.469084 seconds**. Compared by filename with the initialization
+  checkpoint, this is 21 new passes and one lost pass, not yet a stable
+  parity checkpoint. No corpus source, limit or default skip was changed.
+- The candidate exposes the existing guest-written Array, String, Number
+  and RegExp libraries through one runtime installation API, rather than
+  making their availability depend on the Node-compatible embedding.
+  Bootstrap bindings live in a private runtime-owned context.
+- The lost pass is `ecma_3/extensions/regress-103087.js`. Running the
+  owned matcher, rather than an outer interpreter's regex callback, made
+  its work visible to the unchanged instruction limit. A diagnostic run
+  completes correctly with a larger explicit budget; that is not counted
+  as a default-budget pass.
+- Follow-up matcher work removes impossible backtracking choices when a
+  greedy character repeat and its following mandatory literal are proven
+  disjoint in both case modes. It does not cross captures or assertions.
+  The lost file now passes a focused default-budget run in **457.253 ms /
+  2904106 instructions**. The HTML replacement regression and RegExp exec
+  tests also pass. A fresh full run is still required before replacing
+  the whole-suite counts above.
+- Project suites pass on both Node and js_min: 12 programs / 270 assertions
+  each, plus compiler, CLI and three-context checks. The consuming compiler
+  fix is checked in separately as `da624af`: replayed finally subtrees
+  retain nested function ASTs until their owning statement is released.
+- New optional native-frame sampling reads published heap frames at normal
+  budget yields. It is diagnostic-only, uses no threads, and is excluded
+  from clean timing runs. The default runner reports remain unchanged
+  except that `--verbose` also reports guest instruction counts.
+
+Follow-up complete run, approximately 22:37 UTC:
+
+- **890 passed / 439 failed / 38 timed out / 4 skipped / 0 not run**;
+  1333 selected / 1329 executed, **835.356120 seconds** elapsed.
+- Compared by filename with the 868-pass initialization checkpoint:
+  **22 new passes and zero lost passes**. The summed per-file time for
+  all 868 common passes is **293.988 seconds before / 295.617 seconds
+  after** (about 0.6% higher in this pair). The overall run includes
+  additional progress into previously failing expensive combinations;
+  total elapsed time alone is not a common-work throughput comparison.
+- Full Test262 passes **3292 / 3292**, with no failures, timeouts or
+  not-run files, in **445.004271 seconds**. This is 4.9% above the
+  preceding single 424.389549-second run and is retained as a performance
+  follow-up, not called a speedup or silently discarded.
+- Three previously failing descriptor-combination files now report the
+  portable collector's generic marker error instead of timing out. That
+  error label also covers invalid-edge/layout statuses, so it must not
+  yet be classified as proven workspace exhaustion. The collector now
+  distinguishes these statuses and reports the stored bad-edge details;
+  focused diagnosis is in progress.
+
+The uncommitted library migration is not yet claimed regression-free:
+collector diagnosis and the remaining periodic gates are still pending.
+
+2026-11-02 collector follow-up: the marker status was an **invalid reference**,
+not actual workspace exhaustion: a context's active-frame edge pointed at a
+reclaimed frame. A loaded script can export functions and then close its
+embedding context handle. Frame synchronization formerly substituted the
+caller's context when the original handle was absent from the registry,
+publishing a foreign frame into the wrong context. It now reconstructs a
+borrowed facade from the retained heap context; function invocation does the
+same for cached handles that have since been destroyed. Reused frames refresh
+their context metadata as well as their environment and PC. Borrowed facades
+are not registered as permanent roots. The reproducer gets past its former
+invalid edge and reaches the ordinary test limit instead. Bounded structural
+GC stress passes on both hosts: 27 audits / 110423 checked edges / 221
+property-index audits / 74 embedding collections, with maximum bumps
+3530328 and 3530768 bytes under the unchanged 8 MiB cap. These stress results
+precede the subsequent descriptor kernel additions; their gates are pending.
 
 ## Default-policy update
 

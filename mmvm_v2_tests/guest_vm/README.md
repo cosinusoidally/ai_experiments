@@ -143,6 +143,48 @@ The bootstrap owns all internal module ordering. Node code can use the same
 entry point with `require("./guest_vm/guest_vm.js")`; direct `vm.js` requires
 remain compatible.
 
+Guest-written standard-library algorithms can also be installed by a bare
+embedder, without constructing a Node-compatible environment:
+
+```js
+var vm = new GuestVM({nativeInterpreter: true});
+vm.installStandardLibrary(function (filename) {
+    return read(filename); // the embedding supplies source text
+});
+```
+
+The equivalent multi-context API is
+`jsRuntime.installStandardLibrary(readSource)`. Install once, before running
+application code or preparing isolated test contexts. Subsequent calls do not
+reload the libraries. All contexts in that runtime share the installed
+intrinsic methods. The reader must return a primitive string for each of
+`guest_vm/array_runtime.js`, `buffer_runtime.js`, `number_runtime.js` and
+`regexp_runtime.js` (all names have the `guest_vm/` prefix). A Node embedder
+may supply `fs.readFileSync(filename, "utf8")`; an embedded application can
+use a source map or its own filesystem service instead. The VM API imports
+no filesystem or Node modules.
+
+One runtime-owned private context compiles and retains the helper functions.
+Its bootstrap bindings are not installed in application globals, and guest
+replacement of an application's global `Object`/`Array` bindings does not
+replace the private bindings. Intrinsic prototype objects are still shared;
+this is not a separate user realm. Manage only context handles created by
+your embedding; the private context lives until runtime destruction. If
+initialization throws, destroy that partially initialized runtime rather than
+attempting to use partially installed methods. The Node-compatible adapter
+uses this same API; there is no second set of library implementations.
+
+Destroying an embedding context handle prevents further use of that handle;
+it does not change the home context of functions still reachable on the
+runtime heap. Such functions and their frames retain the heap context and
+its global object. Semantic fallback can reconstruct a borrowed context
+facade from that record without registering a new permanent root. Both
+function invocation and native-frame synchronization resolve this actual
+home context; neither substitutes the caller's context when the original
+embedding handle is gone. Frame reuse also refreshes the context field,
+not just the lexical environment and PC. This distinction is important for
+loaded scripts which export functions before their loader handle is closed.
+
 Run the complete current suite with either host or both:
 
 ```sh
@@ -406,6 +448,7 @@ or relying on host-side handles:
 ```js
 var record = vm.inspectHeapRecord(guestAddress);
 var snapshot = vm.inspectExecution(execution);
+var nativeTop = vm.inspectNativeFrames(1);
 ```
 
 `inspectHeapRecord` reports the record type, allocation size, GC state, and the
@@ -416,6 +459,17 @@ when the native engine is enabled its `nativeEngine` field also reports native
 runs, bytecodes, and semantic exits. These objects are read-only diagnostic snapshots allocated on
 the host. They are not guest values and changing them never changes VM state.
 The VM continues to access all authoritative fields through `HeapRecords`.
+
+`inspectNativeFrames(maximumFrames)` reads the last published native-engine
+stack at a yield, top frame first, directly through those accessors. It does
+not decode programs or materialize register arrays. Each frame includes its
+heap/program address, PC, caller, context and a bounded function-source
+preview. Cached names/filenames are included when available; otherwise they
+are explicitly unknown rather than inferred from a different execution.
+Omitting the limit reads the chain, with cycle detection. Use it between
+resume calls, before scheduling another execution on that runtime; unlike
+`inspectExecution(execution)`, it is not a historical view of an arbitrary
+suspended execution. The same API is available on `JSRuntime`.
 
 The embedder provides on both hosts:
 

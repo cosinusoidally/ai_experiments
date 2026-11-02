@@ -26,7 +26,13 @@
     var sharedTrackedIndexX86 = null;
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
+    var MARK_WORK_STACK_EXHAUSTED = -1;
+    var MARK_INVALID_REFERENCE = -2;
+    var MARK_INVALID_RECORD_LAYOUT = -3;
     var markLayoutBindings = {
+        MARK_WORK_STACK_EXHAUSTED: MARK_WORK_STACK_EXHAUSTED,
+        MARK_INVALID_REFERENCE: MARK_INVALID_REFERENCE,
+        MARK_INVALID_RECORD_LAYOUT: MARK_INVALID_RECORD_LAYOUT,
         PROGRAM_BINDING_NAMES: HeapRecords.KernelConstants.PROGRAM_BINDING_NAMES,
         PROGRAM_BINDING_NAMES_EDGE: HeapRecords.KernelConstants.PROGRAM_BINDING_NAMES_EDGE,
         HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
@@ -184,8 +190,6 @@
         var STRING_ROPE_FLAG = 1;
         var RECORD_ALIGNMENT_MASK = 7;
         var MINIMUM_RECORD_BYTES = 16;
-        var MARK_INVALID_REFERENCE = -2;
-        var MARK_INVALID_RECORD_LAYOUT = -3;
         var INVALID_REFERENCE_INDEX_RECORD_LAYOUT = 255;
         var address = HEAP_FIRST_RECORD;
         var stackCount = 0;
@@ -265,7 +269,7 @@
                     if (recordMark(heapBase, address) !== generation) {
                         setRecordMark(heapBase, address, generation);
                     }
-                    if (stackBase + (stackCount + 1) * 4 > heapLimit) return -1;
+                    if (stackBase + (stackCount + 1) * 4 > heapLimit) return MARK_WORK_STACK_EXHAUSTED;
                     store32(heapBase + stackBase + stackCount * 4, address);
                     stackCount = stackCount + 1;
                 }
@@ -559,7 +563,7 @@
                     if (recordType(heapBase, target) !== HEAP_TYPE_FREE) {
                         if (recordMark(heapBase, target) !== generation) {
                             setRecordMark(heapBase, target, generation);
-                            if (stackBase + (stackCount + 1) * 4 > heapLimit) return -1;
+                            if (stackBase + (stackCount + 1) * 4 > heapLimit) return MARK_WORK_STACK_EXHAUSTED;
                             store32(heapBase + stackBase + stackCount * 4,
                                     target);
                             stackCount = stackCount + 1;
@@ -768,6 +772,35 @@
                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1) | 0;
     };
 
+    /* The marker publishes four diagnostic words before returning an invalid
+     * edge/layout status. Read them only for those statuses: on stack overflow
+     * the same workspace still contains ordinary pending mark addresses. */
+    HeapSweeper.prototype.describeMarkFailure = function (status) {
+        if (status === MARK_WORK_STACK_EXHAUSTED) {
+            return "native guest marker exhausted its work stack";
+        }
+        if (status !== MARK_INVALID_REFERENCE && status !== MARK_INVALID_RECORD_LAYOUT) {
+            return "native guest marker returned unknown status " + status;
+        }
+        var workspace = this.heap.collectorStackBase;
+        var diagnostic = this.heap.memory;
+        var field = 0;
+        function nextWord() {
+            var value = diagnostic.readU32Trusted(workspace + field * Heap.WORD_BYTES);
+            field++;
+            return value;
+        }
+        var record = nextWord();
+        var type = nextWord();
+        var referenceIndex = nextWord();
+        var target = nextWord();
+        return "native guest marker found " +
+            (status === MARK_INVALID_REFERENCE ? "an invalid reference" : "an invalid record layout") +
+            ": record=" + record + " type=" + type +
+            " referenceIndex=" + referenceIndex +
+            (status === MARK_INVALID_REFERENCE ? " target=" : " recordBytes=") + target;
+    };
+
     HeapSweeper.prototype.sweep = function (generation) {
         if (this.compiled.backend === "i386") {
             return this.compiled.fn(this.heap.memory.nativeAddress(0),
@@ -841,6 +874,11 @@
      * the implementation object so host-coordinated and self-coordinated
      * collection cannot drift into separate marking or sweeping semantics. */
     HeapSweeper.markKernel = heapMarkKernel;
+    HeapSweeper.MarkConstants = {
+        MARK_WORK_STACK_EXHAUSTED: MARK_WORK_STACK_EXHAUSTED,
+        MARK_INVALID_REFERENCE: MARK_INVALID_REFERENCE,
+        MARK_INVALID_RECORD_LAYOUT: MARK_INVALID_RECORD_LAYOUT
+    };
     HeapSweeper.sweepKernel = heapSweepKernel;
 
     root.GuestVMHeapSweeper = HeapSweeper;

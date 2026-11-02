@@ -94,8 +94,9 @@
                       BOUND_FUNCTION: 127,
                       MATH_TAN: 128,
                       OBJECT_KEYS: 129,
-                      PROGRAM_SET_BINDING_NAME: 130};
-    Intrinsics.LAST_ID = Intrinsics.PROGRAM_SET_BINDING_NAME;
+                      PROGRAM_SET_BINDING_NAME: 130,
+                      OBJECT_GET_OWN_PROPERTY_DESCRIPTOR: 131};
+    Intrinsics.LAST_ID = Intrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
     /* ES5.1 public function lengths, not the native dispatcher's minimum
      * accepted argument counts. Callbacks all have the embedding signature
      * (receiver, args, context), which must never leak into this metadata.

@@ -7,8 +7,9 @@
     var fs = require("fs"), root = "../../js_tests/tests";
     var roots = ["ecma", "ecma_2", "ecma_3", "ecma_5"];
     var selectors = [], tests = [], quiet = false, summaryOnly = false;
-    var failFast = false, list = false, verbose = false, limit = 20000000, timeoutMs = 10000;
+    var failFast = false, list = false, verbose = false, limit = Infinity, timeoutMs = 10000;
     var includeSlow = false;
+    var sampleFunctions = false;
     var preloadHarnesses = true;
     var slowTests = [
         "ecma_3/Array/regress-322135-03.js",
@@ -21,7 +22,7 @@
     function usage(message) {
         if (message) console.error(message);
         console.log("usage: ecma_tests_runner.js / ecma_tests_runner_node.js [--fail-fast] [--verbose] [--quiet] " +
-            "[--summary-only] [--list] [--include-slow] [--no-harness-preload] [--instruction-limit COUNT] [--timeout-ms COUNT] [all|ecma/path ...]");
+            "[--summary-only] [--list] [--include-slow] [--sample-functions] [--no-harness-preload] [--instruction-limit COUNT] [--timeout-ms COUNT] [all|ecma/path ...]");
         if (message) process.exit(2);
     }
     for (var index = 0; index < args.length; index++) {
@@ -34,6 +35,7 @@
         else if (argument === "--list") list = true;
         else if (argument === "--include-slow") includeSlow = true;
         else if (argument === "--no-harness-preload") preloadHarnesses = false;
+        else if (argument === "--sample-functions") sampleFunctions = true;
         else if (argument === "--instruction-limit") {
             limit = Number(args[++index]);
             if (!(limit >= 1 && limit <= 2147483647) || limit !== Math.floor(limit)) usage("invalid instruction limit");
@@ -117,16 +119,21 @@
     }
     var backend = null;
     if (tests.length) {
-        if (typeof EcmaTestsBackend !== "undefined") backend = EcmaTestsBackend;
+        if (typeof EcmaTestsBackend !== "undefined") {
+            if (sampleFunctions) usage("--sample-functions requires the guest VM backend");
+            backend = EcmaTestsBackend;
+        }
         else {
-            var guestBackend = require("./ecma_tests_guest.js").create(fs);
-            backend = require("./ecma_tests_process.js").create(guestBackend, timeoutMs);
+            var guestModule = require("./ecma_tests_guest.js");
+            var guestBackend = guestModule.create(fs,
+                {sampleFunctions: sampleFunctions});
             if (preloadHarnesses) {
                 var preloadStarted = clock();
                 var preloaded = guestBackend.prepareHarnesses(sharedHarnessFiles);
                 if (verbose) console.log("Prepared " + preloaded +
                     " shared harness programs in " + (clock() - preloadStarted).toFixed(3) + " ms");
             }
+            backend = require("./ecma_tests_process.js").create(guestBackend, timeoutMs);
         }
     }
     var total = {passed: 0, failed: 0, timedOut: 0, executed: 0};
@@ -174,6 +181,9 @@
             suites[suite][passed ? "passed" : "failed"]++;
             if (result.status === "timeout") { total.timedOut++; suites[suite].timedOut++; }
             var timing = "; elapsed: " + elapsed.toFixed(3) + " ms";
+            if (verbose && typeof result.instructions === "number") {
+                timing += "; instructions: " + result.instructions;
+            }
             if (passed) { if (!quiet) console.log("PASS " + relative + timing); }
             else if (!summaryOnly) console.error("FAIL " + relative + ": " +
                 (negative && result.status === "completed" ? "expected exception" :

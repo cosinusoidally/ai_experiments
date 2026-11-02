@@ -55,6 +55,11 @@
         this.heap.memory.writeU32Trusted(address + TAG_OFFSET, tag);
     };
 
+    /* Zero denotes an absent vector element, not the JS value undefined. */
+    ValueCells.prototype.writeAbsentAt = function (address) {
+        this.setTagAt(address, 0);
+    };
+
     ValueCells.prototype.int32PayloadAddressAt = function (address) {
         return address + LOW_OFFSET;
     };

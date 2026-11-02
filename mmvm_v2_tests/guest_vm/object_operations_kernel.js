@@ -1,6 +1,74 @@
 /* Shared native object operations. Representation-specific prototype fields
  * are selected here; consumers do not duplicate record offsets. */
 (function (root) {
+    var DESCRIPTOR_KIND_FIELDS = 2;
+    var DESCRIPTOR_RESULT_FIELDS = 4;
+    var descriptorFieldNames = ["value", "writable", "enumerable", "configurable", "get", "set"];
+
+    /* Build an ordinary descriptor object directly on the guest heap. Dense
+     * indexed/exotic properties remain with their specialized semantic path;
+     * ordinary objects and function named properties share this operation. */
+    function objectOwnPropertyDescriptorKernel(heapBase, state, target,
+            registers, argumentsVector, argumentCount, stringSupport, keysBase) {
+        if (argumentCount < 2) return 0;
+        var ownerCell = programArgumentCellKernel(heapBase, argumentsVector, registers, 0);
+        var keyCell = programArgumentCellKernel(heapBase, argumentsVector, registers, 1);
+        if (ownerCell === 0 || keyCell === 0) return 0;
+        if (valueCellTag(0, ownerCell) !== VALUE_TAG_REFERENCE) return 0;
+        var owner = valueCellReference(0, ownerCell), type = recordType(heapBase, owner);
+        if (type !== HEAP_TYPE_OBJECT && type !== HEAP_TYPE_NATIVE_FUNCTION &&
+            type !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        var key = propertyStringKeyReferenceKernel(heapBase, keyCell, stringSupport);
+        if (key === 0) return 0;
+        var entry = findOwnPropertyEntryKernel(heapBase, state, owner, key);
+        if (entry === 0) {
+            setValueCellUndefined(target);
+            return 1;
+        }
+        var attributes = ownPropertyEntryAttributesKernel(heapBase, owner, entry);
+        var bytes = OBJECT_RECORD_BYTES + PROPERTY_STORAGE_RECORD_BYTES +
+            DESCRIPTOR_RESULT_FIELDS * PROPERTY_STORAGE_ENTRY_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        var object = engineHeapBump(heapBase, state), storage = object + OBJECT_RECORD_BYTES;
+        setRecordType(heapBase, object, HEAP_TYPE_OBJECT);
+        setRecordSize(heapBase, object, OBJECT_RECORD_BYTES);
+        setRecordMark(heapBase, object, 0);
+        setRecordFlags(heapBase, object, 0);
+        setObjectPrototype(heapBase, object, valueCellReference(0,
+            vectorCellAddress(heapBase, stringSupport, RUNTIME_SUPPORT_OBJECT_PROTOTYPE)));
+        setObjectExtensible(heapBase, object, 1);
+        setObjectReserved(heapBase, object, 0);
+        initializeOwnPropertyStorageKernel(heapBase, object, storage, DESCRIPTOR_RESULT_FIELDS);
+        var accessor = attributes & PROPERTY_ATTRIBUTE_ACCESSOR;
+        var index = 0;
+        while (index < DESCRIPTOR_RESULT_FIELDS) {
+            var keyIndex = index;
+            if (accessor !== 0 && index < DESCRIPTOR_KIND_FIELDS) keyIndex = index + DESCRIPTOR_RESULT_FIELDS;
+            var resultEntry = ownPropertyEntryDescriptorKernel(heapBase, object, index + 1);
+            setPropertyDescriptorKey(0, resultEntry, valueCellReference(0,
+                vectorCellAddress(heapBase, stringSupport, keysBase + keyIndex)));
+            setPropertyDescriptorAttributes(0, resultEntry, DEFAULT_PROPERTY_ATTRIBUTES);
+            setPropertyDescriptorSetter(0, resultEntry, 0);
+            var resultCell = propertyDescriptorValueCell(0, resultEntry);
+            if (index === 0) copyValueCell(resultCell,
+                ownPropertyEntryValueCellKernel(heapBase, owner, entry));
+            else if (accessor !== 0 && index === 1) {
+                var setter = ownPropertyEntrySetterKernel(heapBase, owner, entry);
+                if (setter === 0) setValueCellUndefined(resultCell);
+                else setValueCellReference(resultCell, setter);
+            } else {
+                var flag = PROPERTY_ATTRIBUTE_WRITABLE;
+                if (index === DESCRIPTOR_KIND_FIELDS) flag = PROPERTY_ATTRIBUTE_ENUMERABLE;
+                else if (index > DESCRIPTOR_KIND_FIELDS) flag = PROPERTY_ATTRIBUTE_CONFIGURABLE;
+                if ((attributes & flag) !== 0) setValueCellTrue(resultCell);
+                else setValueCellFalse(resultCell);
+            }
+            index = index + 1;
+        }
+        setEngineHeapBump(heapBase, state, object + bytes);
+        setValueCellReference(target, object);
+        return 1;
+    }
     /* ES5.1 [[Class]] is not inferred from an object's public prototype or
      * constructor. Date/Error identity lives in object-record flags; wrapper
      * primitives and Arguments already have dedicated internal storage. */
@@ -266,7 +334,10 @@
         return count;
     }
 
-    var exports = {functions: {
+    var exports = {descriptorFieldNames: descriptorFieldNames,
+      constants: {DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
+                  DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
+        objectOwnPropertyDescriptorKernel: objectOwnPropertyDescriptorKernel,
         objectClassIndexKernel: objectClassIndexKernel,
         objectToStringKernel: objectToStringKernel,
         defineLiteralDataKernel: defineLiteralDataKernel,

@@ -69,21 +69,23 @@
                 ", address " + (callable && callable.heapAddress || 0) + ")");
         }
         runtime.assertOwned(callable);
+        var homeContext = runtime.functionHomeContext(callable, context);
+        if (!context || context.destroyed) context = homeContext;
         var execution = new Execution(callable.program, runtime, context);
         while (execution.frames.length) {
             execution.releaseFrame(execution.frames.pop());
         }
         execution.frames = [makeFrame(callable.program, runtime,
-            callable.homeContext || context, receiver, args || [], runtime.functionClosure(callable),
+            homeContext, receiver, args || [], runtime.functionClosure(callable),
             callable, -1)];
         runtime.heapRecords.setContextActiveFrame(
-            (callable.homeContext || context).heapAddress,
+            homeContext.heapAddress,
             execution.frames[0].heapAddress);
         if (runtime.threadedCompiler) {
             var compiled = runtime.threadedCompiler.compile(callable.program);
             if (compiled) {
                 execution.compiledEntry = {fn: compiled, callable: callable,
-                    context: callable.homeContext || context, receiver: receiver,
+                    context: homeContext, receiver: receiver,
                     args: args || []};
             }
         }
@@ -389,16 +391,7 @@
                 var programAddress = authoritativeProgram;
                 var program = this.runtime.adoptHeapProgram(programAddress);
                 var contextAddress = this.runtime.heapRecords.frameContext(address);
-                var context = null;
-                var contextIndex = 0;
-                while (contextIndex < this.runtime.contexts.length) {
-                    if (this.runtime.contexts[contextIndex].heapAddress ===
-                        contextAddress) {
-                        context = this.runtime.contexts[contextIndex];
-                        break;
-                    }
-                    contextIndex++;
-                }
+                var context = this.runtime.contextForHeapAddress(contextAddress);
                 var environmentAddress =
                     this.runtime.heapRecords.frameEnvironment(address);
                 var environmentMetadata = environmentAddress ?
@@ -431,6 +424,10 @@
 
     Execution.prototype.refreshNativeFrame = function (frame) {
         var address = frame.heapAddress;
+        var contextAddress = this.runtime.heapRecords.frameContext(address);
+        if (!frame.context || frame.context.heapAddress !== contextAddress) {
+            frame.context = this.runtime.contextForHeapAddress(contextAddress);
+        }
         var environmentAddress =
             this.runtime.heapRecords.frameEnvironment(address);
         var environmentMetadata = environmentAddress ?
@@ -888,11 +885,13 @@
                     var directEval = code[pc + 3] === -2 &&
                         callableValue && callableValue.directEval;
                     frame.pc = pc + 5;
+                    var calleeContext = frame.context;
                     if (callableValue && callableValue.guestType ===
                         "bytecodeFunction") {
+                        calleeContext = this.runtime.functionHomeContext(
+                            callableValue, frame.context);
                         receiver = this.runtime.normalizeCallReceiver(
-                            callableValue.homeContext || frame.context,
-                            receiver, !!callableValue.program.strict);
+                            calleeContext, receiver, !!callableValue.program.strict);
                     }
                     if (directEval) {
                         if (!args.length || typeof args[0] !== "string") {
@@ -951,7 +950,7 @@
                                 var compiledStarted = new Date().getTime();
                                 try {
                                     registers[destination] = threaded(this.runtime,
-                                        callableValue.homeContext || frame.context,
+                                        calleeContext,
                                         receiver, args, this.runtime.functionClosure(callableValue),
                                         callableValue);
                                 } finally {
@@ -961,12 +960,12 @@
                                 }
                             } else {
                                 registers[destination] = threaded(this.runtime,
-                                    callableValue.homeContext || frame.context, receiver,
+                                    calleeContext, receiver,
                                     args, this.runtime.functionClosure(callableValue), callableValue);
                             }
                         } else {
                             this.frames.push(makeFrame(callableValue.program, this.runtime,
-                                callableValue.homeContext || frame.context, receiver, args,
+                                calleeContext, receiver, args,
                                 this.runtime.functionClosure(callableValue), callableValue,
                                 destination, frame));
                         }
@@ -1059,8 +1058,10 @@
                             this.runtime.setPrototype(constructedReceiver,
                                                       constructorPrototype);
                         }
+                        var constructorContext = this.runtime.functionHomeContext(
+                            constructorValue, frame.context);
                         var constructorFrame = makeFrame(constructorValue.program,
-                            this.runtime, constructorValue.homeContext || frame.context,
+                            this.runtime, constructorContext,
                             constructedReceiver, args, this.runtime.functionClosure(constructorValue),
                             constructorValue, constructDestination, frame);
                         constructorFrame.constructReceiver = constructedReceiver;

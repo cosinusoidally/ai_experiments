@@ -39,7 +39,7 @@
         args = args.slice(1);
     }
     if (traceErrors) {
-        function traceMethod(label, original) {
+        var traceMethod = function (label, original) {
             return function () {
                 try { return original.apply(this, arguments); }
                 catch (error) {
@@ -54,8 +54,8 @@
                     throw error;
                 }
             };
-        }
-        function traceOwner(owner, label) {
+        };
+        var traceOwner = function (owner, label) {
             var name;
             for (name in owner) {
                 if (Object.prototype.hasOwnProperty.call(owner, name) &&
@@ -63,7 +63,7 @@
                     owner[name] = traceMethod(label + "." + name, owner[name]);
                 }
             }
-        }
+        };
         traceOwner(Parser.prototype, "Parser");
         traceOwner(Compiler.prototype, "Compiler");
         traceOwner(nodeHost ? require("../function_analysis.js") :

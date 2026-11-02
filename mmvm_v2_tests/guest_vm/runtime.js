@@ -15,6 +15,8 @@
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     var DateSupport = root.GuestVMDateSupport;
     var ErrorSupport = root.GuestVMErrorSupport;
+    /* null is a valid retained guest value, not a free-handle marker. */
+    var RELEASED_ROOT = {};
     if (typeof module !== "undefined" && module.exports) {
         BufferSupport = require("./buffer.js");
         TypedArraySupport = require("./typed_array.js");
@@ -1272,15 +1274,7 @@
         callable.name = program.name || "";
         callable.source = program.source || null;
         var contextAddress = this.heapRecords.functionHomeContext(address);
-        callable.homeContext = null;
-        var contextIndex = 0;
-        while (contextIndex < this.contexts.length) {
-            if (this.contexts[contextIndex].heapAddress === contextAddress) {
-                callable.homeContext = this.contexts[contextIndex];
-                break;
-            }
-            contextIndex++;
-        }
+        callable.homeContext = this.contextForHeapAddress(contextAddress);
         var closureAddress = this.heapRecords.functionClosure(address);
         if (closureAddress) this.adoptEnvironment(closureAddress, {});
         this.functionMetadata[key] = callable;
@@ -1410,6 +1404,113 @@
             HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
     };
 
+    Runtime.prototype.sameValue = function (left, right) {
+        if (left === right) return left !== 0 || 1 / left === 1 / right;
+        if (typeof left === "number" && typeof right === "number") {
+            return left !== left && right !== right;
+        }
+        return !!left && !!right && !!left.guestType && !!right.guestType &&
+            left.heapAddress === right.heapAddress;
+    };
+
+    /* ES5.1 ToPropertyDescriptor followed by ordinary [[DefineOwnProperty]].
+     * Resolve the target entry only after descriptor getters have run: those
+     * getters may mutate it, grow packed storage, or collect. Returned guest
+     * objects are explicitly rooted across subsequent getter calls. */
+    Runtime.prototype.definePropertyFromDescriptor = function (object, key, descriptor) {
+        var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
+        var desc = {}, roots = [], index;
+        try {
+            for (index = 0; index < fields.length; index++) {
+                var field = fields[index];
+                if (this.hasProperty(descriptor, field)) {
+                    var value = this.getProperty(descriptor, field);
+                    roots.push(this.retain(value));
+                    desc[field] = field === "enumerable" || field === "configurable" ||
+                        field === "writable" ? this.truthy(value) : value;
+                    if ((field === "get" || field === "set") && value !== undefined &&
+                        (!value || (value.guestType !== "function" &&
+                                    value.guestType !== "bytecodeFunction"))) {
+                        throw new TypeError("property " + field + " is not callable");
+                    }
+                }
+            }
+            var accessor = own(desc, "get") || own(desc, "set");
+            var data = own(desc, "value") || own(desc, "writable");
+            if (accessor && data) throw new TypeError("invalid mixed property descriptor");
+            if (object.guestType === "array" && key === "length" &&
+                !this.isArgumentsObject(object)) {
+                return this.defineArrayLength(object, desc);
+            }
+            var keyAddress = this.internStringAddress(key);
+            var entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
+            var attributes = entry ? this.heapRecords.ownPropertyEntryAttributes(
+                object.heapAddress, entry) : 0;
+            var oldAccessor = !!(attributes & HeapRecords.Attributes.ACCESSOR);
+            var oldValue = entry ? this.readHeapValue(
+                this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, entry)) : undefined;
+            var oldSetterAddress = entry ? this.heapRecords.ownPropertyEntrySetter(
+                object.heapAddress, entry) : 0;
+            var oldSetter = oldSetterAddress ? this.readHeapReference(oldSetterAddress) : undefined;
+            if (!entry) {
+                if (object.guestType === "object" &&
+                    !this.heapRecords.objectIsExtensible(object.heapAddress)) {
+                    throw new TypeError("object is not extensible");
+                }
+            } else if (!(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
+                if (desc.configurable || (own(desc, "enumerable") &&
+                    desc.enumerable !== !!(attributes & HeapRecords.Attributes.ENUMERABLE))) {
+                    throw new TypeError("cannot reconfigure property");
+                }
+                if ((accessor || data) && oldAccessor !== accessor) {
+                    throw new TypeError("cannot change non-configurable property kind");
+                }
+                if (oldAccessor) {
+                    if ((own(desc, "get") && !this.sameValue(desc.get, oldValue)) ||
+                        (own(desc, "set") && !this.sameValue(desc.set, oldSetter))) {
+                        throw new TypeError("cannot replace non-configurable accessor");
+                    }
+                } else if (!(attributes & HeapRecords.Attributes.WRITABLE)) {
+                    if (desc.writable || (own(desc, "value") &&
+                        !this.sameValue(desc.value, oldValue))) {
+                        throw new TypeError("cannot write non-writable property");
+                    }
+                }
+            }
+            if ((accessor || data) && oldAccessor !== accessor) {
+                attributes &= ~(HeapRecords.Attributes.ACCESSOR | HeapRecords.Attributes.WRITABLE);
+                oldValue = undefined;
+                oldSetter = undefined;
+            }
+            if (accessor) attributes |= HeapRecords.Attributes.ACCESSOR;
+            if (own(desc, "enumerable")) {
+                attributes &= ~HeapRecords.Attributes.ENUMERABLE;
+                if (desc.enumerable) attributes |= HeapRecords.Attributes.ENUMERABLE;
+            }
+            if (own(desc, "configurable")) {
+                attributes &= ~HeapRecords.Attributes.CONFIGURABLE;
+                if (desc.configurable) attributes |= HeapRecords.Attributes.CONFIGURABLE;
+            }
+            if (own(desc, "writable")) {
+                attributes &= ~HeapRecords.Attributes.WRITABLE;
+                if (desc.writable) attributes |= HeapRecords.Attributes.WRITABLE;
+            }
+            if (attributes & HeapRecords.Attributes.ACCESSOR) {
+                this.defineAccessorProperty(object, keyAddress,
+                    own(desc, "get") ? desc.get : oldValue,
+                    own(desc, "set") ? desc.set : oldSetter, attributes);
+            } else {
+                this.defineDataProperty(object, key,
+                    own(desc, "value") ? desc.value : oldValue, attributes);
+                entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
+                this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, entry, 0);
+            }
+            return object;
+        } finally {
+            for (index = roots.length - 1; index >= 0; index--) this.release(roots[index]);
+        }
+    };
+
     Runtime.prototype.defineLiteralAccessor = function (
             object, key, callable, setterDefinition) {
         var keyAddress = this.internStringAddress(this.propertyKey(key));
@@ -1432,6 +1533,16 @@
             HeapRecords.Attributes.CONFIGURABLE);
     };
 
+    Runtime.prototype.functionHomeContext = function (callable, fallback) {
+        var context = callable.homeContext;
+        if (context && !context.destroyed) return context;
+        var address = this.heapRecords.functionHomeContext(callable.heapAddress);
+        if (!address) return fallback || null;
+        context = this.contextForHeapAddress(address);
+        callable.homeContext = context;
+        return context;
+    };
+
     Runtime.prototype.invokePropertyFunction = function (
             callable, receiver, args) {
         if (!callable) return undefined;
@@ -1440,7 +1551,7 @@
                 throw new Error("guest accessor execution is unavailable");
             }
             return this.interpretGuest(callable, receiver, args,
-                                       callable.homeContext);
+                                       this.functionHomeContext(callable));
         }
         return this.call(callable, receiver, args);
     };
@@ -1481,6 +1592,15 @@
     };
 
     Runtime.prototype.setNamedProperty = function (object, key, value, strict) {
+        if (object.guestType === "array" && key === "length" &&
+            !this.isArgumentsObject(object)) {
+            if (!this.isArrayLengthWritable(object)) {
+                if (strict) throw new TypeError("array length is not writable");
+                return value;
+            }
+            this.defineArrayLength(object, {value: value});
+            return value;
+        }
         var property = this.heapOwnProperty(object, key, false);
         if (property) {
             this.writePropertyEntry(object, property, object, value, strict);
@@ -1534,6 +1654,63 @@
 
     Runtime.prototype.arrayLength = function (array) {
         return this.heapRecords.arrayLength(array.heapAddress);
+    };
+
+    Runtime.prototype.isArrayLengthWritable = function (array) {
+        if (!this.heapRecords.objectPropertyHead(array.heapAddress)) return true;
+        var entry = this.heapOwnProperty(array, "length", false);
+        return !entry || !!(this.heapRecords.ownPropertyEntryAttributes(
+            array.heapAddress, entry) & HeapRecords.Attributes.WRITABLE);
+    };
+
+    Runtime.prototype.publishArrayLength = function (array, length, writable) {
+        this.heapRecords.setArrayLength(array.heapAddress, length);
+        /* The element vector owns the value; a materialized named entry
+         * stores exceptional attributes. Descriptor reads always use the
+         * current vector length, not an obsolete mirror in that entry. */
+        if (!writable || this.heapOwnProperty(array, "length", false)) {
+            this.defineDataProperty(array, "length", length,
+                writable ? HeapRecords.Attributes.WRITABLE : 0);
+        }
+        array.arrayStructureVersion++;
+        array.valueVersion++;
+    };
+
+    Runtime.prototype.defineArrayLength = function (array, desc) {
+        var oldLength = this.arrayLength(array);
+        var oldWritable = this.isArrayLengthWritable(array);
+        var length = oldLength;
+        if (own(desc, "value")) {
+            /* ES5.1 explicitly performs both conversions, in this order.
+             * A valueOf callback can therefore run twice or throw. */
+            length = this.toNumber(desc.value) >>> 0;
+            if (length !== this.toNumber(desc.value)) throw new RangeError("invalid array length");
+        }
+        if (own(desc, "get") || own(desc, "set") || desc.configurable || desc.enumerable) {
+            throw new TypeError("cannot reconfigure array length");
+        }
+        if (!oldWritable && (desc.writable || length !== oldLength)) {
+            throw new TypeError("array length is not writable");
+        }
+        var writable = own(desc, "writable") ? desc.writable : oldWritable;
+        if (length > this.arrayLength(array)) {
+            var current = this.arrayLength(array);
+            this.ensureArrayCapacity(array, length);
+            while (current < length) {
+                this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(array.heapAddress, current++));
+            }
+        } else {
+            var index = this.arrayLength(array);
+            while (index > length) {
+                index--;
+                if (!this.deleteProperty(array, String(index), false)) {
+                    this.publishArrayLength(array, index + 1, writable);
+                    throw new TypeError("cannot truncate a non-configurable array element");
+                }
+            }
+        }
+        this.publishArrayLength(array, length, writable);
+        return array;
     };
 
     Runtime.prototype.isArgumentsObject = function (object) {
@@ -1714,6 +1891,24 @@
         this.heapRecords.setVectorLength(vector, values.length);
         this.linearHeap.freeRecord(oldVector, "array replacement");
         return array;
+    };
+
+    /* A live function/frame can retain a context after its embedding handle
+     * is destroyed. Reconstruct metadata from that heap context; substituting
+     * the caller's context changes globals and publishes dangling frame roots.
+     * Borrowed handles are not registered as additional collector roots. */
+    Runtime.prototype.contextForHeapAddress = function (address) {
+        if (!address) return null;
+        var index = 0;
+        while (index < this.contexts.length) {
+            if (this.contexts[index].heapAddress === address) return this.contexts[index];
+            index++;
+        }
+        this.linearHeap.requireRecord(address, Heap.Types.CONTEXT);
+        if (!this.adoptContext) {
+            throw new Error("embedding cannot recover retained context " + address);
+        }
+        return this.adoptContext(address);
     };
 
     Runtime.prototype.registerContext = function (context) {
@@ -2563,10 +2758,11 @@
 
     Runtime.prototype.retain = function (value) {
         var persistentAddress = value && value.heapAddress ?
-            value.heapAddress : 0;
+            value.heapAddress : typeof value === "string" ?
+                this.internStringAddress(value) : 0;
         var index = 0;
         while (index < this.hostRoots.length) {
-            if (this.hostRoots[index] === null) {
+            if (this.hostRoots[index] === RELEASED_ROOT) {
                 this.hostRoots[index] = value;
                 this.hostRootPersistentAddresses[index] = persistentAddress;
                 if (persistentAddress && this.nativeInterpreter) {
@@ -2588,13 +2784,13 @@
     Runtime.prototype.retained = function (handle) {
         var index = integerHandle(handle, this.hostRoots.length);
         var value = this.hostRoots[index];
-        if (value === null) throw new Error("guest host root has been released");
+        if (value === RELEASED_ROOT) throw new Error("guest host root has been released");
         return value;
     };
 
     Runtime.prototype.release = function (handle) {
         var index = integerHandle(handle, this.hostRoots.length);
-        if (this.hostRoots[index] === null) {
+        if (this.hostRoots[index] === RELEASED_ROOT) {
             throw new Error("guest host root has already been released");
         }
         var persistentAddress = this.hostRootPersistentAddresses[index] || 0;
@@ -2602,7 +2798,7 @@
             this.nativeInterpreter.unregisterPersistentRoot(persistentAddress);
         }
         this.hostRootPersistentAddresses[index] = 0;
-        this.hostRoots[index] = null;
+        this.hostRoots[index] = RELEASED_ROOT;
     };
 
     Runtime.prototype.installBuiltins = function () {
@@ -2622,7 +2818,14 @@
         this.stringPrototype = this.makeObject();
         this.numberPrototype = this.makeObject();
         this.booleanPrototype = this.makeObject();
-        this.regexpPrototype = this.heapNativeBuiltins ? this.makeObject() : null;
+        this.regexpPrototype = null;
+        if (this.heapNativeBuiltins) {
+            /* ES5.1 15.10.6: the prototype is itself an empty RegExp,
+             * including its internal class and instance properties. */
+            this.regexpPrototype = this.makeRegExp("", "");
+            this.heapRecords.setObjectPrototype(this.regexpPrototype.heapAddress,
+                this.objectPrototype.heapAddress);
+        }
         this.strictArgumentsThrower = this.makeNativeFunction(
             "ThrowTypeError", function () {
                 throw new TypeError("restricted arguments property");
@@ -2678,19 +2881,19 @@
             }));
         this.setGlobal("parseInt", this.makeNativeFunction("parseInt",
             function (receiver, args) {
-                return parseInt(String(args[0]), args.length > 1 ? Number(args[1]) : undefined);
+                return parseInt(runtime.toString(args[0]), args.length > 1 ? runtime.toNumber(args[1]) : undefined);
             }, "intrinsic", NativeIntrinsics.PARSE_INT));
         this.setGlobal("parseFloat", this.makeNativeFunction("parseFloat",
             function (receiver, args) {
-                return parseFloat(String(args[0]));
+                return parseFloat(runtime.toString(args[0]));
             }, "intrinsic", NativeIntrinsics.PARSE_FLOAT));
         this.setGlobal("isNaN", this.makeNativeFunction("isNaN",
             function (receiver, args) {
-                return isNaN(Number(args[0]));
+                return isNaN(runtime.toNumber(args[0]));
             }, "intrinsic", NativeIntrinsics.IS_NAN));
         this.setGlobal("isFinite", this.makeNativeFunction("isFinite",
             function (receiver, args) {
-                return isFinite(Number(args[0]));
+                return isFinite(runtime.toNumber(args[0]));
             }));
         this.setGlobal("escape", this.makeNativeFunction("escape",
             function (receiver, args) {
@@ -3165,57 +3368,15 @@
             this.makeNativeFunction("Object.defineProperty",
                 function (receiver, args) {
                     var object = args[0];
-                    var key = runtime.propertyKey(args[1]);
-                    var descriptor = args[2];
                     if (!object || !object.guestType) {
                         throw new TypeError("Object.defineProperty target is not an object");
                     }
+                    var key = runtime.propertyKey(args[1]);
+                    var descriptor = args[2];
                     if (!descriptor || !descriptor.guestType) {
                         throw new TypeError("property descriptor is not an object");
                     }
-                    var hasGetter = runtime.hasOwnProperty(descriptor, "get");
-                    var hasSetter = runtime.hasOwnProperty(descriptor, "set");
-                    var hasValue = runtime.hasOwnProperty(descriptor, "value");
-                    var hasWritable = runtime.hasOwnProperty(
-                        descriptor, "writable");
-                    if ((hasGetter || hasSetter) &&
-                        (hasValue || hasWritable)) {
-                        throw new TypeError("invalid mixed property descriptor");
-                    }
-                    var attributes = 0;
-                    if (hasWritable &&
-                        runtime.getProperty(descriptor, "writable")) {
-                        attributes |= 1;
-                    }
-                    if (runtime.getProperty(descriptor, "enumerable")) {
-                        attributes |= 2;
-                    }
-                    if (runtime.getProperty(descriptor, "configurable")) {
-                        attributes |= 4;
-                    }
-                    var keyAddress = runtime.internStringAddress(key);
-                    if (hasGetter || hasSetter) {
-                        var getter = hasGetter ?
-                            runtime.getProperty(descriptor, "get") : undefined;
-                        var setter = hasSetter ?
-                            runtime.getProperty(descriptor, "set") : undefined;
-                        runtime.defineAccessorProperty(object, keyAddress,
-                            getter, setter, attributes);
-                    } else {
-                        var propertyValue = hasValue ?
-                            runtime.getProperty(descriptor, "value") : undefined;
-                        /* Reading the descriptor can invoke guest code. Resolve
-                         * the destination entry only after that callback. */
-                        var property = runtime.heapRecords.defineOwnPropertyEntry(
-                            object.heapAddress, keyAddress, attributes);
-                        runtime.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, property, 0);
-                        runtime.writeHeapValue(
-                            runtime.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, property),
-                            propertyValue);
-                    }
-                    object.propertyVersion++;
-                    object.valueVersion++;
-                    return object;
+                    return runtime.definePropertyFromDescriptor(object, key, descriptor);
                 }, "intrinsic", NativeIntrinsics.OBJECT_DEFINE_PROPERTY));
         this.defineBuiltinProperty(objectConstructor, "create",
             this.makeNativeFunction("Object.create", function (receiver, args) {
@@ -3247,7 +3408,8 @@
                         !runtime.isArgumentsObject(object)) {
                         runtime.defineDataProperty(descriptor, "value",
                             runtime.arrayLength(object), HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "writable", true, HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "writable",
+                            runtime.isArrayLengthWritable(object), HeapRecords.Attributes.DEFAULT);
                         runtime.defineDataProperty(descriptor, "enumerable", false, HeapRecords.Attributes.DEFAULT);
                         runtime.defineDataProperty(descriptor, "configurable", false, HeapRecords.Attributes.DEFAULT);
                         return descriptor;
@@ -3290,7 +3452,7 @@
                     runtime.defineDataProperty(descriptor, "configurable",
                         !!(attributes & HeapRecords.Attributes.CONFIGURABLE), HeapRecords.Attributes.DEFAULT);
                     return descriptor;
-                }));
+                }, "intrinsic", NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR));
         this.defineBuiltinProperty(objectConstructor, "preventExtensions",
             this.makeNativeFunction("Object.preventExtensions",
                 function (receiver, args) {
@@ -3333,13 +3495,38 @@
         this.setGlobal("Object", objectConstructor);
         this.functionMethods = {};
         this.functionMethods.call = this.makeNativeFunction("Function.call",
-            function () {
-                throw new Error("Function.call must be dispatched by the VM");
+            function (receiver, args) {
+                if (!receiver || (receiver.guestType !== "function" &&
+                                  receiver.guestType !== "bytecodeFunction")) {
+                    throw new TypeError("Function.call receiver is not callable");
+                }
+                return runtime.invokePropertyFunction(receiver,
+                    args.length ? args[0] : undefined, args.slice(1));
             }, "intrinsic", NativeIntrinsics.FUNCTION_CALL);
         this.functionMethods.call.intrinsicKind = "functionCall";
         this.functionMethods.apply = this.makeNativeFunction("Function.apply",
-            function () {
-                throw new Error("Function.apply must be dispatched by the VM");
+            function (receiver, args) {
+                if (!receiver || (receiver.guestType !== "function" &&
+                                  receiver.guestType !== "bytecodeFunction")) {
+                    throw new TypeError("Function.apply receiver is not callable");
+                }
+                var list = args.length > 1 ? args[1] : undefined;
+                var argumentsList = [];
+                if (list !== undefined && list !== null) {
+                    if (!list.guestType) {
+                        throw new TypeError("apply arguments must be an object");
+                    }
+                    var length = runtime.toNumber(
+                        runtime.getProperty(list, "length")) >>> 0;
+                    var index = 0;
+                    while (index < length) {
+                        argumentsList.push(runtime.getProperty(list,
+                            String(index)));
+                        index++;
+                    }
+                }
+                return runtime.invokePropertyFunction(receiver,
+                    args.length ? args[0] : undefined, argumentsList);
             }, "intrinsic", NativeIntrinsics.FUNCTION_APPLY);
         this.functionMethods.apply.intrinsicKind = "functionApply";
         this.functionMethods.bind = this.makeNativeFunction("Function.bind",
@@ -4296,7 +4483,7 @@
     Runtime.prototype.propertyKey = function (value) {
         /* Primitive strings have value identity. Avoid re-interning the already
          * canonical string constants used by almost every property opcode. */
-        return typeof value === "string" ? value : String(value);
+        return typeof value === "string" ? value : this.toString(value);
     };
 
     Runtime.prototype.getProperty = function (object, key, accessReceiver) {
@@ -4395,8 +4582,6 @@
         key = this.propertyKey(key);
         if (!object || !object.guestType) return false;
         if (object.guestType === "array" && isArrayIndex(key)) {
-            if (!this.arrayHas(object, Number(key))) return true;
-            this.detachArgumentMapping(object, Number(key));
             return this.arrayHas(object, Number(key));
         }
         if (object.guestType === "array" && key === "length" &&
@@ -4497,9 +4682,22 @@
             return false;
         }
         if (object.guestType === "array" && isArrayIndex(key)) {
+            var namedElement = this.heapOwnProperty(object, key, false);
+            if (namedElement) {
+                if (!(this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, namedElement) &
+                      HeapRecords.Attributes.CONFIGURABLE)) {
+                    if (strict) throw new TypeError("array element is not configurable");
+                    return false;
+                }
+                this.heapRecords.deleteOwnPropertyEntry(object.heapAddress,
+                    this.internStringAddress(key));
+                object.propertyVersion++;
+            }
+            if (Number(key) >= this.arrayLength(object)) return true;
+            this.detachArgumentMapping(object, Number(key));
             var arrayCell = this.heapRecords.arrayElementCell(
                 object.heapAddress, Number(key));
-            this.linearHeap.memory.writeU32(arrayCell, 0);
+            this.valueCells.writeAbsentAt(arrayCell);
             return true;
         }
         if (object.heapAddress) {
@@ -4603,8 +4801,10 @@
             this.heapRecords.lastOwnPropertyEntry(object.heapAddress) : 0;
         var reversed = [];
         while (property) {
-            reversed.push(this.heapRecords.readString(
-                this.heapRecords.ownPropertyEntryKey(object.heapAddress, property)));
+            var name = this.heapRecords.readString(
+                this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
+            if (!(name === "length" && object.guestType === "array" &&
+                  !this.isArgumentsObject(object))) reversed.push(name);
             property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
         }
         index = reversed.length - 1;
@@ -5349,8 +5549,9 @@
                 this.heapSweeper.marker.backend === "i386";
             if (nativeMarking) {
                 this.seedNativeCollectorRoots(generation);
-                if (this.heapSweeper.mark(generation) !== 0) {
-                    throw new Error("native guest marker exhausted its work stack");
+                var markingStatus = this.heapSweeper.mark(generation);
+                if (markingStatus !== 0) {
+                    throw new Error(this.heapSweeper.describeMarkFailure(markingStatus));
                 }
                 if (this.verifyNativeHeap) {
                     this.verifyNativeFrameMarks(generation);
@@ -5381,7 +5582,7 @@
             }
             var hostRootIndex = 0;
             while (hostRootIndex < this.hostRoots.length) {
-                if (this.hostRoots[hostRootIndex] !== null) {
+                if (this.hostRoots[hostRootIndex] !== RELEASED_ROOT) {
                     this.markValue(this.hostRoots[hostRootIndex], generation);
                 }
                 hostRootIndex++;
@@ -5684,6 +5885,36 @@
         }
         return {records: statistics.records, bytes: statistics.totalBytes,
                 types: types};
+    };
+
+    /* Read the published native stack at a yield, without materializing
+     * register arrays or decoding programs back into host objects. This is
+     * also useful to an embedder sampling a running bytecode workload. */
+    Runtime.prototype.inspectNativeFrames = function (maximumFrames) {
+        var frames = [];
+        if (!this.nativeInterpreter) return frames;
+        maximumFrames = maximumFrames === undefined ? Infinity : Number(maximumFrames);
+        if (!(maximumFrames >= 0) || maximumFrames !== Math.floor(maximumFrames)) {
+            throw new RangeError("invalid inspection frame limit");
+        }
+        var records = this.heapRecords;
+        var frame = records.engineCurrentFrame(this.nativeInterpreter.stateAddress);
+        var seen = {};
+        var sourcePreviewCharacters = 160;
+        while (frame && frames.length < maximumFrames && !own(seen, "$" + frame)) {
+            seen["$" + frame] = true;
+            var description = this.inspectHeapRecord(frame);
+            var program = description.program;
+            var metadata = this.programMetadata["$" + program];
+            description.name = metadata && metadata.name || "";
+            description.filename = metadata && metadata.filename || "<guest-heap-program>";
+            var source = records.programSource(program);
+            description.sourcePreview = source ?
+                this.readHeapString(source).substring(0, sourcePreviewCharacters) : "";
+            frames.push(description);
+            frame = description.caller;
+        }
+        return frames;
     };
 
     Runtime.prototype.inspectExecution = function (execution) {

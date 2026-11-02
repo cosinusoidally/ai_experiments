@@ -1,5 +1,29 @@
 # Test262 status
 
+2026-11-02, approximately 12:59 UTC, ECMA stabilisation checkpoint (native
+contract 94): complete standalone run **3292 / 3292 passed; 0 failed /
+0 timed out / 0 not run**. Runner elapsed **470.868855 seconds**; summed test
+time **452.513295 seconds**. This is 5.8% slower than the preceding candidate's
+445.004271 seconds, and must not be described as a measured performance gain.
+Four long character-class tests account for 357.054773 seconds of this run.
+The Test262 harness, corpus, skip policy and instruction limits are unchanged.
+Command: `./artifacts/js_runner.exe artifacts/ecma-contract94.snap test262_runner.js`.
+The same source checkpoint passes the Node/js_min project suite, bounded GC
+audits on both hosts, standalone GC stress and the cross-host/self-hosted
+byte-identical snapshot gate. See [ECMA_TESTS_STATUS.md](ECMA_TESTS_STATUS.md)
+for the separate historical ECMA corpus and its approved limit-policy change.
+
+2026-11-01, approximately 22:23 UTC, shared-library migration candidate:
+the complete standalone run passes **3292 / 3292; 0 failed / 0 timed out /
+0 not run**. Runner elapsed is **445.004271 seconds**, with 426.831618
+seconds summed test time. The preceding initialization checkpoint below
+takes 424.389549 seconds; this candidate observation is **4.9% slower**.
+It preserves correctness but is not evidence of performance parity. The
+library migration remains uncommitted pending the full ECMA comparison and
+remaining regression/performance gates. No corpus files, skip policy or
+instruction budgets changed. Command:
+`./artifacts/js_runner.exe artifacts/ecma-phase2-final.snap test262_runner.js`.
+
 2026-11-01, ECMA built-in initialization follow-up: the complete standalone
 run passes **3292 / 3292; 0 failed / 0 timed out / 0 not run**, in
 **424.389549 seconds** runner elapsed (407.089305 seconds summed test time).

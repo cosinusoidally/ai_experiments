@@ -49,7 +49,8 @@ node ecma_tests_runner_node.js --list
 
 By default each completed file prints PASS/FAIL and elapsed milliseconds.
 `--quiet` suppresses passing rows; `--summary-only` prints only totals;
-`--verbose` also prints RUN before execution. `--fail-fast` is optional:
+`--verbose` also prints RUN before execution and the guest instruction count
+after each result. `--fail-fast` is optional:
 normally failures, native worker exits and timeouts do not stop the suite.
 The summary gives per-tree and total pass/fail counts, timeout subsets,
 executed/skipped/not-run counts and elapsed time. A failure produces exit status 1;
@@ -63,12 +64,24 @@ and serial worker isolation remain in effect.
 
 The guest runner retains its 10000 ms default watchdog; its `--timeout-ms`
 must be positive. Removing Node's timeout does not remove the guest limits.
-The guest runner additionally accepts `--instruction-limit COUNT`, default
-20000000; Node rejects this flag because V8 has no equivalent counter.
+The guest runner has no total-instruction cap by default. It still resumes
+the VM in finite execution slices and retains the 10000 ms process watchdog.
+`--instruction-limit COUNT` enables an optional total cap for diagnostics;
+Node rejects this flag because V8 has no equivalent counter. This ECMA
+policy does not change the Test262 harness or its limits.
 Instruction and wall-clock limits measure different resources. Specify them
 when recording a baseline, and do not mistake a bounded timeout for a proven
 semantic defect. Timings include isolation/harness overhead and are not
 interpreter-throughput benchmarks.
+
+For a guest-only diagnostic, `--sample-functions` samples the published
+native top frame at the existing instruction-budget yields and prints the
+ten most frequent source previews per test. It does not rebuild an
+instrumented interpreter, start a sampling thread, change the instruction
+limit or change pass/fail rules. It is coarse instruction-period sampling,
+not exact per-function CPU accounting, and its overhead must be excluded
+from clean performance measurements. It uses `inspectNativeFrames(1)`;
+the direct Node runner rejects this guest-specific diagnostic option.
 
 For reproducible Date tests, use the same timezone for both engines, e.g.:
 
