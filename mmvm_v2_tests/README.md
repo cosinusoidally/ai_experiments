@@ -17,6 +17,12 @@ ES1--ES5.1-era `ecma*` tests either in the standalone guest VM or directly in
 Node. Their [bring-up status](ECMA_TESTS_STATUS.md) records pass/fail totals
 and distinguishes standard coverage from SpiderMonkey-specific assumptions.
 
+The [2026-11-04 validation checkpoint](VALIDATION_STATUS.md) records fresh
+project/GC/snapshot checks, ECMA filename parity, Test262, live demos and
+known outstanding failures. The [current Octane comparison](OCTANE_COMPARISON_2026-11-04.md)
+records stock standalone scores, predecessor comparisons and the direct
+Node `--jitless` reference; older dated reports are historical checkpoints.
+
 ## Required checkout layout
 
 The build scripts use relative paths. Arrange the repositories and Firefox

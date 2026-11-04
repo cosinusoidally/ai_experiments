@@ -9,11 +9,14 @@ ordinary writable/enumerable/configurable own data properties. Serialization
 handles ordinary data, escaping, omitted functions/undefined, array nulls,
 non-finite numbers and cycles.
 
-This is deliberately not a complete JSON conformance project. Optional
-reviver/replacer/space behavior, boxed-value/toJSON handling and exhaustive
-number-to-string conformance remain outstanding; existing general VM numeric
-formatting limitations are not claimed fixed by this work. There are no
-SpiderMonkey-specific JSON semantics or modern JSON extensions.
+This is deliberately not a complete JSON conformance claim. The shared codec
+now implements reviver traversal, function/array replacers, indentation,
+boxed-value conversion and `toJSON` calls. The ECMA corpus exercises those
+features beyond the bounded default selection below; its remaining failures
+are recorded in [ECMA_TESTS_STATUS.md](ECMA_TESTS_STATUS.md). Exhaustive
+number-to-string conformance and all surrounding VM object semantics are not
+claimed complete. There are no SpiderMonkey-specific JSON semantics or
+modern JSON extensions.
 
 ## Running the bounded checks
 
@@ -42,7 +45,8 @@ Stock Node, our codec in Node, the js_min-hosted guest and the standalone
 image each pass **908 assertions** in those files.
 This is a selected subset, not a claim that all 36 external test files pass.
 The multi-million-element stress test and optional JSON-feature tests are
-not part of this milestone. Individual external filenames may be supplied
+not part of this bounded selection; they remain in the full ECMA run.
+Individual external filenames may be supplied
 to the runner to investigate additional cases; failures are reported, not
 silently treated as passing.
 

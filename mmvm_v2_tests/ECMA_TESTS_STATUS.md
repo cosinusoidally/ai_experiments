@@ -2,6 +2,31 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Fresh post-check-in validation, 2026-11-04
+
+Rebuilt `fa54ddb` and its predecessor `28b131f`, then ran the complete default
+corpus sequentially with `TZ=UTC`. The current image again reports **990
+passed / 339 failed**, including **39 watchdog timeouts**, with the same
+**4 skips / 0 not run**. It takes **666.732540 seconds**. The predecessor
+reports **963 passed / 366 failed / 39 timeouts / 4 skips / 0 not run** in
+**670.498398 seconds**.
+
+Specific-file comparison confirms **963 preserved / 27 gained / 0 lost**.
+The four suite subtotals and all 27 gained filenames reproduce the November
+2 checkpoint below. The approximately 0.6% elapsed difference is not evidence
+of a meaningful performance improvement. Both revisions run from their own
+source tree so embedding initialization cannot mix library versions.
+See [the validation checkpoint](VALIDATION_STATUS.md) for the broader sweep.
+
+Fresh direct Node: **1218 passed / 111 failed / 0 timed out / 4 skipped /
+0 not run**, **127.018057 seconds**. Filename parity remains **961 / 1218
+(78.90%)**, with **257** Node-passing files outstanding: **81** in `/Date/`
+directories and **176** outside them. Using that literal directory rule,
+non-Date parity is **868 / 1044 (83.14%)**; the November 2 prose's 867/1043
+denominator was a reporting discrepancy, not a new test result. There are
+still **29 guest-only passes**. No failure line reports a freed/invalid heap
+reference or heap corruption; this does not establish universal GC safety.
+
 ### Math and authoritative property semantics, 2026-11-02
 
 Complete default standalone run (native interpreter contract 98):

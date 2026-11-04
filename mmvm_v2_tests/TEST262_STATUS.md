@@ -1,5 +1,16 @@
 # Test262 status
 
+2026-11-04, fresh validation of manually committed `fa54ddb` (native contract
+98): **3292 / 3292 passed; 0 failed / 0 timed out / 0 not run**. Runner
+elapsed **455.714562 seconds**; summed test time **439.551291 seconds**.
+The current snapshot reproduces the November 2 final image byte for byte.
+That image's preceding observation was 489.537720 seconds; the difference
+between runs is not attributed to a VM code optimization. The corpus,
+harness, selection and limits remain unchanged. Command:
+`./artifacts/js_runner.exe artifacts/validation-current.snap test262_runner.js`.
+See [VALIDATION_STATUS.md](VALIDATION_STATUS.md) for ECMA pass-set comparison,
+GC/snapshot gates, live demos and benchmark validation.
+
 2026-11-02, Math and property-semantics checkpoint (native contract 98):
 the final cross-host-identical image completes **3292 / 3292 passed;
 0 failed / 0 timed out / 0 not run**. Runner elapsed **489.537720 seconds**;
