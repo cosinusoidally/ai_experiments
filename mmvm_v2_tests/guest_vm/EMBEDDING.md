@@ -1,10 +1,11 @@
 # Embedding the guest VM
 
-## Current API status
+## Historical API notes
 
-The API documented here is the supported bootstrap embedding surface. It is
-small on purpose and will grow as the VM implements more ECMAScript 5.1 and
-Node behavior.
+The authoritative current API is [docs/api.md](docs/api.md), including exact
+options, return values, scheduling, rooting, context isolation limitations
+and the distinction between embedding callbacks and direct native FFI.
+The notes below are retained as historical bootstrap background.
 The parser and AST records are internal; the `VM` facade, runtime value handles,
 and native-callback convention are the intended integration points.
 

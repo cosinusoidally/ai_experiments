@@ -1,5 +1,9 @@
 # Native kernel interpreter design
 
+This is dated design/bring-up history. For the current execution boundary,
+collector, compiler configuration and native contract, use
+[docs/README.md](docs/README.md).
+
 ## Callable ownership and lexical metadata (2026-10-31)
 
 Native contract 87 distinguishes a native *record representation* from an

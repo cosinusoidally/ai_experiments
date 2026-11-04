@@ -1,5 +1,10 @@
 # Runtime-owned linear heap
 
+This is the historical migration contract. The current mixed record layouts,
+accessor boundaries, allocation and GC behavior are described in
+[docs/data-structures.md](docs/data-structures.md) and
+[docs/execution-and-gc.md](docs/execution-and-gc.md).
+
 This document defines the mandatory guest-heap representation. It supersedes
 the bootstrap's host-object record representation. The migration is staged,
 but the destination contract is not optional: no guest-managed heap field may

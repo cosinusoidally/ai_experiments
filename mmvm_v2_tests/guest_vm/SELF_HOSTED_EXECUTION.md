@@ -1,5 +1,10 @@
 # Self-hosted execution direction
 
+This document records the intended direction. The current implemented
+bootstrap, image format and source-rebuilding process are documented in
+[docs/self-hosting.md](docs/self-hosting.md); its distinctions between
+embedding fallbacks and standalone execution are authoritative.
+
 ## Objective
 
 The MMVM-hosted guest VM must eventually use `js_min.exe` only to bootstrap.

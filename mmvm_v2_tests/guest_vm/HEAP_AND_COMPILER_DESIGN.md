@@ -1,4 +1,9 @@
-# Authoritative heap and dual-backend compiler design
+# Historical heap and dual-backend compiler design
+
+The current implementation reference is [docs/README.md](docs/README.md).
+Its [data-structure](docs/data-structures.md) and
+[compiler](docs/compilation.md) chapters supersede this earlier design's
+representation and completion-status claims.
 
 ## Contract
 

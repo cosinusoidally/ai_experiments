@@ -1,8 +1,9 @@
 # Guest VM design
 
-The long-term MMVM execution boundary and the staged path away from host-VM
-state are specified in `SELF_HOSTED_EXECUTION.md`. That document is normative
-for new frame, value, platform-service, and native-engine work.
+This is historical design/background material. The authoritative description
+of the current implementation is [docs/README.md](docs/README.md). In
+particular, its ownership, execution-mode and self-hosting chapters supersede
+claims here which describe intended rather than implemented behavior.
 
 ## Status and contract
 

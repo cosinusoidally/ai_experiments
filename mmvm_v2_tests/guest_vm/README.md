@@ -1,5 +1,12 @@
 # Guest VM bootstrap
 
+The authoritative current implementation documentation is now in
+[`docs/README.md`](docs/README.md). Start with its architecture/source map,
+heap data structures, execution/GC, compiler, self-hosting and API chapters.
+It distinguishes completed implementation from the historical plans and
+bring-up notes retained in this directory. For embedding, use the
+[current API reference](docs/api.md), not an older example's implied contract.
+
 The ECMA composite-builtin and binding-name lifetime checkpoint is described in
 [`../ECMA_HEAP_LIFETIME.md`](../ECMA_HEAP_LIFETIME.md), with whole-corpus parity
 and validation results in [`../ECMA_TESTS_STATUS.md`](../ECMA_TESTS_STATUS.md).
