@@ -72,7 +72,7 @@ corpus/benchmark audit runs serially on frozen sources.
   or lost passes and no new failures. Runner 657.017358 seconds; process wall
   657.29 seconds / peak RSS 463540 KiB. The previous 675.626443-second run
   is an unpaired observation, not proof of a cleanup-specific speedup.
-- Stock Octane: pending; paired old/new images, excluding RegExp.
+- Stock Octane: all 28 paired runs pass, excluding RegExp; see scores below.
 - Final GC/heap audits and bounded demos/HTTP/remaining integration: pending.
 
 Raw results stay in ignored artifacts/semantics-* files. The existing ECMA
@@ -112,4 +112,35 @@ self-hosted builds (same SHA-256 above). js_min wall time is 109.22 seconds /
 Earlier observations were 103.70 / 316452 and 80.92 / 483560 respectively.
 The slower build-time observations require an adjacent old-source control
 before asserting performance parity. Paired stock Octane against debug.snap
-started 2026-11-05 23:37 UTC, excluding RegExp; results remain pending.
+ran 2026-11-05 23:37--23:58 UTC, excluding RegExp; all 28 runs pass.
+
+## Paired stock Octane: 77a2954 baseline versus fe35c1b
+
+Baseline debug.snap SHA-256:
+c296b7964e3d88084882dbae31ce60243da6f587ffb23258f87246baf07c3538.
+Candidate identity is recorded above. Suites run consecutively, baseline then
+candidate, with no concurrent heavy job. No failures, crashes or timeouts.
+Scores are higher-is-better; RSS is process peak KiB, not live guest size.
+
+| Suite | Before score | After score | Change | Before RSS KiB | After RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Richards | 93.2 | 93.7 | +0.54% | 20864 | 20736 |
+| DeltaBlue | 87.5 | 88.3 | +0.91% | 55936 | 55424 |
+| Crypto | 172 | 169 | -1.74% | 37760 | 37760 |
+| RayTrace | 234 | 268 | +14.53% | 365184 | 234112 |
+| EarleyBoyer | 428 | 463 | +8.18% | 467072 | 467072 |
+| Splay | 659 | 674 | +2.28% | 396288 | 400640 |
+| NavierStokes | 244 | 264 | +8.20% | 24576 | 24704 |
+| PdfJS | 771 | 817 | +5.97% | 239416 | 239904 |
+| Mandreel | 472 | 483 | +2.33% | 487152 | 487128 |
+| Gameboy | 1064 | 1104 | +3.76% | 95744 | 95860 |
+| CodeLoad | 98.4 | 101 | +2.64% | 262656 | 244096 |
+| Box2D | 396 | 404 | +2.02% | 92416 | 92672 |
+| zlib | 599 | 574 | -4.17% | 103680 | 103680 |
+| Typescript | 1407 | 1507 | +7.11% | 467244 | 466976 |
+
+Geometric-mean score change: +3.65%. This aggregate does not establish
+per-suite parity: Crypto and zlib are slower in this pair. Zlib requires
+follow-up, as do build-time observations. Adaptive iteration/GC boundaries
+affect RSS; do not attribute RayTrace's entire decrease to a layout change.
+Raw metadata, logs and metrics: artifacts/semantics-octane/.
