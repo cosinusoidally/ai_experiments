@@ -1,5 +1,15 @@
 # Validation checkpoint, 2026-11-04
 
+2026-11-05 follow-up: [property/root unification validation](PROPERTY_CLEANUP_VALIDATION_2026-11-05.md)
+is complete for implementation `0937e5d`. Test262 passes 3292/3292; ECMA
+preserves the exact 990 passing and 339 failing filenames. All fourteen
+selected stock Octane suites pass on both images, with +0.85% aggregate score
+and small individual slowdowns retained in the report. Node/js_min/self-host
+images match; GC and snapshot audits pass. Standalone demos 1–8, direct-Node
+demos 1–7 and HTTP checks pass in bounded paths. The portable JSON GC defect
+is fixed. Extra Node-hosted guest graphics probes have documented bounds and
+are not a complete passing matrix; the older standalone integration gap remains.
+
 2026-11-05: the next [combined cleanup audit](CLEANUP_VALIDATION_2026-11-05.md)
 is complete for `cdc4539`. Core/GC and cross-host/self-hosted snapshot
 gates pass; complete Test262 passes 3292/3292. ECMA preserves the exact

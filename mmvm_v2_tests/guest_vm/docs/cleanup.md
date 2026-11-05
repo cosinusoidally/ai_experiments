@@ -44,8 +44,11 @@ The next property/root cutover is tracked in
 [validation log](../../PROPERTY_CLEANUP_VALIDATION_2026-11-05.md). It shares
 packed and linked named lookup and packed insertion/clearing, and fixes the
 portable collector's omission of nested callback executions. Full corpus and
-performance acceptance for that checkpoint is still running; earlier audit
-results must not be substituted for those pending gates.
+performance acceptance is now recorded in that report: complete Test262 passes,
+ECMA preserves exact pass/failure sets and fourteen selected stock Octane
+suites pass on both images. Bounded standalone/direct-Node demo checks pass;
+the additional guest-Node graphics bounds and existing integration gaps remain
+explicit. This is not completion of higher-level descriptor/exotic unification.
 
 1. **Duplicate semantic paths — open.** Portable Runtime/Execution, native
    intrinsics, guest libraries and structured-JS compilation overlap. Embedded

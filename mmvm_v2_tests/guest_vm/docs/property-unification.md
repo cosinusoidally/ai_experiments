@@ -125,3 +125,21 @@ The final Node and i386 js_min core suites pass, and the Node image builds in 8.
 290784 KiB peak RSS in one observation. The combined checkpoint is frozen
 for cross-host builds and broader validation. This does not yet establish
 performance parity or completion of all descriptor/exotic-policy unification.
+
+## Combined acceptance checkpoint
+
+The final 0937e5d checkpoint has completed its combined audit. Full imported
+Test262 passes 3292/3292; ECMA preserves the exact 990 passing and 339 failing
+filenames; fourteen selected stock Octane suites pass on both images. Aggregate
+Octane scores are essentially flat (+0.85%), with individual lower observations
+retained in the report. Node/js_min/self-hosted images are bit-identical;
+structural GC and offline marking checks pass. Standalone demos 1–8,
+direct-Node demos 1–7 and HTTP checks pass in the documented bounded paths.
+Additional guest-Node graphics probes have incomplete coverage and slow-start
+bounds, explicitly separate from the successful direct-Node matrix.
+
+See [the complete validation report](../../PROPERTY_CLEANUP_VALIDATION_2026-11-05.md)
+for commands, scores, RSS, timings, remaining integration gaps and scope.
+Higher-level descriptor policy and exotic dispatch still overlap between
+Runtime/native paths. Shared storage leaves are a dependency cut toward that
+work, not a claim that all property semantics now have one implementation.

@@ -1,7 +1,8 @@
 # Property/root cleanup validation — 2026-11-05
 
 Implementation checkpoint: 0937e5d. Starting checkpoint: 46b4518.
-This is a live audit log; pending gates are not passing results.
+The combined audit is complete within the stated scope. Additional Node-hosted
+guest graphics limits below are not silently converted into passing results.
 
 ## Implemented and checked in
 
@@ -33,12 +34,14 @@ Heavy jobs run serially, without threads, Python, downloads or emulation.
 - After the root correction, the unchanged portable JSON sequence passes all
   12 files / 908 assertions on both Node and js_min. Before the correction,
   the complete sequence failed one file on both the baseline and candidate.
-- Structural GC passes on both hosts after the root correction: 27 audits,
+- Final-checkpoint structural GC passes on both hosts: 27 audits,
   111888 checked edges, 221 property-index audits and 74 embedding collections.
   Maximum bumps remain 3531120 / 3531472 bytes under the 8 MiB cap. These
-  stress runs precede the final linked-lookup-only change.
-- Standalone stress after the packed cutover passes 24 rounds / 48 native
-  collections. A final-image repeat is pending.
+  stress runs were repeated after the final linked-lookup change.
+- Final-image standalone stress passes 24 rounds / 48 native collections.
+- Final Node and i386 snapshot audits agree: 37936 reachable records / zero
+  missing marks. They report 456 unreachable occupied records / 85984 bytes,
+  versus baseline 455 / 85784; this occupancy is not claimed to be eliminated.
 - Final Node, js_min and true self-hosted builds are byte-identical:
   7110976 bytes, SHA-256
   `c296b7964e3d88084882dbae31ce60243da6f587ffb23258f87246baf07c3538`.
@@ -57,7 +60,7 @@ These are individual observations, not same-boot controlled speedup claims.
 Self-host RSS is effectively flat. An isolated old-source archive is available
 for an adjacent control if later measurements require attribution.
 
-## Frozen-source broader audit — pending
+## Frozen-source broader audit — completed
 
 - Full imported Test262: **3292 passed / 0 failed / 0 timed out / 0 skipped /
   0 not run**. Runner 426.882453 seconds, summed test time 408.995028 seconds;
@@ -74,12 +77,73 @@ for an adjacent control if later measurements require attribution.
   17:47–18:09 UTC. **28 passes / zero failures, crashes or timeouts**. All
   fourteen selected suites pass on both images. This is not a fifteen-suite
   stock run; RegExp was not repeated.
-- Final-image structural/standalone GC, bounded interactive demos and HTTP:
-  pending.
+- Final-image structural/standalone GC and snapshot audits: pass, as above.
+- Bounded standalone demos 1–8, direct-Node demos 1–7 and HTTP checks: pass
+  in the paths detailed below. The extended Node-hosted guest graphics matrix
+  is incomplete and must not be confused with direct Node execution.
 
 Raw output stays in ignored artifacts/property-* files. Existing ECMA
 failures, configured exclusions and the separate standalone dynamic-library
 integration gap are not reclassified as passes by this cleanup.
+
+## Graphics, HTTP and remaining integration checks
+
+- Standalone demos 1–7 and direct-Node demos 1–7: opened at 320x240 / 20 FPS
+  limit, accepted keyboard/pointer input, produced captures and exited normally.
+  All fourteen captures were visually inspected. Demos 6/7 left attract mode
+  and accepted driving input. This is bounded functional coverage, not a claim
+  that every standalone demo sustains 20 FPS.
+- Standalone Demo8: garage dragging, manual free drive, auto drive, reset to
+  rolling mode and menu exit pass. Garage/field/auto captures were inspected.
+  Initialization took 2168 ms, including 957 ms for the procedural sky.
+  Warm auto logs report 20.0 and 19.8 FPS; a transition-containing interval is
+  16.0 FPS. The field capture reports 20 FPS. No VM or heap error occurred.
+  These checks are not a long soak or a universal minimum-FPS guarantee.
+- Additional Node-hosted guest probes use --vm-native at 160x120, distinct
+  from direct Node: demos 1 and 3 have rendered captures and normal exits.
+  An initial Demo2 readiness probe did not finish within its orchestration
+  bound; a matched old/current retry exits normally on both, but both captures
+  at four seconds are still black. This is not accepted as a visual pass.
+  A broader probe stops at Demo4 before initialization; the previous source
+  also fails to initialize Node-native Demo4 within a 20-second observation.
+  A current portable Demo4 observation likewise ends before initialization.
+  These observations do not establish a new regression, a complete guest-Node
+  graphics matrix, or performance parity for that slow backend path. Guest-Node
+  demos 5–7 were not reached by the stopped probe. The ordinary direct-Node
+  matrix and complete standalone matrix above are separate successful runs.
+- Standalone net.js and node_web.js: generated listing without index.html,
+  default index.html after its creation, exact text/PNG bytes, HEAD with exact
+  Content-Length and 404 all pass on localhost. Test fixtures remain ignored
+  under artifacts/. Server shutdown after requests is intentional.
+- Final standalone, Node-hosted portable/native guest, shared-codec and stock
+  Node reference JSON runs each pass 12 files / 908 assertions. The js_min
+  portable run after the root correction also passes 12/908. The existing JSON
+  sequence is the regression coverage for the callback-root fix; no JSON-only
+  retention rule or new language micro-test suite was introduced.
+- Standalone NativeCompiler dependency integration passes seven functions,
+  nested calls, mutual recursion, nine arguments, lifetime and declaration
+  errors. Runner IO passes its 94-byte round trip, BE word and Xauthority
+  checks. The three-context multiplexing demo passes on Node and js_min,
+  completing exactly 100 calls before shutting down cx_a/cx_b and then cx_c.
+- The existing extra standalone_language_integration.js still exits 70 at
+  CALL PC 391 / detail 1078 during dynamic-library loading. It is unchanged
+  from the baseline and is not hidden by the project-suite pass.
+
+## Scope, remaining work and validation cost
+
+Shared storage lookup/publication/clearing is implemented. ES5 descriptor
+policy, exotic dispatch and other higher-level Runtime/native overlap remain
+explicit; this is not a claim that all semantic duplication has disappeared.
+The root correction unifies execution ownership, not every collector operation.
+
+One full imported Test262 sweep took 7m08s process wall, one complete ECMA
+sweep took 11m17s (including 39 ten-second watchdog failures), and the paired
+stock Octane sweep took about 22 minutes. Both benchmark images were measured
+serially for a current controlled comparison. No complete corpus sweep was
+repeated for an intermediate edit. Intermediate core/build/GC gates and the
+additional Node graphics probes add time; the latter did not yield a complete
+matrix and their limits are retained above. Future small cutovers should prefer
+focused existing record/context checks before the final broad gate.
 
 ## Paired stock Octane scores and peak RSS
 
