@@ -48,6 +48,30 @@
             rejectedForeignObject = true;
         }
         assert(rejectedForeignObject, "context accepted an object from another runtime");
+        var rejectedForeignRoot = false;
+        try { otherRuntime.retain(firstObject); }
+        catch (foreignRootError) { rejectedForeignRoot = true; }
+        assert(rejectedForeignRoot, "runtime retained an object owned by another runtime");
+        /* A persistent root belongs to the runtime, not the creating context.
+         * Exercise collection after removing the only context-owned binding. */
+        var rootContext = firstRuntime.createContext();
+        rootContext.run("var rootSurvivor = {answer: 42, bytes: Buffer.alloc(8)};" +
+                        "rootSurvivor.bytes[0] = 91;", "embedding-root-owner.js");
+        var rootSurvivor = firstRuntime.runtime.getGlobal(rootContext, "rootSurvivor");
+        var survivorToken = firstRuntime.retain(rootSurvivor);
+        rootContext.destroy();
+        firstRuntime.collect();
+        var retainedSurvivor = firstRuntime.retained(survivorToken);
+        assert(firstRuntime.runtime.getProperty(retainedSurvivor, "answer") === 42,
+               "context teardown invalidated a runtime-owned root");
+        var survivorBytes = firstRuntime.runtime.getProperty(retainedSurvivor, "bytes");
+        assert(firstRuntime.runtime.bufferSupport.read(survivorBytes, 0) === 91,
+               "collection lost the graph reachable from a persistent root");
+        firstRuntime.release(survivorToken);
+        var rejectedReleasedRoot = false;
+        try { firstRuntime.retained(survivorToken); }
+        catch (releasedRootError) { rejectedReleasedRoot = true; }
+        assert(rejectedReleasedRoot, "released root token remained usable");
         assert(firstRuntime.internString("shared-name") ===
                firstRuntime.internString("shared-name"),
                "runtime did not intern repeated strings");
@@ -277,6 +301,10 @@
 
         firstRuntime.destroy();
         otherRuntime.destroy();
+        var rejectedDestroyedRoot = false;
+        try { firstRuntime.retain(undefined); }
+        catch (destroyedRootError) { rejectedDestroyedRoot = true; }
+        assert(rejectedDestroyedRoot, "destroyed runtime accepted a new root");
         return "runtime/context isolation and resumable execution passed";
     }
 

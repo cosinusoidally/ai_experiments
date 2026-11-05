@@ -226,6 +226,27 @@
         return 0;
     }
 
+    /* Allocation-free lookup after the caller has prepared an optional index.
+     * Index construction belongs to the active allocator, not to this read.
+     * Keys may be noninterned equal strings, slices, ropes or mixed encodings.
+     * A hash match is never sufficient to establish equality. */
+    function findPropertyStorageEntryKernel(heapBase, storage, key, index, hash) {
+        if (index !== 0) {
+            return propertyIndexFindKernel(heapBase, index, key, hash);
+        }
+        var slot = propertyStorageLength(heapBase, storage);
+        var keyLength = stringLength(heapBase, key);
+        while (slot > 0) {
+            var candidate = propertyStorageKeyAt(heapBase, storage, slot - 1);
+            if (candidate === key) return slot;
+            if (candidate !== 0 && stringLength(heapBase, candidate) === keyLength &&
+                    stringKeyHashKernel(heapBase, candidate) === hash &&
+                    stringKeysEqualKernel(heapBase, candidate, key) === 1) return slot;
+            slot = slot - 1;
+        }
+        return 0;
+    }
+
     function prepareObjectPropertyIndexKernel(heapBase, state, object) {
         var storage = objectPropertyHead(heapBase, object);
         if (storage === 0) return 0;
@@ -287,26 +308,10 @@
             var storage = objectPropertyHead(heapBase, object);
             if (storage === 0) return 0;
             var index = prepareObjectPropertyIndexKernel(heapBase, state, object);
-            if (index !== 0) {
-                var found = propertyIndexFindKernel(heapBase, index, key, hash);
-                if (found !== PROPERTY_INDEX_UNAVAILABLE) return found;
-                setPropertyStorageHashIndex(heapBase, storage, 0);
-            }
-            var slot = propertyStorageLength(heapBase, storage);
-            var keyLength = stringLength(heapBase, key);
-            while (slot > 0) {
-                var candidate = propertyStorageKeyAt(heapBase, storage, slot - 1);
-                if (candidate === key) return slot;
-                /* Small objects deliberately have no hash index. Reject
-                 * unequal keys here before entering the general string
-                 * comparator (which also supports ropes and mixed encodings).
-                 * Hash equality is only a filter, never proof of equality. */
-                if (candidate !== 0 && stringLength(heapBase, candidate) === keyLength &&
-                        stringKeyHashKernel(heapBase, candidate) === hash &&
-                        stringKeysEqualKernel(heapBase, candidate, key) === 1) return slot;
-                slot = slot - 1;
-            }
-            return 0;
+            var found = findPropertyStorageEntryKernel(heapBase, storage, key, index, hash);
+            if (found !== PROPERTY_INDEX_UNAVAILABLE) return found;
+            setPropertyStorageHashIndex(heapBase, storage, 0);
+            return findPropertyStorageEntryKernel(heapBase, storage, key, 0, hash);
         }
         var entry = lastOwnPropertyEntryKernel(heapBase, object);
         while (entry !== 0) {
@@ -365,20 +370,30 @@
         return storage;
     }
 
+    /* Caller has reserved capacity and validated references. Publish one
+     * insertion-ordered entry and advance the structure epoch. Index upkeep
+     * and backing allocation remain with the owning allocator. */
+    function appendPropertyStorageEntryKernel(heapBase, storage, key, attributes, setter) {
+        var entry = propertyStorageLength(heapBase, storage) + 1;
+        setPropertyStorageKeyAt(heapBase, storage, entry - 1, key);
+        setPropertyStorageAttributesAt(heapBase, storage, entry - 1, attributes);
+        setPropertyStorageSetterAt(heapBase, storage, entry - 1, setter);
+        setPropertyStoragePaddingAt(heapBase, storage, entry - 1, 0);
+        setValueCellUndefined(propertyStorageValueCellAt(heapBase, storage, entry - 1));
+        setPropertyStorageLength(heapBase, storage, entry);
+        setPropertyStorageLiveCount(heapBase, storage,
+            propertyStorageLiveCount(heapBase, storage) + 1);
+        setRecordFlags(heapBase, storage, nextPropertyStorageEpochKernel(heapBase, storage));
+        return entry;
+    }
+
     function appendOwnPropertyEntryKernel(heapBase, state, owner, key, attributes) {
         if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
             var storage = growOwnPropertyStorageKernel(heapBase, state, owner);
             if (storage === 0) return 0;
-            var entry = propertyStorageLength(heapBase, storage) + 1;
-            var live = propertyStorageLiveCount(heapBase, storage) + 1;
             var epoch = recordFlags(heapBase, storage);
-            setPropertyStorageKeyAt(heapBase, storage, entry - 1, key);
-            setPropertyStorageAttributesAt(heapBase, storage, entry - 1, attributes);
-            setPropertyStorageSetterAt(heapBase, storage, entry - 1, 0);
-            setValueCellUndefined(propertyStorageValueCellAt(heapBase, storage, entry - 1));
-            setPropertyStorageLength(heapBase, storage, entry);
-            setPropertyStorageLiveCount(heapBase, storage, live);
-            setRecordFlags(heapBase, storage, nextPropertyStorageEpochKernel(heapBase, storage));
+            var entry = appendPropertyStorageEntryKernel(heapBase, storage, key, attributes, 0);
+            var live = propertyStorageLiveCount(heapBase, storage);
             var index = propertyStorageHashIndex(heapBase, storage);
             if (index !== 0) {
                 if (propertyIndexVersion(heapBase, index) === epoch &&
@@ -406,17 +421,25 @@
         return property;
     }
 
+    /* Clear every field, including unused padding and value payloads. The
+     * caller owns index retirement; this operation never allocates or frees. */
+    function clearPropertyStorageEntryKernel(heapBase, storage, entry) {
+        setPropertyStorageKeyAt(heapBase, storage, entry - 1, 0);
+        setPropertyStorageAttributesAt(heapBase, storage, entry - 1, 0);
+        setPropertyStorageSetterAt(heapBase, storage, entry - 1, 0);
+        setPropertyStoragePaddingAt(heapBase, storage, entry - 1, 0);
+        setValueCellUndefined(propertyStorageValueCellAt(heapBase, storage, entry - 1));
+        setPropertyStorageLiveCount(heapBase, storage,
+            propertyStorageLiveCount(heapBase, storage) - 1);
+        setRecordFlags(heapBase, storage, nextPropertyStorageEpochKernel(heapBase, storage));
+        return 1;
+    }
+
     function removeOwnPropertyEntryKernel(heapBase, state, owner, entry, previous) {
         if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
             var storage = objectPropertyHead(heapBase, owner);
-            setPropertyStorageKeyAt(heapBase, storage, entry - 1, 0);
-            setPropertyStorageAttributesAt(heapBase, storage, entry - 1, 0);
-            setPropertyStorageSetterAt(heapBase, storage, entry - 1, 0);
-            setValueCellUndefined(propertyStorageValueCellAt(heapBase, storage, entry - 1));
-            setPropertyStorageLiveCount(heapBase, storage,
-                propertyStorageLiveCount(heapBase, storage) - 1);
+            clearPropertyStorageEntryKernel(heapBase, storage, entry);
             discardPropertyStorageIndexKernel(heapBase, state, storage);
-            setRecordFlags(heapBase, storage, nextPropertyStorageEpochKernel(heapBase, storage));
         } else {
             var next = propertyNext(heapBase, entry);
             if (previous !== 0) setPropertyNext(heapBase, previous, next);
@@ -447,11 +470,14 @@
         retirePropertyRecordKernel: retirePropertyRecordKernel,
         discardPropertyStorageIndexKernel: discardPropertyStorageIndexKernel,
         propertyIndexFindKernel: propertyIndexFindKernel,
+        findPropertyStorageEntryKernel: findPropertyStorageEntryKernel,
+        clearPropertyStorageEntryKernel: clearPropertyStorageEntryKernel,
         propertyIndexInsertKernel: propertyIndexInsertKernel,
         prepareObjectPropertyIndexKernel: prepareObjectPropertyIndexKernel,
         indexedOwnObjectPropertyKernel: indexedOwnObjectPropertyKernel,
         growOwnPropertyStorageKernel: growOwnPropertyStorageKernel,
         appendOwnPropertyEntryKernel: appendOwnPropertyEntryKernel,
+        appendPropertyStorageEntryKernel: appendPropertyStorageEntryKernel,
         removeOwnPropertyEntryKernel: removeOwnPropertyEntryKernel
     };
     root.GuestVMPropertyStorageKernel = kernels;

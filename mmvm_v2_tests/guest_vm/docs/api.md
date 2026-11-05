@@ -104,6 +104,10 @@ options of `VM` unless Runtime reads them.
   heap addresses. Retain guest values the embedder keeps across allocations/
   collection, then release exactly once. Merely keeping a handle in a host
   variable does not keep its guest record alive.
+  Roots belong to the JSRuntime, not the creating JSContext: destroying that
+  context does not release a retained value or the graph it reaches. Retaining
+  a value owned by a different runtime is rejected. Root operations after
+  JSRuntime destruction are rejected; destroy releases all runtime roots.
 - `collect()` -> implementation diagnostic count, **not bytes freed**.
   Requests immediate collection; normally collection is automatic. Do not
   build portable policy around the numeric result.

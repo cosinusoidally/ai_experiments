@@ -18,19 +18,33 @@
      * native execution. Cache code only: the memory argument selects a heap
      * on every call, so no runtime/owner is retained by this service. */
     var resolvedDescriptorKernelJS = null;
+    var propertyLookupKernelJS = null;
+    var propertyClearKernelJS = null;
+    var propertyAppendKernelJS = null;
 
-    function compileResolvedDescriptorKernel() {
+    function compilePropertyStorageKernel(name) {
         var Compiler = root.GuestVMKernelCompiler;
         var Backend = root.GuestVMKernelJSBackend;
         var kernels = root.GuestVMPropertyStorageKernel;
+        var strings = root.GuestVMStringKeyKernel;
         if (typeof module !== "undefined" && module.exports) {
             Compiler = require("./aot/kernel_compiler.js");
             Backend = require("./aot/backend_js.js");
             kernels = require("./property_storage_kernel.js");
+            strings = require("./string_key_kernel.js");
         }
+        var dependencies = {}, key;
+        for (key in kernels) {
+            if (Object.prototype.hasOwnProperty.call(kernels, key)) dependencies[key] = kernels[key];
+        }
+        for (key in strings) {
+            if (Object.prototype.hasOwnProperty.call(strings, key)) dependencies[key] = strings[key];
+        }
+        dependencies.stringHashStep = stringHashStep;
         var ir = new Compiler().compileGraph(
-            kernels.ownPropertyEntryDescriptorKernel, kernels,
-            {constantBindings: Records.KernelConstants});
+            kernels[name], dependencies,
+            {constantBindings: Records.KernelConstants,
+             constantNamespaces: {RecordLayout: Records.KernelConstants}});
         return new Backend().compile(ir).fn;
     }
 
@@ -522,6 +536,7 @@
         HEAP_TYPE_HANDLER: Heap.Types.HANDLER,
         HEAP_TYPE_ENGINE_STATE: Heap.Types.ENGINE_STATE,
         VALUE_TAG_REFERENCE: ValueCells.Tags.REFERENCE,
+        VALUE_TAG_UNDEFINED: ValueCells.Tags.UNDEFINED,
         VALUE_CELL_REFERENCE: ValueCells.KernelConstants.VALUE_CELL_LOW,
         VALUE_CELL_BYTES: CELL_BYTES,
         PROPERTY_ATTRIBUTE_ACCESSOR: ATTR_ACCESSOR,
@@ -1095,7 +1110,7 @@
     Records.prototype.resolvedOwnPropertyEntryDescriptor = function (owner, entry) {
         this.heap.requireRecord(owner);
         if (!resolvedDescriptorKernelJS) {
-            resolvedDescriptorKernelJS = compileResolvedDescriptorKernel();
+            resolvedDescriptorKernelJS = compilePropertyStorageKernel("ownPropertyEntryDescriptorKernel");
         }
         return resolvedDescriptorKernelJS(this.heap.memory, 0, owner, entry);
     };
@@ -2383,43 +2398,17 @@
     Records.prototype.findPropertyStorageEntry = function (storage, key) {
         this.heap.requireRecord(key, Heap.Types.STRING);
         var index = this.preparePropertyStorageIndex(storage);
-        if (index) {
-            var hash = this.stringHash(key);
-            var capacity = this.propertyIndexCapacity(index);
-            var bucket = hash & (capacity - 1);
-            var probes = 0;
-            while (probes++ < capacity) {
-                var slot = this.propertyIndexSlot(index, bucket);
-                if (!slot) return 0;
-                var candidateKey = this.propertyStorageKey(storage, slot);
-                if (candidateKey === key || (this.stringHash(candidateKey) === hash &&
-                        this.readString(candidateKey) === this.readString(key))) return slot;
-                bucket = (bucket + 1) & (capacity - 1);
-            }
-            return 0;
-        }
-        var text = null, entry = 1, length = this.propertyStorageLength(storage);
+        var length = this.propertyStorageLength(storage);
         this.heap.checkPayload(storage, PROPERTY_STORAGE_ENTRIES,
             length * PROPERTY_ENTRY_BYTES, Heap.Types.PROPERTY_STORAGE);
-        var keyLength = this.stringLength(key), keyHash = 0, hashReady = false;
-        while (entry <= length) {
-            var candidate = this.propertyStorageKeyWithinLength(storage, entry);
-            if (candidate === key) return entry;
-            if (candidate && this.stringLength(candidate) === keyLength) {
-                if (!hashReady) {
-                    keyHash = this.stringHash(key);
-                    hashReady = true;
-                }
-                if (this.stringHash(candidate) !== keyHash) {
-                    entry++;
-                    continue;
-                }
-                if (text === null) text = this.readString(key);
-                if (this.readString(candidate) === text) return entry;
-            }
-            entry++;
+        if (!propertyLookupKernelJS) {
+            propertyLookupKernelJS = compilePropertyStorageKernel("findPropertyStorageEntryKernel");
         }
-        return 0;
+        var hash = this.stringHash(key);
+        var found = propertyLookupKernelJS(this.heap.memory, 0, storage, key, index, hash);
+        if (found !== Records.KernelConstants.PROPERTY_INDEX_UNAVAILABLE) return found;
+        this.discardPropertyStorageIndex(storage);
+        return propertyLookupKernelJS(this.heap.memory, 0, storage, key, 0, hash);
     };
     Records.prototype.insertPropertyStorageIndex = function (storage, index, entry) {
         var capacity = this.propertyIndexCapacity(index);
@@ -2488,17 +2477,12 @@
             throw new RangeError("property storage needs growth before insertion");
         }
         if (setter) this.heap.requireRecord(setter);
-        this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LENGTH, entry);
-        var offset = this.propertyStorageEntryOffset(storage, entry);
-        this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_KEY, key);
-        this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_ATTRIBUTES,
-            attributes === undefined ? DEFAULT_ATTRIBUTES : attributes);
-        this.heap.writeTrustedFieldU32(storage, offset + PROPERTY_ENTRY_SETTER, setter || 0);
-        this.cells.writePrimitiveAt(this.propertyStorageValueCell(storage, entry), undefined);
-        this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT,
-            this.propertyStorageLiveCount(storage) + 1);
         var epoch = this.heap.flags(storage);
-        this.heap.setFlags(storage, this.nextPropertyStorageEpoch(storage));
+        if (!propertyAppendKernelJS) {
+            propertyAppendKernelJS = compilePropertyStorageKernel("appendPropertyStorageEntryKernel");
+        }
+        entry = propertyAppendKernelJS(this.heap.memory, 0, storage, key,
+            attributes === undefined ? DEFAULT_ATTRIBUTES : attributes, setter || 0);
         var index = this.propertyStorageHashIndex(storage);
         if (index) {
             var live = this.propertyStorageLiveCount(storage);
@@ -2512,13 +2496,13 @@
         return entry;
     };
     Records.prototype.deletePropertyStorageEntry = function (storage, entry) {
-        var offset = this.propertyStorageEntryOffset(storage, entry);
+        this.propertyStorageEntryOffset(storage, entry);
         if (!this.propertyStorageKey(storage, entry)) return false;
-        this.heap.memory.fill(this.heap.trustedPayloadAddress(storage, offset), PROPERTY_ENTRY_BYTES, 0);
-        this.heap.writeTrustedFieldU32(storage, PROPERTY_STORAGE_LIVE_COUNT,
-            this.propertyStorageLiveCount(storage) - 1);
+        if (!propertyClearKernelJS) {
+            propertyClearKernelJS = compilePropertyStorageKernel("clearPropertyStorageEntryKernel");
+        }
+        propertyClearKernelJS(this.heap.memory, 0, storage, entry);
         this.discardPropertyStorageIndex(storage);
-        this.heap.setFlags(storage, this.nextPropertyStorageEpoch(storage));
         return true;
     };
     Records.prototype.growPropertyStorage = function (storage, required) {

@@ -2843,6 +2843,7 @@
     };
 
     Runtime.prototype.retain = function (value) {
+        this.assertOwned(value);
         var persistentAddress = value && value.heapAddress ?
             value.heapAddress : typeof value === "string" ?
                 this.internStringAddress(value) : 0;

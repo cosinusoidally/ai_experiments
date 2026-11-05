@@ -307,16 +307,21 @@
         return this.runtime.internString(value);
     };
 
+    function runtimeForRootOperation(jsRuntime) {
+        if (jsRuntime.destroyed) throw new Error("JSRuntime has been destroyed");
+        return jsRuntime.runtime;
+    }
+
     JSRuntime.prototype.retain = function (value) {
-        return this.runtime.retain(value);
+        return runtimeForRootOperation(this).retain(value);
     };
 
     JSRuntime.prototype.retained = function (handle) {
-        return this.runtime.retained(handle);
+        return runtimeForRootOperation(this).retained(handle);
     };
 
     JSRuntime.prototype.release = function (handle) {
-        return this.runtime.release(handle);
+        return runtimeForRootOperation(this).release(handle);
     };
 
     JSRuntime.prototype.collect = function () {
