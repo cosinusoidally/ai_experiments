@@ -2,8 +2,9 @@
 
 2026-11-05: the next [combined cleanup audit](CLEANUP_VALIDATION_2026-11-05.md)
 is in progress for `cdc4539`. Core/GC and cross-host/self-hosted snapshot
-gates pass; complete Test262 passes 3292/3292. ECMA, paired Octane and live
-integration checks remain pending. Slower historical Test262 timings are
+gates pass; complete Test262 passes 3292/3292. ECMA preserves the exact
+990-pass / 339-failure sets (39 timeouts / 4 skips / 0 not run). Paired Octane
+and live integration checks remain pending. Slower historical Test262 timings are
 recorded rather than claimed as a performance improvement.
 
 The subsequent [full cleanup validation](CLEANUP_VALIDATION_2026-11-04.md) is

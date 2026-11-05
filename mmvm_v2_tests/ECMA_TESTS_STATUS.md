@@ -2,6 +2,29 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Cleanup regression audit, 2026-11-05
+
+Standalone `cdc4539`, complete default corpus with `TZ=UTC`:
+
+- Selected: **1333**; executed: **1329**; passed: **990**; failed: **339**,
+  including **39** watchdog timeouts; configured skips: **4**; not run: **0**.
+- Passing filename sets: **990 preserved / 0 gained / 0 lost** against the
+  previous complete cleanup audit. All 339 failing filenames also match;
+  no new failure is hidden by an equal total.
+- Subtotals: ecma **472/148**, ecma_2 **148/24**, ecma_3 **175/50**,
+  ecma_5 **195/117** (pass/fail). Timeout distribution remains 11/0/1/27.
+- Runner elapsed: **675.248083 seconds**; process wall: **676.71 seconds**;
+  peak RSS: **463636 KiB**. Previous complete cleanup observation:
+  **685.095617 seconds / 463576 KiB**. The approximately 1.4% lower time
+  is a single observation, not an established speedup; peak memory is flat.
+- No corpus, harness, selection, watchdog or instruction-cap changes. No
+  semantic feature was added by these architecture cleanups, and the Node
+  filename-parity gap below is unchanged.
+
+Command: `TZ=UTC ./artifacts/js_runner.exe artifacts/cleanup10-final.snap ecma_tests_runner.js`.
+See [the cleanup audit](CLEANUP_VALIDATION_2026-11-05.md). Raw failures are
+temporary logs, not checked-in copies of the external tests.
+
 ### Fresh post-check-in validation, 2026-11-04
 
 Rebuilt `fa54ddb` and its predecessor `28b131f`, then ran the complete default

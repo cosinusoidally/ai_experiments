@@ -87,9 +87,14 @@ once for this combined checkpoint, not once per small source edit.
   436.840919 seconds / 511672 KiB. Correctness is preserved, but the observed
   8.0% time and 2.5% RSS increases are not silently called parity. Compare an
   adjacent slow-case baseline before attributing the difference to the code.
-- Historical ECMA: pending. Compare specific passing filenames with the
-  previous 990-pass result, not just its total. Previously: 339 failures
-  including 39 timeouts, four explicitly configured default skips.
+- Historical ECMA: completed around 12:42 UTC. **990 passed / 339 failed**,
+  including **39** timeouts; **4 configured skips / 0 not run**. All 1329
+  executable files ran. Specific passing and failing filename sets match the
+  previous complete audit exactly: **0 lost passes / 0 new failures**.
+  Runner elapsed 675.248083 seconds; process wall 676.71 seconds / peak RSS
+  463636 KiB. Previous observation: 685.095617 seconds / 463576 KiB. Time is
+  modestly lower in this observation and memory is effectively flat;
+  neither is claimed as a statistically established improvement.
 - Stock Octane: pending. Pair all fourteen suites other than RegExp against
   the starting snapshot. RegExp's much longer stock run is not repeated here;
   this exclusion must not be called a full-fifteen stock sweep.
@@ -103,6 +108,20 @@ Test262 command:
 ```sh
 ./artifacts/js_runner.exe artifacts/cleanup10-final.snap test262_runner.js
 ```
+
+ECMA command:
+
+```sh
+TZ=UTC ./artifacts/js_runner.exe artifacts/cleanup10-final.snap ecma_tests_runner.js
+```
+
+A targeted starting-image control of the slow
+`ch07/7.8/7.8.5/S7.8.5_A2.4_T2.js` passes in 90.021140 test seconds. The
+current full run's same test took 90.145700 seconds; this does not reproduce
+the historical 77.740865-second observation on the starting implementation.
+A matching targeted candidate run remains pending. A system reboot around
+15:48 UTC ended the test sequencer after completed ECMA/control logs were
+saved; no Octane process had started. Completed suites were not rerun.
 
 ## Remaining architectural work
 
