@@ -55,9 +55,12 @@
         assert(firstRuntime.runtime.linearHeap.recordType(atomAddress) ===
                firstRuntime.runtime.linearHeap.constructor.Types.STRING,
                "runtime atom is not an authoritative heap string");
-        assert(firstRuntime.runtime.internedStrings !==
-               otherRuntime.runtime.internedStrings,
+        assert(firstRuntime.runtime.stringAddresses !==
+               otherRuntime.runtime.stringAddresses,
                "independent runtimes shared an intern table");
+        assert(firstRuntime.runtime.computedStringAddress("shared-name") ===
+               atomAddress,
+               "computed and interned spellings did not share a live string");
 
         var budgetExecution = firstContext.start(
             "var total = 0;" +

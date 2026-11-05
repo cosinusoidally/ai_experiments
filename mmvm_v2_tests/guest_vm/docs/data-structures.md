@@ -151,12 +151,33 @@ preserved. Ropes hold left/right/depth; slices hold backing/start/length.
 Length and indexing remain UTF-16 code-unit operations in every layout.
 Slices normalize nested views to avoid repeated backing-chain traversal.
 
-The portable runtime has atom-address, transient computed-string and decoded
-representation maps. These are **not immortal roots**: collection prunes
-them against marked records. Equal live atoms can share identity while dead
+The portable runtime has one spelling-to-address index (`stringAddresses`)
+for atoms, computed strings and program sources, plus an address-to-decoded-text
+cache (`decodedStrings`). These are **not immortal roots**: collection prunes
+them against marked records. Equal live indexed strings share identity while dead
 atoms and their host spelling keys disappear. Heap properties/programs and
 other reachable owners retain their actual string edges. The native engine
 uses heap strings and hashes directly, not a host dictionary for each lookup.
+Its `stringKeysEqualKernel` handles code-unit equality and
+`stringKeyHashKernel`/`computeStringKeyHashKernel` own cached hashing;
+`Records.findPropertyStorageEntry` provides the corresponding portable
+property-lookup path. Hash equality alone is never string equality.
+
+`internStringAddress` returns the canonical live heap address;
+`internString` returns its decoded primitive text. `computedStringAddress`
+uses the same index but accounts for newly allocated computed strings in the
+allocation debt. There is no separate atom/transient ownership classification.
+All spelling keys have a `$` prefix, keeping inherited Object prototype names
+out of this dictionary's key space. The index is runtime-local, shared across
+its contexts, and rebuilt after marking before freed addresses can be reused.
+
+This is not universal interning: native concatenation, ropes and slices may
+produce equal strings with distinct addresses. String equality and property
+lookup must retain hash/code-unit comparison after their address fast path.
+ES5.1 requires value equality, not canonical allocation identity. A native
+weak atom index might help repeated dynamic property names, but universally
+interning temporary strings would add hashing/probing and collector work;
+it should not be introduced without workload measurements.
 
 Program source can be a slice into an enclosing source. Snapshot finalization
 also shares remaining identical/contained backings while preserving string

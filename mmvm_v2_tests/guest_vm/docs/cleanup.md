@@ -88,6 +88,17 @@ adding runtime loads or calls to hot code.
 
 ## Progress
 
+- 2026-11-05: audited string interning. The portable/bootstrap runtime already
+  canonicalizes strings per runtime and prunes the weak index after marking;
+  native strings compare by value and do not depend on universal interning.
+  Removed the write-only transient classification and redundant atom subset:
+  one spelling-to-address index now serves atoms, computed strings and source
+  views. GC rebuilds two dictionaries instead of four (including decoded
+  text). Address-returning interning no longer round-trips through decoded
+  text on an atom miss. No native record layout, kernel instructions or root
+  policy changes; computed allocation-debt accounting is preserved. This is
+  a bounded ownership/data-structure cleanup, not a new string execution tier.
+
 - 2026-11-04: recorded the direction and complete current issue register;
   capturing a fresh pre-change standalone image and build timing. No runtime
   behavior has changed at this checkpoint.
@@ -458,3 +469,34 @@ This is compiler resource ownership and vocabulary consolidation, not a claim
 of faster guest execution or a new whole-suite result. No demo, benchmark,
 test262/ECMA harness or C source was modified. Full suites were not rerun for
 this focused change. Raw outputs remain in ignored `artifacts/cleanup7-*`.
+
+### String-index consolidation validation (2026-11-05)
+
+- Core project/CLI/multiplexing checks pass on Node and native i386 js_min:
+  12 guest programs / 270 guest assertions per host, plus the existing
+  internal compiler, heap, embedding and continuation checks. The existing
+  runtime/context integration check verifies that a computed spelling shares
+  the canonical live atom address and independent runtimes have separate maps.
+- Bounded structural GC checks pass on both hosts: 27 audits, 111888 checked
+  edges, 221 property-index audits, 74 embedding collections. Maximum bumps
+  remain 3531120 / 3531472 bytes under the 8 MiB cap. Standalone workload:
+  24 rounds / 48 native collections. Offline JS-backend marking finds 37860
+  reachable records and zero missing marks, with the same 455 unreachable
+  occupied records / 85784 bytes as the previous audit.
+- Node, js_min and genuine standalone self-host builds produce byte-identical
+  7097728-byte images, down 1488 bytes. The 630331-byte native interpreter/
+  collector instruction segment is unchanged from the pre-change image.
+- Sequential Node build observations: baseline 9.49 seconds / 303052 KiB
+  peak RSS; final 8.70 seconds / 297964 KiB. An intermediate candidate was
+  9.69 seconds / 296844 KiB. The final self-host build is 82.05 seconds /
+  481904 KiB. These are single-run observations, not statistically established
+  CPU improvements. Removing duplicate index entries and survivor dictionaries
+  is the definite storage/work reduction; it does not halve whole-process RSS.
+- Adjacent js_min source builds: final 107.70 seconds / 323416 KiB, unchanged
+  backup baseline 106.64 seconds / 322136 KiB (about 1.0% slower wall time /
+  0.4% higher RSS in this pair). This does not demonstrate an i386 build
+  improvement; the native execution code itself remains identical. Unlike
+  the Node pair, whole-process peak RSS is not reduced on this host.
+- No demo, C code, external corpus or test harness changed. Full Test262,
+  ECMA, Octane and interactive demo sweeps were not repeated for this bounded
+  change; their earlier dated audit is not represented as a new run here.

@@ -295,13 +295,10 @@
         /* Opt-in compiler diagnostics; ordinary native runs release build IR. */
         this.retainNativeBuildIR = !!options.retainNativeBuildIR;
         this.contexts = [];
-        this.internedStrings = {};
+        /* One weak spelling-to-address index for both atoms and computed
+         * strings. Neither classification changes ownership: only traced
+         * guest edges retain a string across collection. */
         this.stringAddresses = {};
-        /* Computed primitive strings need stable heap addresses while they are
-         * being spilled and reloaded, but they are not language atoms. Keep a
-         * generation-local reverse map so repeated spills share one record
-         * without making every computed string an immortal interned root. */
-        this.transientStringAddresses = {};
         /* Strings are immutable. This is a decoded representation cache keyed
          * only by the authoritative heap address, never semantic storage. */
         this.decodedStrings = {};
@@ -2598,6 +2595,10 @@
     };
 
     Runtime.prototype.internString = function (value) {
+        return this.readHeapString(this.internStringAddress(value));
+    };
+
+    Runtime.prototype.internStringAddress = function (value) {
         value = String(value);
         var key = "$" + value;
         var address = this.stringAddresses[key];
@@ -2605,11 +2606,9 @@
             this.ensureLinearHeap();
             address = this.heapRecords.allocateString(value);
             this.decodedStrings["$" + address] = value;
+            this.stringAddresses[key] = address;
         }
-        this.stringAddresses[key] = address;
-        this.internedStrings[key] = address;
-        delete this.transientStringAddresses[key];
-        return this.readHeapString(address);
+        return address;
     };
 
     Runtime.prototype.readHeapString = function (address) {
@@ -2622,17 +2621,10 @@
         return value;
     };
 
-    Runtime.prototype.internStringAddress = function (value) {
-        value = String(value);
-        var key = "$" + value;
-        if (!this.internedStrings[key]) this.internString(value);
-        return this.internedStrings[key];
-    };
-
     Runtime.prototype.internProgramSource = function (
             source, enclosingSource, enclosingAddress) {
         var key = "$" + source;
-        var address = this.internedStrings[key];
+        var address = this.stringAddresses[key];
         if (address) return address;
         if (enclosingAddress && enclosingSource) {
             var start = enclosingSource.indexOf(source);
@@ -2640,9 +2632,7 @@
                 address = this.heapRecords.allocateStringSlice(
                     enclosingAddress, start, source.length);
                 this.stringAddresses[key] = address;
-                this.internedStrings[key] = address;
                 this.decodedStrings["$" + address] = source;
-                delete this.transientStringAddresses[key];
                 return address;
             }
         }
@@ -2703,7 +2693,6 @@
             this.ensureLinearHeap();
             address = this.heapRecords.allocateString(value);
             this.stringAddresses[key] = address;
-            this.transientStringAddresses[key] = address;
             this.decodedStrings["$" + address] = value;
             this.noteAllocation(1);
         }
@@ -5512,12 +5501,8 @@
          * Retain table entries only for those live records, and allow all
          * other strings and their host-side spelling keys to disappear. */
         var oldAddresses = this.stringAddresses;
-        var oldInterned = this.internedStrings;
-        var oldTransient = this.transientStringAddresses;
         var oldDecoded = this.decodedStrings;
         var liveAddresses = {};
-        var liveInterned = {};
-        var liveTransient = {};
         var liveDecoded = {};
         var key;
         for (key in oldAddresses) {
@@ -5525,14 +5510,10 @@
             var address = oldAddresses[key];
             if (this.linearHeap.collectorMark(address) !== generation) continue;
             liveAddresses[key] = address;
-            if (oldInterned[key] === address) liveInterned[key] = address;
-            if (oldTransient[key] === address) liveTransient[key] = address;
             var decoded = oldDecoded["$" + address];
             if (decoded !== undefined) liveDecoded["$" + address] = decoded;
         }
         this.stringAddresses = liveAddresses;
-        this.internedStrings = liveInterned;
-        this.transientStringAddresses = liveTransient;
         this.decodedStrings = liveDecoded;
     };
 
@@ -6077,9 +6058,7 @@
         this.hostRoots = [];
         this.hostRootPersistentAddresses = [];
         this.contexts = [];
-        this.internedStrings = {};
         this.stringAddresses = {};
-        this.transientStringAddresses = {};
         this.decodedStrings = {};
         this.hostRegExpCache = {};
         this.hostRegExpCacheEntries = 0;
