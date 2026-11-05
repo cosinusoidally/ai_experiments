@@ -79,9 +79,9 @@ not local-variable initializers given hidden compile-time semantics.
 ### Compilation transaction and function scopes
 
 External scalar/namespace descriptors belong to one compilation transaction.
-`compileGraph` validates input configuration, discovers/merges reachable legacy
-constants, checks the merged namespace conflicts, then constructs one external
-binding environment. It does not rebuild and revalidate that entire environment
+`compileGraph` validates input configuration, discovers reachable helpers and
+their local declarations, then constructs one explicit external binding
+environment. It does not rebuild and revalidate that entire environment
 for every member. Both public entry points use the same private lowering
 routine; graph member lowering does not re-enter the public `compile` method.
 The public signatures/options are unchanged; method interception is not a
@@ -91,11 +91,11 @@ Each function has a distinct writable scope for its parameters, locals and
 lowering bookkeeping. It inherits read-only external descriptors through an
 ES3-compatible prototype. One scope constructor belongs to the transaction,
 not to each member and not to mutable compiler-global state. Parameters and
-normal-mode locals shadow external names; a caller's local cannot leak into a
+locals shadow external names; a caller's local cannot leak into a
 callee. The compiler never mutates an inherited descriptor. Once resolved,
 these environments do not introduce runtime symbol/property lookups in the
-generated kernel. The legacy local-constant compatibility mode below remains
-explicitly separate; this ownership refactor does not remove it.
+generated kernel. No local declaration becomes an external binding for another
+graph member, regardless of capitalization or initializer.
 
 Identifier keys are `$`-prefixed; internal bookkeeping is outside that key
 namespace. Previously the bookkeeping keys accidentally reserved valid locals
@@ -174,18 +174,22 @@ from 424 to 471 guest registers; factoring limits it to 432. This matters
 because ordinary compiler implementation functions are themselves guest
 bytecode during self-hosting, not magically optimized native compiler code.
 
-### Active legacy exception
+### Explicit interpreter dependencies
 
-The current native interpreter constructor explicitly sets
-`legacyConstantLocals: true` and supplies `constantOverrides`. In this mode,
-recognized local constant-style declarations can become build-time constants.
-`validateConstantOptions` rejects overrides without the legacy switch.
-This compatibility mode is still used by the large interpreter kernel; its
-removal is **not complete**. Do not infer ordinary JS-local equivalence for
-that configured build merely because the compiler's default is now normal.
-The named layout definitions and constants in `HeapRecords` are authoritative
-for the generated code. See the actual compiler options in
-[`aot/native_interpreter.js`](../aot/native_interpreter.js).
+The native interpreter uses the same local-variable semantics as every other
+kernel graph. Its `nativeKernelBindings` builder supplies external scalar
+dependencies explicitly; layout namespaces point to the authoritative module
+tables. Record offsets/sizes derive from `HeapRecords`, primitive tags from
+`ValueCells`, and imported helpers receive the same graph environment. Modes
+such as opcode profiling and operand predecoding are explicit configuration
+arguments, not replacements for placeholder declarations in function bodies.
+
+`legacyConstantLocals` and `constantOverrides` have been removed. Supplying
+either obsolete option is an error, rather than silently compiling a different
+program. Local uppercase names are mutable and shadow external names just as
+other JS locals do. Graph discovery collects local names and dependency edges
+in one traversal; it no longer discovers or merges constants from source.
+
 The large kernel also retains inline layout calculations alongside named
 accessor dependencies. The existence of accessor/compiler infrastructure is
 not a claim that every old call site has completed that refactor.

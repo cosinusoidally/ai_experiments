@@ -57,6 +57,13 @@ adding runtime loads or calls to hot code.
    overrides and inline layout calculations are still open. The subsequent
    interpreter cutover below removes its 94 declarations for already exported
    fields; other legacy declarations have not yet migrated.
+
+   Update 2026-11-05: the remaining legacy-local cutover is implemented.
+   Interpreter constants are explicit graph inputs and canonical record/tag
+   bindings, not declarations whose meanings are changed by the compiler.
+   The compiler's detection, cross-function merging and override machinery
+   have been removed. Inline layout calculations still need further migration
+   to named accessors; this does not close that separate part of the issue.
 4. **Context versus realm — open.** Fresh globals share built-in objects and
    prototypes. The API documents this, but does not model independent realms
    explicitly. Do not silently change sharing semantics during unrelated work.
@@ -500,3 +507,40 @@ this focused change. Raw outputs remain in ignored `artifacts/cleanup7-*`.
 - No demo, C code, external corpus or test harness changed. Full Test262,
   ECMA, Octane and interactive demo sweeps were not repeated for this bounded
   change; their earlier dated audit is not represented as a new run here.
+
+## Explicit interpreter bindings: legacy mode removed (2026-11-05)
+
+Removed 191 constant-style declarations from interpreter/helper bodies.
+`nativeKernelBindings` now supplies the full graph environment explicitly;
+59 previously private record offsets/sizes are exported as expressions of
+their authoritative HeapRecords definitions, not copied numeric literals.
+Value tags/attributes and intrinsic bounds use their module definitions.
+Opcode profiling and operand-predecode choices remain explicit inputs.
+
+The compiler no longer infers constants from local spelling, merges them
+between graph members, or overrides initializer values. It discovers locals
+and helper edges in one traversal. Obsolete legacy options are rejected.
+The existing broad backend check now verifies mutable uppercase locals
+shadow external bindings, alongside immutable external bindings and graph
+namespace validation. No additional language micro-test file was introduced.
+
+The default 630331-byte integrated native instruction segment is identical
+to the pre-change image. Focused compiler checks pass on Node/i386, and the
+full core/CLI/multiplexing suite passes on both hosts (12 programs / 270 guest
+assertions each, plus internal checks). Bounded GC checks pass on both hosts:
+27 audits, 111888 edges, 221 property-index audits, 74 collections, maximum
+bumps 3531120 / 3531472 within the 8 MiB cap.
+
+Final-source Node construction is 9.22 seconds / 305764 KiB peak RSS; a
+standalone source rebuild is 84.13 seconds / 481732 KiB and matches the Node
+image from the same source. These observations do not establish a build
+speedup. Final js_min identity and another seed-to-identical-output self-host
+gate are in progress at this checkpoint; their results will follow.
+
+The next ownership cleanup removes the legacy wrapper-owned refill arena.
+Only its retry/release code still mentions its cursor: current native run
+entry uses the engine-owned allocator instead. Carrying both models obscures
+which index/cursor owns a reusable span and can temporarily hide a claimed
+free span from the allocator that actually executes. Preserve the compiled
+allocator, borrowed-index certificate and GC-safe retry policy; remove this
+obsolete third arena rather than building another layer around it.

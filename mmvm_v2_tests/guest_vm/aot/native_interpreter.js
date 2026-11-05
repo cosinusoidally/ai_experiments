@@ -227,12 +227,127 @@
     var ERROR_CONSTRUCTOR_RECORD_STRIDE = RuntimeSupportLayout.ERROR_CONSTRUCTOR_RECORD_STRIDE;
     var ERROR_CONSTRUCTOR_NAME_OFFSET = RuntimeSupportLayout.ERROR_CONSTRUCTOR_NAME_OFFSET;
 
-    /* One configuration owner for both explicit dependency bindings and the
-     * temporary legacy-local compatibility mode. Selected modes are ordinary
-     * arguments; canonical module IDs are never inferred from function bodies. */
+    /* One explicit lexical environment for the compiled function graph.
+     * Selected modes are configuration arguments. No binding is inferred
+     * from declarations inside a function body. */
     function nativeKernelBindings(profileOpcodes, recordConstants,
                                   operandPredecode) {
         var bindings = {
+            WORD_BYTES: recordConstants.HEAP_WORD_BYTES,
+            FIRST_OPERAND: 1,
+            SECOND_OPERAND: 2,
+            THIRD_OPERAND: 3,
+            TWO_WORD_INSTRUCTION: 2,
+            THREE_WORD_INSTRUCTION: 3,
+            FOUR_WORD_INSTRUCTION: 4,
+            FIVE_WORD_INSTRUCTION: 5,
+            VALUE_CELL_INT32: ValueCells.KernelConstants.VALUE_CELL_LOW,
+            VALUE_TAG_UNDEFINED: ValueCells.Tags.UNDEFINED,
+            VALUE_TAG_NULL: ValueCells.Tags.NULL,
+            VALUE_TAG_FALSE: ValueCells.Tags.FALSE,
+            VALUE_TAG_TRUE: ValueCells.Tags.TRUE,
+            VALUE_TAG_INT32: ValueCells.Tags.INT32,
+            VALUE_TAG_DOUBLE: ValueCells.Tags.DOUBLE,
+            IEEE754_SIGN_BIT: 1 << (Binary64.KernelConstants.IEEE754_WORD_BITS - 1),
+            MINIMUM_INT32: 1 << (Binary64.KernelConstants.IEEE754_WORD_BITS - 1),
+            INVALID_PROGRAM_INTEGER: 1 << (Binary64.KernelConstants.IEEE754_WORD_BITS - 1),
+            INVALID_PROGRAM_BOOLEAN: -1,
+            MAX_SIGNED_INT32: ~(1 << (Binary64.KernelConstants.IEEE754_WORD_BITS - 1)),
+            ASCII_DIGIT_ZERO: 48,
+            ASCII_DIGIT_NINE: 57,
+            ASCII_UPPER_A: 65,
+            ASCII_UPPER_Z: 90,
+            ASCII_BACKSLASH: 92,
+            ASCII_UNDERSCORE: 95,
+            ASCII_LOWER_A: 97,
+            ASCII_LOWER_Z: 122,
+            IEEE754_QUIET_NAN_HIGH: 2146959360,
+            POSITIVE_2147483648_HIGH: 1105199104,
+            UINT32_LOW_UNUSED_MASK: 2097151,
+            UINT32_MANTISSA_LOW_SHIFT: 21,
+            UINT32_MANTISSA_HIGH_SHIFT: 11,
+            PROGRAM_FLAG_USES_ARGUMENTS: 1,
+            PROGRAM_FLAG_STRICT: 2,
+            BUFFER_KIND_NATIVE: 0,
+            BUFFER_KIND_ARRAY_BUFFER: 1,
+            BUFFER_KIND_UINT8: 2,
+            BUFFER_KIND_UINT16: 3,
+            BUFFER_KIND_UINT32: 4,
+            BUFFER_KIND_INT32: 5,
+            BUFFER_KIND_FLOAT32: 6,
+            BUFFER_KIND_FLOAT64: 7,
+            BUFFER_KIND_INT8: 8,
+            BUFFER_KIND_INT16: 9,
+            PROPERTY_VALUE_REFERENCE: recordConstants.PROPERTY_VALUE + ValueCells.KernelConstants.VALUE_CELL_LOW,
+            DEFAULT_PROPERTY_ATTRIBUTES: HeapRecords.Attributes.DEFAULT,
+            PROPERTY_ATTRIBUTE_WRITABLE: HeapRecords.Attributes.WRITABLE,
+            PROPERTY_ATTRIBUTE_ENUMERABLE: HeapRecords.Attributes.ENUMERABLE,
+            PROPERTY_ATTRIBUTE_CONFIGURABLE: HeapRecords.Attributes.CONFIGURABLE,
+            FRAME_FLAG_NATIVE_CALL: 1,
+            FRAME_FLAG_NATIVE_CONSTRUCT: 2,
+            FRAME_FLAG_INDIRECT_EVAL_COMPILE: 3,
+            INTRINSIC_RESULT_COMPLETE: 1,
+            /* Separate from handled/allocation (1/2) and public exits (1..4). */
+            INTRINSIC_RESULT_FRAME_ENTERED: 5,
+            /* Named diagnostic protocol, shared by every helper. Opcode
+             * implementations must not invent numeric diagnostic IDs. */
+            CALL_REJECT_NONE: 0,
+            CALL_REJECT_ARGUMENT_LIST: 1,
+            CALL_REJECT_ARGUMENT_REGISTER: 2,
+            CALL_REJECT_HEAP_ENVIRONMENT: 3,
+            CALL_REJECT_HEAP_SPACE: 4,
+            CALL_REJECT_BUFFER_RECEIVER: 5,
+            CALL_REJECT_BUFFER_ENCODING: 6,
+            CALL_REJECT_BUFFER_DATA: 7,
+            CALL_REJECT_BUFFER_ARGUMENT_DESCRIPTOR: 8,
+            CALL_REJECT_BUFFER_ARGUMENT_VALUE: 9,
+            CALL_REJECT_BUFFER_ARGUMENT_RECORD: 10,
+            CALL_REJECT_BUFFER_ENCODING_NAME: 11,
+            CALL_REJECT_INTRINSIC_RECEIVER: 12,
+            CALL_REJECT_INTRINSIC_ARGUMENT: 13,
+            CALL_REJECT_SNPRINTF_SERVICE: 14,
+            CALL_REJECT_INTRINSIC_RESULT: 15,
+            CALL_REJECT_PLATFORM_RECORD: 16,
+            CALL_REJECT_INTRINSIC_FUNCTION_CELL: 17,
+            CALL_REJECT_INTRINSIC_ARGUMENT_CELL: 18,
+            CALL_REJECT_INTRINSIC_FUNCTION_RECORD: 19,
+            CALL_REJECT_INTRINSIC_ID: 20,
+            CALL_REJECT_INTRINSIC_CALL_FORM: 21,
+            CALL_REJECT_INTRINSIC_ARGUMENT_ARRAY: 22,
+            CALL_REJECT_INTRINSIC_ARGUMENT_COUNT: 23,
+            CALL_REJECT_FROM_CHAR_CODE_UNCLASSIFIED: 24,
+            CALL_REJECT_FROM_CHAR_CODE_INVALID_RESULT: 25,
+            CALL_DIAGNOSTIC_FROM_CHAR_CODE_COMPLETE: 26,
+            CALL_DIAGNOSTIC_INTRINSIC_BASE: 1000,
+            CALL_DIAGNOSTIC_VALUE_TAG_BASE: 2000,
+            CALL_DIAGNOSTIC_HEAP_TYPE_BASE: 3000,
+            CALL_DIAGNOSTIC_ARITHMETIC_PAIR_BASE: 4000,
+            CALL_DIAGNOSTIC_TAG_RADIX: 16,
+            CALL_DIAGNOSTIC_ARGUMENT_DESCRIPTOR_TAG_BASE: 4700,
+            CALL_DIAGNOSTIC_ARGUMENT_VALUE_TAG_BASE: 4800,
+            CALL_DIAGNOSTIC_STRING_CONCATENATION_FAILED: 4900,
+            CALL_DIAGNOSTIC_COMPARISON_PAIR_BASE: 5000,
+            CALL_DIAGNOSTIC_VALUE_KIND_RADIX: 32,
+            CALL_DIAGNOSTIC_REFERENCE_KIND_BASE: 16,
+            CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE: 6000,
+            CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE: 7000,
+            CALL_DIAGNOSTIC_GC_TYPE_RADIX: 256,
+            CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE: 15000,
+            EXIT_BUDGET: Exit.BUDGET,
+            EXIT_RETURN: Exit.RETURN,
+            EXIT_UNSUPPORTED: Exit.UNSUPPORTED,
+            PROPERTY_FOUND_SENTINEL: -1,
+            INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR: NativeIntrinsics.UINT8_ARRAY_CONSTRUCTOR,
+            INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR: NativeIntrinsics.INT16_ARRAY_CONSTRUCTOR,
+            ENABLE_NATIVE_REGEXP_TEST: 0,
+            IEEE754_TWO_TO_30_HIGH: 1104150528,
+            IEEE754_TWO_TO_52_HIGH: 1127219200,
+            MINIMUM_NUMBER_RADIX: 2,
+            MAXIMUM_NUMBER_RADIX: 36,
+            IEEE754_NEGATIVE_ZERO_HIGH: 1 << (Binary64.KernelConstants.IEEE754_WORD_BITS - 1),
+            MICROSECONDS_PER_SECOND: 1000000,
+            MINIMUM_HEAP_GROWTH_BYTES: 16777216,
+            MINIMUM_RECORD_BYTES: recordConstants.HEAP_HEADER_BYTES,
             NATIVE_ALLOCATION_REGION_FLAG: NATIVE_ALLOCATION_REGION_FLAG,
             FREE_RECORD_HEADER_BYTES: FREE_RECORD_HEADER_BYTES,
             PREFERRED_NATIVE_REGION_BYTES: PREFERRED_NATIVE_REGION_BYTES,
@@ -434,193 +549,10 @@
     function interpreterKernel(heapBase, frame, platformServices,
                                arrayLengthKey,
                                arrayPrototype, stringSupport, budget, state) {
-        /* Canonical exported fields use RecordLayout, backed by HeapRecords.
-         * Remaining declarations still use the temporary legacy constant-local
-         * mode; unmigrated offsets below are not authoritative definitions. */
-        var WORD_BYTES = 4;
-        var FIRST_OPERAND = 1;
-        var SECOND_OPERAND = 2;
-        var THIRD_OPERAND = 3;
-        var TWO_WORD_INSTRUCTION = 2;
-        var THREE_WORD_INSTRUCTION = 3;
-        var FOUR_WORD_INSTRUCTION = 4;
-        var FIVE_WORD_INSTRUCTION = 5;
-        var VALUE_CELL_INT32 = 4;
-        var VALUE_TAG_UNDEFINED = 1;
-        var VALUE_TAG_NULL = 2;
-        var VALUE_TAG_FALSE = 3;
-        var VALUE_TAG_TRUE = 4;
-        var VALUE_TAG_INT32 = 5;
-        var VALUE_TAG_DOUBLE = 6;
-        var STRING_LENGTH = 16;
-        var STRING_HASH = 20;
-        var STRING_CHARS = 24;
-        var IEEE754_SIGN_BIT = -2147483648;
-        var MINIMUM_INT32 = -2147483648;
-        var INVALID_PROGRAM_INTEGER = -2147483648;
-        var INVALID_PROGRAM_BOOLEAN = -1;
-        var IEEE754_ABSOLUTE_MASK = 2147483647;
-        var MAX_SIGNED_INT32 = 2147483647;
-        var ASCII_DIGIT_ZERO = 48;
-        var ASCII_DIGIT_NINE = 57;
-        var ASCII_UPPER_A = 65;
-        var ASCII_UPPER_Z = 90;
-        var ASCII_BACKSLASH = 92;
-        var ASCII_UNDERSCORE = 95;
-        var ASCII_LOWER_A = 97;
-        var ASCII_LOWER_Z = 122;
-        var IEEE754_EXPONENT_MASK = 2146435072;
-        var IEEE754_FRACTION_HIGH_MASK = 1048575;
-        var IEEE754_QUIET_NAN_HIGH = 2146959360;
-        var POSITIVE_2147483648_HIGH = 1105199104;
-        var UINT32_LOW_UNUSED_MASK = 2097151;
-        var UINT32_MANTISSA_LOW_SHIFT = 21;
-        var UINT32_MANTISSA_HIGH_SHIFT = 11;
+        /* Layout namespaces and scalar dependencies are supplied explicitly
+         * by nativeKernelBindings. Ordinary var declarations are mutable JS
+         * locals; their spelling never changes their semantics. */
 
-        var FRAME_PC = 28;
-        var FRAME_RETURN_SLOT = 32;
-        var HANDLER_TARGET = 20;
-        var HANDLER_BINDING_SLOT = 24;
-        var PROGRAM_REGISTER_COUNT = 36;
-        var PROGRAM_ARGUMENTS_SLOT = 40;
-        var PROGRAM_THIS_SLOT = 44;
-        var PROGRAM_FUNCTION_NAME_SLOT = 48;
-        var PROGRAM_FLAGS = 56;
-        var PROGRAM_BINDING_COUNT = 60;
-        var PROGRAM_METADATA = 52;
-        var PROGRAM_FLAG_USES_ARGUMENTS = 1;
-        var PROGRAM_FLAG_STRICT = 2;
-        var PROGRAM_RECORD_BYTES = 72;
-        var BYTECODE_LENGTH = 16;
-        var BYTECODE_WORDS = 24;
-        var BYTECODE_FIXED_BYTES = 24;
-        var OBJECT_EXTENSIBLE = 24;
-        var OBJECT_RESERVED = 28;
-        var REGEXP_RECORD_BYTES = 32;
-        var BUFFER_VIEW_OFFSET = 20;
-        var BUFFER_VIEW_LENGTH = 24;
-        var BUFFER_VIEW_KIND = 36;
-        var BUFFER_VIEW_RECORD_BYTES = 40;
-        var BUFFER_KIND_NATIVE = 0;
-        var BUFFER_KIND_ARRAY_BUFFER = 1;
-        var BUFFER_KIND_UINT8 = 2;
-        var BUFFER_KIND_UINT16 = 3;
-        var BUFFER_KIND_UINT32 = 4;
-        var BUFFER_KIND_INT32 = 5;
-        var BUFFER_KIND_FLOAT32 = 6;
-        var BUFFER_KIND_FLOAT64 = 7;
-        var BUFFER_KIND_INT8 = 8;
-        var BUFFER_KIND_INT16 = 9;
-        var BUFFER_BACKING_LENGTH = 20;
-        var BUFFER_BACKING_DATA = 32;
-        var ARRAY_PROTOTYPE = 16;
-        var ARRAY_PROPERTY_HEAD = 20;
-        var VECTOR_FIXED_BYTES = 24;
-        var NATIVE_FUNCTION_METADATA = 28;
-        var FUNCTION_RECORD_BYTES = 40;
-        var BYTECODE_FUNCTION_CLOSURE = 24;
-        var BYTECODE_FUNCTION_PROGRAM = 28;
-        var BYTECODE_FUNCTION_HOME_CONTEXT = 32;
-        var PROPERTY_VALUE_REFERENCE = 36;
-        var PROPERTY_RESERVED = 28;
-        var DEFAULT_PROPERTY_ATTRIBUTES = 7;
-        var PROPERTY_ATTRIBUTE_WRITABLE = 1;
-        var PROPERTY_ATTRIBUTE_ENUMERABLE = 2;
-        var PROPERTY_ATTRIBUTE_CONFIGURABLE = 4;
-        var FRAME_FIXED_BYTES = 48;
-        var FRAME_FLAG_NATIVE_CALL = 1;
-        var FRAME_FLAG_NATIVE_CONSTRUCT = 2;
-        var FRAME_FLAG_INDIRECT_EVAL_COMPILE = 3;
-        var INTRINSIC_RESULT_COMPLETE = 1;
-        /* Distinct from helper-local handled/allocation results (1 and 2)
-         * and from public engine exits (1 through 4). */
-        var INTRINSIC_RESULT_FRAME_ENTERED = 5;
-        var ENGINE_EXIT_REASON = 0;
-        var ENGINE_PC = 4;
-        var ENGINE_RESULT = 8;
-        var ENGINE_INSTRUCTIONS = 12;
-        var ENGINE_HEAP_BUMP = 16;
-        var ENGINE_HEAP_LIMIT = 20;
-        var ENGINE_CURRENT_FRAME = 24;
-        var ENGINE_CALL_REJECT_REASON = 28;
-        var ENGINE_FREE_FRAME = 32;
-        /* Authoritative offsets and stride are compiler-substituted from
-         * HeapRecords.KernelConstants. */
-        var PLATFORM_DLSYM_POINTER = 16;
-        var PLATFORM_ARRAY_SLICE_POINTER = 36;
-        var PLATFORM_ARRAY_CONCAT_POINTER = 40;
-        var PLATFORM_GETTIMEOFDAY_POINTER = 44;
-        var PLATFORM_DATE_INTRINSIC_POINTER = 48;
-        var PLATFORM_NUMERIC_PROPERTY_POINTER = 52;
-        var PLATFORM_STRTOD_POINTER = 56;
-        var PLATFORM_MALLOC_POINTER = 60;
-        var PLATFORM_FREE_POINTER = 64;
-        var PLATFORM_SNPRINTF_POINTER = 68;
-        var PROFILE_OPCODES = 0;
-        var CALL_REJECT_NONE = 0;
-        var CALL_REJECT_ARGUMENT_LIST = 1;
-        var CALL_REJECT_ARGUMENT_REGISTER = 2;
-        var CALL_REJECT_HEAP_ENVIRONMENT = 3;
-        var CALL_REJECT_HEAP_SPACE = 4;
-        var CALL_REJECT_BUFFER_RECEIVER = 5;
-        var CALL_REJECT_BUFFER_ENCODING = 6;
-        var CALL_REJECT_BUFFER_DATA = 7;
-        var CALL_REJECT_BUFFER_ARGUMENT_DESCRIPTOR = 8;
-        var CALL_REJECT_BUFFER_ARGUMENT_VALUE = 9;
-        var CALL_REJECT_BUFFER_ARGUMENT_RECORD = 10;
-        var CALL_REJECT_BUFFER_ENCODING_NAME = 11;
-        var CALL_REJECT_INTRINSIC_RECEIVER = 12;
-        var CALL_REJECT_INTRINSIC_ARGUMENT = 13;
-        var CALL_REJECT_SNPRINTF_SERVICE = 14;
-        var CALL_REJECT_INTRINSIC_RESULT = 15;
-        var CALL_REJECT_PLATFORM_RECORD = 16;
-        var CALL_REJECT_INTRINSIC_FUNCTION_CELL = 17;
-        var CALL_REJECT_INTRINSIC_ARGUMENT_CELL = 18;
-        var CALL_REJECT_INTRINSIC_FUNCTION_RECORD = 19;
-        var CALL_REJECT_INTRINSIC_ID = 20;
-        var CALL_REJECT_INTRINSIC_CALL_FORM = 21;
-        var CALL_REJECT_INTRINSIC_ARGUMENT_ARRAY = 22;
-        var CALL_REJECT_INTRINSIC_ARGUMENT_COUNT = 23;
-        var CALL_REJECT_FROM_CHAR_CODE_UNCLASSIFIED = 24;
-        var CALL_REJECT_FROM_CHAR_CODE_INVALID_RESULT = 25;
-        var CALL_DIAGNOSTIC_FROM_CHAR_CODE_COMPLETE = 26;
-
-        /* Standalone diagnostics reserve separate, named ranges for encoded
-         * runtime values.  Keep the encoding policy here: individual opcode
-         * implementations must not invent numeric diagnostic IDs. */
-        var CALL_DIAGNOSTIC_INTRINSIC_BASE = 1000;
-        var CALL_DIAGNOSTIC_VALUE_TAG_BASE = 2000;
-        var CALL_DIAGNOSTIC_HEAP_TYPE_BASE = 3000;
-        var CALL_DIAGNOSTIC_ARITHMETIC_PAIR_BASE = 4000;
-        var CALL_DIAGNOSTIC_TAG_RADIX = 16;
-        var CALL_DIAGNOSTIC_ARGUMENT_DESCRIPTOR_TAG_BASE = 4700;
-        var CALL_DIAGNOSTIC_ARGUMENT_VALUE_TAG_BASE = 4800;
-        var CALL_DIAGNOSTIC_STRING_CONCATENATION_FAILED = 4900;
-        var CALL_DIAGNOSTIC_COMPARISON_PAIR_BASE = 5000;
-        var CALL_DIAGNOSTIC_VALUE_KIND_RADIX = 32;
-        var CALL_DIAGNOSTIC_REFERENCE_KIND_BASE = 16;
-        var CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE = 6000;
-        var CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE = 7000;
-        var CALL_DIAGNOSTIC_GC_TYPE_RADIX = 256;
-        var CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE = 15000;
-
-        var OBJECT_RECORD_BYTES = 32;
-        var ARRAY_RECORD_BYTES = 32;
-        var HANDLER_RECORD_BYTES = 32;
-
-        var EXIT_BUDGET = 1;
-        var EXIT_RETURN = 2;
-        var EXIT_UNSUPPORTED = 3;
-        var PROPERTY_FOUND_SENTINEL = -1;
-        /* Remaining historical aliases still await canonical bindings. */
-        var INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR = 92;
-        var INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR = 99;
-        var ENABLE_NATIVE_REGEXP_TEST = 0;
-        /* These aliases still use legacy substitution from RuntimeSupportLayout. */
-        var STRING_SUPPORT_CHAR_AT_KEY = 0;
-        var STRING_SUPPORT_CHAR_AT_FUNCTION = 0;
-        var STRING_SUPPORT_EMPTY = 0;
-        var STRING_SUPPORT_ASCII_BASE = 0;
         var currentContext = frameContext(heapBase, frame);
         var currentProgram = frameProgram(heapBase, frame);
         setEngineAllocationFailed(heapBase, state, 0);
@@ -10167,8 +10099,6 @@
      * ToInt32 is a modulo conversion, not a valid overflow test. */
     function roundLargeNumberKernel(heapBase, state, target, source,
                                     intrinsicId) {
-        var IEEE754_TWO_TO_30_HIGH = 1104150528;
-        var IEEE754_TWO_TO_52_HIGH = 1127219200;
         var absoluteHigh = valueCellDoubleHigh(0, source) & IEEE754_ABSOLUTE_MASK;
         if (absoluteHigh < IEEE754_TWO_TO_30_HIGH) return 0;
         if (absoluteHigh >= IEEE754_TWO_TO_52_HIGH) {
@@ -10782,8 +10712,6 @@
             intrinsicArgumentsVector, intrinsicArgumentCount,
             bytecodeAddress, pc, stringSupport, platformServices,
             callReceiverIndex) {
-        var MINIMUM_NUMBER_RADIX = 2;
-        var MAXIMUM_NUMBER_RADIX = 36;
         var radix = 10;
         if (intrinsicArgumentCount >= 1) {
             var radixCell = programArgumentCellKernel(
@@ -10853,11 +10781,6 @@
         if (intrinsicId !== NativeIntrinsics.NUMBER_TO_PRECISION) {
             if (intrinsicId !== NativeIntrinsics.NUMBER_TO_FIXED) return 0;
         }
-        var CALL_REJECT_INTRINSIC_RECEIVER = 12;
-        var CALL_REJECT_INTRINSIC_ARGUMENT = 13;
-        var CALL_REJECT_SNPRINTF_SERVICE = 14;
-        var CALL_REJECT_INTRINSIC_RESULT = 15;
-        var CALL_REJECT_PLATFORM_RECORD = 16;
         if (intrinsicId === NativeIntrinsics.NUMBER_TO_PRECISION) {
         if (intrinsicArgumentCount !== 1) {
             setEngineCallRejectReason(
@@ -13478,7 +13401,6 @@
     }
 
     function isNegativeZeroCellKernel(cell) {
-        var IEEE754_NEGATIVE_ZERO_HIGH = -2147483648;
         if (valueCellTag(0, cell) !== VALUE_TAG_DOUBLE) return 0;
         if (valueCellDoubleLow(0, cell) !== 0) return 0;
         if (valueCellDoubleHigh(0, cell) !== IEEE754_NEGATIVE_ZERO_HIGH) return 0;
@@ -14373,8 +14295,6 @@
 
     function formatDoubleStringKernel(
             heapBase, platformServices, sourceCell, destination, format) {
-        var IEEE754_ABSOLUTE_MASK = 2147483647;
-        var IEEE754_EXPONENT_MASK = 2146435072;
         var low = load32(sourceCell + RecordLayout.VALUE_CELL_LOW);
         var high = load32(sourceCell + RecordLayout.VALUE_CELL_HIGH);
         var absoluteHigh = high & IEEE754_ABSOLUTE_MASK;
@@ -14497,13 +14417,11 @@
         if (clockPointer === 0) return 0;
         var timeval = engineScratchLeftAddress(heapBase, state);
         if (callNativeI32(clockPointer, timeval, 0) !== 0) return 0;
-        var MICROSECONDS_PER_SECOND = 1000000;
         return (engineClockSeconds(heapBase, state) *
             MICROSECONDS_PER_SECOND + engineClockMicroseconds(heapBase, state)) | 0;
     }
 
     function growNativeHeapLimitKernel(heapBase, state) {
-        var MINIMUM_HEAP_GROWTH_BYTES = 16777216;
         var currentTailLimit = engineNativeTailLimit(heapBase, state);
         var maximumTailLimit = engineNativeMaximumLimit(heapBase, state);
         if (currentTailLimit >= maximumTailLimit) return 0;
@@ -14892,7 +14810,6 @@
     }
 
     function reserveNativeAllocationKernel(heapBase, state, bytes) {
-        var MINIMUM_RECORD_BYTES = 16;
         var current = engineHeapBump(heapBase, state);
         var currentLimit = engineHeapLimit(heapBase, state);
         if (engineNativeRegionActive(heapBase, state) === 0) {
@@ -17455,7 +17372,6 @@
     function convertValueToNumberKernel(
             heapBase, targetCell, sourceCell, platformServices,
             stringSupport) {
-        var IEEE754_QUIET_NAN_HIGH = 2146959360;
         var sourceTag = valueCellTag(0, sourceCell);
         if (sourceTag === VALUE_TAG_INT32) {
             copyValueCell(targetCell, sourceCell);
@@ -17648,7 +17564,6 @@
     function parseFloatIntrinsicKernel(
             heapBase, targetCell, registerAddress, argumentsVector,
             argumentCount, platformServices) {
-        var IEEE754_QUIET_NAN_HIGH = 2146959360;
         if (argumentCount === 0) {
             setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
             return 1;
@@ -17758,8 +17673,6 @@
     function isNaNIntrinsicKernel(
             heapBase, targetCell, registerAddress, argumentsVector,
             argumentCount, platformServices) {
-        var IEEE754_EXPONENT_MASK = 2146435072;
-        var IEEE754_FRACTION_HIGH_MASK = 1048575;
         var convertedCell = targetCell;
         if (argumentCount === 0) {
             setValueCellUndefined(convertedCell);
@@ -17802,7 +17715,6 @@
     function parseIntIntrinsicKernel(heapBase, state, targetCell,
                                      registerAddress, argumentsVector,
                                      argumentCount, platformServices) {
-        var IEEE754_QUIET_NAN_HIGH = 2146959360;
         if (argumentCount === 0) {
             setValueCellDoubleBits(targetCell, 0, IEEE754_QUIET_NAN_HIGH);
             return 1;
@@ -18453,9 +18365,6 @@
             var compilerOptions = {
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
-                /* Temporary compatibility while the interpreter's placeholder
-                 * declarations migrate to real lexical layout bindings. */
-                legacyConstantLocals: true,
                 constantNamespaces: {
                     RecordLayout: RecordLayout,
                     Bytecode: Bytecode,
@@ -18469,8 +18378,7 @@
                 registerPreferencesByFunction: {
                     interpreterKernel: ["registerAddress", "pc", "bytecodeAddress", "heapBase"]
                 },
-                timings: loweringTimings,
-                constantOverrides: kernelConstants
+                timings: loweringTimings
             };
             var graphLoweringStarted = runtime.nativeSnapshotWrite ?
                 new Date().getTime() : 0;

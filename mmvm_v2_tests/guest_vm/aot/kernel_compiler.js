@@ -272,10 +272,9 @@
         var entryName = functions[0].name;
         var entryDependencies = [];
         functions[0].localNames = [];
-        var sharedConstants = collectFunctionConstants(
-            entry, options.constantOverrides || {}, functions[0].expression,
-            dependencies, signatures, entryDependencies,
-            functions[0].localNames, options.legacyConstantLocals === true);
+        var sharedConstants = {};
+        collectFunctionBindings(functions[0].expression, dependencies, signatures,
+            entryDependencies, functions[0].localNames);
         copyExternalConstants(sharedConstants, options.constantBindings);
         entryDependencies.sort();
         var entryDependencyIndex = 0;
@@ -283,34 +282,14 @@
             var entryDependency = entryDependencies[entryDependencyIndex++];
             addFunction(entryDependency, dependencies[entryDependency]);
         }
-        var constantMemberIndex = 1;
-        while (constantMemberIndex < functions.length) {
+        var discoveryIndex = 1;
+        while (discoveryIndex < functions.length) {
             var memberDependencies = [];
-            functions[constantMemberIndex].localNames = [];
-            var memberConstants = collectFunctionConstants(
-                functions[constantMemberIndex].fn,
-                options.constantOverrides || {},
-                functions[constantMemberIndex].expression,
+            functions[discoveryIndex].localNames = [];
+            collectFunctionBindings(
+                functions[discoveryIndex].expression,
                 dependencies, signatures, memberDependencies,
-                functions[constantMemberIndex].localNames,
-                options.legacyConstantLocals === true);
-            var memberConstantName;
-            for (memberConstantName in memberConstants) {
-                if (Object.prototype.hasOwnProperty.call(
-                        memberConstants, memberConstantName)) {
-                    if (Object.prototype.hasOwnProperty.call(
-                            sharedConstants, memberConstantName) &&
-                        sharedConstants[memberConstantName] !==
-                            memberConstants[memberConstantName]) {
-                        throw new SyntaxError("kernel graph constant " +
-                            memberConstantName + " has conflicting values in " +
-                            entryName + " and " +
-                            functions[constantMemberIndex].name);
-                    }
-                    sharedConstants[memberConstantName] =
-                        memberConstants[memberConstantName];
-                }
-            }
+                functions[discoveryIndex].localNames);
             memberDependencies.sort();
             var memberDependencyIndex = 0;
             while (memberDependencyIndex < memberDependencies.length) {
@@ -318,7 +297,7 @@
                     memberDependencies[memberDependencyIndex++];
                 addFunction(memberDependency, dependencies[memberDependency]);
             }
-            constantMemberIndex++;
+            discoveryIndex++;
         }
         var entryMember = functions[0];
         var helperMembers = functions.slice(1);
@@ -328,7 +307,6 @@
         functions = [entryMember].concat(helperMembers);
         /* External bindings belong to this compilation transaction, not each
          * member's local-variable scope. Build their descriptors only once. */
-        validateConstantNamespaces(options.constantNamespaces, sharedConstants);
         var graphBindings = kernelBindingSymbols(
             options.constantNamespaces, sharedConstants);
         var graphScopeConstructor = kernelFunctionScope(graphBindings);
@@ -548,18 +526,10 @@
         return program.body[0].declarations[0].initial;
     }
 
-    function kernelFunctionExpression(functionObject) {
-        return parseKernelFunctionSource(functionObject.toString(),
-                                         "<kernel-constants>");
-    }
-
-    function collectFunctionConstants(functionObject, overrides,
-                                      parsedExpression, dependencies,
-                                      signatures, dependencyNames,
-                                      localNames, legacyConstantLocals) {
-        var expression = parsedExpression ||
-            kernelFunctionExpression(functionObject);
-        var result = {};
+    /* Discover graph edges and JS locals in one traversal. External lexical
+     * bindings come only from explicit compilation options, never locals. */
+    function collectFunctionBindings(expression, dependencies, signatures,
+                                     dependencyNames, localNames) {
         var seenDependencies = {};
         var seenLocals = {};
         var parameterIndex = 0;
@@ -583,15 +553,7 @@
                 var declarationIndex = 0;
                 while (declarationIndex < node.declarations.length) {
                     var declaration = node.declarations[declarationIndex++];
-                    if (legacyConstantLocals &&
-                        isKernelConstantDeclaration(declaration)) {
-                        result[declaration.name] =
-                            Object.prototype.hasOwnProperty.call(
-                                overrides, declaration.name) ?
-                            overrides[declaration.name] | 0 :
-                            kernelConstantValue(declaration.initial);
-                    } else if (localNames &&
-                               !seenLocals["$" + declaration.name]) {
+                    if (!seenLocals["$" + declaration.name]) {
                         seenLocals["$" + declaration.name] = true;
                         localNames.push(declaration.name);
                     }
@@ -612,7 +574,6 @@
             }
         }
         visit(expression.body);
-        return result;
     }
 
     var READ_FIELD_ACCESSORS = {
@@ -1137,9 +1098,8 @@
                     options.precollectedLocalNames[precollectedIndex++];
                 var existing = symbolAt(symbols, precollectedName);
                 if (existing === undefined ||
-                    (!options.legacyConstantLocals &&
-                     (existing.kind === "constant" ||
-                      existing.kind === "constant_namespace"))) {
+                    existing.kind === "constant" ||
+                    existing.kind === "constant_namespace") {
                     symbols["$" + precollectedName] = {
                         kind: "local", index: localNames.length
                     };
@@ -1147,9 +1107,7 @@
                 }
             }
         } else {
-            collectLocals(fn.body, symbols, localNames,
-                          options.constantOverrides || {},
-                          options.legacyConstantLocals === true);
+            collectLocals(fn.body, symbols, localNames);
         }
         /* Identifier bindings are '$'-prefixed. Bookkeeping must not use that
          * namespace: kernelFunctions is also a perfectly valid local name. */
@@ -1427,8 +1385,7 @@
         return preferences;
     }
 
-    function collectLocals(node, symbols, names, constantOverrides,
-                           legacyConstantLocals) {
+    function collectLocals(node, symbols, names) {
         if (!node || typeof node !== "object") return;
         if (node.type === "VariableStatement") {
             var declarationIndex = 0;
@@ -1436,23 +1393,10 @@
                 var declaration = node.declarations[declarationIndex++];
                 var name = declaration.name;
                 var existing = symbolAt(symbols, name);
-                if (existing === undefined ||
-                    (!legacyConstantLocals &&
-                     (existing.kind === "constant" ||
-                      existing.kind === "constant_namespace"))) {
-                    if (legacyConstantLocals &&
-                        isKernelConstantDeclaration(declaration)) {
-                        symbols["$" + name] = {
-                            kind: "constant",
-                            value: Object.prototype.hasOwnProperty.call(
-                                constantOverrides, name) ?
-                                constantOverrides[name] | 0 :
-                                kernelConstantValue(declaration.initial)
-                        };
-                    } else {
-                        symbols["$" + name] = {kind: "local", index: names.length};
-                        names.push(name);
-                    }
+                if (existing === undefined || existing.kind === "constant" ||
+                        existing.kind === "constant_namespace") {
+                    symbols["$" + name] = {kind: "local", index: names.length};
+                    names.push(name);
                 }
             }
         }
@@ -1464,25 +1408,19 @@
                     if (typeof value.length === "number") {
                         var index = 0;
                         while (index < value.length) {
-                            collectLocals(value[index++], symbols, names,
-                                          constantOverrides, legacyConstantLocals);
+                            collectLocals(value[index++], symbols, names);
                         }
-                    } else collectLocals(value, symbols, names,
-                                         constantOverrides, legacyConstantLocals);
+                    } else collectLocals(value, symbols, names);
                 }
             }
         }
     }
 
-    function isKernelConstantDeclaration(declaration) {
-        return isKernelConstantName(declaration.name) &&
-               kernelConstantValue(declaration.initial) !== null;
-    }
-
     function validateConstantOptions(options) {
-        if (options.constantOverrides && !options.legacyConstantLocals) {
-            throw new SyntaxError("constantOverrides requires the temporary " +
-                "legacyConstantLocals mode; use real external bindings instead");
+        if (options.legacyConstantLocals !== undefined ||
+                options.constantOverrides !== undefined) {
+            throw new SyntaxError("legacy kernel constant-local options were removed; " +
+                "use explicit constantBindings or constantNamespaces");
         }
         copyExternalConstants({}, options.constantBindings);
         validateConstantNamespaces(options.constantNamespaces, options.constantBindings);
@@ -1514,46 +1452,6 @@
                 target[name] = value;
             }
         }
-    }
-
-    function isKernelConstantName(name) {
-        if (!name.length) return false;
-        var first = name.charCodeAt(0);
-        if (first < 65 || first > 90) return false;
-        var index = 1;
-        while (index < name.length) {
-            var code = name.charCodeAt(index++);
-            if (code >= 65 && code <= 90) continue;
-            if (code >= 48 && code <= 57) continue;
-            if (code === 95) continue;
-            return false;
-        }
-        return true;
-    }
-
-    function kernelConstantValue(expression) {
-        if (typeof expression === "number" &&
-            expression === (expression | 0)) {
-            return expression | 0;
-        }
-        if (expression && expression.type === "Literal" &&
-            typeof expression.value === "number" &&
-            expression.value === (expression.value | 0)) {
-            return expression.value | 0;
-        }
-        if (expression && expression.type === "UnaryExpression" &&
-            expression.operator === "-" && expression.argument &&
-            ((typeof expression.argument === "number" &&
-              -expression.argument === (-expression.argument | 0)) ||
-             (expression.argument.type === "Literal" &&
-              typeof expression.argument.value === "number" &&
-              -expression.argument.value ===
-                  (-expression.argument.value | 0)))) {
-            var argumentValue = typeof expression.argument === "number" ?
-                expression.argument : expression.argument.value;
-            return -argumentValue | 0;
-        }
-        return null;
     }
 
     function lowerStatements(statements, symbols) {
@@ -1594,10 +1492,7 @@
                                                      declaration.name);
                     if (!declarationSymbol) {
                         throw new SyntaxError("unknown kernel declaration " +
-                            declaration.name + " (constantName=" +
-                            isKernelConstantName(declaration.name) +
-                            ", constantValue=" +
-                            kernelConstantValue(declaration.initial) + ")");
+                            declaration.name);
                     }
                     if (declarationSymbol.kind !== "constant") {
                         declarations.push({op: "set_local",

@@ -400,25 +400,25 @@
             function namedConstantKernel(value) {
                 var WORD_BYTES = 4;
                 var PREVIOUS_WORD = -1;
+                WORD_BYTES = WORD_BYTES + 1;
                 return value * WORD_BYTES + PREVIOUS_WORD;
             }
             var namedConstantIR = compiler.compile(namedConstantKernel,
-                {legacyConstantLocals: true});
+                {constantBindings: {WORD_BYTES: 99, PREVIOUS_WORD: 99}});
             var namedConstantJS = new JSBackend().compile(namedConstantIR);
             var namedConstantX86 = new X86Backend().compile(namedConstantIR);
             try {
-                if (namedConstantIR.locals.length !== 0 ||
-                    namedConstantJS.fn(null, 3) !== 11 ||
-                    (namedConstantX86.fn && namedConstantX86.fn(3) !== 11)) {
-                    throw new Error("named kernel constants were not folded");
+                if (namedConstantIR.locals.length !== 2 ||
+                    namedConstantJS.fn(null, 3) !== 14 ||
+                    (namedConstantX86.fn && namedConstantX86.fn(3) !== 14)) {
+                    throw new Error("uppercase locals did not mutate/shadow external bindings");
                 }
                 var rejectedConstantAssignment = false;
                 try {
                     compiler.compile(function () {
-                        var IMMUTABLE_WORDS = 4;
                         IMMUTABLE_WORDS = 8;
                         return IMMUTABLE_WORDS;
-                    }, {legacyConstantLocals: true});
+                    }, {constantBindings: {IMMUTABLE_WORDS: 4}});
                 } catch (constantError) {
                     rejectedConstantAssignment =
                         String(constantError).indexOf(
@@ -514,13 +514,12 @@
             var preparedGraphSource = compiler.prepareSource(
                 graphEntry.toString() + "\n" + graphMiddle.toString() + "\n" +
                 graphLeaf.toString() + "\n" + graphSink.toString());
-            /* Legacy declarations also join the graph's external environment.
-             * Their conflicts must still be checked after discovery, even
-             * though member lowering no longer repeats public validation. */
+            /* Only explicit external bindings join the graph environment.
+             * A name cannot denote both a scalar and a namespace there. */
             var rejectedGraphBinding = false;
             try {
                 compiler.compileGraph(graphMiddle, {graphLeaf: graphLeaf}, {
-                    legacyConstantLocals: true,
+                    constantBindings: {LOCAL_WEIGHT: 3},
                     constantNamespaces: {LOCAL_WEIGHT: {VALUE: 3}}
                 });
             } catch (graphBindingError) {
