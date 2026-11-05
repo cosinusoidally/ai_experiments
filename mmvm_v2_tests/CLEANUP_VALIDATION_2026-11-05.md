@@ -3,7 +3,7 @@
 Implementation checkpoint: `cdc4539` on `guestVM-cleanup3`.
 Starting implementation: `a7fc652`. Documentation-only follow-ups do not
 change the implementation under test. This report distinguishes completed
-checks from the broader audit still running; it does not replace failures
+checks from existing failures; it does not replace failures
 with smoke-test passes.
 
 ## Scope
@@ -23,7 +23,7 @@ No demo, C source, external corpus, Test262/ECMA/Octane harness or language
 feature was changed. Generated artifacts/logs are not checked in. All heavy
 validation jobs run serially; no VM multithreading or emulation is used.
 
-The checked-in JavaScript line count is 232 lines lower than `a7fc652`,
+The checked-in JavaScript line count is 231 lines lower than `a7fc652`,
 including comments and extensions of existing integration checks. This is
 not by itself a performance or correctness argument.
 
@@ -75,7 +75,7 @@ slower/faster build observations remain in `guest_vm/docs/cleanup.md`.
   marks, 455 unreachable occupied records / 85784 bytes. The latter are
   reported, not silently described as reachable or eliminated.
 
-## Broader frozen-source audit — in progress
+## Broader frozen-source audit — completed
 
 Started around 12:23 UTC. Run Test262, ECMA and a stock Octane image comparison
 once for this combined checkpoint, not once per small source edit.
@@ -99,10 +99,10 @@ once for this combined checkpoint, not once per small source edit.
   0 failures / 0 timeouts / 0 crashes**: both images pass every one of the
   fourteen selected suites. RegExp's much longer stock run was not repeated;
   this is not a full-fifteen stock sweep.
-- Live graphics/HTTP and additional integration checks: pending.
+- Live graphics/HTTP and additional integration checks: completed as detailed
+  below, with known failures explicitly retained.
 
-Commands and final results will be added when these runs complete. Raw
-outputs stay in ignored `artifacts/cleanup10-*`.
+Raw outputs stay in ignored `artifacts/cleanup10-*`.
 
 Test262 command:
 
@@ -166,6 +166,58 @@ node octane_compare.js --reference-snapshot artifacts/strings-final.snap \
   --snapshot artifacts/cleanup10-final.snap --exclude RegExp \
   --output artifacts/cleanup10-octane-paired --timeout 900
 ```
+
+## Live demos, HTTP and additional integration checks
+
+- Standalone demos 1–7 opened at 320x240 with a 20 FPS limit, accepted input
+  and closed normally. Captures were visually inspected for all seven.
+  Demo1 accepted text and pointer movement; the model demos accepted camera
+  input; demos 6/7 left attract mode and accepted driving input. This is
+  functional coverage, not a claim that every demo sustains its FPS limit.
+- A bounded Demo8 repeat exercised garage dragging, manual free drive, auto
+  drive, reset to rolling mode and menu exit. Garage, field and auto captures
+  were inspected. Warm manual/auto readings were 19.8–20.0 FPS; the first
+  combined initialization/transition interval was about 16 FPS. Initialization
+  took 1918 ms, including 876 ms for the sky. No VM/heap error was reported.
+  An earlier orchestration attempt remained in garage mode and was terminated
+  by the test driver; it is not counted as a normal-exit pass or a VM crash.
+  These bounded checks are not a long soak or a universal minimum-FPS claim.
+- Node-hosted native guest Demo1 also opened, accepted text and closed
+  normally at 160x120. That is a functional check, not an FPS comparison.
+- Standalone net.js and node_web.js both passed localhost checks for generated
+  directory listings, default index.html, exact text and binary PNG contents,
+  HEAD/Content-Length and 404. Temporary fixture files stayed in artifacts/.
+- Standalone JSON checks pass all 12 files / 908 assertions. The shared JSON
+  codec and stock Node reference also pass 12/908, as does the Node-hosted
+  native guest path and js_min-hosted native guest path. The Node-hosted
+  portable interpreter fails one file in
+  the full sequence: parse-syntax-errors-02.js reports a non-SyntaxError.
+  The isolated earlier 476c904 implementation reproduces the exact 11-pass /
+  1-failure result; the selected file alone passes on both. This is a newly
+  exercised existing sequence-dependent gap, not a resolved issue.
+- The native compiler dependency integration passes nested calls, mutual
+  recursion, nine arguments, lifetime and declaration-error checks (seven
+  functions). The runner IO integration passes its 94-byte round trip,
+  big-endian word and Xauthority checks.
+- The native-exit inspector reports a named CALL_REJECT_INTRINSIC_ID and
+  filename/line/column on its deliberately stopped CALL. Exit 70 is expected
+  for that diagnostic probe, not a passing execution of the whole program.
+- The existing extra standalone_language_integration.js still stops at CALL,
+  bytecode PC 391, detail 1078 during dynamic library loading. This previously
+  documented gap is not hidden by the passing main project suite.
+
+## Why validation took this long
+
+The combined checkpoint ran one full Test262 sweep (7m53s process wall), one
+full ECMA sweep (11m17s), and one serial before/after Octane sweep (about
+20m45s). Octane means 28 stock benchmark processes, not 14 quick checks.
+Each architectural cutover also needed bounded core/GC and genuine snapshot
+build/identity gates. Additional slow-case controls investigated the observed
+Test262 timing difference instead of silently accepting it. Completed full
+suites were not repeated after the reboot; saved logs were reused. The reboot
+and interruption gaps are not time spent running tests. The first stalled
+Demo8 input-driver sequence added avoidable time; the successful repeat used
+bounded per-input operations rather than a long soak.
 
 ## Remaining architectural work
 

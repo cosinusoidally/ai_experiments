@@ -134,7 +134,7 @@ wrapper documentation when selecting full sweeps or explicit subsets.
 Run memory-heavy jobs serially on the current machine. No multithreading is
 needed to measure or improve the interpreter.
 
-The [latest cleanup validation](../../CLEANUP_VALIDATION_2026-11-04.md) records current passing
+The [latest cleanup validation](../../CLEANUP_VALIDATION_2026-11-05.md) records current passing
 tests, known ECMA gaps, an existing extra standalone integration failure,
 Demo8 mode checks and performance regressions. Do not treat an older bring-up
 report or one green smoke test as the current complete status.

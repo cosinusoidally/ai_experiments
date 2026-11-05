@@ -1,11 +1,14 @@
 # Validation checkpoint, 2026-11-04
 
 2026-11-05: the next [combined cleanup audit](CLEANUP_VALIDATION_2026-11-05.md)
-is in progress for `cdc4539`. Core/GC and cross-host/self-hosted snapshot
+is complete for `cdc4539`. Core/GC and cross-host/self-hosted snapshot
 gates pass; complete Test262 passes 3292/3292. ECMA preserves the exact
-990-pass / 339-failure sets (39 timeouts / 4 skips / 0 not run). Paired Octane
-and live integration checks remain pending. Slower historical Test262 timings are
-recorded rather than claimed as a performance improvement.
+990-pass / 339-failure sets (39 timeouts / 4 skips / 0 not run). All fourteen
+selected stock Octane suites pass on both images; aggregate scores are flat
+(+0.13%). RegExp was not repeated. Live demos 1–8 and HTTP checks pass in the
+documented bounded paths. Existing standalone and portable JSON gaps remain.
+Slower historical Test262 timings are recorded, with targeted controls, rather
+than claimed as a performance improvement. See the report for scope and RSS.
 
 The subsequent [full cleanup validation](CLEANUP_VALIDATION_2026-11-04.md) is
 complete for implementation `430cad1`: no lost ECMA pass, complete Test262 and

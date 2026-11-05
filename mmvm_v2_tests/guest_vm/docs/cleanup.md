@@ -666,3 +666,12 @@ offline marking agree on 37843 reachable records / zero missing marks and
 the unchanged unreachable occupancy. Standalone GC passes 24 rounds /
 48 collections. The frozen-source broader audit is recorded separately in
 [the 2026-11-05 validation report](../../CLEANUP_VALIDATION_2026-11-05.md).
+
+The broader audit is now complete: 3292/3292 imported Test262 files pass;
+ECMA preserves the exact 990 passing and 339 failing filenames; all fourteen
+selected stock Octane suites pass on both images with essentially flat
+aggregate scores. RegExp was not repeated. Bounded demos 1–8, HTTP/binary
+serving and additional compiler/IO checks pass in the documented paths.
+The report retains historical timing differences and existing standalone
+and portable JSON gaps; it does not claim these cleanups complete semantic
+unification or establish a significant CPU/RSS improvement.

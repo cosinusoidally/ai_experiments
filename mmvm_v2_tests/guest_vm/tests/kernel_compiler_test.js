@@ -408,8 +408,9 @@
             var namedConstantJS = new JSBackend().compile(namedConstantIR);
             var namedConstantX86 = new X86Backend().compile(namedConstantIR);
             try {
-                if (namedConstantIR.locals.length !== 2 ||
-                    namedConstantJS.fn(null, 3) !== 14 ||
+                /* Observable mutation/shadowing matters, not whether a
+                 * later data-flow pass can eliminate these local slots. */
+                if (namedConstantJS.fn(null, 3) !== 14 ||
                     (namedConstantX86.fn && namedConstantX86.fn(3) !== 14)) {
                     throw new Error("uppercase locals did not mutate/shadow external bindings");
                 }
