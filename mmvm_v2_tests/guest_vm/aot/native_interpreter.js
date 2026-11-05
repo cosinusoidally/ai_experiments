@@ -12,6 +12,7 @@
     var HeapRecords = root.GuestVMHeapRecords;
     var NativeFreeIndexKernels = root.GuestVMNativeFreeIndexKernel;
     var PropertyStorageKernels = root.GuestVMPropertyStorageKernel;
+    var PropertySemantics = root.GuestVMPropertySemanticsKernel;
     var StringKeyKernels = root.GuestVMStringKeyKernel;
     var NumberFormatKernels = root.GuestVMNumberFormatKernel;
     var ObjectOperationKernels = root.GuestVMObjectOperationsKernel;
@@ -29,6 +30,7 @@
         HeapRecords = require("../heap_records.js");
         NativeFreeIndexKernels = require("../native_free_index_kernel.js");
         PropertyStorageKernels = require("../property_storage_kernel.js");
+        PropertySemantics = require("../property_semantics_kernel.js");
         StringKeyKernels = require("../string_key_kernel.js");
         NumberFormatKernels = require("../number_format_kernel.js");
         ObjectOperationKernels = require("../object_operations_kernel.js");
@@ -13898,61 +13900,45 @@
             }
         }
         var attributes = 0;
-        if (existingProperty === 0) {
-            if (objectIsExtensibleKernel(heapBase, object) === 0) return DEFINE_PROPERTY_REJECTED;
-        } else {
-            attributes = ownPropertyEntryAttributesKernel(heapBase, object, existingProperty);
-            var wasAccessor = attributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR;
-            var dataDescriptor = 0;
-            if (valueCell !== 0) dataDescriptor = 1;
-            if (writableCell !== 0) dataDescriptor = 1;
-            if ((attributes & PROPERTY_ATTRIBUTE_CONFIGURABLE) === 0) {
-                if (configurableCell !== 0 && valueCellTruthyKernel(heapBase, configurableCell) === 1) return DEFINE_PROPERTY_REJECTED;
-                if (enumerableCell !== 0) {
-                    var wasEnumerable = 0;
-                    if ((attributes & PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) wasEnumerable = 1;
-                    if (valueCellTruthyKernel(heapBase, enumerableCell) !== wasEnumerable) return DEFINE_PROPERTY_REJECTED;
-                }
-                if (wasAccessor !== 0) {
-                    if (dataDescriptor !== 0) return DEFINE_PROPERTY_REJECTED;
-                    if (getterCell !== 0 && sameValueCellsKernel(heapBase, getterCell,
-                        ownPropertyEntryValueCellKernel(heapBase, object, existingProperty)) === 0) return DEFINE_PROPERTY_REJECTED;
-                    if (setterCell !== 0 && setter !==
-                        ownPropertyEntrySetterKernel(heapBase, object, existingProperty)) return DEFINE_PROPERTY_REJECTED;
-                } else {
-                    if (accessorDescriptor !== 0) return DEFINE_PROPERTY_REJECTED;
-                    if ((attributes & PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                        if (writableCell !== 0 && valueCellTruthyKernel(heapBase, writableCell) === 1) return DEFINE_PROPERTY_REJECTED;
-                        if (valueCell !== 0 && sameValueCellsKernel(heapBase, valueCell,
-                            ownPropertyEntryValueCellKernel(heapBase, object, existingProperty)) === 0) return DEFINE_PROPERTY_REJECTED;
-                    }
-                }
-            }
-            if (accessorDescriptor !== 0) {
-                if (wasAccessor === 0) attributes = attributes & ~PROPERTY_ATTRIBUTE_WRITABLE;
-            } else if (dataDescriptor !== 0) {
-                if (wasAccessor !== 0) attributes = attributes & ~RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR;
-            }
-        }
-        if (accessorDescriptor !== 0) attributes = attributes | RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR;
+        if (existingProperty !== 0) attributes = ownPropertyEntryAttributesKernel(heapBase, object, existingProperty);
+        var present = 0;
+        var requested = 0;
+        var mismatches = 0;
+        if (valueCell !== 0) present = present | DescriptorFields.VALUE;
+        if (getterCell !== 0) present = present | DescriptorFields.GET;
+        if (setterCell !== 0) present = present | DescriptorFields.SET;
         if (writableCell !== 0) {
-            attributes = attributes & ~PROPERTY_ATTRIBUTE_WRITABLE;
-            if (valueCellTruthyKernel(heapBase, writableCell) === 1) {
-                attributes = attributes + PROPERTY_ATTRIBUTE_WRITABLE;
-            }
+            present = present | DescriptorFields.WRITABLE;
+            if (valueCellTruthyKernel(heapBase, writableCell) === 1) requested = requested | PropertyAttributes.WRITABLE;
         }
         if (enumerableCell !== 0) {
-            attributes = attributes & ~PROPERTY_ATTRIBUTE_ENUMERABLE;
-            if (valueCellTruthyKernel(heapBase, enumerableCell) === 1) {
-                attributes = attributes + PROPERTY_ATTRIBUTE_ENUMERABLE;
-            }
+            present = present | DescriptorFields.ENUMERABLE;
+            if (valueCellTruthyKernel(heapBase, enumerableCell) === 1) requested = requested | PropertyAttributes.ENUMERABLE;
         }
         if (configurableCell !== 0) {
-            attributes = attributes & ~PROPERTY_ATTRIBUTE_CONFIGURABLE;
-            if (valueCellTruthyKernel(heapBase, configurableCell) === 1) {
-                attributes = attributes + PROPERTY_ATTRIBUTE_CONFIGURABLE;
+            present = present | DescriptorFields.CONFIGURABLE;
+            if (valueCellTruthyKernel(heapBase, configurableCell) === 1) requested = requested | PropertyAttributes.CONFIGURABLE;
+        }
+        if (existingProperty !== 0 && (attributes & PropertyAttributes.CONFIGURABLE) === 0) {
+            if ((attributes & PropertyAttributes.ACCESSOR) !== 0) {
+                if (getterCell !== 0 && sameValueCellsKernel(heapBase, getterCell,
+                        ownPropertyEntryValueCellKernel(heapBase, object, existingProperty)) === 0) {
+                    mismatches = mismatches | DescriptorFields.GET;
+                }
+                if (setterCell !== 0 && setter !== ownPropertyEntrySetterKernel(heapBase, object, existingProperty)) {
+                    mismatches = mismatches | DescriptorFields.SET;
+                }
+            } else if ((attributes & PropertyAttributes.WRITABLE) === 0 && valueCell !== 0 &&
+                    sameValueCellsKernel(heapBase, valueCell,
+                        ownPropertyEntryValueCellKernel(heapBase, object, existingProperty)) === 0) {
+                mismatches = mismatches | DescriptorFields.VALUE;
             }
         }
+        var extensible = 1;
+        if (existingProperty === 0) extensible = objectIsExtensibleKernel(heapBase, object);
+        attributes = ordinaryDescriptorDecisionKernel(existingProperty, extensible,
+            attributes, present, requested, mismatches);
+        if (attributes < 0) return DEFINE_PROPERTY_REJECTED;
         /* Descriptor and target may be the same object. Appending can move
          * and retire its backing, so preserve the value before doing so. No
          * collection or guest callback occurs inside the append operation. */
@@ -18131,6 +18117,11 @@
                 kernelDependencies[propertyKernelName] = PropertyStorageKernels[propertyKernelName];
             }
         }
+        for (propertyKernelName in PropertySemantics.functions) {
+            if (Object.prototype.hasOwnProperty.call(PropertySemantics.functions, propertyKernelName)) {
+                kernelDependencies[propertyKernelName] = PropertySemantics.functions[propertyKernelName];
+            }
+        }
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
         var kernelConstants = nativeKernelBindings(
@@ -18229,6 +18220,9 @@
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
                 constantNamespaces: {
+                    DescriptorFields: PropertySemantics.namespaces.DescriptorFields,
+                    PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,
+                    DescriptorReject: PropertySemantics.namespaces.DescriptorReject,
                     RecordLayout: RecordLayout,
                     Bytecode: Bytecode,
                     NativeIntrinsics: NativeIntrinsics,

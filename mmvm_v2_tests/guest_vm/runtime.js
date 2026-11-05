@@ -6,6 +6,7 @@
     var Heap = root.GuestVMHeap;
     var ValueCells = root.GuestVMValueCells;
     var HeapRecords = root.GuestVMHeapRecords;
+    var PropertySemantics = root.GuestVMPropertySemanticsKernel;
     var Bytecode = root.GuestVMBytecode;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     var RecordInitializer = root.GuestVMRecordInitializer;
@@ -25,6 +26,7 @@
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
         HeapRecords = require("./heap_records.js");
+        PropertySemantics = require("./property_semantics_kernel.js");
         Bytecode = require("./bytecode.js");
         ThreadedCompiler = require("./threaded_compiler.js");
         RecordInitializer = require("./aot/record_initializer.js");
@@ -1492,47 +1494,39 @@
             var oldSetterAddress = entry ? this.heapRecords.ownPropertyEntrySetter(
                 object.heapAddress, entry) : 0;
             var oldSetter = oldSetterAddress ? this.readHeapReference(oldSetterAddress) : undefined;
-            if (!entry) {
-                if (!this.heapRecords.objectIsExtensible(object.heapAddress)) {
-                    throw new TypeError("object is not extensible");
-                }
-            } else if (!(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
-                if (desc.configurable || (own(desc, "enumerable") &&
-                    desc.enumerable !== !!(attributes & HeapRecords.Attributes.ENUMERABLE))) {
-                    throw new TypeError("cannot reconfigure property");
-                }
-                if ((accessor || data) && oldAccessor !== accessor) {
-                    throw new TypeError("cannot change non-configurable property kind");
-                }
-                if (oldAccessor) {
-                    if ((own(desc, "get") && !this.sameValue(desc.get, oldValue)) ||
-                        (own(desc, "set") && !this.sameValue(desc.set, oldSetter))) {
-                        throw new TypeError("cannot replace non-configurable accessor");
-                    }
-                } else if (!(attributes & HeapRecords.Attributes.WRITABLE)) {
-                    if (desc.writable || (own(desc, "value") &&
-                        !this.sameValue(desc.value, oldValue))) {
-                        throw new TypeError("cannot write non-writable property");
-                    }
-                }
+            var fieldBits = PropertySemantics.fields;
+            var present = 0, requested = 0, mismatches = 0;
+            if (own(desc, "value")) present |= fieldBits.VALUE;
+            if (own(desc, "get")) present |= fieldBits.GET;
+            if (own(desc, "set")) present |= fieldBits.SET;
+            if (own(desc, "writable")) {
+                present |= fieldBits.WRITABLE;
+                if (desc.writable) requested |= HeapRecords.Attributes.WRITABLE;
             }
-            if ((accessor || data) && oldAccessor !== accessor) {
-                attributes &= ~(HeapRecords.Attributes.ACCESSOR | HeapRecords.Attributes.WRITABLE);
-                oldValue = undefined;
-                oldSetter = undefined;
-            }
-            if (accessor) attributes |= HeapRecords.Attributes.ACCESSOR;
             if (own(desc, "enumerable")) {
-                attributes &= ~HeapRecords.Attributes.ENUMERABLE;
-                if (desc.enumerable) attributes |= HeapRecords.Attributes.ENUMERABLE;
+                present |= fieldBits.ENUMERABLE;
+                if (desc.enumerable) requested |= HeapRecords.Attributes.ENUMERABLE;
             }
             if (own(desc, "configurable")) {
-                attributes &= ~HeapRecords.Attributes.CONFIGURABLE;
-                if (desc.configurable) attributes |= HeapRecords.Attributes.CONFIGURABLE;
+                present |= fieldBits.CONFIGURABLE;
+                if (desc.configurable) requested |= HeapRecords.Attributes.CONFIGURABLE;
             }
-            if (own(desc, "writable")) {
-                attributes &= ~HeapRecords.Attributes.WRITABLE;
-                if (desc.writable) attributes |= HeapRecords.Attributes.WRITABLE;
+            if (entry && !(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
+                if (oldAccessor) {
+                    if (own(desc, "get") && !this.sameValue(desc.get, oldValue)) mismatches |= fieldBits.GET;
+                    if (own(desc, "set") && !this.sameValue(desc.set, oldSetter)) mismatches |= fieldBits.SET;
+                } else if (!(attributes & HeapRecords.Attributes.WRITABLE) &&
+                        own(desc, "value") && !this.sameValue(desc.value, oldValue)) {
+                    mismatches |= fieldBits.VALUE;
+                }
+            }
+            attributes = PropertySemantics.decision(entry ? 1 : 0,
+                entry || this.heapRecords.objectIsExtensible(object.heapAddress) ? 1 : 0,
+                attributes, present, requested, mismatches);
+            if (attributes < 0) throw new TypeError(PropertySemantics.messages[attributes]);
+            if ((accessor || data) && oldAccessor !== accessor) {
+                oldValue = undefined;
+                oldSetter = undefined;
             }
             if (attributes & HeapRecords.Attributes.ACCESSOR) {
                 this.defineAccessorProperty(object, keyAddress,
