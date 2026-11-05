@@ -60,8 +60,13 @@ corpus/benchmark audit runs serially on frozen sources.
 
 ## Combined acceptance — pending
 
-- Full imported Test262: running, approximately 22:25 UTC.
-- Historical ECMA: queued, including exact filename comparison against the
+- Full imported Test262: **3292 passed / zero failures, timeouts, skips or
+  not-run files**. Runner 405.860864 seconds; summed test time 389.599210
+  seconds; process wall 406.50 seconds / peak RSS 511564 KiB. Previous
+  observation 426.882453 seconds / 524244 KiB: 4.9% lower runner time and
+  2.4% lower peak RSS in this observation, not a controlled attribution of
+  the entire difference to the cleanup.
+- Historical ECMA: running, including exact filename comparison against the
   saved 990-pass / 339-failure baseline verified by the preceding audit.
 - Stock Octane: pending; paired old/new images, excluding RegExp.
 - Final GC/heap audits and bounded demos/HTTP/remaining integration: pending.

@@ -1,5 +1,20 @@
 # Test262 status
 
+2026-11-05, approximately 22:24–22:31 UTC, ordinary-semantics/root checkpoint
+`4b24556` (native contract 99), complete imported suite under standalone
+js_runner:
+
+- Test files / variants / executed: **3292 / 3292 / 3292**.
+- Passed **3292**; failed **0**; timed out **0**; not run **0**; skipped **0**.
+- Runner elapsed **405.860864 seconds**; summed test time **389.599210 seconds**.
+  Process wall **406.50 seconds**; peak RSS **511564 KiB**.
+- Every pass is preserved, with unchanged corpus, harness and execution limits.
+  The preceding observation was 426.882453 seconds / 524244 KiB: this run is
+  4.9% faster with 2.4% lower peak RSS, without attributing all variation to code.
+- Command: `./artifacts/js_runner.exe artifacts/semantics-final.snap test262_runner.js`.
+  See [the semantic cleanup audit](SEMANTIC_CLEANUP_VALIDATION_2026-11-05.md)
+  for the remaining ECMA/benchmark/GC/integration gates.
+
 2026-11-05, approximately 17:27–17:35 UTC, property/root checkpoint `0937e5d`
 (native contract 98), complete imported suite under standalone js_runner:
 
