@@ -105,3 +105,11 @@ A fresh follow-up standalone image (7122608 bytes; SHA-256
 runs hello.js and preserves the four selected descriptor-test passes. The
 focused ECMA runner takes 24.038751 seconds. This is a smoke/focused check,
 not a repeat of either complete corpus or a cross-host identity check.
+
+The corrected image now also has byte-identical i386 js_min and genuine
+self-hosted builds (same SHA-256 above). js_min wall time is 109.22 seconds /
+316392 KiB peak RSS; self-host wall time is 84.91 seconds / 481684 KiB.
+Earlier observations were 103.70 / 316452 and 80.92 / 483560 respectively.
+The slower build-time observations require an adjacent old-source control
+before asserting performance parity. Paired stock Octane against debug.snap
+started 2026-11-05 23:37 UTC, excluding RegExp; results remain pending.

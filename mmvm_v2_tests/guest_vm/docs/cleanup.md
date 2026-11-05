@@ -50,6 +50,15 @@ suites pass on both images. Bounded standalone/direct-Node demo checks pass;
 the additional guest-Node graphics bounds and existing integration gaps remain
 explicit. This is not completion of higher-level descriptor/exotic unification.
 
+The subsequent [ordinary-semantics/root cutover](semantic-unification.md)
+shares descriptor validation, write decisions, named prototype traversal and
+runtime/frame root enumeration. Native descriptor fields use the canonical
+key table and ordinary strict-write rejection has a guest continuation.
+Its [acceptance log](../../SEMANTIC_CLEANUP_VALIDATION_2026-11-05.md) separates
+completed full-corpus checks from the later injected-exception GC correction
+and from outstanding benchmark/demo gates. Callback-bearing descriptor fields
+and indexed/exotic semantics still require further consolidation.
+
 1. **Duplicate semantic paths — open.** Portable Runtime/Execution, native
    intrinsics, guest libraries and structured-JS compilation overlap. Embedded
    semantic fallback can mask missing standalone support. The goal is shared
