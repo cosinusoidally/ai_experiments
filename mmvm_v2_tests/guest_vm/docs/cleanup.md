@@ -39,6 +39,14 @@ adding runtime loads or calls to hot code.
 
 ## Current issue register
 
+The next property/root cutover is tracked in
+[property-unification.md](property-unification.md), with a separate
+[validation log](../../PROPERTY_CLEANUP_VALIDATION_2026-11-05.md). It shares
+packed and linked named lookup and packed insertion/clearing, and fixes the
+portable collector's omission of nested callback executions. Full corpus and
+performance acceptance for that checkpoint is still running; earlier audit
+results must not be substituted for those pending gates.
+
 1. **Duplicate semantic paths — open.** Portable Runtime/Execution, native
    intrinsics, guest libraries and structured-JS compilation overlap. Embedded
    semantic fallback can mask missing standalone support. The goal is shared
