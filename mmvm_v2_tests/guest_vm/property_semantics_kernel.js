@@ -10,6 +10,33 @@
         CONFIGURABLE: 8, GET: 16, SET: 32};
     var DescriptorReject = {NOT_EXTENSIBLE: -1, RECONFIGURE: -2,
         CHANGE_KIND: -3, REPLACE_ACCESSOR: -4, NON_WRITABLE: -5, MIXED: -6};
+    var PropertyWriteAction = {WRITE_DATA: 0, CALL_SETTER: 1,
+        NO_SETTER: -1, NON_WRITABLE: -2};
+
+    function ordinaryWriteActionKernel(attributes, setter) {
+        if ((attributes & PropertyAttributes.ACCESSOR) !== 0) {
+            if (setter === 0) return PropertyWriteAction.NO_SETTER;
+            return PropertyWriteAction.CALL_SETTER;
+        }
+        if ((attributes & PropertyAttributes.WRITABLE) === 0) return PropertyWriteAction.NON_WRITABLE;
+        return PropertyWriteAction.WRITE_DATA;
+    }
+
+    /* Ordinary JS dependency injection: portable lookup binds checked/cached
+     * record access; AOT binds the corresponding named kernel helpers. The
+     * traversal itself is identical. Return a logical owner, never a cell
+     * address or a newly allocated descriptor. Positive entry caches supply
+     * the caller's subsequent entry read. No callback/GC occurs in this walk. */
+    function createNamedPropertyOwnerResolver(findOwnPropertyEntryKernel,
+            objectPrototypeReferenceKernel) {
+        return function namedPropertyOwnerKernel(heapBase, state, owner, key) {
+            while (owner !== 0) {
+                if (findOwnPropertyEntryKernel(heapBase, state, owner, key) !== 0) return owner;
+                owner = objectPrototypeReferenceKernel(heapBase, owner);
+            }
+            return 0;
+        };
+    }
 
     /* Returns new attributes or a named negative rejection. mismatches uses
      * VALUE/GET/SET presence bits only where SameValue has returned false. */
@@ -51,10 +78,14 @@
     }
 
     var exports = {fields: DescriptorFields, reject: DescriptorReject,
+        writeActions: PropertyWriteAction,
+        writeAction: ordinaryWriteActionKernel,
+        createNamedPropertyOwnerResolver: createNamedPropertyOwnerResolver,
         decision: ordinaryDescriptorDecisionKernel,
-        functions: {ordinaryDescriptorDecisionKernel: ordinaryDescriptorDecisionKernel},
+        functions: {ordinaryDescriptorDecisionKernel: ordinaryDescriptorDecisionKernel,
+                    ordinaryWriteActionKernel: ordinaryWriteActionKernel},
         namespaces: {DescriptorFields: DescriptorFields, PropertyAttributes: PropertyAttributes,
-                     DescriptorReject: DescriptorReject},
+                     DescriptorReject: DescriptorReject, PropertyWriteAction: PropertyWriteAction},
         messages: {}};
     exports.messages[DescriptorReject.NOT_EXTENSIBLE] = "object is not extensible";
     exports.messages[DescriptorReject.RECONFIGURE] = "cannot reconfigure property";

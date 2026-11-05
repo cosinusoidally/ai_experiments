@@ -52,3 +52,22 @@ They take 26.047 runner seconds versus 28.356 on the unchanged old debug image
 in an adjacent control. This is a focused observation, not full acceptance or
 a claimed general speedup. Node builds the candidate in 9.57 seconds /
 302840 KiB peak RSS. Broader build/corpus/performance gates remain pending.
+
+## Assignment and resolution checkpoint
+
+The shared ordinaryWriteActionKernel selects data write, setter invocation,
+missing setter or non-writable rejection. Runtime and native assignment use
+that function; strict/sloppy effects and guest call-frame entry stay with the
+execution adapter. Existing native rejection exits are not yet removed.
+
+createNamedPropertyOwnerResolver uses ordinary JS dependency injection to bind
+own-entry lookup and prototype access. Runtime binds its existing guarded own
+cache and checked records; native compilation binds the corresponding kernel
+helpers. The traversal source is identical. It returns a logical owner offset;
+the positive cache supplies the subsequent entry read, without allocating a
+descriptor pair or keeping a raw cell address. Prototype chains are not cached
+as a whole: mutations/shadowing retain their existing visibility rules.
+The native setter's duplicate prototype/type/list scan has been removed.
+
+Node core, i386 focused embedding/context checks and standalone JSON (12 files /
+908 assertions) pass. These are intermediate gates, not a completed full audit.

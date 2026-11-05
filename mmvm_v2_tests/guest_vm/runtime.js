@@ -1616,18 +1616,17 @@
             owner, entry, receiver, value, strict) {
         var descriptor = this.heapRecords.resolvedOwnPropertyEntryDescriptor(owner.heapAddress, entry);
         var attributes = this.heapRecords.propertyDescriptorAttributes(descriptor);
-        if (attributes & HeapRecords.Attributes.ACCESSOR) {
-            var setterAddress = this.heapRecords.propertyDescriptorSetter(descriptor);
-            if (!setterAddress) {
-                if (strict) throw new TypeError("property has no setter");
-                return value;
-            }
+        var setterAddress = attributes & HeapRecords.Attributes.ACCESSOR ?
+            this.heapRecords.propertyDescriptorSetter(descriptor) : 0;
+        var action = PropertySemantics.writeAction(attributes, setterAddress);
+        if (action === PropertySemantics.writeActions.CALL_SETTER) {
             var setter = this.readHeapReference(setterAddress);
             this.invokePropertyFunction(setter, receiver, [value]);
             return value;
         }
-        if (!(attributes & HeapRecords.Attributes.WRITABLE)) {
-            if (strict) throw new TypeError("property is not writable");
+        if (action !== PropertySemantics.writeActions.WRITE_DATA) {
+            if (strict) throw new TypeError(action === PropertySemantics.writeActions.NO_SETTER ?
+                "property has no setter" : "property is not writable");
             return value;
         }
         this.writeHeapValue(this.heapRecords.propertyDescriptorValueCell(descriptor), value);
@@ -1676,14 +1675,17 @@
         if (!object || !object.heapAddress) return 0;
         var prototypeAddress = this.heapRecords.objectPrototype(
             object.heapAddress);
-        while (prototypeAddress) {
-            var prototype = this.readHeapReference(prototypeAddress);
-            var property = this.heapOwnProperty(prototype, key, false);
-            if (property) return prototype;
-            prototypeAddress = this.heapRecords.objectPrototype(
-                prototype.heapAddress);
+        if (!prototypeAddress) return 0;
+        if (!this.namedPropertyOwnerResolver) {
+            var runtime = this;
+            this.namedPropertyOwnerResolver = PropertySemantics.createNamedPropertyOwnerResolver(
+                function (heapBase, state, owner, keyAddress) {
+                    return runtime.heapOwnPropertyEntry(runtime.readHeapReference(owner), keyAddress, false);
+                }, function (heapBase, owner) { return runtime.heapRecords.objectPrototype(owner); });
         }
-        return 0;
+        var owner = this.namedPropertyOwnerResolver(0, 0, prototypeAddress,
+            this.internStringAddress(this.propertyKey(key)));
+        return owner ? this.readHeapReference(owner) : 0;
     };
 
     Runtime.prototype.setPrototype = function (object, prototype) {

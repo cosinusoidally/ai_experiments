@@ -39,6 +39,9 @@
     }
 
     var heapMarkKernel = HeapSweeper.markKernel;
+    var namedPropertyOwnerKernel = PropertySemantics.createNamedPropertyOwnerResolver(
+        PropertyStorageKernels.findOwnPropertyEntryKernel,
+        ObjectOperationKernels.functions.objectPrototypeReferenceKernel);
     var heapSweepKernel = HeapSweeper.sweepKernel;
     var BUFFER_BACKING_EXTERNAL_FLAG = HeapRecords.KernelConstants.BUFFER_BACKING_EXTERNAL_FLAG;
     var LARGE_BUFFER_BYTES = HeapRecords.KernelConstants.LARGE_BUFFER_BYTES;
@@ -1769,71 +1772,17 @@
                     }
                 }
                 if (setPropertyRecord === 0) {
-                    var inheritedSetObject = 0;
-                    if (setPropertyObjectType >= RecordLayout.HEAP_TYPE_OBJECT) {
-                        if (setPropertyObjectType <=
-                            RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
-                            inheritedSetObject = objectPrototype(
-                                heapBase, setPropertyObject);
-                        }
-                    }
-                    if (setPropertyObjectType === RecordLayout.HEAP_TYPE_REGEXP) {
-                        inheritedSetObject = regexpPrototype(
-                            heapBase, setPropertyObject);
-                    } else if (setPropertyObjectType ===
-                               RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                        inheritedSetObject = bufferViewPrototype(
-                            heapBase, setPropertyObject);
-                    }
-                    while (inheritedSetObject !== 0) {
-                        var inheritedSetType = recordType(
-                            heapBase, inheritedSetObject);
-                        var inheritedSetHead = 0;
-                        var inheritedSetPrototype = 0;
-                        if (inheritedSetType >= RecordLayout.HEAP_TYPE_OBJECT) {
-                            if (inheritedSetType <=
-                                RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
-                                inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
-                                inheritedSetPrototype = objectPrototype(
-                                    heapBase, inheritedSetObject);
-                            }
-                        }
-                        if (inheritedSetType === RecordLayout.HEAP_TYPE_REGEXP) {
-                            inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
-                            inheritedSetPrototype = regexpPrototype(
-                                heapBase, inheritedSetObject);
-                        } else if (inheritedSetType ===
-                                   RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                            inheritedSetHead = lastOwnPropertyEntryKernel(heapBase, inheritedSetObject);
-                            inheritedSetPrototype = bufferViewPrototype(
-                                heapBase, inheritedSetObject);
-                        }
-                        while (inheritedSetHead !== 0) {
-                            var inheritedSetKey = ownPropertyEntryKeyKernel(heapBase, inheritedSetObject, inheritedSetHead);
-                            var inheritedSetMatches = 1;
-                            if (inheritedSetKey !== setPropertyNamedKey) {
-                                inheritedSetMatches = stringKeysEqualKernel(
-                                    heapBase, inheritedSetKey,
-                                    setPropertyNamedKey);
-                            }
-                            if (inheritedSetMatches === 1) {
-                                var inheritedSetAttributes =
-                                    ownPropertyEntryAttributesKernel(heapBase, inheritedSetObject, inheritedSetHead);
-                                if ((inheritedSetAttributes &
-                                     RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                                    setPropertyRecord = inheritedSetHead;
-                                    setPropertyOwner = inheritedSetObject;
-                                } else if ((inheritedSetAttributes &
-                                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                                    setPropertyRecord = inheritedSetHead;
-                                    setPropertyOwner = inheritedSetObject;
-                                }
-                                inheritedSetHead = 0;
-                                inheritedSetObject = 0;
-                            } else inheritedSetHead = previousOwnPropertyEntryKernel(heapBase, inheritedSetObject, inheritedSetHead);
-                        }
-                        if (inheritedSetObject !== 0) {
-                            inheritedSetObject = inheritedSetPrototype;
+                    var inheritedSetObject = namedPropertyOwnerKernel(heapBase, state,
+                        objectPrototypeReferenceKernel(heapBase, setPropertyObject), setPropertyNamedKey);
+                    if (inheritedSetObject !== 0) {
+                        var inheritedSetEntry = findOwnPropertyEntryKernel(heapBase, state,
+                            inheritedSetObject, setPropertyNamedKey);
+                        var inheritedSetAttributes = ownPropertyEntryAttributesKernel(
+                            heapBase, inheritedSetObject, inheritedSetEntry);
+                        if ((inheritedSetAttributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0 ||
+                                (inheritedSetAttributes & PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                            setPropertyRecord = inheritedSetEntry;
+                            setPropertyOwner = inheritedSetObject;
                         }
                     }
                 }
@@ -1860,13 +1809,13 @@
                 }
                 var setPropertyDescriptor = ownPropertyEntryDescriptorKernel(
                     heapBase, setPropertyOwner, setPropertyRecord);
-                if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
-                            RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                    var setter = propertyDescriptorSetter(0, setPropertyDescriptor);
-                    if (setter === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
+                var setPropertyAttributes = propertyDescriptorAttributes(0, setPropertyDescriptor);
+                var setter = 0;
+                if ((setPropertyAttributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                    setter = propertyDescriptorSetter(0, setPropertyDescriptor);
+                }
+                var setPropertyAction = ordinaryWriteActionKernel(setPropertyAttributes, setter);
+                if (setPropertyAction === PropertyWriteAction.CALL_SETTER) {
                     var setterCell = engineScratchLeftAddress(heapBase, state);
                     setValueCellReference(setterCell, setter);
                     var setterArgumentCell = registerAddress +
@@ -1882,8 +1831,7 @@
                         return unsupportedDiagnosticExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                } else if ((propertyDescriptorAttributes(0, setPropertyDescriptor) &
-                            PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                } else if (setPropertyAction !== PropertyWriteAction.WRITE_DATA) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
@@ -18122,6 +18070,7 @@
                 kernelDependencies[propertyKernelName] = PropertySemantics.functions[propertyKernelName];
             }
         }
+        kernelDependencies.namedPropertyOwnerKernel = namedPropertyOwnerKernel;
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
         var kernelConstants = nativeKernelBindings(
@@ -18223,6 +18172,7 @@
                     DescriptorFields: PropertySemantics.namespaces.DescriptorFields,
                     PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,
                     DescriptorReject: PropertySemantics.namespaces.DescriptorReject,
+                    PropertyWriteAction: PropertySemantics.namespaces.PropertyWriteAction,
                     RecordLayout: RecordLayout,
                     Bytecode: Bytecode,
                     NativeIntrinsics: NativeIntrinsics,
