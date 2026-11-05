@@ -36,6 +36,12 @@ recover its actual home context, not substitute the caller's context.
 
 ## Calls and built-ins
 
+Embedding collections enumerate scheduler/context executions and synchronous
+nested guest callbacks through the same visitRuntimeExecutions helper in
+runtime.js. Native root seeding and portable marking must not maintain
+different execution-owner lists. Nested callbacks can have live registers
+that are not reachable from the context's published execution.
+
 - Bytecode functions carry program, lexical closure and home context. Calls
   normalize `this` according to strictness and initialize binding/argument
   registers. Constructors additionally apply construction/prototype rules.

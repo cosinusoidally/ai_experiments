@@ -5472,14 +5472,7 @@
         while (index < this.activeEnvironmentFrames.length) {
             environment(this.activeEnvironmentFrames[index++]);
         }
-        index = 0;
-        while (index < this.contexts.length) {
-            execution(this.contexts[index++].execution);
-        }
-        index = 0;
-        while (index < this.activeExecutions.length) {
-            execution(this.activeExecutions[index++]);
-        }
+        visitRuntimeExecutions(this, execution);
         if (this.functionConstructionCallable) {
             value(this.functionConstructionCallable);
         }
@@ -5702,9 +5695,12 @@
                 var context = this.contexts[contextIndex];
                 this.linearHeap.setMark(context.heapAddress, generation);
                 this.markValue(context.globalObject, generation);
-                if (context.execution) markExecution(context.execution, generation, this);
                 contextIndex++;
             }
+            var collectingRuntime = this;
+            visitRuntimeExecutions(this, function (execution) {
+                markExecution(execution, generation, collectingRuntime);
+            });
             if (this.nativeInterpreter) {
                 this.linearHeap.setMark(
                     this.nativeInterpreter.stringSupportAddress, generation);
@@ -6135,6 +6131,21 @@
             throw new RangeError("gcThreshold must be a positive integer");
         }
         return value;
+    }
+
+    /* Contexts publish scheduler-owned executions. Synchronous guest-library
+     * callbacks publish separate nested executions while their caller remains
+     * suspended. Both collector backends must enumerate the same owners. */
+    function visitRuntimeExecutions(runtime, visit) {
+        var index = 0;
+        while (index < runtime.contexts.length) {
+            var execution = runtime.contexts[index++].execution;
+            if (execution) visit(execution);
+        }
+        index = 0;
+        while (index < runtime.activeExecutions.length) {
+            visit(runtime.activeExecutions[index++]);
+        }
     }
 
     function markExecution(execution, generation, runtime) {

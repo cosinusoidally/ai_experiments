@@ -90,3 +90,23 @@ root operations reject use after JSRuntime destruction. Existing context
 integration coverage now retains an object/Buffer graph, destroys its context,
 collects, verifies the graph, and releases it. Root tokens keep their existing
 runtime-local, reusable-slot contract; no new token representation is added.
+
+## Callback-root correction
+
+The portable JSON failure was a GC defect, not JSON syntax handling. A caught
+exception reported a freed 144-byte record while assigning the parse result
+to its lexical slot. Synchronous guest-library calls publish nested executions
+in Runtime.activeExecutions. Native root seeding visited those executions;
+the portable collector visited only context.execution, omitting their live
+registers and environments. A threshold collection during the full sequence
+therefore reclaimed a live JSON result. Running the selected file alone did
+not reach the same collection point.
+
+visitRuntimeExecutions now enumerates context-owned and nested executions for
+both collector paths. Their marking mechanics remain backend-specific, but
+root ownership has one enumerator. The unchanged twelve-file JSON integration
+now passes 908 assertions under the Node-hosted portable interpreter, where
+the prior implementation failed. No JSON-specific retention or parser change
+was required. The same JSON sequence passes 12/908 under js_min portable
+execution. Node core and bounded structural GC on both hosts also pass after
+the fix (unchanged 27 audits / 111888 edges / maximum bumps).
