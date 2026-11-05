@@ -659,3 +659,10 @@ takes 87.22 seconds / 481592 KiB. Each reproduces its own Node-built image
 exactly. This finds no material difference in that pair; it is not a speedup
 claim. Final js_min image identity/audits and the broader corpus/integration
 sweep are still pending at this source checkpoint.
+
+Final cross-host gates completed: Node/js_min/self-host images are identical,
+7108408 bytes; js_min builds in 106.25 seconds / 322828 KiB. Node and i386
+offline marking agree on 37843 reachable records / zero missing marks and
+the unchanged unreachable occupancy. Standalone GC passes 24 rounds /
+48 collections. The frozen-source broader audit is recorded separately in
+[the 2026-11-05 validation report](../../CLEANUP_VALIDATION_2026-11-05.md).
