@@ -21,6 +21,7 @@
     var propertyLookupKernelJS = null;
     var propertyClearKernelJS = null;
     var propertyAppendKernelJS = null;
+    var linkedPropertyLookupKernelJS = null;
 
     function compilePropertyStorageKernel(name) {
         var Compiler = root.GuestVMKernelCompiler;
@@ -1267,13 +1268,18 @@
         if (this.heap.recordType(object) === Heap.Types.OBJECT) {
             throw new Error("ordinary properties require owner/entry accessors");
         }
-        var keyAddress = typeof keyString === "number" ? keyString : 0;
+        if (typeof keyString === "number") {
+            this.heap.requireRecord(keyString, Heap.Types.STRING);
+            if (!linkedPropertyLookupKernelJS) {
+                linkedPropertyLookupKernelJS = compilePropertyStorageKernel("findLinkedPropertyEntryKernel");
+            }
+            return linkedPropertyLookupKernelJS(this.heap.memory, 0, object, keyString);
+        }
         var property = this.objectPropertyHead(object);
         while (property) {
             var candidate = this.heap.readTrustedFieldU32(
                 property, PROPERTY_KEY, Heap.Types.PROPERTY);
-            if ((keyAddress && candidate === keyAddress) ||
-                (!keyAddress && this.readString(candidate) === keyString)) {
+            if (this.readString(candidate) === keyString) {
                 return property;
             }
             property = this.heap.readTrustedFieldU32(property, PROPERTY_NEXT,
@@ -2472,6 +2478,7 @@
             ((flags + 1) & PROPERTY_STORAGE_EPOCH_MASK)) >>> 0;
     };
     Records.prototype.appendPropertyStorageEntry = function (storage, key, attributes, setter) {
+        this.heap.requireRecord(key, Heap.Types.STRING);
         var entry = this.propertyStorageLength(storage) + 1;
         if (entry > this.propertyStorageCapacity(storage)) {
             throw new RangeError("property storage needs growth before insertion");

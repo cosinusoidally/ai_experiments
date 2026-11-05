@@ -111,6 +111,17 @@
             if (records.functionClosure(fn) !== inner) {
                 throw new Error("heap function layout failed");
             }
+            /* Packed and linked named properties have identical string-key
+             * semantics even when an embedder supplies noninterned views. */
+            var functionProperty = records.defineOwnPropertyEntry(fn, key);
+            var equalKeys = [records.allocateString("answer"),
+                records.allocateStringSlice(records.allocateString("[answer]"), 1, 6)];
+            for (var equalKeyIndex = 0; equalKeyIndex < equalKeys.length; equalKeyIndex++) {
+                if (records.findOwnPropertyEntry(object, equalKeys[equalKeyIndex]) !== property ||
+                        records.findOwnPropertyEntry(fn, equalKeys[equalKeyIndex]) !== functionProperty) {
+                    throw new Error("packed/linked string-key lookup disagrees");
+                }
+            }
             var frame = records.allocateFrame(0, inner, 0, -1, 2);
             records.setFramePC(frame, 29);
             cells.writeReferenceAt(records.frameRegisterCell(frame, 0), fn);

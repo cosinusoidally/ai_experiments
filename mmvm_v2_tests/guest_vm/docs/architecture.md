@@ -93,7 +93,7 @@ the bare constructor: see [maintenance](maintenance.md).
 | Language front end | `tokenizer.js`, Unicode data, `parser.js`, `compiler.js`, `function_analysis.js`, `register_allocator.js`, `bytecode_optimizer.js`, `verifier.js` |
 | Portable execution | `interpreter.js` scheduling/frames/fallback; `runtime.js` semantics, roots, metadata and built-in construction |
 | Heap | `host_memory.js`, `linear_memory.js`, `heap.js`, `value_cell.js`, `heap_records.js` |
-| Shared low-level operations | `property_storage_kernel.js`, `object_operations_kernel.js`, `lexical_environment_kernel.js`, `memory_transfer_kernel.js`, `native_free_index_kernel.js`, `number_format_kernel.js` |
+| Shared low-level operations | `property_storage_kernel.js`, `string_key_kernel.js`, `object_operations_kernel.js`, `lexical_environment_kernel.js`, `memory_transfer_kernel.js`, `native_free_index_kernel.js`, `number_format_kernel.js` |
 | AOT | `aot/kernel_compiler.js`, `kernel_slots.js`, `backend_js.js`, `backend_x86.js`, `x86_assembler.js` |
 | Native engine/collector | `aot/native_interpreter.js`, `heap_sweeper.js`, `free_index_kernel.js`, `record_initializer.js` |
 | Guest libraries | `array_runtime.js`, `object_runtime.js`, `math_runtime.js`, `number_runtime.js`, `regexp_runtime.js`, `buffer_runtime.js`, shared `json.js` |

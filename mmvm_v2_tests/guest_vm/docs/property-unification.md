@@ -110,3 +110,18 @@ the prior implementation failed. No JSON-specific retention or parser change
 was required. The same JSON sequence passes 12/908 under js_min portable
 execution. Node core and bounded structural GC on both hosts also pass after
 the fix (unchanged 27 audits / 111888 edges / maximum bumps).
+
+## Linked named entries
+
+The non-ordinary named-property scan is now findLinkedPropertyEntryKernel.
+Both native lookup entry points and the record-layer numeric-key API use it.
+This removes the record layer's pointer-only string match: equal-content
+noninterned strings now find the same entry as interned atoms. Existing
+record integration coverage exercises packed and function-owned entries with
+fresh strings and slice views. Host-text low-level lookup remains an explicit
+embedding convenience, not a native execution path.
+
+The final Node and i386 js_min core suites pass, and the Node image builds in 8.57 seconds /
+290784 KiB peak RSS in one observation. The combined checkpoint is frozen
+for cross-host builds and broader validation. This does not yet establish
+performance parity or completion of all descriptor/exotic-policy unification.

@@ -11,6 +11,10 @@
         if (recordType(heapBase, owner) === HEAP_TYPE_OBJECT) {
             return findCachedOwnObjectPropertyKernel(heapBase, state, owner, key);
         }
+        return findLinkedPropertyEntryKernel(heapBase, owner, key);
+    }
+
+    function findLinkedPropertyEntryKernel(heapBase, owner, key) {
         var entry = lastOwnPropertyEntryKernel(heapBase, owner);
         while (entry !== 0) {
             if (stringKeysEqualKernel(heapBase,
@@ -313,13 +317,7 @@
             setPropertyStorageHashIndex(heapBase, storage, 0);
             return findPropertyStorageEntryKernel(heapBase, storage, key, 0, hash);
         }
-        var entry = lastOwnPropertyEntryKernel(heapBase, object);
-        while (entry !== 0) {
-            if (stringKeysEqualKernel(heapBase,
-                    ownPropertyEntryKeyKernel(heapBase, object, entry), key) === 1) return entry;
-            entry = previousOwnPropertyEntryKernel(heapBase, object, entry);
-        }
-        return 0;
+        return findLinkedPropertyEntryKernel(heapBase, object, key);
     }
 
     function growOwnPropertyStorageKernel(heapBase, state, owner) {
@@ -454,6 +452,7 @@
         ownPropertyEntryDescriptorKernel: ownPropertyEntryDescriptorKernel,
         ownPropertyEpochKernel: ownPropertyEpochKernel,
         findOwnPropertyEntryKernel: findOwnPropertyEntryKernel,
+        findLinkedPropertyEntryKernel: findLinkedPropertyEntryKernel,
         ownPropertyEntryAttributesKernel: ownPropertyEntryAttributesKernel,
         ownPropertyEntryValueCellKernel: ownPropertyEntryValueCellKernel,
         ownPropertyEntryKeyKernel: ownPropertyEntryKeyKernel,

@@ -2,7 +2,8 @@
 
 Read this with [`heap.js`](../heap.js), [`value_cell.js`](../value_cell.js),
 [`heap_records.js`](../heap_records.js) and
-[`property_storage_kernel.js`](../property_storage_kernel.js). Numerical
+[`property_storage_kernel.js`](../property_storage_kernel.js) and
+[`string_key_kernel.js`](../string_key_kernel.js). Numerical
 layouts below explain the current representation, not constants to duplicate
 at call sites. Use the named accessors/exports when implementing changes.
 
