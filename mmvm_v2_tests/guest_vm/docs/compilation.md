@@ -199,6 +199,16 @@ not a claim that every old call site has completed that refactor.
 [`backend_js.js`](../aot/backend_js.js) generates ordinary JavaScript functions
 using a leading `memory` adapter and explicit memory operations. It is Node's
 kernel execution path and an equivalence reference, not an FFI emulator.
+
+Ordinary property policy is shared without adding a special compiler mode:
+property_semantics_kernel.js contains ordinary JS decision functions over
+normalized integer flags. Runtime calls them directly; the native graph compiles
+the same bodies with explicit constant namespaces. Named prototype traversal
+is produced by a normal JS factory binding its lookup/prototype helpers.
+Native graph dependencies bind those same named kernel helpers explicitly;
+this is not general closure compilation or mutable-local constant inference.
+The portable factory binds the existing checked/cached record operations.
+
 The compile result includes `.fn`, generated `.source`, `.ir` and backend
 identity; a graph result also exposes generated helper functions.
 

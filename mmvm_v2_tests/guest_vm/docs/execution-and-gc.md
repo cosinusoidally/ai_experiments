@@ -36,6 +36,21 @@ recover its actual home context, not substitute the caller's context.
 
 ## Calls and built-ins
 
+Embedding root discovery has three shared ownership walks in runtime.js:
+visitRuntimeRecordRoots for runtime-owned heap records, visitEmbeddingRoots
+for retain tokens and active embedding stacks, and visitExecutionRoots for
+frames/constructor receivers/pending callables, receivers and arguments.
+Collector-specific visitors decide how to mark those roots, not which frame
+values count as live. Host/heap register authority is still guarded by
+nativeHeapCurrent. Weak code/atom caches are not promoted to permanent roots.
+
+Ordinary descriptor decisions and assignment actions are defined in
+property_semantics_kernel.js and used by Runtime and the compiled kernel.
+Conversion, guest calls, error creation and exotic handling remain explicit
+adapter responsibilities. Native ordinary write rejection handles sloppy
+ignores and caught strict TypeErrors through its internal continuation.
+Allocation retry and the existing uncaught-error protocol are separate cases.
+
 Embedding collections enumerate scheduler/context executions and synchronous
 nested guest callbacks through the same visitRuntimeExecutions helper in
 runtime.js. Native root seeding and portable marking must not maintain

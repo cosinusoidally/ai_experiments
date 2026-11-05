@@ -229,6 +229,9 @@ blocking native call or guarantee a strict bound on every intrinsic's work.
 
 - `completeHostCall(value)` publishes the return value and makes execution
   ready. It can reach a GC safe point; keep external values rooted as needed.
+  While the request is pending, the execution roots its callable, receiver
+  and arguments. Once completed/failed/aborted, that request no longer owns
+  them: an embedder retaining such values beyond the request must use retain.
 - `failHostCall(error)` queues an exception at the suspended call. Guest
   exception handling happens when resumed, not when this method is called.
 - `serviceHostCall()` invokes the stored callback, then completes or fails
