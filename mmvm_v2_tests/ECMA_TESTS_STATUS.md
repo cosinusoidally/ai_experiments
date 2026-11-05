@@ -770,6 +770,26 @@ are part of this bring-up.
   - `ecma_3`: 203 passed / 26 failed / 4 timed out.
   - `ecma_5`: 230 passed / 82 failed / 21 timed out.
 
+## 2026-11-04 20:23--20:35 UTC: full cleanup audit
+
+- Frozen implementation `430cad1`, standalone js_runner, complete configured
+  selection: **1333 selected / 1329 executed / 990 passed / 339 failed /
+  39 timed out / 4 configured skips / 0 not run**. Timeouts are included in
+  failures. No test or exclusion was changed.
+- Harness elapsed 685095.617 ms; process wall 686.53 seconds; peak RSS
+  463576 KiB. `ecma`: 472/148 (11 timeouts); `ecma_2`: 148/24;
+  `ecma_3`: 175/50 (1 timeout, 4 skips); `ecma_5`: 195/117 (27 timeouts).
+- Completed control: archived `fa54ddb` reports the same 990 passes / 339
+  failures, including 39 timeouts, 4 configured skips and 0 not run, in
+  685452.750 ms harness elapsed / 685.78 seconds wall, peak RSS 463568 KiB.
+  Specific filename comparison gives **990 preserved / 0 gained / 0 lost**.
+- Direct Node reports 1218 passes / 111 failures / 0 timeouts / 4 skips /
+  0 not run, in 125631.019 ms / 125.78 seconds wall, peak RSS 149556 KiB.
+  The guest preserves 961/1218 specific Node passes; 257 gaps remain,
+  unchanged. See the [full cleanup audit](CLEANUP_VALIDATION_2026-11-04.md).
+- Raw output stays in ignored `artifacts/cleanup-full.j9oRH8/ecma-current.log`
+  and `.time`; stderr failure lines are in `.time`, alongside process metrics.
+
 ## Investigation notes
 
 - The first nonisolated Node attempt hung inside native `Array.splice` on a

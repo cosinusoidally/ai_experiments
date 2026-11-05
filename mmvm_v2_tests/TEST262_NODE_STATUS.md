@@ -8,6 +8,13 @@ API here. No test under `../../js_tests/tests` is modified or skipped.
 
 ## Measurements
 
+- 2026-11-04 22:05--22:06 UTC, Node v24.14.1, complete default selection:
+  **3292 executed / 3253 passed / 39 failed / 0 not run / 0 timed out**.
+  The exact 39 failing IDs match the inventory below. Harness elapsed
+  30477.862 ms; summed test time 29744.572 ms; process wall 30.61 seconds;
+  peak RSS 760960 KiB. This was a reference control in the
+  [full cleanup audit](CLEANUP_VALIDATION_2026-11-04.md), not guest semantics.
+
 - 2026-10-29, Node v24.14.1, default per-test result/timing output:
   `node test262_runner_node.js`. Complete inventory: **3,292 executed /
   3,253 passed / 39 failed / 0 not run / 0 timed out**. First full measurement:

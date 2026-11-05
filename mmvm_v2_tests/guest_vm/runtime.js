@@ -5825,7 +5825,7 @@
              * every native/semantic boundary.  Give it useful bump headroom;
              * an allocation exit still forces a collection if fragmented
              * free space or the remaining tail cannot satisfy a record. */
-            var postCollectionHeadroom = Math.max(1024 * 1024,
+            var postCollectionHeadroom = Math.max(Heap.GCPolicy.MINIMUM_HEADROOM_BYTES,
                 Math.floor(sweepResult.bytes / 2));
             /* The native free-block indexer reports total free bytes while it
              * is already walking the authoritative record stream.  Rewalking

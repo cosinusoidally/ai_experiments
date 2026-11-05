@@ -1,10 +1,15 @@
 # Guest VM: current implementation reference
 
 This directory is the authoritative maintainer and embedder documentation
-for the implementation at `fa54ddb` (native interpreter contract 98), reviewed
-2026-11-04. It describes what the code does, not the intended endpoint of the
-earlier plans. Update these documents alongside implementation changes.
+initially audited at `fa54ddb` (native interpreter contract 98), reviewed
+2026-11-04 and updated with the cleanup work tracked below. It describes what
+the code does, not the intended endpoint of the earlier plans. Update these
+documents alongside implementation changes.
 Source definitions remain the final authority for binary layouts and flags.
+
+Ongoing work is tracked in [the cleanup approach and issue register](cleanup.md).
+It separates completed changes from remaining architectural work and records
+the validation required at each working point.
 
 Start here:
 
@@ -44,8 +49,9 @@ Important current facts:
 - Source is retained for function `toString`. Snapshot compactness does not
   mean deleting source, compressing files or hard-coding an application.
 - The native interpreter build still opts into the kernel compiler's legacy
-  local-constant mode. It has not completely migrated to ordinary JavaScript
-  local semantics. See [Compilation](compilation.md).
+  local-constant mode. The shared collector has migrated to explicit constant
+  namespaces, but the main interpreter has not completed that migration.
+  See [Compilation](compilation.md).
 
 The older documents alongside `runtime.js` are historical design notes,
 bring-up reports and performance investigations. They can explain decisions,
@@ -54,3 +60,6 @@ architecture. Current measured correctness/performance is recorded separately
 in [the validation checkpoint](../../VALIDATION_STATUS.md) and
 [Octane comparison](../../OCTANE_COMPARISON_2026-11-04.md). Passing the imported
 Test262 selection is not a claim to pass all ES5.1 built-in coverage.
+Subsequent cleanup validation is recorded in [cleanup.md](cleanup.md);
+dated reports retain their original source identity rather than silently
+acquiring the newest implementation's status.

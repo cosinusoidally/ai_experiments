@@ -10,6 +10,42 @@
 
     function KernelCompiler() {}
 
+    /* Immutable compiler vocabulary, shared by both expression front ends.
+     * Keep the older straight-line grammar's supported subset explicit rather
+     * than silently broadening it when the control-flow grammar grows. */
+    var INTEGER_OPERATIONS = {
+        "+": "add_i32", "-": "sub_i32", "*": "mul_i32", "%": "rem_i32",
+        "&": "and_i32", "|": "or_i32", "^": "xor_i32",
+        "<<": "shl_i32", ">>": "shr_i32", ">>>": "ushr_i32",
+        "===": "eq_i32", "!==": "ne_i32", "<": "lt_i32",
+        "<=": "le_i32", ">": "gt_i32", ">=": "ge_i32"
+    };
+    var FLOAT_OPERATIONS = {
+        addF64: "add_f64", subtractF64: "sub_f64",
+        multiplyF64: "mul_f64", divideF64: "div_f64", powF64: "pow_f64",
+        atan2F64: "atan2_f64", remainderF64: "rem_f64"
+    };
+    var FLOAT_COMPARISONS = {
+        equalF64: "eq_f64", lessF64: "lt_f64", lessEqualF64: "le_f64",
+        greaterF64: "gt_f64", greaterEqualF64: "ge_f64"
+    };
+    var STRAIGHT_LINE_INTEGER_OPERATIONS = operatorSubset(INTEGER_OPERATIONS,
+        ["+", "-", "*", "%", "&", "|", "^", "<<", ">>"]);
+    var STRAIGHT_LINE_FLOAT_OPERATIONS = operatorSubset(FLOAT_OPERATIONS,
+        ["addF64", "subtractF64", "multiplyF64", "divideF64"]);
+
+    function operatorSubset(catalog, names) {
+        var subset = {}, index = 0;
+        while (index < names.length) {
+            var name = names[index++];
+            if (!Object.prototype.hasOwnProperty.call(catalog, name)) {
+                throw new Error("unknown kernel subset operation " + name);
+            }
+            subset[name] = catalog[name];
+        }
+        return subset;
+    }
+
     /* Function#toString formatting is host-specific. Fingerprint the parsed
      * syntax, retaining semantic fields but excluding source positions/text.
      * This is equally usable by the bootstrap shell and a standalone guest;
@@ -290,6 +326,12 @@
             return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
         });
         functions = [entryMember].concat(helperMembers);
+        /* External bindings belong to this compilation transaction, not each
+         * member's local-variable scope. Build their descriptors only once. */
+        validateConstantNamespaces(options.constantNamespaces, sharedConstants);
+        var graphBindings = kernelBindingSymbols(
+            options.constantNamespaces, sharedConstants);
+        var graphScopeConstructor = kernelFunctionScope(graphBindings);
         var compiled = [];
         var index = 0;
         while (index < functions.length) {
@@ -318,7 +360,8 @@
                     perFunctionPreferences[member.name] || [];
             }
             try {
-                compiled.push(this.compile(member.fn, memberOptions));
+                compiled.push(compileKernelFunction(
+                    member.fn, memberOptions, graphScopeConstructor));
             } catch (error) {
                 error.message = "kernel function " + member.name + ": " +
                                 error.message;
@@ -942,6 +985,13 @@
         }
         options = options || {};
         validateConstantOptions(options);
+        return compileKernelFunction(functionObject, options, null);
+    };
+
+    /* Both public entry points validate their configuration. Graph discovery
+     * additionally validates/merges each member's literal constants before
+     * lowering, so member lowering must not repeat public-entry validation. */
+    function compileKernelFunction(functionObject, options, scopeConstructor) {
         var timings = options.timings || null;
         var started = timings ? new Date().getTime() : 0;
         var source = options.source === undefined ?
@@ -955,8 +1005,8 @@
             throw new SyntaxError("kernel source must contain one function");
         }
         if (needsControlFlow(fn.body.body) || options.kernelFunctions ||
-            options.constantBindings) {
-            return compileControlFlow(fn, source, options, timings);
+            options.constantBindings || options.constantNamespaces) {
+            return compileControlFlow(fn, source, options, timings, scopeConstructor);
         }
         var locals = {};
         var parameterIndex = 0;
@@ -997,7 +1047,7 @@
                 resultType: "i32", instructions: instructions,
                 expression: resultExpression,
                 source: source};
-    };
+    }
 
     function needsControlFlow(statements) {
         var index = 0;
@@ -1031,9 +1081,18 @@
         return false;
     }
 
-    function compileControlFlow(fn, source, options, timings) {
+    function kernelBindingSymbols(namespaces, constantBindings) {
         var symbols = {};
-        var constantBindings = options.constantBindings || {};
+        namespaces = namespaces || {};
+        var namespaceName;
+        for (namespaceName in namespaces) {
+            if (Object.prototype.hasOwnProperty.call(namespaces, namespaceName)) {
+                symbols["$" + namespaceName] = {
+                    kind: "constant_namespace", value: namespaces[namespaceName]
+                };
+            }
+        }
+        constantBindings = constantBindings || {};
         var constantName;
         for (constantName in constantBindings) {
             if (Object.prototype.hasOwnProperty.call(
@@ -1043,6 +1102,25 @@
                 };
             }
         }
+        return symbols;
+    }
+
+    /* ES3-compatible lexical environment: function bindings are own fields;
+     * read-only external descriptors are inherited from the graph environment.
+     * All symbol names are '$'-prefixed, so Object.prototype cannot supply one.
+     * The compiler never mutates a descriptor inherited from the parent. */
+    function kernelFunctionScope(bindings) {
+        function FunctionScope() {}
+        FunctionScope.prototype = bindings;
+        return FunctionScope;
+    }
+
+    function compileControlFlow(fn, source, options, timings, scopeConstructor) {
+        if (!scopeConstructor) {
+            scopeConstructor = kernelFunctionScope(kernelBindingSymbols(
+                options.constantNamespaces, options.constantBindings));
+        }
+        var symbols = new scopeConstructor();
         var parameterIndex = 0;
         while (parameterIndex < fn.parameters.length) {
             symbols["$" + fn.parameters[parameterIndex]] =
@@ -1060,7 +1138,8 @@
                 var existing = symbolAt(symbols, precollectedName);
                 if (existing === undefined ||
                     (!options.legacyConstantLocals &&
-                     existing.kind === "constant")) {
+                     (existing.kind === "constant" ||
+                      existing.kind === "constant_namespace"))) {
                     symbols["$" + precollectedName] = {
                         kind: "local", index: localNames.length
                     };
@@ -1072,8 +1151,9 @@
                           options.constantOverrides || {},
                           options.legacyConstantLocals === true);
         }
-        symbols.$kernelFunctions = options.kernelFunctions || null;
-        symbols.$kernelFunctionName = fn.name || "kernel";
+        /* Identifier bindings are '$'-prefixed. Bookkeeping must not use that
+         * namespace: kernelFunctions is also a perfectly valid local name. */
+        symbols.kernelFunctions = options.kernelFunctions || null;
         if (timings) timings.collect = new Date().getTime() - collectStarted;
         var lowerStarted = timings ? new Date().getTime() : 0;
         /* Validate/lower both branches first. Configuration constants must
@@ -1338,7 +1418,8 @@
         while (index < names.length) {
             var name = names[index++];
             var symbol = symbolAt(symbols, name);
-            if (!symbol || symbol.kind === "constant") {
+            if (!symbol || symbol.kind === "constant" ||
+                    symbol.kind === "constant_namespace") {
                 throw new SyntaxError("unknown kernel register preference " + name);
             }
             preferences.push(symbol.kind + ":" + symbol.index);
@@ -1356,7 +1437,9 @@
                 var name = declaration.name;
                 var existing = symbolAt(symbols, name);
                 if (existing === undefined ||
-                    (!legacyConstantLocals && existing.kind === "constant")) {
+                    (!legacyConstantLocals &&
+                     (existing.kind === "constant" ||
+                      existing.kind === "constant_namespace"))) {
                     if (legacyConstantLocals &&
                         isKernelConstantDeclaration(declaration)) {
                         symbols["$" + name] = {
@@ -1402,6 +1485,21 @@
                 "legacyConstantLocals mode; use real external bindings instead");
         }
         copyExternalConstants({}, options.constantBindings);
+        validateConstantNamespaces(options.constantNamespaces, options.constantBindings);
+    }
+
+    function validateConstantNamespaces(namespaces, constantBindings) {
+        namespaces = namespaces || {};
+        for (var name in namespaces) {
+            if (!Object.prototype.hasOwnProperty.call(namespaces, name)) continue;
+            if (!namespaces[name] || typeof namespaces[name] !== "object") {
+                throw new TypeError("kernel constant namespace must be an object: " + name);
+            }
+            if (constantBindings && Object.prototype.hasOwnProperty.call(
+                    constantBindings, name)) {
+                throw new TypeError("kernel binding is both scalar and namespace: " + name);
+            }
+        }
     }
 
     function copyExternalConstants(target, bindings) {
@@ -1702,7 +1800,7 @@
     function writableKernelIdentifier(symbols, name) {
         var target = symbolAt(symbols, name);
         if (!target) throw new SyntaxError("unknown kernel assignment " + name);
-        if (target.kind === "constant") {
+        if (target.kind === "constant" || target.kind === "constant_namespace") {
             throw new SyntaxError("kernel constant cannot be assigned: " + name);
         }
         return target;
@@ -1797,6 +1895,31 @@
         return {op: "block", body: body};
     }
 
+    /* Namespace resolution is a separate operation, not extra locals/temporary
+     * registers paid by every recursive expression-lowering invocation when
+     * this compiler runs inside the guest VM. */
+    function lowerKernelNamespaceField(node, symbols) {
+        var namespace = node.object.type === "Identifier" ?
+            symbolAt(symbols, node.object.name) : null;
+        var fieldName = typeof node.property === "string" ? node.property :
+            node.property && node.property.type === "Literal" ?
+                node.property.value : null;
+        if (!namespace || namespace.kind !== "constant_namespace" ||
+                typeof fieldName !== "string") {
+            throw new SyntaxError("unsupported kernel namespace field");
+        }
+        if (!Object.prototype.hasOwnProperty.call(namespace.value, fieldName)) {
+            throw new SyntaxError("unknown kernel constant field " +
+                node.object.name + "." + fieldName);
+        }
+        var fieldValue = namespace.value[fieldName];
+        if (typeof fieldValue !== "number" || fieldValue !== (fieldValue | 0)) {
+            throw new TypeError("kernel constant field must be int32: " +
+                node.object.name + "." + fieldName);
+        }
+        return {op: "const_i32", value: fieldValue, type: "i32"};
+    }
+
     function lowerKernelExpression(node, symbols) {
         if (typeof node === "number" && node === (node | 0)) {
             return {op: "const_i32", value: node | 0, type: "i32"};
@@ -1811,9 +1934,13 @@
             if (symbol.kind === "constant") {
                 return {op: "const_i32", value: symbol.value, type: "i32"};
             }
+            if (symbol.kind === "constant_namespace") {
+                throw new SyntaxError("kernel namespace requires a named field: " + node.name);
+            }
             return {op: symbol.kind === "local" ? "local_i32" : "arg_i32",
                     index: symbol.index, type: "i32"};
         }
+        if (node.type === "MemberExpression") return lowerKernelNamespaceField(node, symbols);
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
             INDEXED_ADDRESS_ACCESSORS[node.callee.name] &&
@@ -1900,7 +2027,7 @@
         }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier") {
-            var kernelFunctions = symbols.$kernelFunctions;
+            var kernelFunctions = symbols.kernelFunctions;
             var kernelFunction = kernelFunctions &&
                 kernelFunctions[node.callee.name];
             if (kernelFunction) {
@@ -1941,11 +2068,9 @@
                     value: lowerKernelF64Expression(node.arguments[0], symbols),
                     type: "i32"};
             }
-            var comparisons = {equalF64: "eq_f64", lessF64: "lt_f64",
-                lessEqualF64: "le_f64", greaterF64: "gt_f64",
-                greaterEqualF64: "ge_f64"};
-            var comparison = comparisons[node.callee.name];
-            if (comparison && node.arguments.length === 2) {
+            var comparison = FLOAT_COMPARISONS[node.callee.name];
+            if (Object.prototype.hasOwnProperty.call(
+                    FLOAT_COMPARISONS, node.callee.name) && node.arguments.length === 2) {
                 return {op: comparison,
                     left: lowerKernelF64Expression(node.arguments[0], symbols),
                     right: lowerKernelF64Expression(node.arguments[1], symbols),
@@ -1968,13 +2093,7 @@
                     right: lowerKernelExpression(node.right, symbols),
                     type: "i32"};
             }
-            var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
-                "%": "rem_i32",
-                "&": "and_i32", "|": "or_i32", "^": "xor_i32",
-                "<<": "shl_i32", ">>": "shr_i32", ">>>": "ushr_i32",
-                "===": "eq_i32", "!==": "ne_i32", "<": "lt_i32",
-                "<=": "le_i32", ">": "gt_i32", ">=": "ge_i32"};
-            var operation = operations[node.operator];
+            var operation = INTEGER_OPERATIONS[node.operator];
             if (!operation) throw new SyntaxError("unsupported kernel operator " +
                                                   node.operator);
             var left = lowerKernelExpression(node.left, symbols);
@@ -2179,12 +2298,9 @@
                     value: lowerKernelF64Expression(node.arguments[0], symbols),
                     type: "f64"};
         }
-        var operations = {addF64: "add_f64", subtractF64: "sub_f64",
-                          multiplyF64: "mul_f64", divideF64: "div_f64",
-                          powF64: "pow_f64", atan2F64: "atan2_f64",
-                          remainderF64: "rem_f64"};
-        if (operations[name] && node.arguments.length === 2) {
-            return {op: operations[name],
+        if (Object.prototype.hasOwnProperty.call(FLOAT_OPERATIONS, name) &&
+                node.arguments.length === 2) {
+            return {op: FLOAT_OPERATIONS[name],
                     left: lowerKernelF64Expression(node.arguments[0], symbols),
                     right: lowerKernelF64Expression(node.arguments[1], symbols),
                     type: "f64"};
@@ -2234,11 +2350,7 @@
                     value: lower(node.argument, locals), type: "i32"};
         }
         if (node.type === "BinaryExpression") {
-            var operations = {"+": "add_i32", "-": "sub_i32", "*": "mul_i32",
-                "%": "rem_i32",
-                              "&": "and_i32", "|": "or_i32", "^": "xor_i32",
-                              "<<": "shl_i32", ">>": "shr_i32"};
-            var operation = operations[node.operator];
+            var operation = STRAIGHT_LINE_INTEGER_OPERATIONS[node.operator];
             if (!operation) throw new SyntaxError("unsupported kernel operator " +
                                                   node.operator);
             return {op: operation, left: lower(node.left, locals),
@@ -2277,10 +2389,9 @@
                     address: lower(node.arguments[0], locals),
                     type: "f64"};
         }
-        var operations = {addF64: "add_f64", subtractF64: "sub_f64",
-                          multiplyF64: "mul_f64", divideF64: "div_f64"};
-        if (operations[name] && node.arguments.length === 2) {
-            return {op: operations[name],
+        if (Object.prototype.hasOwnProperty.call(STRAIGHT_LINE_FLOAT_OPERATIONS, name) &&
+                node.arguments.length === 2) {
+            return {op: STRAIGHT_LINE_FLOAT_OPERATIONS[name],
                     left: lowerF64(node.arguments[0], locals),
                     right: lowerF64(node.arguments[1], locals), type: "f64"};
         }

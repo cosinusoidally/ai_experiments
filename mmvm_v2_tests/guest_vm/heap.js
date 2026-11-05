@@ -94,6 +94,9 @@
     /* Large native byte backings keep their logical heap reservation for
      * accounting/snapshot layout, but own separately calloc'ed data. */
     Heap.BufferBackingPolicy = {EXTERNAL: 1, LARGE_BYTES: 1048576};
+    /* Minimum useful allocation headroom after a complete collection. Both
+     * embedding and standalone collectors use the same policy constant. */
+    Heap.GCPolicy = {MINIMUM_HEADROOM_BYTES: 1024 * 1024};
     Heap.LastRecordType = Types.CONSTANT_POOL;
     Heap.WORD_BYTES = WORD_BYTES;
     Heap.HEADER_SIZE = HEADER_SIZE;

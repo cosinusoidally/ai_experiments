@@ -6,20 +6,22 @@
         var compiler = new Compiler();
         /* Compare normal JavaScript with both backends, rather than asserting
          * a particular private IR shape for the loop implementation. */
+        var ChecksumLayout = {COLUMNS: 3, FINAL_ROWS: 2};
         function loopChecksum(rows) {
             var CHECKSUM = 0;
             for (var row = 0; row < rows; row++) {
-                for (var column = 3; column > 0; --column) {
+                for (var column = ChecksumLayout.COLUMNS; column > 0; --column) {
                     CHECKSUM = CHECKSUM + row * column;
                 }
             }
-            for (; row < rows + 2; row = row + 1);
+            for (; row < rows + ChecksumLayout["FINAL_ROWS"]; row = row + 1);
             for (;;) {
-                if (row >= rows + 2) return CHECKSUM + row;
+                if (row >= rows + ChecksumLayout.FINAL_ROWS) return CHECKSUM + row;
                 row++;
             }
         }
-        var loopIR = compiler.compile(loopChecksum);
+        var loopIR = compiler.compile(loopChecksum,
+            {constantNamespaces: {ChecksumLayout: ChecksumLayout}});
         var loopJS = new JSBackend().compile(loopIR);
         var loopX86 = new X86Backend().compile(loopIR);
         var nativeStorageBackend = new X86Backend({captureBytes: false});
@@ -271,6 +273,27 @@
                         loadF64(base + right)));
                 return output;
             }
+            /* Catalogs contain only declared intrinsics, not inherited object
+             * methods. Check both front ends reject an unsupported name before
+             * returning malformed IR; no backend/code-shape assertion needed. */
+            function inheritedFloatOperation(base) {
+                storeF64(base, toString(loadF64(base), loadF64(base)));
+                return 0;
+            }
+            var floatFrontends = [null, {constantBindings: {}}];
+            for (var frontendIndex = 0; frontendIndex < floatFrontends.length;
+                    frontendIndex++) {
+                var rejectedInheritedFloat = false;
+                try {
+                    compiler.compile(inheritedFloatOperation,
+                        floatFrontends[frontendIndex]);
+                } catch (intrinsicError) {
+                    rejectedInheritedFloat = intrinsicError instanceof SyntaxError;
+                }
+                if (!rejectedInheritedFloat) {
+                    throw new Error("inherited method accepted as a float intrinsic");
+                }
+            }
             var f64IR = compiler.compile(binary64Kernel);
             var f64JS = new JSBackend().compile(f64IR);
             var f64X86 = new X86Backend().compile(f64IR);
@@ -461,11 +484,14 @@
             }
             var VECTOR_CELLS = 24;
             var VALUE_CELL_BYTES = 16;
+            var GraphLayout = {BIAS: 1};
+            var LOCAL_WEIGHT = 2;
             function graphEntry(base, address, value, fourth, fifth) {
-                var LOCAL_WEIGHT = 0;
+                var LOCAL_WEIGHT = 1;
+                LOCAL_WEIGHT = LOCAL_WEIGHT - 1;
                 var carried = fourth + value + LOCAL_WEIGHT;
                 graphSink(base, address, value);
-                return graphMiddle(base, address, value, carried, fifth) + 1;
+                return graphMiddle(base, address, value, carried, fifth) + GraphLayout.BIAS;
             }
             function graphSink(base, address, value) {
                 store32(vectorCellAddress(base, address, 2), value);
@@ -476,35 +502,58 @@
                 return graphLeaf(base, address, value * LOCAL_WEIGHT, fourth, fifth);
             }
             function graphLeaf(base, address, value, fourth, fifth) {
-                var result = value + fourth + fifth;
+                /* This member sees the external weight, not either caller's
+                 * same-named local. Bookkeeping names are ordinary source
+                 * identifiers too, not reserved kernel-language locals. */
+                var kernelFunctions = LOCAL_WEIGHT;
+                var kernelFunctionName = kernelFunctions;
+                var result = value + fourth + fifth + kernelFunctionName;
                 store32(vectorCellAddress(base, address, 1), result);
                 return result;
             }
             var preparedGraphSource = compiler.prepareSource(
                 graphEntry.toString() + "\n" + graphMiddle.toString() + "\n" +
                 graphLeaf.toString() + "\n" + graphSink.toString());
+            /* Legacy declarations also join the graph's external environment.
+             * Their conflicts must still be checked after discovery, even
+             * though member lowering no longer repeats public validation. */
+            var rejectedGraphBinding = false;
+            try {
+                compiler.compileGraph(graphMiddle, {graphLeaf: graphLeaf}, {
+                    legacyConstantLocals: true,
+                    constantNamespaces: {LOCAL_WEIGHT: {VALUE: 3}}
+                });
+            } catch (graphBindingError) {
+                rejectedGraphBinding = String(graphBindingError).indexOf(
+                    "both scalar and namespace: LOCAL_WEIGHT") >= 0;
+            }
+            if (!rejectedGraphBinding) {
+                throw new Error("merged graph binding conflict was not rejected");
+            }
             var graphIR = compiler.compileGraph(graphEntry, {
                 graphMiddle: graphMiddle,
                 graphLeaf: graphLeaf,
                 graphSink: graphSink
-            }, {preparedSource: preparedGraphSource, constantBindings: {
+            }, {preparedSource: preparedGraphSource,
+                constantNamespaces: {GraphLayout: GraphLayout}, constantBindings: {
                 VECTOR_CELLS: VECTOR_CELLS,
-                VALUE_CELL_BYTES: VALUE_CELL_BYTES
+                VALUE_CELL_BYTES: VALUE_CELL_BYTES,
+                LOCAL_WEIGHT: LOCAL_WEIGHT
             }});
             var graphJS = new JSBackend().compile(graphIR);
             var graphX86 = new X86Backend().compile(graphIR);
             var graphHeap = new Heap({heapBytes: 4096});
             try {
-                if (graphJS.fn(graphHeap.memory, 0, 64, 7, 11, 13) !== 53 ||
-                    graphHeap.memory.readU32(104) !== 52 ||
+                if (graphJS.fn(graphHeap.memory, 0, 64, 7, 11, 13) !== 55 ||
+                    graphHeap.memory.readU32(104) !== 54 ||
                     graphHeap.memory.readU32(120) !== 7) {
                     throw new Error("JavaScript kernel function graph mismatch");
                 }
                 graphHeap.memory.writeU32(104, 0);
                 if (graphX86.fn &&
                     (graphX86.fn(graphHeap.memory.nativeAddress(0), 64, 9,
-                                 11, 13) !== 61 ||
-                     graphHeap.memory.readU32(104) !== 60 ||
+                                 11, 13) !== 63 ||
+                     graphHeap.memory.readU32(104) !== 62 ||
                      graphHeap.memory.readU32(120) !== 9)) {
                     throw new Error("i386 kernel function graph mismatch");
                 }

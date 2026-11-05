@@ -83,6 +83,20 @@ scheduling:
 guest_vm/tests/run_tests.sh both
 ```
 
+For a kernel front/middle-end change, start with the existing broad compiler
+and backend integration checks alone, on both hosts:
+
+```sh
+node guest_vm/tools/check_kernel_compiler.js
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_vm/tools/check_kernel_compiler.js
+```
+
+This entry point reuses `kernel_compiler_test.js`; it does not define another
+language micro-test suite. Node checks shared IR/JS and macro output; js_min
+also executes the generated i386 code. It is not a claim that unrelated full
+corpora or graphical paths were rerun.
+
 Bounded GC audits check graph integrity without a long graphical run:
 
 ```sh
@@ -120,7 +134,7 @@ wrapper documentation when selecting full sweeps or explicit subsets.
 Run memory-heavy jobs serially on the current machine. No multithreading is
 needed to measure or improve the interpreter.
 
-The [latest validation](../../VALIDATION_STATUS.md) records current passing
+The [latest cleanup validation](../../CLEANUP_VALIDATION_2026-11-04.md) records current passing
 tests, known ECMA gaps, an existing extra standalone integration failure,
 Demo8 mode checks and performance regressions. Do not treat an older bring-up
 report or one green smoke test as the current complete status.

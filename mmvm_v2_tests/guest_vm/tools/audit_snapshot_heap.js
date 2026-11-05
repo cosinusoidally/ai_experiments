@@ -739,9 +739,13 @@
     var generation = maximumMark + 1;
     var compiled = new Backend().compile(
         new Compiler().compileGraph(Sweeper.markKernel, {},
-            {legacyConstantLocals: true,
-             constantBindings: markerConstants,
-             constantOverrides: markerConstants}));
+            {constantBindings: markerConstants,
+             constantNamespaces: {
+                 /* Include any inspected historical-layout adjustments in
+                  * the same namespace consumed by the shared marker. */
+                 CollectorLayout: markerConstants,
+                 MarkStatus: Sweeper.kernelNamespaces.MarkStatus
+             }}));
     var parameters = [nodeHost ? 0 : heap.memory.nativeAddress(0),
         heapLength, heap.collectorStackBase, heap.byteLength, generation,
         roots[0], roots[1], 0, 0, 0, roots[2], roots[3], roots[4],

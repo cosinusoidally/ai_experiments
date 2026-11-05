@@ -1826,6 +1826,49 @@ performance are separate mandatory regression gates.
   versus 47.35 seconds for that fresh reference; no language changes were
   introduced by the guard fix.
 
+### 2026-11-04 20:15--20:23 UTC: full cleanup validation
+
+- Implementation `430cad1`, standalone js_runner image, complete unchanged
+  default imported selection: 3292 files / 3292 variants / 3292 executed.
+- **Passed 3292; failed 0; timed out 0; not run 0.** No exclusions added and no
+  external test changes. Harness elapsed 501932.639 ms; summed test time
+  480969.830 ms; process wall 502.65 seconds; peak RSS 517576 KiB.
+- The four exhaustive Unicode/regexp-literal tests remain executed and pass.
+  A full pre-cleanup control run is scheduled. Timing comparison is pending;
+  do not label a difference from an older run as an implementation effect.
+- Raw output stays in ignored `artifacts/cleanup-full.j9oRH8/test262.log` and
+  `.time`; the overall [cleanup audit](CLEANUP_VALIDATION_2026-11-04.md) is still
+  in progress.
+
+### 2026-11-04 20:45--20:53 UTC: archived pre-cleanup control
+
+- `fa54ddb`, fresh standalone image from its own archived sources, unchanged
+  full selection: **3292 executed / 3292 passed / 0 failed / 0 timed out /
+  0 not run**. Every current correctness pass is preserved.
+- Harness elapsed 451377.470 ms; summed test time 435002.697 ms; process wall
+  452.04 seconds; peak RSS 527488 KiB. Current's earlier 501932.639 ms is
+  approximately 11.2% slower. The exhaustive-case samples also favor baseline;
+  this is not dismissed because native interpreter code matches byte for byte.
+- A complete current repeat is queued after the other serial validation jobs.
+  Timing attribution remains pending. Logs: ignored
+  `artifacts/cleanup-full.j9oRH8/test262-baseline.log` and `.time`.
+
+### 2026-11-04 21:58--22:06 UTC: completed cleanup timing follow-up
+
+- Full current repeat, same frozen `430cad1` implementation and selection:
+  **3292 executed / 3292 passed / 0 failed / 0 timed out / 0 not run**.
+  Harness elapsed 436840.919 ms, test sum 418677.428 ms, process wall
+  437.49 seconds, peak RSS 511672 KiB. The first 11.2% slowdown does not
+  reproduce: this run is 3.2% faster than the 451377.470-ms baseline.
+  Neither observation alone establishes a stable code-speed difference.
+- Direct Node completes 3292 variants: **3253 passed / 39 failed / 0 timed
+  out / 0 not run**, with exactly the same 39 failure IDs as its existing
+  reference inventory. Harness elapsed 30477.862 ms, test sum 29744.572 ms,
+  process wall 30.61 seconds, peak RSS 760960 KiB.
+- The [full cleanup audit](CLEANUP_VALIDATION_2026-11-04.md) is complete.
+  This extra full current repeat was broader than a focused timing follow-up
+  needed to be; future small refactors should not trigger repeated full sweeps.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

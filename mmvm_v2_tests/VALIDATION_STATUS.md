@@ -1,5 +1,12 @@
 # Validation checkpoint, 2026-11-04
 
+The subsequent [full cleanup validation](CLEANUP_VALIDATION_2026-11-04.md) is
+complete for implementation `430cad1`: no lost ECMA pass, complete Test262 and
+all 15 stock Octane suites pass, project/GC/snapshot gates and live demos pass.
+Existing standalone-only gaps remain; Gameboy's paired score is lower and
+build timings vary. See that report for the current qualifications. The results
+below remain the earlier `fa54ddb`/`28b131f` audit, not cleanup measurements.
+
 This checkpoint validates the manually committed `fa54ddb` against its
 predecessor, `28b131f`. It does not introduce further VM features or change
 the external corpora, demo sources, test selection or execution limits.

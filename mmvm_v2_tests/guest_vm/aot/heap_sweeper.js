@@ -26,74 +26,23 @@
     var sharedTrackedIndexX86 = null;
     var sharedClearLinksJS = null;
     var sharedClearLinksX86 = null;
-    var MARK_WORK_STACK_EXHAUSTED = -1;
-    var MARK_INVALID_REFERENCE = -2;
-    var MARK_INVALID_RECORD_LAYOUT = -3;
-    var markLayoutBindings = {
-        MARK_WORK_STACK_EXHAUSTED: MARK_WORK_STACK_EXHAUSTED,
-        MARK_INVALID_REFERENCE: MARK_INVALID_REFERENCE,
-        MARK_INVALID_RECORD_LAYOUT: MARK_INVALID_RECORD_LAYOUT,
-        PROGRAM_BINDING_NAMES: HeapRecords.KernelConstants.PROGRAM_BINDING_NAMES,
-        PROGRAM_BINDING_NAMES_EDGE: HeapRecords.KernelConstants.PROGRAM_BINDING_NAMES_EDGE,
-        HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
-        OBJECT_PROPERTY_INDEX: HeapRecords.KernelConstants.OBJECT_PROPERTY_INDEX,
-        HEAP_TYPE_PROPERTY_STORAGE: Heap.Types.PROPERTY_STORAGE,
-        PROPERTY_STORAGE_LENGTH: HeapRecords.KernelConstants.PROPERTY_STORAGE_LENGTH,
-        PROPERTY_STORAGE_CAPACITY: HeapRecords.KernelConstants.PROPERTY_STORAGE_CAPACITY,
-        PROPERTY_STORAGE_HASH: HeapRecords.KernelConstants.PROPERTY_STORAGE_HASH,
-        PROPERTY_STORAGE_ENTRIES: HeapRecords.KernelConstants.PROPERTY_STORAGE_ENTRIES,
-        PROPERTY_STORAGE_ENTRY_BYTES: HeapRecords.KernelConstants.PROPERTY_STORAGE_ENTRY_BYTES,
-        PROPERTY_STORAGE_KEY: HeapRecords.KernelConstants.PROPERTY_STORAGE_KEY,
-        PROPERTY_STORAGE_SETTER: HeapRecords.KernelConstants.PROPERTY_STORAGE_SETTER,
-        PROPERTY_STORAGE_VALUE: HeapRecords.KernelConstants.PROPERTY_STORAGE_VALUE,
-        ENGINE_RECORD_PLATFORM_SERVICES: HeapRecords.KernelConstants.ENGINE_RECORD_PLATFORM_SERVICES,
-        STRING_SLICE_FLAG: HeapRecords.KernelConstants.STRING_SLICE_FLAG,
-        STRING_SLICE_BACKING: HeapRecords.KernelConstants.STRING_SLICE_BACKING,
-        HEAP_TYPE_BYTECODE: Heap.Types.BYTECODE,
-        BYTECODE_EXECUTION_CACHE: HeapRecords.KernelConstants.BYTECODE_EXECUTION_CACHE,
-        HEAP_TYPE_INTEGER_VECTOR: Heap.Types.INTEGER_VECTOR,
-        HEAP_TYPE_CONSTANT_POOL: Heap.Types.CONSTANT_POOL,
-        CONSTANT_POOL_LENGTH: HeapRecords.KernelConstants.CONSTANT_POOL_LENGTH,
-        CONSTANT_POOL_EXECUTION_CACHE: HeapRecords.KernelConstants.CONSTANT_POOL_EXECUTION_CACHE,
-        CONSTANT_POOL_TAGS: HeapRecords.KernelConstants.CONSTANT_POOL_TAGS,
-        CONSTANT_POOL_PAYLOAD_BYTES: HeapRecords.KernelConstants.CONSTANT_POOL_PAYLOAD_BYTES,
-        HEAP_RECORD_ALIGNMENT: Heap.RECORD_ALIGNMENT,
-        INTEGER_VECTOR_EXECUTION_CACHE: HeapRecords.KernelConstants.INTEGER_VECTOR_EXECUTION_CACHE
-    };
-
-    /* Ordinary closure bindings, taken from the authoritative heap layout.
-     * The compiler receives these same values as its external environment;
-     * it must never replace a different initializer inside the function. */
-    var RECORD_TYPE = Heap.HeaderFields.TYPE;
-    var RECORD_MARK = Heap.HeaderFields.MARK;
-    var HEAP_FIRST_RECORD = Heap.FIRST_RECORD;
-    var RECORD_HEADER_BYTES = Heap.HEADER_SIZE;
-    var HEAP_TYPE_FREE = Heap.Types.FREE;
-    var HEAP_TYPE_BUFFER_BACKING = Heap.Types.BUFFER_BACKING;
-    var BUFFER_BACKING_EXTERNAL_FLAG = Heap.BufferBackingPolicy.EXTERNAL;
-    var RECORD_ALIGNMENT_MASK = Heap.RECORD_ALIGNMENT - 1;
-    var freeRegionLayoutBindings = {
-        RECORD_TYPE: RECORD_TYPE,
-        RECORD_MARK: RECORD_MARK,
-        RECORD_SIZE: Heap.HeaderFields.SIZE,
-        RECORD_FLAGS: Heap.HeaderFields.FLAGS,
-        HEAP_FIRST_RECORD: HEAP_FIRST_RECORD,
-        RECORD_HEADER_BYTES: RECORD_HEADER_BYTES,
-        HEAP_TYPE_FREE: HEAP_TYPE_FREE,
-        RECORD_ALIGNMENT_MASK: RECORD_ALIGNMENT_MASK
-    };
+    /* One layout owner, shared by embedding and standalone compilation. */
+    var CollectorLayout = HeapRecords.KernelConstants;
+    var MarkStatus = {WORK_STACK_EXHAUSTED: -1, INVALID_REFERENCE: -2,
+        INVALID_RECORD_LAYOUT: -3, INVALID_LAYOUT_EDGE: 255};
+    var collectorNamespaces = {CollectorLayout: CollectorLayout, MarkStatus: MarkStatus};
 
     /* Free-region links use the otherwise-unused mark word. Release them
      * before weak metadata is filtered: a stale next address must never be
-     * mistaken for the collection generation. Layout names refer to the
-     * closure bindings above, just as they do in ordinary JavaScript. */
+     * mistaken for the collection generation. Layout reads use the same
+     * ordinary namespace binding in JavaScript and compiled kernels. */
     function clearFreeRegionLinksKernel(heapBase, heapBump, region) {
         var count = 0;
         while (region !== 0) {
-            if (region < HEAP_FIRST_RECORD) return -1;
-            if (region > heapBump - RECORD_HEADER_BYTES) return -1;
-            if ((region & RECORD_ALIGNMENT_MASK) !== 0) return -1;
-            if (recordType(heapBase, region) !== HEAP_TYPE_FREE) return -1;
+            if (region < CollectorLayout.HEAP_FIRST_RECORD) return -1;
+            if (region > heapBump - CollectorLayout.HEAP_HEADER_BYTES) return -1;
+            if ((region & CollectorLayout.RECORD_ALIGNMENT_MASK) !== 0) return -1;
+            if (recordType(heapBase, region) !== CollectorLayout.HEAP_TYPE_FREE) return -1;
             var next = recordMark(heapBase, region);
             setRecordMark(heapBase, region, 0);
             region = next;
@@ -108,90 +57,7 @@
             rootArrayPrototype, rootStringSupport, rootGlobal,
             rootContext, rootNativeFunction, rootEngineState,
             rootPersistentSlot, scanStructuralRoots) {
-        var HEAP_FIRST_RECORD = 64;
-        var HEAP_TYPE_FREE = 0;
-        var HEAP_TYPE_OBJECT = 1;
-        var HEAP_TYPE_ARRAY = 2;
-        var HEAP_TYPE_NATIVE_FUNCTION = 3;
-        var HEAP_TYPE_BYTECODE_FUNCTION = 4;
-        var HEAP_TYPE_ENVIRONMENT = 5;
-        var HEAP_TYPE_PROPERTY = 6;
-        var HEAP_TYPE_STRING = 7;
-        var HEAP_TYPE_REGEXP = 9;
-        var HEAP_TYPE_BUFFER_VIEW = 10;
-        var HEAP_TYPE_BUFFER_BACKING = 11;
-        var HEAP_TYPE_ROOT_SLOT = 12;
-        var HEAP_TYPE_VALUE_VECTOR = 13;
-        var HEAP_TYPE_FRAME = 14;
-        var HEAP_TYPE_PROGRAM = 15;
-        var HEAP_TYPE_CONTEXT = 17;
-        var HEAP_TYPE_HANDLER = 18;
-        var HEAP_TYPE_ENGINE_STATE = 19;
-        var VALUE_TAG_REFERENCE = 7;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_MARK = 8;
-        var RECORD_FLAGS = 12;
-        var OBJECT_PROTOTYPE = 16;
-        var OBJECT_PROPERTY_HEAD = 20;
-        var ARRAY_ELEMENTS = 24;
-        var ARRAY_RESERVED = 28;
-        var FUNCTION_CLOSURE = 24;
-        var FUNCTION_METADATA = 28;
-        var FUNCTION_HOME_CONTEXT = 32;
-        var FUNCTION_GC_NEXT = 36;
-        var ENVIRONMENT_PARENT = 16;
-        var ENVIRONMENT_COUNT = 20;
-        var ENVIRONMENT_PROGRAM = 24;
-        var ENVIRONMENT_RESERVED = 28;
-        var ENVIRONMENT_CELLS = 32;
-        var PROPERTY_NEXT = 16;
-        var PROPERTY_KEY = 20;
-        var PROPERTY_ATTRIBUTES = 24;
-        var PROPERTY_SETTER = 28;
-        var PROPERTY_VALUE = 32;
-        var STRING_ROPE_LEFT = 24;
-        var STRING_ROPE_RIGHT = 28;
-        var HANDLER_RESERVED = 28;
-        var PROPERTY_ATTRIBUTE_ACCESSOR = 8;
-        var REGEXP_PATTERN = 16;
-        var REGEXP_FLAGS = 20;
-        var REGEXP_PROTOTYPE = 24;
-        var REGEXP_PROPERTY_HEAD = 28;
-        var BUFFER_VIEW_BACKING = 16;
-        var BUFFER_VIEW_PROTOTYPE = 28;
-        var BUFFER_VIEW_PROPERTY_HEAD = 32;
-        var BUFFER_BACKING_METADATA = 24;
-        var VECTOR_LENGTH = 16;
-        var VECTOR_CAPACITY = 20;
-        var VECTOR_CELLS = 24;
-        var FRAME_PROGRAM = 16;
-        var FRAME_ENVIRONMENT = 20;
-        var FRAME_CALLER = 24;
-        var FRAME_REGISTER_COUNT = 36;
-        var FRAME_HANDLER = 40;
-        var FRAME_CONTEXT = 44;
-        var FRAME_REGISTERS = 48;
-        var PROGRAM_BYTECODE = 16;
-        var PROGRAM_CONSTANTS = 20;
-        var PROGRAM_CONSTANT_REGISTERS = 24;
-        var PROGRAM_BINDING_REGISTERS = 28;
-        var PROGRAM_PARAMETER_SLOTS = 32;
-        var PROGRAM_SOURCE = 64;
-        var CONTEXT_GLOBAL = 16;
-        var CONTEXT_ACTIVE_FRAME = 20;
-        var CONTEXT_NEXT = 28;
-        var HANDLER_NEXT = 16;
-        var ENGINE_RECORD_CURRENT_FRAME = 40;
-        var VALUE_CELL_TAG = 0;
-        var VALUE_CELL_REFERENCE = 4;
-        var VALUE_CELL_BYTES = 16;
-        var ROOT_SLOT_NEXT = 32;
-        var STRING_ROPE_FLAG = 1;
-        var RECORD_ALIGNMENT_MASK = 7;
-        var MINIMUM_RECORD_BYTES = 16;
-        var INVALID_REFERENCE_INDEX_RECORD_LAYOUT = 255;
-        var address = HEAP_FIRST_RECORD;
+        var address = CollectorLayout.HEAP_FIRST_RECORD;
         var stackCount = 0;
         if (scanStructuralRoots === 0) {
             if (rootFrame !== 0) {
@@ -255,13 +121,13 @@
         }
         while (address < heapBump) {
             var rootType = recordType(heapBase, address);
-            if (rootType !== HEAP_TYPE_FREE) {
+            if (rootType !== CollectorLayout.HEAP_TYPE_FREE) {
                 var structuralRoot = 0;
                 /* Callback roots are explicitly seeded by the embedder.
                  * Native-function type alone does not imply host ownership:
                  * a guest-created bound function must be collectible. */
-                if (rootType === HEAP_TYPE_CONTEXT) structuralRoot = 1;
-                else if (rootType === HEAP_TYPE_ENGINE_STATE) structuralRoot = 1;
+                if (rootType === CollectorLayout.HEAP_TYPE_CONTEXT) structuralRoot = 1;
+                else if (rootType === CollectorLayout.HEAP_TYPE_ENGINE_STATE) structuralRoot = 1;
                 if (recordMark(heapBase, address) === generation) {
                     structuralRoot = 1;
                 }
@@ -269,7 +135,7 @@
                     if (recordMark(heapBase, address) !== generation) {
                         setRecordMark(heapBase, address, generation);
                     }
-                    if (stackBase + (stackCount + 1) * 4 > heapLimit) return MARK_WORK_STACK_EXHAUSTED;
+                    if (stackBase + (stackCount + 1) * 4 > heapLimit) return MarkStatus.WORK_STACK_EXHAUSTED;
                     store32(heapBase + stackBase + stackCount * 4, address);
                     stackCount = stackCount + 1;
                 }
@@ -284,31 +150,31 @@
             var itemIndex = 0;
             var itemPart = 0;
             var itemCount = 0;
-            if (type === HEAP_TYPE_ENVIRONMENT) {
+            if (type === CollectorLayout.HEAP_TYPE_ENVIRONMENT) {
                 itemCount = environmentCount(heapBase, address);
-            } else if (type === HEAP_TYPE_VALUE_VECTOR) {
+            } else if (type === CollectorLayout.HEAP_TYPE_VALUE_VECTOR) {
                 itemCount = vectorLength(heapBase, address);
-            } else if (type === HEAP_TYPE_FRAME) {
+            } else if (type === CollectorLayout.HEAP_TYPE_FRAME) {
                 itemCount = frameRegisterCount(heapBase, address);
-            } else if (type === HEAP_TYPE_PROPERTY_STORAGE) {
+            } else if (type === CollectorLayout.HEAP_TYPE_PROPERTY_STORAGE) {
                 itemCount = propertyStorageLength(heapBase, address);
             }
             var recordBytes = recordSize(heapBase, address);
             var cellBytes = 0;
-            var itemStride = VALUE_CELL_BYTES;
-            if (type === HEAP_TYPE_ENVIRONMENT) {
-                cellBytes = ENVIRONMENT_CELLS;
-            } else if (type === HEAP_TYPE_VALUE_VECTOR) {
-                cellBytes = VECTOR_CELLS;
-            } else if (type === HEAP_TYPE_FRAME) {
-                cellBytes = FRAME_REGISTERS;
-            } else if (type === HEAP_TYPE_PROPERTY_STORAGE) {
-                cellBytes = PROPERTY_STORAGE_ENTRIES;
-                itemStride = PROPERTY_STORAGE_ENTRY_BYTES;
+            var itemStride = CollectorLayout.VALUE_CELL_BYTES;
+            if (type === CollectorLayout.HEAP_TYPE_ENVIRONMENT) {
+                cellBytes = CollectorLayout.ENVIRONMENT_CELLS;
+            } else if (type === CollectorLayout.HEAP_TYPE_VALUE_VECTOR) {
+                cellBytes = CollectorLayout.VECTOR_CELLS;
+            } else if (type === CollectorLayout.HEAP_TYPE_FRAME) {
+                cellBytes = CollectorLayout.FRAME_REGISTERS;
+            } else if (type === CollectorLayout.HEAP_TYPE_PROPERTY_STORAGE) {
+                cellBytes = CollectorLayout.PROPERTY_STORAGE_ENTRIES;
+                itemStride = CollectorLayout.PROPERTY_STORAGE_ENTRY_BYTES;
             }
             var recordLayoutValid = 1;
-            if (recordBytes < MINIMUM_RECORD_BYTES) recordLayoutValid = 0;
-            else if ((recordBytes & RECORD_ALIGNMENT_MASK) !== 0) {
+            if (recordBytes < CollectorLayout.HEAP_HEADER_BYTES) recordLayoutValid = 0;
+            else if ((recordBytes & CollectorLayout.RECORD_ALIGNMENT_MASK) !== 0) {
                 recordLayoutValid = 0;
             } else if (address + recordBytes > heapBump) {
                 recordLayoutValid = 0;
@@ -321,29 +187,29 @@
                     recordLayoutValid = 0;
                 }
             }
-            if (recordLayoutValid !== 0 && type === HEAP_TYPE_PROPERTY_STORAGE) {
+            if (recordLayoutValid !== 0 && type === CollectorLayout.HEAP_TYPE_PROPERTY_STORAGE) {
                 var packedCapacity = propertyStorageCapacity(heapBase, address);
                 if (itemCount < 0 || packedCapacity < itemCount ||
-                        packedCapacity > divideI32(recordBytes - PROPERTY_STORAGE_ENTRIES,
-                            PROPERTY_STORAGE_ENTRY_BYTES)) recordLayoutValid = 0;
+                        packedCapacity > divideI32(recordBytes - CollectorLayout.PROPERTY_STORAGE_ENTRIES,
+                            CollectorLayout.PROPERTY_STORAGE_ENTRY_BYTES)) recordLayoutValid = 0;
             }
             if (recordLayoutValid === 0) {
                 store32(heapBase + stackBase, address);
                 store32(heapBase + stackBase + 4, type);
                 store32(heapBase + stackBase + 8,
-                        INVALID_REFERENCE_INDEX_RECORD_LAYOUT);
+                        MarkStatus.INVALID_LAYOUT_EDGE);
                 store32(heapBase + stackBase + 12, recordBytes);
-                return MARK_INVALID_RECORD_LAYOUT;
+                return MarkStatus.INVALID_RECORD_LAYOUT;
             }
             while (referenceIndex >= 0) {
                 var target = 0;
                 var cellAddress = 0;
-                if (type === HEAP_TYPE_OBJECT) {
+                if (type === CollectorLayout.HEAP_TYPE_OBJECT) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
                     else if (referenceIndex === 2) target = objectPropertyIndex(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_ARRAY) {
+                } else if (type === CollectorLayout.HEAP_TYPE_ARRAY) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
                     else if (referenceIndex === 2) target = arrayElements(heapBase, address);
@@ -352,78 +218,78 @@
                         if (target === -1) target = 0;
                     }
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_NATIVE_FUNCTION) {
+                } else if (type === CollectorLayout.HEAP_TYPE_NATIVE_FUNCTION) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
                     else if (referenceIndex === 2) target = functionClosure(heapBase, address);
                     else if (referenceIndex === 3) target = functionHomeContext(heapBase, address);
                     else if (referenceIndex === 4) target = functionGCNext(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_BYTECODE_FUNCTION) {
+                } else if (type === CollectorLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
                     if (referenceIndex === 0) target = objectPrototype(heapBase, address);
                     else if (referenceIndex === 1) target = objectPropertyHead(heapBase, address);
                     else if (referenceIndex === 2) target = functionClosure(heapBase, address);
                     else if (referenceIndex === 3) target = functionMetadata(heapBase, address);
                     else if (referenceIndex === 4) target = functionHomeContext(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_ENVIRONMENT) {
+                } else if (type === CollectorLayout.HEAP_TYPE_ENVIRONMENT) {
                     if (referenceIndex === 0) target = environmentParent(heapBase, address);
                     else if (referenceIndex === 1) {
                         target = environmentProgram(heapBase, address);
                     } else if (referenceIndex === 2) {
                         target = environmentScopeData(heapBase, address);
                     } else if (itemIndex < itemCount) {
-                        cellAddress = address + ENVIRONMENT_CELLS +
-                                      itemIndex * VALUE_CELL_BYTES;
+                        cellAddress = address + CollectorLayout.ENVIRONMENT_CELLS +
+                                      itemIndex * CollectorLayout.VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
                     } else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_PROPERTY) {
+                } else if (type === CollectorLayout.HEAP_TYPE_PROPERTY) {
                     if (referenceIndex === 0) target = propertyNext(heapBase, address);
                     else if (referenceIndex === 1) target = propertyKey(heapBase, address);
-                    else if (referenceIndex === 2) cellAddress = address + PROPERTY_VALUE;
+                    else if (referenceIndex === 2) cellAddress = address + CollectorLayout.PROPERTY_VALUE;
                     else if (referenceIndex === 3) {
                         if ((propertyAttributes(heapBase, address) &
-                             PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                             CollectorLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
                             target = propertySetter(heapBase, address);
                         }
                     }
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_STRING) {
+                } else if (type === CollectorLayout.HEAP_TYPE_STRING) {
                     if ((recordFlags(heapBase, address) &
-                         STRING_ROPE_FLAG) !== 0) {
+                         CollectorLayout.STRING_ROPE_FLAG) !== 0) {
                         if (referenceIndex === 0) {
                             target = stringRopeLeft(heapBase, address);
                         } else if (referenceIndex === 1) {
                             target = stringRopeRight(heapBase, address);
                         } else referenceIndex = -2;
                     } else if ((recordFlags(heapBase, address) &
-                                STRING_SLICE_FLAG) !== 0) {
+                                CollectorLayout.STRING_SLICE_FLAG) !== 0) {
                         if (referenceIndex === 0) {
                             target = stringSliceBacking(heapBase, address);
                         } else referenceIndex = -2;
                     } else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_REGEXP) {
+                } else if (type === CollectorLayout.HEAP_TYPE_REGEXP) {
                     if (referenceIndex === 0) target = regexpPattern(heapBase, address);
                     else if (referenceIndex === 1) target = regexpFlags(heapBase, address);
                     else if (referenceIndex === 2) target = regexpPrototype(heapBase, address);
                     else if (referenceIndex === 3) target = regexpPropertyHead(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_BUFFER_VIEW) {
+                } else if (type === CollectorLayout.HEAP_TYPE_BUFFER_VIEW) {
                     if (referenceIndex === 0) target = bufferViewBacking(heapBase, address);
                     else if (referenceIndex === 1) target = bufferViewPrototype(heapBase, address);
                     else if (referenceIndex === 2) target = bufferViewPropertyHead(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_BUFFER_BACKING) {
+                } else if (type === CollectorLayout.HEAP_TYPE_BUFFER_BACKING) {
                     if (referenceIndex === 0) {
                         target = bufferBackingMetadata(heapBase, address);
                     } else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_ROOT_SLOT) {
+                } else if (type === CollectorLayout.HEAP_TYPE_ROOT_SLOT) {
                     if (referenceIndex === 0) cellAddress = address + 16;
                     else if (referenceIndex === 1) {
                         target = rootSlotNext(heapBase, address);
                     }
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_PROPERTY_STORAGE) {
+                } else if (type === CollectorLayout.HEAP_TYPE_PROPERTY_STORAGE) {
                     if (referenceIndex === 0) target = propertyStorageHashIndex(heapBase, address);
                     else if (itemIndex < itemCount) {
                         var packedKey = propertyStorageKeyAt(heapBase, address, itemIndex);
@@ -442,69 +308,69 @@
                             itemPart = 0;
                         }
                     } else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_VALUE_VECTOR) {
+                } else if (type === CollectorLayout.HEAP_TYPE_VALUE_VECTOR) {
                     if (itemIndex < itemCount) {
-                        cellAddress = address + VECTOR_CELLS +
-                                      itemIndex * VALUE_CELL_BYTES;
+                        cellAddress = address + CollectorLayout.VECTOR_CELLS +
+                                      itemIndex * CollectorLayout.VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
                     } else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_FRAME) {
+                } else if (type === CollectorLayout.HEAP_TYPE_FRAME) {
                     if (referenceIndex === 0) target = frameProgram(heapBase, address);
                     else if (referenceIndex === 1) target = frameEnvironment(heapBase, address);
                     else if (referenceIndex === 2) target = frameCaller(heapBase, address);
                     else if (referenceIndex === 3) target = frameHandler(heapBase, address);
                     else if (referenceIndex === 4) target = frameContext(heapBase, address);
                     else if (itemIndex < itemCount) {
-                        cellAddress = address + FRAME_REGISTERS +
-                                      itemIndex * VALUE_CELL_BYTES;
+                        cellAddress = address + CollectorLayout.FRAME_REGISTERS +
+                                      itemIndex * CollectorLayout.VALUE_CELL_BYTES;
                         itemIndex = itemIndex + 1;
                     } else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_CONSTANT_POOL) {
+                } else if (type === CollectorLayout.HEAP_TYPE_CONSTANT_POOL) {
                     var poolCache = constantPoolExecutionCache(heapBase, address);
                     if (poolCache !== 0) {
                         if (referenceIndex === 0) target = poolCache;
                         else referenceIndex = -2;
                     } else {
                         var poolLength = constantPoolLength(heapBase, address);
-                        var poolData = address + CONSTANT_POOL_TAGS +
-                            ((poolLength + HEAP_RECORD_ALIGNMENT - 1) & (0 - HEAP_RECORD_ALIGNMENT));
+                        var poolData = address + CollectorLayout.CONSTANT_POOL_TAGS +
+                            ((poolLength + CollectorLayout.HEAP_RECORD_ALIGNMENT - 1) & (0 - CollectorLayout.HEAP_RECORD_ALIGNMENT));
                         while (itemIndex < poolLength && target === 0) {
                             var poolTag = constantPoolTag(heapBase, address, itemIndex);
                             var poolIndex = itemIndex;
                             itemIndex = itemIndex + 1;
-                            if (poolTag === VALUE_TAG_REFERENCE) {
+                            if (poolTag === CollectorLayout.VALUE_TAG_REFERENCE) {
                                 target = constantPoolLowWord(heapBase, poolData, poolIndex);
                             }
                         }
                         if (itemIndex >= poolLength && target === 0) referenceIndex = -2;
                     }
-                } else if (type === HEAP_TYPE_INTEGER_VECTOR) {
+                } else if (type === CollectorLayout.HEAP_TYPE_INTEGER_VECTOR) {
                     if (referenceIndex === 0) target = integerVectorExecutionCache(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_BYTECODE) {
+                } else if (type === CollectorLayout.HEAP_TYPE_BYTECODE) {
                     if (referenceIndex === 0) target = bytecodeExecutionCache(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_PROGRAM) {
+                } else if (type === CollectorLayout.HEAP_TYPE_PROGRAM) {
                     if (referenceIndex === 0) target = programBytecode(heapBase, address);
                     else if (referenceIndex === 1) target = programConstants(heapBase, address);
                     else if (referenceIndex === 2) target = programConstantRegisters(heapBase, address);
                     else if (referenceIndex === 3) target = programBindingRegisters(heapBase, address);
                     else if (referenceIndex === 4) target = programParameterSlots(heapBase, address);
                     else if (referenceIndex === 5) target = programSource(heapBase, address);
-                    else if (referenceIndex === PROGRAM_BINDING_NAMES_EDGE) target = programBindingNames(heapBase, address);
+                    else if (referenceIndex === CollectorLayout.PROGRAM_BINDING_NAMES_EDGE) target = programBindingNames(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_CONTEXT) {
+                } else if (type === CollectorLayout.HEAP_TYPE_CONTEXT) {
                     if (referenceIndex === 0) target = contextGlobal(heapBase, address);
                     else if (referenceIndex === 1) target = contextActiveFrame(heapBase, address);
                     else if (referenceIndex === 2) target = contextNext(heapBase, address);
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_HANDLER) {
+                } else if (type === CollectorLayout.HEAP_TYPE_HANDLER) {
                     if (referenceIndex === 0) target = handlerNext(heapBase, address);
                     else if (referenceIndex === 1) {
                         target = handlerEnvironment(heapBase, address);
                     }
                     else referenceIndex = -2;
-                } else if (type === HEAP_TYPE_ENGINE_STATE) {
+                } else if (type === CollectorLayout.HEAP_TYPE_ENGINE_STATE) {
                     if (referenceIndex === 0) {
                         target = engineRecordCurrentFrame(heapBase, address);
                     }
@@ -515,15 +381,15 @@
                     else referenceIndex = -2;
                 } else referenceIndex = -2;
                 if (cellAddress !== 0) {
-                    if (valueCellTag(heapBase, cellAddress) === VALUE_TAG_REFERENCE) {
+                    if (valueCellTag(heapBase, cellAddress) === CollectorLayout.VALUE_TAG_REFERENCE) {
                         target = valueCellReference(heapBase, cellAddress);
                     }
                 }
                 if (target !== 0) {
                     var targetValid = 1;
-                    if (target < HEAP_FIRST_RECORD) targetValid = 0;
+                    if (target < CollectorLayout.HEAP_FIRST_RECORD) targetValid = 0;
                     else if (target >= heapBump) targetValid = 0;
-                    else if ((target & RECORD_ALIGNMENT_MASK) !== 0) {
+                    else if ((target & CollectorLayout.RECORD_ALIGNMENT_MASK) !== 0) {
                         targetValid = 0;
                     }
                     var targetType = 0;
@@ -531,12 +397,12 @@
                     if (targetValid === 1) {
                         targetType = recordType(heapBase, target);
                         targetBytes = recordSize(heapBase, target);
-                        if (targetType <= HEAP_TYPE_FREE) targetValid = 0;
-                        else if (targetType > HEAP_LAST_RECORD_TYPE) {
+                        if (targetType <= CollectorLayout.HEAP_TYPE_FREE) targetValid = 0;
+                        else if (targetType > CollectorLayout.HEAP_LAST_RECORD_TYPE) {
                             targetValid = 0;
-                        } else if (targetBytes < MINIMUM_RECORD_BYTES) {
+                        } else if (targetBytes < CollectorLayout.HEAP_HEADER_BYTES) {
                             targetValid = 0;
-                        } else if ((targetBytes & RECORD_ALIGNMENT_MASK) !== 0) {
+                        } else if ((targetBytes & CollectorLayout.RECORD_ALIGNMENT_MASK) !== 0) {
                             targetValid = 0;
                         } else if (target + targetBytes > heapBump) {
                             targetValid = 0;
@@ -558,12 +424,12 @@
                         store32(heapBase + stackBase + 8,
                                 diagnosticReferenceIndex);
                         store32(heapBase + stackBase + 12, target);
-                        return MARK_INVALID_REFERENCE;
+                        return MarkStatus.INVALID_REFERENCE;
                     }
-                    if (recordType(heapBase, target) !== HEAP_TYPE_FREE) {
+                    if (recordType(heapBase, target) !== CollectorLayout.HEAP_TYPE_FREE) {
                         if (recordMark(heapBase, target) !== generation) {
                             setRecordMark(heapBase, target, generation);
-                            if (stackBase + (stackCount + 1) * 4 > heapLimit) return MARK_WORK_STACK_EXHAUSTED;
+                            if (stackBase + (stackCount + 1) * 4 > heapLimit) return MarkStatus.WORK_STACK_EXHAUSTED;
                             store32(heapBase + stackBase + stackCount * 4,
                                     target);
                             stackCount = stackCount + 1;
@@ -579,11 +445,11 @@
                  * still advance normally. */
                 var advanceReferenceIndex = 1;
                 if (cellAddress !== 0) {
-                    if (type === HEAP_TYPE_ENVIRONMENT) {
+                    if (type === CollectorLayout.HEAP_TYPE_ENVIRONMENT) {
                         advanceReferenceIndex = 0;
-                    } else if (type === HEAP_TYPE_VALUE_VECTOR) {
+                    } else if (type === CollectorLayout.HEAP_TYPE_VALUE_VECTOR) {
                         advanceReferenceIndex = 0;
-                    } else if (type === HEAP_TYPE_FRAME) {
+                    } else if (type === CollectorLayout.HEAP_TYPE_FRAME) {
                         advanceReferenceIndex = 0;
                     }
                 }
@@ -596,34 +462,28 @@
     }
 
     function heapSweepKernel(heapBase, heapBump, generation, freePointer) {
-        var HEAP_FIRST_RECORD = 64;
-        var HEAP_TYPE_FREE = 0;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_MARK = 8;
-        var RECORD_FLAGS = 12;
-        var address = HEAP_FIRST_RECORD;
+        var address = CollectorLayout.HEAP_FIRST_RECORD;
         var reclaimedBytes = 0;
         var freeRun = 0;
         while (address < heapBump) {
             var type = recordType(heapBase, address);
             var size = recordSize(heapBase, address);
-            if (type !== HEAP_TYPE_FREE) {
+            if (type !== CollectorLayout.HEAP_TYPE_FREE) {
                 if (recordMark(heapBase, address) !== generation) {
-                    if (type === HEAP_TYPE_BUFFER_BACKING) {
-                        if ((recordFlags(heapBase, address) & BUFFER_BACKING_EXTERNAL_FLAG) !== 0) {
+                    if (type === CollectorLayout.HEAP_TYPE_BUFFER_BACKING) {
+                        if ((recordFlags(heapBase, address) & CollectorLayout.BUFFER_BACKING_EXTERNAL_FLAG) !== 0) {
                             var released = callNativeI32(freePointer,
                                 bufferBackingPointer(heapBase, address));
                         }
                     }
-                    setRecordType(heapBase, address, HEAP_TYPE_FREE);
+                    setRecordType(heapBase, address, CollectorLayout.HEAP_TYPE_FREE);
                     setRecordMark(heapBase, address, 0);
                     setRecordFlags(heapBase, address, 0);
                     reclaimedBytes = reclaimedBytes + size;
-                    type = HEAP_TYPE_FREE;
+                    type = CollectorLayout.HEAP_TYPE_FREE;
                 }
             }
-            if (type === HEAP_TYPE_FREE) {
+            if (type === CollectorLayout.HEAP_TYPE_FREE) {
                 if (recordFlags(heapBase, address) === 0) {
                     if (freeRun === 0) {
                         freeRun = address;
@@ -644,12 +504,7 @@
      * Keeping the record walk in kernel code avoids one host FFI transition for
      * every header word in a large, fragmented heap. */
     function indexFreeBlocksKernel(heapBase, heapBump, outputBase, outputLimit) {
-        var HEAP_FIRST_RECORD = 64;
-        var HEAP_TYPE_FREE = 0;
-        var RECORD_TYPE = 0;
-        var RECORD_SIZE = 4;
-        var RECORD_FLAGS = 12;
-        var address = HEAP_FIRST_RECORD;
+        var address = CollectorLayout.HEAP_FIRST_RECORD;
         var count = 0;
         var freeBytes = 0;
         var rebuiltBump = heapBump;
@@ -657,7 +512,7 @@
             var size = recordSize(heapBase, address);
             var ordinaryFree = 0;
             var type = recordType(heapBase, address);
-            if (type === HEAP_TYPE_FREE) {
+            if (type === CollectorLayout.HEAP_TYPE_FREE) {
                 if (recordFlags(heapBase, address) === 0) ordinaryFree = 1;
             }
             if (ordinaryFree === 1) {
@@ -671,7 +526,7 @@
                     store32(heapBase + outputAddress, address);
                     count = count + 1;
                 }
-            } else if (type === HEAP_TYPE_FREE) {
+            } else if (type === CollectorLayout.HEAP_TYPE_FREE) {
                 freeBytes = freeBytes + size;
             }
             address = address + size;
@@ -689,35 +544,42 @@
         if (nativeMemory ? !sharedX86 : !sharedJS) {
             var backend = nativeMemory ? new X86Backend() : new JSBackend();
             var ir = new KernelCompiler().compile(heapSweepKernel, {
-                legacyConstantLocals: true,
-                constantBindings: {HEAP_TYPE_BUFFER_BACKING: HEAP_TYPE_BUFFER_BACKING,
-                    BUFFER_BACKING_POINTER: HeapRecords.KernelConstants.BUFFER_BACKING_POINTER,
-                    BUFFER_BACKING_EXTERNAL_FLAG: BUFFER_BACKING_EXTERNAL_FLAG},
+                constantBindings: CollectorLayout,
+                constantNamespaces: collectorNamespaces,
                 registerPreferences: ["heapBase", "heapBump", "address"]
             });
             var sweeper = backend.compile(ir);
             var markIR = new KernelCompiler().compile(heapMarkKernel, {
-                legacyConstantLocals: true,
-                constantBindings: markLayoutBindings,
+                constantBindings: CollectorLayout,
+                constantNamespaces: collectorNamespaces,
                 registerPreferences: ["heapBase", "address", "stackCount"]
             });
             var marker = backend.compile(markIR);
+            var indexBindings = {}, binding;
+            for (binding in CollectorLayout) {
+                if (Object.prototype.hasOwnProperty.call(CollectorLayout, binding)) indexBindings[binding] = CollectorLayout[binding];
+            }
+            for (binding in FreeIndex.constants) {
+                if (Object.prototype.hasOwnProperty.call(FreeIndex.constants, binding)) indexBindings[binding] = FreeIndex.constants[binding];
+            }
             var indexIR = new KernelCompiler().compile(indexFreeBlocksKernel, {
-                legacyConstantLocals: true,
-                constantBindings: FreeIndex.constants,
+                constantBindings: indexBindings,
+                constantNamespaces: collectorNamespaces,
                 registerPreferences: ["heapBase", "address", "count"]
             });
             var indexer = backend.compile(indexIR);
-            var trackedBindings = {}, binding;
-            for (binding in freeRegionLayoutBindings) trackedBindings[binding] = freeRegionLayoutBindings[binding];
-            for (binding in FreeIndex.constants) trackedBindings[binding] = FreeIndex.constants[binding];
+            var trackedBindings = {RECORD_HEADER_BYTES: Heap.HEADER_SIZE};
+            for (binding in indexBindings) {
+                if (Object.prototype.hasOwnProperty.call(indexBindings, binding)) trackedBindings[binding] = indexBindings[binding];
+            }
             var trackedIR = new KernelCompiler().compileGraph(
                 FreeIndex.functions.recoverTrackedFreeBlocksKernel,
                 FreeIndex.functions, {constantBindings: trackedBindings});
             var trackedIndexer = backend.compile(trackedIR);
             var clearLinksIR = new KernelCompiler().compile(
                 clearFreeRegionLinksKernel, {
-                    constantBindings: freeRegionLayoutBindings
+                    constantBindings: CollectorLayout,
+                    constantNamespaces: collectorNamespaces
                 });
             var linkReleaser = backend.compile(clearLinksIR);
             if (nativeMemory) {
@@ -776,10 +638,10 @@
      * edge/layout status. Read them only for those statuses: on stack overflow
      * the same workspace still contains ordinary pending mark addresses. */
     HeapSweeper.prototype.describeMarkFailure = function (status) {
-        if (status === MARK_WORK_STACK_EXHAUSTED) {
+        if (status === MarkStatus.WORK_STACK_EXHAUSTED) {
             return "native guest marker exhausted its work stack";
         }
-        if (status !== MARK_INVALID_REFERENCE && status !== MARK_INVALID_RECORD_LAYOUT) {
+        if (status !== MarkStatus.INVALID_REFERENCE && status !== MarkStatus.INVALID_RECORD_LAYOUT) {
             return "native guest marker returned unknown status " + status;
         }
         var workspace = this.heap.collectorStackBase;
@@ -795,10 +657,10 @@
         var referenceIndex = nextWord();
         var target = nextWord();
         return "native guest marker found " +
-            (status === MARK_INVALID_REFERENCE ? "an invalid reference" : "an invalid record layout") +
+            (status === MarkStatus.INVALID_REFERENCE ? "an invalid reference" : "an invalid record layout") +
             ": record=" + record + " type=" + type +
             " referenceIndex=" + referenceIndex +
-            (status === MARK_INVALID_REFERENCE ? " target=" : " recordBytes=") + target;
+            (status === MarkStatus.INVALID_REFERENCE ? " target=" : " recordBytes=") + target;
     };
 
     HeapSweeper.prototype.sweep = function (generation) {
@@ -874,11 +736,7 @@
      * the implementation object so host-coordinated and self-coordinated
      * collection cannot drift into separate marking or sweeping semantics. */
     HeapSweeper.markKernel = heapMarkKernel;
-    HeapSweeper.MarkConstants = {
-        MARK_WORK_STACK_EXHAUSTED: MARK_WORK_STACK_EXHAUSTED,
-        MARK_INVALID_REFERENCE: MARK_INVALID_REFERENCE,
-        MARK_INVALID_RECORD_LAYOUT: MARK_INVALID_RECORD_LAYOUT
-    };
+    HeapSweeper.kernelNamespaces = collectorNamespaces;
     HeapSweeper.sweepKernel = heapSweepKernel;
 
     root.GuestVMHeapSweeper = HeapSweeper;
