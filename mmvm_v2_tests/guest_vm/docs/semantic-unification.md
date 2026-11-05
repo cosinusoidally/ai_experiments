@@ -95,3 +95,30 @@ bounded structural stress pass during this cutover. i386 embedding/context and
 structural GC also pass (27 audits / 111888 edges / unchanged maximum bump).
 The combined acceptance audit is still pending. Immutable source sharing
 and substring policy remain unchanged.
+
+## Native rejection and descriptor reader checkpoint
+
+Ordinary named-write rejection no longer automatically leaves the native
+interpreter. Sloppy writes advance through the internal native continuation;
+strict writes construct TypeError and enter an available guest handler. Error
+construction/handler transition is shared with null-property access. Failure
+to allocate or an uncaught error retains the existing exit protocol; this is
+not a new claim of complete uncaught-exception handling. Named message slots
+are appended to runtime support and the native contract is bumped to 99.
+
+The descriptor reader now resolves the six canonical named fields, rather than
+recognising them using numeric character-code comparisons. Field indices derive
+from the existing descriptorFieldNames table. Nearest-owner resolution means
+a shadowed ancestor accessor no longer causes an unnecessary decline. An
+actual accessor field still returns DESCRIPTOR_FIELD_NEEDS_CALLBACK; its guest
+continuation remains future work, not a hidden host-language implementation.
+Cell views are temporary, with no callback/GC before consumption; target append
+still saves aliased descriptor values before moving its property backing.
+
+Node core passes. A focused standalone run preserves all seven baseline
+outcomes: six passes and the existing proto-property-change-writability-set
+failure. Its four descriptor tests report 88.619/4102.491/126.852/5049.005 ms,
+versus adjacent old-image 122.281/5457.150/149.149/6209.712 ms in the same
+selection order. These are observations, not an aggregate benchmark claim.
+There are no measured new ECMA passes yet. A candidate Node build takes 8.23
+seconds / 299908 KiB; the final source is now frozen for combined acceptance.

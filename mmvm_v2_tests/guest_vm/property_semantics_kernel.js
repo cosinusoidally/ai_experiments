@@ -11,7 +11,7 @@
     var DescriptorReject = {NOT_EXTENSIBLE: -1, RECONFIGURE: -2,
         CHANGE_KIND: -3, REPLACE_ACCESSOR: -4, NON_WRITABLE: -5, MIXED: -6};
     var PropertyWriteAction = {WRITE_DATA: 0, CALL_SETTER: 1,
-        NO_SETTER: -1, NON_WRITABLE: -2};
+        NO_SETTER: -1, NON_WRITABLE: -2, NOT_EXTENSIBLE: -3};
 
     function ordinaryWriteActionKernel(attributes, setter) {
         if ((attributes & PropertyAttributes.ACCESSOR) !== 0) {

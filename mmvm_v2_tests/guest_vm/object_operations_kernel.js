@@ -5,6 +5,28 @@
     var DESCRIPTOR_RESULT_FIELDS = 4;
     var STRING_PROPERTY_KEY_UNSUPPORTED = -1;
     var descriptorFieldNames = ["value", "writable", "enumerable", "configurable", "get", "set"];
+    var descriptorFieldIndices = {};
+    for (var descriptorIndex = 0; descriptorIndex < descriptorFieldNames.length; descriptorIndex++) {
+        descriptorFieldIndices[descriptorFieldNames[descriptorIndex].toUpperCase()] = descriptorIndex;
+    }
+    var DESCRIPTOR_FIELD_NEEDS_CALLBACK = -1;
+
+    /* Resolve the nearest definition. An ancestor accessor shadowed by a
+     * nearer data field must neither be invoked nor force a semantic exit.
+     * Zero means absent; the named sentinel means a guest call is required.
+     * A returned cell is temporary: no callback/GC may precede its use. */
+    function descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, fieldIndex) {
+        var key = valueCellReference(0, vectorCellAddress(heapBase, stringSupport,
+            RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE + fieldIndex));
+        var owner = namedPropertyOwnerKernel(heapBase, state, descriptor, key);
+        if (owner === 0) return 0;
+        var entry = findOwnPropertyEntryKernel(heapBase, state, owner, key);
+        if ((ownPropertyEntryAttributesKernel(heapBase, owner, entry) & PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+            return DESCRIPTOR_FIELD_NEEDS_CALLBACK;
+        }
+        return ownPropertyEntryValueCellKernel(heapBase, owner, entry);
+    }
 
     /* String primitives expose immutable virtual own properties without
      * allocating a boxed object or one descriptor per character. */
@@ -370,10 +392,13 @@
     }
 
     var exports = {descriptorFieldNames: descriptorFieldNames,
+      descriptorFieldIndices: descriptorFieldIndices,
       constants: {STRING_PROPERTY_KEY_UNSUPPORTED: STRING_PROPERTY_KEY_UNSUPPORTED,
+                  DESCRIPTOR_FIELD_NEEDS_CALLBACK: DESCRIPTOR_FIELD_NEEDS_CALLBACK,
                   DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
                   DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
         objectIsExtensibleKernel: objectIsExtensibleKernel,
+        descriptorDataFieldCellKernel: descriptorDataFieldCellKernel,
         stringOwnPropertyKeyKernel: stringOwnPropertyKeyKernel,
         objectExtensibilityKernel: objectExtensibilityKernel,
         objectOwnPropertyDescriptorKernel: objectOwnPropertyDescriptorKernel,

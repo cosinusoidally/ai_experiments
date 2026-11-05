@@ -210,6 +210,9 @@
         RuntimeSupportLayout.MINIMUM_INTRINSIC_ARGUMENTS;
     RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.COUNT;
     RuntimeSupportLayout.COUNT += ObjectOperationKernels.descriptorFieldNames.length;
+    RuntimeSupportLayout.WRITE_NO_SETTER_MESSAGE = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.WRITE_NON_WRITABLE_MESSAGE = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.WRITE_NOT_EXTENSIBLE_MESSAGE = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE;
     var INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
     var INTRINSIC_GUEST_BUILTIN = NativeIntrinsics.GUEST_BUILTIN;
@@ -1791,12 +1794,13 @@
                         return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
-                    /* Let the semantic path apply strict/sloppy assignment
-                     * behavior when an ordinary object rejects extension. */
+                    /* Rejection follows the guest strict/sloppy rule without
+                     * asking the embedding interpreter to perform the write. */
                     if (objectIsExtensibleKernel(heapBase, setPropertyObject) === 0) {
-                            return unsupportedExitKernel(
+                            return rejectedPropertyWriteKernel(
                                 heapBase, state, frame, pc, opcode,
-                                (initialBudget - budget));
+                                initialBudget - budget, stringSupport,
+                                FOUR_WORD_INSTRUCTION, PropertyWriteAction.NOT_EXTENSIBLE);
                     }
                     setPropertyRecord = appendOwnPropertyEntryKernel(
                         heapBase, state, setPropertyObject, setPropertyNamedKey,
@@ -1832,8 +1836,9 @@
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
                 } else if (setPropertyAction !== PropertyWriteAction.WRITE_DATA) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
+                    return rejectedPropertyWriteKernel(
+                        heapBase, state, frame, pc, opcode, initialBudget - budget,
+                        stringSupport, FOUR_WORD_INSTRUCTION, setPropertyAction);
                 }
                 if (setPropertyAccessorEntered === 1) {
                     frame = engineCurrentFrame(heapBase, state);
@@ -6745,7 +6750,7 @@
             var definePropertyResult = objectDefinePropertyKernel(
                 heapBase, state, intrinsicTarget, registerAddress,
                 intrinsicArgumentsVector, valueCellReference(0, vectorCellAddress(
-                    heapBase, stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY)));
+                    heapBase, stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY)), stringSupport);
             if (definePropertyResult === 1) intrinsicHandled = 1;
             else if (definePropertyResult === DEFINE_PROPERTY_REJECTED) {
                 var descriptorError = engineScratchRightAddress(heapBase, state);
@@ -11019,12 +11024,38 @@
 
     function propertyAccessTypeErrorKernel(heapBase, state, frame, pc, opcode,
                                            instructions, stringSupport) {
+        return typeErrorAtInstructionKernel(heapBase, state, frame, pc, opcode,
+            instructions, stringSupport, RuntimeSupportLayout.NULL_PROPERTY_MESSAGE);
+    }
+
+    /* Ordinary rejection is a language result, not a missing interpreter
+     * feature. Sloppy code continues; strict code enters the guest handler.
+     * Allocation failure or an uncaught exception retains the existing exit
+     * protocol rather than discarding the operands or inventing a host call. */
+    function rejectedPropertyWriteKernel(heapBase, state, frame, pc, opcode,
+            instructions, stringSupport, instructionWords, action) {
+        if ((programFlags(heapBase, frameProgram(heapBase, frame)) & PROGRAM_FLAG_STRICT) === 0) {
+            setFramePC(heapBase, frame, pc + instructionWords);
+            setEngineCurrentFrame(heapBase, state, frame);
+            setEngineInstructions(heapBase, state, instructions + 1);
+            setEngineExitReason(heapBase, state, NATIVE_INTERNAL_RESUME);
+            return NATIVE_INTERNAL_RESUME;
+        }
+        var message = RuntimeSupportLayout.WRITE_NON_WRITABLE_MESSAGE;
+        if (action === PropertyWriteAction.NO_SETTER) message = RuntimeSupportLayout.WRITE_NO_SETTER_MESSAGE;
+        else if (action === PropertyWriteAction.NOT_EXTENSIBLE) message = RuntimeSupportLayout.WRITE_NOT_EXTENSIBLE_MESSAGE;
+        return typeErrorAtInstructionKernel(heapBase, state, frame, pc, opcode,
+            instructions, stringSupport, message);
+    }
+
+    function typeErrorAtInstructionKernel(heapBase, state, frame, pc, opcode,
+            instructions, stringSupport, messageIndex) {
         /* A private tagged scratch cell leaves the original operands intact
          * if error/catch-environment allocation needs a collection and retry. */
         var errorCell = engineScratchLeftAddress(heapBase, state);
         if (allocateErrorKernel(heapBase, state, errorCell,
                 valueCellReference(0, vectorCellAddress(heapBase, stringSupport,
-                    RuntimeSupportLayout.NULL_PROPERTY_MESSAGE)),
+                    messageIndex)),
                 RuntimeSupportLayout.TYPE_ERROR_PROTOTYPE,
                 RuntimeSupportLayout.TYPE_ERROR_NAME, stringSupport) === 0) {
             return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
@@ -13602,108 +13633,7 @@
         return 0;
     }
 
-    /* Return the descriptor field represented by a guest string.  This stays
-     * deliberately independent of host strings so Object.defineProperty can
-     * execute after the standalone handoff. */
-    function descriptorFieldKindKernel(heapBase, key) {
-        var length = stringLength(heapBase, key);
-        if (length === 3) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 103) {
-            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 101) {
-            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 116) {
-                return 5;
-            }
-            }
-            }
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 115) {
-            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 101) {
-            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 116) {
-                return 6;
-            }
-            }
-            }
-        } else if (length === 5) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 118) {
-            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 97) {
-            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 108) {
-            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 117) {
-            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 101) {
-                return 1;
-            }
-            }
-            }
-            }
-            }
-        } else if (length === 8) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 119) {
-            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 114) {
-            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 105) {
-            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 116) {
-            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 97) {
-            if ((stringCharacterCodeUnit(heapBase, key, 5) & 65535) === 98) {
-            if ((stringCharacterCodeUnit(heapBase, key, 6) & 65535) === 108) {
-            if ((stringCharacterCodeUnit(heapBase, key, 7) & 65535) === 101) {
-                return 2;
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-        } else if (length === 10) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 101) {
-            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 110) {
-            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 117) {
-            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 109) {
-            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 101) {
-            if ((stringCharacterCodeUnit(heapBase, key, 5) & 65535) === 114) {
-            if ((stringCharacterCodeUnit(heapBase, key, 6) & 65535) === 97) {
-            if ((stringCharacterCodeUnit(heapBase, key, 7) & 65535) === 98) {
-            if ((stringCharacterCodeUnit(heapBase, key, 8) & 65535) === 108) {
-            if ((stringCharacterCodeUnit(heapBase, key, 9) & 65535) === 101) {
-                return 3;
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-        } else if (length === 12) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 99) {
-            if ((stringCharacterCodeUnit(heapBase, key, 1) & 65535) === 111) {
-            if ((stringCharacterCodeUnit(heapBase, key, 2) & 65535) === 110) {
-            if ((stringCharacterCodeUnit(heapBase, key, 3) & 65535) === 102) {
-            if ((stringCharacterCodeUnit(heapBase, key, 4) & 65535) === 105) {
-            if ((stringCharacterCodeUnit(heapBase, key, 5) & 65535) === 103) {
-            if ((stringCharacterCodeUnit(heapBase, key, 6) & 65535) === 117) {
-            if ((stringCharacterCodeUnit(heapBase, key, 7) & 65535) === 114) {
-            if ((stringCharacterCodeUnit(heapBase, key, 8) & 65535) === 97) {
-            if ((stringCharacterCodeUnit(heapBase, key, 9) & 65535) === 98) {
-            if ((stringCharacterCodeUnit(heapBase, key, 10) & 65535) === 108) {
-            if ((stringCharacterCodeUnit(heapBase, key, 11) & 65535) === 101) {
-                return 4;
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-            }
-        }
-        return 0;
-    }
-
+    /* Guest truthiness reads tags and string length, never host coercions. */
     function valueCellTruthyKernel(heapBase, cell) {
         var tag = valueCellTag(0, cell);
         if (tag === VALUE_TAG_UNDEFINED) return 0;
@@ -13739,7 +13669,7 @@
     }
 
     function objectDefinePropertyKernel(
-            heapBase, state, target, registerAddress, argumentsVector, lengthKey) {
+            heapBase, state, target, registerAddress, argumentsVector, lengthKey, stringSupport) {
         var objectCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 0);
         var keyCell = programArgumentCellKernel(
@@ -13767,45 +13697,24 @@
             stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return 0;
         if (objectType === RecordLayout.HEAP_TYPE_ARRAY && propertyKeyIndexKernel(heapBase, key) >= 0) return 0;
 
-        var descriptorOwner = descriptor;
-        var descriptorProperty = 0;
-        var valueCell = 0;
-        var writableCell = 0;
-        var enumerableCell = 0;
-        var configurableCell = 0;
-        var getterCell = 0;
-        var setterCell = 0;
-        while (descriptorOwner !== 0) {
-          var ownerType = recordType(heapBase, descriptorOwner);
-          if (ownerType < RecordLayout.HEAP_TYPE_OBJECT || ownerType > RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) return 0;
-          descriptorProperty = lastOwnPropertyEntryKernel(heapBase, descriptorOwner);
-          while (descriptorProperty !== 0) {
-            var fieldKind = descriptorFieldKindKernel(
-                heapBase, ownPropertyEntryKeyKernel(heapBase, descriptorOwner, descriptorProperty));
-            /* ToPropertyDescriptor reads field values, so an accessor on
-             * the descriptor itself needs a guest call rather than treating
-             * its getter function cell as the descriptor value. */
-            if (fieldKind !== 0) {
-                if ((ownPropertyEntryAttributesKernel(heapBase, descriptorOwner,
-                        descriptorProperty) & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return 0;
-            }
-            if (fieldKind === 1) {
-                if (valueCell === 0) valueCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
-            } else if (fieldKind === 2) {
-                if (writableCell === 0) writableCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
-            } else if (fieldKind === 3) {
-                if (enumerableCell === 0) enumerableCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
-            } else if (fieldKind === 4) {
-                if (configurableCell === 0) configurableCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
-            } else if (fieldKind === 5) {
-                if (getterCell === 0) getterCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
-            } else if (fieldKind === 6) {
-                if (setterCell === 0) setterCell = ownPropertyEntryValueCellKernel(heapBase, descriptorOwner, descriptorProperty);
-            }
-            descriptorProperty = previousOwnPropertyEntryKernel(heapBase, descriptorOwner, descriptorProperty);
-          }
-          descriptorOwner = objectPrototype(heapBase, descriptorOwner);
-        }
+        var valueCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, DescriptorFieldIndex.VALUE);
+        if (valueCell === DESCRIPTOR_FIELD_NEEDS_CALLBACK) return 0;
+        var writableCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, DescriptorFieldIndex.WRITABLE);
+        if (writableCell === DESCRIPTOR_FIELD_NEEDS_CALLBACK) return 0;
+        var enumerableCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, DescriptorFieldIndex.ENUMERABLE);
+        if (enumerableCell === DESCRIPTOR_FIELD_NEEDS_CALLBACK) return 0;
+        var configurableCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, DescriptorFieldIndex.CONFIGURABLE);
+        if (configurableCell === DESCRIPTOR_FIELD_NEEDS_CALLBACK) return 0;
+        var getterCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, DescriptorFieldIndex.GET);
+        if (getterCell === DESCRIPTOR_FIELD_NEEDS_CALLBACK) return 0;
+        var setterCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
+            stringSupport, DescriptorFieldIndex.SET);
+        if (setterCell === DESCRIPTOR_FIELD_NEEDS_CALLBACK) return 0;
 
         var accessorDescriptor = 0;
         if (getterCell !== 0) accessorDescriptor = 1;
@@ -18009,7 +17918,6 @@
                 allocateFlatStringConcatenationKernel,
             allocateStringSliceKernel: allocateStringSliceKernel,
             stringNumericValueKernel: stringNumericValueKernel,
-            descriptorFieldKindKernel: descriptorFieldKindKernel,
             stringReplaceKernel: stringReplaceKernel,
             strictValueCellsEqualKernel: strictValueCellsEqualKernel,
             sameValueCellsKernel: sameValueCellsKernel,
@@ -18070,6 +17978,8 @@
                 kernelDependencies[propertyKernelName] = PropertySemantics.functions[propertyKernelName];
             }
         }
+        kernelDependencies.rejectedPropertyWriteKernel = rejectedPropertyWriteKernel;
+        kernelDependencies.typeErrorAtInstructionKernel = typeErrorAtInstructionKernel;
         kernelDependencies.namedPropertyOwnerKernel = namedPropertyOwnerKernel;
         var snapshotRequested = runtime.nativeSnapshotRead ||
                                 runtime.nativeSnapshotWrite;
@@ -18172,6 +18082,7 @@
                     DescriptorFields: PropertySemantics.namespaces.DescriptorFields,
                     PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,
                     DescriptorReject: PropertySemantics.namespaces.DescriptorReject,
+                    DescriptorFieldIndex: ObjectOperationKernels.descriptorFieldIndices,
                     PropertyWriteAction: PropertySemantics.namespaces.PropertyWriteAction,
                     RecordLayout: RecordLayout,
                     Bytecode: Bytecode,
@@ -18438,6 +18349,15 @@
         runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.NULL_PROPERTY_MESSAGE),
             runtime.internStringAddress("cannot read property of null or undefined"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.WRITE_NO_SETTER_MESSAGE),
+            runtime.internStringAddress("property has no setter"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.WRITE_NON_WRITABLE_MESSAGE),
+            runtime.internStringAddress("property is not writable"));
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.WRITE_NOT_EXTENSIBLE_MESSAGE),
+            runtime.internStringAddress("object is not extensible"));
         var typeofNames = ["undefined", "object", "boolean", "number",
                            "string", "function"];
         var typeofNameIndex = 0;
