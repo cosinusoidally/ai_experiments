@@ -592,3 +592,16 @@ The default native instruction segment remains byte-identical (630331 bytes).
 Node construction is 8.09 seconds / 305940 KiB in this observation. Remaining
 cross-host snapshot/fixed-point and integration gates are in progress at
 this checkpoint; no new full-corpus result is claimed yet.
+
+Remaining gates completed: Node/js_min/self-host images are bit-identical,
+7097456 bytes (7248 below the preceding cutover). Standalone GC passes
+24 rounds / 48 collections; offline marking finds 37807 reachable records,
+zero missing marks, and the same 455 unreachable occupied records / 85784
+bytes. The existing inclusive phase profiler runs with the renamed methods.
+Self-host construction is 86.71 seconds / 481628 KiB, js_min 108.80 seconds /
+323048 KiB. The previous pair was 81.71 / 101.12 seconds: these slower
+observations are retained, not claimed as a speedup. Kernel parse/lowering/
+assembly all rise together despite unchanged kernel source/instructions;
+an adjacent controlled build comparison is required before attributing the
+whole difference to allocator behavior. Node's separate build observation
+was faster. The broader checkpoint audit will include build comparisons.
