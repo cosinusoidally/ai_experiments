@@ -70,10 +70,51 @@ for an adjacent control if later measurements require attribution.
   passes / zero gains / zero new failures / zero missing results. Runner
   elapsed 675.626443 seconds, process wall 677.15 seconds / peak RSS 463484 KiB,
   versus previous 675.248083 seconds / 463636 KiB: effectively flat.
-- Paired stock Octane against the starting image, excluding RegExp: running.
+- Paired stock Octane against the starting image, excluding RegExp: completed
+  17:47–18:09 UTC. **28 passes / zero failures, crashes or timeouts**. All
+  fourteen selected suites pass on both images. This is not a fifteen-suite
+  stock run; RegExp was not repeated.
 - Final-image structural/standalone GC, bounded interactive demos and HTTP:
   pending.
 
 Raw output stays in ignored artifacts/property-* files. Existing ECMA
 failures, configured exclusions and the separate standalone dynamic-library
 integration gap are not reclassified as passes by this cleanup.
+
+## Paired stock Octane scores and peak RSS
+
+Before is the starting cleanup10 image (46b4518 / cdc4539 implementation);
+after is 0937e5d. Scores are higher-is-better, not process wall-time ratios.
+RSS is process peak KiB, not live guest bytes. Adaptive iteration and GC
+boundaries can substantially change individual peaks.
+
+| Suite | Before score | After score | Before RSS KiB | After RSS KiB |
+| --- | ---: | ---: | ---: | ---: |
+| Richards | 95.1 | 96.3 | 20864 | 20864 |
+| DeltaBlue | 90.5 | 92.3 | 56192 | 56576 |
+| Crypto | 182 | 181 | 37888 | 38016 |
+| RayTrace | 242 | 247 | 270208 | 326784 |
+| EarleyBoyer | 441 | 447 | 466944 | 466944 |
+| Splay | 697 | 700 | 411136 | 413312 |
+| NavierStokes | 265 | 265 | 24576 | 24704 |
+| PdfJS | 839 | 842 | 240284 | 239484 |
+| Mandreel | 476 | 469 | 487384 | 487260 |
+| Gameboy | 1002 | 1019 | 95996 | 95976 |
+| CodeLoad | 90.4 | 93.2 | 262656 | 262912 |
+| Box2D | 360 | 375 | 92672 | 92416 |
+| zlib | 567 | 560 | 103680 | 103808 |
+| Typescript | 1327 | 1313 | 467100 | 467108 |
+
+The geometric mean of the fourteen after/before ratios is **1.008526**
+(+0.85%): essentially flat aggregate performance, not a major CPU gain.
+Mandreel, zlib and Typescript have small lower scores; these observations are
+retained, not hidden in the aggregate. zlib wall time is 270.05 versus 273.50
+seconds. Most RSS observations are close; RayTrace peaks higher by 56576 KiB.
+Earlier same-image RayTrace observations also varied substantially with
+adaptive GC boundaries. This pair does not establish a general RSS reduction.
+
+```sh
+node octane_compare.js --reference-snapshot artifacts/cleanup10-final.snap \
+  --snapshot artifacts/property-final.snap --exclude RegExp \
+  --output artifacts/property-final-octane --timeout 900
+```
