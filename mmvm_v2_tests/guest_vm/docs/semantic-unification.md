@@ -71,3 +71,27 @@ The native setter's duplicate prototype/type/list scan has been removed.
 
 Node core, i386 focused embedding/context checks and standalone JSON (12 files /
 908 assertions) pass. These are intermediate gates, not a completed full audit.
+
+## Root ownership cutover
+
+visitRuntimeRecordRoots now enumerates common heap owners for native root
+seeding and portable graph traversal: globals, registered contexts/callbacks,
+retained programs, live snapshots, engine services and in-progress function
+construction. visitEmbeddingRoots covers explicit retain tokens and active
+embedding register/environment stacks. visitExecutionRoots is the one frame
+and pending-call walk, used by both collectors through marking visitors.
+
+Constructor receivers are now explicit in the portable walk too; pending
+callables are explicit alongside their receiver/arguments. These references
+last only as long as the owning frame/request. No new permanent roots or
+moving collection are introduced. Frame/register diagnostic labels are built
+only when reporting an invalid root, rather than concatenating a string for
+every live register at each collection.
+
+Existing context integration now collects while a host call is suspended;
+existing automatic-GC coverage constructs an instance while its constructor
+allocates without reading this. Node embedding, automatic GC, full core and
+bounded structural stress pass during this cutover. i386 embedding/context and
+structural GC also pass (27 audits / 111888 edges / unchanged maximum bump).
+The combined acceptance audit is still pending. Immutable source sharing
+and substring policy remain unchanged.

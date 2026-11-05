@@ -129,6 +129,10 @@
                    hostExecution.frames[0].heapAddress) > 0,
                "host-call yield did not spill its frame PC");
         assert(hostCalls === 0, "host callback ran before the embedder serviced it");
+        firstRuntime.collect();
+        assert(!firstRuntime.runtime.linearHeap.isFreeRecord(
+                   hostExecution.pendingHostCall.callable.heapAddress),
+               "collection lost the callable of a suspended host request");
         assert(hostResult.call.name === "hostAdd" &&
                hostResult.call.arguments[0] === 20 &&
                hostResult.call.arguments[1] === 22,

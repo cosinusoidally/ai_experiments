@@ -16,6 +16,14 @@
         if (thresholdVM.runtime.bufferSupport.liveBackingCount() > 4) {
             throw new Error("automatic GC retained too many unreachable buffers");
         }
+        thresholdVM.run(
+            "function CollectingConstructor() {" +
+            " for (var n = 0; n < 24; n++) Buffer.alloc(32);" +
+            "}" +
+            "var constructed = new CollectingConstructor();" +
+            "assertEqual(constructed instanceof CollectingConstructor, true," +
+            " 'constructor receiver survives collection without a this read');",
+            "automatic_gc_constructor_receiver.js");
         thresholdVM.destroy();
 
         var stressVM = new VM({gcStress: true});

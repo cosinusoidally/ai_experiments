@@ -5308,36 +5308,8 @@
                 pending.push(address);
             }
         });
-        enqueue(this.globalObject ? this.globalObject.heapAddress : 0);
-        enqueue(this.nativeCallbackRootHead);
-        var index = 0;
-        while (index < this.contexts.length) {
-            enqueue(this.contexts[index++].heapAddress);
-        }
-        var retainedProgramKey;
-        for (retainedProgramKey in this.retainedProgramAddresses) {
-            if (own(this.retainedProgramAddresses, retainedProgramKey)) {
-                enqueue(this.retainedProgramAddresses[retainedProgramKey]);
-            }
-        }
-        if (this.nativeInterpreter) {
-            enqueue(this.nativeInterpreter.stateAddress);
-        }
-        var snapshotIndex = 0;
-        while (snapshotIndex < this.heapStateSnapshots.length) {
-            var snapshot = this.heapStateSnapshots[snapshotIndex++];
-            if (!snapshot || snapshot.destroyed) continue;
-            var snapshotAddressIndex = 0;
-            while (snapshotAddressIndex < snapshot.roots.length) {
-                enqueue(snapshot.roots[snapshotAddressIndex++],
-                    "heap snapshot");
-            }
-        }
-        enqueue(this.functionConstructionProgram || 0);
-        enqueue(this.functionConstructionCallable ?
-                this.functionConstructionCallable.heapAddress : 0);
-        enqueue(this.functionConstructionPrototype ?
-                this.functionConstructionPrototype.heapAddress : 0);
+        visitRuntimeRecordRoots(this, enqueue);
+        var index;
 
         index = 0;
         while (index < pending.length) {
@@ -5352,7 +5324,7 @@
 
     Runtime.prototype.seedNativeCollectorRoots = function (generation) {
         var runtime = this;
-        function value(candidate, source) {
+        function value(candidate, source, owner, slot) {
             if (typeof candidate === "string") {
                 var stringAddress = runtime.stringAddresses["$" + candidate];
                 if (stringAddress) {
@@ -5363,7 +5335,8 @@
             if (candidate && candidate.heapAddress) {
                 if (runtime.linearHeap.isFreeRecord(candidate.heapAddress)) {
                     throw new Error("collector root contains freed reference: " +
-                        (source || "value") + " type=" + candidate.guestType +
+                        (source || "value") + (owner === undefined ? "" :
+                            " owner=" + owner + " slot=" + slot) + " type=" + candidate.guestType +
                         " reference=" + candidate.heapAddress);
                 }
                 runtime.linearHeap.setMark(candidate.heapAddress, generation);
@@ -5378,37 +5351,9 @@
                 runtime.linearHeap.setMark(candidate.heapAddress, generation);
             }
         }
-        function execution(candidate) {
-            if (!candidate) return;
-            var frameIndex = 0;
-            while (frameIndex < candidate.frames.length) {
-                var hostFrame = candidate.frames[frameIndex++];
-                runtime.linearHeap.setMark(hostFrame.heapAddress, generation);
-                if (!runtime.nativeInterpreter ||
-                    !hostFrame.nativeHeapCurrent) {
-                    var hostRegisterIndex = 0;
-                    while (hostRegisterIndex < hostFrame.registers.length) {
-                        value(hostFrame.registers[hostRegisterIndex],
-                            "frame " + hostFrame.heapAddress + " register " +
-                            hostRegisterIndex);
-                        hostRegisterIndex++;
-                    }
-                }
-                environment(hostFrame.environment);
-                value(hostFrame.constructReceiver);
-            }
-            if (candidate.pendingHostCall) {
-                value(candidate.pendingHostCall.receiver);
-                var argumentIndex = 0;
-                while (argumentIndex < candidate.pendingHostCall.args.length) {
-                    value(candidate.pendingHostCall.args[argumentIndex++]);
-                }
-            }
-        }
-        value(this.globalObject);
-        if (this.nativeCallbackRootHead) {
-            this.linearHeap.setMark(this.nativeCallbackRootHead, generation);
-        }
+        var visitor = {value: value, environment: environment, record: function (address) {
+            runtime.linearHeap.setMark(address, generation);
+        }};
         value(this.bufferSupport.prototype);
         value(this.typedArraySupport.arrayBufferPrototype,
               "typedArraySupport.arrayBufferPrototype");
@@ -5418,67 +5363,9 @@
                   "typedArraySupport.prototypes[" + typedPrototypeIndex + "]");
             typedPrototypeIndex++;
         }
-        if (this.nativeInterpreter) {
-            this.linearHeap.setMark(
-                this.nativeInterpreter.stateAddress, generation);
-            this.linearHeap.setMark(
-                this.nativeInterpreter.platformServicesAddress, generation);
-            this.linearHeap.setMark(
-                this.nativeInterpreter.stringSupportAddress, generation);
-        }
-        var snapshotIndex = 0;
-        while (snapshotIndex < this.heapStateSnapshots.length) {
-            var snapshot = this.heapStateSnapshots[snapshotIndex++];
-            if (!snapshot || snapshot.destroyed) continue;
-            var snapshotAddressIndex = 0;
-            while (snapshotAddressIndex < snapshot.roots.length) {
-                this.linearHeap.setMark(
-                    snapshot.roots[snapshotAddressIndex++], generation);
-            }
-        }
-        var retainedProgramKey;
-        for (retainedProgramKey in this.retainedProgramAddresses) {
-            if (own(this.retainedProgramAddresses, retainedProgramKey)) {
-                this.linearHeap.setMark(
-                    this.retainedProgramAddresses[retainedProgramKey],
-                    generation);
-            }
-        }
-        var contextRootIndex = 0;
-        while (contextRootIndex < this.contexts.length) {
-            this.linearHeap.setMark(
-                this.contexts[contextRootIndex++].heapAddress, generation);
-        }
-        var index = 0;
-        while (index < this.hostRoots.length) {
-            value(this.hostRoots[index], "hostRoots[" + index + "]");
-            index++;
-        }
-        index = 0;
-        while (index < this.activeRegisterFrames.length) {
-            var registers = this.activeRegisterFrames[index++];
-            var registerIndex = 0;
-            while (registerIndex < registers.length) {
-                value(registers[registerIndex], "activeRegisters[" + index +
-                    "][" + registerIndex + "]");
-                registerIndex++;
-            }
-        }
-        index = 0;
-        while (index < this.activeEnvironmentFrames.length) {
-            environment(this.activeEnvironmentFrames[index++]);
-        }
-        visitRuntimeExecutions(this, execution);
-        if (this.functionConstructionCallable) {
-            value(this.functionConstructionCallable);
-        }
-        if (this.functionConstructionPrototype) {
-            value(this.functionConstructionPrototype);
-        }
-        if (this.functionConstructionProgram) {
-            this.linearHeap.setMark(
-                this.functionConstructionProgram, generation);
-        }
+        visitRuntimeRecordRoots(this, visitor.record);
+        visitEmbeddingRoots(this, visitor);
+
     };
 
     Runtime.prototype.rebuildWeakStringTables = function (generation) {
@@ -5665,38 +5552,18 @@
                     if (builtinMethod) this.markValue(builtinMethod, generation);
                 }
             }
-            var hostRootIndex = 0;
-            while (hostRootIndex < this.hostRoots.length) {
-                if (this.hostRoots[hostRootIndex] !== RELEASED_ROOT) {
-                    this.markValue(this.hostRoots[hostRootIndex], generation);
-                }
-                hostRootIndex++;
-            }
-            var frameIndex = 0;
-            while (frameIndex < this.activeRegisterFrames.length) {
-                var registerIndex = 0;
-                while (registerIndex < this.activeRegisterFrames[frameIndex].length) {
-                    this.markValue(this.activeRegisterFrames[frameIndex][registerIndex], generation);
-                    registerIndex++;
-                }
-                frameIndex++;
-            }
-            frameIndex = 0;
-            while (frameIndex < this.activeEnvironmentFrames.length) {
-                this.markEnvironment(this.activeEnvironmentFrames[frameIndex], generation);
-                frameIndex++;
-            }
+            var collectingRuntime = this;
+            visitEmbeddingRoots(this, {
+                value: function (value) { collectingRuntime.markValue(value, generation); },
+                environment: function (environment) { collectingRuntime.markEnvironment(environment, generation); },
+                record: function (address) { collectingRuntime.linearHeap.setMark(address, generation); }
+            });
             var contextIndex = 0;
             while (contextIndex < this.contexts.length) {
-                var context = this.contexts[contextIndex];
+                var context = this.contexts[contextIndex++];
                 this.linearHeap.setMark(context.heapAddress, generation);
                 this.markValue(context.globalObject, generation);
-                contextIndex++;
             }
-            var collectingRuntime = this;
-            visitRuntimeExecutions(this, function (execution) {
-                markExecution(execution, generation, collectingRuntime);
-            });
             if (this.nativeInterpreter) {
                 this.linearHeap.setMark(
                     this.nativeInterpreter.stringSupportAddress, generation);
@@ -6144,27 +6011,86 @@
         }
     }
 
-    function markExecution(execution, generation, runtime) {
+    /* One owner walk for both collectors. Visitors determine how a root is
+     * marked, never which suspended frames/values count as roots. */
+    /* Heap-graph owners common to native seeding and portable traversal.
+     * Code/atom caches are intentionally absent: they are weak metadata. */
+    function visitRuntimeRecordRoots(runtime, visit) {
+        function record(address, source) { if (address) visit(address, source); }
+        record(runtime.globalObject ? runtime.globalObject.heapAddress : 0, "runtime global");
+        record(runtime.nativeCallbackRootHead, "registered native callbacks");
+        var index = 0;
+        while (index < runtime.contexts.length) {
+            record(runtime.contexts[index++].heapAddress, "registered context");
+        }
+        var key;
+        for (key in runtime.retainedProgramAddresses) {
+            if (own(runtime.retainedProgramAddresses, key)) {
+                record(runtime.retainedProgramAddresses[key], "retained program");
+            }
+        }
+        if (runtime.nativeInterpreter) {
+            record(runtime.nativeInterpreter.stateAddress, "native engine");
+            record(runtime.nativeInterpreter.platformServicesAddress, "platform services");
+            record(runtime.nativeInterpreter.stringSupportAddress, "runtime support");
+        }
+        index = 0;
+        while (index < runtime.heapStateSnapshots.length) {
+            var snapshot = runtime.heapStateSnapshots[index++];
+            if (!snapshot || snapshot.destroyed) continue;
+            var rootIndex = 0;
+            while (rootIndex < snapshot.roots.length) record(snapshot.roots[rootIndex++], "heap snapshot");
+        }
+        record(runtime.functionConstructionProgram, "constructing program");
+        record(runtime.functionConstructionCallable ? runtime.functionConstructionCallable.heapAddress : 0, "constructing callable");
+        record(runtime.functionConstructionPrototype ? runtime.functionConstructionPrototype.heapAddress : 0, "constructing prototype");
+    }
+    function visitEmbeddingRoots(runtime, visitor) {
+        var index = 0;
+        while (index < runtime.hostRoots.length) {
+            var root = runtime.hostRoots[index++];
+            if (root !== RELEASED_ROOT) visitor.value(root, "retained value");
+        }
+        index = 0;
+        while (index < runtime.activeRegisterFrames.length) {
+            var registers = runtime.activeRegisterFrames[index++];
+            var slot = 0;
+            while (slot < registers.length) {
+                visitor.value(registers[slot], "embedding register", index - 1, slot);
+                slot++;
+            }
+        }
+        index = 0;
+        while (index < runtime.activeEnvironmentFrames.length) {
+            visitor.environment(runtime.activeEnvironmentFrames[index++]);
+        }
+        visitRuntimeExecutions(runtime, function (execution) {
+            visitExecutionRoots(runtime, execution, visitor);
+        });
+    }
+
+    function visitExecutionRoots(runtime, execution, visitor) {
         var frameIndex = 0;
         while (frameIndex < execution.frames.length) {
-            var frame = execution.frames[frameIndex];
-            runtime.linearHeap.setMark(frame.heapAddress, generation);
+            var frame = execution.frames[frameIndex++];
+            visitor.record(frame.heapAddress);
             if (!runtime.nativeInterpreter || !frame.nativeHeapCurrent) {
                 var registerIndex = 0;
                 while (registerIndex < frame.registers.length) {
-                    runtime.markValue(frame.registers[registerIndex], generation);
+                    visitor.value(frame.registers[registerIndex], "frame register",
+                        frame.heapAddress, registerIndex);
                     registerIndex++;
                 }
             }
-            runtime.markEnvironment(frame.environment, generation);
-            frameIndex++;
+            visitor.environment(frame.environment);
+            visitor.value(frame.constructReceiver, "constructor receiver");
         }
         if (execution.pendingHostCall) {
-            runtime.markValue(execution.pendingHostCall.receiver, generation);
+            visitor.value(execution.pendingHostCall.callable, "pending callable");
+            visitor.value(execution.pendingHostCall.receiver, "pending receiver");
             var index = 0;
             while (index < execution.pendingHostCall.args.length) {
-                runtime.markValue(execution.pendingHostCall.args[index], generation);
-                index++;
+                visitor.value(execution.pendingHostCall.args[index++], "pending argument");
             }
         }
     }
