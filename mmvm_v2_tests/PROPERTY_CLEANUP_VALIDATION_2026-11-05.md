@@ -59,7 +59,11 @@ for an adjacent control if later measurements require attribution.
 
 ## Frozen-source broader audit — pending
 
-- Full imported Test262: running, started around 17:27 UTC.
+- Full imported Test262: **3292 passed / 0 failed / 0 timed out / 0 skipped /
+  0 not run**. Runner 426.882453 seconds, summed test time 408.995028 seconds;
+  process wall 427.56 seconds / peak RSS 524244 KiB. Previous same-day runner
+  observation 471.851133 seconds / 524532 KiB: 9.5% lower time in this run,
+  essentially flat memory, not a controlled attribution of the whole change.
 - Full historical ECMA and exact passing-filename comparison: queued.
 - Paired stock Octane against the starting image, excluding RegExp: pending.
 - Final-image structural/standalone GC, bounded interactive demos and HTTP:

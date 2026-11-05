@@ -1,5 +1,22 @@
 # Test262 status
 
+2026-11-05, approximately 17:27–17:35 UTC, property/root checkpoint `0937e5d`
+(native contract 98), complete imported suite under standalone js_runner:
+
+- Test files / variants / executed: **3292 / 3292 / 3292**.
+- Passed: **3292**; failed: **0**; timed out: **0**; not run: **0**;
+  skipped: **0**.
+- Runner elapsed: **426.882453 seconds**; summed test time:
+  **408.995028 seconds**. Process wall: **427.56 seconds**;
+  peak RSS: **524244 KiB**.
+- No corpus, harness, selection or instruction-limit changes. This preserves
+  every passing file. Runner time is 9.5% lower than the preceding same-day
+  observation, with effectively flat RSS; these are individual observations,
+  not a controlled attribution of all the difference to the cleanup.
+- Command: `./artifacts/js_runner.exe artifacts/property-final.snap test262_runner.js`.
+  Remaining audit gates are tracked in
+  [the property/root validation report](PROPERTY_CLEANUP_VALIDATION_2026-11-05.md).
+
 2026-11-05, approximately 12:20–12:30 UTC, cleanup checkpoint `cdc4539`
 (native contract 98), complete imported suite under standalone js_runner:
 
