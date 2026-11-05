@@ -32,6 +32,18 @@ corpus, benchmark, self-host/cross-host build and graphical/HTTP audit.
 Compare exact ECMA pass sets. Preserve raw failures and timing/RSS observations
 in ignored artifacts, run heavy work serially and commit working checkpoints.
 
+## Remaining acceptance work
+
+The completed corpus audit for 4b24556 preserves all 3292 Test262 passes and
+the exact historical ECMA pass/fail sets (990/339), but does not gain ECMA
+passes. The injected-exception ownership correction fe35c1b is a later,
+separately tested change: a suspended execution owns its injected guest value
+until resume or abort, including the interval after failHostCall and before
+resume. The core suite passes on both hosts and bounded native GC structural
+stress passes. Broader standalone demo/HTTP, Octane and cross-host self-build
+acceptance remains open; do not treat the architectural cutovers as completed
+acceptance of those gates. See the dated semantic cleanup validation report.
+
 ## Descriptor decision checkpoint
 
 property_semantics_kernel.js now owns ordinary descriptor rejection and flag

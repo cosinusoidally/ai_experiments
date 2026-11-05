@@ -89,3 +89,19 @@ foreign-runtime value before consuming the pending request. The existing
 context/execution integration covers collection in this interval and passes
 under Node and i386 js_min. This follow-up is later than the full corpus runs
 above; those runs must not be represented as validation of the follow-up.
+
+Follow-up implementation fe35c1b also passes the complete core driver under
+Node and i386 js_min: 12 guest programs / 270 guest assertions, plus the
+compiler, heap, embedding/context, native interpreter and structured compiler
+checks. Raw logs: artifacts/semantics-exception-root-{node,jsmin}-core.log.
+
+The follow-up Node-hosted native GC stress run passes 24 workload rounds,
+27 structural audits, 111969 edge checks, 221 property-index audits and 74
+embedding collections. Maximum observed heap bump: 3531312 bytes with an
+8388608-byte cap; construction 1472 ms and workload/check time 15065 ms.
+
+A fresh follow-up standalone image (7122608 bytes; SHA-256
+946639b0c3302012ed38bb87cabf20a20f47f5199959c63e726f527ef8867652)
+runs hello.js and preserves the four selected descriptor-test passes. The
+focused ECMA runner takes 24.038751 seconds. This is a smoke/focused check,
+not a repeat of either complete corpus or a cross-host identity check.
