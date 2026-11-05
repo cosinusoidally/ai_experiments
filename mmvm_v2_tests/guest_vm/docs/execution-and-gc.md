@@ -128,8 +128,8 @@ already reused. This is a correctness constraint, not just a performance knob.
 The common collector source now reads `CollectorLayout` from HeapRecords and
 uses normal kernel-local semantics, not repeated numeric declarations or
 legacy initializer overrides. Embedding and standalone compilation use the
-same explicit namespace. The main interpreter's remaining legacy mode must
-not silently become a dependency of collector layout resolution again.
+same explicit namespace. The main interpreter now also uses explicit graph
+bindings; no legacy constant-local override mode remains in the compiler.
 
 Pressure boundaries trigger collection before expanding logical capacity.
 If live data still requires space, growth grants adaptive headroom up to the

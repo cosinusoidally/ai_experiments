@@ -537,6 +537,16 @@ image from the same source. These observations do not establish a build
 speedup. Final js_min identity and another seed-to-identical-output self-host
 gate are in progress at this checkpoint; their results will follow.
 
+Final gates completed: js_min build 101.12 seconds / 322800 KiB peak RSS;
+same-seed self-hosted rebuild 81.71 seconds / 481512 KiB. Node, js_min and
+the self-hosted result are bit-identical, 7104704 bytes. The image is 6976
+bytes larger than before: canonical exported fields/explicit dependency
+metadata have a storage cost; this is not a snapshot-size optimization.
+Standalone GC passes 24 rounds / 48 collections. Offline marking finds 37825
+reachable records, zero missing marks and the unchanged 455 unreachable
+occupied records / 85784 bytes. No full external-corpus rerun is claimed at
+this intermediate checkpoint; the broader audit follows the ownership cutover.
+
 The next ownership cleanup removes the legacy wrapper-owned refill arena.
 Only its retry/release code still mentions its cursor: current native run
 entry uses the engine-owned allocator instead. Carrying both models obscures
