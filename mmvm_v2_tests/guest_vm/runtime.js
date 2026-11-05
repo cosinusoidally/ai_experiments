@@ -6070,6 +6070,9 @@
     }
 
     function visitExecutionRoots(runtime, execution, visitor) {
+        if (execution.hasInjectedHostException) {
+            visitor.value(execution.injectedHostException, "injected host exception");
+        }
         var frameIndex = 0;
         while (frameIndex < execution.frames.length) {
             var frame = execution.frames[frameIndex++];

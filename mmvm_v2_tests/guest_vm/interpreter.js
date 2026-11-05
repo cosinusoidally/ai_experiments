@@ -1163,6 +1163,7 @@
 
     Execution.prototype.failHostCall = function (error) {
         if (!this.pendingHostCall) throw new Error("execution has no pending host call");
+        this.runtime.assertOwned(error);
         var call = this.pendingHostCall;
         error = this.runtime.locateError(error, call.frame.program, call.locationPc);
         this.pendingHostCall = null;

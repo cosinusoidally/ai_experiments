@@ -176,6 +176,24 @@
                String(failedResult.exception).indexOf("host failed") >= 0,
                "host failure was not injected when execution resumed");
 
+        var injectedExecution = firstContext.start(
+            "try { hostFailure(); } catch (problem) { var injectedAnswer = problem.answer; }",
+            "injected_guest_failure.js");
+        assert(injectedExecution.resume(Infinity).status === "hostCall",
+               "guest-valued host failure did not suspend");
+        var foreignFailureRejected = false;
+        try { injectedExecution.failHostCall(otherRuntime.runtime.makeObject()); }
+        catch (foreignFailureError) { foreignFailureRejected = true; }
+        assert(foreignFailureRejected && injectedExecution.pendingHostCall,
+               "foreign failure was accepted or consumed the pending request");
+        var injectedValue = firstRuntime.runtime.makeObject();
+        firstRuntime.runtime.setProperty(injectedValue, "answer", 99);
+        injectedExecution.failHostCall(injectedValue);
+        firstRuntime.collect();
+        assert(injectedExecution.resume(Infinity).status === "completed" &&
+               firstRuntime.runtime.getGlobal(firstContext, "injectedAnswer") === 99,
+               "collection lost an injected guest exception before resume");
+
         var forbiddenCallbackCount = 0;
         var forbiddenRuntime = new JSRuntime({forbidHostCalls: true});
         var forbiddenContext = forbiddenRuntime.createContext();
