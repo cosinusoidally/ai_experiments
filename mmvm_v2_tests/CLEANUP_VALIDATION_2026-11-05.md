@@ -80,8 +80,13 @@ slower/faster build observations remain in `guest_vm/docs/cleanup.md`.
 Started around 12:23 UTC. Run Test262, ECMA and a stock Octane image comparison
 once for this combined checkpoint, not once per small source edit.
 
-- Full imported Test262: pending. Previous recorded result: 3292 passes,
-  zero failures/timeouts/not-run.
+- Full imported Test262: completed around 12:30 UTC. **3292 passed / 0 failed /
+  0 timed out / 0 not run / 0 skipped**, all 3292 authored files executed.
+  Runner elapsed 471.851133 seconds; summed test time 453.062347 seconds.
+  Process wall 472.58 seconds / peak RSS 524532 KiB. Previous cleanup repeat:
+  436.840919 seconds / 511672 KiB. Correctness is preserved, but the observed
+  8.0% time and 2.5% RSS increases are not silently called parity. Compare an
+  adjacent slow-case baseline before attributing the difference to the code.
 - Historical ECMA: pending. Compare specific passing filenames with the
   previous 990-pass result, not just its total. Previously: 339 failures
   including 39 timeouts, four explicitly configured default skips.
@@ -92,6 +97,12 @@ once for this combined checkpoint, not once per small source edit.
 
 Commands and final results will be added when these runs complete. Raw
 outputs stay in ignored `artifacts/cleanup10-*`.
+
+Test262 command:
+
+```sh
+./artifacts/js_runner.exe artifacts/cleanup10-final.snap test262_runner.js
+```
 
 ## Remaining architectural work
 

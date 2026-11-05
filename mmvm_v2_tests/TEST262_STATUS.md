@@ -1,5 +1,23 @@
 # Test262 status
 
+2026-11-05, approximately 12:20–12:30 UTC, cleanup checkpoint `cdc4539`
+(native contract 98), complete imported suite under standalone js_runner:
+
+- Test files / variants / executed: **3292 / 3292 / 3292**.
+- Passed: **3292**; failed: **0**; timed out: **0**; not run: **0**;
+  skipped: **0**.
+- Runner elapsed: **471.851133 seconds**; summed test time:
+  **453.062347 seconds**. Process wall: **472.58 seconds**;
+  peak RSS: **524532 KiB**.
+- No corpus, harness, selection or instruction-limit changes. Command:
+  `./artifacts/js_runner.exe artifacts/cleanup10-final.snap test262_runner.js`.
+- Correctness is preserved. This is about 8.0% slower than the preceding
+  cleanup repeat (436.840919 seconds); peak RSS is about 2.5% higher than
+  that run's 511672 KiB. These are retained observations, not claimed as
+  performance parity. An adjacent slow-case baseline is planned to check
+  whether the difference is reproducible. The broader ECMA/Octane audit is
+  still running; see [the cleanup report](CLEANUP_VALIDATION_2026-11-05.md).
+
 2026-11-04, fresh validation of manually committed `fa54ddb` (native contract
 98): **3292 / 3292 passed; 0 failed / 0 timed out / 0 not run**. Runner
 elapsed **455.714562 seconds**; summed test time **439.551291 seconds**.
