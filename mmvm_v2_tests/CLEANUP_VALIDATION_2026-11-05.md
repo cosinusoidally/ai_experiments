@@ -95,9 +95,10 @@ once for this combined checkpoint, not once per small source edit.
   463636 KiB. Previous observation: 685.095617 seconds / 463576 KiB. Time is
   modestly lower in this observation and memory is effectively flat;
   neither is claimed as a statistically established improvement.
-- Stock Octane: pending. Pair all fourteen suites other than RegExp against
-  the starting snapshot. RegExp's much longer stock run is not repeated here;
-  this exclusion must not be called a full-fifteen stock sweep.
+- Stock Octane: completed 15:59–16:20 UTC after the reboot. **28 passes /
+  0 failures / 0 timeouts / 0 crashes**: both images pass every one of the
+  fourteen selected suites. RegExp's much longer stock run was not repeated;
+  this is not a full-fifteen stock sweep.
 - Live graphics/HTTP and additional integration checks: pending.
 
 Commands and final results will be added when these runs complete. Raw
@@ -119,9 +120,52 @@ A targeted starting-image control of the slow
 `ch07/7.8/7.8.5/S7.8.5_A2.4_T2.js` passes in 90.021140 test seconds. The
 current full run's same test took 90.145700 seconds; this does not reproduce
 the historical 77.740865-second observation on the starting implementation.
-A matching targeted candidate run remains pending. A system reboot around
+A matching targeted candidate run passes in 85.806622 test seconds (97.71
+process wall seconds / 380236 KiB peak RSS), versus control 90.021140 test
+seconds (102.35 wall / 470896 KiB). The candidate is after the reboot, so
+these are not a clean same-boot speedup measurement. They do not reproduce a
+clear new slow-case regression; the historical complete-suite difference is
+retained above rather than reclassified as a measured improvement.
+A system reboot around
 15:48 UTC ended the test sequencer after completed ECMA/control logs were
 saved; no Octane process had started. Completed suites were not rerun.
+
+## Paired stock Octane scores and peak RSS
+
+Before is the `a7fc652` starting image; after is `cdc4539`. One process runs
+at a time, with a 900-second limit per stock suite and unchanged correctness
+checks. Scores are higher-is-better observations; RSS is process peak KiB,
+not guest live bytes. Adaptive iteration/GC boundaries can change peaks, so
+individual lower peaks are not proof of a persistent-memory optimization.
+
+| Suite | Before score | After score | Before RSS KiB | After RSS KiB |
+| --- | ---: | ---: | ---: | ---: |
+| Richards | 99.1 | 97.9 | 20608 | 20736 |
+| DeltaBlue | 94.2 | 94.4 | 58496 | 58496 |
+| Crypto | 190 | 190 | 38144 | 38016 |
+| RayTrace | 251 | 256 | 417408 | 270208 |
+| EarleyBoyer | 463 | 463 | 466944 | 426112 |
+| Splay | 737 | 730 | 428032 | 423808 |
+| NavierStokes | 276 | 276 | 24448 | 24576 |
+| PdfJS | 875 | 876 | 239872 | 240280 |
+| Mandreel | 510 | 513 | 497664 | 487212 |
+| Gameboy | 1095 | 1101 | 95744 | 95960 |
+| CodeLoad | 99.4 | 99.9 | 262528 | 272512 |
+| Box2D | 400 | 397 | 92416 | 92672 |
+| zlib | 595 | 593 | 103552 | 103552 |
+| Typescript | 1411 | 1428 | 466888 | 467100 |
+
+The geometric mean of the fourteen after/before score ratios is **1.00134**
+(approximately +0.13%). That finds essentially flat performance in this
+pair, not a significant interpreter speedup. RSS is mostly flat, lower for
+several adaptive runs, and higher for CodeLoad; the full data are retained.
+No Node comparison is newly measured by this guest-image regression sweep.
+
+```sh
+node octane_compare.js --reference-snapshot artifacts/strings-final.snap \
+  --snapshot artifacts/cleanup10-final.snap --exclude RegExp \
+  --output artifacts/cleanup10-octane-paired --timeout 900
+```
 
 ## Remaining architectural work
 
