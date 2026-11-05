@@ -64,8 +64,13 @@ for an adjacent control if later measurements require attribution.
   process wall 427.56 seconds / peak RSS 524244 KiB. Previous same-day runner
   observation 471.851133 seconds / 524532 KiB: 9.5% lower time in this run,
   essentially flat memory, not a controlled attribution of the whole change.
-- Full historical ECMA and exact passing-filename comparison: queued.
-- Paired stock Octane against the starting image, excluding RegExp: pending.
+- Full historical ECMA: **990 passed / 339 failed**, including 39 watchdog
+  timeouts; four configured skips / zero not run. All 1329 executable files
+  ran. Exact passing and failing filename sets match the baseline: zero lost
+  passes / zero gains / zero new failures / zero missing results. Runner
+  elapsed 675.626443 seconds, process wall 677.15 seconds / peak RSS 463484 KiB,
+  versus previous 675.248083 seconds / 463636 KiB: effectively flat.
+- Paired stock Octane against the starting image, excluding RegExp: running.
 - Final-image structural/standalone GC, bounded interactive demos and HTTP:
   pending.
 

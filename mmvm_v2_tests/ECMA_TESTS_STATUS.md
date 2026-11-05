@@ -2,6 +2,26 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Property/root cleanup audit, 2026-11-05
+
+Standalone `0937e5d`, full default corpus with `TZ=UTC`:
+
+- **990 passed / 339 failed**, including **39** watchdog timeouts;
+  **4 configured skips / 0 not run**. All **1329** executable files ran.
+- The exact 990 passing and 339 failing filename sets match `cdc4539`:
+  **0 lost passes / 0 gained passes / 0 new failures / 0 missing results**.
+- Subtotals remain ecma **472/148**, ecma_2 **148/24**, ecma_3 **175/50**,
+  ecma_5 **195/117** (pass/fail), with timeout distribution 11/0/1/27.
+- Runner elapsed **675.626443 seconds**; process wall **677.15 seconds**;
+  peak RSS **463484 KiB**. Previous same-day observation **675.248083 seconds /
+  463636 KiB**: effectively flat CPU time and peak memory.
+- No corpus, harness, selection or limit changes. Node filename-parity gaps
+  remain unchanged. The separate portable JSON sequence GC defect is fixed,
+  but this is not counted as a new ECMA corpus pass.
+
+Command: `TZ=UTC ./artifacts/js_runner.exe artifacts/property-final.snap ecma_tests_runner.js`.
+See [the property/root audit](PROPERTY_CLEANUP_VALIDATION_2026-11-05.md).
+
 ### Cleanup regression audit, 2026-11-05
 
 Standalone `cdc4539`, complete default corpus with `TZ=UTC`:
