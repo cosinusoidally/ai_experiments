@@ -2,6 +2,22 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Ordinary semantics cleanup audit, 2026-11-05
+
+Standalone 4b24556, complete default corpus with TZ=UTC:
+
+- 1333 selected / 1329 executed / **990 passed / 339 failed**, including
+  39 watchdog timeouts; 4 configured skips / 0 not run.
+- Exact passing and failing filename sets are unchanged from the preceding
+  baseline: 0 gained passes / 0 lost passes / 0 new failures / 0 missing results.
+- Subtotals remain ecma 472/148, ecma_2 148/24, ecma_3 175/50,
+  ecma_5 195/117 (pass/fail); timeouts 11/0/1/27.
+- Runner 657.017358 seconds; process wall 657.29 seconds; peak RSS 463540 KiB.
+  Previous observation: 675.626443 seconds / 463484 KiB. These are unpaired
+  observations; the architectural cleanup has not yet gained corpus passes.
+
+See [the semantic cleanup audit](SEMANTIC_CLEANUP_VALIDATION_2026-11-05.md).
+
 ### Property/root cleanup audit, 2026-11-05
 
 Standalone `0937e5d`, full default corpus with `TZ=UTC`:

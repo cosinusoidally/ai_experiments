@@ -66,8 +66,12 @@ corpus/benchmark audit runs serially on frozen sources.
   observation 426.882453 seconds / 524244 KiB: 4.9% lower runner time and
   2.4% lower peak RSS in this observation, not a controlled attribution of
   the entire difference to the cleanup.
-- Historical ECMA: running, including exact filename comparison against the
-  saved 990-pass / 339-failure baseline verified by the preceding audit.
+- Historical ECMA at 4b24556: 1333 selected / 1329 executed / 990 passed /
+  339 failed (including 39 watchdog timeouts) / 4 configured skips / 0 not run.
+  Exact passing and failing filename sets match the saved baseline: no gained
+  or lost passes and no new failures. Runner 657.017358 seconds; process wall
+  657.29 seconds / peak RSS 463540 KiB. The previous 675.626443-second run
+  is an unpaired observation, not proof of a cleanup-specific speedup.
 - Stock Octane: pending; paired old/new images, excluding RegExp.
 - Final GC/heap audits and bounded demos/HTTP/remaining integration: pending.
 
@@ -75,3 +79,13 @@ Raw results stay in ignored artifacts/semantics-* files. The existing ECMA
 failures and standalone dynamic-library integration gap are not reclassified
 as passing. The extra Node-hosted guest graphics matrix had validation bounds
 in the previous report; direct-Node and standalone execution are distinct.
+
+## Follow-up: injected exception ownership
+
+The embedding audit reproduced a freed guest reference when failHostCall
+received a guest object and collection ran before resume. Suspended executions
+now enumerate their injected exception as a root, and failHostCall rejects a
+foreign-runtime value before consuming the pending request. The existing
+context/execution integration covers collection in this interval and passes
+under Node and i386 js_min. This follow-up is later than the full corpus runs
+above; those runs must not be represented as validation of the follow-up.
