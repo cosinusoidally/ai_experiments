@@ -81,6 +81,11 @@ adding runtime loads or calls to hot code.
    exotic linked descriptors share an accessor boundary but still duplicate
    representation handling. Preserve indexed-special-object semantics while
    moving toward common named-property ownership.
+
+   Update 2026-11-05: resolved descriptor addressing is now one shared kernel
+   algorithm, used by native execution and the portable JS backend. Checked
+   entry APIs retain their different validation contract. Lookup/mutation and
+   exotic indexed semantics still have further consolidation work remaining.
 7. **Performance — open.** The latest controlled audit finds repeated
    Richards/zlib score losses and increased self-host build cost. RegExp,
    CodeLoad, allocation peaks and early framebuffer demos remain expensive.
@@ -90,6 +95,13 @@ adding runtime loads or calls to hot code.
 8. **Diagnostics — open.** Adopted executables lack full per-PC locations;
    native unsupported-case reports remain less descriptive than desirable.
    Preserve source/debuggability when changing storage or compiler output.
+
+   Update 2026-11-05: rejection IDs/ranges, profile names and inspection output
+   now share one catalog. The old 17-element positional profile name list
+   could print undefined for newer reasons; it has been removed. Source
+   location lookup is shared and bounds-checked, with zero for unavailable
+   positions. Complete adopted source maps and standalone entry-stub symbolic
+   formatting remain open; host-transition auditing coverage is unchanged.
 9. **Compliance and existing integration gap — open.** Imported Test262 passes
    3292/3292, but the historical ECMA corpus still has 339 failures including
    39 timeouts and four default skips. An extra standalone language-integration
@@ -605,3 +617,45 @@ assembly all rise together despite unchanged kernel source/instructions;
 an adjacent controlled build comparison is required before attributing the
 whole difference to allocator behavior. Node's separate build observation
 was faster. The broader checkpoint audit will include build comparisons.
+
+## Shared property kernel and diagnostic protocol (2026-11-05)
+
+The portable resolved-descriptor path now uses the existing
+`ownPropertyEntryDescriptorKernel` through the ordinary kernel JS backend,
+instead of maintaining its own packed-versus-linked address algorithm. Code
+is compiled lazily and shared across runtimes without capturing their memory.
+Owner validation remains in the portable accessor; checked entry APIs keep
+bounds/deletion checks. This is a first shared operation, not a completed
+unification of every object lookup or exotic-object semantic path.
+
+Removed the no-op opcode/intrinsic helper-install hooks and their three
+unreachable retry branches. These methods always returned false; they were
+not a functioning execution tier. Buffer/typed-array kind IDs now belong to
+HeapRecords as part of the record ABI; portable typed arrays and native
+dispatch use that same definition.
+
+All 42 rejection IDs/encoding constants have one owner. Kernel bindings,
+profiling and the exit inspector consume it; numeric protocol values are
+unchanged. The formatter preserves raw composite payloads and never follows a
+guest pointer. A shared cold source-location helper avoids scanning arbitrary
+PCs or scanning programs with no locations, and does not manufacture source
+positions. Existing native integration checks verify catalog/formatter
+agreement and unavailable-location behavior; no new test file was added.
+
+The default native instructions remain exactly the pre-cleanup 630331 bytes.
+Adjacent Node observations for the descriptor prototype were 9.16 seconds /
+306168 KiB versus isolated control 9.20 seconds / 302920 KiB: no CPU gain is
+established and peak RSS is modestly higher. The control archive reproduces
+its reference snapshot exactly. With the diagnostic additions, Node builds in
+9.06 seconds / 309252 KiB. Controlled self-host/build and broad validation
+are in progress; do not treat these observations as completed acceptance.
+
+Core/CLI/multiplexing and bounded GC gates now pass on both hosts: 12 guest
+programs / 270 guest assertions per host, internal checks including the new
+diagnostic catalog checks, 27 GC audits / 111888 edges / 221 property-index
+audits / 74 collections, with unchanged maximum guest-heap bumps. An adjacent
+isolated self-host control takes 86.74 seconds / 481408 KiB; the candidate
+takes 87.22 seconds / 481592 KiB. Each reproduces its own Node-built image
+exactly. This finds no material difference in that pair; it is not a speedup
+claim. Final js_min image identity/audits and the broader corpus/integration
+sweep are still pending at this source checkpoint.

@@ -227,6 +227,53 @@
     var ERROR_CONSTRUCTOR_RECORD_STRIDE = RuntimeSupportLayout.ERROR_CONSTRUCTOR_RECORD_STRIDE;
     var ERROR_CONSTRUCTOR_NAME_OFFSET = RuntimeSupportLayout.ERROR_CONSTRUCTOR_NAME_OFFSET;
 
+    /* One diagnostic protocol for kernel bindings, profilers and inspectors.
+     * Ranges encode runtime values; opcode bodies never invent numeric IDs. */
+    var CallDiagnostics = {
+        CALL_REJECT_NONE: 0,
+        CALL_REJECT_ARGUMENT_LIST: 1,
+        CALL_REJECT_ARGUMENT_REGISTER: 2,
+        CALL_REJECT_HEAP_ENVIRONMENT: 3,
+        CALL_REJECT_HEAP_SPACE: 4,
+        CALL_REJECT_BUFFER_RECEIVER: 5,
+        CALL_REJECT_BUFFER_ENCODING: 6,
+        CALL_REJECT_BUFFER_DATA: 7,
+        CALL_REJECT_BUFFER_ARGUMENT_DESCRIPTOR: 8,
+        CALL_REJECT_BUFFER_ARGUMENT_VALUE: 9,
+        CALL_REJECT_BUFFER_ARGUMENT_RECORD: 10,
+        CALL_REJECT_BUFFER_ENCODING_NAME: 11,
+        CALL_REJECT_INTRINSIC_RECEIVER: 12,
+        CALL_REJECT_INTRINSIC_ARGUMENT: 13,
+        CALL_REJECT_SNPRINTF_SERVICE: 14,
+        CALL_REJECT_INTRINSIC_RESULT: 15,
+        CALL_REJECT_PLATFORM_RECORD: 16,
+        CALL_REJECT_INTRINSIC_FUNCTION_CELL: 17,
+        CALL_REJECT_INTRINSIC_ARGUMENT_CELL: 18,
+        CALL_REJECT_INTRINSIC_FUNCTION_RECORD: 19,
+        CALL_REJECT_INTRINSIC_ID: 20,
+        CALL_REJECT_INTRINSIC_CALL_FORM: 21,
+        CALL_REJECT_INTRINSIC_ARGUMENT_ARRAY: 22,
+        CALL_REJECT_INTRINSIC_ARGUMENT_COUNT: 23,
+        CALL_REJECT_FROM_CHAR_CODE_UNCLASSIFIED: 24,
+        CALL_REJECT_FROM_CHAR_CODE_INVALID_RESULT: 25,
+        CALL_DIAGNOSTIC_FROM_CHAR_CODE_COMPLETE: 26,
+        CALL_DIAGNOSTIC_INTRINSIC_BASE: 1000,
+        CALL_DIAGNOSTIC_VALUE_TAG_BASE: 2000,
+        CALL_DIAGNOSTIC_HEAP_TYPE_BASE: 3000,
+        CALL_DIAGNOSTIC_ARITHMETIC_PAIR_BASE: 4000,
+        CALL_DIAGNOSTIC_TAG_RADIX: 16,
+        CALL_DIAGNOSTIC_ARGUMENT_DESCRIPTOR_TAG_BASE: 4700,
+        CALL_DIAGNOSTIC_ARGUMENT_VALUE_TAG_BASE: 4800,
+        CALL_DIAGNOSTIC_STRING_CONCATENATION_FAILED: 4900,
+        CALL_DIAGNOSTIC_COMPARISON_PAIR_BASE: 5000,
+        CALL_DIAGNOSTIC_VALUE_KIND_RADIX: 32,
+        CALL_DIAGNOSTIC_REFERENCE_KIND_BASE: 16,
+        CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE: 6000,
+        CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE: 7000,
+        CALL_DIAGNOSTIC_GC_TYPE_RADIX: 256,
+        CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE: 15000
+    };
+
     /* One explicit lexical environment for the compiled function graph.
      * Selected modes are configuration arguments. No binding is inferred
      * from declarations inside a function body. */
@@ -268,16 +315,16 @@
             UINT32_MANTISSA_HIGH_SHIFT: 11,
             PROGRAM_FLAG_USES_ARGUMENTS: 1,
             PROGRAM_FLAG_STRICT: 2,
-            BUFFER_KIND_NATIVE: 0,
-            BUFFER_KIND_ARRAY_BUFFER: 1,
-            BUFFER_KIND_UINT8: 2,
-            BUFFER_KIND_UINT16: 3,
-            BUFFER_KIND_UINT32: 4,
-            BUFFER_KIND_INT32: 5,
-            BUFFER_KIND_FLOAT32: 6,
-            BUFFER_KIND_FLOAT64: 7,
-            BUFFER_KIND_INT8: 8,
-            BUFFER_KIND_INT16: 9,
+            BUFFER_KIND_NATIVE: HeapRecords.BufferKinds.BUFFER,
+            BUFFER_KIND_ARRAY_BUFFER: HeapRecords.BufferKinds.ARRAY_BUFFER,
+            BUFFER_KIND_UINT8: HeapRecords.BufferKinds.UINT8,
+            BUFFER_KIND_UINT16: HeapRecords.BufferKinds.UINT16,
+            BUFFER_KIND_UINT32: HeapRecords.BufferKinds.UINT32,
+            BUFFER_KIND_INT32: HeapRecords.BufferKinds.INT32,
+            BUFFER_KIND_FLOAT32: HeapRecords.BufferKinds.FLOAT32,
+            BUFFER_KIND_FLOAT64: HeapRecords.BufferKinds.FLOAT64,
+            BUFFER_KIND_INT8: HeapRecords.BufferKinds.INT8,
+            BUFFER_KIND_INT16: HeapRecords.BufferKinds.INT16,
             PROPERTY_VALUE_REFERENCE: recordConstants.PROPERTY_VALUE + ValueCells.KernelConstants.VALUE_CELL_LOW,
             DEFAULT_PROPERTY_ATTRIBUTES: HeapRecords.Attributes.DEFAULT,
             PROPERTY_ATTRIBUTE_WRITABLE: HeapRecords.Attributes.WRITABLE,
@@ -289,50 +336,6 @@
             INTRINSIC_RESULT_COMPLETE: 1,
             /* Separate from handled/allocation (1/2) and public exits (1..4). */
             INTRINSIC_RESULT_FRAME_ENTERED: 5,
-            /* Named diagnostic protocol, shared by every helper. Opcode
-             * implementations must not invent numeric diagnostic IDs. */
-            CALL_REJECT_NONE: 0,
-            CALL_REJECT_ARGUMENT_LIST: 1,
-            CALL_REJECT_ARGUMENT_REGISTER: 2,
-            CALL_REJECT_HEAP_ENVIRONMENT: 3,
-            CALL_REJECT_HEAP_SPACE: 4,
-            CALL_REJECT_BUFFER_RECEIVER: 5,
-            CALL_REJECT_BUFFER_ENCODING: 6,
-            CALL_REJECT_BUFFER_DATA: 7,
-            CALL_REJECT_BUFFER_ARGUMENT_DESCRIPTOR: 8,
-            CALL_REJECT_BUFFER_ARGUMENT_VALUE: 9,
-            CALL_REJECT_BUFFER_ARGUMENT_RECORD: 10,
-            CALL_REJECT_BUFFER_ENCODING_NAME: 11,
-            CALL_REJECT_INTRINSIC_RECEIVER: 12,
-            CALL_REJECT_INTRINSIC_ARGUMENT: 13,
-            CALL_REJECT_SNPRINTF_SERVICE: 14,
-            CALL_REJECT_INTRINSIC_RESULT: 15,
-            CALL_REJECT_PLATFORM_RECORD: 16,
-            CALL_REJECT_INTRINSIC_FUNCTION_CELL: 17,
-            CALL_REJECT_INTRINSIC_ARGUMENT_CELL: 18,
-            CALL_REJECT_INTRINSIC_FUNCTION_RECORD: 19,
-            CALL_REJECT_INTRINSIC_ID: 20,
-            CALL_REJECT_INTRINSIC_CALL_FORM: 21,
-            CALL_REJECT_INTRINSIC_ARGUMENT_ARRAY: 22,
-            CALL_REJECT_INTRINSIC_ARGUMENT_COUNT: 23,
-            CALL_REJECT_FROM_CHAR_CODE_UNCLASSIFIED: 24,
-            CALL_REJECT_FROM_CHAR_CODE_INVALID_RESULT: 25,
-            CALL_DIAGNOSTIC_FROM_CHAR_CODE_COMPLETE: 26,
-            CALL_DIAGNOSTIC_INTRINSIC_BASE: 1000,
-            CALL_DIAGNOSTIC_VALUE_TAG_BASE: 2000,
-            CALL_DIAGNOSTIC_HEAP_TYPE_BASE: 3000,
-            CALL_DIAGNOSTIC_ARITHMETIC_PAIR_BASE: 4000,
-            CALL_DIAGNOSTIC_TAG_RADIX: 16,
-            CALL_DIAGNOSTIC_ARGUMENT_DESCRIPTOR_TAG_BASE: 4700,
-            CALL_DIAGNOSTIC_ARGUMENT_VALUE_TAG_BASE: 4800,
-            CALL_DIAGNOSTIC_STRING_CONCATENATION_FAILED: 4900,
-            CALL_DIAGNOSTIC_COMPARISON_PAIR_BASE: 5000,
-            CALL_DIAGNOSTIC_VALUE_KIND_RADIX: 32,
-            CALL_DIAGNOSTIC_REFERENCE_KIND_BASE: 16,
-            CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE: 6000,
-            CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE: 7000,
-            CALL_DIAGNOSTIC_GC_TYPE_RADIX: 256,
-            CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE: 15000,
             EXIT_BUDGET: Exit.BUDGET,
             EXIT_RETURN: Exit.RETURN,
             EXIT_UNSUPPORTED: Exit.UNSUPPORTED,
@@ -406,7 +409,7 @@
         }
         var sharedTables = [recordConstants, ObjectOperationKernels.constants,
             Binary64.KernelConstants, NumberFormatKernels.KernelConstants,
-            HeapRecords.ObjectClassConstants];
+            HeapRecords.ObjectClassConstants, CallDiagnostics];
         var tableIndex = 0;
         while (tableIndex < sharedTables.length) {
             var table = sharedTables[tableIndex++];
@@ -18881,6 +18884,100 @@
     }
 
     NativeInterpreter.Exit = Exit;
+    NativeInterpreter.CallDiagnostics = CallDiagnostics;
+
+    /* Cold diagnostics only. Never decode by dereferencing a guest value:
+     * the failing value may itself be a corrupt reference. Retain numeric
+     * payloads when an enum has no name, rather than printing undefined. */
+    function describeEncodedDiagnostic(reason, base, name, values, prefix) {
+        var payload = reason - base;
+        var description = name + "+" + payload;
+        if (values) {
+            for (var key in values) {
+                if (Object.prototype.hasOwnProperty.call(values, key) &&
+                        values[key] === payload &&
+                        (!prefix || key.indexOf(prefix) === 0)) {
+                    return description + " [" + key + "]";
+                }
+            }
+        }
+        return description;
+    }
+
+    function describeCallRejectReason(reason) {
+        var codes = CallDiagnostics;
+        for (var name in codes) {
+            if (Object.prototype.hasOwnProperty.call(codes, name) &&
+                    codes[name] === reason &&
+                    (name.indexOf("CALL_REJECT_") === 0 ||
+                     name === "CALL_DIAGNOSTIC_FROM_CHAR_CODE_COMPLETE" ||
+                     name === "CALL_DIAGNOSTIC_STRING_CONCATENATION_FAILED")) {
+                return name;
+            }
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_PROPERTY_PAIR_BASE, "property-pair payload");
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_GC_INVALID_REFERENCE_BASE, "GC-reference payload");
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_ARGUMENT_COUNT_BASE, "argument-count");
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_COMPARISON_PAIR_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_COMPARISON_PAIR_BASE, "comparison-pair payload");
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_STRING_CONCATENATION_FAILED) {
+            return "unclassified diagnostic " + reason;
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_ARGUMENT_VALUE_TAG_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_ARGUMENT_VALUE_TAG_BASE, "argument-value-tag", ValueCells.Tags);
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_ARGUMENT_DESCRIPTOR_TAG_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_ARGUMENT_DESCRIPTOR_TAG_BASE, "argument-descriptor-tag", ValueCells.Tags);
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_ARITHMETIC_PAIR_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_ARITHMETIC_PAIR_BASE, "arithmetic-pair payload");
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_HEAP_TYPE_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_HEAP_TYPE_BASE, "heap-type", RecordLayout, "HEAP_TYPE_");
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_VALUE_TAG_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_VALUE_TAG_BASE, "value-tag", ValueCells.Tags);
+        }
+        if (reason >= codes.CALL_DIAGNOSTIC_INTRINSIC_BASE) {
+            return describeEncodedDiagnostic(reason,
+                codes.CALL_DIAGNOSTIC_INTRINSIC_BASE, "intrinsic", NativeIntrinsics);
+        }
+        return "unclassified diagnostic " + reason;
+    }
+    NativeInterpreter.describeCallRejectReason = describeCallRejectReason;
+
+    function sourceLocation(program, pc) {
+        var location = null;
+        /* A GC diagnostic can put a record address in the PC field. Never
+         * scan backwards from an arbitrary address looking for source data. */
+        if (program && program.code && program.sourceLocations &&
+                pc >= 0 && pc < program.code.length) {
+            while (pc >= 0 && !location) {
+                location = program.sourceLocations[pc--];
+            }
+        }
+        return {filename: location && location.filename ||
+                    program && program.filename || "<source>",
+                line: location && location.line || 0,
+                column: location && location.column || 0};
+    }
+    NativeInterpreter.sourceLocation = sourceLocation;
 
     function reportSnapshot(message) {
         if (typeof print === "function") print(message);
@@ -18888,14 +18985,6 @@
             console.log(message);
         }
     }
-
-    NativeInterpreter.prototype.ensureIntrinsicHelper = function (callable) {
-        return false;
-    };
-
-    NativeInterpreter.prototype.ensureOpcodeHelper = function (opcode) {
-        return false;
-    };
 
     NativeInterpreter.prototype.setDlsymPointer = function (pointer) {
         this.runtime.heapRecords.setPlatformDlsymPointer(
@@ -19472,19 +19561,11 @@
                 console.log(line);
             }
         }
-        var rejectNames = ["none", "argument-list", "argument-register",
-                           "heap-environment", "heap-space",
-                           "buffer-receiver", "buffer-encoding",
-                           "buffer-data", "buffer-argument-descriptor",
-                           "buffer-argument-value", "buffer-argument-record",
-                           "buffer-encoding-name", "intrinsic-receiver",
-                           "intrinsic-argument", "snprintf-service",
-                           "intrinsic-result", "platform-record"];
         var rejectParts = [];
         var rejectIndex = 1;
         while (rejectIndex < this.callRejectCounts.length) {
             if (this.callRejectCounts[rejectIndex]) {
-                rejectParts.push(rejectNames[rejectIndex] + "=" +
+                rejectParts.push(describeCallRejectReason(rejectIndex) + "=" +
                                  this.callRejectCounts[rejectIndex]);
             }
             rejectIndex++;
@@ -19585,17 +19666,11 @@
         var programAddress = records.frameProgram(frameAddress);
         var program = this.runtime.programMetadata["$" + programAddress];
         if (!program) return;
-        var location = null;
-        var scan = pc;
-        while (scan >= 0 && !location) {
-            location = program.sourceLocations && program.sourceLocations[scan];
-            scan--;
-        }
+        var location = sourceLocation(program, pc);
         var name = Bytecode.NAMES[opcode] || String(opcode);
-        var filename = location && location.filename || program.filename ||
-                       "<source>";
-        var line = location && location.line || 1;
-        var column = location && location.column || 1;
+        var filename = location.filename;
+        var line = location.line;
+        var column = location.column;
         var detail = "";
         if (opcode === Bytecode.ADD || opcode === Bytecode.GET_PROPERTY) {
             var leftRegister = program.code[pc + 2];

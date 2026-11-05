@@ -14,6 +14,25 @@
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
     var INITIAL_ARRAY_CAPACITY = 4;
     var MAX_VECTOR_LENGTH = 134217726;
+    /* The resolved (already guarded) descriptor algorithm is shared with
+     * native execution. Cache code only: the memory argument selects a heap
+     * on every call, so no runtime/owner is retained by this service. */
+    var resolvedDescriptorKernelJS = null;
+
+    function compileResolvedDescriptorKernel() {
+        var Compiler = root.GuestVMKernelCompiler;
+        var Backend = root.GuestVMKernelJSBackend;
+        var kernels = root.GuestVMPropertyStorageKernel;
+        if (typeof module !== "undefined" && module.exports) {
+            Compiler = require("./aot/kernel_compiler.js");
+            Backend = require("./aot/backend_js.js");
+            kernels = require("./property_storage_kernel.js");
+        }
+        var ir = new Compiler().compileGraph(
+            kernels.ownPropertyEntryDescriptorKernel, kernels,
+            {constantBindings: Records.KernelConstants});
+        return new Backend().compile(ir).fn;
+    }
 
     /* Shared geometric growth policy for both execution backends. Validate
      * the bound before multiplication so a large index cannot wrap capacity. */
@@ -323,6 +342,11 @@
                           CONFIGURABLE: ATTR_CONFIGURABLE,
                           ACCESSOR: ATTR_ACCESSOR,
                           DEFAULT: DEFAULT_ATTRIBUTES};
+    /* Buffer and typed-array view kinds are part of the record ABI. Keep one
+     * definition for portable typed arrays and native intrinsic dispatch. */
+    Records.BufferKinds = {BUFFER: 0, ARRAY_BUFFER: 1,
+        UINT8: 2, UINT16: 3, UINT32: 4, INT32: 5,
+        FLOAT32: 6, FLOAT64: 7, INT8: 8, INT16: 9};
     Records.BytecodeLayout = {wideCountContract: 60};
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
@@ -1069,11 +1093,11 @@
      * No callback or structural mutation may intervene before using the view.
      * Keep ownPropertyEntryDescriptor as the checked low-level API. */
     Records.prototype.resolvedOwnPropertyEntryDescriptor = function (owner, entry) {
-        if (this.heap.recordType(owner) === Heap.Types.OBJECT) {
-            return this.propertyStorageEntriesAddress(this.ownPropertyStorage(owner)) +
-                (entry - 1) * PROPERTY_ENTRY_BYTES + PROPERTY_ENTRY_KEY;
+        this.heap.requireRecord(owner);
+        if (!resolvedDescriptorKernelJS) {
+            resolvedDescriptorKernelJS = compileResolvedDescriptorKernel();
         }
-        return this.heap.trustedPayloadAddress(entry, PROPERTY_KEY);
+        return resolvedDescriptorKernelJS(this.heap.memory, 0, owner, entry);
     };
     Records.prototype.propertyDescriptorSetter = function (descriptor) {
         return this.heap.memory.readU32Trusted(descriptor + PROPERTY_DESCRIPTOR_SETTER);

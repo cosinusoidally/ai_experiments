@@ -106,9 +106,12 @@ function inspectExitWrapRun(originalRun) {
     var records = this.runtime.heapRecords;
     var program = this.runtime.adoptHeapProgram(records.frameProgram(result.frame));
     if (inspectExitFilename !== null && (!program || program.filename !== inspectExitFilename)) return result;
+    var location = inspectExitNative.sourceLocation(program, result.pc);
     inspectExitPrint("native exit: " + inspectExitBytecode.NAMES[result.opcode] +
         " pc=" + result.pc + " function=" + (program && program.name || "<anonymous>") +
-        " file=" + (program && program.filename || "<unknown>"));
+        " file=" + location.filename + ":" + location.line + ":" + location.column +
+        " detail=" + inspectExitNative.describeCallRejectReason(
+            records.engineCallRejectReason(this.stateAddress)));
     if (program && (result.opcode === inspectExitBytecode.GET_NAME ||
                     result.opcode === inspectExitBytecode.TYPEOF_NAME)) {
         inspectExitPrint("binding: " + program.constants[program.code[result.pc + 2]]);

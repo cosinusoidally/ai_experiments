@@ -86,9 +86,16 @@ bits. For an accessor entry the value represents the getter and the setter
 has a separate reference. Operations must distinguish “descriptor absent”
 from an existing data property whose value is undefined.
 
+After lookup/guard validation, `resolvedOwnPropertyEntryDescriptor` uses the
+same `ownPropertyEntryDescriptorKernel` as native execution. The portable
+accessor lazily compiles that small graph through the shared front/middle end
+and JS backend once per loaded module. Cached code receives the memory object
+on each call; it captures no runtime, heap or owner. The wrapper retains owner
+validation, and the explicitly checked entry API retains its bounds/deletion
+checks. Do not replace a checked accessor with this resolved-only operation.
+
 Small objects scan entries. At 32 live properties native packed lookup can
-build an optional power-of-two,
-linear-probed `PROPERTY_INDEX` can be built, with capacity at least twice
+build an optional power-of-two, linear-probed `PROPERTY_INDEX`, with capacity at least twice
 the indexed count. Hash buckets point into storage; they do not own property
 values and do not define enumeration order. A cached FNV-style hash over
 UTF-16 code units avoids rehashing each lookup; split partial multiplication

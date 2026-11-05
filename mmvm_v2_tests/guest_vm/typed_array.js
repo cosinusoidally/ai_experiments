@@ -5,9 +5,11 @@
 (function (root) {
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     var Binary64 = root.GuestVMBinary64;
+    var HeapRecords = root.GuestVMHeapRecords;
     if (typeof module !== "undefined" && module.exports) {
         NativeIntrinsics = require("./native_intrinsics.js");
         Binary64 = require("./binary64.js");
+        HeapRecords = require("./heap_records.js");
     }
     function integer(value) {
         value = Number(value);
@@ -26,18 +28,7 @@
             value === Math.floor(value) && String(value) === key ? value : -1;
     }
 
-    var Kinds = {
-        BUFFER: 0,
-        ARRAY_BUFFER: 1,
-        UINT8: 2,
-        UINT16: 3,
-        UINT32: 4,
-        INT32: 5,
-        FLOAT32: 6,
-        FLOAT64: 7,
-        INT8: 8,
-        INT16: 9
-    };
+    var Kinds = HeapRecords.BufferKinds;
 
     var Descriptions = [
         null, null,

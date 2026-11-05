@@ -586,11 +586,6 @@
                         throw new Error("unknown native interpreter exit " +
                                         nativeResult.reason);
                     }
-                    if (this.runtime.nativeInterpreter.ensureOpcodeHelper(
-                            nativeResult.opcode)) {
-                        nativeFrame.nativeHeapCurrent = true;
-                        continue;
-                    }
                     if (this.runtime.nativeInterpreter.
                             prepareSemanticFallback(nativeResult.opcode)) {
                         this.runtime.gcPending = true;
@@ -849,13 +844,6 @@
                     }
                     var callableValue = registers[code[pc + 2]];
                     if (this.runtime.nativeInterpreter &&
-                        this.runtime.nativeInterpreter.ensureIntrinsicHelper(
-                            callableValue)) {
-                        frame.pc = pc;
-                        frame.nativeHeapCurrent = true;
-                        continue;
-                    }
-                    if (this.runtime.nativeInterpreter &&
                         (this.runtime.profileOpcodeCounts ||
                          this.runtime.logHostCalls)) {
                         this.runtime.nativeInterpreter.noteFallbackCall(
@@ -1009,13 +997,6 @@
                         index++;
                     }
                     var constructorValue = registers[code[pc + 2]];
-                    if (this.runtime.nativeInterpreter &&
-                        this.runtime.nativeInterpreter.ensureIntrinsicHelper(
-                            constructorValue)) {
-                        frame.pc = pc;
-                        frame.nativeHeapCurrent = true;
-                        continue;
-                    }
                     if (this.runtime.nativeInterpreter &&
                         (this.runtime.profileOpcodeCounts ||
                          this.runtime.logHostCalls)) {

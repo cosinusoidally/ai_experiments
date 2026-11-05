@@ -146,6 +146,16 @@ report or one green smoke test as the current complete status.
 - `tools/inspect_native_exit.js` stops at an unsupported native instruction
   with opcode/file/PC filters and bounded value/record descriptions. It
   supports standalone use; read its header for the different host invocations.
+  Its rejection details use the same `NativeInterpreter.CallDiagnostics`
+  catalog as kernel bindings and profile output, not a positional name list.
+  `NativeInterpreter.describeCallRejectReason(code)` formats named simple
+  reasons and encoded payloads; intrinsic/value-tag/heap-type payloads include
+  enum names when known. Composite pair/GC payloads remain numeric rather
+  than dereferencing potentially corrupt guest values. The raw code protocol
+  used by the standalone entry stub is unchanged.
+  `NativeInterpreter.sourceLocation(program, pc)` returns filename/line/column
+  from available program metadata; unavailable positions are zero, not an
+  invented line 1. This does not create missing source maps for adopted code.
 - `tools/run_ecma_diagnostic.js` adds focused ECMA exception/imported-prototype
   and instruction diagnostics. It is optional tooling, not a VM dependency.
 - `tools/inspect_kernel_build.js`, `inspect_native_exit.js` and the profiling

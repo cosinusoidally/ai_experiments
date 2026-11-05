@@ -17,6 +17,18 @@
                 throw new Error("native interpreter budget continuation mismatch: reason=" +
                     first.reason + ", pc=" + first.pc + ", instructions=" + first.instructions);
             }
+            var diagnosticCodes = NativeInterpreter.CallDiagnostics;
+            for (var diagnosticName in diagnosticCodes) {
+                if (Object.prototype.hasOwnProperty.call(diagnosticCodes, diagnosticName) &&
+                        diagnosticName.indexOf("CALL_REJECT_") === 0 &&
+                        NativeInterpreter.describeCallRejectReason(
+                            diagnosticCodes[diagnosticName]) !== diagnosticName) {
+                    throw new Error("native diagnostic catalog/formatter disagree");
+                }
+            }
+            if (NativeInterpreter.sourceLocation(program, first.pc).line !== 0) {
+                throw new Error("native diagnostic invented a missing source location");
+            }
             var second = engine.run(frame, program, 2);
             if (second.reason !== NativeInterpreter.Exit.RETURN ||
                 second.pc !== 6 || second.instructions !== 1 ||
