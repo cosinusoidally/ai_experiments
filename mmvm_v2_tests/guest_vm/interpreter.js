@@ -1,6 +1,11 @@
 (function (root) {
     var op = root.GuestVMBytecode;
-    if (typeof module !== "undefined" && module.exports) op = require("./bytecode.js");
+    var NativeInterpreter = root.GuestVMNativeInterpreter;
+    if (typeof module !== "undefined" && module.exports) {
+        op = require("./bytecode.js");
+        NativeInterpreter = require("./aot/native_interpreter.js");
+    }
+    var NativeExit = NativeInterpreter.Exit;
 
     function makeFrame(program, runtime, context, receiver, args, closure, callable,
                        returnRegister, caller, environmentOverride) {
@@ -532,11 +537,11 @@
                     used += nativeResult.instructions;
                     this.totalInstructions += nativeResult.instructions;
                     if (budget !== Infinity) budget -= nativeResult.instructions;
-                    if (nativeResult.reason === 1) {
+                    if (nativeResult.reason === NativeExit.BUDGET) {
                         this.status = "budget";
                         return this.result("budget", used);
                     }
-                    if (nativeResult.reason === 2) {
+                    if (nativeResult.reason === NativeExit.RETURN) {
                         var nativeReturnValue = this.runtime.readHeapValue(
                             nativeResult.resultCell);
                         var nativeReturnedFrame = this.frames.pop();
@@ -556,12 +561,7 @@
                         nativeCaller.nativeHeapCurrent = true;
                         continue;
                     }
-                    if (nativeResult.reason === 4) {
-                        if (this.runtime.nativeInterpreter.
-                                tryRefillAllocationRegion()) {
-                            nativeFrame.nativeHeapCurrent = true;
-                            continue;
-                        }
+                    if (nativeResult.reason === NativeExit.ALLOCATION) {
                         if (this.allocationRetryFrame !== nativeFrame.heapAddress ||
                             this.allocationRetryPC !== nativeResult.pc) {
                             this.allocationRetryFrame = nativeFrame.heapAddress;
@@ -577,12 +577,12 @@
                          * a genuine out-of-memory error. */
                         this.allocationRetryFrame = 0;
                         this.allocationRetryPC = -1;
-                        nativeResult.reason = 3;
+                        nativeResult.reason = NativeExit.UNSUPPORTED;
                     } else {
                         this.allocationRetryFrame = 0;
                         this.allocationRetryPC = -1;
                     }
-                    if (nativeResult.reason !== 3) {
+                    if (nativeResult.reason !== NativeExit.UNSUPPORTED) {
                         throw new Error("unknown native interpreter exit " +
                                         nativeResult.reason);
                     }

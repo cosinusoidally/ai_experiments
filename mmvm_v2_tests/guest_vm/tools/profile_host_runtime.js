@@ -84,8 +84,8 @@ if (GuestHostPhaseFrontend) {
     "propertyStorageLength", "propertyStorageKey"
     ]);
     GuestHostPhaseWrap(GuestHostPhaseNative.prototype, "native", [
-    "prepareSemanticFallback", "releaseAllocationRegionForCollection",
-    "installNativeFreeRegions", "run"
+    "prepareSemanticFallback", "releaseAllocatorOwnership",
+    "acquireAllocatorOwnership", "run"
     ]);
 }
 GuestHostPhaseRuntime.prototype.destroy = Function(

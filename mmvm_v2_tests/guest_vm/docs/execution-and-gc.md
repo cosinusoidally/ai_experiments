@@ -119,11 +119,33 @@ records, not live object references. The portable largest-block structure is
 not the native bin index.
 
 Only one allocator may own a free span at a time. Native entry transfers
-ownership; host-side allocation/context creation releases or publishes native
-regions first. Collection retires unused arena tails, coalesces reusable
+ownership. Ordinary embedding constructors reserve through the native engine
+while it owns the spans; context creation explicitly returns ownership first.
+Collection retires unused region tails, coalesces reusable
 records, drops derived indexes and rebuilds ownership from the post-sweep
 heap. An old portable free list must never allocate a span that native GC has
 already reused. This is a correctness constraint, not just a performance knob.
+
+The coordination API has three operations:
+
+- `acquireAllocatorOwnership()` removes every reusable address from the
+  portable index and installs the engine's region lists. The borrowed portable
+  index is dormant and reusable only with an unchanged-domain certificate.
+- `releaseAllocatorOwnership(deferIndexRebuild)` publishes remaining native
+  spans and resets the engine allocator. It restores a certified index,
+  recovers the tracked free spans or reconstructs the index from headers.
+  Collection preparation defers that reconstruction until after sweep.
+- `prepareForCollection()` owns the ordered handoff, cached-frame retirement
+  and weak property-cache invalidation. No guest allocation may occur between
+  that preparation and marking/sweeping. The runtime rebuilds the portable
+  free index from the post-sweep graph once, not from pre-collection regions.
+
+There is no wrapper-owned refill arena or per-execution allocation cursor.
+An allocation exit enters the existing bounded collection/retry policy; it
+does not claim a separate span which the engine-owned allocator cannot see.
+Embedded exit dispatch uses `NativeInterpreter.Exit`, not duplicated numeric
+IDs. Profiling reports `allocationExits` plus the existing index-handoff and
+collection counters; the obsolete arena-refill counters have been removed.
 
 The common collector source now reads `CollectorLayout` from HeapRecords and
 uses normal kernel-local semantics, not repeated numeric declarations or

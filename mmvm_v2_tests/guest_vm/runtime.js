@@ -2018,7 +2018,7 @@
          * Context construction is host-side heap work, so publish the unused
          * tail before allocating its global and property records. */
         if (this.nativeInterpreter) {
-            this.nativeInterpreter.releaseAllocationRegionForCollection();
+            this.nativeInterpreter.releaseAllocatorOwnership();
         }
     };
 
@@ -5621,12 +5621,7 @@
                  * derived allocator indexes now and rebuild them once from
                  * the post-sweep graph, rather than copying and indexing
                  * pre-collection free regions twice only to replace them. */
-                this.nativeInterpreter.releaseAllocationRegionForCollection(true);
-                this.nativeInterpreter.releaseCachedFramesForCollection(true);
-                /* Inline property entries are weak derived state. Clear them
-                 * before reclaimed object/property addresses can be reused. */
-                this.heapRecords.clearEnginePropertyCache(
-                    this.nativeInterpreter.stateAddress);
+                this.nativeInterpreter.prepareForCollection();
             }
             var heapBumpBeforeCollection = this.linearHeap.bump;
             var preparationFinished = this.profileOpcodeCounts ?

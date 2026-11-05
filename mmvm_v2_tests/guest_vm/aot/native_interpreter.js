@@ -18455,8 +18455,6 @@
          * trigger a collection on a pressured runtime. Publish the engine
          * state before those allocations so it, and the platform-services
          * record reachable from it, participate in the ordinary root graph. */
-        this.allocationRegion = null;
-        this.forceTailAllocation = false;
         this.nativeFreeRegionsOwned = false;
         this.borrowedFreeBlocks = null;
         this.freeIndexReuseCount = 0;
@@ -18814,9 +18812,6 @@
         this.synchronizationElapsedMs = 0;
         this.allocationExitCount = 0;
         this.allocationOpcodeCounts = [];
-        this.allocationRefillAttemptCount = 0;
-        this.allocationRefillCount = 0;
-        this.allocationRefillElapsedMs = 0;
         this.nextInstructionProfileReport = 25000000;
         this.unsupportedExitCount = 0;
         this.unsupportedOpcodeCounts = [];
@@ -18827,9 +18822,6 @@
         this.fallbackCallHeapLayouts = {};
         this.callRejectCounts = [];
         this.propertyFallbackCounts = {};
-        this.allocationRegion = null;
-        this.forceTailAllocation = false;
-        this.nativeFreeRegionsOwned = false;
         if (runtime.profileOpcodeCounts) {
             var codeLine = "native guest code: pointer=" +
                 this.nativeResult.pointer + " bytes=" + this.nativeResult.length;
@@ -19009,7 +19001,7 @@
     NativeInterpreter.prototype.canRestoreBorrowedFreeIndex = function () {
         var heap = this.runtime.linearHeap;
         var records = this.runtime.heapRecords;
-        return this.borrowedFreeBlocks !== null && !this.allocationRegion &&
+        return this.borrowedFreeBlocks !== null &&
             heap.freeBlocks.length === 0 && heap.bump === this.borrowedFreeBump &&
             records.engineHeapBump(this.stateAddress) === this.borrowedFreeBump &&
             records.engineNativeTailBump(this.stateAddress) === this.borrowedFreeBump &&
@@ -19020,12 +19012,10 @@
             records.engineGCCollections(this.stateAddress) === this.borrowedFreeCollections;
     };
 
-    /* A published native allocation suffix is private only between
-     * collections.  Collection rebuilds and coalesces the authoritative free
-     * record graph, so retaining its old cursor across that operation would
-     * both fragment the heap and leave this object describing pre-collection
-     * layout. */
-    NativeInterpreter.prototype.releaseAllocationRegionForCollection =
+    /* Transfer every reusable span back to the portable allocator. With a
+     * pending collection, discard derived indexes and rebuild only after
+     * sweep; otherwise restore a certified index or reconstruct it. */
+    NativeInterpreter.prototype.releaseAllocatorOwnership =
             function (deferIndexRebuild) {
         var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;
@@ -19080,26 +19070,13 @@
                 if (rebuildStarted) this.freeIndexRebuildElapsedMs +=
                     new Date().getTime() - rebuildStarted;
             }
-        }
-        if (!this.allocationRegion) {
+        } else {
             records.setEngineNativeAllocator(
-                this.stateAddress, 0, 0, heap.bump,
-                heap.allocationLimit, 0, 0);
-            return;
+                this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0, 0);
         }
-        var remaining = this.allocationRegion.end -
-                        this.allocationRegion.cursor;
-        if (remaining >= FREE_RECORD_HEADER_BYTES) {
-            heap.publishFreeRegion(this.allocationRegion.cursor, remaining, 0);
-        }
-        this.allocationRegion = null;
-        records.setEngineNativeAllocator(
-            this.stateAddress, 0, 0, heap.bump, heap.allocationLimit, 0, 0);
-        if (deferIndexRebuild) heap.freeBlocks = [];
-        else this.runtime.rebuildFreeBlockIndex();
     };
 
-    NativeInterpreter.prototype.installNativeFreeRegions = function () {
+    NativeInterpreter.prototype.acquireAllocatorOwnership = function () {
         if (this.nativeFreeRegionsOwned) return;
         var heap = this.runtime.linearHeap;
         var nativeHead = 0;
@@ -19151,44 +19128,15 @@
     };
 
     NativeInterpreter.prototype.prepareSemanticFallback = function (opcode) {
-        var heap = this.runtime.linearHeap;
-        /* A legacy wrapper-owned arena cannot survive recursive execution.
-         * The current engine-owned allocator is different: all contexts share
-         * its authoritative cursor, and run() republishes the portable tail
-         * before every entry. Portable allocation reserves through the same
-         * compiled allocator. Re-entry therefore shares allocator state,
-         * not a stale per-execution arena. Collection still releases it. */
-        if (!this.nativeFreeRegionsOwned &&
-                (opcode === Bytecode.CALL || opcode === Bytecode.CONSTRUCT)) {
-            this.releaseAllocationRegionForCollection();
+        /* Portable constructors reserve through the same engine-owned
+         * allocator while it owns the free spans. Calls may re-enter it: run
+         * republishes the tail before entry, so no wrapper-owned arena or
+         * per-execution cursor has to survive a callback. */
+        if (this.nativeFreeRegionsOwned ||
+                opcode === Bytecode.CALL || opcode === Bytecode.CONSTRUCT) {
             return false;
         }
-        if (this.nativeFreeRegionsOwned) {
-            /* Portable constructors use reserveRecordSpan(), sharing the
-             * compiled allocator rather than rebuilding its free index. */
-            return false;
-        }
-        if (!this.allocationRegion) {
-            return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
-                       heap.allocationLimit &&
-                   heap.largestFreeBlockSize() <
-                       MIN_NATIVE_ALLOCATION_REGION_BYTES;
-        }
-        /* Most semantic operations allocate nothing and should not disturb
-         * the native bump region. If the ordinary allocator has neither tail
-         * room nor a useful free block, however, return the reserved suffix
-         * before entering host semantics so allocating fallbacks cannot see a
-         * false out-of-memory condition. */
-        if (heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES <=
-                heap.allocationLimit ||
-            heap.largestFreeBlockSize() >= MIN_NATIVE_ALLOCATION_REGION_BYTES) {
-            return false;
-        }
-        this.releaseAllocationRegionForCollection();
-        return heap.bump + MIN_NATIVE_ALLOCATION_REGION_BYTES >
-                   heap.allocationLimit &&
-               heap.largestFreeBlockSize() <
-                   MIN_NATIVE_ALLOCATION_REGION_BYTES;
+        return this.needsLogicalHeapGrowth();
     };
 
     NativeInterpreter.prototype.reserveRecordSpan = function (bytes) {
@@ -19211,7 +19159,7 @@
             /* Reservation cannot collect while a constructor is incomplete.
              * Return ownership to the ordinary allocator for growth; the
              * next safe point remains responsible for collection. */
-            this.releaseAllocationRegionForCollection();
+            this.releaseAllocatorOwnership();
         }
         return address;
     };
@@ -19224,40 +19172,6 @@
                    MIN_NATIVE_ALLOCATION_REGION_BYTES;
     };
 
-    NativeInterpreter.prototype.tryRefillAllocationRegion = function () {
-        /* Native ownership transfers every reusable region to the compiled
-         * allocator.  It has already tried those regions, the tail, and its
-         * internal collector before reporting an allocation exit; claiming
-         * another host-side region here would duplicate allocator ownership. */
-        if (this.nativeFreeRegionsOwned) return false;
-        if (this.allocationRegion) {
-            /* The current largest reclaimed arena was too small for this
-             * compound allocation.  Return its untouched suffix and retry
-             * once from contiguous tail space.  Reclaiming the same largest
-             * block would repeat the failure; collecting here is also wrong
-             * when the logical heap still has ample unused tail capacity. */
-            this.releaseAllocationRegionForCollection();
-            this.forceTailAllocation = true;
-            return true;
-        }
-        var refillStarted = this.runtime.profileOpcodeCounts ?
-            new Date().getTime() : 0;
-        var claimedRegion = this.runtime.linearHeap.claimLargestFreeBlock(
-            MIN_NATIVE_ALLOCATION_REGION_BYTES);
-        this.allocationRefillAttemptCount++;
-        if (refillStarted) {
-            this.allocationRefillElapsedMs +=
-                new Date().getTime() - refillStarted;
-        }
-        if (!claimedRegion) return false;
-        this.allocationRegion = {
-            cursor: claimedRegion.address,
-            end: claimedRegion.address + claimedRegion.size
-        };
-        this.allocationRefillCount++;
-        return true;
-    };
-
     /* Execution owns the returned frame until its result has been consumed.
      * Unpublish that ownership before storage is reclaimed; another context
      * may collect before the next native invocation replaces this root. */
@@ -19268,8 +19182,11 @@
         }
     };
 
-    NativeInterpreter.prototype.releaseCachedFramesForCollection = function (
-            deferIndexRebuild) {
+    /* One collection boundary owns allocator handoff, cached-frame
+     * retirement and invalidation of untraced property-cache hints. No guest
+     * allocation may occur between this preparation and the collector. */
+    NativeInterpreter.prototype.prepareForCollection = function () {
+        this.releaseAllocatorOwnership(true);
         var records = this.runtime.heapRecords;
         var heap = this.runtime.linearHeap;
         var frame = records.engineFreeFrame(this.stateAddress);
@@ -19279,7 +19196,7 @@
             heap.setFreeRecordFlags(frame, 0);
             frame = next;
         }
-        if (!deferIndexRebuild) this.runtime.rebuildFreeBlockIndex();
+        records.clearEnginePropertyCache(this.stateAddress);
     };
 
     NativeInterpreter.prototype.run = function (frame, program, budget, context) {
@@ -19295,7 +19212,7 @@
          * native collection rebuilds this same list; leaving any of those
          * addresses in the host free-block index would let the two allocators
          * hand out overlapping storage. */
-        if (!this.nativeFreeRegionsOwned) this.installNativeFreeRegions();
+        if (!this.nativeFreeRegionsOwned) this.acquireAllocatorOwnership();
         if (tailLimit > this.runtime.gcHeapPressureBump) {
             /* Stop the native bump allocator at the collection-pressure
              * boundary. It will publish its frame and return an allocation
@@ -19355,7 +19272,7 @@
          * not merely on a later CALL. No pre-collection index may allocate. */
         if (this.nativeFreeRegionsOwned && records.engineGCCollections(this.stateAddress) !==
                 this.borrowedFreeCollections) {
-            this.releaseAllocationRegionForCollection();
+            this.releaseAllocatorOwnership();
         }
         if (this.runtime.verifyNativeHeap) {
             heap.visitRecords(function () {});
@@ -19485,10 +19402,7 @@
                    " nativeMs=" + this.nativeElapsedMs +
                    " sync=" + this.synchronizationCount + "/" +
                    this.synchronizationElapsedMs + "ms" +
-                   " allocation=" + this.allocationExitCount + "/" +
-                   this.allocationRefillAttemptCount + "/" +
-                   this.allocationRefillCount + "/" +
-                   this.allocationRefillElapsedMs + "ms" +
+                   " allocationExits=" + this.allocationExitCount +
                    " runs=" + this.runCount + " " +
                    parts.join(" ");
         if (typeof print === "function") print(line);

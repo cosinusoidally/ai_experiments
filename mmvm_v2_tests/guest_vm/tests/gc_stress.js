@@ -42,6 +42,16 @@
     function checkEngineLinks() {
         var heap = vm.runtime.linearHeap, records = vm.runtime.heapRecords;
         var engine = vm.runtime.nativeInterpreter;
+        if (heap.recordAllocationProvider !== engine) {
+            throw new Error("GC stress: heap allocation provider is not its native engine");
+        }
+        if (engine.nativeFreeRegionsOwned &&
+                (heap.freeBlocks.length !== 0 || engine.borrowedFreeBlocks === null)) {
+            throw new Error("GC stress: portable/native free-span ownership overlaps");
+        }
+        if (!engine.nativeFreeRegionsOwned && engine.borrowedFreeBlocks !== null) {
+            throw new Error("GC stress: released allocator retains a borrowed index");
+        }
         if (records.enginePlatformServices(engine.stateAddress) !==
                 engine.platformServicesAddress ||
                 heap.recordType(engine.platformServicesAddress) !== Heap.Types.PLATFORM_SERVICES) {

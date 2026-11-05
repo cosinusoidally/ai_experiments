@@ -804,7 +804,7 @@
         /* A standalone image has no host-side free-block index. Publish and
          * retire every arena owned by the previous native run before taking
          * the heap template, then start the image from its contiguous tail. */
-        nativeInterpreter.releaseAllocationRegionForCollection();
+        nativeInterpreter.releaseAllocatorOwnership();
         var frame = execution.frames[0];
         var expectedNameBytes = standaloneStringBytes(expectedProgramPath || "");
         var strcmpNameBytes = standaloneStringBytes("strcmp");

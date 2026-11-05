@@ -47,6 +47,12 @@ adding runtime loads or calls to hot code.
    cached frames, temporary roots and partially reloaded register arrays
    require careful synchronization. GC corruption is a release blocker.
    Improve encapsulation without changing to a moving collector.
+
+   Update 2026-11-05: removed the obsolete wrapper-owned refill arena. The
+   engine allocator now has named acquire/release operations and a single
+   collection-preparation boundary. Cached-frame/root lifetime and ownership
+   certificates still require the existing audits; this is not a claim that
+   every remaining lifetime API has been unified.
 3. **Kernel semantics/layout duplication — first cutover implemented.** The
    shared collector now uses explicit constant namespaces and normal local
    semantics, with canonical record exports rather than duplicate offsets.
@@ -554,3 +560,35 @@ which index/cursor owns a reusable span and can temporarily hide a claimed
 free span from the allocator that actually executes. Preserve the compiled
 allocator, borrowed-index certificate and GC-safe retry policy; remove this
 obsolete third arena rather than building another layer around it.
+
+## Allocator ownership cutover (2026-11-05)
+
+Removed `allocationRegion`, `forceTailAllocation`, the legacy refill attempt
+and refill-only counters. Native run entry did not consume that arena cursor;
+all real allocation uses the engine-owned allocator or the ordinary heap
+after a handoff. Allocation exits now enter the existing bounded GC/retry
+policy directly. The actual compiled allocator, free-region threshold,
+size-class indexing, borrowed-index certificate and collection policy have
+not changed. No moving collector is introduced.
+
+`acquireAllocatorOwnership` / `releaseAllocatorOwnership` name the actual
+operation, which also applies to context creation and snapshot publication,
+not just collection. Release no longer resets the same allocator fields
+twice on the native-owned path. `prepareForCollection` owns the ordered
+handoff, cached-frame retirement and weak property-cache invalidation rather
+than having the caller coordinate three separate private operations.
+
+Embedded native-exit handling reads `NativeInterpreter.Exit` instead of
+duplicating its numeric IDs. Updated the existing phase profiler for the
+renamed operations and removed obsolete refill counters from its diagnostic
+line. The GC stress driver now checks provider identity, exclusion of the
+portable free index during native ownership and release of borrowed indexes.
+
+Core/CLI/multiplexing checks pass on both hosts (12 programs / 270 guest
+assertions per host plus internal checks). GC checks including the new
+ownership assertions pass on both: 27 audits, 111888 edges, 221 property-index
+audits, 74 collections and unchanged maximum bumps within the 8 MiB cap.
+The default native instruction segment remains byte-identical (630331 bytes).
+Node construction is 8.09 seconds / 305940 KiB in this observation. Remaining
+cross-host snapshot/fixed-point and integration gates are in progress at
+this checkpoint; no new full-corpus result is claimed yet.
