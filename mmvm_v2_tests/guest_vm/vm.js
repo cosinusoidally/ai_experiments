@@ -269,8 +269,18 @@
         runtime.deleteProperty(context.globalObject, "__guestArraySliceGeneric", false);
         install(runtime.getGlobal(context, "Buffer"), "byteLength",
             "__guestBufferByteLength", "Buffer.byteLength");
-        loadLibrary("guest_vm/object_runtime.js");
         var objectConstructor = runtime.getGlobal(context, "Object");
+        /* Keep the primitive private: a normalized call must not recursively
+         * enter the public method's guest conversion continuation. */
+        var definePropertyPrimitive = runtime.getProperty(objectConstructor, "defineProperty");
+        runtime.defineBuiltinProperty(objectConstructor, "defineProperty",
+            runtime.makeNativeFunction("Object.defineProperty", definePropertyPrimitive.callback,
+                "intrinsic", definePropertyPrimitive.nativeIntrinsic));
+        loadLibrary("guest_vm/object_runtime.js");
+        /* The library captured the primitive clone. Restore the public entry
+         * before attaching its bytecode continuation. */
+        runtime.defineBuiltinProperty(objectConstructor, "defineProperty", definePropertyPrimitive);
+        installFallback(objectConstructor, "defineProperty", "__guestObjectDefineProperty");
         installBuiltin(runtime.objectPrototype, "toLocaleString", "__guestObjectToLocaleString", "Object.toLocaleString");
         installBuiltin(runtime.numberPrototype, "toLocaleString", "__guestNumberToLocaleString", "Number.toLocaleString");
         installBuiltin(objectConstructor, "defineProperties", "__guestObjectDefineProperties", "Object.defineProperties");

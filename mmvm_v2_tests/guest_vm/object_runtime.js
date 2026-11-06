@@ -5,6 +5,7 @@
     var names = Object.getOwnPropertyNames;
     var create = Object.create, prevent = Object.preventExtensions;
     var extensible = Object.isExtensible;
+    var string = String;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
     function requireObject(value) {
         if (value === null || (typeof value !== "object" && typeof value !== "function")) {
@@ -12,9 +13,27 @@
         }
         return value;
     }
+    function propertyKey(value) {
+        if (value !== null && (typeof value === "object" || typeof value === "function")) {
+            var method = value.toString, primitive;
+            if (typeof method === "function") {
+                primitive = method.call(value);
+                if (primitive === null || (typeof primitive !== "object" && typeof primitive !== "function")) return string(primitive);
+            }
+            method = value.valueOf;
+            if (typeof method === "function") {
+                primitive = method.call(value);
+                if (primitive === null || (typeof primitive !== "object" && typeof primitive !== "function")) return string(primitive);
+            }
+            throw new TypeError("cannot convert property key to a primitive");
+        }
+        return string(value);
+    }
     function propertyDescriptor(source) {
         requireObject(source);
-        var result = {}, index, field, value;
+        /* An internal descriptor has no inherited fields. The activation and
+         * this object are ordinary guest roots across each observable getter. */
+        var result = create(null), index, field, value;
         for (index = 0; index < fields.length; index++) {
             field = fields[index];
             if (field in source) {
@@ -31,6 +50,13 @@
         }
         return result;
     }
+    this.__guestObjectDefineProperty = function (object, key, attributes) {
+        requireObject(object);
+        /* ToString precedes ToPropertyDescriptor, including user callbacks.
+         * The captured primitive receives only normalized descriptor fields. */
+        key = propertyKey(key);
+        return define(object, key, propertyDescriptor(attributes));
+    };
     function defineProperties(object, properties) {
         requireObject(object);
         if (properties === null || properties === undefined) throw new TypeError("properties is null or undefined");

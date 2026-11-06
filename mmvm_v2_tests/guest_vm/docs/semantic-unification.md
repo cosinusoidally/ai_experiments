@@ -1,5 +1,42 @@
 # Ordinary property semantics and root ownership
 
+## Current continuation cutover (2026-11-06, acceptance in progress)
+
+Callback-bearing Object.defineProperty conversion now has a guest-bytecode
+implementation attached to the public intrinsic's traced implementation
+closure. A supported native call avoids descriptor-normalization allocations.
+Otherwise intrinsic dispatch enters that implementation as an ordinary guest
+frame, preserving receiver, arguments, return destination and exception chain.
+There is no separate host callback state machine or host-owned progress object.
+
+The library captures a private native primitive before attaching the public
+continuation. Normalization checks the target, converts the key with a string
+hint, and reads descriptor fields in ES5.1 order. Field results live in a
+null-prototype guest object and activation locals, both traced across calls,
+reentrancy and collections. The normalized call uses the private primitive,
+so an unsupported exotic case cannot recursively restart normalization.
+Replacing the public method does not replace a composite built-in's captured
+primitive. Actual exotic definition support is a separate cutover below;
+this does not claim every normalized primitive case is implemented yet.
+
+Dynamic named getter reads now enter guest frames just like constant and
+indexed getter reads. These forms share enterPropertyGetterKernel; absent
+getters still produce undefined without entering a frame. Getter receiver is
+the original receiver, not the prototype that owns the descriptor.
+
+Object.getOwnPropertyNames now has a named native intrinsic and shares key
+collection with Object.keys/for-in through explicit EnumerationMode values.
+Own names include nonenumerable named entries and implicit true-array length;
+for-in retains nearest-owner shadowing and per-owner insertion order. Exotic
+virtual-property coverage is still being consolidated. Contract 100 prevents
+stale embedded interpreter-code reuse after the intrinsic/dispatch change.
+
+Existing integration coverage is extended by object_operations_integration.js,
+which runs on stock Node and guest entrypoints. It covers conversion order,
+reentrant mutation, inherited getters, thrown-value identity and captured
+primitive lifetime. Complete acceptance remains pending; intermediate focused
+passes must not be confused with a full corpus/demo/performance sweep.
+
 Follow-up to the storage/root cutover, starting from 77a2954.
 
 ## Boundaries and sequence

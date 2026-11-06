@@ -998,12 +998,11 @@
                             if (valueCellTag(0, indexedDescriptorCell) === VALUE_TAG_UNDEFINED) {
                                 setValueCellUndefined(arrayGetTarget);
                             } else {
-                                setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
-                                indexedGetterEntered = bytecodeCallKernel(
-                                    heapBase, state, frame, indexedDescriptorCell, 0, 1,
+                                indexedGetterEntered = enterPropertyGetterKernel(
+                                    heapBase, state, frame, indexedDescriptorCell,
                                     arrayGetTargetOperand, currentContext, stringSupport,
-                                    arrayPrototype, bytecodeAddress, registerAddress, pc, framePC,
-                                    arrayGetObjectCell, FOUR_WORD_INSTRUCTION, 0, 0);
+                                    arrayPrototype, bytecodeAddress, registerAddress, pc,
+                                    arrayGetObjectCell);
                                 if (indexedGetterEntered !== 1) {
                                     return unsupportedDiagnosticExitKernel(
                                         heapBase, state, frame, pc, opcode, initialBudget - budget);
@@ -1215,7 +1214,18 @@
                             heapBase, namedGetOwner, namedGetProperty);
                         if ((propertyDescriptorAttributes(0, namedGetDescriptor) &
                              RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            arrayGetSupported = 0;
+                            var namedGetter = propertyDescriptorValueCell(0, namedGetDescriptor);
+                            if (valueCellTag(0, namedGetter) === VALUE_TAG_UNDEFINED) {
+                                setValueCellUndefined(arrayGetTarget);
+                            } else {
+                                indexedGetterEntered = enterPropertyGetterKernel(
+                                    heapBase, state, frame, namedGetter,
+                                    arrayGetTargetOperand, currentContext, stringSupport,
+                                    arrayPrototype, bytecodeAddress, registerAddress, pc,
+                                    arrayGetObjectCell);
+                                if (indexedGetterEntered !== 1) return unsupportedDiagnosticExitKernel(
+                                    heapBase, state, frame, pc, opcode, initialBudget - budget);
+                            }
                         } else {
                             var namedGetSource = propertyDescriptorValueCell(0, namedGetDescriptor);
                             copyValueCell(arrayGetTarget, namedGetSource);
@@ -4085,7 +4095,7 @@
                                              keysTargetIndex),
                     frameRegisterCellAddress(heapBase, frame,
                                              keysSourceIndex),
-                    arrayPrototype, arrayLengthKey, 1) === 0) {
+                    arrayPrototype, arrayLengthKey, EnumerationMode.INHERITED_ENUMERABLE) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
@@ -4396,14 +4406,12 @@
                                         propertyTargetIndex));
                                 propertyRecord = PROPERTY_FOUND_SENTINEL;
                             } else {
-                                setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
-                                propertyAccessorEntered = bytecodeCallKernel(
-                                    heapBase, state, frame, getterCell, 0, 1,
+                                propertyAccessorEntered = enterPropertyGetterKernel(
+                                    heapBase, state, frame, getterCell,
                                     propertyTargetIndex, currentContext,
                                     stringSupport, arrayPrototype,
-                                    bytecodeAddress, registerAddress, pc, framePC,
-                                    propertyObjectCell,
-                                    FOUR_WORD_INSTRUCTION, 0, 0);
+                                    bytecodeAddress, registerAddress, pc,
+                                    propertyObjectCell);
                                 if (propertyAccessorEntered !== 1) {
                                     return unsupportedDiagnosticExitKernel(
                                         heapBase, state, frame, pc, opcode,
@@ -6022,6 +6030,18 @@
             receiver, FIVE_WORD_INSTRUCTION, 0, argumentsVector);
     }
 
+    /* All property forms preserve the original receiver and resume the
+     * caller after its four-word Get. Callers handle an absent getter before
+     * entry; a present getter creates a normal traced activation. */
+    function enterPropertyGetterKernel(heapBase, state, frame, getter, targetIndex,
+            currentContext, stringSupport, arrayPrototype, bytecodeAddress,
+            registers, pc, receiver) {
+        setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
+        return bytecodeCallKernel(heapBase, state, frame, getter, 0, CALL_OPERATION_CALL,
+            targetIndex, currentContext, stringSupport, arrayPrototype, bytecodeAddress,
+            registers, pc, frame + FRAME_PC, receiver, FOUR_WORD_INSTRUCTION, 0, 0);
+    }
+
     function intrinsicCallKernel(
             heapBase, state, frame, callFunctionCell, callArgumentsCell,
             callOperation, callTargetIndex, currentContext, stringSupport,
@@ -6360,13 +6380,16 @@
                 heapBase, state, frame, pc, opcode, instructions);
             intrinsicHandled = 1;
         }
-        if (intrinsicId === NativeIntrinsics.OBJECT_KEYS) {
+        if (intrinsicId === NativeIntrinsics.OBJECT_KEYS ||
+                intrinsicId === NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_NAMES) {
             var keysSource = programArgumentCellKernel(heapBase,
                 intrinsicArgumentsVector, registerAddress, 0);
             var keysLengthKey = valueCellReference(0, vectorCellAddress(
                 heapBase, stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY));
+            var keysMode = EnumerationMode.OWN_ENUMERABLE;
+            if (intrinsicId === NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_NAMES) keysMode = EnumerationMode.OWN_NAMES;
             intrinsicHandled = getKeysKernel(heapBase, state, intrinsicTarget,
-                keysSource, arrayPrototype, keysLengthKey, 0);
+                keysSource, arrayPrototype, keysLengthKey, keysMode);
             if (intrinsicHandled !== 1) return unsupportedDiagnosticExitKernel(
                 heapBase, state, frame, pc, opcode, instructions);
         }
@@ -6768,6 +6791,14 @@
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             } else {
+                /* Conversion/getter work runs in an ordinary guest activation.
+                 * Its locals are traced and its calls/throws use the same
+                 * scheduler as application code. Private normalized primitives
+                 * have no implementation closure and cannot recurse here. */
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
@@ -11355,7 +11386,7 @@
     }
 
     function getKeysKernel(heapBase, state, targetCell, sourceCell,
-                           arrayPrototype, arrayLengthKey, includeInherited) {
+                           arrayPrototype, arrayLengthKey, mode) {
         var object = 0;
         var type = 0;
         var property = 0;
@@ -11390,13 +11421,25 @@
         var ancestor = 0;
         if (object !== 0) {
             ownCount = enumerationOwnCountKernel(heapBase, state, object, object, arrayLengthKey);
+            if (mode === EnumerationMode.OWN_NAMES) {
+                ownCount = 0;
+                property = lastOwnPropertyEntryKernel(heapBase, object);
+                while (property !== 0) {
+                    ownCount = ownCount + 1;
+                    property = previousOwnPropertyEntryKernel(heapBase, object, property);
+                }
+            }
             ancestor = objectPrototypeReferenceKernel(heapBase, object);
         }
-        if (includeInherited === 0) {
+        if (mode !== EnumerationMode.INHERITED_ENUMERABLE) {
             if (object === 0) return 0;
             ancestor = 0;
         }
-        var count = indexedCount + ownCount;
+        var virtualLength = 0;
+        if (mode === EnumerationMode.OWN_NAMES && type === RecordLayout.HEAP_TYPE_ARRAY &&
+                arrayReserved(heapBase, object) === 0 &&
+                findOwnPropertyEntryKernel(heapBase, state, object, arrayLengthKey) === 0) virtualLength = 1;
+        var count = indexedCount + ownCount + virtualLength;
         while (ancestor !== 0) {
             var ancestorType = recordType(heapBase, ancestor);
             if (ancestorType === RecordLayout.HEAP_TYPE_ARRAY) {
@@ -11437,7 +11480,7 @@
             var index = segmentEnd - 1;
             property = lastOwnPropertyEntryKernel(heapBase, owner);
             while (property !== 0) {
-                if ((ownPropertyEntryAttributesKernel(heapBase, owner, property) &
+                if (mode === EnumerationMode.OWN_NAMES || (ownPropertyEntryAttributesKernel(heapBase, owner, property) &
                         PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
                     var key = ownPropertyEntryKeyKernel(heapBase, owner, property);
                     if (owner === object || enumerationKeyVisibleKernel(
@@ -11450,7 +11493,7 @@
             }
             segmentStart = segmentEnd;
             owner = objectPrototypeReferenceKernel(heapBase, owner);
-            if (includeInherited === 0) owner = 0;
+            if (mode !== EnumerationMode.INHERITED_ENUMERABLE) owner = 0;
             if (owner !== 0) ownerCount = enumerationOwnCountKernel(
                 heapBase, state, object, owner, arrayLengthKey);
         }
@@ -11464,6 +11507,8 @@
         setArrayReserved(heapBase, array, 0);
         setValueCellReference(targetCell, array);
         setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
+        if (virtualLength !== 0) setValueCellReference(
+            vectorCellAddress(heapBase, vector, count - 1), arrayLengthKey);
         /* Publish the result before allocating index strings. The ordinary
          * frame register is then a GC root even if allocation needs a retry.
          * Holes are absent properties, unlike present undefined elements. */
@@ -17848,6 +17893,7 @@
             bytecodePreparationExitKernel: bytecodePreparationExitKernel,
             intrinsicCallKernel: intrinsicCallKernel,
             enterGuestBuiltinKernel: enterGuestBuiltinKernel,
+            enterPropertyGetterKernel: enterPropertyGetterKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
             typedArrayMetadataGetKernel: typedArrayMetadataGetKernel,
@@ -18083,6 +18129,7 @@
                     PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,
                     DescriptorReject: PropertySemantics.namespaces.DescriptorReject,
                     DescriptorFieldIndex: ObjectOperationKernels.descriptorFieldIndices,
+                    EnumerationMode: ObjectOperationKernels.EnumerationMode,
                     PropertyWriteAction: PropertySemantics.namespaces.PropertyWriteAction,
                     RecordLayout: RecordLayout,
                     Bytecode: Bytecode,

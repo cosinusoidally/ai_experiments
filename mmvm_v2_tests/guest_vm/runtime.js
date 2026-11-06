@@ -3571,7 +3571,7 @@
                             "Object.getOwnPropertyNames target is not an object");
                     }
                     return runtime.ownPropertyNames(args[0]);
-                }));
+                }, "intrinsic", NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_NAMES));
         this.defineBuiltinProperty(objectConstructor, "keys",
             this.makeNativeFunction("Object.keys", function (receiver, args) {
                 if (!args[0] || !args[0].guestType) {

@@ -10,6 +10,7 @@
         descriptorFieldIndices[descriptorFieldNames[descriptorIndex].toUpperCase()] = descriptorIndex;
     }
     var DESCRIPTOR_FIELD_NEEDS_CALLBACK = -1;
+    var EnumerationMode = {OWN_ENUMERABLE: 0, INHERITED_ENUMERABLE: 1, OWN_NAMES: 2};
 
     /* Resolve the nearest definition. An ancestor accessor shadowed by a
      * nearer data field must neither be invoked nor force a semantic exit.
@@ -392,6 +393,7 @@
     }
 
     var exports = {descriptorFieldNames: descriptorFieldNames,
+      EnumerationMode: EnumerationMode,
       descriptorFieldIndices: descriptorFieldIndices,
       constants: {STRING_PROPERTY_KEY_UNSUPPORTED: STRING_PROPERTY_KEY_UNSUPPORTED,
                   DESCRIPTOR_FIELD_NEEDS_CALLBACK: DESCRIPTOR_FIELD_NEEDS_CALLBACK,
