@@ -59,8 +59,12 @@ use this contract. Compact immutable constant pools have their own encoding.
 An ordinary `OBJECT` has prototype, property-storage reference, extensible
 state and a retained legacy property-index field in its payload. The active
 packed-layout hash reference is in `PROPERTY_STORAGE`, not that legacy field.
-Class flags distinguish internal Date/Error identity independently of public
-prototypes.
+Class flags distinguish internal Date/Error identity and primitive-wrapper
+branding independently of public prototypes. PRIMITIVE_WRAPPER guards wrapper
+slot lookup in constant time; changing a prototype does not remove the brand.
+Wrapper payloads still use the existing internal-value entry, not a new host
+object or a new record layout. The wrapper's implementation entry is omitted
+from key enumeration. This is not a general migration of all private slots.
 
 Ordinary named properties are a growable `PROPERTY_STORAGE` record:
 
@@ -146,10 +150,31 @@ Numeric explicit descriptors coexist with dense storage, so get/set/delete
 must honor descriptor precedence and inherited semantics. Array length
 changes and methods cannot be implemented as unconditional vector writes.
 
+Virtual descriptor attributes have one policy in property_semantics_kernel.js.
+The native/portable adapters feed ordinary descriptor decisions with the
+current dense/mapped value. Materialization clears the superseded dense cell;
+an own-index probe recognizes either representation. Array-length definition
+is a storage adapter with descending deletion and partial-shrink rollback,
+not a plain ordinary-property write. Callback conversions must revalidate
+current length writability rather than restore a pre-callback value.
+
 Arguments use mapping metadata linking selected indices to environment
 slots. Strict/unmapped cases and detachment use explicit flags/sentinels.
 Aliasing must survive ordinary index access, descriptor changes and deletion;
 do not keep an untraced pointer into a replaced vector as the mapping.
+
+Both descriptor queries and data redefinition consult live mapped parameters.
+A non-writable redefinition snapshots that value before detaching. Enumeration
+counts/fills the same index space, suppresses duplicate materialized entries,
+honors their enumerability and emits numeric indices before named properties.
+
+String-wrapper characters are immutable enumerable virtual data properties;
+length is immutable/nonenumerable. Descriptor queries allocate an independent
+one-code-unit result (or reuse the character table), never a parent-retaining
+slice. Buffer/typed-view index adapters read/write backing storage, not shadow
+named entries. Indexed-view descriptor restrictions have one leaf policy used
+by Runtime, native code and guest conversion code. These extensions are not a
+claim of complete modern typed-array semantics or complete ES5.1 compliance.
 
 ## Strings and interning
 

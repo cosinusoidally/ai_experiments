@@ -1497,6 +1497,18 @@
             var accessor = own(desc, "get") || own(desc, "set");
             var data = own(desc, "value") || own(desc, "writable");
             if (accessor && data) throw new TypeError("invalid mixed property descriptor");
+            if ((object.guestType === "buffer" || object.guestType === "typedArray") && isArrayIndex(key)) {
+                var viewIndex = Number(key);
+                var viewLength = this.heapRecords.bufferViewLength(object.heapAddress);
+                if (viewIndex >= viewLength || !PropertySemantics.indexedViewDescriptorAllowed(
+                        accessor ? 1 : 0, own(desc, "writable") ? 1 : 0, desc.writable ? 1 : 0,
+                        own(desc, "enumerable") ? 1 : 0, desc.enumerable ? 1 : 0,
+                        own(desc, "configurable") ? 1 : 0, desc.configurable ? 1 : 0)) {
+                    throw new TypeError("invalid indexed view descriptor");
+                }
+                if (own(desc, "value")) this.setProperty(object, key, this.toNumber(desc.value));
+                return object;
+            }
             if (object.guestType === "array" && key === "length" &&
                 !this.isArgumentsObject(object)) {
                 return this.defineArrayLength(object, desc);
@@ -1541,22 +1553,12 @@
                 object.heapAddress, entry) : 0;
             var oldSetter = oldSetterAddress ? this.readHeapReference(oldSetterAddress) : undefined;
             var fieldBits = PropertySemantics.fields;
-            var present = 0, requested = 0, mismatches = 0;
-            if (own(desc, "value")) present |= fieldBits.VALUE;
-            if (own(desc, "get")) present |= fieldBits.GET;
-            if (own(desc, "set")) present |= fieldBits.SET;
-            if (own(desc, "writable")) {
-                present |= fieldBits.WRITABLE;
-                if (desc.writable) requested |= HeapRecords.Attributes.WRITABLE;
-            }
-            if (own(desc, "enumerable")) {
-                present |= fieldBits.ENUMERABLE;
-                if (desc.enumerable) requested |= HeapRecords.Attributes.ENUMERABLE;
-            }
-            if (own(desc, "configurable")) {
-                present |= fieldBits.CONFIGURABLE;
-                if (desc.configurable) requested |= HeapRecords.Attributes.CONFIGURABLE;
-            }
+            var present = PropertySemantics.descriptorPresence(own(desc, "value") ? 1 : 0,
+                own(desc, "writable") ? 1 : 0, own(desc, "enumerable") ? 1 : 0,
+                own(desc, "configurable") ? 1 : 0, own(desc, "get") ? 1 : 0, own(desc, "set") ? 1 : 0);
+            var requested = PropertySemantics.descriptorRequestedAttributes(desc.writable ? 1 : 0,
+                desc.enumerable ? 1 : 0, desc.configurable ? 1 : 0);
+            var mismatches = 0;
             if (exists && !(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
                 if (oldAccessor) {
                     if (own(desc, "get") && !this.sameValue(desc.get, oldValue)) mismatches |= fieldBits.GET;
@@ -1770,7 +1772,6 @@
 
     Runtime.prototype.defineArrayLength = function (array, desc, throwOnReject) {
         var oldLength = this.arrayLength(array);
-        var oldWritable = this.isArrayLengthWritable(array);
         var length = oldLength;
         if (own(desc, "value")) {
             /* ES5.1 explicitly performs both conversions, in this order.
@@ -1778,13 +1779,19 @@
             length = this.toNumber(desc.value) >>> 0;
             if (length !== this.toNumber(desc.value)) throw new RangeError("invalid array length");
         }
-        if (own(desc, "get") || own(desc, "set") || desc.configurable || desc.enumerable) {
-            throw new TypeError("cannot reconfigure array length");
-        }
-        if (!oldWritable && (desc.writable || length !== oldLength)) {
-            throw new TypeError("array length is not writable");
-        }
-        var writable = own(desc, "writable") ? desc.writable : oldWritable;
+        /* Conversion can mutate/freeze the array. Apply ordinary policy to
+         * current storage, never restore writability from a stale snapshot. */
+        var oldWritable = this.isArrayLengthWritable(array);
+        var present = PropertySemantics.descriptorPresence(own(desc, "value") ? 1 : 0,
+            own(desc, "writable") ? 1 : 0, own(desc, "enumerable") ? 1 : 0,
+            own(desc, "configurable") ? 1 : 0, own(desc, "get") ? 1 : 0, own(desc, "set") ? 1 : 0);
+        var requested = PropertySemantics.descriptorRequestedAttributes(desc.writable ? 1 : 0,
+            desc.enumerable ? 1 : 0, desc.configurable ? 1 : 0);
+        var attributes = PropertySemantics.decision(1, 1,
+            PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.ARRAY_LENGTH, oldWritable ? 1 : 0),
+            present, requested, length !== this.arrayLength(array) ? PropertySemantics.fields.VALUE : 0);
+        if (attributes < 0) throw new TypeError(PropertySemantics.messages[attributes]);
+        var writable = !!(attributes & HeapRecords.Attributes.WRITABLE);
         if (length > this.arrayLength(array)) {
             var current = this.arrayLength(array);
             this.ensureArrayCapacity(array, length);
@@ -4891,30 +4898,45 @@
         return true;
     };
 
-    Runtime.prototype.keys = function (object) {
+    /* One representation adapter for Object.keys, own names and for-in's
+     * per-owner candidates. Inclusion policy is shared with native kernels. */
+    Runtime.prototype.collectOwnKeys = function (object, mode) {
         this.assertOwned(object);
-        var values = [];
-        var index;
+        var values = [], index, indexedLength = 0, virtualLength = false;
+        var wrappedString = this.stringWrapperValue(object);
+        var wrapper = object && object.guestType === "object" &&
+            !!(this.linearHeap.flags(object.heapAddress) & HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER);
         if (object && object.guestType === "array") {
-            for (index = 0; index < this.arrayLength(object); index++) {
+            indexedLength = this.arrayLength(object);
+            virtualLength = !this.isArgumentsObject(object);
+            for (index = 0; index < indexedLength; index++) {
                 if (this.arrayHas(object, index)) {
                     var indexedProperty = this.heapOwnProperty(object, String(index), false);
-                    if (!indexedProperty || (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress,
-                            indexedProperty) & HeapRecords.Attributes.ENUMERABLE)) values.push(String(index));
+                    var attributes = indexedProperty ? this.heapRecords.ownPropertyEntryAttributes(object.heapAddress,
+                        indexedProperty) : PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.INDEXED_ELEMENT, 0);
+                    if (PropertySemantics.includeEnumerationEntry(mode, attributes, 0, 0)) values.push(String(index));
                 }
             }
+        } else {
+            if (wrappedString !== undefined) {
+                indexedLength = wrappedString.length;
+                virtualLength = true;
+            } else if (object && object.guestType === "buffer") indexedLength = this.bufferSupport.viewLength(object);
+            else if (object && object.guestType === "typedArray") indexedLength = this.typedArraySupport.viewLength(object);
+            for (index = 0; index < indexedLength; index++) values.push(String(index));
         }
+        if (virtualLength && mode === PropertySemantics.enumerationModes.OWN_NAMES) values.push("length");
         var key;
         if (object && object.heapAddress) {
             var property = this.heapRecords.lastOwnPropertyEntry(object.heapAddress);
             var heapKeys = [];
             while (property) {
-                if (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property) &
-                        HeapRecords.Attributes.ENUMERABLE) {
-                    var namedKey = this.heapRecords.readString(this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
-                    if (!(object.guestType === "array" && isArrayIndex(namedKey) &&
-                            Number(namedKey) < this.arrayLength(object))) heapKeys.push(namedKey);
-                }
+                var namedKey = this.heapRecords.readString(this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
+                var duplicate = (virtualLength && namedKey === "length") ||
+                    (isArrayIndex(namedKey) && Number(namedKey) < indexedLength);
+                if (PropertySemantics.includeEnumerationEntry(mode,
+                        this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property),
+                        wrapper && namedKey === this.primitiveValueKey ? 1 : 0, duplicate ? 1 : 0)) heapKeys.push(namedKey);
                 property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
             }
             var heapKeyIndex = heapKeys.length - 1;
@@ -4927,6 +4949,10 @@
             }
         }
         return this.arrayFrom(values);
+    };
+
+    Runtime.prototype.keys = function (object) {
+        return this.collectOwnKeys(object, PropertySemantics.enumerationModes.OWN_ENUMERABLE);
     };
 
     /* For-in is not Object.keys: inherited names participate, and a nearer
@@ -4963,32 +4989,10 @@
     };
 
     Runtime.prototype.ownPropertyNames = function (object) {
-        this.assertOwned(object);
-        var values = [];
-        var index;
-        if (object.guestType === "array") {
-            for (index = 0; index < this.arrayLength(object); index++) {
-                if (this.arrayHas(object, index)) values.push(String(index));
-            }
-            if (!this.isArgumentsObject(object)) values.push("length");
-        }
-        var property = object.heapAddress ?
-            this.heapRecords.lastOwnPropertyEntry(object.heapAddress) : 0;
-        var reversed = [];
-        while (property) {
-            var name = this.heapRecords.readString(
-                this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
-            if (!(object.guestType === "array" && ((name === "length" &&
-                  !this.isArgumentsObject(object)) || (isArrayIndex(name) &&
-                  Number(name) < this.arrayLength(object))))) reversed.push(name);
-            property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
-        }
-        index = reversed.length - 1;
-        while (index >= 0) values.push(reversed[index--]);
-        if ((object.guestType === "function" ||
-             object.guestType === "bytecodeFunction") &&
-            !this.heapOwnProperty(object, "length", false)) values.push("length");
-        return this.arrayFrom(values);
+        var result = this.collectOwnKeys(object, PropertySemantics.enumerationModes.OWN_NAMES);
+        if ((object.guestType === "function" || object.guestType === "bytecodeFunction") &&
+                !this.heapOwnProperty(object, "length", false)) this.arraySet(result, this.arrayLength(result), "length");
+        return result;
     };
 
     Runtime.prototype.callableLength = function (callable) {

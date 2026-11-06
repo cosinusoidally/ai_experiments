@@ -4,7 +4,11 @@
  * is compiled unchanged for the native interpreter. */
 (function (root) {
     var Records = root.GuestVMHeapRecords;
-    if (typeof module !== "undefined" && module.exports) Records = require("./heap_records.js");
+    var indexedViewDescriptorAllowedKernel = root.GuestVMIndexedViewDescriptorAllowed;
+    if (typeof module !== "undefined" && module.exports) {
+        Records = require("./heap_records.js");
+        indexedViewDescriptorAllowedKernel = require("./indexed_view_policy.js");
+    }
     var PropertyAttributes = Records.Attributes;
     var DescriptorFields = {VALUE: 1, WRITABLE: 2, ENUMERABLE: 4,
         CONFIGURABLE: 8, GET: 16, SET: 32};
@@ -14,6 +18,32 @@
         NO_SETTER: -1, NON_WRITABLE: -2, NOT_EXTENSIBLE: -3};
     var VirtualPropertyKind = {ARRAY_LENGTH: 1, STRING_LENGTH: 2,
         STRING_INDEX: 3, INDEXED_ELEMENT: 4};
+    var EnumerationMode = {OWN_ENUMERABLE: 0, INHERITED_ENUMERABLE: 1, OWN_NAMES: 2};
+
+    function enumerationIncludeEntryKernel(mode, attributes, privateEntry, virtualEntry) {
+        if (privateEntry !== 0 || virtualEntry !== 0) return 0;
+        if (mode === EnumerationMode.OWN_NAMES || (attributes & PropertyAttributes.ENUMERABLE) !== 0) return 1;
+        return 0;
+    }
+
+    function descriptorPresenceKernel(value, writable, enumerable, configurable, getter, setter) {
+        var present = 0;
+        if (value !== 0) present = present | DescriptorFields.VALUE;
+        if (writable !== 0) present = present | DescriptorFields.WRITABLE;
+        if (enumerable !== 0) present = present | DescriptorFields.ENUMERABLE;
+        if (configurable !== 0) present = present | DescriptorFields.CONFIGURABLE;
+        if (getter !== 0) present = present | DescriptorFields.GET;
+        if (setter !== 0) present = present | DescriptorFields.SET;
+        return present;
+    }
+
+    function descriptorRequestedAttributesKernel(writable, enumerable, configurable) {
+        var requested = 0;
+        if (writable !== 0) requested = requested | PropertyAttributes.WRITABLE;
+        if (enumerable !== 0) requested = requested | PropertyAttributes.ENUMERABLE;
+        if (configurable !== 0) requested = requested | PropertyAttributes.CONFIGURABLE;
+        return requested;
+    }
 
     function virtualPropertyAttributesKernel(kind, writableLength) {
         if (kind === VirtualPropertyKind.ARRAY_LENGTH) {
@@ -90,6 +120,10 @@
     }
 
     var exports = {fields: DescriptorFields, reject: DescriptorReject,
+        enumerationModes: EnumerationMode, includeEnumerationEntry: enumerationIncludeEntryKernel,
+        indexedViewDescriptorAllowed: indexedViewDescriptorAllowedKernel,
+        descriptorPresence: descriptorPresenceKernel,
+        descriptorRequestedAttributes: descriptorRequestedAttributesKernel,
         virtualKinds: VirtualPropertyKind, virtualAttributes: virtualPropertyAttributesKernel,
         writeActions: PropertyWriteAction,
         writeAction: ordinaryWriteActionKernel,
@@ -97,9 +131,14 @@
         decision: ordinaryDescriptorDecisionKernel,
         functions: {ordinaryDescriptorDecisionKernel: ordinaryDescriptorDecisionKernel,
                     virtualPropertyAttributesKernel: virtualPropertyAttributesKernel,
+                    enumerationIncludeEntryKernel: enumerationIncludeEntryKernel,
+                    indexedViewDescriptorAllowedKernel: indexedViewDescriptorAllowedKernel,
+                    descriptorPresenceKernel: descriptorPresenceKernel,
+                    descriptorRequestedAttributesKernel: descriptorRequestedAttributesKernel,
                     ordinaryWriteActionKernel: ordinaryWriteActionKernel},
         namespaces: {DescriptorFields: DescriptorFields, PropertyAttributes: PropertyAttributes,
                      VirtualPropertyKind: VirtualPropertyKind,
+                     EnumerationMode: EnumerationMode,
                      DescriptorReject: DescriptorReject, PropertyWriteAction: PropertyWriteAction},
         messages: {}};
     exports.messages[DescriptorReject.NOT_EXTENSIBLE] = "object is not extensible";

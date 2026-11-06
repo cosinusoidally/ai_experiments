@@ -209,6 +209,23 @@ Native graph dependencies bind those same named kernel helpers explicitly;
 this is not general closure compilation or mutable-local constant inference.
 The portable factory binds the existing checked/cached record operations.
 
+The shared policy also owns descriptor presence/attribute construction,
+virtual-property attributes, key-enumeration inclusion and indexed-view
+descriptor validation. Storage adapters compute inputs rather than repeat
+the language rules. The indexed-view validation leaf has no external bindings;
+standard-library installation loads indexed_view_policy.js into the guest
+as well. Reading identical source text avoids bootstrap-host differences in
+Function.toString pretty-printing. This uses the application parser/compiler, not
+a new kernel-language mode or a host callback at execution time.
+
+Callback-bearing Object operations are guest-bytecode continuations. Public
+intrinsics retain fast native cases and a traced implementation closure;
+unsupported conversion work enters a normal guest frame. Private primitive
+copies have no continuation closure and receive normalized inputs, preventing
+recursive normalization. No new special-purpose host progress objects or
+snapshot relocation category is required. See semantic-unification.md for
+the supported adapters and the current acceptance boundaries.
+
 The compile result includes `.fn`, generated `.source`, `.ir` and backend
 identity; a graph result also exposes generated helper functions.
 

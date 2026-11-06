@@ -8,6 +8,9 @@
     var extensible = Object.isExtensible;
     var string = String;
     var number = Number, isArray = Array.isArray;
+    var indexedViewLength = __guestObjectPrimitives.indexedViewLength;
+    var indexedViewDescriptorAllowed = GuestVMIndexedViewDescriptorAllowed;
+    var MAX_ARRAY_LENGTH = 4294967295;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
     function requireObject(value) {
         if (value === null || (typeof value !== "object" && typeof value !== "function")) {
@@ -61,6 +64,21 @@
          * The captured primitive receives only normalized descriptor fields. */
         key = propertyKey(key);
         var normalized = propertyDescriptor(attributes);
+        var viewLength = indexedViewLength(object);
+        if (viewLength >= 0) {
+            var elementIndex = number(key);
+            if (elementIndex >= 0 && elementIndex < MAX_ARRAY_LENGTH &&
+                    (elementIndex >>> 0) === elementIndex && string(elementIndex) === key) {
+                if (elementIndex >= viewLength || indexedViewDescriptorAllowed(
+                        "get" in normalized || "set" in normalized ? 1 : 0,
+                        "writable" in normalized ? 1 : 0, normalized.writable ? 1 : 0,
+                        "enumerable" in normalized ? 1 : 0, normalized.enumerable ? 1 : 0,
+                        "configurable" in normalized ? 1 : 0, normalized.configurable ? 1 : 0) === 0) {
+                    throw new TypeError("invalid indexed view descriptor");
+                }
+                if ("value" in normalized) normalized.value = number(primitive(normalized.value, false));
+            }
+        }
         if (isArray(object) && key === "length" && "value" in normalized) {
             var value = normalized.value;
             var length = number(primitive(value, false)) >>> 0;

@@ -1,5 +1,13 @@
 # Self-hosting and standalone snapshots
 
+Object-library preparation captures private property primitives and installs
+guest-bytecode conversion continuations on the public intrinsics. A shared
+indexed-view descriptor-policy leaf is also loaded from indexed_view_policy.js
+during setup, not from host-specific Function.toString output. Both bootstrap hosts and a self-hosted rebuild
+execute this same setup; these functions/closures are ordinary traced heap
+records in the image. Their arguments and suspended progress are not saved
+as host callback state. Contract 101 includes this intrinsic/branding change.
+
 ## What is being built
 
 A standalone snapshot contains executable i386 interpreter code, a small

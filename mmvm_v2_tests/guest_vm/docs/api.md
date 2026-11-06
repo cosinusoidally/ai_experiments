@@ -1,5 +1,13 @@
 # Embedding API reference
 
+The Object-operation continuation cutover does not add a public embedding
+method or a new execution-result status. Callback-bearing built-ins use normal
+guest frames and the existing budget/exception/GC protocols. Internal primitive
+tables and indexed-view classification/validation helpers are library setup
+details, not globals embedders should call. installStandardLibrary still needs
+the supplied source reader; bare minimal runtimes are not silently upgraded to
+the complete guest standard library. See semantic-unification.md.
+
 This is the implemented JavaScript embedding API, not the C image-launch ABI
 or an arbitrary Node-compatible API. Sources: [`vm.js`](../vm.js),
 [`interpreter.js`](../interpreter.js), [`runtime.js`](../runtime.js),

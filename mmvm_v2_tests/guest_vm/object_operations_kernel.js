@@ -10,8 +10,45 @@
         descriptorFieldIndices[descriptorFieldNames[descriptorIndex].toUpperCase()] = descriptorIndex;
     }
     var DESCRIPTOR_FIELD_NEEDS_CALLBACK = -1;
-    var EnumerationMode = {OWN_ENUMERABLE: 0, INHERITED_ENUMERABLE: 1, OWN_NAMES: 2};
+    var Semantics = root.GuestVMPropertySemanticsKernel;
+    if (typeof module !== "undefined" && module.exports) Semantics = require("./property_semantics_kernel.js");
+    var EnumerationMode = Semantics.enumerationModes;
     var PropertyDeleteResult = {UNSUPPORTED: 0, HANDLED: 1, REJECTED: -1};
+
+    function descriptorRequestedAttributesCellsKernel(heapBase, writable, enumerable, configurable) {
+        var writableValue = 0, enumerableValue = 0, configurableValue = 0;
+        if (writable !== 0) writableValue = valueCellTruthyKernel(heapBase, writable);
+        if (enumerable !== 0) enumerableValue = valueCellTruthyKernel(heapBase, enumerable);
+        if (configurable !== 0) configurableValue = valueCellTruthyKernel(heapBase, configurable);
+        return descriptorRequestedAttributesKernel(writableValue, enumerableValue, configurableValue);
+    }
+
+    function enumerationOwnEntryIncludedKernel(heapBase, owner, entry, mode,
+            privateKey, indexedLength, virtualIndices, lengthKey, virtualLength) {
+        var key = ownPropertyEntryKeyKernel(heapBase, owner, entry);
+        var privateEntry = 0, virtualEntry = 0;
+        if (privateKey !== 0 && stringKeysEqualKernel(heapBase, key, privateKey) === 1) privateEntry = 1;
+        if (virtualLength !== 0 && stringKeysEqualKernel(heapBase, key, lengthKey) === 1) virtualEntry = 1;
+        if (virtualIndices !== 0) {
+            var index = propertyKeyIndexKernel(heapBase, key);
+            if (index >= 0 && index < indexedLength) virtualEntry = 1;
+        }
+        return enumerationIncludeEntryKernel(mode, ownPropertyEntryAttributesKernel(heapBase, owner, entry),
+            privateEntry, virtualEntry);
+    }
+
+    function enumerationArrayIndexIncludedKernel(heapBase, state, array, index, mode) {
+        if (arrayPropertyHead(heapBase, array) !== 0) {
+            var descriptor = indexedOwnPropertyDescriptorKernel(heapBase, state, array, index);
+            if (descriptor !== 0) {
+                if (mode === EnumerationMode.OWN_NAMES ||
+                        (propertyDescriptorAttributes(0, descriptor) & PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) return 1;
+                return 0;
+            }
+        }
+        if (valueCellTag(0, vectorCellAddress(heapBase, arrayElements(heapBase, array), index)) !== 0) return 1;
+        return 0;
+    }
 
     /* Dense holes and materialized descriptors are two representations of
      * the same own-index space. This probe never reads a getter or allocates. */
@@ -39,6 +76,16 @@
         if (stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return VirtualPropertyKind.STRING_LENGTH;
         var index = propertyKeyIndexKernel(heapBase, key);
         if (index >= 0 && index < stringLength(heapBase, string)) return VirtualPropertyKind.STRING_INDEX;
+        return 0;
+    }
+
+    function stringWrapperOwnPropertyKeyKernel(heapBase, owner, keyCell, lengthKey, stringSupport) {
+        if (recordType(heapBase, owner) !== HEAP_TYPE_OBJECT) return 0;
+        var wrapped = primitiveWrapperValueCellKernel(heapBase, owner, stringSupport);
+        if (wrapped === 0 || valueCellTag(0, wrapped) !== VALUE_TAG_REFERENCE) return 0;
+        var string = valueCellReference(0, wrapped);
+        if (recordType(heapBase, string) !== HEAP_TYPE_STRING) return 0;
+        if (stringOwnPropertyKeyKernel(heapBase, string, keyCell, lengthKey) === 1) return 1;
         return 0;
     }
 
@@ -77,6 +124,19 @@
         setEngineHeapBump(heapBase, state, result + bytes);
         setValueCellReference(target, result);
         return 1;
+    }
+
+    function readBufferViewElementKernel(heapBase, target, view, index) {
+        var kind = bufferViewKind(heapBase, view);
+        if (kind === BUFFER_KIND_ARRAY_BUFFER || index < 0 || index >= bufferViewLength(heapBase, view)) return 0;
+        var pointer = bufferBackingPointer(heapBase, bufferViewBacking(heapBase, view));
+        if (pointer === 0) return 0;
+        pointer = pointer + bufferViewOffset(heapBase, view);
+        if (kind === BUFFER_KIND_NATIVE) {
+            setValueCellInt32(target, loadRaw8(pointer + index));
+            return 1;
+        }
+        return readTypedArrayElementKernel(pointer + index * typedArrayElementBytesKernel(kind), kind, target);
     }
 
     /* Resolve the nearest definition. An ancestor accessor shadowed by a
@@ -179,6 +239,11 @@
                 if (mapped !== 0) value = mapped;
                 attributes = virtualPropertyAttributesKernel(VirtualPropertyKind.INDEXED_ELEMENT, 0);
             }
+        } else if (type === HEAP_TYPE_BUFFER_VIEW && index >= 0 &&
+                bufferViewKind(heapBase, owner) !== BUFFER_KIND_ARRAY_BUFFER && index < bufferViewLength(heapBase, owner)) {
+            value = engineScratchRightAddress(heapBase, state);
+            if (readBufferViewElementKernel(heapBase, value, owner, index) === 0) return 0;
+            attributes = virtualPropertyAttributesKernel(VirtualPropertyKind.INDEXED_ELEMENT, 0);
         }
         if (value === 0) {
             setValueCellUndefined(target);
@@ -445,10 +510,15 @@
         return 1;
     }
 
-    function enumerationKeyVisibleKernel(heapBase, state, root, owner, key, lengthKey) {
+    function enumerationKeyVisibleKernel(heapBase, state, root, owner, key, lengthKey, stringSupport) {
         var nearer = root;
         while (nearer !== owner && nearer !== 0) {
             var type = recordType(heapBase, nearer);
+            if (stringVirtualPropertyKindKernel(heapBase, nearer, key, stringSupport) !== 0) return 0;
+            if (type === HEAP_TYPE_BUFFER_VIEW && bufferViewKind(heapBase, nearer) !== BUFFER_KIND_ARRAY_BUFFER) {
+                var viewIndex = propertyKeyIndexKernel(heapBase, key);
+                if (viewIndex >= 0 && viewIndex < bufferViewLength(heapBase, nearer)) return 0;
+            }
             if (type === HEAP_TYPE_ARRAY) {
                 if (arrayReserved(heapBase, nearer) === 0 &&
                     stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return 0;
@@ -474,14 +544,14 @@
         return 1;
     }
 
-    function enumerationOwnCountKernel(heapBase, state, root, owner, lengthKey) {
+    function enumerationOwnCountKernel(heapBase, state, root, owner, lengthKey, stringSupport) {
         var count = 0;
         var property = lastOwnPropertyEntryKernel(heapBase, owner);
         while (property !== 0) {
             if ((ownPropertyEntryAttributesKernel(heapBase, owner, property) &
                     PROPERTY_ATTRIBUTE_ENUMERABLE) !== 0) {
                 if (owner === root || enumerationKeyVisibleKernel(heapBase, state,
-                        root, owner, ownPropertyEntryKeyKernel(heapBase, owner, property), lengthKey) === 1) {
+                        root, owner, ownPropertyEntryKeyKernel(heapBase, owner, property), lengthKey, stringSupport) === 1) {
                     count = count + 1;
                 }
             }
@@ -499,9 +569,14 @@
                   DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
                   DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
         arrayHasOwnElementKernel: arrayHasOwnElementKernel,
+        descriptorRequestedAttributesCellsKernel: descriptorRequestedAttributesCellsKernel,
+        enumerationOwnEntryIncludedKernel: enumerationOwnEntryIncludedKernel,
+        enumerationArrayIndexIncludedKernel: enumerationArrayIndexIncludedKernel,
         stringVirtualPropertyKindKernel: stringVirtualPropertyKindKernel,
+        stringWrapperOwnPropertyKeyKernel: stringWrapperOwnPropertyKeyKernel,
         stringVirtualPropertyValueKernel: stringVirtualPropertyValueKernel,
         stringIndexedValueKernel: stringIndexedValueKernel,
+        readBufferViewElementKernel: readBufferViewElementKernel,
         objectIsExtensibleKernel: objectIsExtensibleKernel,
         descriptorDataFieldCellKernel: descriptorDataFieldCellKernel,
         stringOwnPropertyKeyKernel: stringOwnPropertyKeyKernel,

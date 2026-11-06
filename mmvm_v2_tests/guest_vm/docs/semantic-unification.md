@@ -2,8 +2,9 @@
 
 ## Current continuation cutover (2026-11-06, acceptance in progress)
 
-Callback-bearing Object.defineProperty conversion now has a guest-bytecode
-implementation attached to the public intrinsic's traced implementation
+Callback-bearing Object.defineProperty, getOwnPropertyDescriptor and
+hasOwnProperty conversions have guest-bytecode implementations attached to
+the public intrinsic's traced implementation
 closure. A supported native call avoids descriptor-normalization allocations.
 Otherwise intrinsic dispatch enters that implementation as an ordinary guest
 frame, preserving receiver, arguments, return destination and exception chain.
@@ -16,8 +17,10 @@ null-prototype guest object and activation locals, both traced across calls,
 reentrancy and collections. The normalized call uses the private primitive,
 so an unsupported exotic case cannot recursively restart normalization.
 Replacing the public method does not replace a composite built-in's captured
-primitive. Actual exotic definition support is a separate cutover below;
-this does not claim every normalized primitive case is implemented yet.
+primitive. Object.keys/getOwnPropertyNames also have guest target-validation
+continuations. propertyIsEnumerable is a guest builtin using the captured
+descriptor primitive. Exotic definition support is described below; this is
+not a claim of complete ES5.1 compliance or every extension edge case.
 
 Dynamic named getter reads now enter guest frames just like constant and
 indexed getter reads. These forms share enterPropertyGetterKernel; absent
@@ -27,8 +30,11 @@ the original receiver, not the prototype that owns the descriptor.
 Object.getOwnPropertyNames now has a named native intrinsic and shares key
 collection with Object.keys/for-in through explicit EnumerationMode values.
 Own names include nonenumerable named entries and implicit true-array length;
-for-in retains nearest-owner shadowing and per-owner insertion order. Exotic
-virtual-property coverage is still being consolidated. Contract 101 prevents
+for-in retains nearest-owner shadowing and per-owner insertion order. The
+own-entry inclusion policy is shared with Runtime.collectOwnKeys. Dense and
+materialized array indices are counted/filled through the same predicate,
+in numeric order before length/named entries. String characters and view
+elements participate without storing shadow named entries. Contract 101 prevents
 stale embedded interpreter-code reuse after the intrinsic/dispatch change.
 
 Existing integration coverage is extended by object_operations_integration.js,
@@ -68,10 +74,32 @@ string, not a slice retaining its parent. Strict delete rejection now uses a
 named result protocol and a shared guest exception continuation for all three
 delete bytecodes.
 
-The existing broad integration file covers these adapters on stock Node,
-portable guest and standalone execution. Node core, bounded structural GC,
-standalone GC and selected JSON checks pass during the cutover. Remaining key
-enumeration/view work and final corpus/demo/performance acceptance stay open.
+The indexed-view storage adapter validates descriptor restrictions before
+value conversion, converts callback-bearing values in the guest activation,
+and writes the backing element. A private branded-length intrinsic distinguishes
+views from lookalike ordinary objects without consulting public properties.
+The restriction policy is loaded from indexed_view_policy.js by the host and
+guest and compiled to native code through the same kernel graph. No generated
+source file or bootstrap-host Function.toString formatting is persisted.
+
+The broad integration file covers these adapters on stock Node, portable
+guest and standalone execution, including aggressive GC during descriptor
+conversion. Node core and bounded structural GC pass at the frozen-source
+checkpoint. The final corpus/demo/performance acceptance is tracked in
+[the dated report](../../OBJECT_OPERATIONS_VALIDATION_2026-11-06.md).
+
+### Explicit remaining limits
+
+This cutover is property-operation consolidation, not a second complete JS
+implementation or a declaration of full ES5.1 compliance. General opcode
+coercion paths outside these builtins, large/sparse-array capacity limits,
+enumeration of nonempty dense-array prototypes, complete RegExp semantics and
+general private-slot isolation remain separate issues. Unsupported normalized
+primitive cases have no recursive conversion closure: standalone execution
+reports the unsupported case rather than secretly using host JS. Modern
+integer-indexed/typed-array semantics beyond the existing extension contract
+are not promised by an ES5.1 target. No C, application/demo or external corpus
+changes are part of this cutover.
 
 Follow-up to the storage/root cutover, starting from 77a2954.
 

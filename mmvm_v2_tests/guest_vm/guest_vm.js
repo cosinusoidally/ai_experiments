@@ -27,6 +27,7 @@
         load("guest_vm/heap_records.js");
         load("guest_vm/native_free_index_kernel.js");
         load("guest_vm/property_storage_kernel.js");
+        load("guest_vm/indexed_view_policy.js");
         load("guest_vm/property_semantics_kernel.js");
         load("guest_vm/string_key_kernel.js");
         load("guest_vm/object_operations_kernel.js");

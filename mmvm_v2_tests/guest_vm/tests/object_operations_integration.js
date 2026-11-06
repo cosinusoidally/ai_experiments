@@ -94,6 +94,10 @@
     var character = Object.getOwnPropertyDescriptor(boxed, "1");
     check(character.value === "\u20ac" && character.enumerable &&
           !character.writable && !character.configurable, "boxed string virtual character");
+    check(Object.getOwnPropertyNames(boxed).join(",") === "0,1,length" &&
+          Object.keys(boxed).join(",") === "0,1" && boxed.hasOwnProperty("1") &&
+          boxed.propertyIsEnumerable("1") && !boxed.propertyIsEnumerable("length"),
+          "wrapper enumeration and own-property predicates");
     Object.defineProperty(boxed, "1", {value: "\u20ac"});
     var characterRejected = false;
     try { Object.defineProperty(boxed, "1", {value: "X"}); }
@@ -109,6 +113,49 @@
         try { delete boxed[1]; } catch (error) { strictDeleteRejected = error instanceof TypeError; }
     }());
     check(strictWriteRejected && strictDeleteRejected, "strict virtual-property rejection stays in guest");
+    var view = new Uint16Array(3);
+    view[1] = 513;
+    check(Object.keys(view).join(",") === "0,1,2" &&
+          Object.getOwnPropertyNames(view).join(",") === "0,1,2" &&
+          Object.getOwnPropertyDescriptor(view, "1").value === 513,
+          "typed view virtual indices participate in shared reflection");
+    var viewConversions = 0;
+    Object.defineProperty(view, "1", {value: {valueOf: function () { viewConversions++; return 1025; }}});
+    check(view[1] === 1025 && viewConversions === 1, "view definition converts value in guest activation");
+    var viewRejected = false;
+    try { Object.defineProperty(view, "1", {value: {valueOf: function () {
+        throw new Error("invalid descriptor must reject before conversion");
+    }}, writable: false}); }
+    catch (error) { viewRejected = error instanceof TypeError; }
+    check(viewRejected && view[1] === 1025, "invalid view descriptor rejects before conversion");
+    check(Object.getOwnPropertyDescriptor(target, key).value === 42 && target.hasOwnProperty(key),
+          "reflective key conversion uses guest callbacks");
+    var invalidKeysRejected = false;
+    try { Object.keys(null); } catch (error) { invalidKeysRejected = error instanceof TypeError; }
+    check(invalidKeysRejected, "invalid reflection target throws in guest");
+    var frozenDuringConversion = [1, 2, 3], freezeConversions = 0;
+    Object.defineProperty(frozenDuringConversion, "length", {value: {valueOf: function () {
+        if (freezeConversions++ === 0) Object.defineProperty(frozenDuringConversion, "length", {writable: false});
+        return 3;
+    }}});
+    check(freezeConversions === 2 && !Object.getOwnPropertyDescriptor(frozenDuringConversion, "length").writable,
+          "conversion cannot resurrect length writability");
+    var retainedDescriptor = {};
+    Object.defineProperty(retainedDescriptor, "value", {get: function () { return {child: {marker: 17}}; }});
+    Object.defineProperty(retainedDescriptor, "writable", {get: function () {
+        for (var round = 0; round < 600; round++) {
+            var garbage = {round: round, values: [round, round + 1]};
+        }
+        return true;
+    }});
+    Object.defineProperty(target, "retained", retainedDescriptor);
+    check(target.retained.child.marker === 17, "earlier descriptor result survives later callback allocation");
+    var privateArray = [1, 2, 3];
+    Object.defineProperty(privateArray, "1", {enumerable: false});
+    privateArray.extra = 7;
+    check(Object.keys(privateArray).join(",") === "0,2,extra" &&
+          Object.getOwnPropertyNames(privateArray).join(",") === "0,1,2,length,extra",
+          "materialized indices have numeric ordering and honor enumerability");
     var message = "object operations integration passed";
     if (typeof print === "function") print(message);
     else console.log(message);

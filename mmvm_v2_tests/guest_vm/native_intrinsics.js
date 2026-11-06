@@ -99,8 +99,9 @@
                       GUEST_BUILTIN: 132,
                       OBJECT_PREVENT_EXTENSIONS: 133,
                       OBJECT_IS_EXTENSIBLE: 134,
-                      OBJECT_GET_OWN_PROPERTY_NAMES: 135};
-    Intrinsics.LAST_ID = Intrinsics.OBJECT_GET_OWN_PROPERTY_NAMES;
+                      OBJECT_GET_OWN_PROPERTY_NAMES: 135,
+                      OBJECT_INDEXED_VIEW_LENGTH: 136};
+    Intrinsics.LAST_ID = Intrinsics.OBJECT_INDEXED_VIEW_LENGTH;
     /* A non-constructible native-shaped public function delegates to guest
      * bytecode through a traced closure vector, never a host callback. */
     Intrinsics.GuestBuiltinLayout = {IMPLEMENTATION: 0, LENGTH: 1};

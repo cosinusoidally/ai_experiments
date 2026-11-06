@@ -7,6 +7,12 @@ the code does, not the intended endpoint of the earlier plans. Update these
 documents alongside implementation changes.
 Source definitions remain the final authority for binary layouts and flags.
 
+The current Object-operation cutover uses native contract **101**. See
+[semantic-unification.md](semantic-unification.md) for guest built-in
+continuations, private normalized primitives and shared exotic-property
+policy. Its current acceptance results are tracked separately from older
+completed cleanup reports; do not infer a full-suite pass from focused checks.
+
 Ongoing work is tracked in [the cleanup approach and issue register](cleanup.md).
 It separates completed changes from remaining architectural work and records
 the validation required at each working point.

@@ -282,6 +282,15 @@
                     "intrinsic", objectPrimitive.nativeIntrinsic));
         }
         context.installGlobal("__guestObjectPrimitives", objectPrimitives);
+        runtime.defineBuiltinProperty(objectPrimitives, "indexedViewLength",
+            runtime.makeNativeFunction("<indexed-view-length>", function (receiver, args) {
+                var value = args[0];
+                if (!value || (value.guestType !== "buffer" && value.guestType !== "typedArray")) return -1;
+                return runtime.heapRecords.bufferViewLength(value.heapAddress);
+            }, "intrinsic", NativeIntrinsics.OBJECT_INDEXED_VIEW_LENGTH));
+        /* Read identical text on every bootstrap host: Function.toString
+         * pretty-printing differs between Node and old SpiderMonkey. */
+        loadLibrary("guest_vm/indexed_view_policy.js");
         loadLibrary("guest_vm/object_runtime.js");
         installFallback(objectConstructor, "defineProperty", "__guestObjectDefineProperty");
         installFallback(objectConstructor, "getOwnPropertyDescriptor", "__guestObjectGetOwnPropertyDescriptor");
@@ -290,6 +299,7 @@
         installFallback(runtime.objectPrototype, "hasOwnProperty", "__guestObjectHasOwnProperty");
         installBuiltin(runtime.objectPrototype, "propertyIsEnumerable", "__guestObjectPropertyIsEnumerable", "Object.propertyIsEnumerable");
         runtime.deleteProperty(context.globalObject, "__guestObjectPrimitives", false);
+        runtime.deleteProperty(context.globalObject, "GuestVMIndexedViewDescriptorAllowed", false);
         installBuiltin(runtime.objectPrototype, "toLocaleString", "__guestObjectToLocaleString", "Object.toLocaleString");
         installBuiltin(runtime.numberPrototype, "toLocaleString", "__guestNumberToLocaleString", "Number.toLocaleString");
         installBuiltin(objectConstructor, "defineProperties", "__guestObjectDefineProperties", "Object.defineProperties");
