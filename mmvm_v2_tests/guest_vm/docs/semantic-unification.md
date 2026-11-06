@@ -28,7 +28,7 @@ Object.getOwnPropertyNames now has a named native intrinsic and shares key
 collection with Object.keys/for-in through explicit EnumerationMode values.
 Own names include nonenumerable named entries and implicit true-array length;
 for-in retains nearest-owner shadowing and per-owner insertion order. Exotic
-virtual-property coverage is still being consolidated. Contract 100 prevents
+virtual-property coverage is still being consolidated. Contract 101 prevents
 stale embedded interpreter-code reuse after the intrinsic/dispatch change.
 
 Existing integration coverage is extended by object_operations_integration.js,
@@ -36,6 +36,42 @@ which runs on stock Node and guest entrypoints. It covers conversion order,
 reentrant mutation, inherited getters, thrown-value identity and captured
 primitive lifetime. Complete acceptance remains pending; intermediate focused
 passes must not be confused with a full corpus/demo/performance sweep.
+
+### Exotic property adapters: intermediate working cutover
+
+VirtualPropertyKind and virtualPropertyAttributesKernel define array-length,
+string-length, string-index and indexed-element descriptor attributes once.
+Both the portable Runtime and native descriptor path use these rules. Named
+properties retain the owner/entry abstraction regardless of record kind.
+
+Native array indexed definitions materialize a dense cell through the common
+ordinary descriptor decision, preserve its value, check extensibility/length
+writability, extend the vector and clear the superseded dense cell. Arguments
+mapping remains live through data redefinition; freezing snapshots its current
+parameter value before detaching. The shared own-element probe recognizes both
+dense cells and materialized descriptors. Portable descriptor reads and freezing
+now also consult the live parameter mapping, rather than a stale stored mirror.
+
+Array-length definition has a separate storage adapter, using ordinary
+nonconfigurable descriptor policy, descending deletion and ES5 partial-shrink
+rollback. Callback-bearing numeric conversion runs twice in the guest
+continuation before the normalized primitive. Seven unchanged external ECMA
+array-length files pass at this checkpoint; complete acceptance is pending.
+
+Primitive wrappers carry the PRIMITIVE_WRAPPER object-class flag. Native
+Object boxing and portable wrapper construction establish it. A wrapper probe
+can therefore reject ordinary objects in constant time without scanning their
+properties. String characters are virtual immutable enumerable data properties;
+length is immutable/nonenumerable. Descriptor/read/write/delete paths respect
+these rules. A non-Latin-1 character result is an independent one-code-unit
+string, not a slice retaining its parent. Strict delete rejection now uses a
+named result protocol and a shared guest exception continuation for all three
+delete bytecodes.
+
+The existing broad integration file covers these adapters on stock Node,
+portable guest and standalone execution. Node core, bounded structural GC,
+standalone GC and selected JSON checks pass during the cutover. Remaining key
+enumeration/view work and final corpus/demo/performance acceptance stay open.
 
 Follow-up to the storage/root cutover, starting from 77a2954.
 

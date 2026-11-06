@@ -366,11 +366,11 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 100;
+    Records.NativeInterpreterContractVersion = 101;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
-    Records.ObjectClassFlags = {DATE: 1, ERROR: 2};
+    Records.ObjectClassFlags = {DATE: 1, ERROR: 2, PRIMITIVE_WRAPPER: 4};
     /* Non-ordinary object records have no extensibility payload word. This
      * bit belongs only to their header namespace, never ordinary objects. */
     Records.ExoticObjectFlags = {NON_EXTENSIBLE: 0x40000000};
@@ -405,6 +405,7 @@
         STRING_LENGTH: Heap.HEADER_SIZE + STRING_LENGTH,
         STRING_HASH: Heap.HEADER_SIZE + STRING_HASH,
         STRING_CHARS: Heap.HEADER_SIZE + STRING_CHARS,
+        STRING_CODE_UNIT_BYTES: 2,
         FRAME_PC: Heap.HEADER_SIZE + FRAME_PC,
         FRAME_RETURN_SLOT: Heap.HEADER_SIZE + FRAME_RETURN_SLOT,
         HANDLER_TARGET: Heap.HEADER_SIZE + HANDLER_TARGET,

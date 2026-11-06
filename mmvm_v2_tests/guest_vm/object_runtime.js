@@ -1,11 +1,13 @@
 /* ES5.1 composite object operations. Capture primitives once; replacing a
  * public method must not replace another algorithm's internal operations. */
 (function () {
-    var define = Object.defineProperty, descriptor = Object.getOwnPropertyDescriptor;
-    var names = Object.getOwnPropertyNames;
+    var define = __guestObjectPrimitives.defineProperty;
+    var descriptor = __guestObjectPrimitives.getOwnPropertyDescriptor;
+    var names = __guestObjectPrimitives.getOwnPropertyNames, keys = __guestObjectPrimitives.keys;
     var create = Object.create, prevent = Object.preventExtensions;
     var extensible = Object.isExtensible;
     var string = String;
+    var number = Number, isArray = Array.isArray;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
     function requireObject(value) {
         if (value === null || (typeof value !== "object" && typeof value !== "function")) {
@@ -13,21 +15,24 @@
         }
         return value;
     }
-    function propertyKey(value) {
+    function primitive(value, stringHint) {
         if (value !== null && (typeof value === "object" || typeof value === "function")) {
-            var method = value.toString, primitive;
+            var method = stringHint ? value.toString : value.valueOf, result;
             if (typeof method === "function") {
-                primitive = method.call(value);
-                if (primitive === null || (typeof primitive !== "object" && typeof primitive !== "function")) return string(primitive);
+                result = method.call(value);
+                if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
             }
-            method = value.valueOf;
+            method = stringHint ? value.valueOf : value.toString;
             if (typeof method === "function") {
-                primitive = method.call(value);
-                if (primitive === null || (typeof primitive !== "object" && typeof primitive !== "function")) return string(primitive);
+                result = method.call(value);
+                if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
             }
-            throw new TypeError("cannot convert property key to a primitive");
+            throw new TypeError("cannot convert object to a primitive");
         }
-        return string(value);
+        return value;
+    }
+    function propertyKey(value) {
+        return string(primitive(value, true));
     }
     function propertyDescriptor(source) {
         requireObject(source);
@@ -55,7 +60,33 @@
         /* ToString precedes ToPropertyDescriptor, including user callbacks.
          * The captured primitive receives only normalized descriptor fields. */
         key = propertyKey(key);
-        return define(object, key, propertyDescriptor(attributes));
+        var normalized = propertyDescriptor(attributes);
+        if (isArray(object) && key === "length" && "value" in normalized) {
+            var value = normalized.value;
+            var length = number(primitive(value, false)) >>> 0;
+            if (length !== number(primitive(value, false))) throw new RangeError("invalid array length");
+            normalized.value = length;
+        }
+        return define(object, key, normalized);
+    };
+    this.__guestObjectGetOwnPropertyDescriptor = function (object, key) {
+        requireObject(object);
+        return descriptor(object, propertyKey(key));
+    };
+    this.__guestObjectGetOwnPropertyNames = function (object) { return names(requireObject(object)); };
+    this.__guestObjectKeys = function (object) { return keys(requireObject(object)); };
+    this.__guestObjectHasOwnProperty = function (key) {
+        "use strict";
+        key = propertyKey(key);
+        if (this === null || this === undefined) throw new TypeError("null or undefined receiver");
+        return descriptor(Object(this), key) !== undefined;
+    };
+    this.__guestObjectPropertyIsEnumerable = function (key) {
+        "use strict";
+        key = propertyKey(key);
+        if (this === null || this === undefined) throw new TypeError("null or undefined receiver");
+        var result = descriptor(Object(this), key);
+        return result !== undefined && result.enumerable;
     };
     function defineProperties(object, properties) {
         requireObject(object);

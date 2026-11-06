@@ -11,6 +11,73 @@
     }
     var DESCRIPTOR_FIELD_NEEDS_CALLBACK = -1;
     var EnumerationMode = {OWN_ENUMERABLE: 0, INHERITED_ENUMERABLE: 1, OWN_NAMES: 2};
+    var PropertyDeleteResult = {UNSUPPORTED: 0, HANDLED: 1, REJECTED: -1};
+
+    /* Dense holes and materialized descriptors are two representations of
+     * the same own-index space. This probe never reads a getter or allocates. */
+    function arrayHasOwnElementKernel(heapBase, array, index) {
+        if (index < 0) return 0;
+        var elements = arrayElements(heapBase, array);
+        if (index < vectorLength(heapBase, elements) &&
+                valueCellTag(0, vectorCellAddress(heapBase, elements, index)) !== 0) return 1;
+        var entry = lastOwnPropertyEntryKernel(heapBase, array);
+        while (entry !== 0) {
+            if (propertyKeyIndexKernel(heapBase, ownPropertyEntryKeyKernel(heapBase, array, entry)) === index) return 1;
+            entry = previousOwnPropertyEntryKernel(heapBase, array, entry);
+        }
+        return 0;
+    }
+
+    function stringVirtualPropertyKindKernel(heapBase, owner, key, stringSupport) {
+        if (recordType(heapBase, owner) !== HEAP_TYPE_OBJECT) return 0;
+        var wrapped = primitiveWrapperValueCellKernel(heapBase, owner, stringSupport);
+        if (wrapped === 0 || valueCellTag(0, wrapped) !== VALUE_TAG_REFERENCE) return 0;
+        var string = valueCellReference(0, wrapped);
+        if (recordType(heapBase, string) !== HEAP_TYPE_STRING) return 0;
+        var lengthKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY));
+        if (stringKeysEqualKernel(heapBase, key, lengthKey) === 1) return VirtualPropertyKind.STRING_LENGTH;
+        var index = propertyKeyIndexKernel(heapBase, key);
+        if (index >= 0 && index < stringLength(heapBase, string)) return VirtualPropertyKind.STRING_INDEX;
+        return 0;
+    }
+
+    /* Return an independent one-code-unit string, never a view retaining a
+     * potentially large parent. ASCII values reuse the runtime's table. */
+    function stringVirtualPropertyValueKernel(heapBase, state, target, owner, key,
+            stringSupport, kind) {
+        var wrapped = primitiveWrapperValueCellKernel(heapBase, owner, stringSupport);
+        var string = valueCellReference(0, wrapped);
+        if (kind === VirtualPropertyKind.STRING_LENGTH) {
+            setValueCellInt32(target, stringLength(heapBase, string));
+            return 1;
+        }
+        return stringIndexedValueKernel(heapBase, state, target, string,
+            propertyKeyIndexKernel(heapBase, key), stringSupport);
+    }
+
+    function stringIndexedValueKernel(heapBase, state, target, string, index, stringSupport) {
+        var code = stringCharacterCodeUnit(heapBase, string, index) & 65535;
+        if (code < RuntimeSupportLayout.BUFFER_PROTOTYPE - RuntimeSupportLayout.ASCII_STRING_BASE) {
+            copyValueCell(target, vectorCellAddress(heapBase, stringSupport, STRING_SUPPORT_ASCII_BASE + code));
+            return 1;
+        }
+        var bytes = (STRING_CHARS + RecordLayout.STRING_CODE_UNIT_BYTES + RecordLayout.HEAP_RECORD_ALIGNMENT - 1) &
+            (0 - RecordLayout.HEAP_RECORD_ALIGNMENT);
+        if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
+        var result = engineHeapBump(heapBase, state);
+        setRecordType(heapBase, result, HEAP_TYPE_STRING);
+        setRecordSize(heapBase, result, bytes);
+        setRecordMark(heapBase, result, 0);
+        setRecordFlags(heapBase, result, 0);
+        setStringLength(heapBase, result, 1);
+        setStringHash(heapBase, result, stringHashStep(STRING_HASH_OFFSET_BASIS, code));
+        setStringCharacterByte(heapBase, result, 0, code & 255);
+        setStringCharacterByte(heapBase, result, 1, code >>> 8);
+        setEngineHeapBump(heapBase, state, result + bytes);
+        setValueCellReference(target, result);
+        return 1;
+    }
 
     /* Resolve the nearest definition. An ancestor accessor shadowed by a
      * nearer data field must neither be invoked nor force a semantic exit.
@@ -74,16 +141,49 @@
         if (ownerCell === 0 || keyCell === 0) return 0;
         if (valueCellTag(0, ownerCell) !== VALUE_TAG_REFERENCE) return 0;
         var owner = valueCellReference(0, ownerCell), type = recordType(heapBase, owner);
-        if (type !== HEAP_TYPE_OBJECT && type !== HEAP_TYPE_NATIVE_FUNCTION &&
-            type !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        if (objectReferenceIsObjectKernel(heapBase, owner) === 0) return 0;
         var key = propertyStringKeyReferenceKernel(heapBase, keyCell, stringSupport);
         if (key === 0) return 0;
         var entry = findOwnPropertyEntryKernel(heapBase, state, owner, key);
-        if (entry === 0) {
+        var value = 0, setter = 0, attributes = 0;
+        var index = propertyKeyIndexKernel(heapBase, key);
+        var lengthKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY));
+        var stringKind = stringVirtualPropertyKindKernel(heapBase, owner, key, stringSupport);
+        if (stringKind !== 0) {
+            value = engineScratchRightAddress(heapBase, state);
+            if (stringVirtualPropertyValueKernel(heapBase, state, value, owner, key, stringSupport, stringKind) === 0) return 0;
+            attributes = virtualPropertyAttributesKernel(stringKind, 0);
+        } else if (type === HEAP_TYPE_ARRAY && arrayReserved(heapBase, owner) === 0 &&
+                stringKeysEqualKernel(heapBase, key, lengthKey) === 1) {
+            var writable = 1;
+            if (entry !== 0 && (ownPropertyEntryAttributesKernel(heapBase, owner, entry) &
+                    PROPERTY_ATTRIBUTE_WRITABLE) === 0) writable = 0;
+            attributes = virtualPropertyAttributesKernel(VirtualPropertyKind.ARRAY_LENGTH, writable);
+            value = engineScratchRightAddress(heapBase, state);
+            setValueCellInt32(value, vectorLength(heapBase, arrayElements(heapBase, owner)));
+        } else if (entry !== 0) {
+            attributes = ownPropertyEntryAttributesKernel(heapBase, owner, entry);
+            value = ownPropertyEntryValueCellKernel(heapBase, owner, entry);
+            setter = ownPropertyEntrySetterKernel(heapBase, owner, entry);
+            if (type === HEAP_TYPE_ARRAY && index >= 0) {
+                var mapped = argumentsMappedCellKernel(heapBase, owner, index);
+                if (mapped !== 0) value = mapped;
+            }
+        } else if (type === HEAP_TYPE_ARRAY && index >= 0 &&
+                index < vectorLength(heapBase, arrayElements(heapBase, owner))) {
+            value = vectorCellAddress(heapBase, arrayElements(heapBase, owner), index);
+            if (valueCellTag(0, value) === 0) value = 0;
+            else {
+                var mapped = argumentsMappedCellKernel(heapBase, owner, index);
+                if (mapped !== 0) value = mapped;
+                attributes = virtualPropertyAttributesKernel(VirtualPropertyKind.INDEXED_ELEMENT, 0);
+            }
+        }
+        if (value === 0) {
             setValueCellUndefined(target);
             return 1;
         }
-        var attributes = ownPropertyEntryAttributesKernel(heapBase, owner, entry);
         var bytes = OBJECT_RECORD_BYTES + PROPERTY_STORAGE_RECORD_BYTES +
             DESCRIPTOR_RESULT_FIELDS * PROPERTY_STORAGE_ENTRY_BYTES;
         if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) return 0;
@@ -108,10 +208,8 @@
             setPropertyDescriptorAttributes(0, resultEntry, DEFAULT_PROPERTY_ATTRIBUTES);
             setPropertyDescriptorSetter(0, resultEntry, 0);
             var resultCell = propertyDescriptorValueCell(0, resultEntry);
-            if (index === 0) copyValueCell(resultCell,
-                ownPropertyEntryValueCellKernel(heapBase, owner, entry));
+            if (index === 0) copyValueCell(resultCell, value);
             else if (accessor !== 0 && index === 1) {
-                var setter = ownPropertyEntrySetterKernel(heapBase, owner, entry);
                 if (setter === 0) setValueCellUndefined(resultCell);
                 else setValueCellReference(resultCell, setter);
             } else {
@@ -394,11 +492,16 @@
 
     var exports = {descriptorFieldNames: descriptorFieldNames,
       EnumerationMode: EnumerationMode,
+      PropertyDeleteResult: PropertyDeleteResult,
       descriptorFieldIndices: descriptorFieldIndices,
       constants: {STRING_PROPERTY_KEY_UNSUPPORTED: STRING_PROPERTY_KEY_UNSUPPORTED,
                   DESCRIPTOR_FIELD_NEEDS_CALLBACK: DESCRIPTOR_FIELD_NEEDS_CALLBACK,
                   DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
                   DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
+        arrayHasOwnElementKernel: arrayHasOwnElementKernel,
+        stringVirtualPropertyKindKernel: stringVirtualPropertyKindKernel,
+        stringVirtualPropertyValueKernel: stringVirtualPropertyValueKernel,
+        stringIndexedValueKernel: stringIndexedValueKernel,
         objectIsExtensibleKernel: objectIsExtensibleKernel,
         descriptorDataFieldCellKernel: descriptorDataFieldCellKernel,
         stringOwnPropertyKeyKernel: stringOwnPropertyKeyKernel,

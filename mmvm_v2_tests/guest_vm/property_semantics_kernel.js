@@ -12,6 +12,18 @@
         CHANGE_KIND: -3, REPLACE_ACCESSOR: -4, NON_WRITABLE: -5, MIXED: -6};
     var PropertyWriteAction = {WRITE_DATA: 0, CALL_SETTER: 1,
         NO_SETTER: -1, NON_WRITABLE: -2, NOT_EXTENSIBLE: -3};
+    var VirtualPropertyKind = {ARRAY_LENGTH: 1, STRING_LENGTH: 2,
+        STRING_INDEX: 3, INDEXED_ELEMENT: 4};
+
+    function virtualPropertyAttributesKernel(kind, writableLength) {
+        if (kind === VirtualPropertyKind.ARRAY_LENGTH) {
+            if (writableLength !== 0) return PropertyAttributes.WRITABLE;
+            return 0;
+        }
+        if (kind === VirtualPropertyKind.STRING_LENGTH) return 0;
+        if (kind === VirtualPropertyKind.STRING_INDEX) return PropertyAttributes.ENUMERABLE;
+        return PropertyAttributes.WRITABLE | PropertyAttributes.ENUMERABLE | PropertyAttributes.CONFIGURABLE;
+    }
 
     function ordinaryWriteActionKernel(attributes, setter) {
         if ((attributes & PropertyAttributes.ACCESSOR) !== 0) {
@@ -78,13 +90,16 @@
     }
 
     var exports = {fields: DescriptorFields, reject: DescriptorReject,
+        virtualKinds: VirtualPropertyKind, virtualAttributes: virtualPropertyAttributesKernel,
         writeActions: PropertyWriteAction,
         writeAction: ordinaryWriteActionKernel,
         createNamedPropertyOwnerResolver: createNamedPropertyOwnerResolver,
         decision: ordinaryDescriptorDecisionKernel,
         functions: {ordinaryDescriptorDecisionKernel: ordinaryDescriptorDecisionKernel,
+                    virtualPropertyAttributesKernel: virtualPropertyAttributesKernel,
                     ordinaryWriteActionKernel: ordinaryWriteActionKernel},
         namespaces: {DescriptorFields: DescriptorFields, PropertyAttributes: PropertyAttributes,
+                     VirtualPropertyKind: VirtualPropertyKind,
                      DescriptorReject: DescriptorReject, PropertyWriteAction: PropertyWriteAction},
         messages: {}};
     exports.messages[DescriptorReject.NOT_EXTENSIBLE] = "object is not extensible";

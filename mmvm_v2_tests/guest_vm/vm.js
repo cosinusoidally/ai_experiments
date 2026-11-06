@@ -270,17 +270,26 @@
         install(runtime.getGlobal(context, "Buffer"), "byteLength",
             "__guestBufferByteLength", "Buffer.byteLength");
         var objectConstructor = runtime.getGlobal(context, "Object");
-        /* Keep the primitive private: a normalized call must not recursively
-         * enter the public method's guest conversion continuation. */
-        var definePropertyPrimitive = runtime.getProperty(objectConstructor, "defineProperty");
-        runtime.defineBuiltinProperty(objectConstructor, "defineProperty",
-            runtime.makeNativeFunction("Object.defineProperty", definePropertyPrimitive.callback,
-                "intrinsic", definePropertyPrimitive.nativeIntrinsic));
+        /* Private primitives cannot recursively re-enter public conversion
+         * continuations. Guest library closures capture this table once. */
+        var objectPrimitives = runtime.makeObject();
+        var objectPrimitiveNames = ["defineProperty", "getOwnPropertyDescriptor", "getOwnPropertyNames", "keys"];
+        for (var objectPrimitiveIndex = 0; objectPrimitiveIndex < objectPrimitiveNames.length; objectPrimitiveIndex++) {
+            var objectPrimitiveName = objectPrimitiveNames[objectPrimitiveIndex];
+            var objectPrimitive = runtime.getProperty(objectConstructor, objectPrimitiveName);
+            runtime.defineBuiltinProperty(objectPrimitives, objectPrimitiveName,
+                runtime.makeNativeFunction("Object." + objectPrimitiveName, objectPrimitive.callback,
+                    "intrinsic", objectPrimitive.nativeIntrinsic));
+        }
+        context.installGlobal("__guestObjectPrimitives", objectPrimitives);
         loadLibrary("guest_vm/object_runtime.js");
-        /* The library captured the primitive clone. Restore the public entry
-         * before attaching its bytecode continuation. */
-        runtime.defineBuiltinProperty(objectConstructor, "defineProperty", definePropertyPrimitive);
         installFallback(objectConstructor, "defineProperty", "__guestObjectDefineProperty");
+        installFallback(objectConstructor, "getOwnPropertyDescriptor", "__guestObjectGetOwnPropertyDescriptor");
+        installFallback(objectConstructor, "getOwnPropertyNames", "__guestObjectGetOwnPropertyNames");
+        installFallback(objectConstructor, "keys", "__guestObjectKeys");
+        installFallback(runtime.objectPrototype, "hasOwnProperty", "__guestObjectHasOwnProperty");
+        installBuiltin(runtime.objectPrototype, "propertyIsEnumerable", "__guestObjectPropertyIsEnumerable", "Object.propertyIsEnumerable");
+        runtime.deleteProperty(context.globalObject, "__guestObjectPrimitives", false);
         installBuiltin(runtime.objectPrototype, "toLocaleString", "__guestObjectToLocaleString", "Object.toLocaleString");
         installBuiltin(runtime.numberPrototype, "toLocaleString", "__guestNumberToLocaleString", "Number.toLocaleString");
         installBuiltin(objectConstructor, "defineProperties", "__guestObjectDefineProperties", "Object.defineProperties");

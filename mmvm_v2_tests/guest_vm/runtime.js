@@ -597,6 +597,10 @@
     };
 
     Runtime.prototype.defineInternalValue = function (object, key, value) {
+        if (key === this.primitiveValueKey && object.guestType === "object") {
+            this.linearHeap.setFlags(object.heapAddress,
+                this.linearHeap.flags(object.heapAddress) | HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER);
+        }
         var keyAddress = this.internStringAddress(key);
         var property = this.heapRecords.defineOwnPropertyEntry(
             object.heapAddress, keyAddress, 0);
@@ -612,7 +616,18 @@
     Runtime.prototype.makePrimitiveWrapper = function (value, prototype) {
         var wrapper = this.makeObjectWithPrototype(prototype);
         this.defineInternalValue(wrapper, this.primitiveValueKey, value);
+        if (typeof value === "string") this.defineDataProperty(wrapper, "length", value.length, 0);
         return wrapper;
+    };
+
+    Runtime.prototype.stringWrapperValue = function (object) {
+        if (!object || object.guestType !== "object" ||
+                !(this.linearHeap.flags(object.heapAddress) & HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER)) return undefined;
+        var entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress,
+            this.internStringAddress(this.primitiveValueKey));
+        if (!entry) return undefined;
+        var value = this.readHeapValue(this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, entry));
+        return typeof value === "string" ? value : undefined;
     };
 
     Runtime.prototype.makeArgumentsObject = function (
@@ -1437,6 +1452,17 @@
             HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
     };
 
+    Runtime.prototype.populateDataDescriptor = function (descriptor, value, attributes) {
+        this.defineDataProperty(descriptor, "value", value, HeapRecords.Attributes.DEFAULT);
+        this.defineDataProperty(descriptor, "writable",
+            !!(attributes & HeapRecords.Attributes.WRITABLE), HeapRecords.Attributes.DEFAULT);
+        this.defineDataProperty(descriptor, "enumerable",
+            !!(attributes & HeapRecords.Attributes.ENUMERABLE), HeapRecords.Attributes.DEFAULT);
+        this.defineDataProperty(descriptor, "configurable",
+            !!(attributes & HeapRecords.Attributes.CONFIGURABLE), HeapRecords.Attributes.DEFAULT);
+        return descriptor;
+    };
+
     Runtime.prototype.sameValue = function (left, right) {
         if (left === right) return left !== 0 || 1 / left === 1 / right;
         if (typeof left === "number" && typeof right === "number") {
@@ -1488,9 +1514,29 @@
             var entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
             var attributes = entry ? this.heapRecords.ownPropertyEntryAttributes(
                 object.heapAddress, entry) : 0;
+            var virtualStringKind = 0, virtualStringValue;
+            if (object.guestType === "object") {
+                var wrapped = this.primitiveWrapperValue(object);
+                if (wrapped.found && typeof wrapped.value === "string") {
+                    if (key === "length") {
+                        virtualStringKind = PropertySemantics.virtualKinds.STRING_LENGTH;
+                        virtualStringValue = wrapped.value.length;
+                    } else if (isArrayIndex(key) && Number(key) < wrapped.value.length) {
+                        virtualStringKind = PropertySemantics.virtualKinds.STRING_INDEX;
+                        virtualStringValue = wrapped.value.charAt(Number(key));
+                    }
+                }
+            }
+            if (virtualStringKind) attributes = PropertySemantics.virtualAttributes(virtualStringKind, 0);
+            var exists = !!entry || !!virtualStringKind;
             var oldAccessor = !!(attributes & HeapRecords.Attributes.ACCESSOR);
             var oldValue = entry ? this.readHeapValue(
                 this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, entry)) : undefined;
+            if (virtualStringKind) oldValue = virtualStringValue;
+            if (indexedArray && !oldAccessor) {
+                var currentMapping = this.argumentsMappedCell(object, elementIndex);
+                if (currentMapping) oldValue = this.readHeapValue(currentMapping);
+            }
             var oldSetterAddress = entry ? this.heapRecords.ownPropertyEntrySetter(
                 object.heapAddress, entry) : 0;
             var oldSetter = oldSetterAddress ? this.readHeapReference(oldSetterAddress) : undefined;
@@ -1511,7 +1557,7 @@
                 present |= fieldBits.CONFIGURABLE;
                 if (desc.configurable) requested |= HeapRecords.Attributes.CONFIGURABLE;
             }
-            if (entry && !(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
+            if (exists && !(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
                 if (oldAccessor) {
                     if (own(desc, "get") && !this.sameValue(desc.get, oldValue)) mismatches |= fieldBits.GET;
                     if (own(desc, "set") && !this.sameValue(desc.set, oldSetter)) mismatches |= fieldBits.SET;
@@ -1520,10 +1566,11 @@
                     mismatches |= fieldBits.VALUE;
                 }
             }
-            attributes = PropertySemantics.decision(entry ? 1 : 0,
-                entry || this.heapRecords.objectIsExtensible(object.heapAddress) ? 1 : 0,
+            attributes = PropertySemantics.decision(exists ? 1 : 0,
+                exists || this.heapRecords.objectIsExtensible(object.heapAddress) ? 1 : 0,
                 attributes, present, requested, mismatches);
             if (attributes < 0) throw new TypeError(PropertySemantics.messages[attributes]);
+            if (virtualStringKind) return object;
             if ((accessor || data) && oldAccessor !== accessor) {
                 oldValue = undefined;
                 oldSetter = undefined;
@@ -3491,15 +3538,23 @@
                     }
                     var descriptor = runtime.makeObject();
                     var property = runtime.heapOwnProperty(object, key, false);
+                    if (object.guestType === "object") {
+                        var wrapped = runtime.primitiveWrapperValue(object);
+                        if (wrapped.found && typeof wrapped.value === "string") {
+                            if (key === "length") return runtime.populateDataDescriptor(descriptor,
+                                wrapped.value.length, PropertySemantics.virtualAttributes(
+                                    PropertySemantics.virtualKinds.STRING_LENGTH, 0));
+                            if (isArrayIndex(key) && Number(key) < wrapped.value.length) {
+                                return runtime.populateDataDescriptor(descriptor, wrapped.value.charAt(Number(key)),
+                                    PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.STRING_INDEX, 0));
+                            }
+                        }
+                    }
                     if (object.guestType === "array" && key === "length" &&
                         !runtime.isArgumentsObject(object)) {
-                        runtime.defineDataProperty(descriptor, "value",
-                            runtime.arrayLength(object), HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "writable",
-                            runtime.isArrayLengthWritable(object), HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "enumerable", false, HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "configurable", false, HeapRecords.Attributes.DEFAULT);
-                        return descriptor;
+                        return runtime.populateDataDescriptor(descriptor, runtime.arrayLength(object),
+                            PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.ARRAY_LENGTH,
+                                runtime.isArrayLengthWritable(object) ? 1 : 0));
                     }
                     if ((object.guestType === "array" ||
                          object.guestType === "buffer" ||
@@ -3507,12 +3562,8 @@
                         isArrayIndex(key) &&
                         !property &&
                         runtime.hasOwnProperty(object, key)) {
-                        runtime.defineDataProperty(descriptor, "value",
-                            runtime.getProperty(object, key), HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "writable", true, HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "enumerable", true, HeapRecords.Attributes.DEFAULT);
-                        runtime.defineDataProperty(descriptor, "configurable", true, HeapRecords.Attributes.DEFAULT);
-                        return descriptor;
+                        return runtime.populateDataDescriptor(descriptor, runtime.getProperty(object, key),
+                            PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.INDEXED_ELEMENT, 0));
                     }
                     if (!property) return undefined;
                     var attributes = runtime.heapRecords.ownPropertyEntryAttributes(
@@ -3527,10 +3578,14 @@
                         runtime.defineDataProperty(descriptor, "set", setter ?
                             runtime.readHeapReference(setter) : undefined, HeapRecords.Attributes.DEFAULT);
                     } else {
+                        var descriptorValueCell = runtime.heapRecords.resolvedOwnPropertyEntryValueCell(
+                            object.heapAddress, property);
+                        if (object.guestType === "array" && isArrayIndex(key)) {
+                            var mapped = runtime.argumentsMappedCell(object, Number(key));
+                            if (mapped) descriptorValueCell = mapped;
+                        }
                         runtime.defineDataProperty(descriptor, "value",
-                            runtime.readHeapValue(
-                                runtime.heapRecords.resolvedOwnPropertyEntryValueCell(
-                                    object.heapAddress, property)), HeapRecords.Attributes.DEFAULT);
+                            runtime.readHeapValue(descriptorValueCell), HeapRecords.Attributes.DEFAULT);
                         runtime.defineDataProperty(descriptor, "writable",
                             !!(attributes & HeapRecords.Attributes.WRITABLE), HeapRecords.Attributes.DEFAULT);
                     }
@@ -4624,6 +4679,11 @@
         }
         key = this.propertyKey(key);
         this.internStringAddress(key);
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined) {
+            if (key === "length") return wrappedString.length;
+            if (isArrayIndex(key) && Number(key) < wrappedString.length) return wrappedString.charAt(Number(key));
+        }
         if (object.guestType === "object" || object.guestType === "function" ||
             object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
             var property = this.heapOwnProperty(object, key, false);
@@ -4675,6 +4735,9 @@
     Runtime.prototype.hasOwnProperty = function (object, key) {
         key = this.propertyKey(key);
         if (!object || !object.guestType) return false;
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < wrappedString.length))) return true;
         if (object.guestType === "array" && isArrayIndex(key)) {
             return this.arrayHas(object, Number(key));
         }
@@ -4776,6 +4839,12 @@
                 return false;
             }
             return true;
+        }
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < wrappedString.length))) {
+            if (strict) throw new TypeError("String property is not configurable");
+            return false;
         }
         if (object.guestType === "array" && key === "length" &&
             !this.isArgumentsObject(object)) {
@@ -5091,6 +5160,12 @@
             } else if (strict) {
                 throw new TypeError("cannot write property on primitive value");
             }
+            return value;
+        }
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < wrappedString.length))) {
+            if (strict) throw new TypeError("String property is not writable");
             return value;
         }
         if (object.guestType === "object" || object.guestType === "function" ||
