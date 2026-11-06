@@ -134,6 +134,24 @@ wrapper documentation when selecting full sweeps or explicit subsets.
 Run memory-heavy jobs serially on the current machine. No multithreading is
 needed to measure or improve the interpreter.
 
+The current [Object-operation cutover audit](../../OBJECT_OPERATIONS_VALIDATION_2026-11-06.md)
+distinguishes its completed core/GC/focused checks from pending whole-corpus,
+benchmark and demo acceptance. The broad property integration runs with stock
+Node, guest_runner or a standalone image:
+
+```sh
+node guest_vm/tests/object_operations_integration.js
+./artifacts/js_runner.exe artifacts/snap guest_vm/tests/object_operations_integration.js
+./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native --vm-gc-stress guest_vm/tests/object_operations_integration.js
+```
+
+To isolate the existing native interpreter integration without defining another
+micro-test suite, use tools/check_native_interpreter.js --predecode, optionally
+with --allocation-stack, on Node or js_min. Preserve the fixture's 256 KiB cap.
+When a corpus harness reloads VM/library source, run a reference image from its
+matching source checkout: old images combined with current on-disk libraries
+are not a valid baseline comparison.
+
 The [latest cleanup validation](../../PROPERTY_CLEANUP_VALIDATION_2026-11-05.md) records current passing
 tests, known ECMA gaps, an existing extra standalone integration failure,
 Demo8 mode checks and performance regressions. Do not treat an older bring-up

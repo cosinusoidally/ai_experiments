@@ -6,7 +6,8 @@ indexed-view descriptor-policy leaf is also loaded from indexed_view_policy.js
 during setup, not from host-specific Function.toString output. Both bootstrap hosts and a self-hosted rebuild
 execute this same setup; these functions/closures are ordinary traced heap
 records in the image. Their arguments and suspended progress are not saved
-as host callback state. Contract 101 includes this intrinsic/branding change.
+as host callback state. Contract 102 also includes bytecode targets reached
+through chained Function.prototype.call forwarding.
 
 ## What is being built
 

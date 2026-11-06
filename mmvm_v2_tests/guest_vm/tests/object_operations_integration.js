@@ -150,6 +150,14 @@
     }});
     Object.defineProperty(target, "retained", retainedDescriptor);
     check(target.retained.child.marker === 17, "earlier descriptor result survives later callback allocation");
+    var originalCall = Function.prototype.call;
+    Function.prototype.call = function () { throw new Error("public call consulted by an internal operation"); };
+    try {
+        var protectedKey = {toString: function () { return "protectedCall"; }};
+        Object.defineProperty(target, protectedKey, {value: 67});
+        check(Object.getOwnPropertyDescriptor(target, protectedKey).value === 67,
+              "internal conversion does not consult mutable Function.prototype.call");
+    } finally { Function.prototype.call = originalCall; }
     var privateArray = [1, 2, 3];
     Object.defineProperty(privateArray, "1", {enumerable: false});
     privateArray.extra = 7;

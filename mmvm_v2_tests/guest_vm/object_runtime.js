@@ -9,6 +9,7 @@
     var string = String;
     var number = Number, isArray = Array.isArray;
     var indexedViewLength = __guestObjectPrimitives.indexedViewLength;
+    var call = __guestObjectPrimitives.call;
     var indexedViewDescriptorAllowed = GuestVMIndexedViewDescriptorAllowed;
     var MAX_ARRAY_LENGTH = 4294967295;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
@@ -22,12 +23,12 @@
         if (value !== null && (typeof value === "object" || typeof value === "function")) {
             var method = stringHint ? value.toString : value.valueOf, result;
             if (typeof method === "function") {
-                result = method.call(value);
+                result = call(method, value);
                 if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
             }
             method = stringHint ? value.valueOf : value.toString;
             if (typeof method === "function") {
-                result = method.call(value);
+                result = call(method, value);
                 if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
             }
             throw new TypeError("cannot convert object to a primitive");
@@ -155,11 +156,11 @@
         if (this === null || this === undefined) throw new TypeError("null or undefined receiver");
         var object = Object(this), method = object.toString;
         if (typeof method !== "function") throw new TypeError("toString is not callable");
-        return method.call(object);
+        return call(method, object);
     };
     var numberValue = Number.prototype.valueOf, numberString = Number.prototype.toString;
     this.__guestNumberToLocaleString = function () {
         "use strict";
-        return numberString.call(numberValue.call(this));
+        return call(numberString, call(numberValue, this));
     };
 }());

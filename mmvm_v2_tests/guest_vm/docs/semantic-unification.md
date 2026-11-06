@@ -34,7 +34,7 @@ for-in retains nearest-owner shadowing and per-owner insertion order. The
 own-entry inclusion policy is shared with Runtime.collectOwnKeys. Dense and
 materialized array indices are counted/filled through the same predicate,
 in numeric order before length/named entries. String characters and view
-elements participate without storing shadow named entries. Contract 101 prevents
+elements participate without storing shadow named entries. Contract 102 prevents
 stale embedded interpreter-code reuse after the intrinsic/dispatch change.
 
 Existing integration coverage is extended by object_operations_integration.js,
@@ -82,6 +82,13 @@ The restriction policy is loaded from indexed_view_policy.js by the host and
 guest and compiled to native code through the same kernel graph. No generated
 source file or bootstrap-host Function.toString formatting is persisted.
 
+Internal callback invocation captures Call bound to itself during pristine
+library setup. It does not read a user's mutable Function.prototype.call
+property on each conversion. Native call forwarding can now enter a bytecode
+target reached after multiple call-forwarding steps, preserving the original
+receiver, argument descriptors, result destination and traced callee frame.
+The same broad integration checks this while replacing the public call method.
+
 The broad integration file covers these adapters on stock Node, portable
 guest and standalone execution, including aggressive GC during descriptor
 conversion. Node core and bounded structural GC pass at the frozen-source
@@ -100,6 +107,11 @@ reports the unsupported case rather than secretly using host JS. Modern
 integer-indexed/typed-array semantics beyond the existing extension contract
 are not promised by an ES5.1 target. No C, application/demo or external corpus
 changes are part of this cutover.
+
+General accessor invocation still has separate unsupported native-callable
+cases outside these conversion continuations; enterPropertyGetterKernel is
+not claimed to implement every native intrinsic as a getter. Do not treat
+this working cutover as closure of all language/call-dispatch feature gaps.
 
 Follow-up to the storage/root cutover, starting from 77a2954.
 

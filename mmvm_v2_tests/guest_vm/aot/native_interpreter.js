@@ -6205,6 +6205,28 @@
                     heapBase, state, frame, pc, opcode, instructions);
             }
             intrinsicFunction = valueCellReference(0, forwardedFunctionCell);
+            /* A chain such as call.call(fn, receiver) can reach bytecode
+             * after the first forwarding step. Enter that target through
+             * the same traced call protocol instead of treating it as a
+             * missing native intrinsic. Preserve the original return slot. */
+            if (recordType(heapBase, intrinsicFunction) === RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
+                var forwardedReceiver = engineScratchRightAddress(heapBase, state);
+                var forwardedDescriptors = intrinsicArgumentsVector;
+                if (intrinsicArgumentCount === 0) setValueCellUndefined(forwardedReceiver);
+                else {
+                    forwardedReceiver = programArgumentCellKernel(heapBase, intrinsicArgumentsVector, registerAddress, 0);
+                    forwardedDescriptors = argumentRegisterTailKernel(heapBase, state, intrinsicArgumentsVector);
+                    if (forwardedDescriptors === 0) return unsupportedDiagnosticExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                }
+                if (bytecodeCallKernel(heapBase, state, frame, forwardedFunctionCell, 0,
+                        CALL_OPERATION_CALL, callTargetIndex, currentContext, stringSupport,
+                        arrayPrototype, bytecodeAddress, registerAddress, pc, frame + FRAME_PC,
+                        forwardedReceiver, FIVE_WORD_INSTRUCTION, 0, forwardedDescriptors) === 1) {
+                    return INTRINSIC_RESULT_FRAME_ENTERED;
+                }
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
             if (recordType(heapBase, intrinsicFunction) !==
                     RecordLayout.HEAP_TYPE_NATIVE_FUNCTION) {
                 return unsupportedDiagnosticExitKernel(

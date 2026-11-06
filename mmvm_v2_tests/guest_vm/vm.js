@@ -282,6 +282,12 @@
                     "intrinsic", objectPrimitive.nativeIntrinsic));
         }
         context.installGlobal("__guestObjectPrimitives", objectPrimitives);
+        /* Bind Call to itself while intrinsics are pristine. Later user
+         * changes to Function.prototype.call must not change internal Call. */
+        context.run("this.__guestObjectCall = Function.prototype.call.bind(Function.prototype.call);",
+            "<object-internal-call>");
+        runtime.defineBuiltinProperty(objectPrimitives, "call", runtime.getGlobal(context, "__guestObjectCall"));
+        runtime.deleteProperty(context.globalObject, "__guestObjectCall", false);
         runtime.defineBuiltinProperty(objectPrimitives, "indexedViewLength",
             runtime.makeNativeFunction("<indexed-view-length>", function (receiver, args) {
                 var value = args[0];

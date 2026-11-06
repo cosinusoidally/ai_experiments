@@ -2,6 +2,21 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Property-operation cutover, 2026-11-06 — focused progress
+
+- Current standalone protected-Call checkpoint: **13 selected files passed /
+  0 failed / 0 timed out / 0 skipped**, runner 26.102780 seconds.
+- Two confirmed fixes from the previous failure set:
+  ecma_5/Object/15.2.3.7-01.js and ecma_5/Object/propertyIsEnumerable.js.
+  Both fail on fe35c1b with its matching archived source tree and pass now.
+- Other selected files cover ordinary descriptor changes and array-length
+  definition/conversion/truncation. No external corpus or harness changed.
+- **Whole-suite total has not yet been remeasured.** The last complete result
+  remains 990 passed / 339 failed (39 timeouts), four configured skips. Do not
+  infer a new full total or zero lost passes by adding the two focused gains.
+
+See [the current cutover audit](OBJECT_OPERATIONS_VALIDATION_2026-11-06.md).
+
 ### Ordinary semantics cleanup audit, 2026-11-05
 
 Standalone 4b24556, complete default corpus with TZ=UTC:
