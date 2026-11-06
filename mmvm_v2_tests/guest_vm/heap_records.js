@@ -362,6 +362,11 @@
     Records.BufferKinds = {BUFFER: 0, ARRAY_BUFFER: 1,
         UINT8: 2, UINT16: 3, UINT32: 4, INT32: 5,
         FLOAT32: 6, FLOAT64: 7, INT8: 8, INT16: 9};
+    Records.contextAllocationBytes = function (propertyCount) {
+        var bytes = Heap.HEADER_SIZE + OBJECT_BYTES + Heap.HEADER_SIZE + CONTEXT_BYTES;
+        if (propertyCount) bytes += Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + propertyCount * PROPERTY_ENTRY_BYTES;
+        return bytes;
+    };
     Records.BytecodeLayout = {wideCountContract: 60};
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately

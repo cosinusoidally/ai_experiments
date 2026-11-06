@@ -27,6 +27,24 @@ It is not counted as a complete final suite pass. The policy now loads one
 checked-in source file rather than storing host-specific Function.toString
 pretty-printing in the guest program. Final cross-host identity remains a gate.
 
+The following complete i386 audit found a 256 KiB fixed-heap failure during
+predecoded integration: context creation could begin without space for the
+whole global clone. Context construction now preflights its aggregate storage
+at a safe boundary using the cached global-property count. The isolated
+unchanged-size predecoded integration passes after this correction. The
+existing Buffer fixture also now explicitly retains its unpublished buffer
+across context creation, as required by the embedding root contract; no
+assertion or heap limit was removed or relaxed. A generic diagnostic entrypoint
+reuses that existing integration and can report allocation stacks:
+guest_vm/tools/check_native_interpreter.js --predecode --allocation-stack.
+
+Node/i386/self-host images before the context preflight were bit-identical:
+7284872 bytes, SHA-256
+6544c6a3ead7b41f0c6d8079a1ae770d01592c611c11d0ac63a6b1544450d4b4.
+Node/js_min/self-host wall times were 9.15/108.86/85.59 seconds, peak RSS
+302832/319916/484120 KiB. These do not validate the later preflight change;
+final rebuild identity and complete core acceptance are still required.
+
 ## Combined acceptance — pending
 
 - Complete final i386 core and structural GC; Node/js_min/self-hosted image

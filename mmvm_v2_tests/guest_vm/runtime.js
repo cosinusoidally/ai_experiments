@@ -572,22 +572,24 @@
         return target;
     };
 
+    Runtime.prototype.contextGlobalPropertyCount = function () {
+        var source = this.globalObject;
+        var entries = this.guardedOwnPropertyEntries(source);
+        if (this.contextGlobalOwnPropertyCount === undefined ||
+            this.contextGlobalOwnPropertyEntries !== entries ||
+            this.contextGlobalOwnPropertyVersion !== source.propertyVersion) {
+            this.contextGlobalOwnPropertyCount =
+                this.heapRecords.countOwnProperties(source.heapAddress);
+            this.contextGlobalOwnPropertyVersion = source.propertyVersion;
+            this.contextGlobalOwnPropertyEntries = entries;
+        }
+        return this.contextGlobalOwnPropertyCount;
+    };
+
     Runtime.prototype.cloneOwnProperties = function (source, target) {
         this.assertOwned(source);
         this.assertOwned(target);
-        var propertyCount;
-        if (source === this.globalObject) {
-            var entries = this.guardedOwnPropertyEntries(source);
-            if (this.contextGlobalOwnPropertyCount === undefined ||
-                this.contextGlobalOwnPropertyEntries !== entries ||
-                this.contextGlobalOwnPropertyVersion !== source.propertyVersion) {
-                this.contextGlobalOwnPropertyCount =
-                    this.heapRecords.countOwnProperties(source.heapAddress);
-                this.contextGlobalOwnPropertyVersion = source.propertyVersion;
-                this.contextGlobalOwnPropertyEntries = entries;
-            }
-            propertyCount = this.contextGlobalOwnPropertyCount;
-        }
+        var propertyCount = source === this.globalObject ? this.contextGlobalPropertyCount() : undefined;
         this.heapRecords.cloneOwnProperties(
             source.heapAddress, target.heapAddress, propertyCount, false);
         target.propertyEntries = {};
@@ -2069,6 +2071,16 @@
          * tail before allocating its global and property records. */
         if (this.nativeInterpreter) {
             this.nativeInterpreter.releaseAllocatorOwnership();
+        }
+        /* Plan the whole construction before publishing a partial context.
+         * Record allocation cannot collect midway through cloning globals.
+         * The common case is a constant-time tail check; only pressure probes
+         * the reusable-region index and may collect at this safe boundary. */
+        var bytes = HeapRecords.contextAllocationBytes(this.contextGlobalPropertyCount());
+        var heap = this.linearHeap;
+        if (heap.allocationLimit - heap.bump < bytes && heap.largestFreeBlockSize() < bytes) {
+            this.gcPending = true;
+            this.gcSafePoint();
         }
     };
 

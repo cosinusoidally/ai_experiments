@@ -1,5 +1,13 @@
 # Execution, boundaries and garbage collection
 
+Context construction preflights its global object, context record and packed
+global-property backing as one aggregate requirement. Normal creation is a
+cached-count/tail-capacity check. Under pressure, allocator ownership is first
+released and collection may run before any partial context is allocated.
+Records.contextAllocationBytes owns the layout calculation; Runtime owns the
+safe boundary. This avoids an unrecoverable mid-clone allocation failure on a
+small fixed heap without growing test limits or collecting in constructors.
+
 Primary sources: [`interpreter.js`](../interpreter.js),
 [`runtime.js`](../runtime.js), [`aot/native_interpreter.js`](../aot/native_interpreter.js),
 [`aot/heap_sweeper.js`](../aot/heap_sweeper.js),

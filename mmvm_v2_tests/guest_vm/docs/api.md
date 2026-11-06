@@ -8,6 +8,14 @@ details, not globals embedders should call. installStandardLibrary still needs
 the supplied source reader; bare minimal runtimes are not silently upgraded to
 the complete guest standard library. See semantic-unification.md.
 
+Context creation is a collection boundary: before allocating a context/global
+clone, Runtime checks the aggregate storage requirement against available tail
+and reusable regions. This may collect before construction starts, never in
+the middle of an unpublished context. Host locals are not roots; retain a
+guest value before creating another context if it has not yet been published
+in a live guest object/program. The record layer owns the size calculation;
+the guarded global-property-count cache is shared with the subsequent clone.
+
 This is the implemented JavaScript embedding API, not the C image-launch ABI
 or an arbitrary Node-compatible API. Sources: [`vm.js`](../vm.js),
 [`interpreter.js`](../interpreter.js), [`runtime.js`](../runtime.js),

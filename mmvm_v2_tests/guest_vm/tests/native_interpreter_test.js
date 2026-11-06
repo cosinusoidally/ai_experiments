@@ -128,6 +128,7 @@
             var integratedVM = new VM({heapBytes: 256 * 1024,
                                        nativeInterpreter: true,
                                        nativeOperandPredecode: !!predecode});
+            var wordBufferRoot = null;
             try {
                 var context = integratedVM.context;
                 integratedVM.run(
@@ -492,6 +493,10 @@
                 }
 
                 var wordBuffer = integratedVM.runtime.bufferSupport.allocate(8);
+                /* Context creation can collect before constructing its heap
+                 * records. A host local is not an embedding root; retain the
+                 * unpublished buffer until it is consumed by the program. */
+                wordBufferRoot = integratedVM.runtime.retain(wordBuffer);
                 var writeUInt32LE = integratedVM.runtime.getProperty(
                     wordBuffer, "writeUInt32LE");
                 var readUInt32LE = integratedVM.runtime.getProperty(
@@ -521,6 +526,7 @@
                     throw new Error("native Buffer UInt32LE used semantic fallback");
                 }
             } finally {
+                if (wordBufferRoot !== null) integratedVM.runtime.release(wordBufferRoot);
                 integratedVM.destroy();
             }
             if (typeof get_dlsym === "function") {
