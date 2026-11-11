@@ -1,5 +1,19 @@
 # Test262 status
 
+2026-11-11, approximately 16:23–16:31 UTC, standalone snapshot acceptance
+at `bfc122f` (native contract 103):
+
+- Complete imported suite: **3292 files / 3292 variants / 3292 executed**.
+- **3292 passed / 0 failed / 0 timed out / 0 not run / 0 skipped**.
+- Runner elapsed **453.320431 seconds**, summed test time **434.960826
+  seconds**; supervisor process wall **453.981 seconds**.
+- Command: `./artifacts/js_runner.exe artifacts/launcher-final.snap test262_runner.js`.
+- The executable-only repeat, after removal of this snapshot, is pending.
+  See [the two-launcher acceptance record](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
+  This is slower than the older contract-99 observation below; it is not
+  represented as a performance improvement or a controlled attribution of
+  the difference to the small contract-103 handoff fixes.
+
 2026-11-05, approximately 22:24–22:31 UTC, ordinary-semantics/root checkpoint
 `4b24556` (native contract 99), complete imported suite under standalone
 js_runner:

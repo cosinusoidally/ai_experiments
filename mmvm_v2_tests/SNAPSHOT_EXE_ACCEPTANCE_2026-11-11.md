@@ -58,8 +58,11 @@ Runs are serial; Node supervises processes, not guest language execution.
   native GC (24 rounds / 48 collections), and selected JSON (12 files /
   908 assertions) pass.
 - Final snapshot demos 1–8 and all three HTTP examples pass the bounded live
-  application matrix (81.386 seconds). Whole Test262/ECMA/Octane and the
-  snapshot-absent executable matrix are still pending.
+  application matrix (81.386 seconds).
+- Final snapshot complete imported Test262: **3292 / 3292 passed, zero failures,
+  timeouts, skips or not-run tests**; runner **453.320431 seconds**, process
+  wall **453.981 seconds**. Historical ECMA/Octane and the snapshot-absent
+  executable matrix are still pending.
 
 The first interrupted corpus probe used an older preflight image and is not
 counted as a completed suite run. The final frozen-image run is the acceptance
