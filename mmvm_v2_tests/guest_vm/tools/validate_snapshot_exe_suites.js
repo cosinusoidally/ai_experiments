@@ -61,6 +61,7 @@
     job("objects", ["guest_vm/tests/object_operations_integration.js"], "object operations integration passed");
     job("gc", ["guest_vm/tests/gc_stress_workload.js"], "GC stress workload passed: 24 rounds");
     job("json", ["json_runner.js"], "12 passed, 0 failed");
+    jobs.push({name: "apps", external: true, expected: "application matrix finished", seconds: 900});
     job("test262", ["test262_runner.js"], "Test262 ES5.1 summary", 1800);
     job("ecma", ["ecma_tests_runner.js"], "ECMA ES1--ES5.1 corpus summary", 1800);
     var suites = ["Richards", "DeltaBlue", "Crypto", "RayTrace", "EarleyBoyer", "RegExp",
@@ -135,7 +136,10 @@
         var current = jobs[report.nextJob], stem = report.phase + "-" + current.name;
         var logFile = path.join(output, stem + ".log"), metrics = path.join(output, stem + ".time.json");
         var command = report.phase === "snapshot" ? [path.resolve(runner), snapshot] : [executable];
-        command = command.concat(current.args);
+        if (current.external) {
+            command = [process.execPath, "guest_vm/tools/validate_snapshot_exe_apps.js", snapshot,
+                executable, path.join(output, report.phase + "-apps"), "--phase", report.phase];
+        } else command = command.concat(current.args);
         var fd = fs.openSync(logFile, "w"), started = new Date().getTime();
         line("START " + stem + (report.phase === "exe" ? " (source snapshot absent)" : ""));
         var child = cp.spawn("/usr/bin/time", ["-f", '{"wall":%e,"rssKiB":%M}', "-o", metrics,
