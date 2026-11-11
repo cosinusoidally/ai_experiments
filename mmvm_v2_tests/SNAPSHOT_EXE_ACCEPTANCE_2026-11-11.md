@@ -71,7 +71,43 @@ Runs are serial; Node supervises processes, not guest language execution.
   peak RSS **463724 KiB**. The old complete stdout-only baseline log lists
   RUN/PASS but not stderr FAIL lines; its completed RUN-without-PASS files
   are retained as failures in the analysis, not treated as unexecuted tests.
-- Stock Octane and the snapshot-absent executable matrix remain pending.
+- Final snapshot **all 15 stock Octane suites pass**, including RegExp,
+  Mandreel, zlib and Typescript. Scores and process times are below.
+- Genuine self-hosted source rebuild passes in **83.118 seconds** and produces
+  the same snapshot SHA-256 listed above. The rebuild output was removed.
+- The original snapshot was **unlinked at 17:03:42 UTC**. The supervisor
+  records deletion at `2026-11-11T17:03:42.847Z`; independent filesystem checks
+  confirm both the input and rebuild output are absent. The executable-only
+  matrix is now in progress, with absence checked before every job.
+
+## Stock Octane — snapshot phase
+
+These are stock per-suite overall scores (including latency results where the
+suite defines them), not quick-correctness scores. They are single observations,
+not a controlled performance comparison against an earlier VM revision.
+
+| Suite | Score | Process seconds | Result |
+| --- | ---: | ---: | --- |
+| Richards | 84.1 | 3.404 | pass |
+| DeltaBlue | 69.8 | 4.580 | pass |
+| Crypto | 144 | 28.832 | pass |
+| RayTrace | 256 | 10.875 | pass |
+| EarleyBoyer | 438 | 27.779 | pass |
+| RegExp | 2.93 | 561.948 | pass |
+| Splay | 707 | 4.017 | pass |
+| NavierStokes | 273 | 10.082 | pass |
+| PdfJS | 820 | 18.726 | pass |
+| Mandreel | 509 | 106.117 | pass |
+| Gameboy | 1058 | 13.875 | pass |
+| CodeLoad | 98.6 | 28.743 | pass |
+| Box2D | 391 | 14.820 | pass |
+| zlib | 600 | 255.000 | pass |
+| Typescript | 1430 | 100.436 | pass |
+
+The first complete launcher phase takes approximately 43 minutes. Most of
+that is the actual Test262/ECMA/stock Octane workload, including slow regex
+cases and the unchanged ECMA watchdog failures. The second full launcher pass
+is deliberate, not another repeat of an intermediate VM revision.
 
 The first interrupted corpus probe used an older preflight image and is not
 counted as a completed suite run. The final frozen-image run is the acceptance
