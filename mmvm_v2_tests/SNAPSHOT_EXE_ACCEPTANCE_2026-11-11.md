@@ -1,6 +1,7 @@
 # Full snapshot / executable acceptance — 2026-11-11
 
-Status: **in progress**. This file distinguishes completed checks from the
+Status: **paused for user-requested power-down at 17:07 UTC**.
+This file distinguishes completed checks from the
 pending full-corpus results. The earlier packaging-only report is not a full
 suite acceptance claim.
 
@@ -108,6 +109,43 @@ The first complete launcher phase takes approximately 43 minutes. Most of
 that is the actual Test262/ECMA/stock Octane workload, including slow regex
 cases and the unchanged ECMA watchdog failures. The second full launcher pass
 is deliberate, not another repeat of an intermediate VM revision.
+
+## Power-down checkpoint and resume
+
+The supervisor and its active executable Test262 worker were terminated at the
+user's request on 2026-11-11, approximately 17:07 UTC. No tests were left running.
+
+- The entire snapshot phase is complete, including all 15 stock Octane suites
+  and the bit-identical self-hosted rebuild.
+- The input snapshot and rebuild output remain **absent**.
+- Executable-only core, tokenizer, language, objects, GC and JSON checks pass.
+- Executable-only live demos 1–8 and all three HTTP examples pass; application
+  matrix time **79.551 seconds**. Every executable job started with the source
+  snapshot absent.
+- Executable Test262 was interrupted about 52 seconds into its run. It is
+  **not** counted as complete. Executable ECMA, stock Octane and self-build
+  remain pending. The saved checkpoint is phase `exe`, next job index `9`.
+
+Resume from mmvm_v2_tests using the same command; completed jobs are not rerun:
+
+```
+node guest_vm/tools/validate_snapshot_exe_suites.js artifacts/launcher-final.snap artifacts/launcher-final.exe artifacts/launcher-acceptance --ecma-baseline ../../ai_experiments_bak8/mmvm_v2_tests/artifacts/cleanup-full.j9oRH8/ecma-current.log
+```
+
+The first snapshot argument is deliberately a nonexistent path in this phase.
+Keep `artifacts/launcher-final.exe` and `artifacts/launcher-acceptance/` across
+the reboot; they contain the executable and resumable results. The interrupted
+Test262 job restarts, but completed snapshot suites and executable core/apps
+are retained. Do not modify VM sources before the remaining acceptance runs.
+
+After the main sweep, invoke the same command again to refresh the exact-file
+analysis from saved logs (including the completed stdout-only ECMA baseline).
+Additional `--only-programs` acceptance still needs both launchers: structural
+GC, raw FFI, frontend/adoption, native compiler dependencies, demo8 I/O, and the
+three-context demo. Because the main snapshot has been removed, generate a
+fresh temporary snapshot, verify its hash matches the frozen image above, run
+that supplemental two-phase driver, and let it delete the temporary snapshot
+before its executable half. No supplemental pass is claimed yet.
 
 The first interrupted corpus probe used an older preflight image and is not
 counted as a completed suite run. The final frozen-image run is the acceptance
