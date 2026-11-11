@@ -76,7 +76,7 @@ packager. Native contract 102 and standalone format version 2 are unchanged.
 The stack is marked non-executable with `PT_GNU_STACK`. Executable file-backed
 segments use the kernel's private mappings: runtime writes affect private/COW
 pages, not the executable file. Neither the executable nor the source snapshot
-is opened for writing during execution. Output has about 8.6 KiB of packaging
+is opened for writing during execution. Output has about 8.5 KiB of packaging
 overhead, with no compression and no sparse-file allocation tricks.
 
 ## Implementation and safe output
@@ -122,3 +122,6 @@ environment/argument checks, invoke the packager under the generated executable,
 check unchanged ordinary-loader execution, and exercise invalid input,
 no-clobber, and file-immutability behavior. Artifacts, including the launcher
 macro dump, remain beneath a per-process directory in `artifacts/`.
+
+See [the dated acceptance record](snapshot-executable-validation.md) for the
+checks actually completed and their scope.

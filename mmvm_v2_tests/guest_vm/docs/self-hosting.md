@@ -1,5 +1,11 @@
 # Self-hosting and standalone snapshots
 
+An existing standalone snapshot can also be wrapped in a dynamically linked
+i386 executable without a compiler or linker. See
+[Snapshot executables](snapshot-executable.md). This is packaging only: it
+does not change the snapshot format, normal loader, independent linear heap,
+or self-hosted source-rebuild process described here.
+
 Object-library preparation captures private property primitives and installs
 guest-bytecode conversion continuations on the public intrinsics. A shared
 indexed-view descriptor-policy leaf is also loaded from indexed_view_policy.js
