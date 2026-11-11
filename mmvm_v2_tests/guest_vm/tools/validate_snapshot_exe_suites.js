@@ -28,9 +28,16 @@
     }
     function records(log) {
         var result = {}, lines = log.split("\n"), i, match;
+        /* Old completed ECMA logs retained stdout only. Every test has RUN,
+         * while FAIL went to stderr. A completed run's RUN-without-PASS is
+         * therefore a failure, not a missing/implicitly passing result. */
+        var completeECMA = log.indexOf("ECMA ES1--ES5.1 corpus summary") >= 0 &&
+            /not run: 0(?:\s|$)/.test(log);
         for (i = 0; i < lines.length; i++) {
-            match = /^(PASS|FAIL|SKIP) ([^; :]+)(?:[; :]|$)/.exec(lines[i]);
-            if (match) result[match[2]] = match[1];
+            match = /^(PASS|FAIL|SKIP|RUN) ([^; :]+)(?:[; :]|$)/.exec(lines[i]);
+            if (match && (match[1] !== "RUN" || completeECMA)) {
+                result[match[2]] = match[1] === "RUN" ? "FAIL" : match[1];
+            }
         }
         return result;
     }
@@ -116,6 +123,10 @@
                     saved.files = records(fs.readFileSync(path.join(output,
                         saved.phase + "-" + saved.name + ".log"), "utf8"));
                 }
+            }
+            if (args[4] && report.baseline) {
+                if (digest(args[4]) !== report.baseline.sha256) throw new Error("baseline log changed");
+                report.baseline.files = records(fs.readFileSync(args[4], "utf8"));
             }
             compare(); save(); line("completed report comparisons refreshed"); return;
         }

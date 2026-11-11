@@ -2,6 +2,22 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Snapshot/executable acceptance, 2026-11-11 — snapshot pass complete
+
+- Frozen `bfc122f`, native contract 103, complete default standalone snapshot
+  run with TZ=UTC: **1333 selected / 1329 executed / 994 passed / 335 failed**,
+  including **39 timeouts**, **4 configured skips / 0 not run**.
+- Exact filename comparison with the archived complete 990-pass baseline:
+  **990 preserved / 4 gained / 0 lost passes**. The gained files are:
+  ecma/GlobalObject/15.1.2.7.js, ecma_3/Array/regress-387501.js,
+  ecma_5/Object/15.2.3.7-01.js, and ecma_5/Object/propertyIsEnumerable.js.
+- Subtotals (pass/fail): ecma **473/147**, ecma_2 **148/24**, ecma_3
+  **176/49**, ecma_5 **197/115**. Timeout/skip policy and corpus unchanged.
+- Runner **665.285013 seconds**, process wall **666.74 seconds**, peak RSS
+  **463724 KiB**. Failures remain failures, not reclassified passes.
+- The executable-only repeat after unlinking the input snapshot is pending.
+  See [the full acceptance record](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
+
 ### Property-operation cutover, 2026-11-06 — focused progress
 
 - Current standalone protected-Call checkpoint: **13 selected files passed /

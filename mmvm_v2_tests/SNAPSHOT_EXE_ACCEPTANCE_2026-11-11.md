@@ -61,8 +61,17 @@ Runs are serial; Node supervises processes, not guest language execution.
   application matrix (81.386 seconds).
 - Final snapshot complete imported Test262: **3292 / 3292 passed, zero failures,
   timeouts, skips or not-run tests**; runner **453.320431 seconds**, process
-  wall **453.981 seconds**. Historical ECMA/Octane and the snapshot-absent
-  executable matrix are still pending.
+  wall **453.981 seconds**.
+- Final snapshot complete historical ECMA: **994 passed / 335 failed**,
+  including the same **39 timeouts / 4 configured skips / 0 not run**. All
+  **990** baseline passing filenames remain passing; **4** gained passes:
+  ecma/GlobalObject/15.1.2.7.js, ecma_3/Array/regress-387501.js,
+  ecma_5/Object/15.2.3.7-01.js and ecma_5/Object/propertyIsEnumerable.js.
+  Runner **665.285013 seconds**, process wall **666.74 seconds**,
+  peak RSS **463724 KiB**. The old complete stdout-only baseline log lists
+  RUN/PASS but not stderr FAIL lines; its completed RUN-without-PASS files
+  are retained as failures in the analysis, not treated as unexecuted tests.
+- Stock Octane and the snapshot-absent executable matrix remain pending.
 
 The first interrupted corpus probe used an older preflight image and is not
 counted as a completed suite run. The final frozen-image run is the acceptance
