@@ -58,7 +58,9 @@ linear heap independently and resolves its own bindings at startup.
 
 The normal `js_runner.c` loader and snapshot format are unchanged. Shared format
 constants now live in `aot/standalone_format.js`, used by the backend and the
-packager. Native contract 102 and standalone format version 2 are unchanged.
+packager. Packaging does not change the native contract or standalone format.
+The subsequent whole-suite bring-up uses native contract 103 for independent
+Math/String coercion fixes; standalone format version 2 remains unchanged.
 
 ## File layout and mutability
 
@@ -125,3 +127,27 @@ macro dump, remain beneath a per-process directory in `artifacts/`.
 
 See [the dated acceptance record](snapshot-executable-validation.md) for the
 checks actually completed and their scope.
+
+For the full two-launcher sweep, including deletion of the source snapshot
+before **every executable-phase job**:
+
+```
+node guest_vm/tools/validate_snapshot_exe_suites.js artifacts/bar.snap artifacts/bar.exe artifacts/launcher-acceptance
+```
+
+This serial supervisor runs core/GC/JSON checks, the live application matrix,
+complete imported Test262 and historical ECMA, all fifteen stock Octane suites,
+and genuine source rebuilds. It intentionally deletes the supplied snapshot
+after the snapshot phase, so use a reproducible build artifact. It records
+per-job logs, timing/RSS, image hashes and deletion/absence evidence. Reinvoking
+the same command resumes at the last completed job. Do not modify VM sources
+between jobs; a rebuild must use the same source as the loaded image to test
+the fixed point. Existing ECMA failures remain failures, not hidden passes.
+An optional `--ecma-baseline LOG` compares the exact historical filename sets.
+Do not run another heavy suite concurrently.
+
+`validate_snapshot_exe_apps.js SNAP EXE OUTDIR` can also run the bounded graphics
+and HTTP matrix alone, deleting SNAP between its phases. `--only-programs`
+selects the additional structural GC, raw-FFI, frontend, native-compiler,
+demo8 I/O and multi-context programs. `--phase snapshot|exe` lets the full
+supervisor manage deletion itself; executable mode rejects an existing SNAP.

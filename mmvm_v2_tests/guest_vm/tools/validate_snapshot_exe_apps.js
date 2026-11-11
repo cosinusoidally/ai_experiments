@@ -35,6 +35,8 @@
         "Welsh upland rally", "Welsh upland rally"];
     var jobs = [];
     if (programsOnly) {
+    jobs.push({name: "gc-structural", program: ["guest_vm/tests/gc_stress.js"],
+        expected: "GC structural checks passed"});
     jobs.push({name: "raw-ffi", program: ["guest_vm/tests/raw_ffi_file_guest.js"]});
     jobs.push({name: "frontend", program: ["guest_vm/tests/self_hosted_frontend_test.js"]});
     jobs.push({name: "frontend-net", program: ["guest_vm/tests/self_hosted_compile_file.js", "net.js"],
