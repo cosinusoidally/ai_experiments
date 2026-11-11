@@ -10,11 +10,13 @@
     var KernelCompiler = root.GuestVMKernelCompiler;
     var HostFFI = root.GuestVMHostFFI;
     var SnapshotOutput = root.GuestVMSnapshotOutput;
+    var StandaloneFormat = root.GuestVMStandaloneFormat;
     if (typeof module !== "undefined" && module.exports) {
         Assembler = require("./x86_assembler.js");
         KernelCompiler = require("./kernel_compiler.js");
         HostFFI = require("../host_ffi.js");
         SnapshotOutput = require("./snapshot_output.js");
+        StandaloneFormat = require("./standalone_format.js");
     }
 
     function X86Backend(options) {
@@ -367,14 +369,10 @@
     var SNAPSHOT_HEADER_BYTES = 32;
     var SNAPSHOT_OPERAND_MODE_OFFSET = 24;
     var STANDALONE_OPERAND_MODE_OFFSET = 92;
-    var STANDALONE_SNAPSHOT_MAGIC = 0x32535647;
-    var STANDALONE_SNAPSHOT_VERSION = 2;
-    var STANDALONE_HEADER_BYTES = 128;
-    var STANDALONE_HEADER_FIELDS = {magic: 0, version: 4, fileLength: 8,
-        entryOffset: 12, entryLength: 16, codeOffset: 20, codeLength: 24,
-        heapOffset: 28, heapLength: 32, heapCapacity: 36, frameAddress: 40,
-        contextAddress: 44, dlsymCellAddress: 48, compilerVersion: 80,
-        profileMode: 84, sourceHash: 88};
+    var STANDALONE_SNAPSHOT_MAGIC = StandaloneFormat.magic;
+    var STANDALONE_SNAPSHOT_VERSION = StandaloneFormat.version;
+    var STANDALONE_HEADER_BYTES = StandaloneFormat.headerBytes;
+    var STANDALONE_HEADER_FIELDS = StandaloneFormat.fields;
     X86Backend.StandaloneHeaderFields = STANDALONE_HEADER_FIELDS;
     var STANDALONE_ENGINE_BUDGET = 2147483647;
     var ENGINE_EXIT_BUDGET = 1;

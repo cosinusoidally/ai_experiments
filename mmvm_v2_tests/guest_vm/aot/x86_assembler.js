@@ -258,6 +258,14 @@
         if (this.macros) this.macros.push("sub_esp_i32(" + value + ")");
         this.emitBytes2(0x81, 0xec); this.word32(value);
     };
+    Assembler.prototype.addEspImmediate = function (value) {
+        if (this.macros) this.macros.push("add_esp_i32(" + value + ")");
+        this.emitBytes2(0x81, 0xc4); this.word32(value);
+    };
+    Assembler.prototype.undefinedInstruction = function () {
+        if (this.macros) this.macros.push("ud2()");
+        this.emitBytes2(0x0f, 0x0b);
+    };
     Assembler.prototype.movEaxLocal = function (index) {
         var displacement = -(index + 1) * 4;
         if (this.macros) this.macros.push("mov_eax_local(" + index + ")");

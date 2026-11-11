@@ -33,6 +33,8 @@ Start here:
    host callbacks, rooting and lifecycle rules, with runnable examples.
 7. [Commands and maintenance](maintenance.md): runner options, diagnostics,
    tests, compatibility changes and safe development workflows.
+8. [Snapshot executables](snapshot-executable.md): pure-JS ELF packaging,
+   startup ABI, file layout, host support, and validation.
 
 Important current facts:
 
