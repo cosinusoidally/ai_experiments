@@ -298,6 +298,8 @@
          * pretty-printing differs between Node and old SpiderMonkey. */
         loadLibrary("guest_vm/indexed_view_policy.js");
         loadLibrary("guest_vm/object_runtime.js");
+        installFallback(context.globalObject, "String", "__guestStringConvert");
+        installBuiltin(runtime.errorPrototypes.$Error, "toString", "__guestErrorToString", "Error.toString");
         installFallback(objectConstructor, "defineProperty", "__guestObjectDefineProperty");
         installFallback(objectConstructor, "getOwnPropertyDescriptor", "__guestObjectGetOwnPropertyDescriptor");
         installFallback(objectConstructor, "getOwnPropertyNames", "__guestObjectGetOwnPropertyNames");

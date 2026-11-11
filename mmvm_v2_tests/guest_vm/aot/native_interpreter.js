@@ -6825,10 +6825,17 @@
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 stringSupport, platformServices, intrinsicId, pc, opcode,
                 instructions, frame);
-            if (stringConstructorResult === EXIT_UNSUPPORTED) {
+            if (stringConstructorResult === 1) {
+                intrinsicHandled = 1;
+            } else if (stringConstructorResult === EXIT_UNSUPPORTED) {
+                /* Allocation retry is not semantic conversion failure. */
                 return EXIT_UNSUPPORTED;
+            } else {
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
             }
-            if (stringConstructorResult === 1) intrinsicHandled = 1;
         }
         }
         if (intrinsicHandled === 0) {
@@ -7078,6 +7085,13 @@
                 intrinsicArgumentsVector, intrinsicArgumentCount,
                 intrinsicId);
             if (intrinsicHandled === 0) {
+                /* Numeric leaves deliberately decline conversions and ES
+                 * special cases. Public Math callables carry their guest
+                 * algorithm; private numeric leaves have no such closure. */
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }

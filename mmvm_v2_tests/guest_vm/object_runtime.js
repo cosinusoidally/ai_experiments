@@ -38,6 +38,20 @@
     function propertyKey(value) {
         return string(primitive(value, true));
     }
+    this.__guestStringConvert = function (value) {
+        return string(primitive(value, true));
+    };
+    this.__guestErrorToString = function () {
+        "use strict";
+        requireObject(this);
+        var name = this.name;
+        name = name === undefined ? "Error" : string(primitive(name, true));
+        var message = this.message;
+        message = message === undefined ? "" : string(primitive(message, true));
+        if (!name) return message;
+        if (!message) return name;
+        return name + ": " + message;
+    };
     function propertyDescriptor(source) {
         requireObject(source);
         /* An internal descriptor has no inherited fields. The activation and

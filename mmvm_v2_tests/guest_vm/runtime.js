@@ -3042,7 +3042,11 @@
             }, "intrinsic", NativeIntrinsics.IS_NAN));
         this.setGlobal("isFinite", this.makeNativeFunction("isFinite",
             function (receiver, args) {
-                return isFinite(runtime.toNumber(args[0]));
+                /* The semantic implementation also runs inside a guest VM
+                 * during self-hosted embedding. Do not require an outer
+                 * global isFinite callback after guest ToNumber completes. */
+                var number = runtime.toNumber(args[0]);
+                return number === number && number !== Infinity && number !== -Infinity;
             }));
         this.setGlobal("escape", this.makeNativeFunction("escape",
             function (receiver, args) {

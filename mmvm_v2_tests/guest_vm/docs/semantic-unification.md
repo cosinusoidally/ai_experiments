@@ -247,3 +247,33 @@ versus adjacent old-image 122.281/5457.150/149.149/6209.712 ms in the same
 selection order. These are observations, not an aggregate benchmark claim.
 There are no measured new ECMA passes yet. A candidate Node build takes 8.23
 seconds / 299908 KiB; the final source is now frozen for combined acceptance.
+## Standalone acceptance follow-up: conversion handoffs (2026-11-11)
+
+Native contract 103 fixes two missing transitions to existing guest semantic
+algorithms. A numeric Math leaf may decline conversions or special cases;
+the public callable now enters its guest-bytecode implementation rather than
+exiting to an unavailable host. Private numeric leaves have no semantic
+closure, so they still report unsupported input rather than recursively
+calling themselves. Normal numeric fast paths are unchanged.
+
+String's primitive conversion fast path similarly delegates an object input
+it cannot convert to the captured string-hint ToPrimitive algorithm in
+object_runtime.js. That algorithm reuses the same internal Call and primitive
+conversion ordering as property-key conversion. Its final String invocation
+receives a primitive, so it does not recurse on the original object. Allocation
+retry is kept separate from semantic decline and never enters the fallback.
+The successful primitive case does not need an additional fallback check.
+
+Error.prototype.toString is now a guest built-in. It validates its receiver,
+reads/converts name before message, and preserves ES5.1's default/empty-name
+and empty-message rules. This also lets self-hosted embedding checks stringify
+exceptions without an outer JavaScript Error implementation. The semantic
+runtime's isFinite callback completes its numeric check directly after guest
+ToNumber, instead of calling an unavailable outer global function.
+
+These gaps were exposed by executing the existing full embedding/core driver
+inside a standalone snapshot, not by changing its assertions. The preflight
+now completes all 12 language/Buffer programs (270 assertions), embedding,
+heap, native and predecoded interpreter, and structured compiler checks.
+The final two-launcher whole-corpus acceptance is recorded separately; this
+preflight alone is not a full Test262/ECMA/Octane result.
