@@ -3,9 +3,24 @@
 Current implementation: `-g`, independent `-O0`, deterministic bound DWARF,
 executable incorporation and real debugger checks are implemented. Final
 cross-host identity passes both policies, including -O0 self-hosting. Broad
-acceptance is still running; the full Test262 timing caveat remains explicit.
+acceptance outside executable debugging is parked. Executable debug acceptance
+is complete; the full Test262 timing caveat remains explicit.
 See [measured results](kernel-debug-benchmarks.md). Entries below are
 chronological working points, not contradictory descriptions of current API.
+
+## 2026-11-12: executable debug delivery complete
+
+The final delivery is scoped to executable debugging, as requested. See
+[the final acceptance report](kernel-debug-exe-acceptance.md). Both policies
+pass real GDB source/local/unwind checks, including machine-frame boundaries,
+and objdump source disassembly. Both debug executables pass the core suite
+(12 programs / 270 assertions each) and bounded GC stress (24 rounds / 48
+collections each), with their original snapshots and sidecars unlinked.
+Input restoration and unchanged executable hashes are verified afterward.
+Cross-host build/packaging identities were revalidated using the recorded
+source and artifact hashes. No production changes were needed at this final
+acceptance checkpoint. The wider pending benchmark matrix is not claimed
+complete and is not being restarted for this scoped delivery.
 
 ## 2026-11-12: first -O0 working point
 

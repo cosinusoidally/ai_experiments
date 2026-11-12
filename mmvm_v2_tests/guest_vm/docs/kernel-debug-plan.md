@@ -7,6 +7,12 @@ Acceptance and benchmarking progress are recorded in the working-point log.
 Requirements below remain the acceptance checklist, not claims that every
 validation gate has already completed.
 
+Final delivery scope (2026-11-12): the user narrowed completion to debug work
+for executable output. That delivery is complete; see
+[executable acceptance](kernel-debug-exe-acceptance.md). Unfinished broad
+benchmark/demo matrix gates below remain recorded, not silently passed.
+The optional mmap-loaded js_runner debugger workflow remains deferred.
+
 Implementation has started; see [the working-point log](kernel-debug-status.md)
 for the exact implemented subset and completed checks. Until the final gates
 are complete, do not infer support for every proposed interface below.

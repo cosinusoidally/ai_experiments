@@ -139,3 +139,20 @@ scripts are excluded from that identity; production builder/packager sources
 are included. Symlinked source trees are rejected by this developer check,
 not by the production build tools. No executable instructions are loaded from
 a build cache, and every newly requested self-hosted build runs compilation.
+
+For executable consumer checks, run:
+
+```sh
+node guest_vm/tools/check_kernel_debug_gdb.js artifacts/BUILD_DIRECTORY --core
+```
+
+This expects the artifact driver's `node-g`/`node-g-o0` image pairs and
+`debug.exe`. It temporarily unlinks both snapshot/sidecar pairs, runs GDB
+and objdump checks against the executables, then restores and verifies inputs
+in `finally`. Use only disposable generated artifacts: interruption by machine
+failure cannot execute restoration. `--core` additionally runs the core suite
+and bounded GC workload serially under both policies. Without it, only the
+debugger checks run. JSON receipts are `exe-debug-acceptance-core.json` and
+`exe-debug-acceptance.json`, respectively, within that artifact directory.
+Both executable hashes must remain unchanged. See the
+[final executable acceptance report](kernel-debug-exe-acceptance.md).

@@ -1,6 +1,8 @@
 # Kernel debug measurements — 2026-11-12
 
-Status: **acceptance in progress**. This records measured results, including
+Status: **executable debug acceptance complete; broader matrix parked**.
+See [final executable checks](kernel-debug-exe-acceptance.md).
+This records measured results, including
 the performance concern, rather than declaring every planned gate complete.
 Production code is frozen after the on-demand-support change. No C, demo,
 external corpus, test assertion, instruction limit or watchdog policy changed.
