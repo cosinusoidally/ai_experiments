@@ -10,7 +10,7 @@
         attr: {name: 3, location: 2, byteSize: 11, stmtList: 16, lowPC: 17, highPC: 18,
             language: 19, compDir: 27, producer: 37, type: 73, frameBase: 64,
             declFile: 58, declLine: 59, encoding: 62, abstractOrigin: 49,
-            callFile: 88, callLine: 89},
+            callFile: 88, callLine: 89, inline: 32},
         form: {addr: 1, data1: 11, data2: 5, data4: 6, string: 8,
             ref4: 19, secOffset: 23, exprloc: 24},
         op: {reg0: 80, regEBP: 85, fbreg: 145}, languageC: 2,
@@ -18,7 +18,8 @@
             extended: 0, endSequence: 1, setAddress: 2},
         cfi: {advanceLoc4: 4, offset: 128, defCFA: 12, defCFAOffset: 14,
             defCFARegister: 13, restore: 192, rememberState: 10, restoreState: 11, sameValue: 8},
-        reg: {edx: 2, ebx: 3, esp: 4, ebp: 5, esi: 6, edi: 7, eip: 8}, signedEncoding: 5
+        reg: {edx: 2, ebx: 3, esp: 4, ebp: 5, esi: 6, edi: 7, eip: 8},
+        signedEncoding: 5, inlineInlined: 1
     };
 
     function build(debug, codeLength) {
@@ -57,11 +58,19 @@
             A.name,F.string,A.compDir,F.string,A.stmtList,F.secOffset,A.lowPC,F.addr,A.highPC,F.data4]);
         abbreviation(2, D.tag.baseType, false, [A.name,F.string,A.byteSize,F.data1,A.encoding,F.data1]);
         abbreviation(3, D.tag.subprogram, true, [A.name,F.string,A.declFile,F.data4,
-            A.declLine,F.data4,A.lowPC,F.addr,A.highPC,F.data4,A.frameBase,F.exprloc]);
+            A.declLine,F.data4,A.type,F.ref4,A.lowPC,F.addr,A.highPC,F.data4,A.frameBase,F.exprloc]);
         abbreviation(4, D.tag.formalParameter, false, [A.name,F.string,A.type,F.ref4,A.location,F.secOffset]);
         abbreviation(5, D.tag.variable, false, [A.name,F.string,A.type,F.ref4,A.location,F.secOffset]);
         abbreviation(6, D.tag.inlinedSubroutine, false, [A.abstractOrigin,F.ref4,
             A.lowPC,F.addr,A.highPC,F.data4,A.callFile,F.data4,A.callLine,F.data4]);
+        abbreviation(7, D.tag.subprogram, true, [A.name,F.string,A.declFile,F.data4,
+            A.declLine,F.data4,A.type,F.ref4,A.inline,F.data1]);
+        abbreviation(8, D.tag.formalParameter, false, [A.name,F.string,A.type,F.ref4]);
+        abbreviation(9, D.tag.variable, false, [A.name,F.string,A.type,F.ref4]);
+        abbreviation(10, D.tag.subprogram, true, [A.abstractOrigin,F.ref4,
+            A.lowPC,F.addr,A.highPC,F.data4,A.frameBase,F.exprloc]);
+        abbreviation(11, D.tag.formalParameter, false, [A.abstractOrigin,F.ref4,A.location,F.secOffset]);
+        abbreviation(12, D.tag.variable, false, [A.abstractOrigin,F.ref4,A.location,F.secOffset]);
         a.uleb(0);
 
         var line = section(".debug_line"), l = line.writer;
@@ -99,7 +108,22 @@
         l.patch32(0, l.bytes.length - 4);
 
         var locations = section(".debug_loc"), loc = locations.writer;
+        function excludeUnavailable(fn, ranges) {
+            var result = [], index = 0;
+            while (index < ranges.length) {
+                var range = ranges[index++], start = range.start, excluded = 0;
+                while (excluded < fn.unavailableRanges.length) {
+                    var gap = fn.unavailableRanges[excluded++];
+                    if (gap.end <= start || gap.start >= range.end) continue;
+                    if (gap.start > start) result.push({start: start, end: gap.start});
+                    start = Math.max(start, gap.end);
+                }
+                if (start < range.end) result.push({start: start, end: range.end});
+            }
+            return result;
+        }
         function variableLocation(fn, displacement, ranges, register) {
+            ranges = excludeUnavailable(fn, ranges);
             var offset = loc.bytes.length;
             if (ranges.length) {
                 /* Entries below relocate to absolute addresses. Override the
@@ -124,12 +148,45 @@
         address(info, 0); i.u32(codeLength);
         var scalarType = i.bytes.length;
         i.uleb(2); i.string("kernel_i32"); i.u8(4); i.u8(D.signedEncoding);
-        var functionDIEs = {}, originFixups = [];
+        /* Abstract origins have names/types but no concrete machine homes.
+         * Inheriting a concrete callee's parameter locations is unsound for
+         * inlining, especially if a function is inlined into its own body. */
+        var abstractDIEs = {}, abstractBindings = {}, requiredOrigins = {}, originFixups = [];
+        for (index = 0; index < functions.length; index++) {
+            var requiredIndex = 0;
+            while (requiredIndex < functions[index].inlines.length) {
+                requiredOrigins["$" + functions[index].inlines[requiredIndex++].name] = true;
+            }
+        }
         for (index = 0; index < functions.length; index++) {
             fn = functions[index];
-            functionDIEs["$" + fn.name] = i.bytes.length;
-            i.uleb(3); i.string(fn.name); i.u32(fileNumber(fn.location.filename));
-            i.u32(fn.location.line); address(info, fn.start); i.u32(fn.end - fn.start);
+            if (!requiredOrigins["$" + fn.name]) continue;
+            abstractDIEs["$" + fn.name] = i.bytes.length;
+            var bindingDIEs = {parameters: [], locals: []};
+            abstractBindings["$" + fn.name] = bindingDIEs;
+            i.uleb(7); i.string(fn.name); i.u32(fileNumber(fn.location.filename));
+            i.u32(fn.location.line); i.u32(scalarType); i.u8(D.inlineInlined);
+            var abstractBinding;
+            for (abstractBinding = 0; abstractBinding < fn.parameters.length; abstractBinding++) {
+                bindingDIEs.parameters.push(i.bytes.length);
+                i.uleb(8); i.string(fn.parameters[abstractBinding]); i.u32(scalarType);
+            }
+            for (abstractBinding = 0; abstractBinding < fn.locals.length; abstractBinding++) {
+                bindingDIEs.locals.push(i.bytes.length);
+                i.uleb(9); i.string(fn.locals[abstractBinding]); i.u32(scalarType);
+            }
+            i.uleb(0);
+        }
+        for (index = 0; index < functions.length; index++) {
+            fn = functions[index];
+            var abstractOrigin = abstractDIEs["$" + fn.name];
+            bindingDIEs = abstractBindings["$" + fn.name];
+            if (abstractOrigin) { i.uleb(10); i.u32(abstractOrigin); }
+            else {
+                i.uleb(3); i.string(fn.name); i.u32(fileNumber(fn.location.filename));
+                i.u32(fn.location.line); i.u32(scalarType);
+            }
+            address(info, fn.start); i.u32(fn.end - fn.start);
             i.uleb(1); i.u8(D.op.regEBP);
             var binding;
             var parameterRanges = [], rangeStart = fn.bodyStart, unavailable = 0;
@@ -140,13 +197,15 @@
             }
             if (rangeStart < fn.bodyEnd) parameterRanges.push({start: rangeStart, end: fn.bodyEnd});
             for (binding = 0; binding < fn.parameters.length; binding++) {
-                i.uleb(4); i.string(fn.parameters[binding]); i.u32(scalarType);
+                if (bindingDIEs) { i.uleb(11); i.u32(bindingDIEs.parameters[binding]); }
+                else { i.uleb(4); i.string(fn.parameters[binding]); i.u32(scalarType); }
                 i.u32(variableLocation(fn, 8 + binding * 4, parameterRanges, fn.argumentRegisters[binding]));
             }
             for (binding = 0; binding < fn.locals.length; binding++) {
-                i.uleb(5); i.string(fn.locals[binding]); i.u32(scalarType);
-                i.u32(variableLocation(fn, -(binding + 1) * 4,
-                    fn.localRanges ? fn.localRanges[binding] : []));
+                if (bindingDIEs) { i.uleb(12); i.u32(bindingDIEs.locals[binding]); }
+                else { i.uleb(5); i.string(fn.locals[binding]); i.u32(scalarType); }
+                i.u32(variableLocation(fn, fn.localDisplacements[binding],
+                    fn.localRanges ? fn.localRanges[binding] : [], fn.localRegisters[binding]));
             }
             var inlineIndex = 0;
             while (inlineIndex < fn.inlines.length) {
@@ -160,7 +219,7 @@
         }
         i.uleb(0); i.patch32(0, i.bytes.length - 4);
         for (index = 0; index < originFixups.length; index++) {
-            var fixup = originFixups[index], origin = functionDIEs["$" + fixup.name];
+            var fixup = originFixups[index], origin = abstractDIEs["$" + fixup.name];
             if (!origin) throw new Error("missing DWARF inline origin: " + fixup.name);
             i.patch32(fixup.offset, origin);
         }

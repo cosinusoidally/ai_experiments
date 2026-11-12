@@ -26,8 +26,9 @@ example, using an existing bootstrap image:
 It records canonical source provenance without changing generated instructions.
 `-O0` is independent and may be used without `-g`. Optimization is a build-time
 property of the image, not a runtime switch for an already compiled image.
-Existing executables without debug incorporation and ordinary `js_runner`
-snapshot loading remain supported. The packager still refuses to overwrite an
+Executables without debug incorporation and ordinary `js_runner` snapshot
+loading remain supported. Both packager modes describe exact code/heap ranges
+without moving load segments or snapshot bytes. The packager refuses to overwrite an
 existing output. Sidecars are never loaded implicitly by the runtime.
 
 ## Debugger use and limitations
@@ -60,10 +61,13 @@ This may under-report availability after a loop or a branch that cannot return.
 It must not show an uninitialized slot as a source value.
 
 Optimized parameters have register or canonical stack locations; tail-frame
-replacement ranges are unavailable. Optimized locals are currently reported
-as optimized out: the allocator reuses slots and registers, and its summary
-is not sufficient to reconstruct every binding's lifetime. Inline call ranges
-retain their callee origin and source call site. Use `-O0` when inspecting or
+replacement ranges are unavailable. Optimized locals use conservative ownership
+ranges: reuse invalidates the previous binding, joins intersect ownership, and
+loops discard uncertain backedge ownership. Register-resident values use their
+actual register (EDX uses its write-through canonical home). Callers containing
+inlined early returns currently leave locals unavailable; their full control
+flow needs richer lifetime analysis. Inline ranges retain their callee origin
+and source call site. Use `-O0` when inspecting or
 editing named locals is important. Source stepping is statement-level; several
 instructions and inline helpers may correspond to the same statement.
 
@@ -121,3 +125,13 @@ a failed build must not be treated as a complete artifact pair.
 See [the implementation/validation log](kernel-debug-status.md) for completed
 checks and remaining acceptance gates, and [the original plan](kernel-debug-plan.md)
 for the requested benchmark and reproducibility matrix.
+
+Developer acceptance tools run heavy jobs serially. The artifact driver accepts
+`--build-only`, `--all-hosts`, `--directory artifacts/NAME` and `--resume-builds`.
+Resume verifies a recorded SHA-256 of project JavaScript source contents as
+well as every reused snapshot/sidecar hash. It rejects changed sources and old
+reports without a source identity. The three supervisory debug/benchmark driver
+scripts are excluded from that identity; production builder/packager sources
+are included. Symlinked source trees are rejected by this developer check,
+not by the production build tools. No executable instructions are loaded from
+a build cache, and every newly requested self-hosted build runs compilation.

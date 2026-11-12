@@ -146,7 +146,8 @@
             location: ir.debugLocation, parameters: ir.parameters.slice(0),
             locals: ir.locals.slice(0), start: assembler.length,
             optimization: ir.optimization || "default", lines: [], cfi: [], availability: [],
-            argumentRegisters: [], unavailableRanges: [], inlines: []} : null;
+            argumentRegisters: [], localRegisters: [], localDisplacements: [],
+            unavailableRanges: [], inlines: []} : null;
         state.debug = debug;
         if (debug) {
             var argumentIndex = 0;
@@ -155,12 +156,20 @@
                 argumentIndex++;
             }
         }
-        if (debug && debug.optimization === "none") DebugLocations.prepare(ir.body);
+        if (debug) debug.tracksLocals = DebugLocations.prepare(ir.body,
+            ir.localStorage ? ir.localStorage.slots : null, debug.optimization !== "none");
         assembler.pushEbp();
         if (debug) debug.pushedFrame = assembler.length;
         assembler.movEbpEsp();
         if (debug) debug.establishedFrame = assembler.length;
         reserveKernelLocals(assembler, ir, state);
+        if (debug) {
+            var localIndex = 0;
+            while (localIndex < ir.locals.length) {
+                debug.localRegisters.push(kernelRegister(state, "local", localIndex) || null);
+                debug.localDisplacements.push(localDisplacement(state, localIndex++));
+            }
+        }
         saveKernelRegisters(assembler, state.preserveEdx, debug);
         initializeKernelArgumentRegisters(assembler, state.registerMap);
         if (debug) debug.bodyStart = assembler.length;
@@ -168,7 +177,7 @@
         assembler.movEaxImmediate(0);
         assembler.label(state.returnLabel);
         if (debug) debug.bodyEnd = assembler.length;
-        if (debug && debug.optimization === "none") DebugLocations.finish(debug);
+        if (debug && debug.tracksLocals) DebugLocations.finish(debug);
         restoreKernelRegisters(assembler, state.preserveEdx, debug);
         assembler.leave();
         if (debug) debug.leftFrame = assembler.length;
@@ -1042,7 +1051,7 @@
                 });
                 dwarf.sections.push({name: ".guestvm.debug", bytes: codeDigest, relocations: []});
                 debugBytes = DebugELF.build(dwarf);
-                output.write32(header.debugVersion, 1);
+                output.write32(header.debugVersion, StandaloneFormat.debugBindingVersion);
                 output.write32(header.debugLength, debugBytes.length);
                 output.copyBytes(header.debugDigest, DebugDigest.bytes(debugBytes));
             }
@@ -1440,7 +1449,6 @@
         var storage = ir.localStorage;
         state.localSlots = storage ? storage.slots.slice(0) : null;
         var localWords = storage ? storage.storageCount : ir.locals.length;
-        if (state.debug) state.debug.localWords = localWords;
         if ((state.dispatchStrategy === "indexed" ||
              state.dispatchStrategy === "replicated") && containsOpcodeDispatch(ir.body)) {
             state.dispatchBaseLocal = ir.locals.length;
@@ -1448,6 +1456,7 @@
             localWords++;
             state.dispatchBaseLabel = state.returnLabel + "_dispatch_base";
         }
+        if (state.debug) state.debug.localWords = localWords;
         if (localWords) assembler.subEspImmediate(localWords * WORD_BYTES);
         if (state.dispatchBaseLabel) {
             /* Discover the relocated address once per invocation, not once

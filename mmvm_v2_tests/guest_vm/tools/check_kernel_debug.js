@@ -39,7 +39,7 @@
                 }
                 index++;
             }
-            var functions = result.debug.functions, lines = 0;
+            var functions = result.debug.functions, lines = 0, trackedLocals = 0;
             index = 0;
             while (index < functions.length) {
                 var fn = functions[index++], row = 0;
@@ -58,9 +58,32 @@
                     }
                     lines++;
                 }
+                if (fn.localRanges) {
+                    var storage = {}, local = 0;
+                    while (local < fn.localRanges.length) {
+                        var ranges = fn.localRanges[local], slot = "$" + fn.localDisplacements[local];
+                        if (!storage[slot]) storage[slot] = [];
+                        for (var r = 0; r < ranges.length; r++) {
+                            storage[slot].push({start: ranges[r].start, end: ranges[r].end, owner: local});
+                        }
+                        if (ranges.length) trackedLocals++;
+                        local++;
+                    }
+                    for (slot in storage) {
+                        if (!Object.prototype.hasOwnProperty.call(storage, slot)) continue;
+                        var owners = storage[slot];
+                        owners.sort(function (left, right) { return left.start - right.start; });
+                        for (r = 1; r < owners.length; r++) {
+                            if (owners[r].start < owners[r-1].end && owners[r].owner !== owners[r-1].owner) {
+                                throw new Error("debugger exposes reused storage to two locals: " + fn.name);
+                            }
+                        }
+                    }
+                }
             }
             report(policy + ": unchanged " + result.length + " code bytes; " +
-                functions.length + " canonical functions; " + lines + " statement positions");
+                functions.length + " canonical functions; " + lines + " statement positions; " +
+                trackedLocals + " locals with safe availability ranges");
             var dwarf = DWARF.build(result.debug, result.length);
             var sidecar = ELF.build(dwarf);
             var relocated = ELF.relocate(sidecar, 0x10000000, result.length);

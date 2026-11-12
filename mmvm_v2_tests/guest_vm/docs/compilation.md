@@ -151,10 +151,8 @@ The interpreter now reads fields already exported by HeapRecords through its
 own `RecordLayout` namespace, rather than redeclaring their literal offsets or
 zero-valued placeholders in the dispatch body. Its constructor still supplies
 canonical scalar bindings for accessor dependencies, but does not repeat those
-bindings individually in the options object. This migration is deliberately
-partial: older offsets not yet exported and algorithm declarations
-remain in legacy mode below.
-The next cutover removes copied opcode/intrinsic IDs and runtime-support slot
+bindings individually in the options object. The completed cutover removed
+copied opcode/intrinsic IDs and runtime-support slot
 placeholders from the dispatch graph. It reads `Bytecode`, `NativeIntrinsics`
 and `RuntimeSupportLayout` as explicit lexical namespaces. Imported helpers
 that still use scalar names receive the same canonical values explicitly;
@@ -163,10 +161,9 @@ they no longer depend on ID declarations in `interpreterKernel`.
 `nativeKernelBindings(profileOpcodes, recordConstants, operandPredecode)` owns
 the integer configuration used by graph compilation and build fingerprinting.
 It collects canonical tables once, alongside explicit mode-dependent values.
-The same table feeds the temporary legacy overrides; the constructor no longer
-reassembles a partially overlapping bindings table. This does not make the
-remaining legacy local declarations standard JavaScript: removing that mode is
-still pending.
+The constructor no longer reassembles a partially overlapping bindings table.
+Legacy overrides and constant-local semantics have been removed; local
+declarations retain ordinary mutable JS semantics.
 The collector-driving native entry has also dropped its zero-valued layout
 placeholders. The post-GC minimum headroom is defined once by `Heap.GCPolicy`
 and exported through HeapRecords for the compiled path, rather than copied

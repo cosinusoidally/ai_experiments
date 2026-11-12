@@ -4,10 +4,47 @@
 (function () {
     var fs = require("fs"), cp = require("child_process"), crypto = require("crypto");
     var directory = "artifacts/kernel-debug-acceptance";
+    var directoryOption = process.argv.indexOf("--directory");
+    if (directoryOption !== -1) directory = process.argv[directoryOption + 1];
+    var buildOnly = process.argv.indexOf("--build-only") !== -1;
+    var resumeBuilds = process.argv.indexOf("--resume-builds") !== -1;
     var allHosts = process.argv.indexOf("--all-hosts") !== -1;
+    for (var optionIndex = 2; optionIndex < process.argv.length; optionIndex++) {
+        var option = process.argv[optionIndex];
+        if (option === "--directory") {
+            if (!process.argv[++optionIndex]) throw new Error("--directory needs a path");
+        } else if (option !== "--build-only" && option !== "--resume-builds" && option !== "--all-hosts") {
+            throw new Error("unknown check option: " + option);
+        }
+    }
     if (!fs.existsSync(directory)) fs.mkdirSync(directory);
-    var report = {builds: [], executions: [], checks: []};
+    var report = resumeBuilds ? JSON.parse(fs.readFileSync(directory + "/results.json", "utf8")) :
+        {builds: [], executions: [], checks: []};
     function hash(bytes) { return crypto.createHash("sha256").update(bytes).digest("hex"); }
+    function sourceIdentity() {
+        var digest = crypto.createHash("sha256");
+        function visit(path) {
+            var stat = fs.lstatSync(path);
+            if (stat.isSymbolicLink()) throw new Error("source identity requires ordinary files/directories: " + path);
+            if (stat.isDirectory()) {
+                var entries = fs.readdirSync(path).sort();
+                for (var i = 0; i < entries.length; i++) {
+                    if (entries[i] !== "artifacts" && entries[i] !== ".git" && entries[i] !== "node_modules") {
+                        visit(path === "." ? entries[i] : path + "/" + entries[i]);
+                    }
+                }
+            } else if (/\.js$/.test(path) && path !== "guest_vm/tools/check_kernel_debug_artifacts.js" &&
+                path !== "guest_vm/tools/check_kernel_debug_gdb.js" && path !== "guest_vm/tools/benchmark_kernel_debug.js") {
+                digest.update(path + "\u0000"); digest.update(fs.readFileSync(path));
+            }
+        }
+        visit("."); return digest.digest("hex");
+    }
+    var sources = sourceIdentity();
+    if (resumeBuilds && report.sourceSHA256 !== sources) {
+        throw new Error("cannot resume: source contents changed or no source identity was recorded");
+    }
+    report.sourceSHA256 = sources;
     function run(name, command, args) {
         var start = new Date().getTime();
         console.log("RUN " + name);
@@ -37,8 +74,25 @@
     }
     function build(name, host, prefix, options) {
         var path = directory + "/" + name + ".snap";
+        if (sourceIdentity() !== report.sourceSHA256) throw new Error("sources changed during build matrix");
+        if (resumeBuilds) {
+            for (var previousIndex = 0; previousIndex < report.builds.length; previousIndex++) {
+                var previous = report.builds[previousIndex];
+                if (previous.name === name) {
+                    if (image(path).sha256 !== previous.image.sha256 ||
+                        (previous.debugSHA256 && hash(fs.readFileSync(path + ".dbg")) !== previous.debugSHA256)) {
+                        throw new Error("resume artifact changed: " + name);
+                    }
+                    console.log("RESUME build " + name); return previous;
+                }
+            }
+            if (name.indexOf("node-") === 0 || name === "renamed") {
+                throw new Error("--resume-builds needs completed Node builds: " + name);
+            }
+        }
         var result = run(name, host, prefix.concat(["guest_runner.js", "--vm-native"], options,
             ["--snapshot", path]));
+        if (sourceIdentity() !== report.sourceSHA256) throw new Error("sources changed during " + name);
         result.image = image(path);
         if (options.indexOf("-g") !== -1) {
             var debug = fs.readFileSync(path + ".dbg");
@@ -82,7 +136,21 @@
         run("package-self", "./" + executable, [tool, directory + "/node-g.snap", shellExe,
             "--debug-info", directory + "/node-g.snap.dbg"]);
         check(hash(fs.readFileSync(executable)) === hash(fs.readFileSync(shellExe)), "Node/self-hosted executable identity");
+        var minimalO0 = build("js-min-g-o0", jsMin, [], ["-g", "-O0"]);
+        check(debugO0.image.sha256 === minimalO0.image.sha256 && debugO0.debugSHA256 === minimalO0.debugSHA256,
+            "Node/js_min -O0 snapshot and sidecar identity");
+        var selfO0 = build("self-g-o0", "./" + executable, [], ["-g", "-O0"]);
+        check(debugO0.image.sha256 === selfO0.image.sha256 && debugO0.debugSHA256 === selfO0.debugSHA256,
+            "optimized host builds identical -O0 snapshot and sidecar");
+        var o0Executable = directory + "/debug-o0.exe";
+        if (fs.existsSync(o0Executable)) fs.unlinkSync(o0Executable);
+        run("package-o0", process.execPath, [tool, directory + "/node-g-o0.snap", o0Executable,
+            "--debug-info", directory + "/node-g-o0.snap.dbg"]);
+        var ownO0 = build("self-o0-host", "./" + o0Executable, [], ["-g", "-O0"]);
+        check(debugO0.image.sha256 === ownO0.image.sha256 && debugO0.debugSHA256 === ownO0.debugSHA256,
+            "-O0 host genuinely rebuilds identical -O0 snapshot and sidecar");
     }
+    if (buildOnly) { save(); console.log("kernel debug build checks passed: " + directory + "/results.json"); return; }
     var loader = process.env.JS_RUNNER_BINARY || "./artifacts/js_runner.exe";
     var policies = ["node-default", "node-g", "node-o0", "node-g-o0"];
     for (var p = 0; p < policies.length; p++) {
@@ -97,11 +165,11 @@
         }
     }
     /* The debug executable must also work with its input snapshot absent. */
-    var snap = directory + "/node-g.snap", saved = snap + ".saved";
-    fs.renameSync(snap, saved);
+    var snap = directory + "/node-g.snap";
+    fs.unlinkSync(snap);
     try {
         report.executions.push(run("exe-no-snapshot-core", "./" + executable,
             ["guest_vm/tests/run_tests.js"]));
-    } finally { fs.renameSync(saved, snap); }
+    } finally { fs.writeFileSync(snap, fs.readFileSync(directory + "/renamed.snap")); }
     save(); console.log("kernel debug artifact checks passed; results: " + directory + "/results.json");
 }());

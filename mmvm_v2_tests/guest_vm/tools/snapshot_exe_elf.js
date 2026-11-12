@@ -59,6 +59,8 @@
                 field("fileLength") !== length ||
                 field("entryOffset") < format.headerBytes ||
                 field("entryOffset") >= field("codeOffset") ||
+                field("entryLength") === 0 ||
+                field("entryLength") > field("codeOffset") - field("entryOffset") ||
                 field("codeOffset") >= field("heapOffset") ||
                 field("codeLength") > field("heapOffset") - field("codeOffset") ||
                 field("heapOffset") > length ||
@@ -195,7 +197,7 @@
         }
         sections.push({}); // SHN_UNDEF
         section(".interp", ELF.progbits, ELF.alloc, LAYOUT.interpreter, interpreter.length, 1);
-        section(".text", ELF.progbits, ELF.alloc | ELF.executableSection,
+        section(".text.launcher", ELF.progbits, ELF.alloc | ELF.executableSection,
             LAYOUT.start, LAYOUT.main + code.main.length - LAYOUT.start, 16);
         section(".dynstr", ELF.strtab, ELF.alloc, stringOffset, strings.length, 1);
         section(".dynsym", ELF.symtab, ELF.alloc, symbolOffset, symbols.length * SYMBOL_BYTES, 4, 3, SYMBOL_BYTES);
@@ -206,22 +208,24 @@
             LAYOUT.dynamic, dynamicEntries.length * DYN.bytes, 4, 3, DYN.bytes);
         suffixOffset = LAYOUT.snapshot + length;
         var suffixCursor = suffixOffset;
-        if (!debug) {
-            section(".snapshot", ELF.progbits, ELF.alloc | ELF.writable | ELF.executableSection,
-                LAYOUT.snapshot, length, ELF.page);
-        } else {
-            var kernelOffset = read32(header, format.fields.codeOffset);
-            var kernelLength = read32(header, format.fields.codeLength);
-            var heapOffset = read32(header, format.fields.heapOffset);
-            section(".snapshot.header", ELF.progbits, ELF.alloc | ELF.writable,
-                LAYOUT.snapshot, format.headerBytes, 1);
-            section(".snapshot.bootstrap", ELF.progbits, ELF.alloc | ELF.executableSection,
-                LAYOUT.snapshot + format.headerBytes, kernelOffset - format.headerBytes, 1);
-            var kernelSectionIndex = sections.length;
-            section(".text.kernel", ELF.progbits, ELF.alloc | ELF.executableSection,
-                LAYOUT.snapshot + kernelOffset, kernelLength, 1);
-            section(".snapshot.heap", ELF.progbits, ELF.alloc | ELF.writable,
-                LAYOUT.snapshot + heapOffset, length - heapOffset, 1);
+        var kernelOffset = read32(header, format.fields.codeOffset);
+        var kernelLength = read32(header, format.fields.codeLength);
+        var heapOffset = read32(header, format.fields.heapOffset);
+        var bootstrapEnd = entryOffset + read32(header, format.fields.entryLength);
+        section(".snapshot.header", ELF.progbits, ELF.alloc | ELF.writable,
+            LAYOUT.snapshot, entryOffset, 1);
+        section(".text.bootstrap", ELF.progbits, ELF.alloc | ELF.executableSection,
+            LAYOUT.snapshot + entryOffset, bootstrapEnd - entryOffset, 1);
+        section(".snapshot.bindings", ELF.progbits, ELF.alloc | ELF.writable,
+            LAYOUT.snapshot + bootstrapEnd, kernelOffset - bootstrapEnd, 1);
+        var kernelSectionIndex = sections.length;
+        section(".text.kernel", ELF.progbits, ELF.alloc | ELF.executableSection,
+            LAYOUT.snapshot + kernelOffset, kernelLength, 1);
+        section(".snapshot.padding", ELF.progbits, ELF.alloc,
+            LAYOUT.snapshot + kernelOffset + kernelLength, heapOffset - kernelOffset - kernelLength, 1);
+        section(".snapshot.heap", ELF.progbits, ELF.alloc | ELF.writable,
+            LAYOUT.snapshot + heapOffset, length - heapOffset, 1);
+        if (debug) {
             function appendSection(name, type, bytes, alignment, link, entrySize) {
                 var position = align(suffixCursor, alignment);
                 while (suffix.length < position - suffixOffset) suffix.push(0);

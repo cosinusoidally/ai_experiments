@@ -93,7 +93,7 @@
             var offset=read32(bytes,at+S.offset),length=read32(bytes,at+S.size);
             var name=string(names+read32(bytes,at+S.name));
             if(type!==E.nobits && offset+length>bytes.length)throw new Error("truncated debug section");
-            var section={name:name,type:type,bytes:bytes.slice(offset,offset+length),
+            var section={name:name,type:type,bytes:type === E.nobits ? [] : bytes.slice(offset,offset+length),
                 target:read32(bytes,at+S.info), link:read32(bytes,at+S.link)};
             sections.push(section);
             if(name===".text"&&length!==codeLength)throw new Error("debug kernel size mismatch");

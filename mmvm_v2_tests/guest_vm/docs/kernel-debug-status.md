@@ -89,3 +89,55 @@ The unchanged optimized code SHA-256 remains
 `3ef0776560227fa90a3acaca5af7a2e1fa83ae6f8f8144f9b94d8905084faedd`.
 Other runtime configurations, the full final matrix and the benchmark report
 remain pending at this checkpoint.
+
+## 2026-11-12: optimized ownership and consumer refinements
+
+The optimized pass now tracks logical ownership of physical local storage,
+including actual register locations and EDX's canonical write-through home.
+Reused slots invalidate prior bindings, joins intersect ownership, and loops
+drop uncertain backedge ownership. Inline callers conservatively keep locals
+unavailable until richer return-edge analysis exists. The full-graph check
+also verifies that two bindings never simultaneously claim reused storage.
+
+Both executable modes now expose exact launcher/bootstrap/kernel code sections
+and non-executable header/binding/padding/heap sections, without moving any
+PT_LOAD or changing snapshot payloads. Sidecar relocation does not materialize
+the NOBITS code section as a spurious copy of debug data. The binding version
+has one authoritative definition in the shared snapshot format.
+
+The first four-policy runtime matrix completed successfully: every policy
+passes the existing core suite, native GC workload and stock Richards. The
+debug executable also passes the core suite with its input snapshot path
+absent. Real GDB verifies that editing an initialized -O0 local changes later
+native computation, alongside live parameters, native/inline backtraces,
+normal program exit and source-interleaved GDB/objdump disassembly.
+
+An optimized-ownership self-host bring-up exposed a native dynamic negative
+array-index lookup limitation: the range builder read its empty list at -1.
+The builder now explicitly checks for a predecessor, avoiding an unnecessary
+out-of-range lookup. The self-hosted build completes after this correction.
+This is not a claim that the independent general negative-key VM limitation
+has been implemented or that language tests were changed to work around it.
+
+Pre-debug Node build control at `b93e08e`: 10.19 s user CPU / 9.40 s wall,
+315884 KiB peak RSS. The first new default build observed 10.07 s user CPU /
+12.90 s wall, 316176 KiB RSS; the subsequent default build observed 10.20 s CPU /
+9.47 s wall. No CPU build regression is apparent; wall-clock variance is why
+the final short controls use serial interleaved repetitions.
+
+The final expanded build matrix is running. It includes both debug policies
+on Node/js_min/optimized self-host, plus an -O0 host rebuilding itself. The
+complete corpus/stock-suite report remains a separate pending acceptance gate.
+
+The final metadata review additionally clips optimized local ranges across
+tail-frame teardown and gives inline functions separate abstract-origin DIEs,
+without inheriting a concrete callee's machine homes. Native return types are
+explicit i32. The high-level graph check confirms 333 optimized locals and
+2794 -O0 locals with conservative availability, unchanged native instructions,
+and no simultaneous claims on a reused slot.
+
+GDB consumer checks pass after these changes, including initialized optimized
+locals in the number formatter while its uninitialized bindings remain
+unavailable. The earlier ambiguous developer `--cross-host-only` option has
+been replaced by `--resume-builds`, guarded by source-content identity and
+artifact hashes. Final cross-host checks are running on that frozen source set.

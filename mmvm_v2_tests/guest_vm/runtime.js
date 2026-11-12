@@ -369,6 +369,12 @@
         this.nativeOperandPredecode = !!options.nativeOperandPredecode;
         this.kernelOptimization = options.kernelOptimization || "default";
         this.kernelSourceReader = options.kernelSourceReader || null;
+        if (this.kernelSourceReader && typeof this.kernelSourceReader !== "function") {
+            throw new TypeError("kernelSourceReader must be a function");
+        }
+        if (this.kernelSourceReader && options.withSnapshot) {
+            throw new Error("kernel debug provenance requires fresh compilation, not withSnapshot");
+        }
         if (this.kernelOptimization !== "default" && this.kernelOptimization !== "none") {
             throw new RangeError("unknown kernel optimization policy: " + this.kernelOptimization);
         }

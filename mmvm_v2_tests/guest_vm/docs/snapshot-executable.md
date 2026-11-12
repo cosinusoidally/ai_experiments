@@ -2,8 +2,8 @@
 
 Optional DWARF incorporation uses `--debug-info INPUT.snap.dbg`. See
 [kernel-debugging.md](kernel-debugging.md) for `-g`/`-O0`, debugger use,
-binding validation and variable-availability limitations. Omitting this option
-preserves the ordinary executable layout.
+binding validation and variable-availability limitations. Both modes expose
+precise code/data section ranges without moving payloads or load segments.
 
 `guest_vm/tools/snapshot_to_exe.js` wraps an existing version-2 standalone
 snapshot in an i386 ELF executable. It does not compile the VM, regenerate its
@@ -79,7 +79,8 @@ Math/String coercion fixes; standalone format version 2 remains unchanged.
   loader, whose bootstrap patches process-local bindings in the image.
 - After the payload: section names and ELF section headers, not mapped as
   another load segment. Named sections expose the launcher, dynamic metadata,
-  and `.snapshot`; the snapshot's own inspectable contents are retained.
+  and precise bootstrap/kernel/header/binding/padding/heap ranges. Only the
+  actual code sections have SHF_EXECINSTR; the full snapshot remains retained.
 
 The stack is marked non-executable with `PT_GNU_STACK`. Executable file-backed
 segments use the kernel's private mappings: runtime writes affect private/COW

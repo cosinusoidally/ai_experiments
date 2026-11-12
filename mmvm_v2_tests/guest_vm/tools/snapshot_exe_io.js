@@ -103,7 +103,7 @@
                 var debugDescriptor = io.openInput(debugPath), debugBytes = [];
                 try {
                     var debugLength = io.length(debugDescriptor);
-                    if (elf.read32(header, format.fields.debugVersion) !== 1 ||
+                    if (elf.read32(header, format.fields.debugVersion) !== format.debugBindingVersion ||
                         debugLength !== elf.read32(header, format.fields.debugLength) ||
                         debugLength > 64 * 1024 * 1024) throw new Error("invalid debug binding/length");
                     while (debugBytes.length < debugLength) {

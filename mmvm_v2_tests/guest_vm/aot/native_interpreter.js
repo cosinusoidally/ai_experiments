@@ -18472,11 +18472,14 @@
                 },
                 timings: loweringTimings
             };
+            if (runtime.kernelSourceReader) {
+                var provenanceStarted = new Date().getTime();
+                compilerOptions.debugSources = new KernelSources(runtime.kernelSourceReader);
+                if (runtime.nativeSnapshotWrite) reportSnapshot("resolved canonical kernel debug sources in " +
+                    (new Date().getTime() - provenanceStarted) + " ms");
+            }
             var graphLoweringStarted = runtime.nativeSnapshotWrite ?
                 new Date().getTime() : 0;
-            if (runtime.kernelSourceReader) {
-                compilerOptions.debugSources = new KernelSources(runtime.kernelSourceReader);
-            }
             this.ir = kernelCompiler.compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
             if (runtime.nativeSnapshotWrite) {
