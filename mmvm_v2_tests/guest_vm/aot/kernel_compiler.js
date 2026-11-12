@@ -354,13 +354,14 @@
         }
         var graph = {kernelGraph: true, entry: entryName, functions: compiled,
                      signatures: signatures, preparation: preparation};
-        inlineSmallCalls(graph);
+        if (options.optimization !== "none") inlineSmallCalls(graph);
         if (!KernelSlots || typeof KernelSlots.allocate !== "function") {
             throw new Error("kernel stack-storage allocator is not loaded");
         }
         var storageIndex = 0;
         while (storageIndex < graph.functions.length) {
-            KernelSlots.allocate(graph.functions[storageIndex++], KernelCompiler.buildControlFlow);
+            if (options.optimization === "none") storageIndex++;
+            else KernelSlots.allocate(graph.functions[storageIndex++], KernelCompiler.buildControlFlow);
         }
         return graph;
     };
@@ -965,7 +966,7 @@
         if (!fn || fn.type !== "FunctionExpression") {
             throw new SyntaxError("kernel source must contain one function");
         }
-        if (needsControlFlow(fn.body.body) || options.kernelFunctions ||
+        if (options.optimization === "none" || needsControlFlow(fn.body.body) || options.kernelFunctions ||
             options.constantBindings || options.constantNamespaces) {
             return compileControlFlow(fn, source, options, timings, scopeConstructor);
         }
@@ -1116,8 +1117,8 @@
         var lowerStarted = timings ? new Date().getTime() : 0;
         /* Validate/lower both branches first. Configuration constants must
          * not make unsupported source syntax disappear from validation. */
-        var body = combineStoreRuns(pruneConstantBranches(
-            lowerStatements(fn.body.body, symbols)));
+        var body = lowerStatements(fn.body.body, symbols);
+        if (options.optimization !== "none") body = combineStoreRuns(pruneConstantBranches(body));
         if (timings) timings.lower = new Date().getTime() - lowerStarted;
         var registerPreferences = resolveRegisterPreferences(
             options.registerPreferences || [], symbols);
@@ -1125,7 +1126,8 @@
                 locals: localNames, resultType: "i32", body: body,
                 controlFlow: true, source: source,
                 registerPreferences: registerPreferences};
-        forwardSingleUseLocals(ir);
+        if (options.optimization === "none") ir.optimization = "none";
+        else forwardSingleUseLocals(ir);
         return ir;
     }
 
@@ -1417,6 +1419,10 @@
     }
 
     function validateConstantOptions(options) {
+        if (options.optimization !== undefined && options.optimization !== "default" &&
+                options.optimization !== "none") {
+            throw new RangeError("unknown kernel optimization policy: " + options.optimization);
+        }
         if (options.legacyConstantLocals !== undefined ||
                 options.constantOverrides !== undefined) {
             throw new SyntaxError("legacy kernel constant-local options were removed; " +

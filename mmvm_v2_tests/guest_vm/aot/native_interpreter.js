@@ -18407,6 +18407,7 @@
                  * the executable contract without changing kernel source. */
                 compilerVersion: HeapRecords.NativeInterpreterContractVersion,
                 operandMode: runtime.nativeOperandPredecode ? 1 : 0,
+                optimizationMode: runtime.kernelOptimization === "none" ? 1 : 0,
                 profileMode: runtime.profileOpcodeCounts ? 1 : 0,
                 sourceHash: snapshotNeedsSource ?
                     preparedKernelSource.fingerprint : 0,
@@ -18439,6 +18440,7 @@
                 reportSnapshot("lowering native interpreter kernel");
             }
             var compilerOptions = {
+                optimization: runtime.kernelOptimization,
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
                 constantNamespaces: {

@@ -32,6 +32,7 @@ var guestRunnerVerifyHeap = false;
 var guestRunnerThreaded = false;
 var guestRunnerNative = false;
 var guestRunnerPredecode = false;
+var guestRunnerKernelOptimization = "default";
 var guestRunnerSnapshot = null;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
@@ -115,6 +116,9 @@ for (var guestRunnerOptionIndex = 0;
         guestRunnerMaxHeapBytes = guestRunnerHeapMiB * 1024 * 1024;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-threaded") {
         guestRunnerThreaded = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "-O0") {
+        guestRunnerKernelOptimization = "none";
+        guestRunnerNative = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
         guestRunnerNative = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-predecode") {
@@ -175,7 +179,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-no-host-calls] " +
                      "[--vm-log-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
-                     "[--vm-native] [--vm-predecode] [--snapshot file | " +
+                     "[--vm-native] [--vm-predecode] [-O0] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] " +
                      "[program.js]";
     if (typeof print === "function") print(guestUsage);
@@ -217,6 +221,7 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode || !!guestRun
                                         gcThreshold: 16384,
                                         nativeInterpreter: guestRunnerNative,
                                         nativeOperandPredecode: guestRunnerPredecode,
+                                        kernelOptimization: guestRunnerKernelOptimization,
                                         snapshot: guestRunnerSnapshot,
                                         deferSnapshotWrite:
                                             !!guestRunnerSnapshot,

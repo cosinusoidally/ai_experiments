@@ -6,6 +6,10 @@ The current runner has neither kernel `-g` nor `-O0`; the packager has no
 DWARF incorporation option. Commands below describe the proposed interface.
 No debug-mode benchmark results exist yet.
 
+Implementation has started; see [the working-point log](kernel-debug-status.md)
+for the exact implemented subset and completed checks. Until the final gates
+are complete, do not infer support for every proposed interface below.
+
 ## Scope and required outcomes
 
 Add debugging for the **native-compiled kernel dialect**: the interpreter,

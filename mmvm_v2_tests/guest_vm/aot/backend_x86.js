@@ -129,6 +129,7 @@
                      returnLabel: prefix + "_return",
                      functionReturnLabel: prefix + "_return",
                      parameterCount: ir.parameters.length,
+                     optimization: ir.optimization,
                      registerMap: allocateKernelRegisters(ir, registerCount),
                      preserveEdx: registerCount === 4,
                      dispatchStrategy: dispatchStrategy};
@@ -280,6 +281,7 @@
         var state = {nextLabel: 0, returnLabel: "kernel_return",
                      functionReturnLabel: "kernel_return",
                      parameterCount: ir.parameters.length,
+                     optimization: ir.optimization,
                      registerMap: allocateKernelRegisters(ir, backend.registerCount),
                      preserveEdx: backend.registerCount === 4,
                      dispatchStrategy: backend.dispatchStrategy};
@@ -368,6 +370,7 @@
     var SNAPSHOT_FORMAT_VERSION = 1;
     var SNAPSHOT_HEADER_BYTES = 32;
     var SNAPSHOT_OPERAND_MODE_OFFSET = 24;
+    var SNAPSHOT_OPTIMIZATION_MODE_OFFSET = 28;
     var STANDALONE_OPERAND_MODE_OFFSET = 92;
     var STANDALONE_SNAPSHOT_MAGIC = StandaloneFormat.magic;
     var STANDALONE_SNAPSHOT_VERSION = StandaloneFormat.version;
@@ -415,6 +418,8 @@
         var profileMode = peek32(header + (standalone ? 84 : 12)) >>> 0;
         var operandMode = peek32(header + (standalone ?
             STANDALONE_OPERAND_MODE_OFFSET : SNAPSHOT_OPERAND_MODE_OFFSET)) >>> 0;
+        var optimizationMode = peek32(header + (standalone ?
+            STANDALONE_HEADER_FIELDS.optimizationMode : SNAPSHOT_OPTIMIZATION_MODE_OFFSET)) >>> 0;
         var codeOffset = standalone ? peek32(header + STANDALONE_HEADER_FIELDS.codeOffset) >>> 0 :
                                       SNAPSHOT_HEADER_BYTES;
         var length = peek32(header + (standalone ? STANDALONE_HEADER_FIELDS.codeLength : 20)) >>> 0;
@@ -425,6 +430,7 @@
             compilerVersion !== (expected.compilerVersion >>> 0) ||
             profileMode !== (expected.profileMode >>> 0) ||
             operandMode !== (expected.operandMode >>> 0) ||
+            optimizationMode !== (expected.optimizationMode >>> 0) ||
             length <= 0 || length > 16 * 1024 * 1024) {
             this.ffi.call(closePointer, [descriptor]);
             throw new Error("native snapshot is incompatible with this VM: " +
@@ -486,6 +492,7 @@
         poke32(header + 12, metadata.profileMode | 0);
         poke32(header + 16, metadata.sourceHash | 0);
         poke32(header + SNAPSHOT_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
+        poke32(header + SNAPSHOT_OPTIMIZATION_MODE_OFFSET, metadata.optimizationMode | 0);
         poke32(header + 20, result.length | 0);
         var complete = writeExact(this.ffi, writePointer, descriptor, header,
                                   SNAPSHOT_HEADER_BYTES) &&
@@ -989,6 +996,7 @@
             output.write32(header.contextAddress, layout.contextAddress);
             output.write32(header.dlsymCellAddress, layout.dlsymCellAddress);
             output.write32(header.compilerVersion, metadata.compilerVersion | 0);
+            output.write32(header.optimizationMode, metadata.optimizationMode | 0);
             output.write32(header.profileMode, metadata.profileMode | 0);
             output.write32(header.sourceHash, metadata.sourceHash | 0);
             output.write32(STANDALONE_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
@@ -1085,6 +1093,7 @@
      * is deliberately an IR-wide backend policy: kernels do not name physical
      * registers and semantic code remains identical in the JS backend. */
     function allocateKernelRegisters(ir, registerCount) {
+        if (ir.optimization === "none") return {};
         var counts = {};
         countStatementUses(ir.body, counts);
         if (ir.localStorage && containsOpcodeDispatch(ir.body)) {
@@ -1513,7 +1522,7 @@
             return;
         }
         if (node.op === "return") {
-            if (node.value.op === "call_kernel_i32" &&
+            if (state.optimization !== "none" && node.value.op === "call_kernel_i32" &&
                 state.returnLabel === state.functionReturnLabel &&
                 node.value.arguments.length <= state.parameterCount) {
                 /* Reuse only argument space already owned by this cdecl

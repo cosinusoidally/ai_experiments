@@ -567,6 +567,32 @@
                 graphHeap.destroy();
                 graphX86.destroy();
             }
+            /* The same graph must preserve observable effects without the
+             * optimizing policy; exercise calls/locals through both backends. */
+            var unoptimizedGraph = compiler.compileGraph(graphEntry,
+                {graphMiddle: graphMiddle, graphLeaf: graphLeaf, graphSink: graphSink},
+                {optimization: "none", constantNamespaces: {GraphLayout: GraphLayout},
+                    constantBindings: {VECTOR_CELLS: VECTOR_CELLS,
+                        VALUE_CELL_BYTES: VALUE_CELL_BYTES, LOCAL_WEIGHT: LOCAL_WEIGHT}});
+            var unoptimizedJS = new JSBackend().compile(unoptimizedGraph);
+            var unoptimizedX86 = new X86Backend().compile(unoptimizedGraph);
+            var unoptimizedHeap = new Heap({heapBytes: 4096});
+            try {
+                unoptimizedHeap.memory.writeU32(64, 0);
+                var unoptimizedExpected = graphJS.fn(unoptimizedHeap.memory,
+                    0, 64, 9, 11, 13);
+                unoptimizedHeap.memory.writeU32(64, 0);
+                if (unoptimizedJS.fn(unoptimizedHeap.memory, 0, 64, 9, 11, 13) !== unoptimizedExpected) {
+                    throw new Error("unoptimized JS graph differs");
+                }
+                unoptimizedHeap.memory.writeU32(64, 0);
+                if (unoptimizedX86.fn && unoptimizedX86.fn(
+                        unoptimizedHeap.memory.nativeAddress(0), 64, 9, 11, 13) !== unoptimizedExpected) {
+                    throw new Error("unoptimized native graph differs");
+                }
+            } finally {
+                unoptimizedX86.destroy(); unoptimizedHeap.destroy();
+            }
             return "shared kernel IR passed on JS" +
                    (x86Result.fn ? " and native i386" :
                     "; i386 macro output validated");

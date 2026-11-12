@@ -367,6 +367,10 @@
              this.linearHeapBytes) : Number(options.maxHeapBytes);
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.nativeOperandPredecode = !!options.nativeOperandPredecode;
+        this.kernelOptimization = options.kernelOptimization || "default";
+        if (this.kernelOptimization !== "default" && this.kernelOptimization !== "none") {
+            throw new RangeError("unknown kernel optimization policy: " + this.kernelOptimization);
+        }
         this.traceExceptions = !!options.traceExceptions;
         this.forbidHostCalls = !!options.forbidHostCalls;
         this.logHostCalls = !!options.logHostCalls;
