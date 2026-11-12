@@ -8,8 +8,14 @@
     var fs = require("fs"), path = require("path"), cp = require("child_process");
     var crypto = require("crypto");
     var args = process.argv.slice(2), snapshot = args[0], executable = args[1], output = args[2];
-    if (!output || args.length !== 3 && (args.length !== 5 || args[3] !== "--ecma-baseline")) {
-        throw new Error("usage: validate_snapshot_exe_suites.js SNAP EXE OUTDIR [--ecma-baseline LOG]");
+    var baselinePath = null, recoverTest262 = false;
+    for (var option = 3; option < args.length; option++) {
+        if (args[option] === "--ecma-baseline") baselinePath = args[++option];
+        else if (args[option] === "--recover-test262-summary") recoverTest262 = true;
+        else throw new Error("unknown validation option: " + args[option]);
+    }
+    if (!output) {
+        throw new Error("usage: validate_snapshot_exe_suites.js SNAP EXE OUTDIR [--ecma-baseline LOG] [--recover-test262-summary]");
     }
     if (path.resolve(output).indexOf(path.resolve("artifacts") + path.sep) !== 0) {
         throw new Error("results must be beneath artifacts/");
@@ -53,7 +59,7 @@
         report = {started: new Date().toISOString(), snapshot: snapshot, executable: executable,
             snapshotSHA256: digest(snapshot), exeSHA256: digest(executable), phase: "snapshot",
             nextJob: 0, sourceDeleted: null, results: [], baseline: null};
-        if (args[4]) report.baseline = {sha256: digest(args[4]), files: records(fs.readFileSync(args[4], "utf8"))};
+        if (baselinePath) report.baseline = {sha256: digest(baselinePath), files: records(fs.readFileSync(baselinePath, "utf8"))};
         save();
     }
     var jobs = [];
@@ -124,9 +130,9 @@
                         saved.phase + "-" + saved.name + ".log"), "utf8"));
                 }
             }
-            if (args[4] && report.baseline) {
-                if (digest(args[4]) !== report.baseline.sha256) throw new Error("baseline log changed");
-                report.baseline.files = records(fs.readFileSync(args[4], "utf8"));
+            if (baselinePath && report.baseline) {
+                if (digest(baselinePath) !== report.baseline.sha256) throw new Error("baseline log changed");
+                report.baseline.files = records(fs.readFileSync(baselinePath, "utf8"));
             }
             compare(); save(); line("completed report comparisons refreshed"); return;
         }
@@ -177,6 +183,40 @@
             line("END " + stem + " status=" + status + " pass=" + entry.pass + " elapsed_ms=" + entry.elapsedMs);
             next();
         });
+    }
+    if (recoverTest262) {
+        /* Explicit recovery for a completed worker whose supervisor vanished
+         * before checkpointing. Do not invent an observed process exit code.
+         * Partial logs, failed runs and mismatched images cannot be adopted. */
+        if (!jobs[report.nextJob] || jobs[report.nextJob].name !== "test262") {
+            throw new Error("recovery requires Test262 to be the pending job");
+        }
+        if (report.phase === "exe" && fs.existsSync(snapshot)) throw new Error("source snapshot must be absent");
+        var completedLog = fs.readFileSync(path.join(output, report.phase + "-test262.log"), "utf8");
+        var summaryAt = completedLog.lastIndexOf("Test262 ES5.1 summary\n");
+        var summary = completedLog.substring(summaryAt), counts = {}, countNames =
+            ["test files", "variants", "executed", "passed", "failed", "not run", "timed out"];
+        for (var countIndex = 0; countIndex < countNames.length; countIndex++) {
+            var countMatch = new RegExp("(?:^|\\n)  " + countNames[countIndex] + ":\\s+(\\d+)").exec(summary);
+            if (!countMatch) throw new Error("incomplete Test262 summary");
+            counts[countNames[countIndex]] = Number(countMatch[1]);
+        }
+        var elapsed = /(?:^|\n)  elapsed ms: ([0-9.]+)\s*$/.exec(summary);
+        var completedFiles = records(completedLog), completedCount = 0;
+        for (var completedName in completedFiles) {
+            if (completedFiles[completedName] !== "PASS") throw new Error("recovery log contains a non-pass");
+            completedCount++;
+        }
+        if (summaryAt < 0 || !elapsed || counts.failed || counts["not run"] || counts["timed out"] ||
+                counts.executed <= 0 || counts.executed !== counts.passed ||
+                counts.executed !== counts.variants || completedCount !== counts.executed) {
+            throw new Error("Test262 recovery requires a complete all-passing run");
+        }
+        report.results.push({phase: report.phase, name: "test262", status: null, signal: null,
+            elapsedMs: Number(elapsed[1]), pass: true, files: completedFiles,
+            recoveredFromCompleteSummary: true, processExitObserved: false,
+            sourceAbsent: !fs.existsSync(snapshot)});
+        report.nextJob++; save(); line("RECOVERED complete Test262 summary; process exit status was not observed");
     }
     next();
 }());

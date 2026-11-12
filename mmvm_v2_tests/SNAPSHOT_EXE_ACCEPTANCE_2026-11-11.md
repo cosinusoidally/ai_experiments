@@ -1,6 +1,6 @@
 # Full snapshot / executable acceptance — 2026-11-11
 
-Status: **paused for user-requested power-down at 17:07 UTC**.
+Status: **resumed on 2026-11-12; executable-only suites in progress**.
 This file distinguishes completed checks from the
 pending full-corpus results. The earlier packaging-only report is not a full
 suite acceptance claim.
@@ -150,3 +150,18 @@ before its executable half. No supplemental pass is claimed yet.
 The first interrupted corpus probe used an older preflight image and is not
 counted as a completed suite run. The final frozen-image run is the acceptance
 run; no whole corpus is being repeated for intermediate edits.
+
+## Resume on 2026-11-12
+
+The existing executable still runs i386 code after the power-down; its image
+hash and preserved checkpoint are unchanged. The input snapshot is still
+absent. No VM rebuild or source change was required to resume.
+
+The resumed executable Test262 worker produced a complete summary:
+**3292 executed / 3292 passed / 0 failed / 0 timed out / 0 not run**, runner
+**465.797257 seconds**. Its supervisor disappeared before recording completion;
+the worker's process exit status was not captured. Explicit recovery validates
+the complete all-passing summary and every per-file result against the image
+identity, records `processExitObserved: false` and a null status rather than
+inventing exit code zero, then resumes at ECMA. The original log is retained.
+ECMA/Octane/rebuild and supplemental checks remain pending at this checkpoint.
