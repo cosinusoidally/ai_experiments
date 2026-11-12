@@ -12,9 +12,10 @@
     } else {
         load("guest_vm/guest_vm.js");
         VM = GuestVM;
-        DWARF = GuestVMKernelDWARF;
-        ELF = GuestVMDebugELF;
-        Digest = GuestVMDebugDigest;
+        var support = GuestVMKernelX86Backend.debugSupport();
+        DWARF = support.DWARF;
+        ELF = support.ELF;
+        Digest = support.Digest;
         readSource = read;
         report = print;
     }

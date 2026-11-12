@@ -3,6 +3,7 @@
  * to generate an artifact; gdb/objdump are optional validation consumers. */
 (function () {
     var fs = require("fs"), cp = require("child_process"), crypto = require("crypto");
+    var format = require("../aot/standalone_format.js");
     var directory = "artifacts/kernel-debug-acceptance";
     var directoryOption = process.argv.indexOf("--directory");
     if (directoryOption !== -1) directory = process.argv[directoryOption + 1];
@@ -16,6 +17,10 @@
         } else if (option !== "--build-only" && option !== "--resume-builds" && option !== "--all-hosts") {
             throw new Error("unknown check option: " + option);
         }
+    }
+    var paths = require("path");
+    if (!directory || paths.resolve(directory).indexOf(paths.resolve("artifacts") + paths.sep) !== 0) {
+        throw new Error("--directory must name a dedicated directory beneath artifacts/");
     }
     if (!fs.existsSync(directory)) fs.mkdirSync(directory);
     var report = resumeBuilds ? JSON.parse(fs.readFileSync(directory + "/results.json", "utf8")) :
@@ -68,7 +73,8 @@
     function save() { fs.writeFileSync(directory + "/results.json", JSON.stringify(report, null, 2) + "\n"); }
     function image(path) {
         var bytes = fs.readFileSync(path);
-        var offset = bytes.readUInt32LE(20), length = bytes.readUInt32LE(24);
+        var offset = bytes.readUInt32LE(format.fields.codeOffset);
+        var length = bytes.readUInt32LE(format.fields.codeLength);
         return {bytes: bytes.length, sha256: hash(bytes), codeBytes: length,
             codeSHA256: hash(bytes.slice(offset, offset + length))};
     }
@@ -119,6 +125,48 @@
     run("package-renamed", process.execPath, [tool, directory + "/renamed.snap", secondExe,
         "--debug-info", directory + "/renamed.snap.dbg"]);
     check(hash(fs.readFileSync(executable)) === hash(fs.readFileSync(secondExe)), "renamed debug executables are bit identical");
+    var snapshotPath = directory + "/node-g.snap", debugPath = snapshotPath + ".dbg";
+    var snapshotBytes = fs.readFileSync(snapshotPath), debugBytes = fs.readFileSync(debugPath);
+    check(snapshotBytes.slice(format.headerBytes).equals(
+        fs.readFileSync(directory + "/node-default.snap").slice(format.headerBytes)),
+        "optimized -g changes only snapshot binding metadata");
+    check(fs.readFileSync(directory + "/node-g-o0.snap").slice(format.headerBytes).equals(
+        fs.readFileSync(directory + "/node-o0.snap").slice(format.headerBytes)),
+        "-O0 -g changes only snapshot binding metadata");
+    var damagedPath = directory + "/damaged.dbg", damaged = fs.readFileSync(debugPath);
+    damaged[damaged.length - 1] ^= 1; fs.writeFileSync(damagedPath, damaged);
+    var rejectedOutput = directory + "/rejected.exe";
+    if (fs.existsSync(rejectedOutput)) fs.unlinkSync(rejectedOutput);
+    var rejected = cp.spawnSync(process.execPath, [tool, snapshotPath, rejectedOutput,
+        "--debug-info", damagedPath], {encoding: "utf8"});
+    check(rejected.status !== 0 && /sidecar does not match/.test(rejected.stderr) && !fs.existsSync(rejectedOutput),
+        "same-size damaged sidecar rejected before output publication");
+    var executableHash = hash(fs.readFileSync(executable));
+    fs.unlinkSync(snapshotPath); fs.unlinkSync(debugPath);
+    try {
+        run("exe-no-inputs-hello", "./" + executable, ["hello.js"]);
+        check(hash(fs.readFileSync(executable)) === executableHash,
+            "executable runs without snapshot/sidecar and does not mutate itself");
+    } finally {
+        fs.writeFileSync(snapshotPath, snapshotBytes, {mode: 384});
+        fs.writeFileSync(debugPath, debugBytes, {mode: 384});
+    }
+    var plain = directory + "/plain.exe";
+    if (fs.existsSync(plain)) fs.unlinkSync(plain);
+    fs.unlinkSync(debugPath);
+    try {
+        run("package-without-sidecar", process.execPath, [tool, snapshotPath, plain]);
+        run("plain-hello", "./" + plain, ["hello.js"]);
+    } finally { fs.writeFileSync(debugPath, debugBytes, {mode: 384}); }
+    check(hash(fs.readFileSync(snapshotPath)) === debug.image.sha256 && hash(fs.readFileSync(debugPath)) === debug.debugSHA256,
+        "packaging and execution leave input contents unchanged");
+    var rejectDirectory = directory + "/resume-rejection";
+    if (!fs.existsSync(rejectDirectory)) fs.mkdirSync(rejectDirectory);
+    fs.writeFileSync(rejectDirectory + "/results.json", JSON.stringify({sourceSHA256: "changed", builds: []}));
+    var resumeRejected = cp.spawnSync(process.execPath, ["guest_vm/tools/check_kernel_debug_artifacts.js",
+        "--resume-builds", "--build-only", "--directory", rejectDirectory], {encoding: "utf8"});
+    check(resumeRejected.status !== 0 && /cannot resume: source contents changed/.test(resumeRejected.stderr),
+        "resume rejects changed source identity before running builds");
     if (allHosts) {
         var jsMin = process.env.JS_MIN_BINARY || "../../mmvm_v2/artifacts/js_min.exe";
         var minimal = build("js-min-g", jsMin, [], ["-g"]);

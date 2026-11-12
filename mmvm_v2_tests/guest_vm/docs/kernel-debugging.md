@@ -91,8 +91,12 @@ function symbols. Debug-only sections are not mapped into the running process.
   transformations. Metadata is excluded from inline eligibility estimates.
 - `aot/backend_x86.js` records instruction offsets, function/frame boundaries,
   saved-register CFI events, inline ranges and parameter register allocation.
+  Its internal `debugSupport()` accessor loads optional provenance/DWARF modules
+  only when requested. Ordinary images do not retain these build-only module
+  objects. Self-hosted debug rebuilds load the support sources on demand.
 - `aot/kernel_debug_locations.js` computes conservative definite assignment
-  for `-O0` locals and turns emission events into availability ranges.
+  and optimized slot ownership and turns emission events into availability
+  ranges. Tail-frame teardown excludes both parameter and local locations.
 - `aot/kernel_dwarf.js` emits DWARF 4 units, lines, scalar bindings, location
   lists, inline origins and native `.debug_frame` unwind information.
 - `aot/debug_binary.js`, `debug_digest.js` and `debug_elf.js` implement binary

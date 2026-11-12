@@ -141,3 +141,34 @@ locals in the number formatter while its uninitialized bindings remain
 unavailable. The earlier ambiguous developer `--cross-host-only` option has
 been replaced by `--resume-builds`, guarded by source-content identity and
 artifact hashes. Final cross-host checks are running on that frozen source set.
+
+## 2026-11-12: default-runtime cost investigation
+
+The first complete default corpus run passes all 3292 Test262 files and matches
+the archived ECMA set exactly: 994 passes, 335 known failures and four approved
+skips, with zero lost passes. Test262 took 477.19 s. A freshly built pre-debug
+`b93e08e` control passes the same 3292 files in 428.98 s; that paired result
+establishes an approximately 11% slowdown, not merely a comparison with an old
+favourable historical run.
+
+Optional source-registry/DWARF modules were still loaded into every generic
+image. They are now loaded on demand through the backend's internal support
+accessor. CommonJS resolution is captured in the defining module; the shell
+loader remains the current guest-owned loader, not an obsolete bootstrap
+callback. No interpreter instruction changes or benchmark-specific fast paths
+are involved.
+
+Images drop from 7453608 to 7325704 bytes (optimized), and from 7326632 to
+7198728 (-O0). The isolated existing eval-heavy file
+`ch07/7.8/7.8.5/S7.8.5_A1.4_T2.js` passes in 85.531 s versus the control's
+86.440 s (test-body time, separate fresh processes). A full post-change
+Test262 run passes 3292/3292 in 447.58 s: an improvement over 477.19 s, but
+still about 4.3% slower than the one full control observation. Do not describe
+that as established full-corpus performance parity.
+
+The first three interleaved short controls give Richards medians 93.8 for
+pre-debug and default, 93.6 for -g, and 59.7 for each -O0 policy. Those data
+precede the on-demand-loading refinement; fresh final controls and the remaining
+stock/corpus/application matrix are pending. Actual GDB variable editing,
+optimized local availability, inline unwinding and source-interleaved objdump
+checks pass with the on-demand-loading build.

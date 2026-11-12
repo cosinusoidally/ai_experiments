@@ -2,7 +2,6 @@
  * the Node/reference implementation; MMVM installs the same IR as native i386. */
 (function (root) {
     var KernelCompiler = root.GuestVMKernelCompiler;
-    var KernelSources = root.GuestVMKernelSources;
     var JSBackend = root.GuestVMKernelJSBackend;
     var X86Backend = root.GuestVMKernelX86Backend;
     var Bytecode = root.GuestVMBytecode;
@@ -21,7 +20,6 @@
     var LexicalEnvironmentKernels = root.GuestVMLexicalEnvironmentKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
-        KernelSources = require("./kernel_sources.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
         Bytecode = require("../bytecode.js");
@@ -18474,7 +18472,8 @@
             };
             if (runtime.kernelSourceReader) {
                 var provenanceStarted = new Date().getTime();
-                compilerOptions.debugSources = new KernelSources(runtime.kernelSourceReader);
+                var SourceRegistry = X86Backend.debugSupport().Sources;
+                compilerOptions.debugSources = new SourceRegistry(runtime.kernelSourceReader);
                 if (runtime.nativeSnapshotWrite) reportSnapshot("resolved canonical kernel debug sources in " +
                     (new Date().getTime() - provenanceStarted) + " ms");
             }

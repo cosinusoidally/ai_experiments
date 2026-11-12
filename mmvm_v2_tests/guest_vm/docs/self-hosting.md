@@ -198,6 +198,11 @@ contract, profile mode and source fingerprint. Operand mode is also stored.
 Header offsets and executable contracts are not interchangeable versions.
 The C launcher performs format/section checks; the embedded code loader
 additionally checks the current native contract and profile/operand modes.
+It also checks the kernel optimization policy for code-only reuse: default
+and `-O0` are not interchangeable cache modes. Standalone format 2 uses
+previously reserved fields for optimization mode and optional debug-sidecar
+binding; the ordinary C loader does not load or verify that sidecar. See
+[kernel debugging](kernel-debugging.md) for the named fields and DWARF format.
 Neither path re-fingerprints all current JS sources on ordinary startup.
 `--skip-snapshot-hash` remains a compatibility option; it is not needed to
 disable a source-verification pass that currently does not run.

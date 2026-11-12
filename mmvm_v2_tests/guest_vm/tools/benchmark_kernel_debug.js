@@ -6,11 +6,19 @@
     var fs = require("fs"), cp = require("child_process"), crypto = require("crypto");
     var directory = process.argv[2];
     if (!directory) throw new Error("usage: benchmark_kernel_debug.js artifacts/BUILD_DIRECTORY");
+    var paths = require("path");
+    if (paths.resolve(directory).indexOf(paths.resolve("artifacts") + paths.sep) !== 0) {
+        throw new Error("benchmark directory must be beneath artifacts/");
+    }
     var short = process.argv.indexOf("--short") !== -1;
     var controlOption = process.argv.indexOf("--control");
     var control = controlOption !== -1 ? process.argv[controlOption + 1] : null;
     var ecmaOption = process.argv.indexOf("--ecma-baseline");
     var ecmaBaseline = ecmaOption !== -1 ? process.argv[ecmaOption + 1] : null;
+    var onlyOption = process.argv.indexOf("--only");
+    var onlyWorkload = onlyOption !== -1 ? process.argv[onlyOption + 1] : null;
+    var modeOption = process.argv.indexOf("--only-mode");
+    var onlyMode = modeOption !== -1 ? process.argv[modeOption + 1] : null;
     var file = directory + (short ? "/short-matrix.json" : "/full-matrix.json");
     var modes = ["node-default", "node-g", "node-o0", "node-g-o0"];
     if (control) modes.push("control");
@@ -20,6 +28,14 @@
     var report = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) :
         {cachePolicy: "serial runs, ordinary OS file cache; no cache drops", images: {}, results: []};
     function digest(path) { return crypto.createHash("sha256").update(fs.readFileSync(path)).digest("hex"); }
+    var harnessHash = crypto.createHash("sha256");
+    var harnesses = ["test262_runner.js", "ecma_tests_runner.js", "octane_runner.js"];
+    for (var harness = 0; harness < harnesses.length; harness++) {
+        harnessHash.update(harnesses[harness] + "\u0000"); harnessHash.update(fs.readFileSync(harnesses[harness]));
+    }
+    var harnessIdentity = harnessHash.digest("hex");
+    if (report.harnessSHA256 && report.harnessSHA256 !== harnessIdentity) throw new Error("benchmark harness sources changed");
+    report.harnessSHA256 = harnessIdentity;
     function save() { fs.writeFileSync(file + ".tmp", JSON.stringify(report, null, 2) + "\n"); fs.renameSync(file + ".tmp", file); }
     var index;
     for (index = 0; index < modes.length; index++) {
@@ -45,6 +61,7 @@
         save();
     }
     function run(mode, name, args) {
+        if (onlyMode && onlyMode !== mode || onlyWorkload && onlyWorkload !== name) return;
         var id = mode + "-full-" + name, previous;
         for (var i = 0; i < report.results.length; i++) {
             if (report.results[i].id === id) { previous = report.results[i]; break; }
@@ -52,12 +69,15 @@
         if (previous) { console.log("RESUME completed " + id); return; }
         console.log("RUN " + id);
         var start = new Date().getTime();
-        var result = cp.spawnSync("/usr/bin/time", ["-f", "%e %U %S %M", "-o", directory + "/" + id + ".time",
-            "./artifacts/js_runner.exe", snapshot(mode)].concat(args), {
-            encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 3600000, env: process.env
-        });
-        var log = (result.stdout || "") + (result.stderr || "");
-        fs.writeFileSync(directory + "/" + id + ".log", log);
+        var logPath = directory + "/" + id + ".log";
+        var descriptor = fs.openSync(logPath, "w", 384), result;
+        try {
+            result = cp.spawnSync("/usr/bin/time", ["-f", "%e %U %S %M", "-o", directory + "/" + id + ".time",
+                "./artifacts/js_runner.exe", snapshot(mode)].concat(args), {
+                stdio: ["ignore", descriptor, descriptor], timeout: 3600000, env: process.env
+            });
+        } finally { fs.closeSync(descriptor); }
+        var log = fs.readFileSync(logPath, "utf8");
         var time = fs.existsSync(directory + "/" + id + ".time") ?
             fs.readFileSync(directory + "/" + id + ".time", "utf8").trim().split(/\s+/) : [];
         var entry = {id: id, mode: mode, workload: name, status: result.status,
@@ -114,5 +134,6 @@
             run(mode, "octane-" + suites[suite], ["octane_runner.js", "--diagnostics", suites[suite]]);
         }
     }
-    console.log("full serial kernel-policy matrix completed: " + file);
+    console.log((onlyMode || onlyWorkload ? "selected serial matrix jobs completed: " :
+        "full serial kernel-policy matrix completed: ") + file);
 }());

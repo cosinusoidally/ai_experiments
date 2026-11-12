@@ -10,22 +10,49 @@
     var KernelCompiler = root.GuestVMKernelCompiler;
     var HostFFI = root.GuestVMHostFFI;
     var SnapshotOutput = root.GuestVMSnapshotOutput;
-    var KernelDWARF = root.GuestVMKernelDWARF;
-    var DebugELF = root.GuestVMDebugELF;
-    var DebugDigest = root.GuestVMDebugDigest;
-    var DebugLocations = root.GuestVMKernelDebugLocations;
+    var KernelDWARF, DebugELF, DebugDigest, DebugLocations;
+    var debugSupport = null;
     var StandaloneFormat = root.GuestVMStandaloneFormat;
-    if (typeof module !== "undefined" && module.exports) {
+    var commonJS = typeof module !== "undefined" && !!module.exports;
+    var requireDebug = commonJS ? require : null;
+    if (commonJS) {
         Assembler = require("./x86_assembler.js");
         KernelCompiler = require("./kernel_compiler.js");
         HostFFI = require("../host_ffi.js");
         SnapshotOutput = require("./snapshot_output.js");
-        KernelDWARF = require("./kernel_dwarf.js");
-        DebugELF = require("./debug_elf.js");
-        DebugDigest = require("./debug_digest.js");
-        DebugLocations = require("./kernel_debug_locations.js");
         StandaloneFormat = require("./standalone_format.js");
     }
+
+    /* Optional build machinery must not become permanent roots in every
+     * application image. Self-hosted rebuilds have the source loader already;
+     * load this graph only when a caller requests kernel provenance. */
+    function getDebugSupport() {
+        if (debugSupport) return debugSupport;
+        var sources;
+        if (commonJS) {
+            sources = requireDebug("./kernel_sources.js");
+            KernelDWARF = requireDebug("./kernel_dwarf.js");
+            DebugELF = requireDebug("./debug_elf.js");
+            DebugDigest = requireDebug("./debug_digest.js");
+            DebugLocations = requireDebug("./kernel_debug_locations.js");
+        } else {
+            load("guest_vm/aot/debug_binary.js");
+            load("guest_vm/aot/debug_digest.js");
+            load("guest_vm/aot/kernel_sources.js");
+            load("guest_vm/aot/kernel_debug_locations.js");
+            load("guest_vm/aot/kernel_dwarf.js");
+            load("guest_vm/aot/debug_elf.js");
+            sources = root.GuestVMKernelSources;
+            KernelDWARF = root.GuestVMKernelDWARF;
+            DebugELF = root.GuestVMDebugELF;
+            DebugDigest = root.GuestVMDebugDigest;
+            DebugLocations = root.GuestVMKernelDebugLocations;
+        }
+        debugSupport = {Sources: sources, DWARF: KernelDWARF, ELF: DebugELF,
+            Digest: DebugDigest, Locations: DebugLocations};
+        return debugSupport;
+    }
+    X86Backend.debugSupport = getDebugSupport;
 
     function X86Backend(options) {
         options = options || {};
@@ -149,6 +176,7 @@
             argumentRegisters: [], localRegisters: [], localDisplacements: [],
             unavailableRanges: [], inlines: []} : null;
         state.debug = debug;
+        if (debug) getDebugSupport();
         if (debug) {
             var argumentIndex = 0;
             while (argumentIndex < ir.parameters.length) {
@@ -1045,6 +1073,7 @@
             output.write32(header.sourceHash, metadata.sourceHash | 0);
             var debugBytes = null;
             if (result.debug) {
+                getDebugSupport();
                 var dwarf = KernelDWARF.build(result.debug, result.length);
                 var codeDigest = DebugDigest.digest(result.length, function (offset) {
                     return result.pointer ? heap.memory.host.ffi.peek8(result.pointer + offset) : result.bytes[offset];
