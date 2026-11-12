@@ -161,6 +161,26 @@ Every slow suite, including RegExp, remains selected. Known historical ECMA
 failures are not relabelled as successes. An -O0 watchdog timeout, if observed,
 will be recorded as such, not hidden by a larger official test limit.
 
+Final on-demand-image historical ECMA also completed: 994 pass / 335 known
+fail / four approved skips / zero lost passes, in **661.00 seconds process
+wall time** (660.159 seconds reported inside the harness). The 335 failures
+include 39 watchdog timeouts.
+
+Completed final default-image stock scores at the crash/recovery checkpoint:
+
+| Suite | Score | Process wall seconds |
+| --- | ---: | ---: |
+| Richards | 97.0 | 3.33 |
+| DeltaBlue | 92.0 | 4.47 |
+| Crypto | 175 | 26.21 |
+| RayTrace | 257 | 11.64 |
+| EarleyBoyer | 468 | 25.73 |
+
+All five exit successfully. The machine crash interrupted RegExp before its
+result was recorded; no RegExp score or failure is inferred from that partial
+run. Subsequent suites and other-policy full sweeps remain pending. Work is
+paused after a checked-in recovery checkpoint at the user's explicit request.
+
 ## Reproduction and receipts
 
 Run from `mmvm_v2_tests`, using the existing js_min with LD_LIBRARY_PATH set:

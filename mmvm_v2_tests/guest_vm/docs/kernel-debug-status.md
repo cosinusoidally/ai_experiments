@@ -188,3 +188,47 @@ does not mutate the executable. Resume rejects changed source identities.
 The final short controls give Richards medians 99.4 default / 99.3 pre-debug,
 98.9 -g, 63.2 -O0 and 63.1 -g -O0. The final remaining ECMA/stock matrix is
 running serially with live per-job logs and resumable receipts.
+
+## 2026-11-12: crash recovery and requested pause
+
+Recovered the committed work from the sibling `ai_experiments_bak9` checkout
+into the fresh `guestVM-cleanup3` branch by local Git transfer and fast-forward.
+The recovered HEAD and tree match the backup exactly at `412c036`; no source
+changes were left uncommitted in the backup. The backup remains untouched.
+Saved cold-build artifacts, control receipts and the archived ECMA baseline
+were copied into the new checkout's ignored artifacts directory. Generated
+snapshots, executables and sidecars remain untracked.
+
+Bounded post-recovery checks pass:
+
+- Existing i386 js_runner executes hello with the recovered -g snapshot.
+- Broad kernel/compiler checks pass on Node and existing i386 js_min (using
+  LD_LIBRARY_PATH, without rebuilding the binary).
+- Full-graph Node debug checks preserve all optimized/-O0 instruction bytes,
+  verify canonical provenance and reject overlapping reused-slot ownership.
+- Artifact resume checks accept the unchanged source identity and saved hashes;
+  renamed outputs, damaged-sidecar rejection, snapshot-free execution and
+  non-mutating execution checks pass.
+- Real GDB/objdump checks pass, including local edits affecting native execution,
+  optimized availability, inline/native unwinding and source disassembly.
+- Native GC stress passes 24 rounds / 48 collections.
+
+The saved final-image corpus results are Test262 3292 pass / zero fail or
+timeout, and historical ECMA 994 pass / 335 known fail (including 39 timeouts)
+/ four approved skips / zero newly lost passing files. Default stock Octane
+completed Richards, DeltaBlue, Crypto, RayTrace and EarleyBoyer successfully.
+The machine crash interrupted RegExp before an exit receipt or score was
+recorded: it is **incomplete**, not counted as a pass or a VM failure. Remaining
+stock suites, other-policy full sweeps and final bounded application acceptance
+are still pending. The approximately 4.3% full-Test262 timing caveat remains.
+
+At the user's request, stop after committing this recovery checkpoint. Do not
+restart the long matrix as part of this recovery. A later explicit continuation
+can resume the saved completed jobs with:
+
+```
+node guest_vm/tools/benchmark_kernel_debug.js artifacts/kernel-debug-cold --ecma-baseline artifacts/launcher-acceptance/exe-ecma.log
+```
+
+The driver retries the interrupted RegExp job and reuses completed receipts;
+it does not fabricate a score from the partial log.
