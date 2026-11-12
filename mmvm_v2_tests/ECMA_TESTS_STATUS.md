@@ -2,7 +2,7 @@
 
 ## Current target: all Node-passing files except Date first
 
-### Snapshot/executable acceptance, 2026-11-11 — snapshot pass complete
+### Snapshot/executable acceptance, 2026-11-11–12 — both corpus passes complete
 
 - Frozen `bfc122f`, native contract 103, complete default standalone snapshot
   run with TZ=UTC: **1333 selected / 1329 executed / 994 passed / 335 failed**,
@@ -15,8 +15,14 @@
   **176/49**, ecma_5 **197/115**. Timeout/skip policy and corpus unchanged.
 - Runner **665.285013 seconds**, process wall **666.74 seconds**, peak RSS
   **463724 KiB**. Failures remain failures, not reclassified passes.
-- The executable-only repeat after unlinking the input snapshot is pending.
-  See [the full acceptance record](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
+- Executable-only repeat on 2026-11-12, with the input snapshot still absent:
+  **994 passed / 335 failed / 39 timeouts / 4 configured skips / 0 not run**.
+  The exact statuses of **all 1333 selected filenames** match the snapshot run:
+  **zero differences / zero lost passes**.
+- Executable runner **661.512067 seconds**, process wall **663.26 seconds**,
+  peak RSS **463720 KiB**. These observations do not establish a significant
+  performance difference between launchers.
+- See [the full acceptance record](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
 
 ### Property-operation cutover, 2026-11-06 — focused progress
 

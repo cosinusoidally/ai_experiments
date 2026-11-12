@@ -165,3 +165,10 @@ the complete all-passing summary and every per-file result against the image
 identity, records `processExitObserved: false` and a null status rather than
 inventing exit code zero, then resumes at ECMA. The original log is retained.
 ECMA/Octane/rebuild and supplemental checks remain pending at this checkpoint.
+
+Executable ECMA subsequently completes on 2026-11-12, approximately
+07:49–08:00 UTC: **994 passed / 335 known failures**, including **39 timeouts**,
+**4 configured skips / 0 not run**. All **1333** per-file statuses match the
+snapshot run exactly. Runner **661.512067 seconds**, process wall **663.26
+seconds**, peak RSS **463720 KiB**. Stock Octane and the remaining checks are
+still running; this is not yet a final all-suite completion statement.
