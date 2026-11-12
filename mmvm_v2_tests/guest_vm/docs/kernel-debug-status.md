@@ -26,3 +26,24 @@ Completed checks:
 The full debug plan and later acceptance gates remain in
 [kernel-debug-plan.md](kernel-debug-plan.md). These focused checks do not
 constitute a new whole-corpus or all-demo acceptance result.
+
+## 2026-11-12: canonical provenance working point
+
+The debug-only source registry resolves every compiled graph function against
+the original project-relative parser AST, structurally validating reformatted
+host function source rather than guessing decompiler line numbers. Unknown or
+ambiguous origins fail closed. Lowering retains statement locations, and the
+backend records authoritative instruction offsets and frame boundaries.
+
+`guest_vm/tools/check_kernel_debug.js` runs on Node and js_min and compares the
+actual interpreter/collector graph with and without provenance. Both hosts pass:
+
+- Optimized: all 672705 instruction bytes unchanged; 269 canonical functions;
+  18597 statement positions.
+- -O0: all 545244 instruction bytes unchanged; 269 canonical functions;
+  25066 statement positions.
+
+Source metadata is excluded from the inliner's eligibility calculation. This
+is essential: metadata must not alter the generated program. The source-reader
+embedding option remains internal plumbing, not a completed public `-g` API.
+DWARF serialization and debugger acceptance remain in progress.

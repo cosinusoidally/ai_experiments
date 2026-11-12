@@ -2,6 +2,7 @@
  * the Node/reference implementation; MMVM installs the same IR as native i386. */
 (function (root) {
     var KernelCompiler = root.GuestVMKernelCompiler;
+    var KernelSources = root.GuestVMKernelSources;
     var JSBackend = root.GuestVMKernelJSBackend;
     var X86Backend = root.GuestVMKernelX86Backend;
     var Bytecode = root.GuestVMBytecode;
@@ -20,6 +21,7 @@
     var LexicalEnvironmentKernels = root.GuestVMLexicalEnvironmentKernel;
     if (typeof module !== "undefined" && module.exports) {
         KernelCompiler = require("./kernel_compiler.js");
+        KernelSources = require("./kernel_sources.js");
         JSBackend = require("./backend_js.js");
         X86Backend = require("./backend_x86.js");
         Bytecode = require("../bytecode.js");
@@ -18428,6 +18430,9 @@
                 ebx: "local:registerAddress", esi: "local:pc",
                 edi: "local:bytecodeAddress", edx: "argument:heapBase"
             };
+            if (runtime.kernelOptimization === "none") {
+                this.nativeResult.registerAllocation = {};
+            }
             loadedSnapshot = true;
             if (loweringTimings) {
                 loweringTimings.source = 0;
@@ -18469,6 +18474,9 @@
             };
             var graphLoweringStarted = runtime.nativeSnapshotWrite ?
                 new Date().getTime() : 0;
+            if (runtime.kernelSourceReader) {
+                compilerOptions.debugSources = new KernelSources(runtime.kernelSourceReader);
+            }
             this.ir = kernelCompiler.compileGraph(
                 nativeExecutionKernel, kernelDependencies, compilerOptions);
             if (runtime.nativeSnapshotWrite) {

@@ -368,6 +368,7 @@
         this.profileOpcodeCounts = options.profile ? [] : null;
         this.nativeOperandPredecode = !!options.nativeOperandPredecode;
         this.kernelOptimization = options.kernelOptimization || "default";
+        this.kernelSourceReader = options.kernelSourceReader || null;
         if (this.kernelOptimization !== "default" && this.kernelOptimization !== "none") {
             throw new RangeError("unknown kernel optimization policy: " + this.kernelOptimization);
         }

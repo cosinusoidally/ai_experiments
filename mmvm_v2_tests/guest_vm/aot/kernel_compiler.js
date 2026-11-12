@@ -252,6 +252,10 @@
                 throw new SyntaxError("kernel graph key " + name +
                                       " does not match function " + actualName);
             }
+            if (options.debugSources) {
+                expression = options.debugSources.resolve(actualName, source);
+                source = expression.source;
+            }
             if (signatures[name]) {
                 throw new SyntaxError("duplicate kernel function " + name);
             }
@@ -386,7 +390,7 @@
             var count = node instanceof Array || node.op === "block" ? 0 : 1, key;
             for (key in node) {
                 if (Object.prototype.hasOwnProperty.call(node, key)) {
-                    count += inspect(node[key], assigned);
+                    if (key !== "debugLocation") count += inspect(node[key], assigned);
                     /* Once over budget neither the exact count nor the
                      * remaining assignment set can affect eligibility.
                      * Do not traverse a giant interpreter body just to
@@ -526,6 +530,7 @@
         var program = parsed.parseProgram();
         return program.body[0].declarations[0].initial;
     }
+    KernelCompiler.parseFunctionSource = parseKernelFunctionSource;
 
     /* Discover graph edges and JS locals in one traversal. External lexical
      * bindings come only from explicit compilation options, never locals. */
@@ -1113,6 +1118,7 @@
         /* Identifier bindings are '$'-prefixed. Bookkeeping must not use that
          * namespace: kernelFunctions is also a perfectly valid local name. */
         symbols.kernelFunctions = options.kernelFunctions || null;
+        symbols.captureDebugLocations = !!options.debugSources;
         if (timings) timings.collect = new Date().getTime() - collectStarted;
         var lowerStarted = timings ? new Date().getTime() : 0;
         /* Validate/lower both branches first. Configuration constants must
@@ -1128,6 +1134,7 @@
                 registerPreferences: registerPreferences};
         if (options.optimization === "none") ir.optimization = "none";
         else forwardSingleUseLocals(ir);
+        if (options.debugSources) ir.debugLocation = fn.location;
         return ir;
     }
 
@@ -1360,8 +1367,10 @@
                     next++;
                 }
                 if (values.length > 1) {
-                    result.push({op: "store_fields", base: first.base,
-                        offsets: offsets, values: values});
+                    var fused = {op: "store_fields", base: first.base,
+                        offsets: offsets, values: values};
+                    if (statement.debugLocation) fused.debugLocation = statement.debugLocation;
+                    result.push(fused);
                     index = next;
                     continue;
                 }
@@ -1475,13 +1484,27 @@
             }
             if (lowered.op === "block") {
                 var child = 0;
-                while (child < lowered.body.length) body.push(lowered.body[child++]);
+                while (child < lowered.body.length) {
+                    var childStatement = lowered.body[child++];
+                    if (lowered.debugLocation && !childStatement.debugLocation) {
+                        childStatement.debugLocation = lowered.debugLocation;
+                    }
+                    body.push(childStatement);
+                }
             } else body.push(lowered);
         }
         return body;
     }
 
     function lowerStatement(statement, symbols) {
+        var lowered = lowerStatementBody(statement, symbols);
+        if (symbols.captureDebugLocations && statement.location) {
+            lowered.debugLocation = statement.location;
+        }
+        return lowered;
+    }
+
+    function lowerStatementBody(statement, symbols) {
         if (statement.type === "EmptyStatement") {
             return {op: "block", body: []};
         }

@@ -35,6 +35,7 @@
         load("guest_vm/lexical_environment_kernel.js");
         load("guest_vm/aot/kernel_slots.js");
         load("guest_vm/aot/kernel_compiler.js");
+        load("guest_vm/aot/kernel_sources.js");
         load("guest_vm/aot/backend_js.js");
         load("guest_vm/aot/x86_assembler.js");
         load("guest_vm/aot/snapshot_output.js");

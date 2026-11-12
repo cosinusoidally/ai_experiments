@@ -134,23 +134,38 @@
                      preserveEdx: registerCount === 4,
                      dispatchStrategy: dispatchStrategy};
         assembler.label(prefix);
+        var debug = ir.debugLocation ? {name: ir.name,
+            location: ir.debugLocation, parameters: ir.parameters.slice(0),
+            locals: ir.locals.slice(0), start: assembler.length,
+            optimization: ir.optimization || "default", lines: []} : null;
+        state.debug = debug;
         assembler.pushEbp();
+        if (debug) debug.pushedFrame = assembler.length;
         assembler.movEbpEsp();
+        if (debug) debug.establishedFrame = assembler.length;
         reserveKernelLocals(assembler, ir, state);
         saveKernelRegisters(assembler, state.preserveEdx);
         initializeKernelArgumentRegisters(assembler, state.registerMap);
+        if (debug) debug.bodyStart = assembler.length;
         emitStatements(assembler, ir.body, state);
         assembler.movEaxImmediate(0);
         assembler.label(state.returnLabel);
+        if (debug) debug.bodyEnd = assembler.length;
         restoreKernelRegisters(assembler, state.preserveEdx);
         assembler.leave();
+        if (debug) debug.leftFrame = assembler.length;
         assembler.ret();
+        if (debug) {
+            debug.end = assembler.length;
+            ir.nativeDebug = debug;
+        }
         return state.registerMap;
     }
 
     function compileGraph(backend, graph) {
         var assembler = backend.createAssembler();
         var registerAllocations = {};
+        var debugFunctions = [];
         var ordered = [];
         var index = 0;
         while (index < graph.functions.length) {
@@ -174,6 +189,7 @@
                 backend.dispatchStrategy, backend.registerCount);
             registerAllocations[ir.name] = describeRegisterAllocation(
                 ir, registerMap);
+            if (ir.nativeDebug) debugFunctions.push(ir.nativeDebug);
             index++;
         }
         assembler.resolveLabels();
@@ -183,6 +199,7 @@
                       ir: graph, backend: "i386",
                       registerAllocation: registerAllocations,
                       destroy: function () {}};
+        if (debugFunctions.length) result.debug = {functions: debugFunctions};
         if (!backend.ffi.isMMVM) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.length / 4096) * 4096);
@@ -1371,6 +1388,7 @@
         var storage = ir.localStorage;
         state.localSlots = storage ? storage.slots.slice(0) : null;
         var localWords = storage ? storage.storageCount : ir.locals.length;
+        if (state.debug) state.debug.localWords = localWords;
         if ((state.dispatchStrategy === "indexed" ||
              state.dispatchStrategy === "replicated") && containsOpcodeDispatch(ir.body)) {
             state.dispatchBaseLocal = ir.locals.length;
@@ -1432,6 +1450,11 @@
     }
 
     function emitStatement(assembler, node, state) {
+        if (state.debug && node.debugLocation) {
+            state.debug.lines.push({offset: assembler.length,
+                filename: node.debugLocation.filename,
+                line: node.debugLocation.line, column: node.debugLocation.column});
+        }
         if (node.op === "expression") {
             emitControlExpression(assembler, node.value, state);
             return;
