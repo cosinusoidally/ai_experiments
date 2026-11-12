@@ -1,5 +1,10 @@
 # Packaging a standalone snapshot as an executable
 
+Optional incorporation of a separate DWARF companion, precise kernel code
+sections for GDB/objdump, and deterministic `-g`/`-O0` builds are planned in
+[kernel-debug-plan.md](kernel-debug-plan.md). The interfaces in that plan are
+not yet supported by this packager; the commands below describe current use.
+
 `guest_vm/tools/snapshot_to_exe.js` wraps an existing version-2 standalone
 snapshot in an i386 ELF executable. It does not compile the VM, regenerate its
 snapshot, or specialize it for a program. No compiler, linker, binutils, crt

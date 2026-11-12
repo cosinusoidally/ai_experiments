@@ -39,6 +39,12 @@ Start here:
 8. [Snapshot executables](snapshot-executable.md): pure-JS ELF packaging,
    startup ABI, file layout, host support, and validation.
 
+Planned work (not current API):
+
+- [Deterministic kernel debugging and -O0](kernel-debug-plan.md): separate
+  DWARF, GDB/objdump, variable locations, debug-friendly compilation,
+  reproducible artifact identity and required -O0 benchmarks.
+
 Important current facts:
 
 - The language target is ES5.1, authored in old-shell-compatible JavaScript.

@@ -3,6 +3,11 @@
 There are two different compilers. Keep their products and optimization
 contracts separate.
 
+The proposed kernel `-g`/`-O0` work is specified in
+[the deterministic debugging plan](kernel-debug-plan.md), including the
+required optimization/build/runtime benchmark matrix. Those flags and DWARF
+generation are **not implemented** by the current compiler.
+
 ## Guest ES5.1 source to bytecode
 
 [`tokenizer.js`](../tokenizer.js) scans characters without regular expressions.
