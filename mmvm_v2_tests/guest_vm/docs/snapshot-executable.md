@@ -146,6 +146,24 @@ the fixed point. Existing ECMA failures remain failures, not hidden passes.
 An optional `--ecma-baseline LOG` compares the exact historical filename sets.
 Do not run another heavy suite concurrently.
 
+Final analysis sets `accepted` and returns a nonzero status for unexpected
+failures, missing/mismatched results, new skips, missing snapshot-deletion
+evidence, or changed executable bytes. Known ECMA failures stay classified as
+failures but do not invalidate acceptance when they match the supplied baseline.
+If `--recover-test262-summary` adopts a completed worker log after its
+supervisor vanished, it records the missing process exit explicitly; this is
+not enough for final acceptance. Supply a clean confirmation receipt with
+`--test262-confirmation PREFIX`. The receipt is `PREFIX.log` plus
+`PREFIX.time.json`, recorded using:
+
+```
+/usr/bin/time -f '{"wall":%e,"rssKiB":%M,"exitStatus":%x}' -o PREFIX.time.json ./artifacts/bar.exe test262_runner.js > PREFIX.log 2>&1
+```
+
+Run that only after removing the source snapshot, and wait for completion.
+The analyzer checks exit status zero and exact Test262 file-result agreement.
+It does not repeat completed expensive suites when refreshing the report.
+
 `validate_snapshot_exe_apps.js SNAP EXE OUTDIR` can also run the bounded graphics
 and HTTP matrix alone, deleting SNAP between its phases. `--only-programs`
 selects the additional structural GC, raw-FFI, frontend, native-compiler,

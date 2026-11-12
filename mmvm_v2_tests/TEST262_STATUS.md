@@ -1,5 +1,19 @@
 # Test262 status
 
+2026-11-12, approximately 08:25–08:32 UTC, clean executable-only acceptance
+at `bfc122f` (native contract 103), with both snapshot inputs removed:
+
+- **3292 files / 3292 variants / 3292 executed / 3292 passed**;
+  **0 failed / 0 timed out / 0 skipped / 0 not run**; observed **exit status 0**.
+- Runner **422.092762 seconds**; summed tests **405.971726 seconds**;
+  process wall **422.82 seconds**, peak RSS **512044 KiB**.
+- Exact per-file results match the complete November 11 snapshot run below.
+- Command: `./artifacts/launcher-final.exe test262_runner.js`.
+- An earlier resumed run also completed all 3292 passes, but its supervisor
+  lost the exit receipt. Its 465.797257-second summary was explicitly
+  recovered, not assigned a fabricated exit status. This final clean run
+  closes that evidence gap. See [full acceptance](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
+
 2026-11-11, approximately 16:23–16:31 UTC, standalone snapshot acceptance
 at `bfc122f` (native contract 103):
 
@@ -8,8 +22,9 @@ at `bfc122f` (native contract 103):
 - Runner elapsed **453.320431 seconds**, summed test time **434.960826
   seconds**; supervisor process wall **453.981 seconds**.
 - Command: `./artifacts/js_runner.exe artifacts/launcher-final.snap test262_runner.js`.
-- The executable-only repeat, after removal of this snapshot, is pending.
-  See [the two-launcher acceptance record](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
+- The executable-only repeat is now complete with identical per-file results;
+  see the November 12 entry above and
+  [the two-launcher acceptance record](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
   This is slower than the older contract-99 observation below; it is not
   represented as a performance improvement or a controlled attribution of
   the difference to the small contract-103 handoff fixes.

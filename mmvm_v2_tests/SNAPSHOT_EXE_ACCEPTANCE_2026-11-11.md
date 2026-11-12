@@ -1,13 +1,83 @@
 # Full snapshot / executable acceptance — 2026-11-11
 
-Status: **resumed on 2026-11-12; executable-only suites in progress**.
-This file distinguishes completed checks from the
-pending full-corpus results. The earlier packaging-only report is not a full
-suite acceptance claim.
+Status: **complete, 2026-11-12**. Final acceptance analysis returns
+`accepted=true`, with **zero unexpected failures**. Historical progress and
+power-down notes below are retained as a work log; their pending statements
+describe those checkpoints, not the final result.
 
 VM implementation frozen at `bfc122f`, native contract 103. No C, demo, corpus
 files, test assertions, selection policies or instruction limits changed.
 Runs are serial; Node supervises processes, not guest language execution.
+
+## Final verdict
+
+Both launchers preserve every previously passing test. The executable was
+tested after unlinking the input snapshot; it has no dependency on that file.
+The complete main matrix contains **54 jobs**, with **14 additional paired
+program checks** and a clean executable Test262 exit confirmation. Known ECMA
+failures are explicitly retained, not counted as passes.
+
+| Coverage | Snapshot via js_runner | Standalone executable |
+| --- | --- | --- |
+| Full core / embedding / heap / compiler | 12 programs, 270 assertions, internal checks pass | same, pass |
+| Tokenizer | 84 checks pass | same, pass |
+| Language and object integration | pass | pass |
+| Selected JSON | 12 files / 908 assertions pass | same, pass |
+| Imported Test262 | 3292 pass, 0 fail/timeout/skip/not-run | same, clean exit 0 |
+| Historical ECMA | 994 pass / 335 known failures | identical filename statuses |
+| Stock Octane | 15/15 pass | 15/15 pass |
+| Bounded graphics / HTTP | demos 1–8, all three servers pass | same, pass |
+| Native GC workload | 24 rounds / 48 collections, pass | same, pass |
+| Supplemental programs | 7/7 pass | 7/7 pass |
+| Genuine self-hosted rebuild | bit-identical, 83.118 s | bit-identical, 83.516 s |
+
+ECMA's 335 failures **include** 39 watchdog timeouts. The same four previously
+configured slow exclusions remain; zero files are unexpectedly unrun or newly
+skipped. All 1333 selected per-file statuses match between launchers. Relative
+to the archived 990-pass baseline: **990 preserved / 4 gained / 0 lost**.
+This is not a claim of complete ES5.1 compliance.
+
+The final clean executable Test262 run observes **exit status 0**: 3292 files /
+variants / executed / passed; zero failures, timeouts, skips or not-run files.
+Runner **422.092762 seconds**, process wall **422.82 seconds**, peak RSS
+**512044 KiB**. It was deliberately repeated once to replace the missing exit
+receipt from the recovered all-passing run; its exact file results match.
+The first recovered observation remains in the logs and is not presented as
+an observed process exit.
+
+Supplemental coverage passes on both launchers: structural GC, raw FFI file
+I/O, self-hosted frontend/adoption, frontend compilation of net.js, recursive
+native compiler dependencies, demo8 runner I/O and three-context multiplexing.
+Structural GC on each launcher checks **27 audits / 111996 edges / 221 property
+indexes / 74 embedding collections**, maximum bump **3531768 bytes** under the
+**8388608-byte** cap. Structural-driver process times are **35.423 / 36.498 s**
+(snapshot/executable). The separate native workload supplies automatic native
+collection coverage; the structural driver reports embedding collections.
+
+The supplemental snapshot was independently rebuilt from unchanged sources
+and matched the frozen image hash. It was **deleted before all seven
+supplemental executable checks**. Both snapshot inputs remain absent. The
+executable hash is unchanged. No heap-corruption, freed-reference or
+segmentation-fault diagnostic was found in the acceptance logs.
+
+The final existing js_min host also independently rebuilds the snapshot to
+the same SHA-256. Node, js_min, snapshot-hosted and executable-hosted source
+builds therefore agree byte for byte. Only LD_LIBRARY_PATH was configured;
+js_min and the C loader were not rebuilt. The extra js_min confirmation
+snapshot was hash-checked and deleted after this check. A final executable
+hello run succeeds with every task-generated valid snapshot input removed.
+
+Final analysis is reproducible without rerunning the suites:
+
+```
+node guest_vm/tools/validate_snapshot_exe_suites.js artifacts/launcher-final.snap artifacts/launcher-final.exe artifacts/launcher-acceptance --ecma-baseline ../../ai_experiments_bak8/mmvm_v2_tests/artifacts/cleanup-full.j9oRH8/ecma-current.log --test262-confirmation artifacts/launcher-acceptance/exe-test262-confirm
+```
+
+It returns exit status 0 with `accepted=true` and an empty `unexpected` list.
+Without the clean confirmation it deliberately fails closed rather than
+claiming that the recovered run's process exit was observed. No further VM
+fixes were needed during the November 12 run; changes after `bfc122f` improve
+the test supervisor/evidence handling and update the status documentation.
 
 ## Images and independence check
 
@@ -79,31 +149,31 @@ Runs are serial; Node supervises processes, not guest language execution.
 - The original snapshot was **unlinked at 17:03:42 UTC**. The supervisor
   records deletion at `2026-11-11T17:03:42.847Z`; independent filesystem checks
   confirm both the input and rebuild output are absent. The executable-only
-  matrix is now in progress, with absence checked before every job.
+  matrix subsequently completes, with absence checked before every job.
 
-## Stock Octane — snapshot phase
+## Stock Octane — both launchers
 
 These are stock per-suite overall scores (including latency results where the
 suite defines them), not quick-correctness scores. They are single observations,
 not a controlled performance comparison against an earlier VM revision.
 
-| Suite | Score | Process seconds | Result |
-| --- | ---: | ---: | --- |
-| Richards | 84.1 | 3.404 | pass |
-| DeltaBlue | 69.8 | 4.580 | pass |
-| Crypto | 144 | 28.832 | pass |
-| RayTrace | 256 | 10.875 | pass |
-| EarleyBoyer | 438 | 27.779 | pass |
-| RegExp | 2.93 | 561.948 | pass |
-| Splay | 707 | 4.017 | pass |
-| NavierStokes | 273 | 10.082 | pass |
-| PdfJS | 820 | 18.726 | pass |
-| Mandreel | 509 | 106.117 | pass |
-| Gameboy | 1058 | 13.875 | pass |
-| CodeLoad | 98.6 | 28.743 | pass |
-| Box2D | 391 | 14.820 | pass |
-| zlib | 600 | 255.000 | pass |
-| Typescript | 1430 | 100.436 | pass |
+| Suite | Snapshot score | Exe score | Snapshot s | Exe s |
+| --- | ---: | ---: | ---: | ---: |
+| Richards | 84.1 | 96.2 | 3.404 | 3.523 |
+| DeltaBlue | 69.8 | 91 | 4.580 | 4.413 |
+| Crypto | 144 | 175 | 28.832 | 26.430 |
+| RayTrace | 256 | 266 | 10.875 | 10.501 |
+| EarleyBoyer | 438 | 451 | 27.779 | 27.278 |
+| RegExp | 2.93 | 2.85 | 561.948 | 577.356 |
+| Splay | 707 | 699 | 4.017 | 4.087 |
+| NavierStokes | 273 | 270 | 10.082 | 10.225 |
+| PdfJS | 820 | 736 | 18.726 | 19.098 |
+| Mandreel | 509 | 495 | 106.117 | 108.635 |
+| Gameboy | 1058 | 1004 | 13.875 | 14.663 |
+| CodeLoad | 98.6 | 89.5 | 28.743 | 32.317 |
+| Box2D | 391 | 374 | 14.820 | 15.629 |
+| zlib | 600 | 595 | 255.000 | 257.428 |
+| Typescript | 1430 | 1456 | 100.436 | 98.920 |
 
 The first complete launcher phase takes approximately 43 minutes. Most of
 that is the actual Test262/ECMA/stock Octane workload, including slow regex

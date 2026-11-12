@@ -1,5 +1,11 @@
 # Snapshot executable validation — 2026-11-11
 
+The subsequent [full two-launcher acceptance](../../SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md)
+is complete on 2026-11-12 at native contract 103. It includes full Test262,
+ECMA and all 15 stock Octane suites, supplemental integration, and executable
+runs after deleting the source snapshots. The initial packaging-only scope
+and limitations recorded below are historical, not the final acceptance scope.
+
 Implementation checkpoint: `6d3fa90`, followed by named ELF field layouts and
 this acceptance record. No C files, demos, external corpora, snapshot format,
 or native interpreter contract changed. No compiler/binutils programs were

@@ -1,5 +1,19 @@
 # Validation checkpoint, 2026-11-04
 
+Latest completed acceptance, 2026-11-12: frozen `bfc122f`, native contract 103,
+runs the complete core, imported Test262, historical ECMA, all 15 stock Octane
+suites, bounded demos 1–8/HTTP, GC and supplementary integration through both
+the normal snapshot loader and the packaged executable. Snapshot inputs were
+deleted before executable runs. Test262 is 3292/3292 with clean exit 0; ECMA
+is 994 passed / 335 known failures (39 timeouts included), four pre-existing
+configured skips, zero unrun tests. All per-file statuses match between
+launchers; no previously passing baseline file is lost. Both genuine
+self-hosted rebuilds are bit-identical. The structural GC audit and all seven
+supplementary programs pass on both paths. Final acceptance reports zero
+unexpected failures. See [the complete report and score comparison](SNAPSHOT_EXE_ACCEPTANCE_2026-11-11.md).
+The older checkpoints below remain historical observations, not the current
+acceptance totals.
+
 2026-11-05 follow-up: [property/root unification validation](PROPERTY_CLEANUP_VALIDATION_2026-11-05.md)
 is complete for implementation `0937e5d`. Test262 passes 3292/3292; ECMA
 preserves the exact 990 passing and 339 failing filenames. All fourteen

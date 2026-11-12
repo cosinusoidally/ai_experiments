@@ -2,20 +2,23 @@
  * process supervisor; every tested program executes inside the guest VM.
  * Usage: node guest_vm/tools/validate_snapshot_exe_suites.js SNAP EXE OUTDIR
  * Optional: --ecma-baseline LOG. Reinvoke the same command to resume.
+ * --test262-confirmation PREFIX supplies a clean .log/.time.json receipt if
+ * an earlier completed summary was recovered without its process exit code.
  * The input snapshot is deliberately deleted between the two full passes.
  * Run from mmvm_v2_tests. No compiler, external corpus writes, or threads. */
 (function () {
     var fs = require("fs"), path = require("path"), cp = require("child_process");
     var crypto = require("crypto");
     var args = process.argv.slice(2), snapshot = args[0], executable = args[1], output = args[2];
-    var baselinePath = null, recoverTest262 = false;
+    var baselinePath = null, recoverTest262 = false, confirmationPrefix = null;
     for (var option = 3; option < args.length; option++) {
         if (args[option] === "--ecma-baseline") baselinePath = args[++option];
         else if (args[option] === "--recover-test262-summary") recoverTest262 = true;
+        else if (args[option] === "--test262-confirmation") confirmationPrefix = args[++option];
         else throw new Error("unknown validation option: " + args[option]);
     }
     if (!output) {
-        throw new Error("usage: validate_snapshot_exe_suites.js SNAP EXE OUTDIR [--ecma-baseline LOG] [--recover-test262-summary]");
+        throw new Error("usage: validate_snapshot_exe_suites.js SNAP EXE OUTDIR [--ecma-baseline LOG] [--recover-test262-summary] [--test262-confirmation PREFIX]");
     }
     if (path.resolve(output).indexOf(path.resolve("artifacts") + path.sep) !== 0) {
         throw new Error("results must be beneath artifacts/");
@@ -107,6 +110,9 @@
                     if (a.files[key] === "PASS" && b.files[key] !== "PASS") item.lostPasses.push(key);
                     if (a.files[key] !== "PASS" && b.files[key] === "PASS") item.gainedPasses.push(key);
                 }
+                for (key in b.files) {
+                    if (a.files[key] === undefined) item.differingStatuses.push(key);
+                }
                 if (name === "ecma" && baseline) {
                     item.baselineLostPasses = []; item.baselineGainedPasses = [];
                     for (key in baseline) {
@@ -118,6 +124,74 @@
             comparisons.push(item);
         }
         report.comparisons = comparisons;
+    }
+    function analyze() {
+        if (baselinePath && report.baseline) {
+            if (digest(baselinePath) !== report.baseline.sha256) throw new Error("baseline log changed");
+            report.baseline.files = records(fs.readFileSync(baselinePath, "utf8"));
+        }
+        compare();
+        var unexpected = [], seen = {}, baseline = report.baseline && report.baseline.files;
+        var confirmation = null, index, name, item, jobKey;
+        if (confirmationPrefix) {
+            var confirmationLog = fs.readFileSync(confirmationPrefix + ".log", "utf8");
+            var confirmationMetrics = JSON.parse(fs.readFileSync(confirmationPrefix + ".time.json", "utf8"));
+            var confirmationFiles = records(confirmationLog);
+            if (confirmationMetrics.exitStatus !== 0 ||
+                    confirmationLog.indexOf("Test262 ES5.1 summary") < 0 ||
+                    !/\n  failed:\s+0\s/.test(confirmationLog) ||
+                    !/\n  timed out:\s+0\s/.test(confirmationLog) ||
+                    !/\n  not run:\s+0\s/.test(confirmationLog)) {
+                throw new Error("clean Test262 confirmation did not pass");
+            }
+            confirmation = {prefix: confirmationPrefix, metrics: confirmationMetrics,
+                logSHA256: digest(confirmationPrefix + ".log")};
+            for (index = 0; index < report.results.length; index++) {
+                item = report.results[index];
+                if (item.phase !== "exe" || item.name !== "test262") continue;
+                for (name in item.files) {
+                    if (item.files[name] !== confirmationFiles[name]) unexpected.push("confirmation mismatch: " + name);
+                }
+                for (name in confirmationFiles) {
+                    if (!item.files[name]) unexpected.push("unexpected confirmation file: " + name);
+                }
+            }
+        }
+        for (index = 0; index < report.results.length; index++) {
+            item = report.results[index]; jobKey = item.phase + ":" + item.name;
+            if (seen[jobKey]) unexpected.push("duplicate result: " + jobKey);
+            seen[jobKey] = true;
+            if (item.phase === "exe" && !item.sourceAbsent) unexpected.push("snapshot present: " + jobKey);
+            if (item.name === "ecma") {
+                if (!item.completed || !baseline) unexpected.push("incomplete ECMA/baseline: " + jobKey);
+                if (item.files && baseline) {
+                    for (name in item.files) {
+                        if ((item.files[name] === "FAIL" || item.files[name] === "SKIP") &&
+                                baseline[name] !== item.files[name]) unexpected.push(jobKey + ": " + name);
+                    }
+                    for (name in baseline) {
+                        if (!item.files[name]) unexpected.push("missing ECMA result: " + name);
+                    }
+                }
+            } else if (!item.pass) unexpected.push("failed: " + jobKey);
+            if (item.name === "test262" && item.processExitObserved === false && !confirmation) {
+                unexpected.push("clean Test262 exit confirmation required: " + jobKey);
+            }
+        }
+        for (index = 0; index < jobs.length; index++) {
+            if (!seen["snapshot:" + jobs[index].name] || !seen["exe:" + jobs[index].name]) {
+                unexpected.push("missing launcher result: " + jobs[index].name);
+            }
+        }
+        for (index = 0; index < report.comparisons.length; index++) {
+            item = report.comparisons[index];
+            if (item.differingStatuses.length) unexpected.push("launcher file-status differences: " + item.name);
+        }
+        if (!report.sourceDeleted || fs.existsSync(snapshot)) unexpected.push("source snapshot not deleted");
+        if (digest(executable) !== report.exeSHA256) unexpected.push("executable changed");
+        report.test262ExitConfirmation = confirmation;
+        report.unexpected = unexpected; report.accepted = unexpected.length === 0;
+        if (!report.accepted) process.exitCode = 1;
     }
     function next() {
         if (report.phase === "finished") {
@@ -134,7 +208,7 @@
                 if (digest(baselinePath) !== report.baseline.sha256) throw new Error("baseline log changed");
                 report.baseline.files = records(fs.readFileSync(baselinePath, "utf8"));
             }
-            compare(); save(); line("completed report comparisons refreshed"); return;
+            analyze(); save(); line("completed report comparisons refreshed; accepted=" + report.accepted); return;
         }
         if (report.nextJob === jobs.length) {
             if (report.phase === "snapshot") {
@@ -146,7 +220,7 @@
                 line("DELETED source snapshot: " + snapshot + "; starting executable-only phase");
             } else {
                 report.phase = "finished"; report.finished = new Date().toISOString();
-                compare(); save(); line("completed both full passes; see results.json"); return;
+                analyze(); save(); line("completed both full passes; accepted=" + report.accepted + "; see results.json"); return;
             }
         }
         if (report.phase === "exe" && fs.existsSync(snapshot)) throw new Error("source snapshot must remain absent");
