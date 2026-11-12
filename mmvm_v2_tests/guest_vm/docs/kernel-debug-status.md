@@ -1,5 +1,12 @@
 # Kernel debug implementation work log
 
+Current implementation: `-g`, independent `-O0`, deterministic bound DWARF,
+executable incorporation and real debugger checks are implemented. Final
+cross-host identity passes both policies, including -O0 self-hosting. Broad
+acceptance is still running; the full Test262 timing caveat remains explicit.
+See [measured results](kernel-debug-benchmarks.md). Entries below are
+chronological working points, not contradictory descriptions of current API.
+
 ## 2026-11-12: first -O0 working point
 
 The runner accepts `-O0` for native kernel construction, with the same shared
@@ -172,3 +179,12 @@ precede the on-demand-loading refinement; fresh final controls and the remaining
 stock/corpus/application matrix are pending. Actual GDB variable editing,
 optimized local availability, inline unwinding and source-interleaved objdump
 checks pass with the on-demand-loading build.
+
+The final on-demand build now passes Node/js_min/standalone snapshot-and-sidecar
+identity for both policies, plus an -O0 host rebuilding itself. All three
+packager hosts produce the same executable. Same-size damaged sidecars are
+rejected; execution succeeds while both build input files are unlinked and
+does not mutate the executable. Resume rejects changed source identities.
+The final short controls give Richards medians 99.4 default / 99.3 pre-debug,
+98.9 -g, 63.2 -O0 and 63.1 -g -O0. The final remaining ECMA/stock matrix is
+running serially with live per-job logs and resumable receipts.
