@@ -78,7 +78,7 @@
         };
     }
 
-    function convert(io, input, output, elf, Assembler, format) {
+    function convert(io, input, output, elf, Assembler, format, debugPath, DebugELF, Digest) {
         var source = -1, destination = -1, owned = false, temporary;
         var length, header = [], layout, n, i, remaining;
         function writeArray(bytes) {
@@ -98,7 +98,30 @@
                 for (i = 0; i < n; i++) header.push(io.get(i));
                 remaining -= n;
             }
-            layout = elf.build(header, length, Assembler, format);
+            var debug = null;
+            if (debugPath) {
+                var debugDescriptor = io.openInput(debugPath), debugBytes = [];
+                try {
+                    var debugLength = io.length(debugDescriptor);
+                    if (elf.read32(header, format.fields.debugVersion) !== 1 ||
+                        debugLength !== elf.read32(header, format.fields.debugLength) ||
+                        debugLength > 64 * 1024 * 1024) throw new Error("invalid debug binding/length");
+                    while (debugBytes.length < debugLength) {
+                        n = io.read(debugDescriptor, Math.min(CHUNK_BYTES, debugLength - debugBytes.length));
+                        if (!n) throw new Error("truncated debug sidecar");
+                        for (i = 0; i < n; i++) debugBytes.push(io.get(i));
+                    }
+                } finally { io.close(debugDescriptor); }
+                var digest = Digest.bytes(debugBytes);
+                for (i = 0; i < digest.length; i++) {
+                    if (digest[i] !== header[format.fields.debugDigest + i]) {
+                        throw new Error("debug sidecar does not match snapshot");
+                    }
+                }
+                debug = DebugELF.relocate(debugBytes,
+                    elf.kernelAddress(header, format), elf.read32(header, format.fields.codeLength));
+            }
+            layout = elf.build(header, length, Assembler, format, debug);
             temporary = output + ".tmp." + io.pid();
             destination = io.createOutput(temporary); owned = true;
             writeArray(layout.prefix); writeArray(header);

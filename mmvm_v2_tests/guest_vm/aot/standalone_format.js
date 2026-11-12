@@ -5,7 +5,8 @@
         fields: {magic: 0, version: 4, fileLength: 8,
             entryOffset: 12, entryLength: 16, codeOffset: 20, codeLength: 24,
             heapOffset: 28, heapLength: 32, heapCapacity: 36, frameAddress: 40,
-            contextAddress: 44, dlsymCellAddress: 48, optimizationMode: 52, compilerVersion: 80,
+            contextAddress: 44, dlsymCellAddress: 48, optimizationMode: 52,
+            debugVersion: 56, debugLength: 60, debugDigest: 96, compilerVersion: 80,
             profileMode: 84, sourceHash: 88}
     };
     root.GuestVMStandaloneFormat = format;

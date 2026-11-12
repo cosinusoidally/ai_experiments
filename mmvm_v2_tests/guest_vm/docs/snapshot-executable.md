@@ -1,9 +1,9 @@
 # Packaging a standalone snapshot as an executable
 
-Optional incorporation of a separate DWARF companion, precise kernel code
-sections for GDB/objdump, and deterministic `-g`/`-O0` builds are planned in
-[kernel-debug-plan.md](kernel-debug-plan.md). The interfaces in that plan are
-not yet supported by this packager; the commands below describe current use.
+Optional DWARF incorporation uses `--debug-info INPUT.snap.dbg`. See
+[kernel-debugging.md](kernel-debugging.md) for `-g`/`-O0`, debugger use,
+binding validation and variable-availability limitations. Omitting this option
+preserves the ordinary executable layout.
 
 `guest_vm/tools/snapshot_to_exe.js` wraps an existing version-2 standalone
 snapshot in an i386 ELF executable. It does not compile the VM, regenerate its
@@ -14,6 +14,7 @@ Run from `mmvm_v2_tests`, using any of these hosts:
 
 ```
 node guest_vm/tools/snapshot_to_exe.js artifacts/bar.snap artifacts/bar.exe
+node guest_vm/tools/snapshot_to_exe.js artifacts/bar.snap artifacts/debug.exe --debug-info artifacts/bar.snap.dbg
 js_min.exe guest_vm/tools/snapshot_to_exe.js artifacts/bar.snap artifacts/bar.exe
 ./artifacts/js_runner.exe artifacts/host.snap guest_vm/tools/snapshot_to_exe.js artifacts/bar.snap artifacts/bar.exe
 ```

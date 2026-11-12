@@ -8,7 +8,7 @@
         needed: 1, hash: 4, stringTable: 5, symbolTable: 6, stringSize: 10,
         symbolSize: 11, relocations: 17, relocationSize: 18,
         relocationEntrySize: 19, debug: 21, globalDataRelocation: 6,
-        progbits: 1, symtab: 11, strtab: 3, hashSection: 5, rel: 9,
+        progbits: 1, symtab: 11, staticSymtab: 2, strtab: 3, hashSection: 5, rel: 9,
         dynamicSection: 6, alloc: 2, writable: 1, executableSection: 4,
         globalFunction: 0x12}; // STB_GLOBAL | STT_FUNC
     var EH = {type: 16, machine: 18, version: 20, entry: 24,
@@ -19,7 +19,7 @@
         fileSize: 16, memorySize: 20, flags: 24, alignment: 28};
     var SH = {name: 0, type: 4, flags: 8, address: 12, offset: 16,
         size: 20, link: 24, info: 28, alignment: 32, entrySize: 36};
-    var SYM = {name: 0, info: 12};
+    var SYM = {name: 0, value: 4, size: 8, info: 12, section: 14};
     var REL = {address: 0, info: 4};
     var DYN = {tag: 0, value: 4, bytes: 8};
     var LAYOUT = {interpreter: 512, start: 1024, main: 1280,
@@ -121,7 +121,11 @@
             assembly: "_start:\n" + start.dump() + "\nmain:\n" + main.dump()};
     }
 
-    function build(header, length, Assembler, format) {
+    function kernelAddress(header, format) {
+        return ELF.base + LAYOUT.snapshot + read32(header, format.fields.codeOffset);
+    }
+
+    function build(header, length, Assembler, format, debug) {
         var entryOffset = validate(header, length, format);
         var code = launcher(Assembler, entryOffset), prefix = [], suffix = [];
         var strings = [0], names = [0], sections = [], i, cursor = LAYOUT.metadata;
@@ -200,14 +204,55 @@
         section(".got", ELF.progbits, ELF.alloc | ELF.writable, LAYOUT.got, 2 * WORD_BYTES, 4);
         section(".dynamic", ELF.dynamicSection, ELF.alloc | ELF.writable,
             LAYOUT.dynamic, dynamicEntries.length * DYN.bytes, 4, 3, DYN.bytes);
-        section(".snapshot", ELF.progbits, ELF.alloc | ELF.writable | ELF.executableSection,
-            LAYOUT.snapshot, length, ELF.page);
         suffixOffset = LAYOUT.snapshot + length;
-        section(".shstrtab", ELF.strtab, 0, suffixOffset, 0, 1);
+        var suffixCursor = suffixOffset;
+        if (!debug) {
+            section(".snapshot", ELF.progbits, ELF.alloc | ELF.writable | ELF.executableSection,
+                LAYOUT.snapshot, length, ELF.page);
+        } else {
+            var kernelOffset = read32(header, format.fields.codeOffset);
+            var kernelLength = read32(header, format.fields.codeLength);
+            var heapOffset = read32(header, format.fields.heapOffset);
+            section(".snapshot.header", ELF.progbits, ELF.alloc | ELF.writable,
+                LAYOUT.snapshot, format.headerBytes, 1);
+            section(".snapshot.bootstrap", ELF.progbits, ELF.alloc | ELF.executableSection,
+                LAYOUT.snapshot + format.headerBytes, kernelOffset - format.headerBytes, 1);
+            var kernelSectionIndex = sections.length;
+            section(".text.kernel", ELF.progbits, ELF.alloc | ELF.executableSection,
+                LAYOUT.snapshot + kernelOffset, kernelLength, 1);
+            section(".snapshot.heap", ELF.progbits, ELF.alloc | ELF.writable,
+                LAYOUT.snapshot + heapOffset, length - heapOffset, 1);
+            function appendSection(name, type, bytes, alignment, link, entrySize) {
+                var position = align(suffixCursor, alignment);
+                while (suffix.length < position - suffixOffset) suffix.push(0);
+                copy(suffix, position - suffixOffset, bytes);
+                section(name, type, 0, position, bytes.length, alignment, link, entrySize);
+                suffixCursor = position + bytes.length;
+            }
+            for (i = 0; i < debug.sections.length; i++) {
+                appendSection(debug.sections[i].name, ELF.progbits, debug.sections[i].bytes, 1);
+            }
+            var debugStrings = [0], debugSymbols = [];
+            for (i = 0; i < SYMBOL_BYTES; i++) debugSymbols.push(0);
+            for (i = 0; i < debug.functions.length; i++) {
+                var fn = debug.functions[i], symbolAt = debugSymbols.length;
+                var symbolName = appendString(debugStrings, fn.name);
+                for (var j = 0; j < SYMBOL_BYTES; j++) debugSymbols.push(0);
+                put32(debugSymbols, symbolAt, symbolName);
+                put32(debugSymbols, symbolAt + SYM.value, fn.address);
+                put32(debugSymbols, symbolAt + SYM.size, fn.length);
+                debugSymbols[symbolAt + SYM.info] = ELF.globalFunction;
+                put16(debugSymbols, symbolAt + SYM.section, kernelSectionIndex);
+            }
+            var debugStringIndex = sections.length;
+            appendSection(".strtab", ELF.strtab, debugStrings, 1);
+            appendSection(".symtab", ELF.staticSymtab, debugSymbols, 4, debugStringIndex, SYMBOL_BYTES);
+        }
+        section(".shstrtab", ELF.strtab, 0, suffixCursor, 0, 1);
         sections[sections.length - 1].size = names.length;
-        sectionTableOffset = align(suffixOffset + names.length, 4);
-        for (i = 0; i < sectionTableOffset - suffixOffset + sections.length * ELF.sectionHeaderBytes; i++) suffix.push(0);
-        copy(suffix, 0, names);
+        sectionTableOffset = align(suffixCursor + names.length, 4);
+        while (suffix.length < sectionTableOffset - suffixOffset + sections.length * ELF.sectionHeaderBytes) suffix.push(0);
+        copy(suffix, suffixCursor - suffixOffset, names);
         for (i = 1; i < sections.length; i++) {
             var s = sections[i], at = sectionTableOffset - suffixOffset + i * ELF.sectionHeaderBytes;
             put32(suffix, at + SH.name, s.name); put32(suffix, at + SH.type, s.type);
@@ -215,7 +260,7 @@
             put32(suffix, at + SH.address, s.flags & ELF.alloc ? ELF.base + s.offset : 0);
             put32(suffix, at + SH.offset, s.offset); put32(suffix, at + SH.size, s.size);
             put32(suffix, at + SH.link, s.link);
-            put32(suffix, at + SH.info, s.type === ELF.symtab ? 1 : 0);
+            put32(suffix, at + SH.info, s.type === ELF.symtab || s.type === ELF.staticSymtab ? 1 : 0);
             put32(suffix, at + SH.alignment, s.alignment);
             put32(suffix, at + SH.entrySize, s.entrySize);
         }
@@ -231,7 +276,7 @@
         return {prefix: prefix, suffix: suffix, snapshotOffset: LAYOUT.snapshot,
             assembly: code.assembly};
     }
-    var api = {build: build, read32: read32};
+    var api = {build: build, read32: read32, kernelAddress: kernelAddress};
     root.GuestVMSnapshotExeELF = api;
     if (typeof module !== "undefined" && module.exports) module.exports = api;
 }(this));

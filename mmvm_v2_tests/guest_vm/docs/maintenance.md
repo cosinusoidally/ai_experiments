@@ -38,6 +38,8 @@ Ordinary `guest_runner.js` options:
 | Flag | Effect |
 | --- | --- |
 | `--vm-native` | Kernel interpreter: i386 on js_min, generated JS on Node. |
+| `-g` | Canonical native-kernel provenance and separate bound DWARF sidecar; requires `--snapshot`, rejects `--with-snapshot`. |
+| `-O0` | Build native kernels with stable named stack homes, without optional inlining/register residency/slot reuse/forwarding/fusion/tail frames. Independent of `-g`. |
 | `--vm-predecode` | Native interpretation with predecoded operand mode; build/load mode must agree. |
 | `--vm-threaded` | Structured-JS compilation. On js_min the non-native runner already enables it; bare VM constructors do not. |
 | `--snapshot FILE` | Build a generic standalone image before opening the optional application; implies native mode. Explicit, never an automatic disk cache. |

@@ -10,12 +10,20 @@
     var KernelCompiler = root.GuestVMKernelCompiler;
     var HostFFI = root.GuestVMHostFFI;
     var SnapshotOutput = root.GuestVMSnapshotOutput;
+    var KernelDWARF = root.GuestVMKernelDWARF;
+    var DebugELF = root.GuestVMDebugELF;
+    var DebugDigest = root.GuestVMDebugDigest;
+    var DebugLocations = root.GuestVMKernelDebugLocations;
     var StandaloneFormat = root.GuestVMStandaloneFormat;
     if (typeof module !== "undefined" && module.exports) {
         Assembler = require("./x86_assembler.js");
         KernelCompiler = require("./kernel_compiler.js");
         HostFFI = require("../host_ffi.js");
         SnapshotOutput = require("./snapshot_output.js");
+        KernelDWARF = require("./kernel_dwarf.js");
+        DebugELF = require("./debug_elf.js");
+        DebugDigest = require("./debug_digest.js");
+        DebugLocations = require("./kernel_debug_locations.js");
         StandaloneFormat = require("./standalone_format.js");
     }
 
@@ -137,21 +145,31 @@
         var debug = ir.debugLocation ? {name: ir.name,
             location: ir.debugLocation, parameters: ir.parameters.slice(0),
             locals: ir.locals.slice(0), start: assembler.length,
-            optimization: ir.optimization || "default", lines: []} : null;
+            optimization: ir.optimization || "default", lines: [], cfi: [], availability: [],
+            argumentRegisters: [], unavailableRanges: [], inlines: []} : null;
         state.debug = debug;
+        if (debug) {
+            var argumentIndex = 0;
+            while (argumentIndex < ir.parameters.length) {
+                debug.argumentRegisters.push(state.registerMap["argument:" + argumentIndex] || null);
+                argumentIndex++;
+            }
+        }
+        if (debug && debug.optimization === "none") DebugLocations.prepare(ir.body);
         assembler.pushEbp();
         if (debug) debug.pushedFrame = assembler.length;
         assembler.movEbpEsp();
         if (debug) debug.establishedFrame = assembler.length;
         reserveKernelLocals(assembler, ir, state);
-        saveKernelRegisters(assembler, state.preserveEdx);
+        saveKernelRegisters(assembler, state.preserveEdx, debug);
         initializeKernelArgumentRegisters(assembler, state.registerMap);
         if (debug) debug.bodyStart = assembler.length;
         emitStatements(assembler, ir.body, state);
         assembler.movEaxImmediate(0);
         assembler.label(state.returnLabel);
         if (debug) debug.bodyEnd = assembler.length;
-        restoreKernelRegisters(assembler, state.preserveEdx);
+        if (debug && debug.optimization === "none") DebugLocations.finish(debug);
+        restoreKernelRegisters(assembler, state.preserveEdx, debug);
         assembler.leave();
         if (debug) debug.leftFrame = assembler.length;
         assembler.ret();
@@ -1016,6 +1034,18 @@
             output.write32(header.optimizationMode, metadata.optimizationMode | 0);
             output.write32(header.profileMode, metadata.profileMode | 0);
             output.write32(header.sourceHash, metadata.sourceHash | 0);
+            var debugBytes = null;
+            if (result.debug) {
+                var dwarf = KernelDWARF.build(result.debug, result.length);
+                var codeDigest = DebugDigest.digest(result.length, function (offset) {
+                    return result.pointer ? heap.memory.host.ffi.peek8(result.pointer + offset) : result.bytes[offset];
+                });
+                dwarf.sections.push({name: ".guestvm.debug", bytes: codeDigest, relocations: []});
+                debugBytes = DebugELF.build(dwarf);
+                output.write32(header.debugVersion, 1);
+                output.write32(header.debugLength, debugBytes.length);
+                output.copyBytes(header.debugDigest, DebugDigest.bytes(debugBytes));
+            }
             output.write32(STANDALONE_OPERAND_MODE_OFFSET, metadata.operandMode | 0);
             output.copyBytes(layout.entryOffset, bootstrap.bytes);
             output.copyBytes(layout.mmapNameOffset, mmapNameBytes);
@@ -1031,6 +1061,13 @@
                 bindingIndex++;
             }
             output.copyCode(layout.codeOffset, result);
+            if (debugBytes) {
+                var debugOutput = new SnapshotOutput(heap.memory, debugBytes.length);
+                try {
+                    debugOutput.copyBytes(0, debugBytes);
+                    if (!debugOutput.write(path + ".dbg", null, 0)) return false;
+                } finally { debugOutput.destroy(); }
+            }
             return output.write(path, heapImage, heapImageLength);
         } finally {
             if (output) output.destroy();
@@ -1244,18 +1281,33 @@
         counts[key] = (counts[key] || 0) + 1;
     }
 
-    function saveKernelRegisters(assembler, preserveEdx) {
+    function saveKernelRegisters(assembler, preserveEdx, debug) {
+        var saved = 0;
+        function record(register) {
+            saved++;
+            if (debug) debug.cfi.push({offset: assembler.length, kind: "save",
+                register: register, words: debug.localWords + saved + 2});
+        }
         assembler.pushEbx();
+        record("ebx");
         assembler.pushEsi();
+        record("esi");
         assembler.pushEdi();
-        if (preserveEdx) assembler.pushEdx();
+        record("edi");
+        if (preserveEdx) { assembler.pushEdx(); record("edx"); }
     }
 
-    function restoreKernelRegisters(assembler, preserveEdx) {
-        if (preserveEdx) assembler.popEdx();
+    function restoreKernelRegisters(assembler, preserveEdx, debug) {
+        function record(register) {
+            if (debug) debug.cfi.push({offset: assembler.length, kind: "restore", register: register});
+        }
+        if (preserveEdx) { assembler.popEdx(); record("edx"); }
         assembler.popEdi();
+        record("edi");
         assembler.popEsi();
+        record("esi");
         assembler.popEbx();
+        record("ebx");
     }
 
     function initializeKernelArgumentRegisters(assembler, registerMap) {
@@ -1450,11 +1502,20 @@
     }
 
     function emitStatement(assembler, node, state) {
+        var outerLocation = state.debugLocation;
+        if (node.debugLocation) state.debugLocation = node.debugLocation;
         if (state.debug && node.debugLocation) {
             state.debug.lines.push({offset: assembler.length,
                 filename: node.debugLocation.filename,
                 line: node.debugLocation.line, column: node.debugLocation.column});
         }
+        if (state.debug) DebugLocations.observe(state.debug, assembler.length, node.debugDefinedBefore);
+        emitStatementBody(assembler, node, state);
+        if (state.debug) DebugLocations.observe(state.debug, assembler.length, node.debugDefinedAfter);
+        state.debugLocation = outerLocation;
+    }
+
+    function emitStatementBody(assembler, node, state) {
         if (node.op === "expression") {
             emitControlExpression(assembler, node.value, state);
             return;
@@ -1552,6 +1613,7 @@
                  * frame. Evaluate everything before overwriting any argument,
                  * so swaps and repeated argument references remain correct. */
                 var tailArguments = node.value.arguments;
+                var tailDebugStart = state.debug ? assembler.length : 0;
                 var tailIndex = tailArguments.length;
                 while (tailIndex > 0) {
                     emitControlExpression(assembler, tailArguments[--tailIndex], state);
@@ -1562,9 +1624,15 @@
                     assembler.popEax();
                     assembler.movEbpArgumentEax(tailIndex++);
                 }
-                restoreKernelRegisters(assembler, state.preserveEdx);
+                if (state.debug) state.debug.cfi.push({offset: assembler.length, kind: "remember"});
+                restoreKernelRegisters(assembler, state.preserveEdx, state.debug);
                 assembler.leave();
+                if (state.debug) state.debug.cfi.push({offset: assembler.length, kind: "leave"});
                 assembler.jump("kernel_function_" + node.value.name);
+                if (state.debug) {
+                    state.debug.cfi.push({offset: assembler.length, kind: "resume"});
+                    state.debug.unavailableRanges.push({start: tailDebugStart, end: assembler.length});
+                }
                 return;
             }
             emitControlExpression(assembler, node.value, state);
@@ -2074,6 +2142,8 @@
     function emitControlExpression(assembler, node, state) {
         if (node.op === "const_i32") assembler.movEaxImmediate(node.value);
         else if (node.op === "inline_call_i32") {
+            var inlineDebug = state.debug ? {name: node.name, start: assembler.length,
+                callLocation: state.debugLocation} : null;
             emitStatements(assembler, node.bindings, state);
             var outerReturn = state.returnLabel;
             var inlineReturn = "kernel_inline_return_" + state.nextLabel++;
@@ -2082,6 +2152,10 @@
             assembler.movEaxImmediate(0);
             assembler.label(inlineReturn);
             state.returnLabel = outerReturn;
+            if (inlineDebug) {
+                inlineDebug.end = assembler.length;
+                state.debug.inlines.push(inlineDebug);
+            }
         }
         else if (node.op === "call_kernel_i32") {
             var kernelArgumentIndex = node.arguments.length;

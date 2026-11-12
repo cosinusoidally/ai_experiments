@@ -81,6 +81,8 @@ All booleans default false unless stated otherwise.
 | `gcThreshold` | Positive allocation-debt/record threshold; default 8192. Not a byte limit or time interval. |
 | `gcStress` | Sets embedding GC threshold to 1. Not identical to the runner's native stress mode. |
 | `nativeInterpreter` | Compile/load the kernel interpreter; JS backend on Node, i386 on js_min. |
+| `kernelOptimization` | `"default"` (optimized) or `"none"` (debug-friendly `-O0`). Code-image loading rejects mismatched policy. |
+| `kernelSourceReader` | Optional `(projectRelativePath) -> sourceText` callback enabling canonical kernel provenance and DWARF on standalone snapshot output. The CLI supplies it for `-g`; never a guest runtime callback. |
 | `nativeOperandPredecode` | Select predecoded native operand mode; image compatibility includes this mode. |
 | `threadedCompile` | Optional structured-JS compilation path; not threads. Prefer one execution strategy rather than combining it with native interpretation. |
 | `rawFFI` | Expose raw FFI/memory globals. Unsafe; real native execution unavailable on ordinary Node. |

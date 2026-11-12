@@ -38,8 +38,10 @@ Start here:
    tests, compatibility changes and safe development workflows.
 8. [Snapshot executables](snapshot-executable.md): pure-JS ELF packaging,
    startup ABI, file layout, host support, and validation.
+9. [Native kernel debugging](kernel-debugging.md): `-g`, `-O0`, DWARF sidecars,
+   executable incorporation, variable availability and debugger use.
 
-Planned work (not current API):
+Design and acceptance checklist:
 
 - [Deterministic kernel debugging and -O0](kernel-debug-plan.md): separate
   DWARF, GDB/objdump, variable locations, debug-friendly compilation,
@@ -65,9 +67,9 @@ Important current facts:
   universal detector of every semantic fallback or outer-VM operation.
 - Source is retained for function `toString`. Snapshot compactness does not
   mean deleting source, compressing files or hard-coding an application.
-- The native interpreter build still opts into the kernel compiler's legacy
-  local-constant mode. The shared collector has migrated to explicit constant
-  namespaces, but the main interpreter has not completed that migration.
+- Kernel configuration uses explicit scalar bindings and constant namespaces.
+  Legacy constant-local options have been removed; normal mutable JS locals
+  are not reinterpreted as compile-time constants.
   See [Compilation](compilation.md).
 
 The older documents alongside `runtime.js` are historical design notes,

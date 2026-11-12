@@ -36,6 +36,11 @@
         load("guest_vm/aot/kernel_slots.js");
         load("guest_vm/aot/kernel_compiler.js");
         load("guest_vm/aot/kernel_sources.js");
+        load("guest_vm/aot/kernel_debug_locations.js");
+        load("guest_vm/aot/debug_binary.js");
+        load("guest_vm/aot/debug_digest.js");
+        load("guest_vm/aot/kernel_dwarf.js");
+        load("guest_vm/aot/debug_elf.js");
         load("guest_vm/aot/backend_js.js");
         load("guest_vm/aot/x86_assembler.js");
         load("guest_vm/aot/snapshot_output.js");

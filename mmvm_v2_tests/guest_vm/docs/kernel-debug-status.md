@@ -47,3 +47,45 @@ Source metadata is excluded from the inliner's eligibility calculation. This
 is essential: metadata must not alter the generated program. The source-reader
 embedding option remains internal plumbing, not a completed public `-g` API.
 DWARF serialization and debugger acceptance remain in progress.
+
+## 2026-11-12: DWARF and executable incorporation
+
+The runner now builds bound ELF32 DWARF sidecars with `-g`. The pure-JS
+packager accepts `--debug-info`, validates the snapshot's SHA-256 binding,
+relocates section-relative kernel addresses and adds nonallocated DWARF plus
+sized native function symbols. Ordinary snapshot loading is unchanged.
+
+Implemented records include function/statement coordinates, parameter locations,
+conservative definitely-assigned -O0 local ranges, inline origins/call sites,
+and frame-pointer/saved-register/tail-epilogue CFI. Optimized locals are
+deliberately unavailable rather than incorrectly described using a reused
+slot. See [kernel-debugging.md](kernel-debugging.md) for the precise API and
+limitations.
+
+Completed consumer checks:
+
+- objdump decodes the relocatable sidecar's units, lines, locations and frames.
+- objdump disassembles sized kernel functions in `.text.kernel` in the exe.
+- GDB breaks at canonical source statements and interleaves native instructions
+  with original JS source.
+- GDB recovers live kernel parameters and unwinds the optimized helper graph,
+  including an inline frame. -O0 locations before initialization are now
+  unavailable rather than showing garbage stack contents.
+
+The full-graph debug check passes on Node and js_min, with matching sidecar
+SHA-256 on both hosts as well as unchanged instruction bytes. Renaming snapshot
+and executable outputs preserves bytes. A genuine self-hosted artifact check
+and serial -O0 benchmark/GC/runtime matrix are currently running. Those pending
+gates are not yet a completed whole-suite acceptance result.
+
+The first end-to-end working point additionally passes:
+
+- Genuine self-hosted debug snapshot **and sidecar** equality with Node/js_min.
+- Node/js_min/self-hosted debug executable equality.
+- Default standalone core: 12 guest programs / 270 assertions plus internal
+  compiler/heap checks; native GC: 24 rounds / 48 collections; stock Richards.
+
+The unchanged optimized code SHA-256 remains
+`3ef0776560227fa90a3acaca5af7a2e1fa83ae6f8f8144f9b94d8905084faedd`.
+Other runtime configurations, the full final matrix and the benchmark report
+remain pending at this checkpoint.

@@ -2,9 +2,10 @@
 
 Recorded 2026-11-12, following the completed native-contract-103 launcher
 acceptance. **This is a design and acceptance plan, not implemented support.**
-The current runner has neither kernel `-g` nor `-O0`; the packager has no
-DWARF incorporation option. Commands below describe the proposed interface.
-No debug-mode benchmark results exist yet.
+The implemented interface is described in [kernel-debugging.md](kernel-debugging.md).
+Acceptance and benchmarking progress are recorded in the working-point log.
+Requirements below remain the acceptance checklist, not claims that every
+validation gate has already completed.
 
 Implementation has started; see [the working-point log](kernel-debug-status.md)
 for the exact implemented subset and completed checks. Until the final gates
@@ -184,11 +185,9 @@ with explicit policy switches rather than a second code-generation pipeline.
   as optimized mode. Do not reinterpret a declaration under different rules
   merely because -O0 was selected.
 
-The legacy local-constant mode documented in compilation.md is an existing
-semantic debt. Debug metadata must honestly distinguish such configured
-constants from runtime locals; -O0 is not permission to introduce or silently
-change that convention. Continue moving actual configuration to explicit
-namespaces as separate, tested work.
+Legacy local-constant options have now been removed. Kernel configuration uses
+explicit bindings/namespaces and normal locals retain ordinary mutable JS
+semantics. Debugging must not introduce a different constant-local convention.
 
 At -O0, locals should be inspectable after their values have been established,
 at sensible statement boundaries. Before initialization, report the actual

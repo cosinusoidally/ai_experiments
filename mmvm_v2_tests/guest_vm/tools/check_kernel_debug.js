@@ -1,14 +1,20 @@
 /* Broad debug/non-debug code-generation equivalence and source provenance.
  * Uses the actual interpreter/collector graph, not a miniature test dialect. */
 (function () {
-    var VM, readSource, report;
+    var VM, readSource, report, DWARF, ELF, Digest;
     if (typeof module !== "undefined" && module.exports) {
         VM = require("../vm.js");
+        DWARF = require("../aot/kernel_dwarf.js");
+        ELF = require("../aot/debug_elf.js");
+        Digest = require("../aot/debug_digest.js");
         readSource = function (path) { return require("fs").readFileSync(path, "utf8"); };
         report = function (message) { console.log(message); };
     } else {
         load("guest_vm/guest_vm.js");
         VM = GuestVM;
+        DWARF = GuestVMKernelDWARF;
+        ELF = GuestVMDebugELF;
+        Digest = GuestVMDebugDigest;
         readSource = read;
         report = print;
     }
@@ -55,6 +61,13 @@
             }
             report(policy + ": unchanged " + result.length + " code bytes; " +
                 functions.length + " canonical functions; " + lines + " statement positions");
+            var dwarf = DWARF.build(result.debug, result.length);
+            var sidecar = ELF.build(dwarf);
+            var relocated = ELF.relocate(sidecar, 0x10000000, result.length);
+            if (relocated.functions.length !== functions.length) throw new Error("missing ELF function symbols");
+            var hash = Digest.bytes(sidecar), hex = "", h = 0;
+            while (h < hash.length) hex += ("0" + hash[h++].toString(16)).slice(-2);
+            report(policy + ": " + sidecar.length + " DWARF ELF bytes; SHA256 " + hex);
         } finally { debug.destroy(); }
     }
     check("default");

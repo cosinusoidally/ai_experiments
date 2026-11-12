@@ -33,6 +33,7 @@ var guestRunnerThreaded = false;
 var guestRunnerNative = false;
 var guestRunnerPredecode = false;
 var guestRunnerKernelOptimization = "default";
+var guestRunnerKernelDebug = false;
 var guestRunnerSnapshot = null;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
@@ -92,6 +93,9 @@ for (var guestRunnerOptionIndex = 0;
     if (guestRunnerFoundProgram) {
         guestRunnerProgramArguments.push(
             guestRunnerArguments[guestRunnerOptionIndex]);
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "-g") {
+        guestRunnerKernelDebug = true;
+        guestRunnerNative = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-profile") {
         guestRunnerProfile = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native-samples") {
@@ -179,7 +183,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-no-host-calls] " +
                      "[--vm-log-host-calls] " +
                      "[--vm-profile-duration milliseconds] " +
-                     "[--vm-native] [--vm-predecode] [-O0] [--snapshot file | " +
+                     "[--vm-native] [--vm-predecode] [-g] [-O0] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] " +
                      "[program.js]";
     if (typeof print === "function") print(guestUsage);
@@ -188,6 +192,9 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
     else quit(2);
 }
 
+if (guestRunnerKernelDebug && (!guestRunnerSnapshot || guestRunnerWithSnapshot)) {
+    throw new Error("-g requires --snapshot and cannot use --with-snapshot");
+}
 var guestProgramPath = guestRunnerArguments[0];
 var guestProgramSource;
 if (guestRunnerSnapshot) {
@@ -222,6 +229,7 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode || !!guestRun
                                         nativeInterpreter: guestRunnerNative,
                                         nativeOperandPredecode: guestRunnerPredecode,
                                         kernelOptimization: guestRunnerKernelOptimization,
+                                        kernelSourceReader: guestRunnerKernelDebug ? read : null,
                                         snapshot: guestRunnerSnapshot,
                                         deferSnapshotWrite:
                                             !!guestRunnerSnapshot,
