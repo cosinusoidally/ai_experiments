@@ -287,12 +287,58 @@ objdump -d -S artifacts/foo.exe
 
 Source lookup is an external debugger setting, not an absolute build path
 stored in artifacts. Unwind/line/variable checks must execute actual kernel
-code; dumping plausible DWARF is not sufficient acceptance. GDB should also
-load the separate companion for an ordinary mmap-loaded snapshot using an
-explicit actual code-base relocation. Document the validated add-symbol-file
-invocation when implemented; do not disable ASLR or fix the heap base to make
-that convenient. Raw .snap is not ELF, so ordinary objdump -d on it is not
-promised to discover its code automatically.
+code; dumping plausible DWARF is not sufficient acceptance. Raw .snap is not
+ELF, so ordinary objdump -d on it is not promised to discover its code
+automatically.
+
+### Deferred: GDB annotation of a js_runner-loaded snapshot
+
+Priority clarification, 2026-11-12: packaged-executable debugging comes first.
+An end-to-end GDB workflow for an mmap-loaded snapshot is **lower priority**
+and is not an initial delivery gate. However, preserving the ability to use
+the same sidecar this way is a **required design constraint from the start**.
+Do not select a representation that would require redesigning debug emission
+or changing the VM execution model to support it later.
+
+The future workflow starts the ordinary loader under GDB:
+
+```
+gdb --args artifacts/js_runner.exe artifacts/foo.snap hello.js
+```
+
+After the snapshot is mapped, determine its actual mapping base and read the
+kernel code offset from snapshot metadata:
+
+```
+runtime kernel address = snapshot mapping base + snapshot kernel-code offset
+```
+
+This address is unrelated to the independently allocated guest linear-heap
+base. Supply the code load address to GDB with add-symbol-file. A companion
+whose primary .text section represents the kernel can use a positional text
+address; multiple named code sections require their individual section load
+addresses. Choose and validate the exact command when implementing this
+workflow, rather than promising an untested section convention now.
+
+Design constraints that cannot be deferred:
+
+- Keep the canonical sidecar's addresses section-relative, with enough
+  section identity/relocation information to apply an arbitrary load base.
+- Relocate function symbols, line addresses, variable-location ranges and
+  unwind data consistently, not just symbol names.
+- Preserve code boundaries and snapshot layout information needed to derive
+  the load addresses; use the authoritative format fields, not guessed offsets.
+- Do not make the sidecar usable only at the packaged executable's fixed
+  address. Applying EXE relocations must not modify the original sidecar.
+- Keep runtime addresses out of the artifacts and their content identity.
+  No fixed heap placement, disabling ASLR, normal-loader changes, new C hooks
+  or debugger-time snapshot rewriting should be needed.
+
+Deferred convenience work includes discovering the mapping, providing a
+documented stop after mmap but before guest startup, and an optional JS helper
+that prints the correct GDB command. Source lookup remains a debugger setting.
+Once implemented, validate kernel breakpoints, source-interleaved disassembly,
+backtraces and local inspection through js_runner as well as the packaged EXE.
 
 ## Required -O0 benchmarking
 
@@ -354,12 +400,16 @@ forward before calling the implementation accepted.
    and size comparison before spending time on elaborate optimized metadata.
 3. Bring up -g -O0 end to end: deterministic sidecar, binding, precise ELF code
    sections/symbols, lines, parameters/locals and unwind information.
-4. Exercise real GDB/objdump: source-interleaved disassembly, breakpoints,
+4. Exercise real GDB/objdump with the packaged executable: source-interleaved disassembly, breakpoints,
    nested calls/backtraces, prologue/epilogue unwinding and known local values.
    Prefer existing representative kernel paths over a forest of micro-tests.
 5. Support optimized -g location ranges, storage reuse and inline provenance;
    deliberately verify unavailable variables are not displayed with stale data.
 6. Finish the correctness/performance matrix and write the measured -O0 report.
+
+The js_runner/add-symbol-file workflow is deferred beyond these initial gates.
+Review its relocation requirements during sidecar/ELF format design now; do
+not postpone that compatibility review until the convenience tooling is built.
 
 For each -g policy, build under Node and js_min and genuinely rebuild under the
 guest. Compare snapshot **and sidecar** bytes. Rebuild under different relative
