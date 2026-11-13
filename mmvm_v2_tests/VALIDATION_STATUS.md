@@ -1,5 +1,16 @@
 # Validation checkpoint, 2026-11-04
 
+Latest full audit, 2026-11-13: implementation `75860af`, both standalone
+launchers complete **54 jobs / zero unexpected failures**. Test262 is
+3292/3292 on each; ECMA is 994 pass / 335 known failures, with the exact
+1333 filename statuses unchanged. All 15 stock Octane suites, demos 1–8,
+HTTP, core, GC and both genuine bit-identical self-builds pass. Portable
+Node/js_min core, four-path structural GC, 14 supplemental checks, packaging
+and debugger checks also pass. No correctness fixes were needed. See
+[full results, timings, RSS and baseline comparisons](FULL_VALIDATION_2026-11-13.md).
+In particular, the short demo samples are not sustained-performance proof,
+and known ECMA failures are not counted as passes.
+
 Latest completed acceptance, 2026-11-12: frozen `bfc122f`, native contract 103,
 runs the complete core, imported Test262, historical ECMA, all 15 stock Octane
 suites, bounded demos 1–8/HTTP, GC and supplementary integration through both

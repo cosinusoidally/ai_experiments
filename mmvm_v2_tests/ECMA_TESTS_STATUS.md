@@ -2,6 +2,17 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Full regression audit, 2026-11-13
+
+- Both standalone launchers: **994 passed / 335 failed**, including
+  **39 timeouts**, **4 pre-existing configured skips / 0 not run**.
+- All **1333 filename statuses exactly match** the November 12 baseline
+  and each other: **zero lost passes / zero changed statuses**.
+- Snapshot runner 666.361 s (process 667.716 s, peak 463836 KiB RSS);
+  executable runner 654.192 s (process 654.485 s, peak 463832 KiB RSS).
+- No harness/corpus/VM changes or relaxed limits. Existing failures remain
+  failures. See [complete validation and performance report](FULL_VALIDATION_2026-11-13.md).
+
 ### Snapshot/executable acceptance, 2026-11-11–12 — both corpus passes complete
 
 - Frozen `bfc122f`, native contract 103, complete default standalone snapshot

@@ -1,5 +1,11 @@
 # Octane guest-VM bring-up and performance approach
 
+Latest full audit, 2026-11-13: **all 15 stock suites pass under both js_runner
+and the packaged executable**, including Mandreel and RegExp. Full current
+scores, elapsed times, executable RSS and comparisons with the November 12
+archive are in [the full VM validation report](FULL_VALIDATION_2026-11-13.md).
+The dated bring-up entries below are historical, not the current failing set.
+
 ## Objective
 
 ### 2026-10-31 follow-up: Typescript stock pass

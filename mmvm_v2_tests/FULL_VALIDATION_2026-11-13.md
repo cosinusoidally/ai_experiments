@@ -1,7 +1,8 @@
 # Full VM validation — 2026-11-13
 
-Status: in progress. Implementation under test: `75860af` on
-`guestVM-cleanup3`. No passing result is inferred from a started job.
+Status: **complete**, approximately 13:16–14:54 UTC. Implementation under
+test: `75860af` on `guestVM-cleanup3`. **No newly lost correctness pass was
+found; no VM fixes were needed.** Existing ECMA failures remain failures.
 
 ## Scope and method
 
@@ -105,5 +106,144 @@ aggregate. No source changes to improve scores were made in this audit.
   clean exit 0. Runner 412.023 s; process 412.645 s. Previous executable
   process observation: 422.82 s.
 
-Executable ECMA/Octane/rebuild and supplementary checks remain in progress.
-No final all-tests verdict is claimed at this checkpoint.
+## Complete main matrix
+
+The serial supervisor completed **54 jobs** with **accepted=true** and an
+empty unexpected-failures list. Both imported Test262 runs have clean exit 0.
+Both ECMA runs have the same 1333 filename statuses as each other and the
+baseline, with zero lost/gained passes or changed statuses. Executable ECMA
+runner time is 654.192 s, process time 654.485 s, peak RSS 463832 KiB.
+Executable Test262 peak RSS is 512400 KiB.
+
+All 15 stock Octane suites also pass under the executable. Its genuine
+self-hosted rebuild takes 83.996 s (previous 83.516 s) and reproduces the
+same snapshot SHA-256. The supervisor confirms the input snapshot remains
+absent throughout that phase and the executable is unmodified.
+
+| Octane suite | Previous exe score | Current exe score | Change | Current seconds | Peak RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Richards | 96.2 | 99.9 | +3.85% | 3.323 | 21504 |
+| DeltaBlue | 91 | 94.8 | +4.18% | 4.501 | 58496 |
+| Crypto | 175 | 180 | +2.86% | 25.567 | 38784 |
+| RayTrace | 266 | 280 | +5.26% | 10.034 | 206720 |
+| EarleyBoyer | 451 | 483 | +7.10% | 25.120 | 467584 |
+| RegExp | 2.85 | 2.98 | +4.56% | 552.082 | 467584 |
+| Splay | 699 | 723 | +3.43% | 3.914 | 420352 |
+| NavierStokes | 270 | 277 | +2.59% | 9.972 | 25344 |
+| PdfJS | 736 | 837 | +13.72% | 18.325 | 270648 |
+| Mandreel | 495 | 511 | +3.23% | 104.727 | 487784 |
+| Gameboy | 1004 | 1073 | +6.87% | 13.693 | 96496 |
+| CodeLoad | 89.5 | 101 | +12.85% | 28.283 | 257536 |
+| Box2D | 374 | 396 | +5.88% | 14.598 | 92672 |
+| zlib | 595 | 611 | +2.69% | 250.527 | 104192 |
+| Typescript | 1456 | 1495 | +2.68% | 96.370 | 467452 |
+
+The executable geometric-mean score ratio is 1.05397 (+5.40%). All individual
+observations are higher than the archived executable run. As with the
+snapshot table, this is not a controlled attribution to a code optimization.
+
+The main supervisor ran from 13:17:08 to 14:41:38 UTC (84 min 29 s), covering
+both launchers serially. This duration is mostly the real corpus/benchmark
+work, notably slow lexical tests, the unchanged ECMA watchdog cases and stock
+RegExp/zlib. It is not multiple retries of incomplete intermediate VM builds.
+
+## Remaining checks: complete
+
+- `guest_vm/tests/run_tests.sh both`: exit 0, both Node and js_min pass
+  12 guest programs / 270 assertions plus tokenizer, heap, embedding,
+  kernel/numeric/native/predecoded backend and structured compiler checks.
+  Runner stdout, net/node_web/demo help paths and three-context multiplexing
+  also pass. Combined wrapper time 201.48 s; peak RSS 273188 KiB.
+- Structural GC passes on all four execution paths: Node, js_min,
+  snapshot-hosted and executable-hosted. Each checks 27 audits / 111996
+  edges / 221 property indexes / 74 embedding collections. Maximum observed
+  heap bump: Node 3531416 bytes; other paths 3531768 bytes, all below the
+  8388608-byte cap. Native-counter collections are checked separately by the
+  native workload (24 rounds / 48 collections on each main launcher).
+- Independent snapshot collector audit: 39008 reachable records, zero
+  missing marks. It also reports 457 unreachable occupied records / 86576
+  bytes; these are disclosed, not confused with missing live marks.
+- Debug/code equivalence passes on Node and js_min under both default and
+  -O0 policies: 269 canonical functions; default 672705 code bytes / 18597
+  statement positions / 333 locals with safe availability; -O0 545244 code
+  bytes / 25066 positions / 2794 locals. Both hosts emit identical DWARF
+  hashes. Node check 5.38 s / 259796 KiB; js_min 141.72 s / 937812 KiB.
+  The latter's roughly 916 MiB compiler-test peak is a resource limitation,
+  not application-runtime RSS. It ran without another heavy workload.
+- Debug executable packaging: all 49 ELF/launch checks pass, including
+  Node/js_min/standalone output identity, original payload/file immutability,
+  no-snapshot execution and ordinary loader behavior. No compiler/binutils
+  programs or rebuilt C loader were needed.
+- Kernel debugger real-kernel acceptance passes on js_min and the standalone
+  executable. Both launcher command-file workflows pass. Coverage includes
+  list main before run, raw disassembly and original breakpoint bytes,
+  local/argument inspection, stepping, CFI boundaries, restart and bounded
+  GC interrupt/resume.
+- Supplementary matrix: **14/14 checks pass**, seven through each launcher:
+  structural GC, raw FFI file I/O, self-hosted frontend, net.js frontend
+  compilation, recursive native compiler dependencies, demo8 runner I/O and
+  three-context multiplexing. Its input snapshot was deleted before the
+  executable half. Total 92.41 s; maximum RSS 266476 KiB.
+- Fresh js_min source build: 110.64 s / 317232 KiB; byte-identical to the
+  Node-built snapshot and both genuine self-hosted rebuilds. Ordinary
+  js_runner executes hello from it. This audit has no matched previous
+  non-debug js_min-build timing, so it does not establish js_min build-time
+  improvement or parity. Node plain build: 9.28 s / 297848 KiB. Snapshot-
+  hosted build: 82.41 s / 484228 KiB; executable-hosted: 83.99 s / 484280 KiB.
+
+## Demo performance and limits of acceptance
+
+All samples use 320x240 and the existing 20 FPS request. Demos 1–7 each have
+one roughly five-second FPS sample before input-driven shutdown; demo8 has
+three chronological samples while the existing driver switches garage and
+auto-drive modes. Those samples include transitions, so they must not be
+called steady-state garage/free-drive benchmarks or a sustained-20-FPS pass.
+
+| Demo | Previous snapshot FPS | Current snapshot FPS | Previous exe FPS | Current exe FPS |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 2.2 | 2.3 | 2.4 | 2.4 |
+| 2 | 2.1 | 2.2 | 2.2 | 2.2 |
+| 3 | 2.9 | 3.0 | 3.1 | 3.1 |
+| 4 | 2.8 | 2.9 | 3.0 | 3.0 |
+| 5 | 2.0 | 2.0 | 2.0 | 2.1 |
+| 6 | 1.5 | 1.5 | 1.6 | 1.6 |
+| 7 | 2.2 | 2.3 | 2.4 | 2.4 |
+| 8, sample 1 | 19.9 | 19.6 | 19.0 | 19.1 |
+| 8, sample 2 | 16.1 | 16.3 | 16.5 | 15.9 |
+| 8, sample 3 | 19.2 | 19.4 | 19.1 | 19.2 |
+
+The demo passes mean live startup, frame production, exercised input/mode
+changes and normal shutdown. They are not automated pixel-by-pixel visual
+comparison or proof against every long-lived GC defect. The bounded GC
+workloads and structural audits provide separate lifetime/corruption checks;
+no seven-minute demo8 run was used.
+
+## Reproduction and evidence
+
+From this directory, with an existing `artifacts/js_runner.exe`:
+
+```sh
+node guest_runner.js --vm-native --snapshot artifacts/full-suite.snap
+node guest_vm/tools/snapshot_to_exe.js artifacts/full-suite.snap artifacts/full-suite.exe
+node guest_vm/tools/validate_snapshot_exe_suites.js artifacts/full-suite.snap artifacts/full-suite.exe artifacts/full-suite-results --ecma-baseline PREVIOUS_COMPLETE_ECMA_LOG
+```
+
+Use a new results directory; reinvoke the same supervisor command to resume.
+It deletes the supplied snapshot between phases. The baseline for this run
+was the saved November 12 complete ECMA log, read-only in the backup checkout.
+The archived per-suite Octane logs provide the previous scores above.
+
+Main receipts: `artifacts/full-suite-results/results.json`, individual
+`.log`/`.time.json` files and `artifacts/full-suite-supervisor.log`.
+Supplementary receipts: `artifacts/full-supplementary/results.json` and
+`artifacts/full-check-*.log` / `*.time`. Project-wrapper and Node snapshot
+build timing logs use the `artifacts/full-validation-*` / `full-suite-build`
+prefixes. Temporary generated data is not committed.
+
+No C, VM, demo or external corpus source was changed during this audit. No
+new tests, skips, relaxed budgets, downloads, emulation, application-specific
+performance shortcuts or parallel heavy jobs were introduced. Existing ECMA
+failures and the imported Test262 corpus's limited coverage mean this is
+**no observed correctness regression**, not complete ES5.1 compliance. The
+historical performance comparisons show no broad application slowdown, but
+single observations cannot exclude small regressions or isolate their cause.

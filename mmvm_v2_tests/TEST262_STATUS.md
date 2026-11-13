@@ -1,5 +1,13 @@
 # Test262 status
 
+2026-11-13, full optimized VM audit at `75860af`: both launchers pass
+**3292/3292 files and variants**, with **0 failed / timed out / skipped /
+not run** and observed exit 0. Snapshot runner 433.644 s (process 434.347 s,
+512404 KiB RSS); executable runner 412.023 s (process 412.645 s,
+512400 KiB RSS). Exact file statuses agree. Source snapshot deleted before
+the executable run; existing corpus, limits and selection unchanged. See
+[full audit and other suite results](FULL_VALIDATION_2026-11-13.md).
+
 2026-11-13: recovered completed November 12 inner-kernel policy comparison
 on `de5e3f5` plus policy-forwarding changes:
 
