@@ -8,6 +8,7 @@
     load("guest_vm/debugger/image.js"); load("guest_vm/debugger/dwarf.js");
     load("guest_vm/debugger/engine.js");
     load("guest_vm/debugger/x86.js");
+    load("guest_vm/debugger/commands.js");
     load("guest_vm/aot/x86_assembler.js"); load("guest_vm/aot/snapshot_frames.js");
     var io = new KernelDebuggerLinux(), image = null;
     function check(condition, description) {
@@ -31,6 +32,27 @@
         }
         check(instructionCount > 0, "all " + debug.functions.length + " real kernel functions decode to exact boundaries");
         io.output("Decoded " + instructionCount + " real kernel instructions.\n");
+        var ui = new KernelDebuggerCommands.UI(io, e, true), listing = [];
+        ui.say = function (text) { listing.push(text); };
+        function capture(command) { listing = []; ui.execute(command); return listing.join("\n"); }
+        check(capture("list main").indexOf("function main(") >= 0,
+            "list main resolves the launcher declaration before starting an inferior");
+        var mainAddress = image.byName.$main.start;
+        var mainInstruction = KernelDebuggerX86.decode(function (address) { return image.codeByte(address); }, mainAddress);
+        var expectedRaw = KernelDebuggerFormat.hex32(mainAddress) + "  ";
+        for (var rawIndex = 0; rawIndex < mainInstruction.bytes.length; rawIndex++) {
+            if (rawIndex) expectedRaw += " ";
+            expectedRaw += KernelDebuggerFormat.hexByte(mainInstruction.bytes[rawIndex]);
+        }
+        var rawListing = capture("disassemble /r main");
+        check(rawListing.indexOf(expectedRaw) >= 0, "disassemble /r renders memory-order instruction bytes");
+        check(capture("disas/r main") === rawListing, "attached /r and disas alias use the same command engine");
+        check(capture("disassemble main").indexOf(expectedRaw) < 0,
+            "ordinary disassembly does not add the raw-byte column");
+        var missingSource = false;
+        try { capture("list snapshot_bootstrap_entry"); }
+        catch (sourceError) { missingSource = sourceError.message.indexOf("no source location") >= 0; }
+        check(missingSource, "assembly-only symbols do not acquire fabricated source listings");
         var sourceName = "guest_vm/aot/native_interpreter.js";
         var source = io.textFile(sourceName);
         var marker = "budget = budget - instructionsCompleted;";
@@ -79,6 +101,11 @@
                 "main parameters are recovered through the bootstrap frame");
         }
         e.selectedFrame = 0;
+        var entryPatch = e.addBreakpoint([mainAddress], false);
+        check(io.readByte(mainAddress) !== image.codeByte(mainAddress), "test exercises an installed main-entry breakpoint");
+        check(capture("disassemble /r main").indexOf(expectedRaw) >= 0,
+            "raw disassembly shows the original instruction, not the debugger's trap byte");
+        e.removeBreakpoint(entryPatch.id);
         check(e.value(e.variable("budget")) > 0, "stack parameter is recovered at function breakpoint");
         event = e.finish(); check(event.kind === "stopped", "finish reaches the native caller");
         io.terminate(); event = e.start();

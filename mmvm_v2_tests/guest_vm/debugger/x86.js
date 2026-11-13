@@ -1,6 +1,7 @@
 /* Small i386 decoder for instructions emitted by our macro assembler.
  * Unknown encodings stop disassembly; never guess an instruction boundary. */
 (function (root) {
+    var MAX_INSTRUCTION_BYTES = 15;
     var names = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"];
     var bytes = ["al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"];
     var shorts = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"];
@@ -10,7 +11,7 @@
     function hex(n) { return root.KernelDebuggerFormat.hex32(n); }
     function decode(read, address) {
         var pc = address, octets = [], operand16 = false;
-        function u8() { if (octets.length >= 15) throw new Error("instruction exceeds 15 bytes"); var value = read(pc++); octets.push(value); return value; }
+        function u8() { if (octets.length >= MAX_INSTRUCTION_BYTES) throw new Error("instruction exceeds " + MAX_INSTRUCTION_BYTES + " bytes"); var value = read(pc++); octets.push(value); return value; }
         function signed8() { var n = u8(); return n & 128 ? n - 256 : n; }
         function word(width) { var n = 0, scale = 1; for (var i = 0; i < width; i++) { n += u8() * scale; scale *= 256; } return n >>> 0; }
         function immediate() { return hex(word(operand16 ? 2 : 4)); }
@@ -93,5 +94,5 @@
         if (!text) throw new Error("unsupported x86 encoding at " + hex(address) + "; disassembly stopped");
         return {address: address, length: pc - address, text: text, bytes: octets};
     }
-    root.KernelDebuggerX86 = {decode: decode};
+    root.KernelDebuggerX86 = {decode: decode, maxInstructionBytes: MAX_INSTRUCTION_BYTES};
 }(this));

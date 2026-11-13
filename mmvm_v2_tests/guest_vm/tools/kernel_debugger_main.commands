@@ -1,4 +1,6 @@
 # Real launcher workflow: an ELF-only symbol followed by compiled kernel JS.
+list main
+disassemble /r main
 break _start
 break main
 run hello.js
@@ -8,6 +10,7 @@ assert argc == 2
 info args
 list
 disassemble main
+disas/r main
 next
 next
 assert guestArgc == 1

@@ -12,5 +12,9 @@
         if (!(line > 0 && line === Math.floor(line))) return null;
         return {file: text.substring(0, colon), line: line};
     }
-    root.KernelDebuggerFormat = {hex32: hex32, sourceLocation: sourceLocation};
+    function hexByte(value) {
+        var digits = "0123456789abcdef";
+        return digits.charAt((value >>> 4) & 15) + digits.charAt(value & 15);
+    }
+    root.KernelDebuggerFormat = {hex32: hex32, hexByte: hexByte, sourceLocation: sourceLocation};
 }(this));

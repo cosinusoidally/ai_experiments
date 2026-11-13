@@ -77,6 +77,11 @@
         if (!line || line.charAt(0) === "#") return;
         if (line.substring(0, 2) === "x/") return this.examine(line);
         var args = words(line), name = args.shift(), handler = this.commands["$" + name];
+        var modifier = name.indexOf("/");
+        if (modifier > 0 && (name.substring(0, modifier) === "disassemble" || name.substring(0, modifier) === "disas")) {
+            args = [name.substring(modifier)].concat(args);
+            name = name.substring(0, modifier); handler = this.commands["$" + name];
+        }
         if (!handler) throw new Error("unknown command " + name + "; try help");
         try { handler(args); }
         catch (error) { throw new Error("command " + name + ": " + error.message +
@@ -104,7 +109,7 @@
                 "registers, info breakpoints|args|locals",
                 "print NAME|$REGISTER|INTEGER, set variable NAME = VALUE",
                 "x/COUNTwx ADDRESS, x/COUNTbx ADDRESS",
-                "disassemble [FUNCTION|*ADDRESS], list [FILE:LINE]",
+                "disassemble [/r] [FUNCTION|*ADDRESS], list [FUNCTION|FILE:LINE|*ADDRESS]",
                 "assert NAME|$REGISTER == VALUE, quit",
                 "Arguments support quotes/backslash escapes, not shell expansion.",
                 "Inferior stdin is /dev/null; while running use Ctrl-C or interrupt."
@@ -151,11 +156,20 @@
             for (var name in registers) if (registers.hasOwnProperty(name)) self.say(name + " " + hex(registers[name]));
         });
         command(["disassemble", "disas"], function (args) {
+            var showBytes = false;
+            if (args.length && args[0].charAt(0) === "/") {
+                if (args[0] !== "/r") throw new Error("unsupported disassemble modifier " + args[0] + "; /r shows instruction bytes");
+                showBytes = true; args = args.slice(1);
+            }
+            if (args.length > 1) throw new Error("disassemble [/r] [FUNCTION|*ADDRESS]");
+            if (e.target.pid) e.requireStopped();
             var start = 0, end;
             if (!args.length) start = e.frame().pc;
-            end = start + 64;
-            if (args.length) { var resolved = e.debug.resolve(args[0]); start = resolved[0];
-                var fn = e.debug.functionAt(start); if (fn) { start = fn.attrs["$" + A.lowPC]; end = start + fn.attrs["$" + A.highPC]; } else end = start + 64; }
+            else start = e.debug.resolve(args[0])[0];
+            var fn = e.debug.functionAt(start), symbol = e.image.symbol(start);
+            if (fn) { start = fn.attrs["$" + A.lowPC]; end = start + fn.attrs["$" + A.highPC]; }
+            else if (symbol) { start = symbol.start; end = start + symbol.size; }
+            else end = start + 64;
             var instructions = 0, previous = "";
             while (start < end && instructions++ < 200) {
                 var row = e.debug.lineAt(start), source = row ? row.file + ":" + row.line : "";
@@ -168,7 +182,17 @@
                     if (!e.target.pid) return e.image.codeByte(address);
                     var site = e.sites["$" + address]; return site && site.installed ? site.original : e.target.readByte(address);
                 }, start);
-                self.say(hex(start) + "  " + decoded.text); start += decoded.length;
+                var raw = "";
+                if (showBytes) {
+                    for (var octet = 0; octet < decoded.bytes.length; octet++) {
+                        if (octet) raw += " ";
+                        raw += root.KernelDebuggerFormat.hexByte(decoded.bytes[octet]);
+                    }
+                    var width = root.KernelDebuggerX86.maxInstructionBytes * 3 - 1;
+                    while (raw.length < width) raw += " ";
+                    raw += "  ";
+                }
+                self.say(hex(start) + "  " + raw + decoded.text); start += decoded.length;
             }
             if (start < end) self.say("Disassembly limited to 200 instructions.");
         });
@@ -194,12 +218,13 @@
         });
         command(["show"], function (args) { if (args[0] !== "args") throw new Error("show args expected"); self.say("Inferior arguments: " + e.args.join(" ")); });
         command(["list", "l"], function (args) {
-            var row = args.length ? root.KernelDebuggerFormat.sourceLocation(args[0]) : null, file, line;
-            if (args.length && !row) throw new Error("list expects FILE:LINE");
+            if (args.length > 1) throw new Error("list [FUNCTION|FILE:LINE|*ADDRESS]");
+            var row = args.length ? e.debug.sourceLocation(args[0]) : null, file, line;
             if (row) { file = row.file; line = row.line; }
             else { var frame = e.frame(); if (!frame.line) throw new Error("no source location"); file = frame.line.file; line = frame.line.line; }
             var lines = self.sourceLines(file);
-            for (var i = Math.max(1, line - 3); i <= Math.min(lines.length, line + 3); i++) self.say((i === line ? "> " : "  ") + i + "\t" + lines[i - 1]);
+            var first = Math.max(1, line - 4), last = Math.min(lines.length, first + 9);
+            for (var i = first; i <= last; i++) self.say((i === line ? "> " : "  ") + i + "\t" + lines[i - 1]);
         });
         command(["assert"], function (args) {
             if (args.length !== 3 || args[1] !== "==") throw new Error("assert NAME|$REGISTER == VALUE");

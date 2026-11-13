@@ -72,14 +72,24 @@ inferior, restores terminal settings and frees owned native buffers.
 Commands: `help`, `run`, `break FUNCTION|FILE:LINE|*ADDRESS`, `delete ID`,
 `continue [SIGNAL]`, `stepi`, `step`, `next`, `finish`, `backtrace`, `frame N`,
 `registers`, `info breakpoints|args|locals`, `print NAME|$REGISTER|INTEGER`,
-`set variable NAME = VALUE`, `list [FILE:LINE]`, `x/COUNTwx ADDRESS`,
+`set variable NAME = VALUE`, `list [FUNCTION|FILE:LINE|*ADDRESS]`, `x/COUNTwx ADDRESS`,
 `x/COUNTbx ADDRESS`, `assert NAME|$REGISTER == VALUE`, `quit`.
-`disassemble [FUNCTION|*ADDRESS]` (alias `disas`) uses the debugger's own x86
+`disassemble [/r] [FUNCTION|*ADDRESS]` (alias `disas`) uses the debugger's own x86
 decoder, with source interleaving when source files are available. Named
 functions can be disassembled before the inferior is started. Live
 disassembly reads original bytes at patched breakpoint sites. It prints at
 most 200 instructions per invocation and explicitly stops on unsupported
 encodings; it does not guess the next instruction boundary.
+The GDB-compatible `/r` modifier adds the instruction bytes in hexadecimal,
+in memory order: `disassemble /r main`. Attached forms such as
+`disas/r main` also work. Without `/r` there is no raw-byte column.
+
+`list main` lists ten source lines around main's declaration and works before
+`run`; the declaration's own compilation-unit file table determines the file.
+`list FILE:LINE` and `list *ADDRESS` select an explicit source location;
+argument-free `list` uses the selected stopped frame. Assembly-only symbols
+without source mappings report an error rather than inventing source lines.
+This is a subset of GDB's list syntax, not its complete paging/range grammar.
 Common short forms include `r`, `b`, `c`, `si`, `s`, `n`, `bt`, `f`, `p`, `l`, `q`.
 Arguments support quotes and backslash escaping, not shell expansion.
 

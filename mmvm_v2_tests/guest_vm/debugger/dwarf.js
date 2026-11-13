@@ -63,6 +63,31 @@
         return undefined;
     };
     DebugInfo.prototype.name = function (die) { return this.attribute(die, A.name) || "<unnamed>"; };
+    DebugInfo.prototype.declaredSource = function (die) {
+        var fileIndex = this.attribute(die, A.declFile), line = this.attribute(die, A.declLine);
+        var unit = die;
+        while (unit && unit.tag !== D.tag.compileUnit) unit = unit.parent;
+        var files = unit ? this.lineTables["$" + unit.attrs["$" + A.stmtList]] : null;
+        return files && fileIndex > 0 && files[fileIndex] && line > 0 ?
+            {file: files[fileIndex], line: line} : null;
+    };
+    DebugInfo.prototype.sourceLocation = function (spec) {
+        var explicit = root.KernelDebuggerFormat.sourceLocation(spec);
+        if (explicit) return explicit;
+        if (spec.charAt(0) !== "*") {
+            /* Declaration locations belong to their CU's file table, not to
+             * whichever source file happens to be selected in the UI. */
+            for (var i = 0; i < this.functions.length; i++) {
+                if (this.name(this.functions[i]) === spec) {
+                    var source = this.declaredSource(this.functions[i]);
+                    if (source) return source;
+                }
+            }
+        }
+        var addresses = this.resolve(spec), row = this.lineAt(addresses[0]);
+        if (!row) throw new Error("no source location for " + spec + " (assembly-only symbol or unmapped source)");
+        return row;
+    };
     DebugInfo.prototype.functionAt = function (pc) {
         var low = 0, high = this.functions.length;
         while (low < high) { var mid = (low + high) >>> 1;

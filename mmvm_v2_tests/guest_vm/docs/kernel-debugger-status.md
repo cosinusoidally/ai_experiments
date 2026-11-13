@@ -1,5 +1,24 @@
 # Kernel debugger acceptance — 2026-11-13
 
+## Follow-up: named source listing and raw disassembly — 2026-11-13
+
+- `list main` now resolves the declaration through its own compilation unit
+  and displays ten source lines, including before `run`. Explicit file/line
+  and address listings remain supported; assembly-only symbols have no
+  fabricated source location.
+- `disassemble /r main` adds hexadecimal instruction bytes in memory order.
+  The `disas` alias and attached `/r` syntax are supported. Plain disassembly
+  retains its source interleaving without the byte column. Function/symbol
+  ranges are used, with the existing 200-instruction output limit.
+- Real-kernel acceptance and the launcher command-file workflow both pass
+  under js_min and the standalone guest executable. Checks cover pre-launch
+  listing, both modifier spellings, ordinary output, and original instruction
+  bytes behind an installed breakpoint. Existing stepping, local edits,
+  restart, unwind-boundary and bounded GC interrupt/resume checks also pass.
+- Checks ran serially against a debug executable repackaged from the existing
+  snapshot/sidecar. No VM/compiler, snapshot format, C or demo changes; no
+  whole-corpus rerun was necessary for this debugger-command-only change.
+
 ## Follow-up: bootstrap and ABI-bridge unwind coverage
 
 The missing interpreter caller now resolves as `snapshot_bootstrap_entry`,
