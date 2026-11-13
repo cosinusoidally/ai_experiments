@@ -35,4 +35,27 @@ passing results. Existing known ECMA failures remain failures, not passes.
 - Fresh Node optimized `-g` snapshot build: exit 0, 9.82 s wall,
   337784 KiB maximum RSS (one observation).
 
-Detailed suite results and final verdict will be added after completion.
+## Completed snapshot-launcher checks
+
+- Core: 12 guest programs / 270 assertions plus the existing embedding,
+  heap, compiler and native/predecoded interpreter checks, exit 0, 106.261 s.
+- Tokenizer: pass; language/object integration: pass; selected JSON: pass;
+  bounded native GC workload: pass.
+- All demos 1–8 and all three HTTP servers pass the existing live application
+  matrix in 80.413 s. Demo8 switches garage/auto-drive modes and exits normally.
+- Imported Test262: **3292 passed / 0 failed / 0 timed out / 0 not run**,
+  clean process exit 0. Runner 433.644 s; process 434.34 s; peak RSS
+  512404 KiB. Previous snapshot observation: 453.981 s process time.
+- ECMA: **994 passed / 335 failed**, including 39 watchdog timeouts;
+  four existing configured skips, zero not run. All **1333 filename statuses
+  exactly match** the November 12 snapshot baseline: zero lost/gained passes,
+  zero changed statuses. Runner 666.361 s; process 667.71 s; peak RSS
+  463836 KiB. Previous process observation: 666.755 s. Exit 1 is expected
+  because the existing known failures are still reported as failures.
+
+Debug and non-debug optimized snapshots contain byte-identical interpreter
+code (672705 bytes). This checks debug emission equivalence, not identity
+with the older VM revision.
+
+Snapshot Octane, the executable matrix and supplementary checks remain in
+progress. No final all-tests verdict is claimed at this checkpoint.
