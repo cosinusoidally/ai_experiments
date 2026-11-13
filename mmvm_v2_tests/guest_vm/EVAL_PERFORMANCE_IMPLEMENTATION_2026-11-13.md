@@ -94,3 +94,25 @@ performance work. The committed binding integration covers primitive inputs,
 cross-backend memory offsets and executable lifetime; it must not be cited as
 proof of complete standalone object-coercion support. Required inner-runtime
 language behavior remains subject to the unchanged full conformance suite.
+
+## Final lifetime/build checkpoint
+
+Callable bindings now retain a small executable-lifetime token rather than
+the full compilation result/IR/macro dump/byte array. Public result metadata
+remains available to its owner; destroying it invalidates every retained entry.
+The existing broad kernel integration checks retained generic/typed entries
+after destruction and the cross-backend memory-view ABI. Direct js_min core
+suite passes with this refinement.
+
+Fresh builds from identical sources produce **bit-identical** images:
+
+- Node: **8.68 s**, **309344 KiB** peak RSS.
+- Genuine self-hosted source rebuild: **84.89 s**, **484192 KiB** peak RSS.
+- js_min: **103.19 s**, **291372 KiB** peak RSS.
+- SHA-256 of all three: `3a9996ec9c790c51dbe6deec4f43bf2e68c43d70c880dffcf2f373b745a0ba11`.
+
+The earlier audit observed 9.28 s / 82.41 s / 110.64 s, respectively. The
+self-hosted observation is 3% slower; do not hide it behind the faster Node
+and js_min observations or claim a significant build-speed improvement.
+A same-source build through the frozen old kernel is queued as a matched
+control. Final full-suite/other regression validation is in progress.

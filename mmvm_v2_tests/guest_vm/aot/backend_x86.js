@@ -1090,16 +1090,23 @@
     }
 
     function bindExecutableResult(result, ffi, munmap, length, arity) {
-        result.fn = ffi.bindI32(result);
+        /* Callable lifetime is not compiler-metadata lifetime. A retained
+         * entry needs its executable address/invalidation state, not the IR,
+         * macro dump and emitted byte array reachable from the public result.
+         * Only destroy mutates this token; pointer is an inspection field. */
+        var owner = {pointer: result.pointer};
+        result.fn = ffi.bindI32(owner);
         result.callI32 = arity !== undefined && arity <= HostFFI.MAX_NATIVE_ARGUMENTS ?
-            ffi.bindI32(result, arity) : null;
+            ffi.bindI32(owner, arity) : null;
         result.callMemoryI32 = arity >= 1 && arity <= HostFFI.MAX_NATIVE_ARGUMENTS ?
-            ffi.bindMemoryI32(result, arity, false) : null;
+            ffi.bindMemoryI32(owner, arity, false) : null;
         result.callMemoryOffset = arity >= 1 && arity <= HostFFI.MAX_NATIVE_ARGUMENTS ?
-            ffi.bindMemoryI32(result, arity, true) : null;
+            ffi.bindMemoryI32(owner, arity, true) : null;
         result.destroy = function () {
-            if (!result.pointer) return;
-            ffi.call(munmap, [result.pointer, length]);
+            if (!owner.pointer) return;
+            var pointer = owner.pointer;
+            owner.pointer = 0;
+            ffi.call(munmap, [pointer, length]);
             result.pointer = 0;
             result.fn = null;
             result.callI32 = null;

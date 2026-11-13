@@ -22,8 +22,11 @@ Installed i386 results retain the general `fn` entry and expose internal
 fixed-signature `callI32` bindings for up to `HostFFI.MAX_NATIVE_ARGUMENTS`
 integer words. The fixed entry avoids creating an arguments array and then
 unpacking it across the FFI. It is for typed internal callers, not arbitrary
-guest argument conversion. Both entries close over the executable owner and
-reject use after destruction; code pointers are data, not generated literals.
+guest argument conversion. Entries close over a small executable-lifetime token,
+not the compilation result and its IR/dump/byte arrays. Retaining a callable
+therefore need not retain its compiler products. `pointer` is an inspection
+field; `destroy()` invalidates the shared token and all retained callable
+variants before unmapping. Code pointers are data, not generated literals.
 The wider-arity vector bridge remains available through `fn`.
 
 `callMemoryI32(memory, offset, ...)` translates a memory view into the current
