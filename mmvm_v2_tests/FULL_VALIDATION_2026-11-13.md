@@ -57,5 +57,34 @@ Debug and non-debug optimized snapshots contain byte-identical interpreter
 code (672705 bytes). This checks debug emission equivalence, not identity
 with the older VM revision.
 
-Snapshot Octane, the executable matrix and supplementary checks remain in
+## Snapshot Octane: complete, 15/15 passed
+
+Stock setup/warmup/timing/correctness checks are retained, including RegExp
+and Mandreel. These are single observations against the November 12 archive,
+not paired controlled benchmarks or evidence of an optimization in this task.
+Scores are higher-is-better; seconds include process execution.
+
+| Suite | Previous score | Current score | Change | Current seconds |
+| --- | ---: | ---: | ---: | ---: |
+| Richards | 84.1 | 94.2 | +12.01% | 3.366 |
+| DeltaBlue | 69.8 | 89 | +27.51% | 4.491 |
+| Crypto | 144 | 169 | +17.36% | 27.391 |
+| RayTrace | 256 | 261 | +1.95% | 10.757 |
+| EarleyBoyer | 438 | 443 | +1.14% | 27.637 |
+| RegExp | 2.93 | 2.82 | -3.75% | 584.375 |
+| Splay | 707 | 692 | -2.12% | 4.060 |
+| NavierStokes | 273 | 275 | +0.73% | 10.038 |
+| PdfJS | 820 | 829 | +1.10% | 18.470 |
+| Mandreel | 509 | 516 | +1.38% | 104.502 |
+| Gameboy | 1058 | 1070 | +1.13% | 13.790 |
+| CodeLoad | 98.6 | 100 | +1.42% | 28.422 |
+| Box2D | 391 | 396 | +1.28% | 14.669 |
+| zlib | 600 | 612 | +2.00% | 250.184 |
+| Typescript | 1430 | 1496 | +4.62% | 96.306 |
+
+The geometric mean of per-suite score ratios is 1.04236 (+4.24%). RegExp
+and Splay have lower individual observations; these are not hidden by the
+aggregate. No source changes to improve scores were made in this audit.
+
+The genuine rebuild, executable matrix and supplementary checks remain in
 progress. No final all-tests verdict is claimed at this checkpoint.
