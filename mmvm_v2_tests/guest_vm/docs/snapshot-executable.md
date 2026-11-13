@@ -74,7 +74,8 @@ constant bindings. It does not use an initialized VM or invent a special
 compile-time meaning for local variables. Only `_start` and argument/relocation
 ABI glue remain macro assembly. All instructions remain position independent.
 
-Every packaged executable now has ELF `_start`, `_main_abi_entry` and `main`
+Every packaged executable now has ELF `_start`, `_main_abi_entry`, `main`, and
+`snapshot_bootstrap_entry`
 symbols. With `--debug-info`, the packager also compiles canonical launcher
 provenance using the snapshot's optimization policy and appends a launcher
 DWARF compilation unit to the incorporated kernel debug sections. Existing
@@ -89,6 +90,23 @@ the snapshot does not need rebuilding. In `kernel_debugger.js`, `break main`
 now stops in the JS source with parameters and supported locals available.
 Named breakpoints fall back to ELF symbols for assembly-only entries such as
 `_start`; these have no invented JS source or locals.
+
+Debug packaging also adds CFI for `snapshot_bootstrap_entry` and
+`_main_abi_entry`, so native backtraces cross the assembly bootstrap into JS
+main and its caller. `aot/snapshot_frames.js` supplies a shared declarative ABI
+plan to the bootstrap emitter and packager. Macro emission records the actual
+instruction boundaries, save-slot distances and restoration events. To support
+existing snapshots, the packager verifies their exact prologue/epilogue bytes
+against that emitted plan; it rejects unknown layouts rather than guessing
+frame sizes. The frame's body preserves EBP and balances its temporary call
+arguments, as required by that ABI plan.
+
+No snapshot-format change or rebuild is needed for compatible existing
+snapshots. Debug linking buffers only the prefix through the bootstrap
+(bounded to 1 MiB), then streams those same original bytes and the remaining
+payload. Non-debug packaging does not read or require a bootstrap CFI plan.
+Only the assembly symbol and debug suffix change; no bootstrap instructions
+are patched. The bootstrap/bridge have no fabricated JS line/local metadata.
 
 The normal `js_runner.c` loader and snapshot format are unchanged. Shared format
 constants now live in `aot/standalone_format.js`, used by the backend and the
@@ -125,8 +143,10 @@ launcher source through the compiler's source registry. The x86 backend's
 `installExecutable: false` mode emits bytes/debug metadata without mmaping or
 executing temporary native code on any host. The assembler's named stack-adjustment and `ud2` macros
 encode single instructions; no raw instruction blobs are embedded in the tool.
-`build(header, fileLength, Assembler, format, optionalRelocatedDebug)` returns `prefix`, `suffix`,
+`build(header, fileLength, Assembler, format, optionalRelocatedDebug, bootstrapBytes)` returns `prefix`, `suffix`,
 `snapshotOffset`, and the launcher macro `assembly` for inspection.
+The actual `bootstrapBytes` are required when incorporating debug data; the
+streaming adapter obtains them from the input and preserves the input payload.
 
 `snapshot_exe_io.js` handles file operations through either Node's built-in fs
 or named libc wrappers over HostFFI. Copying uses a 64 KiB buffer, not a JS copy

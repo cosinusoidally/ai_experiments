@@ -595,9 +595,16 @@
 
     function buildStandaloneBootstrap(layout) {
         var assembler = new Assembler(true);
-        var IMAGE_BASE_LOCAL = 0;
-        var SYMBOL_POINTER_LOCAL = 1;
-        var HEAP_BASE_LOCAL = 2;
+        var Frames;
+        if (commonJS) Frames = requireDebug("./snapshot_frames.js");
+        else {
+            if (!root.GuestVMSnapshotFrames) load("guest_vm/aot/snapshot_frames.js");
+            Frames = root.GuestVMSnapshotFrames;
+        }
+        var plan = Frames.bootstrapPlan();
+        var IMAGE_BASE_LOCAL = Frames.localIndex(plan, "imageBase");
+        var SYMBOL_POINTER_LOCAL = Frames.localIndex(plan, "symbolPointer");
+        var HEAP_BASE_LOCAL = Frames.localIndex(plan, "heapBase");
         function imageAddress(offset) {
             assembler.movEaxLocal(IMAGE_BASE_LOCAL);
             assembler.addEaxImmediate(offset);
@@ -626,12 +633,7 @@
             assembler.movDwordPtrEcxEax();
         }
 
-        assembler.pushEbp();
-        assembler.movEbpEsp();
-        assembler.subEspImmediate(12);
-        assembler.pushEbx();
-        assembler.pushEsi();
-        assembler.pushEdi();
+        var frame = Frames.begin(assembler, plan);
 
         assembler.callLabel("standalone_image_anchor");
         assembler.label("standalone_image_anchor");
@@ -861,11 +863,7 @@
         assembler.label("standalone_allocation_error");
         assembler.movEaxImmediate(74);
         assembler.label("standalone_return");
-        assembler.popEdi();
-        assembler.popEsi();
-        assembler.popEbx();
-        assembler.leave();
-        assembler.ret();
+        Frames.end(assembler, frame);
         assembler.resolveLabels();
         return assembler;
     }

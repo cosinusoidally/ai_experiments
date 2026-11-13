@@ -80,7 +80,8 @@
 
     function convert(io, input, output, elf, Assembler, format, debugPath, DebugELF, Digest) {
         var source = -1, destination = -1, owned = false, temporary;
-        var length, header = [], layout, n, i, remaining;
+        var length, header = [], leading = [], bootstrap = null, layout, n, i, remaining;
+        var MAX_BOOTSTRAP_PREFIX_BYTES = 1024 * 1024;
         function writeArray(bytes) {
             var offset = 0, count, j;
             while (offset < bytes.length) {
@@ -120,12 +121,23 @@
                 }
                 debug = DebugELF.relocate(debugBytes,
                     elf.kernelAddress(header, format), elf.read32(header, format.fields.codeLength));
+                var entryOffset = elf.read32(header, format.fields.entryOffset);
+                var entryLength = elf.read32(header, format.fields.entryLength);
+                var leadingLength = entryOffset + entryLength - header.length;
+                if (entryOffset < header.length || !entryLength || entryOffset + entryLength > length ||
+                    leadingLength > MAX_BOOTSTRAP_PREFIX_BYTES) throw new Error("invalid or oversized snapshot bootstrap range");
+                while (leading.length < leadingLength) {
+                    n = io.read(source, Math.min(CHUNK_BYTES, leadingLength - leading.length));
+                    if (!n) throw new Error("truncated snapshot bootstrap");
+                    for (i = 0; i < n; i++) leading.push(io.get(i));
+                }
+                bootstrap = leading.slice(entryOffset - header.length);
             }
-            layout = elf.build(header, length, Assembler, format, debug);
+            layout = elf.build(header, length, Assembler, format, debug, bootstrap);
             temporary = output + ".tmp." + io.pid();
             destination = io.createOutput(temporary); owned = true;
-            writeArray(layout.prefix); writeArray(header);
-            remaining = length - header.length;
+            writeArray(layout.prefix); writeArray(header); writeArray(leading);
+            remaining = length - header.length - leading.length;
             while (remaining) {
                 n = io.read(source, Math.min(CHUNK_BYTES, remaining));
                 if (!n) throw new Error("snapshot was truncated during copy");

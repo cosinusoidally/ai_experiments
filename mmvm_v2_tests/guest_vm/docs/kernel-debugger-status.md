@@ -1,5 +1,47 @@
 # Kernel debugger acceptance — 2026-11-13
 
+## Follow-up: bootstrap and ABI-bridge unwind coverage
+
+The missing interpreter caller now resolves as `snapshot_bootstrap_entry`,
+with a function symbol covering exactly `.text.bootstrap`. New CFI covers
+both that frame and `_main_abi_entry`, connecting the native interpreter's
+call chain to compiled JS main and then the libc ABI bridge. No JS source
+lines or locals are invented for the assembly frames. A final external libc
+address remains outside the executable's supplied symbols/unwind information.
+
+- `aot/snapshot_frames.js` is the single declarative frame plan for bootstrap
+  and bridge emission. It records instruction positions and saved-register
+  slots while invoking macro assembly. The packager validates compatible old
+  bootstrap prologue/epilogue bytes against the same emitted plan. Unknown
+  shapes fail explicitly. No snapshot-format change or payload patching.
+- js_min → old -O0 snapshot executable and standalone → newly built optimized
+  executable pass real-kernel acceptance. At an interpreter stop, both recover
+  the bootstrap, main, bridge and main's argc/snapshotEntry parameters.
+- Caller PC, SP, EBP, EBX, ESI and EDI are compared against the entry-state
+  baseline at **11 bootstrap boundaries** and **8 bridge boundaries**, including
+  each save/restore and leave. Both hosts pass, as do normal completion and
+  bounded GC workload interrupt/resume (24 rounds / 48 native collections).
+- Packager acceptance passes **47 plain** and **49 debug** checks: all-host
+  executable byte identity, unchanged embedded snapshot and source/executable
+  hashes, ordinary loader behavior, exact bootstrap symbol range, and refusal
+  to publish debug output for a deliberately mismatched bootstrap prologue.
+- The kernel DWARF regression still emits the original native kernel bytes
+  and sidecar hashes for both optimization policies. CFI emission is factored
+  into shared `KernelDWARF.buildFrames`, with zero-base output unchanged.
+- A genuine optimized self-hosted `-g` rebuild completed in **102.57 seconds**
+  wall time (single observation, not a paired performance benchmark). Snapshot
+  and sidecar are bit-identical to the fresh Node build. The existing js_runner
+  binary runs that rebuilt snapshot; it was not recompiled.
+- Optional installed-GDB validation, with debuginfod disabled, also unwinds
+  interpreter → bootstrap → main → bridge and continues hello normally.
+  This introduces no external debugger dependency into the runtime/tool.
+
+The older snapshot used for retrofit testing was generated before the shared
+frame-emitter change. All checks ran serially; raw `artifacts/bootstrap-*`
+outputs remain ignored. No C, demos, test corpus, interpreter opcode execution
+or runtime heap-layout changes were made. These are focused metadata/build/
+debugger checks, not a new whole-corpus performance run.
+
 ## Follow-up: compiled launcher main
 
 The executable packager now compiles `tools/snapshot_launcher.js` through the

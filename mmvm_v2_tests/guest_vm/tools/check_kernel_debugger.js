@@ -8,6 +8,7 @@
     load("guest_vm/debugger/image.js"); load("guest_vm/debugger/dwarf.js");
     load("guest_vm/debugger/engine.js");
     load("guest_vm/debugger/x86.js");
+    load("guest_vm/aot/x86_assembler.js"); load("guest_vm/aot/snapshot_frames.js");
     var io = new KernelDebuggerLinux(), image = null;
     function check(condition, description) {
         if (!condition) throw new Error("kernel debugger acceptance failed: " + description);
@@ -64,10 +65,20 @@
         event = e.start(); check(event.breakpoint === bp.id, "function breakpoint stops a restarted inferior");
         var frames = e.frames(), names = [];
         for (var i = 0; i < frames.length; i++) {
-            if (frames[i].fn) names.push(debug.name(frames[i].fn));
+            var frameSymbol = image.symbol(frames[i].pc);
+            names.push(frames[i].fn ? debug.name(frames[i].fn) : frameSymbol ? frameSymbol.name : "external");
             check(!frames[i].unwindError, "frame " + i + " has no unwind error");
         }
         check(names.join(" ").indexOf("nativeExecutionKernel") >= 0, "CFI reaches the native execution caller");
+        check(names.join(" ").indexOf("snapshot_bootstrap_entry main _main_abi_entry") >= 0,
+            "CFI connects the interpreter through bootstrap, JS main and ABI bridge");
+        for (i = 0; i < names.length; i++) if (names[i] === "main") {
+            e.selectedFrame = i;
+            check(e.value(e.variable("argc")) === 2 &&
+                e.value(e.variable("snapshotEntry")) === image.byName.$snapshot_bootstrap_entry.start,
+                "main parameters are recovered through the bootstrap frame");
+        }
+        e.selectedFrame = 0;
         check(e.value(e.variable("budget")) > 0, "stack parameter is recovered at function breakpoint");
         event = e.finish(); check(event.kind === "stopped", "finish reaches the native caller");
         io.terminate(); event = e.start();
@@ -87,6 +98,39 @@
         e.removeBreakpoint(entry.id); event = e.resume(false, KernelDebuggerLinux.signals.interrupt);
         check(event.kind === "terminated" && event.signal === KernelDebuggerLinux.signals.interrupt,
             "explicit program signal is delivered, not mistaken for a debugger trap");
+        function inspectABIFrame(symbolName, plan) {
+            var symbol = image.byName["$" + symbolName], raw = [], k;
+            check(!!symbol, "ABI frame symbol available: " + symbolName);
+            for (k = 0; k < symbol.size; k++) raw.push(image.codeByte(symbol.start + k));
+            var description = GuestVMSnapshotFrames.describe(raw, plan, GuestVMX86Assembler);
+            var points = [0, description.pushedFrame, description.establishedFrame,
+                description.bodyStart, description.epilogueStart, description.leftFrame];
+            for (k = 0; k < description.cfi.length; k++) points.push(description.cfi[k].offset);
+            points.sort(function (a, b) { return a - b; });
+            var addresses = [];
+            for (k = 0; k < points.length; k++) if (!k || points[k] !== points[k - 1]) addresses.push(symbol.start + points[k]);
+            var boundary = e.addBreakpoint(addresses, false), baseline = null;
+            e.args = ["hello.js"]; var stopped = e.start();
+            var preserved = ["ebp", "ebx", "esi", "edi", "esp", "eip"];
+            for (k = 0; k < addresses.length; k++) {
+                check(stopped.kind === "stopped" && stopped.breakpoint === boundary.id && stopped.pc === addresses[k],
+                    symbolName + " reaches ABI boundary " + k);
+                var trace = e.frames();
+                check(trace.length >= 2 && !trace[0].unwindError, symbolName + " unwinds at boundary " + k);
+                var caller = trace[1].registers;
+                if (!baseline) baseline = caller;
+                for (var saved = 0; saved < preserved.length; saved++) {
+                    if (typeof caller[preserved[saved]] !== "number" ||
+                        caller[preserved[saved]] !== baseline[preserved[saved]]) throw new Error(symbolName +
+                        " recovers the wrong caller " + preserved[saved] + " at boundary " + k);
+                }
+                if (k + 1 < addresses.length) stopped = e.resume(false);
+            }
+            e.removeBreakpoint(boundary.id); stopped = e.resume(false);
+            check(stopped.kind === "exited" && stopped.code === 0, symbolName + " boundary workload exits normally");
+        }
+        inspectABIFrame("snapshot_bootstrap_entry", GuestVMSnapshotFrames.bootstrapPlan());
+        inspectABIFrame("_main_abi_entry", GuestVMSnapshotFrames.bridgePlan());
         var requestedInterrupt = false;
         e.options.runningInput = function () {
             if (!requestedInterrupt) { requestedInterrupt = true; e.interrupt(); }

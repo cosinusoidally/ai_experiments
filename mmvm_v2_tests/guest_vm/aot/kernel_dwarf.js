@@ -228,10 +228,21 @@
             i.patch32(fixup.offset, origin);
         }
 
+        var output = [], sIndex = 0;
+        while (sIndex < sections.length) {
+            var s = sections[sIndex++];
+            output.push({name: s.name, bytes: s.writer.bytes, relocations: s.relocations});
+        }
+        output.push(buildFrames(functions, sectionBases.frames || 0));
+        return {sections: output, codeLength: codeLength, functions: functions};
+    }
+
+    function buildFrames(functions, sectionBase) {
         /* CFA is ESP+4 at entry and EBP+8 after the emitted frame setup.
          * The frame-pointer rules alone recover caller PC/EBP. Saved general
          * register rules and alternate tail epilogues are added by ABI events. */
-        var frame = section(".debug_frame"), c = frame.writer;
+        var c = new Binary.Writer(), relocations = [], index, fn, pc;
+        function address(offset) { relocations.push(c.bytes.length); c.u32(offset); }
         function advanceFrame(from, target) {
             c.u8(D.cfi.advanceLoc4); c.u32(target - from); return target;
         }
@@ -247,7 +258,7 @@
         c.align(4); c.patch32(cie, c.bytes.length - cie - 4);
         for (index = 0; index < functions.length; index++) {
             fn = functions[index]; var fde = c.bytes.length;
-            c.u32(0); c.u32(cie + (sectionBases.frames || 0)); address(frame, fn.start); c.u32(fn.end - fn.start);
+            c.u32(0); c.u32(cie + (sectionBase || 0)); address(fn.start); c.u32(fn.end - fn.start);
             pc = fn.start;
             pc = advanceFrame(pc, fn.pushedFrame); c.u8(D.cfi.defCFAOffset); c.uleb(8);
             c.u8(D.cfi.offset + D.reg.ebp); c.uleb(2);
@@ -270,14 +281,9 @@
             c.u8(D.cfi.restore + D.reg.ebp);
             c.align(4); c.patch32(fde, c.bytes.length - fde - 4);
         }
-        var output = [], sIndex = 0;
-        while (sIndex < sections.length) {
-            var s = sections[sIndex++];
-            output.push({name: s.name, bytes: s.writer.bytes, relocations: s.relocations});
-        }
-        return {sections: output, codeLength: codeLength, functions: functions};
+        return {name: ".debug_frame", bytes: c.bytes, relocations: relocations};
     }
-    var api = {build: build, constants: D};
+    var api = {build: build, buildFrames: buildFrames, constants: D};
     root.GuestVMKernelDWARF = api;
     if (typeof module !== "undefined" && module.exports) module.exports = api;
 }(this));

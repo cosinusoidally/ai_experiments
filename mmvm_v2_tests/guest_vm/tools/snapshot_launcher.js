@@ -32,7 +32,7 @@
         try { return {bytes: result.bytes.slice(0), assembly: result.assembly, debug: result.debug}; }
         finally { result.destroy(); }
     }
-    function appendDebug(kernel, compiled, address, sectionIndex) {
+    function appendDebug(kernel, compiled, address, sectionIndex, unwindFrames) {
         var support = Backend.debugSupport(), bases = {}, names = {
             ".debug_abbrev": "abbreviations", ".debug_line": "lines",
             ".debug_loc": "locations", ".debug_frame": "frames"};
@@ -52,7 +52,11 @@
         for (i = 0; i < kernel.sections.length; i++) {
             section = kernel.sections[i]; var addition = null;
             for (var j = 0; j < extra.sections.length; j++) if (extra.sections[j].name === section.name) addition = extra.sections[j];
-            sections.push({name: section.name, bytes: addition ? section.bytes.concat(addition.bytes) : section.bytes});
+            var bytes = addition ? section.bytes.concat(addition.bytes) : section.bytes;
+            if (section.name === ".debug_frame" && unwindFrames) {
+                bytes = bytes.concat(support.DWARF.buildFrames(unwindFrames, bytes.length).bytes);
+            }
+            sections.push({name: section.name, bytes: bytes});
         }
         for (i = 0; i < extra.functions.length; i++) extra.functions[i].sectionIndex = sectionIndex;
         return {sections: sections, functions: kernel.functions.concat(extra.functions)};

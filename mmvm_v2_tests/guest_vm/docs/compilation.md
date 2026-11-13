@@ -22,6 +22,17 @@ macro assembly.
 bases named `abbreviations`, `lines`, `locations`, and `frames`. These rebase
 section-relative references when adding another compilation unit. Defaults
 are zero and preserve existing sidecar bytes; DIE references stay CU-relative.
+The shared `KernelDWARF.buildFrames(functions, sectionBase)` emitter can also
+produce a CFI-only section for assembly frames. Its inputs are recorded macro
+instruction positions and register save/restore events, not JS source ranges.
+The packager uses it for validated bootstrap/ABI-bridge plans. These extra
+FDEs live in the executable debug suffix, not in the original snapshot sidecar.
+The declarative `snapshot_frames.js` plans are shared with the actual bootstrap
+emitter. `begin`/`end` invoke named macro instructions and record offsets;
+`describeBootstrap` validates an existing payload's frame boundaries against
+those same emitted instructions. `absolute` relocates the recorded metadata
+for ELF linking, not the snapshot code or its heap. Helpers are loaded lazily
+by snapshot construction and do not run in the interpreter's dispatch path.
 
 ## Guest ES5.1 source to bytecode
 

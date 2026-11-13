@@ -1,6 +1,6 @@
 /* Serial integration checks. This developer driver uses Node built-ins only;
  * the packager itself is tested on all three hosts and needs no Node at run time.
- * Usage: node guest_vm/tools/check_snapshot_exe.js INPUT.snap
+ * Usage: node guest_vm/tools/check_snapshot_exe.js INPUT.snap [--debug-info INPUT.snap.dbg]
  * Optional existing tools: JS_MIN_BINARY, FIREFOX_LIB_DIR, JS_RUNNER_BINARY.
  * Nothing here compiles a loader or invokes compiler/binutils programs. */
 (function () {
@@ -8,8 +8,11 @@
     var crypto = require("crypto");
     var elf = require("./snapshot_exe_elf.js"), format = require("../aot/standalone_format.js");
     var Assembler = require("../aot/x86_assembler.js");
-    var snapshot = process.argv[2];
-    if (!snapshot) throw new Error("usage: check_snapshot_exe.js INPUT.snap");
+    var snapshot = process.argv[2], debugSidecar = process.argv[4];
+    if (!snapshot || (process.argv.length !== 3 &&
+            !(process.argv.length === 5 && process.argv[3] === "--debug-info"))) {
+        throw new Error("usage: check_snapshot_exe.js INPUT.snap [--debug-info INPUT.snap.dbg]");
+    }
     var input = fs.readFileSync(snapshot), originalHash = hash(input);
     var directory = "artifacts/snapshot-exe-check-" + process.pid;
     fs.mkdirSync(directory);
@@ -22,6 +25,11 @@
     environment.LD_LIBRARY_PATH = (process.env.FIREFOX_LIB_DIR || "../../firefox-1.0.8/lib") +
         (process.env.LD_LIBRARY_PATH ? ":" + process.env.LD_LIBRARY_PATH : "");
     function hash(bytes) { return crypto.createHash("sha256").update(bytes).digest("hex"); }
+    function packArguments(inputPath, outputPath) {
+        var args = [tool, inputPath, outputPath];
+        if (debugSidecar) args.push("--debug-info", debugSidecar);
+        return args;
+    }
     function check(condition, message) {
         if (!condition) throw new Error(message);
         checks++;
@@ -34,7 +42,7 @@
             throw new Error(binary + " failed: status=" + result.status +
                 " signal=" + result.signal + "\n" + result.stdout + result.stderr);
         }
-        return result.stdout;
+        return status ? result.stdout + result.stderr : result.stdout;
     }
     function verify(bytes) {
         var u32 = function (at) { return elf.read32(bytes, at); };
@@ -95,16 +103,19 @@
             check(image.byName.$_main_abi_entry && image.byName.$_main_abi_entry.start !== image.byName.$main.start,
                 "libc ABI bridge is distinct from compiled main");
             check(image.codeByte(image.byName.$main.start) >= 0, "main lies in executable bytes");
+            check(!!image.byName.$snapshot_bootstrap_entry, "snapshot bootstrap function symbol exists");
+            var bootstrap = image.sections["$.text.bootstrap"], symbol = image.byName.$snapshot_bootstrap_entry;
+            check(symbol.start === bootstrap.address && symbol.size === bootstrap.size, "bootstrap symbol covers its exact code section");
         } finally { image.destroy(); }
     }
-    run(process.execPath, [tool, snapshot, executable]);
+    run(process.execPath, packArguments(snapshot, executable));
     var packed = fs.readFileSync(executable), packedHash = hash(packed);
     verify(packed);
-    run(jsMin, [tool, snapshot, directory + "/js-min.exe"]);
+    run(jsMin, packArguments(snapshot, directory + "/js-min.exe"));
     check(fs.readFileSync(directory + "/js-min.exe").equals(packed), "Node/js_min byte identity");
-    run(runner, [snapshot, tool, snapshot, directory + "/js-runner.exe"]);
+    run(runner, [snapshot].concat(packArguments(snapshot, directory + "/js-runner.exe")));
     check(fs.readFileSync(directory + "/js-runner.exe").equals(packed), "Node/js_runner byte identity");
-    run(executable, [tool, snapshot, directory + "/self.exe"]);
+    run(executable, packArguments(snapshot, directory + "/self.exe"));
     check(fs.readFileSync(directory + "/self.exe").equals(packed), "packager works inside generated executable");
     check(run(executable, ["hello.js"]) === "Hello, world!\n", "hello program");
     check(run(executable, ["guest_vm/tests/standalone_alternate_program.js"]) ===
@@ -119,11 +130,20 @@
     fs.writeFileSync(bad, "not a snapshot");
     run(process.execPath, [tool, bad, directory + "/invalid.exe"], 1);
     check(!fs.existsSync(directory + "/invalid.exe"), "bad input not published");
-    run(process.execPath, [tool, snapshot, executable], 1);
+    run(process.execPath, packArguments(snapshot, executable), 1);
     check(hash(fs.readFileSync(executable)) === packedHash, "no clobber");
-    run(process.execPath, [tool, snapshot, snapshot], 1);
+    run(process.execPath, packArguments(snapshot, snapshot), 1);
     check(hash(fs.readFileSync(snapshot)) === originalHash, "source never modified");
     check(hash(fs.readFileSync(executable)) === packedHash, "execution never modifies executable");
+    if (debugSidecar) {
+        var changed = Buffer.from ? Buffer.from(input) : new Buffer(input);
+        changed[elf.read32(input, format.fields.entryOffset)] ^= 1;
+        var unsupported = directory + "/unsupported-bootstrap.snap", rejected = directory + "/unsupported-bootstrap.exe";
+        fs.writeFileSync(unsupported, changed);
+        var failure = run(process.execPath, packArguments(unsupported, rejected), 1);
+        check(failure.indexOf("unsupported snapshot ABI prologue") >= 0, "unknown bootstrap layout rejects guessed CFI");
+        check(!fs.existsSync(rejected), "unsupported bootstrap output is not published");
+    }
     var generated = elf.build(input.slice(0, format.headerBytes), input.length, Assembler, format);
     fs.writeFileSync(directory + "/launcher.asm.txt", generated.assembly + "\n");
     console.log(checks + " ELF/launch checks passed; artifacts: " + directory);

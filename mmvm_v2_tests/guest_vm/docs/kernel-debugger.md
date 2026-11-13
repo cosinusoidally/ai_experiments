@@ -50,6 +50,12 @@ DWARF compilation unit. Its four parameters are argc, argv, snapshotEntry and
 dlsym. `_start` and `_main_abi_entry` resolve through ELF symbols and support
 instruction-level debugging, not JS locals. Older executables need repackaging
 to gain these symbols and launcher DWARF; their original snapshots are reusable.
+`snapshot_bootstrap_entry` now also has an exact ELF symbol/range and CFI, and
+the ABI bridge has CFI. A backtrace from the interpreter therefore reaches the
+bootstrap, JS main and bridge instead of ending at an unnamed bootstrap
+address. Any final unnamed frame in external libc is outside the supplied
+executable's kernel symbols/CFI; arbitrary shared-library debugging is still
+outside this implementation.
 
 ```sh
 ./artifacts/guest_vm.exe kernel_debugger.js --batch \
@@ -113,6 +119,8 @@ inline variables without concrete locations are not fabricated.
 Inline entries are annotations on physical frames, not separately selectable
 frames with invented registers. Backtraces are bounded to 64 physical frames
 and stop when the target leaves the supplied kernel CFI.
+The supplied CFI includes the assembly bootstrap and libc ABI bridge; they
+remain instruction-level frames without invented JS locals or source lines.
 
 Only the emitted DWARF subset is supported. Unknown forms, line opcodes and
 unwind operations fail explicitly. Backtrace preserves preceding frames and
@@ -168,6 +176,10 @@ one native file allocation; bounded `Reader` views borrow it and must not
 outlive the image. DIEs, rows and CFI reference those views; destroy the image
 only after all debugger operations finish. CFI is interpreted from CIE/FDE
 rules, not guessed from instruction patterns or presumed frame sizes.
+At packaging time, bootstrap/bridge CFI comes from the same macro-emitted ABI
+frame plans as the code. Existing bootstrap frame boundaries must match that
+plan exactly before CFI is incorporated. The live unwinder does not perform
+instruction-pattern inference.
 
 ## Acceptance
 
@@ -180,7 +192,12 @@ js_min.exe guest_vm/tools/check_kernel_debugger.js artifacts/debug.exe
 
 It exercises complete kernel decoding, source/variable edits where available,
 optimized variable availability, stepping, unwinding, restart persistence,
-signals, and interrupt/resume of the bounded GC workload. Command-path testing:
+signals, and interrupt/resume of the bounded GC workload.
+It additionally checks full interpreter → bootstrap → main → bridge unwinding,
+reads main parameters through the bootstrap, and tests caller PC/SP/EBP/EBX/
+ESI/EDI recovery at bootstrap and bridge prologue/epilogue boundaries.
+
+Command-path testing:
 
 ```sh
 js_min.exe kernel_debugger.js --batch --commands guest_vm/tools/kernel_debugger_acceptance.commands artifacts/debug.exe

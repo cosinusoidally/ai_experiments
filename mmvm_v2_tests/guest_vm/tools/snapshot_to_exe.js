@@ -16,6 +16,7 @@
         load("guest_vm/host_ffi.js");
         load("guest_vm/aot/x86_assembler.js");
         load("guest_vm/aot/standalone_format.js");
+        load("guest_vm/aot/snapshot_frames.js");
         load("guest_vm/tools/snapshot_exe_elf.js");
         load("guest_vm/tools/snapshot_exe_io.js");
         load("guest_vm/aot/debug_binary.js");

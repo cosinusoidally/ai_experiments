@@ -1,7 +1,13 @@
-/* ELF32 packaging only: no compiler, host I/O, or snapshot relocation. */
+/* ELF32 layout/linking, with a compiled launcher and validated ABI CFI.
+ * Descriptor ownership/streaming belong to snapshot_exe_io.js; the embedded
+ * snapshot is neither rewritten nor relocated. No native build tools. */
 (function (root) {
     var Launcher = root.GuestVMSnapshotLauncher;
-    if (typeof module !== "undefined" && module.exports) Launcher = require("./snapshot_launcher.js");
+    var Frames = root.GuestVMSnapshotFrames;
+    if (typeof module !== "undefined" && module.exports) {
+        Launcher = require("./snapshot_launcher.js");
+        Frames = require("../aot/snapshot_frames.js");
+    }
     var ELF = {base: 0x08048000, page: 4096, headerBytes: 52,
         programHeaderBytes: 32, programHeaderCount: 7, sectionHeaderBytes: 40,
         executable: 2, i386: 3, current: 1,
@@ -104,8 +110,8 @@
 
         /* Adapt libc main(argc,argv,envp) to the explicit bootstrap bindings
          * consumed by kernel main(argc,argv,snapshotEntry,dlsym). No policy. */
-        bridge.pushEbp(); bridge.movEbpEsp(); bridge.pushEbx();
-        bridge.subEspImmediate(WORD_BYTES);
+        var framePlans = Frames || root.GuestVMSnapshotFrames;
+        var bridgeFrame = framePlans.begin(bridge, framePlans.bridgePlan());
         bridge.callLabel("bridge_pc"); bridge.label("bridge_pc");
         anchor = LAYOUT.mainBridge + bridge.labels.bridge_pc;
         bridge.popInstructionPointerEcx(); bridge.movRegisterRegister("ebx", "ecx");
@@ -114,14 +120,13 @@
         bridge.movEaxEbpArgument(1); bridge.pushEax();
         bridge.movEaxEbpArgument(0); bridge.pushEax();
         bridge.leaEaxRegisterDisplacement("ebx", LAYOUT.main - anchor); bridge.callEax();
-        bridge.discardStackWords(4); bridge.addEspImmediate(WORD_BYTES);
-        bridge.popEbx(); bridge.leave(); bridge.ret(); bridge.resolveLabels();
+        bridge.discardStackWords(4); framePlans.end(bridge, bridgeFrame); bridge.resolveLabels();
         if (start.bytes.length > LAYOUT.mainBridge - LAYOUT.start ||
                 bridge.bytes.length > LAYOUT.main - LAYOUT.mainBridge ||
                 main.bytes.length > LAYOUT.metadata - LAYOUT.main) {
             throw new Error("launcher exceeds its reserved text region");
         }
-        return {start: start.bytes, bridge: bridge.bytes, main: main.bytes, debug: main.debug,
+        return {start: start.bytes, bridge: bridge.bytes, bridgeFrame: bridgeFrame, main: main.bytes, debug: main.debug,
             assembly: "_start:\n" + start.dump() + "\n_main_abi_entry:\n" + bridge.dump() + "\nmain:\n" + main.assembly};
     }
 
@@ -129,7 +134,7 @@
         return ELF.base + LAYOUT.snapshot + read32(header, format.fields.codeOffset);
     }
 
-    function build(header, length, Assembler, format, debug) {
+    function build(header, length, Assembler, format, debug, bootstrapBytes) {
         var entryOffset = validate(header, length, format);
         var code = launcher(Assembler, entryOffset,
             read32(header, format.fields.optimizationMode) === 1 ? "none" : "default", !!debug), prefix = [], suffix = [];
@@ -218,6 +223,7 @@
         var bootstrapEnd = entryOffset + read32(header, format.fields.entryLength);
         section(".snapshot.header", ELF.progbits, ELF.alloc | ELF.writable,
             LAYOUT.snapshot, entryOffset, 1);
+        var bootstrapSectionIndex = sections.length;
         section(".text.bootstrap", ELF.progbits, ELF.alloc | ELF.executableSection,
             LAYOUT.snapshot + entryOffset, bootstrapEnd - entryOffset, 1);
         section(".snapshot.bindings", ELF.progbits, ELF.alloc | ELF.writable,
@@ -237,8 +243,13 @@
             suffixCursor = position + bytes.length;
         }
         if (debug) {
+            if (!bootstrapBytes || bootstrapBytes.length !== bootstrapEnd - entryOffset) throw new Error("bootstrap bytes required for validated unwind metadata");
+            var framePlans = Frames || root.GuestVMSnapshotFrames;
+            var unwindFrames = [
+                framePlans.absolute(framePlans.describeBootstrap(bootstrapBytes, Assembler), ELF.base + LAYOUT.snapshot + entryOffset),
+                framePlans.absolute(code.bridgeFrame, ELF.base + LAYOUT.mainBridge)];
             debug = (Launcher || root.GuestVMSnapshotLauncher).appendDebug(
-                debug, code, ELF.base + LAYOUT.main, launcherSectionIndex);
+                debug, code, ELF.base + LAYOUT.main, launcherSectionIndex, unwindFrames);
             for (i = 0; i < debug.sections.length; i++) {
                 appendSection(debug.sections[i].name, ELF.progbits, debug.sections[i].bytes, 1);
             }
@@ -246,6 +257,8 @@
         var debugStrings = [0], debugSymbols = [];
         var symbolFunctions = [
             {name: "_start", address: ELF.base + LAYOUT.start, length: code.start.length, sectionIndex: launcherSectionIndex},
+            {name: "snapshot_bootstrap_entry", address: ELF.base + LAYOUT.snapshot + entryOffset,
+                length: bootstrapEnd - entryOffset, sectionIndex: bootstrapSectionIndex},
             {name: "_main_abi_entry", address: ELF.base + LAYOUT.mainBridge, length: code.bridge.length, sectionIndex: launcherSectionIndex}];
         if (debug) symbolFunctions = symbolFunctions.concat(debug.functions);
         else symbolFunctions.push({name: "main", address: ELF.base + LAYOUT.main, length: code.main.length, sectionIndex: launcherSectionIndex});
