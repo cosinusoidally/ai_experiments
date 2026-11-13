@@ -17,20 +17,21 @@
     /* The resolved (already guarded) descriptor algorithm is shared with
      * native execution. Cache code only: the memory argument selects a heap
      * on every call, so no runtime/owner is retained by this service. */
-    var resolvedDescriptorKernelJS = null;
-    var propertyLookupKernelJS = null;
-    var propertyClearKernelJS = null;
-    var propertyAppendKernelJS = null;
-    var linkedPropertyLookupKernelJS = null;
+    var propertyKernelEntries = {};
 
-    function compilePropertyStorageKernel(name) {
+    function compilePropertyStorageKernel(name, memory, resultOptions) {
+        var nativeStorage = !!memory.nativeAddress(0);
+        var returnsHeapOffset = !!resultOptions && resultOptions.returnsHeapOffset;
+        var cacheKey = "$" + name + (nativeStorage ? ":native" : ":js") +
+            (returnsHeapOffset ? ":offset" : ":scalar");
+        if (propertyKernelEntries[cacheKey]) return propertyKernelEntries[cacheKey];
         var Compiler = root.GuestVMKernelCompiler;
-        var Backend = root.GuestVMKernelJSBackend;
+        var Backend = nativeStorage ? root.GuestVMKernelX86Backend : root.GuestVMKernelJSBackend;
         var kernels = root.GuestVMPropertyStorageKernel;
         var strings = root.GuestVMStringKeyKernel;
         if (typeof module !== "undefined" && module.exports) {
             Compiler = require("./aot/kernel_compiler.js");
-            Backend = require("./aot/backend_js.js");
+            Backend = nativeStorage ? require("./aot/backend_x86.js") : require("./aot/backend_js.js");
             kernels = require("./property_storage_kernel.js");
             strings = require("./string_key_kernel.js");
         }
@@ -46,7 +47,11 @@
             kernels[name], dependencies,
             {constantBindings: Records.KernelConstants,
              constantNamespaces: {RecordLayout: Records.KernelConstants}});
-        return new Backend().compile(ir).fn;
+        var compiled = new Backend().compile(ir);
+        var entry = nativeStorage ? (returnsHeapOffset ? compiled.callMemoryOffset : compiled.callMemoryI32) : compiled.fn;
+        if (!entry) throw new Error("property kernel has no compatible memory entry: " + name);
+        propertyKernelEntries[cacheKey] = entry;
+        return entry;
     }
 
     /* Shared geometric growth policy for both execution backends. Validate
@@ -242,6 +247,9 @@
     var ENGINE_ALLOCATION_FAILED = ENGINE_NATIVE_REGION_ACTIVE + 4;
     var ENGINE_NATIVE_RETIRED_REGION = ENGINE_ALLOCATION_FAILED + 4;
     var ENGINE_PROPERTY_CACHE = ENGINE_NATIVE_RETIRED_REGION + 4;
+    /* Contract 104 uses only the slot column: hints contain no references.
+     * Preserve the former guard columns as reserved space in this cutover so
+     * unrelated collector-state offsets do not move at the same time. */
     var PROPERTY_CACHE_ENTRY_BYTES = 24;
     var PROPERTY_CACHE_ENTRY_COUNT = 256;
     var ENGINE_PROPERTY_CACHE_OBJECT = ENGINE_PROPERTY_CACHE;
@@ -371,7 +379,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 103;
+    Records.NativeInterpreterContractVersion = 105;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
@@ -1116,10 +1124,13 @@
      * Keep ownPropertyEntryDescriptor as the checked low-level API. */
     Records.prototype.resolvedOwnPropertyEntryDescriptor = function (owner, entry) {
         this.heap.requireRecord(owner);
-        if (!resolvedDescriptorKernelJS) {
-            resolvedDescriptorKernelJS = compilePropertyStorageKernel("ownPropertyEntryDescriptorKernel");
+        if (!this.resolvedDescriptorKernel) {
+            /* The kernel returns a process address on x86, an offset with
+             * the JS backend's zero base. Expose one offset contract here. */
+            this.resolvedDescriptorKernel = compilePropertyStorageKernel("ownPropertyEntryDescriptorKernel", this.heap.memory,
+                {returnsHeapOffset: true});
         }
-        return resolvedDescriptorKernelJS(this.heap.memory, 0, owner, entry);
+        return this.resolvedDescriptorKernel(this.heap.memory, 0, owner, entry);
     };
     Records.prototype.propertyDescriptorSetter = function (descriptor) {
         return this.heap.memory.readU32Trusted(descriptor + PROPERTY_DESCRIPTOR_SETTER);
@@ -1276,10 +1287,10 @@
         }
         if (typeof keyString === "number") {
             this.heap.requireRecord(keyString, Heap.Types.STRING);
-            if (!linkedPropertyLookupKernelJS) {
-                linkedPropertyLookupKernelJS = compilePropertyStorageKernel("findLinkedPropertyEntryKernel");
+            if (!this.linkedPropertyLookupKernel) {
+                this.linkedPropertyLookupKernel = compilePropertyStorageKernel("findLinkedPropertyEntryKernel", this.heap.memory);
             }
-            return linkedPropertyLookupKernelJS(this.heap.memory, 0, object, keyString);
+            return this.linkedPropertyLookupKernel(this.heap.memory, 0, object, keyString);
         }
         var property = this.objectPropertyHead(object);
         while (property) {
@@ -2413,14 +2424,14 @@
         var length = this.propertyStorageLength(storage);
         this.heap.checkPayload(storage, PROPERTY_STORAGE_ENTRIES,
             length * PROPERTY_ENTRY_BYTES, Heap.Types.PROPERTY_STORAGE);
-        if (!propertyLookupKernelJS) {
-            propertyLookupKernelJS = compilePropertyStorageKernel("findPropertyStorageEntryKernel");
+        if (!this.propertyLookupKernel) {
+            this.propertyLookupKernel = compilePropertyStorageKernel("findPropertyStorageEntryKernel", this.heap.memory);
         }
         var hash = this.stringHash(key);
-        var found = propertyLookupKernelJS(this.heap.memory, 0, storage, key, index, hash);
+        var found = this.propertyLookupKernel(this.heap.memory, 0, storage, key, index, hash);
         if (found !== Records.KernelConstants.PROPERTY_INDEX_UNAVAILABLE) return found;
         this.discardPropertyStorageIndex(storage);
-        return propertyLookupKernelJS(this.heap.memory, 0, storage, key, 0, hash);
+        return this.propertyLookupKernel(this.heap.memory, 0, storage, key, 0, hash);
     };
     Records.prototype.insertPropertyStorageIndex = function (storage, index, entry) {
         var capacity = this.propertyIndexCapacity(index);
@@ -2491,10 +2502,10 @@
         }
         if (setter) this.heap.requireRecord(setter);
         var epoch = this.heap.flags(storage);
-        if (!propertyAppendKernelJS) {
-            propertyAppendKernelJS = compilePropertyStorageKernel("appendPropertyStorageEntryKernel");
+        if (!this.propertyAppendKernel) {
+            this.propertyAppendKernel = compilePropertyStorageKernel("appendPropertyStorageEntryKernel", this.heap.memory);
         }
-        entry = propertyAppendKernelJS(this.heap.memory, 0, storage, key,
+        entry = this.propertyAppendKernel(this.heap.memory, 0, storage, key,
             attributes === undefined ? DEFAULT_ATTRIBUTES : attributes, setter || 0);
         var index = this.propertyStorageHashIndex(storage);
         if (index) {
@@ -2511,10 +2522,10 @@
     Records.prototype.deletePropertyStorageEntry = function (storage, entry) {
         this.propertyStorageEntryOffset(storage, entry);
         if (!this.propertyStorageKey(storage, entry)) return false;
-        if (!propertyClearKernelJS) {
-            propertyClearKernelJS = compilePropertyStorageKernel("clearPropertyStorageEntryKernel");
+        if (!this.propertyClearKernel) {
+            this.propertyClearKernel = compilePropertyStorageKernel("clearPropertyStorageEntryKernel", this.heap.memory);
         }
-        propertyClearKernelJS(this.heap.memory, 0, storage, entry);
+        this.propertyClearKernel(this.heap.memory, 0, storage, entry);
         this.discardPropertyStorageIndex(storage);
         return true;
     };
@@ -2590,29 +2601,21 @@
     };
 
     Records.prototype.allocateProgram = function (bytecode, constants, layout) {
-        var address = this.heap.allocateRecordWords(Heap.Types.PROGRAM, PROGRAM_BYTES,
-            bytecode, constants, layout.constantRegisters,
-            layout.bindingRegisters);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_PARAMETER_SLOTS,
-            layout.parameterSlots || 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_REGISTER_COUNT,
-            layout.registerCount || 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_ARGUMENTS_SLOT,
-            layout.argumentsSlot >>> 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_THIS_SLOT,
-            layout.thisSlot >>> 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_FUNCTION_NAME_SLOT,
-            layout.functionNameSlot >>> 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_METADATA,
-            layout.metadata || 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_FLAGS,
-            layout.flags || 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_BINDING_COUNT,
-            layout.bindingCount || 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_SOURCE,
-            layout.source || 0, Heap.Types.PROGRAM);
-        this.heap.writeTrustedFieldU32(address, PROGRAM_BINDING_NAMES,
-            layout.bindingNames || 0, Heap.Types.PROGRAM);
+        /* Materialize the typed payload before reserving the record. This
+         * performs any JS reads/conversions before construction is incomplete;
+         * the fresh dense integer vector can then use checked bulk ingress.
+         * Order follows the canonical PROGRAM_* payload layout above. */
+        var words = [bytecode | 0, constants | 0,
+            layout.constantRegisters | 0, layout.bindingRegisters | 0,
+            layout.parameterSlots | 0, layout.registerCount | 0,
+            layout.argumentsSlot | 0, layout.thisSlot | 0,
+            layout.functionNameSlot | 0, layout.metadata | 0,
+            layout.flags | 0, layout.bindingCount | 0,
+            layout.source | 0, layout.bindingNames | 0];
+        var address = this.heap.allocateRecordWords(Heap.Types.PROGRAM,
+            PROGRAM_BYTES, 0, 0, 0, 0);
+        this.heap.memory.writeWords32LE(
+            this.heap.trustedPayloadAddress(address, PROGRAM_BYTECODE), words);
         return address;
     };
 

@@ -7,8 +7,11 @@ the code does, not the intended endpoint of the earlier plans. Update these
 documents alongside implementation changes.
 Source definitions remain the final authority for binary layouts and flags.
 
-The current native interpreter uses contract **103**, which adds the Math and
-String semantic continuation handoffs described in
+The current native interpreter uses contract **105**: portable record
+construction can reserve, clear and initialize through one non-collecting
+allocator transaction. See [execution and GC](execution-and-gc.md).
+Contract 104 made native own-property hints pointer-free; contract 103 added
+the Math and String semantic continuation handoffs described in
 [semantic-unification.md](semantic-unification.md). The Object-operation cutover
 introduced contract 102. See
 [semantic-unification.md](semantic-unification.md) for guest built-in

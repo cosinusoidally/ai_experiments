@@ -135,15 +135,18 @@
             heap.memory.nativeAddress(0) && sharedPropertyCloneX86.fn ?
             sharedPropertyCloneX86 : sharedPropertyCloneJS;
         this.packedCloneCompiled = nativeMemory ? sharedPackedCloneX86 : sharedPackedCloneJS;
+        this.initializeEntry = this.compiled.callI32 || this.compiled.fn;
+        this.cloneEntry = this.propertyCloneCompiled.callI32 || this.propertyCloneCompiled.fn;
+        this.packedCloneEntry = this.packedCloneCompiled.callI32 || this.packedCloneCompiled.fn;
     }
 
     RecordInitializer.prototype.initialize = function (
             address, type, size, word0, word1, word2, word3) {
         if (this.compiled.backend === "i386") {
-            return this.compiled.fn(this.heap.memory.nativeAddress(0), address,
+            return this.initializeEntry(this.heap.memory.nativeAddress(0), address,
                 type, size, word0 || 0, word1 || 0, word2 || 0, word3 || 0);
         }
-        return this.compiled.fn(this.heap.memory, 0, address, type, size,
+        return this.initializeEntry(this.heap.memory, 0, address, type, size,
             word0 || 0, word1 || 0, word2 || 0, word3 || 0);
     };
 
@@ -157,12 +160,12 @@
             sourceProperty, targetObject, block, blockBytes, propertyCount,
             enumerableOnly) {
         if (this.propertyCloneCompiled.backend === "i386") {
-            return this.propertyCloneCompiled.fn(
+            return this.cloneEntry(
                 this.heap.memory.nativeAddress(0), sourceProperty,
                 targetObject, block, blockBytes, propertyCount,
                 enumerableOnly ? 1 : 0);
         }
-        return this.propertyCloneCompiled.fn(this.heap.memory, 0,
+        return this.cloneEntry(this.heap.memory, 0,
             sourceProperty, targetObject, block, blockBytes, propertyCount,
             enumerableOnly ? 1 : 0);
     };
@@ -170,10 +173,10 @@
     RecordInitializer.prototype.clonePackedProperties = function (
             sourceStorage, targetObject, block, count, enumerableOnly) {
         if (this.packedCloneCompiled.backend === "i386") {
-            return this.packedCloneCompiled.fn(this.heap.memory.nativeAddress(0),
+            return this.packedCloneEntry(this.heap.memory.nativeAddress(0),
                 sourceStorage, targetObject, block, count, enumerableOnly ? 1 : 0);
         }
-        return this.packedCloneCompiled.fn(this.heap.memory, 0,
+        return this.packedCloneEntry(this.heap.memory, 0,
             sourceStorage, targetObject, block, count, enumerableOnly ? 1 : 0);
     };
 

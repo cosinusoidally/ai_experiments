@@ -18,6 +18,20 @@ executing native build artifacts. Its main is an ordinary kernel function
 with explicit argc/argv/snapshotEntry/dlsym inputs; startup ABI glue alone is
 macro assembly.
 
+Installed i386 results retain the general `fn` entry and expose internal
+fixed-signature `callI32` bindings for up to `HostFFI.MAX_NATIVE_ARGUMENTS`
+integer words. The fixed entry avoids creating an arguments array and then
+unpacking it across the FFI. It is for typed internal callers, not arbitrary
+guest argument conversion. Both entries close over the executable owner and
+reject use after destruction; code pointers are data, not generated literals.
+The wider-arity vector bridge remains available through `fn`.
+
+`callMemoryI32(memory, offset, ...)` translates a memory view into the current
+native base. `callMemoryOffset` additionally translates a nonzero returned
+native address into an allocation-relative offset, preserving null zero.
+These adapters let shared storage kernels retain the JS backend's memory-view
+contract without publishing native pointers as guest record references.
+
 `KernelDWARF.build(debug, codeLength, sectionBases)` optionally accepts byte
 bases named `abbreviations`, `lines`, `locations`, and `frames`. These rebase
 section-relative references when adding another compilation unit. Defaults

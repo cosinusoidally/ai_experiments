@@ -72,7 +72,16 @@
                 if (x86Result.fn && x86Result.fn(left, right) !== expected) {
                     throw new Error("i386 kernel backend mismatch");
                 }
+                if (x86Result.callI32 && x86Result.callI32(left, right) !== expected) {
+                    throw new Error("fixed-signature kernel binding differs from generic binding");
+                }
                 index++;
+            }
+            if (x86Result.fn) {
+                if (x86Result.fn.apply(null, [false, true, null, undefined,
+                        -1, 1.5, Infinity, NaN, 9]) !== arithmeticKernel(0, 1)) {
+                    throw new Error("generic kernel binding changed primitive argument conversion");
+                }
             }
             if (x86Result.assembly.indexOf("mov_eax_arg(0)") < 0 ||
                 x86Result.assembly.indexOf("imul_eax_ecx()") < 0 ||
@@ -188,6 +197,22 @@
                 heap.destroy();
                 recordX86.destroy();
             }
+            /* The same memory view must expose allocation-relative addresses
+             * on both backends, including a nonzero view base. */
+            function memoryAddressKernel(base, offset) { return base + offset; }
+            var addressIR = compiler.compile(memoryAddressKernel);
+            var addressJS = new JSBackend().compile(addressIR);
+            var addressX86 = new X86Backend().compile(addressIR);
+            var addressHeap = new Heap({heapBytes: 4096});
+            try {
+                if (addressJS.fn(addressHeap.memory, 64, 16) !== 80 ||
+                        (addressX86.fn &&
+                         (addressX86.callMemoryOffset(addressHeap.memory, 64, 16) !== 80 ||
+                          addressX86.callMemoryI32(addressHeap.memory, 64, 16) !==
+                              ((addressHeap.memory.nativeAddress(64) + 16) | 0)))) {
+                    throw new Error("kernel memory result address contract differs across backends");
+                }
+            } finally { addressX86.destroy(); addressHeap.destroy(); }
             function rawMemoryKernel(byteAddress, wordAddress, byteValue,
                                      wordValue) {
                 var result = 0;
@@ -562,6 +587,16 @@
                  * still expose the graph's named native entry point. */
                 if (graphX86.assembly.indexOf("kernel_function_graphEntry") < 0) {
                     throw new Error("kernel graph macro dump lost its entry point");
+                }
+                if (graphX86.fn) {
+                    var retainedEntry = graphX86.fn, retainedTypedEntry = graphX86.callI32;
+                    graphX86.destroy();
+                    var refusedGeneric = false, refusedTyped = false;
+                    try { retainedEntry(0, 0, 0, 0); }
+                    catch (entryError) { refusedGeneric = entryError.message === "kernel executable is destroyed"; }
+                    try { retainedTypedEntry(0, 0, 0, 0); }
+                    catch (typedError) { refusedTyped = typedError.message === "kernel executable is destroyed"; }
+                    if (!refusedGeneric || !refusedTyped) throw new Error("destroyed kernel binding remained callable");
                 }
             } finally {
                 graphHeap.destroy();

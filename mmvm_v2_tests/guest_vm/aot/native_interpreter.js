@@ -4229,44 +4229,17 @@
                  * Accessors use receiver as `this`; entry resolution uses
                  * owner even after the prototype walk advances/finishes. */
                 var propertyOwner = propertyReceiver;
-                var propertyFoundOnReceiver = 0;
                 var propertyReceiverStorage = 0;
-                var propertyReceiverEpoch = 0;
                 var propertyCacheIndex = 0;
                 if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
                     propertyCacheIndex =
                         stringKeyHashKernel(heapBase, propertyConstantKey) &
                         (RecordLayout.PROPERTY_CACHE_ENTRY_COUNT - 1);
                     propertyReceiverStorage = objectPropertyHead(heapBase, propertyReceiver);
-                    if (propertyReceiverStorage !== 0) {
-                        propertyReceiverEpoch = recordFlags(heapBase, propertyReceiverStorage);
-                    }
-                    if (propertyCacheObject(
-                            heapBase, state, propertyCacheIndex) ===
-                        propertyReceiver) {
-                        if (propertyCacheKey(
-                                heapBase, state, propertyCacheIndex) ===
-                            propertyConstantKey) {
-                            if (propertyCacheVersion(
-                                    heapBase, state, propertyCacheIndex) ===
-                                propertyReceiverEpoch) {
-                                if (propertyCacheGeneration(
-                                        heapBase, state,
-                                        propertyCacheIndex) ===
-                                    recordMark(heapBase,
-                                               propertyReceiver)) {
-                                    if (propertyCacheHead(
-                                            heapBase, state,
-                                            propertyCacheIndex) ===
-                                        propertyReceiverStorage) {
-                                        propertyRecord = propertyCacheProperty(
-                                            heapBase, state,
-                                            propertyCacheIndex);
-                                        propertyObject = 0;
-                                    }
-                                }
-                            }
-                        }
+                    propertyRecord = hintedOwnPropertyEntryKernel(heapBase, state,
+                        propertyCacheIndex, propertyReceiverStorage, propertyConstantKey);
+                    if (propertyRecord !== 0) {
+                        propertyObject = 0;
                     }
                 }
                 if (propertyObject !== 0 && virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT &&
@@ -4389,9 +4362,6 @@
                     if (propertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
                         propertyRecord = findCachedOwnObjectPropertyKernel(
                             heapBase, state, propertyObject, propertyConstantKey);
-                        if (propertyRecord !== 0 && propertyObject === propertyReceiver) {
-                            propertyFoundOnReceiver = 1;
-                        }
                         propertyHead = 0;
                     }
                     while (propertyHead !== 0) {
@@ -4404,9 +4374,6 @@
                         }
                         if (propertyKeysMatch === 1) {
                             propertyRecord = propertyHead;
-                            if (propertyObject === propertyReceiver) {
-                                propertyFoundOnReceiver = 1;
-                            }
                             propertyHead = 0;
                         } else {
                             propertyHead = previousOwnPropertyEntryKernel(heapBase, propertyObject, propertyHead);
@@ -4470,24 +4437,6 @@
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
                 if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
-                    if (propertyFoundOnReceiver === 1 &&
-                            virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
-                        setPropertyCacheKey(heapBase, state,
-                            propertyCacheIndex, propertyConstantKey);
-                        setPropertyCacheVersion(heapBase, state,
-                            propertyCacheIndex,
-                            propertyReceiverEpoch);
-                        setPropertyCacheGeneration(heapBase, state,
-                            propertyCacheIndex,
-                            recordMark(heapBase, propertyReceiver));
-                        setPropertyCacheHead(heapBase, state,
-                            propertyCacheIndex,
-                            propertyReceiverStorage);
-                        setPropertyCacheProperty(heapBase, state,
-                            propertyCacheIndex, propertyRecord);
-                        setPropertyCacheObject(heapBase, state,
-                            propertyCacheIndex, propertyReceiver);
-                    }
                     var propertySource = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
                     var propertyTarget = registerAddress +
                         propertyTargetIndex * RecordLayout.VALUE_CELL_BYTES;
@@ -14376,67 +14325,45 @@
             snprintfPointer, destination, 48, format, low, high);
     }
 
-    /* Property-cache entries are weak derived state.  A collection can reuse
-     * both the cached receiver and property-record addresses, so retaining an
-     * entry across a sweep can turn an otherwise valid lookup into an access
-     * through an unrelated record.  Clearing the receiver field invalidates
-     * the complete entry without coupling this code to its byte layout. */
+    /* Hints are numeric insertion-order slots, not heap pointers. Their use
+     * always validates the current live storage/key. Keep explicit reset at
+     * existing collection/context boundaries without any weak-reference use. */
     function clearNativePropertyCacheKernel(heapBase, state) {
         var cacheIndex = 0;
         while (cacheIndex < RecordLayout.PROPERTY_CACHE_ENTRY_COUNT) {
-            setPropertyCacheObject(heapBase, state, cacheIndex, 0);
+            setPropertyCacheProperty(heapBase, state, cacheIndex, 0);
             cacheIndex = cacheIndex + 1;
         }
         return 0;
     }
 
-    /* Positive own-property entries are guarded by record identity, mutation
-     * version, GC generation and property-list head, just like the inlined
-     * receiver fast path. Never cache a missing property or an entire chain:
-     * adding a shadow, replacing a prototype or changing a descriptor must be
-     * visible on the next lookup. GC clears these weak entries before reuse. */
+    /* A collision, deletion, compaction, different layout or collection cannot
+     * produce a false hit: check the current storage bounds and actual key.
+     * Descriptor attributes and value are resolved afresh by the caller. */
+    function hintedOwnPropertyEntryKernel(heapBase, state, index, storage, key) {
+        if (storage === 0) return 0;
+        var entry = propertyCacheProperty(heapBase, state, index);
+        if (entry <= 0) return 0;
+        if (entry > propertyStorageLength(heapBase, storage)) return 0;
+        var storedKey = propertyStorageKeyAt(heapBase, storage, entry - 1);
+        if (storedKey === key) return entry;
+        if (storedKey !== 0 && stringKeysEqualKernel(heapBase, storedKey, key) === 1) return entry;
+        return 0;
+    }
+
+    /* Cache successful own slots, never missing properties or prototype chains.
+     * Every lookup observes current shadowing, descriptors and prototypes. */
     function findCachedOwnObjectPropertyKernel(heapBase, state, object, key) {
         /* Content addressing lets freshly constructed but equal computed
          * keys reuse entries. A collision is verified by exact equality. */
         var hash = stringKeyHashKernel(heapBase, key);
         var index = hash & (RecordLayout.PROPERTY_CACHE_ENTRY_COUNT - 1);
         var head = objectPropertyHead(heapBase, object);
-        if (propertyCacheObject(heapBase, state, index) === object &&
-                propertyCacheVersion(heapBase, state, index) === ownPropertyEpochKernel(heapBase, object) &&
-                propertyCacheGeneration(heapBase, state, index) === recordMark(heapBase, object) &&
-                propertyCacheHead(heapBase, state, index) === head) {
-            var cachedKey = propertyCacheKey(heapBase, state, index);
-            if (cachedKey === key || stringKeysEqualKernel(heapBase, cachedKey, key) === 1) {
-                return propertyCacheProperty(heapBase, state, index);
-            }
-        }
-        var property = 0;
-        /* The entry is an insertion-order slot, not a persistent address.
-         * Across owners it is only a hint: validate bounds and the current
-         * slot's key before resolving its descriptor. This benefits ordinary
-         * objects with similar layouts without assuming shared shapes or
-         * retaining a pointer into another object's storage. Collection clears
-         * the cache owner; never inspect its cached key after invalidation. */
-        if (head !== 0 && propertyCacheObject(heapBase, state, index) !== 0 &&
-                propertyCacheKey(heapBase, state, index) === key) {
-            var hintedEntry = propertyCacheProperty(heapBase, state, index);
-            if (hintedEntry > 0 && hintedEntry <= propertyStorageLength(heapBase, head)) {
-                var hintedKey = propertyStorageKeyAt(heapBase, head, hintedEntry - 1);
-                if (hintedKey === key) property = hintedEntry;
-                else if (hintedKey !== 0 &&
-                        stringKeysEqualKernel(heapBase, hintedKey, key) === 1) property = hintedEntry;
-            }
-        }
-        if (property === 0) {
-            property = indexedOwnObjectPropertyKernel(heapBase, state, object, key, hash);
-        }
+        var property = hintedOwnPropertyEntryKernel(heapBase, state, index, head, key);
+        if (property !== 0) return property;
+        property = indexedOwnObjectPropertyKernel(heapBase, state, object, key, hash);
         if (property !== 0) {
-            setPropertyCacheKey(heapBase, state, index, key);
-            setPropertyCacheVersion(heapBase, state, index, ownPropertyEpochKernel(heapBase, object));
-            setPropertyCacheGeneration(heapBase, state, index, recordMark(heapBase, object));
-            setPropertyCacheHead(heapBase, state, index, head);
             setPropertyCacheProperty(heapBase, state, index, property);
-            setPropertyCacheObject(heapBase, state, index, object);
             return property;
         }
         return 0;
@@ -14507,6 +14434,14 @@
          * service never collects or touches instruction/frame state, so a
          * portable constructor can reserve storage before publishing roots. */
         if (frame === 0) return reservePortableRecordKernel(heapBase, state, budget);
+        /* Negative requests encode a record type; the remaining six words
+         * are aligned size and four initial payload words. This is the same
+         * non-collecting allocator transaction, with clearing/initialization
+         * inside it rather than a second JS/FFI round trip. Positive frame
+         * values remain ordinary bytecode frame references. */
+        if (frame < 0) return initializePortableRecordKernel(heapBase, state,
+            0 - frame, platformServices, arrayLengthKey, arrayPrototype,
+            stringSupport, budget);
         if (engineNativeRegionActive(heapBase, state) === 0) {
             if (engineNativeFreeRegion(heapBase, state) !== 0) {
                 var entryArena = activateNativeFreeRegionKernel(
@@ -14823,6 +14758,36 @@
                 setRecordMark(heapBase, next, 0);
                 setRecordFlags(heapBase, next, NATIVE_ALLOCATION_REGION_FLAG);
             }
+        }
+        return address;
+    }
+
+    function initializePortableRecordKernel(heapBase, state, type, bytes,
+                                           word0, word1, word2, word3) {
+        var address = reservePortableRecordKernel(heapBase, state, bytes);
+        if (address === 0) return 0;
+        setRecordType(heapBase, address, type);
+        setRecordMark(heapBase, address, 0);
+        setRecordFlags(heapBase, address, 0);
+        var end = address + bytes;
+        var cursor = address + RecordLayout.HEAP_HEADER_BYTES;
+        var services = enginePlatformServices(heapBase, state);
+        var memsetPointer = platformMemsetPointer(heapBase, services);
+        if (memsetPointer !== 0) {
+            var cleared = callNativeI32(memsetPointer, heapBase + cursor,
+                0, end - cursor);
+        } else {
+            while (cursor < end) {
+                store32(heapBase + cursor, 0);
+                cursor = cursor + RecordLayout.HEAP_WORD_BYTES;
+            }
+        }
+        if (bytes >= RecordLayout.HEAP_HEADER_BYTES + 4 * RecordLayout.HEAP_WORD_BYTES) {
+            var payload = heapBase + address + RecordLayout.HEAP_HEADER_BYTES;
+            store32(payload, word0);
+            store32(payload + RecordLayout.HEAP_WORD_BYTES, word1);
+            store32(payload + 2 * RecordLayout.HEAP_WORD_BYTES, word2);
+            store32(payload + 3 * RecordLayout.HEAP_WORD_BYTES, word3);
         }
         return address;
     }
@@ -18177,6 +18142,7 @@
             hasPropertyKernel: hasPropertyKernel,
             clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
             findCachedOwnObjectPropertyKernel: findCachedOwnObjectPropertyKernel,
+            hintedOwnPropertyEntryKernel: hintedOwnPropertyEntryKernel,
             stringKeyHashKernel: stringKeyHashKernel,
             computeStringKeyHashKernel: computeStringKeyHashKernel,
             stringHashStep: HeapRecords.stringHashStep,
@@ -18271,6 +18237,7 @@
             reserveNativeAllocationKernel: reserveNativeAllocationKernel,
             nativeTailAllocationLimitKernel: nativeTailAllocationLimitKernel,
             reservePortableRecordKernel: reservePortableRecordKernel,
+            initializePortableRecordKernel: initializePortableRecordKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
@@ -19335,6 +19302,17 @@
     };
 
     NativeInterpreter.prototype.reserveRecordSpan = function (bytes) {
+        return this.reservePortableRecord(0, 0, 0, 0, 0, bytes);
+    };
+
+    NativeInterpreter.prototype.allocateRecordWords = function (type, size, word0, word1, word2, word3) {
+        return this.reservePortableRecord(-type, size, word0, word1, word2, word3);
+    };
+
+    /* One service owns allocator publication and failure handoff for both
+     * span reservation (request zero) and initialized records (-record type).
+     * The native entry never collects or changes execution/frame state here. */
+    NativeInterpreter.prototype.reservePortableRecord = function (request, size, word0, word1, word2, word3) {
         if (!this.nativeFreeRegionsOwned) return 0;
         var heap = this.runtime.linearHeap;
         var records = this.runtime.heapRecords;
@@ -19344,10 +19322,11 @@
             records.setEngineHeapBounds(this.stateAddress,
                 heap.bump, heap.allocationLimit);
         }
-        var address = this.nativeResult.fn ? this.nativeResult.fn(
-            heap.memory.nativeAddress(0), 0, 0, 0, 0, 0, bytes,
+        var nativeEntry = this.nativeResult.callI32 || this.nativeResult.fn;
+        var address = nativeEntry ? nativeEntry(
+            heap.memory.nativeAddress(0), request, size, word0, word1, word2, word3,
             this.statePayload) : this.js.fn(
-            heap.memory, 0, 0, 0, 0, 0, 0, bytes, this.statePayload);
+            heap.memory, 0, request, size, word0, word1, word2, word3, this.statePayload);
         var tail = records.engineNativeTailBump(this.stateAddress);
         if (tail > heap.bump) heap.bump = tail;
         if (!address) {
@@ -19428,7 +19407,8 @@
         var heapBase = this.runtime.linearHeap.memory.nativeAddress(0);
         var nativeStarted = this.runtime.profileOpcodeCounts ?
             new Date().getTime() : 0;
-        var reason = this.nativeResult.fn ? this.nativeResult.fn(
+        var nativeEntry = this.nativeResult.callI32 || this.nativeResult.fn;
+        var reason = nativeEntry ? nativeEntry(
             heapBase, frame, this.platformServicesAddress,
             arrayLengthKey, arrayPrototype,
             this.stringSupportAddress, budget, this.statePayload) : this.js.fn(

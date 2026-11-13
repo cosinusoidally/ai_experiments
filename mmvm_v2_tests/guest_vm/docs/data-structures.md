@@ -94,7 +94,8 @@ from an existing data property whose value is undefined.
 After lookup/guard validation, `resolvedOwnPropertyEntryDescriptor` uses the
 same `ownPropertyEntryDescriptorKernel` as native execution. The portable
 accessor lazily compiles that small graph through the shared front/middle end
-and JS backend once per loaded module. Cached code receives the memory object
+and the storage-appropriate backend (JS for emulated memory, i386 for native
+memory), once per loaded module/backend/result kind. Cached code receives the memory object
 on each call; it captures no runtime, heap or owner. The wrapper retains owner
 validation, and the explicitly checked entry API retains its bounds/deletion
 checks. Do not replace a checked accessor with this resolved-only operation.
@@ -106,9 +107,15 @@ values and do not define enumeration order. A cached FNV-style hash over
 UTF-16 code units avoids rehashing each lookup; split partial multiplication
 preserves the exact low 32 bits on the different JS hosts. String equality
 still handles distinct records with
-equal text. Optional indexes and the native property cache are guarded by
-owner/storage state, epochs and GC generation; clear/rebuild derived state
-when mutations or collection invalidate it.
+equal text. Optional indexes retain their owner/storage and epoch guards.
+The native property cache is different: it retains only a numeric one-based
+insertion-order slot, never an owner, key or storage pointer. A hint succeeds
+only when it is in bounds in the current object's storage and the current
+slot contains the actual requested key. Descriptor attributes/value are read
+afresh. Deletion, compaction, reuse and collisions therefore cannot turn stale
+hints into false hits. Missing properties and prototype chains are not cached.
+Native contract 104 reserves the previous guard columns; it does not repurpose
+them as GC roots. Explicit cache resets still occur at collection boundaries.
 
 Portable Runtime also maintains derived handle-side `propertyEntries` caches.
 Those do not own semantic property state and must be guarded against heap-side
@@ -299,7 +306,7 @@ address as its data pointer is incorrect.
 ## Engine and platform records
 
 `ENGINE_STATE` holds current frame, exit/result/instruction fields, scratch
-cells, allocator regions and bins, weak property cache, collector root heads,
+cells, allocator regions and bins, pointer-free property-slot hints, collector root heads,
 workspace bounds and diagnostics. `PLATFORM_SERVICES` carries native service
 pointers and arithmetic/FFI support. These are not public JS objects. Named
 accessors and layout exports connect portable code, kernel code, collector

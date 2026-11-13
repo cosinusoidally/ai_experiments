@@ -136,24 +136,8 @@
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
         copyAssemblerToNative(pointer, assembler);
-        var ffi = this.ffi;
-        var munmap = this.munmap;
         result.pointer = pointer;
-        result.fn = function () {
-            var args = [];
-            var argumentIndex = 0;
-            while (argumentIndex < arguments.length && argumentIndex < 8) {
-                args[argumentIndex] = Number(arguments[argumentIndex]) | 0;
-                argumentIndex++;
-            }
-            return ffi.call(pointer, args) | 0;
-        };
-        result.destroy = function () {
-            if (!result.pointer) return;
-            ffi.call(munmap, [result.pointer, allocationLength]);
-            result.pointer = 0;
-            result.fn = null;
-        };
+        bindExecutableResult(result, this.ffi, this.munmap, allocationLength, ir.parameters.length);
         installArgumentVectorBridge(this, result, ir.parameters.length);
         return result;
     }
@@ -263,24 +247,9 @@
             [0, allocationLength, 7, 0x22, -1, 0]);
         if (!pointer || pointer === -1) throw new Error("kernel mmap failed");
         copyAssemblerToNative(pointer, assembler);
-        var ffi = backend.ffi;
-        var munmap = backend.munmap;
         result.pointer = pointer;
-        result.fn = function () {
-            var args = [];
-            var argumentIndex = 0;
-            while (argumentIndex < arguments.length && argumentIndex < 8) {
-                args[argumentIndex] = Number(arguments[argumentIndex]) | 0;
-                argumentIndex++;
-            }
-            return ffi.call(pointer, args) | 0;
-        };
-        result.destroy = function () {
-            if (!result.pointer) return;
-            ffi.call(munmap, [result.pointer, allocationLength]);
-            result.pointer = 0;
-            result.fn = null;
-        };
+        bindExecutableResult(result, backend.ffi, backend.munmap, allocationLength,
+            graph.functions[0].parameters.length);
         installArgumentVectorBridge(backend, result,
                                     graph.functions[0].parameters.length);
         return result;
@@ -289,7 +258,7 @@
     /* The shell FFI accepts eight words. Marshal larger kernel signatures
      * through a vector and a cdecl macro-assembler bridge. */
     function installArgumentVectorBridge(backend, result, arity) {
-        if (arity <= 8) return;
+        if (arity <= HostFFI.MAX_NATIVE_ARGUMENTS) return;
         var assembler = backend.createAssembler();
         assembler.pushEbp();
         assembler.movEbpEsp();
@@ -297,7 +266,7 @@
         while (index > 0) {
             index--;
             assembler.movEaxEbpArgument(0);
-            assembler.addEaxImmediate(index * 4);
+            assembler.addEaxImmediate(index * WORD_BYTES);
             assembler.movEaxDwordPtrEax();
             assembler.pushEax();
         }
@@ -320,18 +289,20 @@
         var calloc = ffi.resolve("calloc");
         var free = ffi.resolve("free");
         result.fn = function () {
+            if (!result.pointer || !bridge) throw new Error("kernel executable is destroyed");
             if (arguments.length !== arity) {
                 throw new RangeError("kernel expects " + arity + " arguments");
             }
-            var vector = ffi.call(calloc, [arity, 4]);
+            var vector = ffi.call(calloc, [arity, WORD_BYTES]);
             if (!vector) throw new Error("argument vector allocation failed");
             try {
                 var argumentIndex = 0;
                 while (argumentIndex < arity) {
-                    ffi.poke32(vector + argumentIndex * 4,
+                    ffi.poke32(vector + argumentIndex * WORD_BYTES,
                         Number(arguments[argumentIndex]) | 0);
                     argumentIndex++;
                 }
+                if (!result.pointer || !bridge) throw new Error("kernel executable is destroyed");
                 return ffi.call(bridge, [vector]) | 0;
             } finally {
                 ffi.call(free, [vector]);
@@ -391,24 +362,8 @@
         var copyStarted = timings ? new Date().getTime() : 0;
         copyAssemblerToNative(pointer, assembler);
         if (timings) timings.install = new Date().getTime() - copyStarted;
-        var ffi = backend.ffi;
-        var munmap = backend.munmap;
         result.pointer = pointer;
-        result.fn = function () {
-            var args = [];
-            var argumentIndex = 0;
-            while (argumentIndex < arguments.length && argumentIndex < 8) {
-                args[argumentIndex] = Number(arguments[argumentIndex]) | 0;
-                argumentIndex++;
-            }
-            return ffi.call(pointer, args) | 0;
-        };
-        result.destroy = function () {
-            if (!result.pointer) return;
-            ffi.call(munmap, [result.pointer, allocationLength]);
-            result.pointer = 0;
-            result.fn = null;
-        };
+        bindExecutableResult(result, backend.ffi, backend.munmap, allocationLength, ir.parameters.length);
         installArgumentVectorBridge(backend, result, ir.parameters.length);
         return result;
     }
@@ -1134,26 +1089,29 @@
         return true;
     }
 
-    function executableResult(ffi, munmap, pointer, length, backendName) {
-        var result = {fn: null, pointer: pointer, length: length,
-            bytes: null, assembly: "", ir: null, backend: backendName,
-            destroy: function () {}};
-        result.fn = function () {
-            var args = [];
-            var argumentIndex = 0;
-            while (argumentIndex < arguments.length && argumentIndex < 8) {
-                args[argumentIndex] = Number(arguments[argumentIndex]) | 0;
-                argumentIndex++;
-            }
-            return ffi.call(pointer, args) | 0;
-        };
+    function bindExecutableResult(result, ffi, munmap, length, arity) {
+        result.fn = ffi.bindI32(result);
+        result.callI32 = arity !== undefined && arity <= HostFFI.MAX_NATIVE_ARGUMENTS ?
+            ffi.bindI32(result, arity) : null;
+        result.callMemoryI32 = arity >= 1 && arity <= HostFFI.MAX_NATIVE_ARGUMENTS ?
+            ffi.bindMemoryI32(result, arity, false) : null;
+        result.callMemoryOffset = arity >= 1 && arity <= HostFFI.MAX_NATIVE_ARGUMENTS ?
+            ffi.bindMemoryI32(result, arity, true) : null;
         result.destroy = function () {
             if (!result.pointer) return;
             ffi.call(munmap, [result.pointer, length]);
             result.pointer = 0;
             result.fn = null;
+            result.callI32 = null;
+            result.callMemoryI32 = null;
+            result.callMemoryOffset = null;
         };
         return result;
+    }
+
+    function executableResult(ffi, munmap, pointer, length, backendName) {
+        return bindExecutableResult({fn: null, pointer: pointer, length: length,
+            bytes: null, assembly: "", ir: null, backend: backendName}, ffi, munmap, length);
     }
 
     function describeRegisterAllocation(ir, registerMap) {

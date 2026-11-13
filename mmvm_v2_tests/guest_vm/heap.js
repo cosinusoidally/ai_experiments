@@ -154,6 +154,31 @@
         }
         var size = align8(HEADER_SIZE + payloadBytes);
         var candidates = this.freeBlocks.length ? 1 : 0;
+        var provider = this.recordAllocationProvider;
+        /* Initial words with observable coercions retain the general path.
+         * Ordinary typed constructors can reserve, clear and initialize in
+         * one allocator-owned transaction. External byte backings must not
+         * clear their separately owned logical data span here. */
+        if (externalBufferMetadataBytes === undefined && typeof type === "number" && provider &&
+                provider.allocateRecordWords && size <= this.maximumAllocationLimit &&
+                (typeof word0 === "number" || word0 === undefined) &&
+                (typeof word1 === "number" || word1 === undefined) &&
+                (typeof word2 === "number" || word2 === undefined) &&
+                (typeof word3 === "number" || word3 === undefined)) {
+            var initialized = provider.allocateRecordWords(type, size,
+                word0 || 0, word1 || 0, word2 || 0, word3 || 0);
+            if (initialized) {
+                if (this.allocationSearchProfile) {
+                    this.allocationSearchProfile.allocations++;
+                    this.allocationSearchProfile.candidates += candidates;
+                    if (candidates > this.allocationSearchProfile.maximumCandidates) {
+                        this.allocationSearchProfile.maximumCandidates = candidates;
+                    }
+                }
+                this.allocationCount++;
+                return initialized;
+            }
+        }
         var address = this.recordAllocationProvider ?
             this.recordAllocationProvider.reserveRecordSpan(size) : 0;
         if (!address) address = this.takeLargestFreeBlock(size, true);
@@ -583,19 +608,21 @@
     };
 
     Heap.prototype.requireRecord = function (address, expectedType) {
-        address = Number(address);
-        if (!address || address !== Math.floor(address) ||
+        if (typeof address !== "number") address = Number(address);
+        if (!address || (address !== (address | 0) && address !== Math.floor(address)) ||
             address < FIRST_RECORD ||
             address + HEADER_SIZE > this.bump) {
             throw new TypeError("invalid guest heap reference " + address +
                                 " (heap bump " + this.bump + ")");
         }
-        var type = this.memory.readU32(address + HEADER_TYPE);
+        /* The complete header is in the live heap prefix. Do not repeat the
+         * linear-memory range/coercion checks for each validated header word. */
+        var type = this.memory.readU32Trusted(address + HEADER_TYPE);
         if (type === Types.FREE && expectedType !== Types.FREE) {
             throw new Error("guest heap reference " + address +
                 " is freed (size " +
-                this.memory.readU32(address + HEADER_SIZE_FIELD) +
-                ", flags " + this.memory.readU32(address + HEADER_FLAGS) + ")");
+                this.memory.readU32Trusted(address + HEADER_SIZE_FIELD) +
+                ", flags " + this.memory.readU32Trusted(address + HEADER_FLAGS) + ")");
         }
         if (expectedType !== undefined && type !== expectedType) {
             throw new TypeError("unexpected guest heap record type at " + address +

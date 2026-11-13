@@ -7,6 +7,67 @@
         this.dlsym = isMMVM ? get_dlsym() : 0;
     }
 
+    var MAX_NATIVE_ARGUMENTS = 8;
+    var integerBindingFactories = {};
+    HostFFI.MAX_NATIVE_ARGUMENTS = MAX_NATIVE_ARGUMENTS;
+
+    /* Kernel entrypoints have integer signatures. Keep their executable owner
+     * as closure data (never bake a process address into generated source).
+     * The generic adapter preserves the old conversion order/extra-argument
+     * behavior; the internal fixed-signature adapter needs no arguments array.
+     * Both avoid packing an array only to unpack it in callNative again. */
+    HostFFI.prototype.bindI32 = function (owner, arity) {
+        return bindInteger(this, owner, arity, false, false);
+    };
+
+    HostFFI.prototype.bindMemoryI32 = function (owner, arity, returnsHeapOffset) {
+        return bindInteger(this, owner, arity, true, !!returnsHeapOffset);
+    };
+
+    function bindInteger(ffi, owner, arity, memoryArgument, returnsHeapOffset) {
+        if (!ffi.isMMVM) throw new Error("native binding is unavailable on this host");
+        if (arity !== undefined && (arity < 0 || arity > MAX_NATIVE_ARGUMENTS ||
+                arity !== Math.floor(arity))) throw new RangeError("invalid native binding arity");
+        if (memoryArgument && !(arity >= 1)) throw new RangeError("memory binding requires a base argument");
+        var key = arity === undefined ? "$generic" :
+            (returnsHeapOffset ? "$offset" : memoryArgument ? "$memory" : "$") + arity;
+        var factory = integerBindingFactories[key];
+        if (!factory) {
+            var parameters = [], values = [], index, count;
+            var body = "var pointer = owner.pointer;" +
+                "if (!pointer) throw new Error('kernel executable is destroyed');";
+            if (arity === undefined) {
+                body += "var count = arguments.length;";
+                for (count = 0; count <= MAX_NATIVE_ARGUMENTS; count++) {
+                    values = [];
+                    var conversions = "";
+                    for (index = 0; index < count; index++) {
+                        conversions += "var word" + index + "=arguments[" + index + "]|0;";
+                        values.push("word" + index);
+                    }
+                    body += (count < MAX_NATIVE_ARGUMENTS ? "if (count === " + count + ") " : "") + "{" +
+                        conversions + "if (owner.pointer !== pointer) throw new Error('kernel executable is destroyed');" +
+                        "return ffi_call(pointer" + (count ? "," + values.join(",") : "") + ")|0;}";
+                }
+            } else {
+                for (index = 0; index < arity; index++) {
+                    if (memoryArgument && index === 0) {
+                        parameters.push("memory", "offset"); values.push("base");
+                    } else {
+                        parameters.push("word" + index); values.push("word" + index + "|0");
+                    }
+                }
+                if (memoryArgument) body += "var base = memory.nativeAddress(offset|0)|0;";
+                var call = "ffi_call(pointer" + (arity ? "," + values.join(",") : "") + ")|0";
+                body += returnsHeapOffset ? "var result = " + call + "; return result ? (result-base+(offset|0))|0 : 0;" :
+                    "return " + call + ";";
+            }
+            factory = Function("owner", "return function(" + parameters.join(",") + "){" + body + "};");
+            integerBindingFactories[key] = factory;
+        }
+        return factory(owner);
+    }
+
     HostFFI.prototype.getDlsym = function () {
         return this.dlsym;
     };

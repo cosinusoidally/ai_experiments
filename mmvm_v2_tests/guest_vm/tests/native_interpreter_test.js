@@ -35,6 +35,30 @@
                 vm.runtime.readHeapValue(second.resultCell) !== 17) {
                 throw new Error("native interpreter return mismatch");
             }
+            /* Construction between execution slices uses the same allocator
+             * without executing bytecode or collecting. Exercise dirty-space
+             * reuse as well as payload initialization and zeroed padding. */
+            var allocationHeap = vm.runtime.linearHeap;
+            var beforeAllocationInstructions = vm.runtime.heapRecords.engineInstructionCount(engine.stateAddress);
+            var allocationType = allocationHeap.constructor.Types.ROOT_SLOT;
+            var initializedRecord = allocationHeap.allocateRecordWords(
+                allocationType, 48, -1, 2, 3, 4);
+            if (allocationHeap.recordType(initializedRecord) !== allocationType ||
+                    allocationHeap.readFieldU32(initializedRecord, 0) !== 4294967295 ||
+                    allocationHeap.readFieldU32(initializedRecord, 12) !== 4 ||
+                    allocationHeap.readFieldU32(initializedRecord, 44) !== 0 ||
+                    vm.runtime.heapRecords.engineInstructionCount(engine.stateAddress) !== beforeAllocationInstructions) {
+                throw new Error("allocator-owned record initialization changed state or payload");
+            }
+            allocationHeap.writeFieldU32(initializedRecord, 44, 123);
+            engine.releaseAllocatorOwnership();
+            allocationHeap.freeRecord(initializedRecord);
+            engine.acquireAllocatorOwnership();
+            initializedRecord = allocationHeap.allocateRecordWords(allocationType, 48, 5, 6, 7, 8);
+            if (allocationHeap.readFieldU32(initializedRecord, 0) !== 5 ||
+                    allocationHeap.readFieldU32(initializedRecord, 44) !== 0) {
+                throw new Error("allocator-owned record reuse retained dirty payload");
+            }
             vm.runtime.linearHeap.freeRecord(frame);
 
             var arithmetic = {code: [bytecode.CONST, 0, 0,

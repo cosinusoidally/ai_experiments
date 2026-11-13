@@ -165,13 +165,46 @@ The coordination API has three operations:
   recovers the tracked free spans or reconstructs the index from headers.
   Collection preparation defers that reconstruction until after sweep.
 - `prepareForCollection()` owns the ordered handoff, cached-frame retirement
-  and weak property-cache invalidation. No guest allocation may occur between
+  and property-slot-hint reset. Hints contain no heap pointers and are validated
+  against current storage on every use. No guest allocation may occur between
   that preparation and marking/sweeping. The runtime rebuilds the portable
   free index from the post-sweep graph once, not from pre-collection regions.
 
 There is no wrapper-owned refill arena or per-execution allocation cursor.
 An allocation exit enters the existing bounded collection/retry policy; it
 does not claim a separate span which the engine-owned allocator cannot see.
+
+### Portable construction through the native allocator
+
+`Heap.allocateRecordWords` remains the validation boundary for record type,
+payload size and optional external-backing metadata. When the allocation
+provider owns the free spans and the initial words are ordinary numbers, it
+can perform reservation, complete zeroing and four-word initialization as
+one transaction. `NativeInterpreter.allocateRecordWords` delegates to
+`initializePortableRecordKernel`, using the same `reservePortableRecordKernel`
+as the span-only service. There is no second allocator or constructor-specific
+record format. Allocation counts and diagnostic search counters remain with
+Heap. Failure publishes allocator ownership back through the existing handoff
+and uses ordinary growth/allocation; it never collects midway through a
+constructor. Observable argument coercions retain the general accessor path.
+
+Native entry contract 105 distinguishes three requests using the frame word:
+positive values are frame references, zero reserves a span (size in the budget
+word), and negative values encode an initialized record's type. In the latter
+case the intervening arguments are aligned size and four initial payload
+words. Only the named wrapper/kernel service knows this internal ABI; record
+constructors do not use it directly. Entry/return preserve execution, budget
+and frame state. The service clears every inline payload byte, including
+padding, using libc memset when available and the equivalent kernel loop on
+emulated memory. External buffer data spans retain their separate metadata-only
+initialization path, rather than clearing a large logical span unnecessarily.
+
+Record access follows the same single-validation principle: `requireRecord`
+checks the complete header against the live heap prefix before trusted header
+reads. It still rejects invalid/fractional/freed references and reports the
+existing detailed errors. It does not repeat linear-memory range/coercion
+checks separately for each word of that already validated header.
+
 Embedded exit dispatch uses `NativeInterpreter.Exit`, not duplicated numeric
 IDs. Profiling reports `allocationExits` plus the existing index-handoff and
 collection counters; the obsolete arena-refill counters have been removed.
@@ -188,8 +221,8 @@ reserved maximum without moving the heap base. Repeatedly collecting the
 same mostly-live heap at an unchanged pressure boundary is pathological;
 native-to-portable reconciliation must preserve newly granted headroom.
 
-Weak string/metadata maps and property caches are invalidated or pruned after
-collection. Cached frames cannot retain an untraced old graph indefinitely.
+Weak string/metadata maps are invalidated or pruned after collection; numeric
+property-slot hints are reset. Cached frames cannot retain an untraced old graph indefinitely.
 Large external buffer allocations are released with their backing records.
 Pinned context-snapshot storage is an exception to eager retirement: its
 saved record boundaries must survive until the snapshot is destroyed.
