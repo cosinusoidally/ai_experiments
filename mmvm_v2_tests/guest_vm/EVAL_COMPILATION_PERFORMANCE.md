@@ -1,5 +1,10 @@
 # Small-program compilation performance investigation
 
+Latest measurements, 2026-11-13: [heavy-eval phase and native CPU profile](EVAL_PHASE_MEASUREMENTS_2026-11-13.md).
+The current unchanged workload points first to typed program construction
+and its native-call boundary. No new performance implementation is claimed;
+the report records observer effects and the earlier rejected experiments.
+
 ## Initial checkpoint: paused, 2026-10-29
 
 **No performance implementation from this investigation was retained.** All

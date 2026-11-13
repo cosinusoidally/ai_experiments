@@ -1,5 +1,9 @@
 # Interpreter architecture and CPU cost
 
+For the latest 2026-11-13 heavy-eval measurements on the current VM, see
+[phase breakdown, native CPU profile and proposed next work](EVAL_PHASE_MEASUREMENTS_2026-11-13.md).
+The older percentages below remain their original observations.
+
 Investigation checkpoint: 2026-10-29, `guestVM-cleanup`.
 
 The small declaration-walker/base-address experiments are parked, not retained
