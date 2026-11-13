@@ -711,6 +711,8 @@
     GuestNodeEnvironment.prototype.makeTest262Service = function () {
         var environment = this;
         var service = this.object({});
+        this.runtime.setProperty(service, "kernelOptimization",
+            this.runtime.kernelOptimization);
         this.runtime.setProperty(service, "runVariant",
             this.makeFunction("Test262VM.runVariant", function (receiver, args) {
                 var filename = String(args[0]);

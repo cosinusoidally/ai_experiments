@@ -26,6 +26,9 @@ example, using an existing bootstrap image:
 It records canonical source provenance without changing generated instructions.
 `-O0` is independent and may be used without `-g`. Optimization is a build-time
 property of the image, not a runtime switch for an already compiled image.
+Test262 constructs a separate inner runtime: use `test262_runner.js -O0` or
+`--kernel-optimization default|none` to select that new kernel independently
+of the outer image. See [the harness instructions](../../TEST262.md).
 Executables without debug incorporation and ordinary `js_runner` snapshot
 loading remain supported. Both packager modes describe exact code/heap ranges
 without moving load segments or snapshot bytes. The packager refuses to overwrite an

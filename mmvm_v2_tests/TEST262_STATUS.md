@@ -1,5 +1,22 @@
 # Test262 status
 
+2026-11-13: recovered completed November 12 inner-kernel policy comparison
+on `de5e3f5` plus policy-forwarding changes:
+
+- Optimized inner kernel: **3292 passed / 0 failed / 0 timed out / 0 skipped /
+  0 not run**, all 3292 files and variants executed; runner **438.576678 s**,
+  summed variants **419.183136 s**, observed successful process exit.
+- -O0 inner kernel: **3292 passed / 0 failed / 0 timed out / 0 skipped /
+  0 not run**, all 3292 files and variants executed; runner **439.218511 s**,
+  summed variants **428.843015 s**, external exit status **0** and peak RSS
+  **512136 KiB**. Optimized peak RSS was not captured by an external receipt.
+- The exact same tests pass under both policies. Same optimized outer
+  executable, unchanged corpus and limits; runs were serial, one per policy.
+  -O0 total time is **0.15% higher**; summed variant time **2.30% higher**.
+- See [full method, slow-test breakdown and caveats](guest_vm/docs/test262-kernel-optimization.md).
+  The new `-O0` / `--kernel-optimization default|none` harness options select
+  the inner runtime explicitly; default behavior remains optimized.
+
 2026-11-12, approximately 08:25–08:32 UTC, clean executable-only acceptance
 at `bfc122f` (native contract 103), with both snapshot inputs removed:
 

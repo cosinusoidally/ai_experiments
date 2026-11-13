@@ -1,5 +1,10 @@
 # Kernel debug measurements — 2026-11-12
 
+Follow-up: [the complete Test262 inner-kernel comparison](test262-kernel-optimization.md)
+now selects the test kernel explicitly. Both policies pass all 3292 tests;
+runner totals are 438.58 s optimized and 439.22 s -O0. This follow-up uses the
+same optimized outer launcher, unlike changing the whole image policy.
+
 Status: **executable debug acceptance complete; broader matrix parked**.
 See [final executable checks](kernel-debug-exe-acceptance.md).
 This records measured results, including

@@ -35,7 +35,8 @@
         if (message) console.error("test262 runner: " + message);
         console.error("usage: test262_runner.js [--fail-fast] [--verbose] " +
             "[--quiet] [--summary-only] [--fresh-contexts] " +
-            "[--self-hosted-eval] [--list] " +
+            "[--self-hosted-eval] [--list] [-O0] " +
+            "[--kernel-optimization default|none] " +
             "[--strict-only|--non-strict-only] " +
             "[--instruction-limit count] [--test-heap-bytes bytes] " +
             "[--test-max-heap-bytes bytes] [all|path ...]");
@@ -70,6 +71,14 @@
         }
         else if (argument === "--fresh-contexts") freshContexts = true;
         else if (argument === "--self-hosted-eval") selfHostedEval = true;
+        else if (argument === "-O0") testRuntimeOptions.kernelOptimization = "none";
+        else if (argument === "--kernel-optimization") {
+            var policy = String(runnerArguments[argumentIndex++]);
+            if (policy !== "default" && policy !== "none") {
+                failUsage("--kernel-optimization requires default or none");
+            }
+            testRuntimeOptions.kernelOptimization = policy;
+        }
         else if (argument === "--list") listOnly = true;
         else if (argument === "--strict-only") {
             if (requestedVariant) failUsage("variant options are mutually exclusive");
@@ -94,7 +103,7 @@
                 instructionLimit !== Math.floor(instructionLimit)) {
                 failUsage("instruction limit must be a positive integer");
             }
-        } else if (argument.substring(0, 2) === "--") {
+        } else if (argument.charAt(0) === "-") {
             failUsage("unknown option " + argument);
         } else selectors.push(normalizeRelativePath(argument));
     }
@@ -167,6 +176,18 @@
             testRuntimeOptions);
     } else if (testRuntimeOptions.heapBytes || testRuntimeOptions.maxHeapBytes) {
         failUsage("test heap options require the guest-owned standalone embedding");
+    }
+    /* Hosted tests execute in the runner's existing runtime. Never claim to
+     * change its already compiled kernel; standalone tests own a new runtime
+     * and can select their policy independently from the outer launcher. */
+    if (testRuntimeOptions.kernelOptimization &&
+            Test262VM.kernelOptimization !== testRuntimeOptions.kernelOptimization) {
+        failUsage("requested kernel policy differs from the hosted runtime; " +
+            "select the same policy in guest_runner before the script name, " +
+            "or use a standalone executable");
+    }
+    if (Test262VM.kernelOptimization) {
+        console.log("Test262 kernel optimization: " + Test262VM.kernelOptimization);
     }
     if (selfHostedEval) {
         if (ownsTestRuntime) Test262VM.installEvalCompiler();
@@ -290,6 +311,9 @@
     if (ownsTestRuntime) Test262VM.destroy();
     var suiteElapsed = now() - suiteStarted;
     console.log("Test262 ES5.1 summary");
+    if (Test262VM.kernelOptimization) {
+        console.log("  kernel:     " + Test262VM.kernelOptimization);
+    }
     console.log("  test files: " + counts.tests);
     console.log("  variants:   " + counts.variants);
     console.log("  executed:   " + counts.executed);

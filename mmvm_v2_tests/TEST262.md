@@ -25,6 +25,43 @@ js_min.exe guest_runner.js --vm-native test262_runner.js --fresh-contexts ch09
 js_min.exe guest_runner.js --vm-native test262_runner.js --self-hosted-eval ch10/10.1
 ```
 
+### Kernel optimization policy
+
+Standalone runs can select the inner test runtime's kernel independently of
+the executable running the harness:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap test262_runner.js --kernel-optimization default
+./artifacts/js_runner.exe artifacts/snap test262_runner.js -O0
+```
+
+`-O0` is shorthand for `--kernel-optimization none`. `default` means the
+normal optimized policy, not an unspecified optimization level. With no
+option the standalone test runtime remains optimized, preserving the previous
+default. Options are processed in command-line order; the last policy wins.
+The harness forwards the policy into the new VM constructor and reports the
+actual policy at startup and in its summary. All test contexts in that runtime
+use that kernel. `-g` is not an optimization option and is not forwarded.
+
+The direct js_min/guest_runner hosted service shares the runner's existing
+runtime rather than creating another native kernel. Its policy is selected
+before the script name; an explicit policy after the script must match:
+
+```sh
+js_min.exe guest_runner.js --vm-native -O0 test262_runner.js -O0
+```
+
+A mismatch is an error, never a silently ignored flag. The direct Node
+comparison runner rejects these guest-kernel-only options; use Node's own
+engine options for that backend.
+
+For a controlled interpreter comparison, use the same optimized standalone
+launcher for both commands and vary only the inner policy. The summary's
+`test ms` sums individual variant timings (including per-test setup and
+parsing, not only bytecode execution); `elapsed ms` also includes
+inner runtime construction, compilation and teardown. Corpus selection,
+instruction limits and watchdog behavior are unchanged.
+
 With no selector, or with `all`, the runner discovers every applicable test.
 Selectors may name a chapter, subtree, or individual test relative to the
 Test262 root.  A normal run continues after failures and prints a complete

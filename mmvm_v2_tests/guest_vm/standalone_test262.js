@@ -18,6 +18,7 @@ exports.create = function (filesystem, progress, options) {
     if (progress) progress("constructing guest test runtime");
     options = options || {};
     var vm = new VM({rawFFI: true, nativeInterpreter: true, gcThreshold: 16384,
+        kernelOptimization: options.kernelOptimization,
         heapBytes: options.heapBytes, maxHeapBytes: options.maxHeapBytes});
     if (progress) progress("guest test runtime ready");
     /* Do not install a second Node environment, mutate the control globals,
@@ -35,6 +36,7 @@ exports.create = function (filesystem, progress, options) {
     embedding.moduleContexts = [];
     embedding.builtinModules = {};
     return {
+        kernelOptimization: vm.runtime.kernelOptimization,
         runVariant: function (filename, source, strict, harnessFiles, limit, fresh) {
             var result = embedding.runTest262Variant(filename, source, strict,
                 harnessFiles, limit, fresh);

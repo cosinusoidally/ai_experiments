@@ -19,6 +19,9 @@
                     timeoutMs > 2147483647) {
                 throw new Error("--timeout-ms requires an integer from 1 to 2147483647");
             }
+        } else if (argument === "-O0" || argument === "--kernel-optimization") {
+            throw new Error(argument + " selects a guest kernel; " +
+                "select Node engine options before test262_runner_node.js instead");
         } else if (argument === "--instruction-limit" ||
                 argument === "--test-heap-bytes" ||
                 argument === "--test-max-heap-bytes" ||
