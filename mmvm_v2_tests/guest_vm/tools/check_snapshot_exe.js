@@ -84,6 +84,18 @@
             needed[i] = bytes.toString("ascii", strtab + needed[i], end);
         }
         check(needed.join(",") === "libc.so.6,libm.so.6,libdl.so.2", "separate historical libraries");
+        /* Reuse the debugger's bounded ELF reader for ordinary symbols too;
+         * this check does not require incorporated DWARF or a tracing host. */
+        var Image = require("../debugger/image.js").KernelDebuggerImage;
+        var image = new Image({readFile: function () { return {address: 0, length: bytes.length}; },
+            release: function () {}, ffi: {peek8: function (at) { return bytes[at]; }}}, "generated executable");
+        try {
+            check(image.byName.$_start && image.byName.$_start.start === u32(24), "entry symbol matches ELF entry");
+            check(image.byName.$main && image.byName.$main.size > 0, "compiled main symbol exists without DWARF");
+            check(image.byName.$_main_abi_entry && image.byName.$_main_abi_entry.start !== image.byName.$main.start,
+                "libc ABI bridge is distinct from compiled main");
+            check(image.codeByte(image.byName.$main.start) >= 0, "main lies in executable bytes");
+        } finally { image.destroy(); }
     }
     run(process.execPath, [tool, snapshot, executable]);
     var packed = fs.readFileSync(executable), packedHash = hash(packed);

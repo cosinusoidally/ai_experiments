@@ -7,7 +7,8 @@ precise code/data section ranges without moving payloads or load segments.
 
 `guest_vm/tools/snapshot_to_exe.js` wraps an existing version-2 standalone
 snapshot in an i386 ELF executable. It does not compile the VM, regenerate its
-snapshot, or specialize it for a program. No compiler, linker, binutils, crt
+snapshot, or specialize it for a program. It compiles only its small launcher
+`main` using the repository's JS kernel compiler. No external compiler, linker, binutils, crt
 objects, development libraries, npm packages, or downloads are needed.
 
 Run from `mmvm_v2_tests`, using any of these hosts:
@@ -56,11 +57,38 @@ longstanding i386 libc startup ABI. Compatibility with old glibc is intended,
 not a claim that every old glibc/kernel combination has been tested.
 
 `_start` preserves the dynamic loader's finalizer and original process stack,
-aligns the call stack, and calls `__libc_start_main`. `main` invokes the embedded
-entry with `(argc - 1, argv + 1, dlsym_address)`. Thus libc initialization and
+aligns the call stack, and calls `__libc_start_main`. A branch-free
+`_main_abi_entry` bridge marshals libc's arguments plus the PC-relative snapshot
+entry and resolved dlsym binding into compiled kernel JS
+`main(argc, argv, snapshotEntry, dlsym)`. `main` invokes the embedded entry with
+`(argc - 1, argv + 4, dlsym)` (argv is a byte address). Thus libc initialization and
 normal libc exit handling run; there is no handcrafted libc substitute. The
 wrapper provides no additional VM services. The snapshot still allocates its
 linear heap independently and resolves its own bindings at startup.
+
+The ordinary control flow is in `tools/snapshot_launcher.js`: reject a missing
+program with status 64, strip the executable argument, call the snapshot and
+return its status. This is the same kernel dialect/compiler/IR/backend as the
+interpreter, with explicit bootstrap parameters and ordinary module-scope
+constant bindings. It does not use an initialized VM or invent a special
+compile-time meaning for local variables. Only `_start` and argument/relocation
+ABI glue remain macro assembly. All instructions remain position independent.
+
+Every packaged executable now has ELF `_start`, `_main_abi_entry` and `main`
+symbols. With `--debug-info`, the packager also compiles canonical launcher
+provenance using the snapshot's optimization policy and appends a launcher
+DWARF compilation unit to the incorporated kernel debug sections. Existing
+snapshot and sidecar bytes/bindings are unchanged. Section-relative references
+(abbreviations, line tables, locations and CIEs) are rebased explicitly;
+CU-relative DIE references stay relative to their own compilation unit.
+The launcher debug data describes the packager source used for packaging,
+not another program or VM captured in the snapshot.
+
+Repackage an existing snapshot to acquire these symbols/debugging improvements;
+the snapshot does not need rebuilding. In `kernel_debugger.js`, `break main`
+now stops in the JS source with parameters and supported locals available.
+Named breakpoints fall back to ELF symbols for assembly-only entries such as
+`_start`; these have no invented JS source or locals.
 
 The normal `js_runner.c` loader and snapshot format are unchanged. Shared format
 constants now live in `aot/standalone_format.js`, used by the backend and the
@@ -91,10 +119,13 @@ overhead, with no compression and no sparse-file allocation tricks.
 ## Implementation and safe output
 
 `snapshot_exe_elf.js` constructs deterministic ELF bytes and invokes the existing
-`aot/x86_assembler.js` to build the launcher. It has no file I/O or native
-execution dependency. The assembler's named stack-adjustment and `ud2` macros
+`aot/x86_assembler.js` for entry/ABI glue and `snapshot_launcher.js` for the
+compiled `main`. It owns no file descriptors; debug compilation reads canonical
+launcher source through the compiler's source registry. The x86 backend's
+`installExecutable: false` mode emits bytes/debug metadata without mmaping or
+executing temporary native code on any host. The assembler's named stack-adjustment and `ud2` macros
 encode single instructions; no raw instruction blobs are embedded in the tool.
-`build(header, fileLength, Assembler, format)` returns `prefix`, `suffix`,
+`build(header, fileLength, Assembler, format, optionalRelocatedDebug)` returns `prefix`, `suffix`,
 `snapshotOffset`, and the launcher macro `assembly` for inspection.
 
 `snapshot_exe_io.js` handles file operations through either Node's built-in fs

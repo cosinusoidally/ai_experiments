@@ -44,6 +44,13 @@ before restart. Batch mode restarts explicitly without prompting.
 At an exit stop, the debugger reports the child's exit status; that status
 does not itself make the debugger fail (as distinct from a command error).
 
+Newly packaged executables also support `break main`: launcher `main` is
+compiled kernel JS in `guest_vm/tools/snapshot_launcher.js`, with its own
+DWARF compilation unit. Its four parameters are argc, argv, snapshotEntry and
+dlsym. `_start` and `_main_abi_entry` resolve through ELF symbols and support
+instruction-level debugging, not JS locals. Older executables need repackaging
+to gain these symbols and launcher DWARF; their original snapshots are reusable.
+
 ```sh
 ./artifacts/guest_vm.exe kernel_debugger.js --batch \
   --ex 'break interpreterKernel' --ex 'run hello.js' \
@@ -123,7 +130,8 @@ outside this initial implementation. There is no automatic extension loader.
   quadratic whole-file string appends on flat-string hosts.
 - `debugger/image.js`: bounds-checked native-memory file views and ELF reader.
 - `debugger/dwarf.js`: producer constants, DIEs/origins, lines, location lists
-  and CFI interpretation. The executable image is held once in native memory.
+  and CFI interpretation. Multiple compilation/line units retain their own
+  reference bases and file tables. The executable image is held once in native memory.
 - `debugger/engine.js`: lifecycle, breakpoint ownership, stepping and frames.
 - `debugger/commands.js`: command registration, interactive/batch UI and scalar
   evaluation. Future extensions can use the engine's target-access APIs and
@@ -180,5 +188,9 @@ js_min.exe kernel_debugger.js --batch --commands guest_vm/tools/kernel_debugger_
 
 See [recorded acceptance](kernel-debugger-status.md) for the tested host/target
 matrix. Generated logs remain temporary artifacts, not checked-in test output.
+
+The additional `guest_vm/tools/kernel_debugger_main.commands` workflow checks
+ELF entry-symbol fallback, compiled main arguments/locals/source stepping and
+return into its ABI bridge under both debugger hosts.
 
 See [the plan](kernel-debugger-plan.md) for scope and implementation stages.

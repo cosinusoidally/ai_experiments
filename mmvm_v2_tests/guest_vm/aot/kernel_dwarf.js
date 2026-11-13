@@ -22,7 +22,11 @@
         signedEncoding: 5, inlineInlined: 1
     };
 
-    function build(debug, codeLength) {
+    function build(debug, codeLength, sectionBases) {
+        /* A packager may append another CU to existing debug sections.
+         * DIE references remain CU-relative; section references use these
+         * explicit bases. Defaults preserve the standalone sidecar bytes. */
+        sectionBases = sectionBases || {};
         var Writer = Binary.Writer, sections = [], files = [], fileNumbers = {};
         var functions = debug.functions, index = 0;
         function fileNumber(filename) {
@@ -124,7 +128,7 @@
         }
         function variableLocation(fn, displacement, ranges, register) {
             ranges = excludeUnavailable(fn, ranges);
-            var offset = loc.bytes.length;
+            var offset = loc.bytes.length + (sectionBases.locations || 0);
             if (ranges.length) {
                 /* Entries below relocate to absolute addresses. Override the
                  * CU's nonzero low_pc base, rather than adding it twice. */
@@ -142,9 +146,9 @@
             loc.u32(0); loc.u32(0); return offset;
         }
         var info = section(".debug_info"), i = info.writer;
-        i.u32(0); i.u16(4); i.u32(0); i.u8(4);
+        i.u32(0); i.u16(4); i.u32(sectionBases.abbreviations || 0); i.u8(4);
         i.uleb(1); i.string("GuestVM kernel dialect / i386"); i.u16(D.languageC);
-        i.string("guest_vm/kernel"); i.string("."); i.u32(0);
+        i.string("guest_vm/kernel"); i.string("."); i.u32(sectionBases.lines || 0);
         address(info, 0); i.u32(codeLength);
         var scalarType = i.bytes.length;
         i.uleb(2); i.string("kernel_i32"); i.u8(4); i.u8(D.signedEncoding);
@@ -243,7 +247,7 @@
         c.align(4); c.patch32(cie, c.bytes.length - cie - 4);
         for (index = 0; index < functions.length; index++) {
             fn = functions[index]; var fde = c.bytes.length;
-            c.u32(0); c.u32(cie); address(frame, fn.start); c.u32(fn.end - fn.start);
+            c.u32(0); c.u32(cie + (sectionBases.frames || 0)); address(frame, fn.start); c.u32(fn.end - fn.start);
             pc = fn.start;
             pc = advanceFrame(pc, fn.pushedFrame); c.u8(D.cfi.defCFAOffset); c.uleb(8);
             c.u8(D.cfi.offset + D.reg.ebp); c.uleb(2);

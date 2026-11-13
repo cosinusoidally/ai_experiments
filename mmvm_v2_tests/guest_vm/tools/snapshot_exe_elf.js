@@ -1,5 +1,7 @@
 /* ELF32 packaging only: no compiler, host I/O, or snapshot relocation. */
 (function (root) {
+    var Launcher = root.GuestVMSnapshotLauncher;
+    if (typeof module !== "undefined" && module.exports) Launcher = require("./snapshot_launcher.js");
     var ELF = {base: 0x08048000, page: 4096, headerBytes: 52,
         programHeaderBytes: 32, programHeaderCount: 7, sectionHeaderBytes: 40,
         executable: 2, i386: 3, current: 1,
@@ -22,7 +24,7 @@
     var SYM = {name: 0, value: 4, size: 8, info: 12, section: 14};
     var REL = {address: 0, info: 4};
     var DYN = {tag: 0, value: 4, bytes: 8};
-    var LAYOUT = {interpreter: 512, start: 1024, main: 1280,
+    var LAYOUT = {interpreter: 512, start: 1024, mainBridge: 1152, main: 1280,
         metadata: 1536, got: 4096, dynamic: 4160, snapshot: 8192};
     var SYMBOL_BYTES = 16, RELOCATION_BYTES = 8, WORD_BYTES = 4;
     var START_MAIN_SYMBOL = 1, DLSYM_SYMBOL = 2;
@@ -75,8 +77,10 @@
         return field("entryOffset");
     }
 
-    function launcher(Assembler, entryOffset) {
-        var start = new Assembler(true), main = new Assembler(true), anchor;
+    function launcher(Assembler, entryOffset, optimization, debug) {
+        var start = new Assembler(true), bridge = new Assembler(true), anchor;
+        var compiler = Launcher || root.GuestVMSnapshotLauncher;
+        var main = compiler.compile(optimization, debug);
         /* Linux i386 entry: ESP points to argc; EDX is ld.so's finalizer.
          * libc performs its normal initialization/exit path. No CRT objects. */
         start.movRegisterRegister("esi", "esp");
@@ -93,34 +97,32 @@
         start.movEaxImmediate(0); start.pushEax(); start.pushEax();
         start.leaEaxRegisterDisplacement("esi", WORD_BYTES); start.pushEax();
         start.movEaxDwordPtrRegisterDisplacement("esi", 0); start.pushEax();
-        start.leaEaxRegisterDisplacement("ebx", LAYOUT.main - anchor);
+        start.leaEaxRegisterDisplacement("ebx", LAYOUT.mainBridge - anchor);
         start.pushEax();
         start.movEaxDwordPtrRegisterDisplacement("ebx", START_MAIN_GOT - anchor);
         start.callEax(); start.undefinedInstruction(); start.resolveLabels();
 
-        main.pushEbp(); main.movEbpEsp(); main.pushEbx();
-        main.subEspImmediate(2 * WORD_BYTES);
-        main.callLabel("main_pc"); main.label("main_pc");
-        anchor = LAYOUT.main + main.labels.main_pc;
-        main.popInstructionPointerEcx(); main.movRegisterRegister("ebx", "ecx");
-        main.movEaxEbpArgument(0); main.compareEaxImmediate(2);
-        main.jumpLess("usage");
-        main.movEaxDwordPtrRegisterDisplacement("ebx", DLSYM_GOT - anchor);
-        main.pushEax();
-        main.movEaxEbpArgument(1); main.addEaxImmediate(WORD_BYTES); main.pushEax();
-        main.movEaxEbpArgument(0); main.subtractEaxImmediate(1); main.pushEax();
-        main.leaEaxRegisterDisplacement("ebx", LAYOUT.snapshot + entryOffset - anchor);
-        main.callEax();
-        main.popEcx(); main.popEcx(); main.popEcx(); main.jump("done");
-        main.label("usage"); main.movEaxImmediate(64);
-        main.label("done"); main.addEspImmediate(2 * WORD_BYTES);
-        main.popEbx(); main.leave(); main.ret(); main.resolveLabels();
-        if (start.bytes.length > LAYOUT.main - LAYOUT.start ||
+        /* Adapt libc main(argc,argv,envp) to the explicit bootstrap bindings
+         * consumed by kernel main(argc,argv,snapshotEntry,dlsym). No policy. */
+        bridge.pushEbp(); bridge.movEbpEsp(); bridge.pushEbx();
+        bridge.subEspImmediate(WORD_BYTES);
+        bridge.callLabel("bridge_pc"); bridge.label("bridge_pc");
+        anchor = LAYOUT.mainBridge + bridge.labels.bridge_pc;
+        bridge.popInstructionPointerEcx(); bridge.movRegisterRegister("ebx", "ecx");
+        bridge.movEaxDwordPtrRegisterDisplacement("ebx", DLSYM_GOT - anchor); bridge.pushEax();
+        bridge.leaEaxRegisterDisplacement("ebx", LAYOUT.snapshot + entryOffset - anchor); bridge.pushEax();
+        bridge.movEaxEbpArgument(1); bridge.pushEax();
+        bridge.movEaxEbpArgument(0); bridge.pushEax();
+        bridge.leaEaxRegisterDisplacement("ebx", LAYOUT.main - anchor); bridge.callEax();
+        bridge.discardStackWords(4); bridge.addEspImmediate(WORD_BYTES);
+        bridge.popEbx(); bridge.leave(); bridge.ret(); bridge.resolveLabels();
+        if (start.bytes.length > LAYOUT.mainBridge - LAYOUT.start ||
+                bridge.bytes.length > LAYOUT.main - LAYOUT.mainBridge ||
                 main.bytes.length > LAYOUT.metadata - LAYOUT.main) {
             throw new Error("launcher exceeds its reserved text region");
         }
-        return {start: start.bytes, main: main.bytes,
-            assembly: "_start:\n" + start.dump() + "\nmain:\n" + main.dump()};
+        return {start: start.bytes, bridge: bridge.bytes, main: main.bytes, debug: main.debug,
+            assembly: "_start:\n" + start.dump() + "\n_main_abi_entry:\n" + bridge.dump() + "\nmain:\n" + main.assembly};
     }
 
     function kernelAddress(header, format) {
@@ -129,7 +131,8 @@
 
     function build(header, length, Assembler, format, debug) {
         var entryOffset = validate(header, length, format);
-        var code = launcher(Assembler, entryOffset), prefix = [], suffix = [];
+        var code = launcher(Assembler, entryOffset,
+            read32(header, format.fields.optimizationMode) === 1 ? "none" : "default", !!debug), prefix = [], suffix = [];
         var strings = [0], names = [0], sections = [], i, cursor = LAYOUT.metadata;
         var libraries = ["libc.so.6", "libm.so.6", "libdl.so.2"], needed = [];
         var interpreter = [], symbols, stringOffset, hashOffset, relocationOffset;
@@ -137,7 +140,7 @@
         for (i = 0; i < LAYOUT.snapshot; i++) prefix.push(0);
         appendString(interpreter, "/lib/ld-linux.so.2");
         copy(prefix, LAYOUT.interpreter, interpreter);
-        copy(prefix, LAYOUT.start, code.start); copy(prefix, LAYOUT.main, code.main);
+        copy(prefix, LAYOUT.start, code.start); copy(prefix, LAYOUT.mainBridge, code.bridge); copy(prefix, LAYOUT.main, code.main);
         for (i = 0; i < libraries.length; i++) needed.push(appendString(strings, libraries[i]));
         symbols = [0, appendString(strings, "__libc_start_main"), appendString(strings, "dlsym")];
         stringOffset = cursor; copy(prefix, cursor, strings); cursor = align(cursor + strings.length, 4);
@@ -197,6 +200,7 @@
         }
         sections.push({}); // SHN_UNDEF
         section(".interp", ELF.progbits, ELF.alloc, LAYOUT.interpreter, interpreter.length, 1);
+        var launcherSectionIndex = sections.length;
         section(".text.launcher", ELF.progbits, ELF.alloc | ELF.executableSection,
             LAYOUT.start, LAYOUT.main + code.main.length - LAYOUT.start, 16);
         section(".dynstr", ELF.strtab, ELF.alloc, stringOffset, strings.length, 1);
@@ -225,33 +229,40 @@
             LAYOUT.snapshot + kernelOffset + kernelLength, heapOffset - kernelOffset - kernelLength, 1);
         section(".snapshot.heap", ELF.progbits, ELF.alloc | ELF.writable,
             LAYOUT.snapshot + heapOffset, length - heapOffset, 1);
+        function appendSection(name, type, bytes, alignment, link, entrySize) {
+            var position = align(suffixCursor, alignment);
+            while (suffix.length < position - suffixOffset) suffix.push(0);
+            copy(suffix, position - suffixOffset, bytes);
+            section(name, type, 0, position, bytes.length, alignment, link, entrySize);
+            suffixCursor = position + bytes.length;
+        }
         if (debug) {
-            function appendSection(name, type, bytes, alignment, link, entrySize) {
-                var position = align(suffixCursor, alignment);
-                while (suffix.length < position - suffixOffset) suffix.push(0);
-                copy(suffix, position - suffixOffset, bytes);
-                section(name, type, 0, position, bytes.length, alignment, link, entrySize);
-                suffixCursor = position + bytes.length;
-            }
+            debug = (Launcher || root.GuestVMSnapshotLauncher).appendDebug(
+                debug, code, ELF.base + LAYOUT.main, launcherSectionIndex);
             for (i = 0; i < debug.sections.length; i++) {
                 appendSection(debug.sections[i].name, ELF.progbits, debug.sections[i].bytes, 1);
             }
-            var debugStrings = [0], debugSymbols = [];
-            for (i = 0; i < SYMBOL_BYTES; i++) debugSymbols.push(0);
-            for (i = 0; i < debug.functions.length; i++) {
-                var fn = debug.functions[i], symbolAt = debugSymbols.length;
-                var symbolName = appendString(debugStrings, fn.name);
-                for (var j = 0; j < SYMBOL_BYTES; j++) debugSymbols.push(0);
-                put32(debugSymbols, symbolAt, symbolName);
-                put32(debugSymbols, symbolAt + SYM.value, fn.address);
-                put32(debugSymbols, symbolAt + SYM.size, fn.length);
-                debugSymbols[symbolAt + SYM.info] = ELF.globalFunction;
-                put16(debugSymbols, symbolAt + SYM.section, kernelSectionIndex);
-            }
-            var debugStringIndex = sections.length;
-            appendSection(".strtab", ELF.strtab, debugStrings, 1);
-            appendSection(".symtab", ELF.staticSymtab, debugSymbols, 4, debugStringIndex, SYMBOL_BYTES);
         }
+        var debugStrings = [0], debugSymbols = [];
+        var symbolFunctions = [
+            {name: "_start", address: ELF.base + LAYOUT.start, length: code.start.length, sectionIndex: launcherSectionIndex},
+            {name: "_main_abi_entry", address: ELF.base + LAYOUT.mainBridge, length: code.bridge.length, sectionIndex: launcherSectionIndex}];
+        if (debug) symbolFunctions = symbolFunctions.concat(debug.functions);
+        else symbolFunctions.push({name: "main", address: ELF.base + LAYOUT.main, length: code.main.length, sectionIndex: launcherSectionIndex});
+        for (i = 0; i < SYMBOL_BYTES; i++) debugSymbols.push(0);
+        for (i = 0; i < symbolFunctions.length; i++) {
+            var fn = symbolFunctions[i], symbolAt = debugSymbols.length;
+            var symbolName = appendString(debugStrings, fn.name);
+            for (var j = 0; j < SYMBOL_BYTES; j++) debugSymbols.push(0);
+            put32(debugSymbols, symbolAt + SYM.name, symbolName);
+            put32(debugSymbols, symbolAt + SYM.value, fn.address);
+            put32(debugSymbols, symbolAt + SYM.size, fn.length);
+            debugSymbols[symbolAt + SYM.info] = ELF.globalFunction;
+            put16(debugSymbols, symbolAt + SYM.section, fn.sectionIndex || kernelSectionIndex);
+        }
+        var debugStringIndex = sections.length;
+        appendSection(".strtab", ELF.strtab, debugStrings, 1);
+        appendSection(".symtab", ELF.staticSymtab, debugSymbols, 4, debugStringIndex, SYMBOL_BYTES);
         section(".shstrtab", ELF.strtab, 0, suffixCursor, 0, 1);
         sections[sections.length - 1].size = names.length;
         sectionTableOffset = align(suffixCursor + names.length, 4);

@@ -1,0 +1,20 @@
+# Real launcher workflow: an ELF-only symbol followed by compiled kernel JS.
+break _start
+break main
+run hello.js
+delete 1
+continue
+assert argc == 2
+info args
+list
+disassemble main
+next
+next
+assert guestArgc == 1
+info locals
+backtrace
+delete 2
+finish
+continue
+run
+quit

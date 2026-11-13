@@ -3,10 +3,25 @@
 There are two different compilers. Keep their products and optimization
 contracts separate.
 
-The proposed kernel `-g`/`-O0` work is specified in
-[the deterministic debugging plan](kernel-debug-plan.md), including the
-required optimization/build/runtime benchmark matrix. Those flags and DWARF
-generation are **not implemented** by the current compiler.
+Implemented kernel `-g`/`-O0` support is described in
+[native kernel debugging](kernel-debugging.md); the original
+[deterministic debugging plan](kernel-debug-plan.md) also records the broader
+optimization/build/runtime benchmark matrix and deferred gates.
+
+`X86Backend({installExecutable: false})` emits the same instruction bytes and
+optional debug metadata without allocating executable memory or installing
+a callable function. Its result has `fn: null` and `pointer: 0`; normal
+compilation defaults to installation on MMVM hosts. This is an output policy,
+not another dialect/backend or a change to generated code. The snapshot
+executable packager uses it to compile `tools/snapshot_launcher.js` without
+executing native build artifacts. Its main is an ordinary kernel function
+with explicit argc/argv/snapshotEntry/dlsym inputs; startup ABI glue alone is
+macro assembly.
+
+`KernelDWARF.build(debug, codeLength, sectionBases)` optionally accepts byte
+bases named `abbreviations`, `lines`, `locations`, and `frames`. These rebase
+section-relative references when adding another compilation unit. Defaults
+are zero and preserve existing sidecar bytes; DIE references stay CU-relative.
 
 ## Guest ES5.1 source to bytecode
 

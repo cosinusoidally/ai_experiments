@@ -1,5 +1,47 @@
 # Kernel debugger acceptance — 2026-11-13
 
+## Follow-up: compiled launcher main
+
+The executable packager now compiles `tools/snapshot_launcher.js` through the
+existing kernel compiler. `_start` and the branch-free libc argument bridge
+remain assembly; main's argument validation, argv adjustment, snapshot call
+and returned status are JS. Bootstrap entry/dlsym are explicit parameters,
+not initialized VM services or hidden compile-time local-variable semantics.
+
+- All packaged executables expose `_start`, `_main_abi_entry`, and `main` ELF
+  symbols. Debug packaging adds a separate launcher DWARF compilation unit
+  without changing the original snapshot/sidecar. Debugger unit/reference/file
+  bases are now independent, and assembly-only names fall back to ELF symbols.
+- The checked-in `kernel_debugger_main.commands` passes under js_min and
+  standalone hosts: break `_start`, then main, inspect four parameters, source
+  step, assert `guestArgc`, inspect locals and finish back into the ABI bridge.
+  Optimized main also passes under the optimized standalone executable.
+- The existing ELF/launch integration now passes **45 checks**, including
+  startup-symbol coverage, ordinary-loader compatibility, all-host executable
+  identity, arbitrary program/environment/argument forwarding, status 64 for
+  missing program, no-clobber and snapshot/executable immutability.
+- Debug-packaged Node/js_min/self-hosted executable bytes match. The x86
+  backend's emit-only option avoids installing temporary executable code
+  during packaging; default compilation/installation is unchanged.
+- The real-kernel debugger acceptance passes with js_min → -O0 and standalone
+  → optimized, including interrupted/resumed bounded GC stress. The decoder
+  covers 270 functions including main: **141938** instructions for -O0 and
+  **170970** for optimized output, all ending on exact function boundaries.
+- The core suite through the new launcher passes **12 guest programs / 270
+  assertions**. Shared kernel/compiler checks pass on Node and native i386;
+  the default-base DWARF regression retains the original kernel instruction
+  bytes and sidecar hashes for both policies.
+- Installed GDB was additionally used as an independent DWARF consumer:
+  `break main`, source display, all four arguments, disassembly and normal
+  continuation pass. This is an optional developer cross-check, not a runtime
+  dependency of either the packager or kernel_debugger.
+
+No C, normal js_runner loader, existing demos or external corpus files changed.
+This is focused launcher/debug/compiler acceptance, not a new full corpus or
+Octane performance sweep. Logs and binaries remain ignored artifacts.
+
+## Initial debugger delivery
+
 Scope: native kernel code in the repository's ELF32/i386 executables with
 incorporated DWARF4. Entry point `kernel_debugger.js`; implementation plan
 committed as `191f4df`, first js_min tracing/inspection working point `18ca06c`.

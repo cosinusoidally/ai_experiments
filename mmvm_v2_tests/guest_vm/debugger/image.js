@@ -2,7 +2,7 @@
 (function (root) {
     var E = {headerBytes: 52, type: 16, machine: 18, entry: 24, sectionOffset: 32,
         sectionSize: 46, sectionCount: 48, sectionNames: 50, executable: 2, i386: 3,
-        sectionBytes: 40, name: 0, sectionType: 4, address: 12, offset: 16,
+        sectionBytes: 40, name: 0, sectionType: 4, flags: 8, executableFlag: 4, address: 12, offset: 16,
         size: 20, link: 24, entrySize: 36, symbols: 2, symbolBytes: 16};
     function Reader(io, address, length) { this.io = io; this.address = address; this.length = length; this.pos = 0; }
     Reader.prototype.check = function (at, count) {
@@ -34,7 +34,7 @@
     function Image(io, path) {
         this.io = io; this.file = io.readFile(path); this.path = path;
         this.reader = new Reader(io, this.file.address, this.file.length);
-        this.sections = {}; this.symbols = []; this.byName = {};
+        this.sections = {}; this.symbols = []; this.byName = {}; this.codeSections = [];
         try { this.parse(); } catch (error) { this.destroy(); throw error; }
     }
     Image.prototype.parse = function () {
@@ -60,6 +60,7 @@
                 offset: r.at32(h + E.offset), size: r.at32(h + E.size), link: r.at32(h + E.link),
                 entrySize: r.at32(h + E.entrySize)};
             this.sections["$" + s.name] = s; list.push(s);
+            if (r.at32(h + E.flags) & E.executableFlag) { r.check(s.offset, s.size); this.codeSections.push(s); }
         }
         for (i = 0; i < list.length; i++) {
             s = list[i]; if (s.type !== E.symbols) continue;
@@ -85,8 +86,16 @@
         return null;
     };
     Image.prototype.codeByte = function (address) {
-        var section = this.sections["$.text.kernel"];
-        if (!section || address < section.address || address >= section.address + section.size) throw new Error("address is outside kernel code");
+        var section = this.lastCodeSection;
+        if (!section || address < section.address || address >= section.address + section.size) {
+            section = null;
+            for (var i = 0; i < this.codeSections.length; i++) {
+                var candidate = this.codeSections[i];
+                if (address >= candidate.address && address < candidate.address + candidate.size) { section = candidate; break; }
+            }
+            if (!section) throw new Error("address is outside executable code sections");
+            this.lastCodeSection = section;
+        }
         return this.io.ffi.peek8(this.file.address + section.offset + address - section.address);
     };
     Image.prototype.destroy = function () { if (this.file) { this.io.release(this.file.address); this.file = null; } };

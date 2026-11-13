@@ -72,9 +72,10 @@
             throw new Error("unknown x86 dispatch strategy: " + this.dispatchStrategy);
         }
         this.timings = options.timings || null;
+        this.installExecutable = options.installExecutable !== false;
         this.ffi = new HostFFI();
-        this.mmap = this.ffi.isMMVM ? this.ffi.resolve("mmap") : 0;
-        this.munmap = this.ffi.isMMVM ? this.ffi.resolve("munmap") : 0;
+        this.mmap = this.ffi.isMMVM && this.installExecutable ? this.ffi.resolve("mmap") : 0;
+        this.munmap = this.ffi.isMMVM && this.installExecutable ? this.ffi.resolve("munmap") : 0;
     }
 
     X86Backend.prototype.compile = function (ir) {
@@ -128,7 +129,7 @@
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       symbols: assembler.labels,
                       ir: ir, backend: "i386", destroy: function () {}};
-        if (!this.ffi.isMMVM) return result;
+        if (!this.ffi.isMMVM || !this.installExecutable) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.length / 4096) * 4096);
         var pointer = this.ffi.call(this.mmap,
@@ -255,7 +256,7 @@
                       registerAllocation: registerAllocations,
                       destroy: function () {}};
         if (debugFunctions.length) result.debug = {functions: debugFunctions};
-        if (!backend.ffi.isMMVM) return result;
+        if (!backend.ffi.isMMVM || !backend.installExecutable) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.length / 4096) * 4096);
         var pointer = backend.ffi.call(backend.mmap,
@@ -381,7 +382,7 @@
                       registerAllocation: describeRegisterAllocation(
                           ir, state.registerMap),
                       destroy: function () {}};
-        if (!backend.ffi.isMMVM) return result;
+        if (!backend.ffi.isMMVM || !backend.installExecutable) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.length / 4096) * 4096);
         var pointer = backend.ffi.call(backend.mmap,

@@ -6,13 +6,21 @@
     function copy(object) { var out = {}; for (var k in object) if (object.hasOwnProperty(k)) out[k] = object[k]; return out; }
     function DebugInfo(image) {
         this.image = image; this.dies = {}; this.functions = []; this.rows = [];
-        this.files = [""]; this.frames = []; this.unitBase = 0;
+        this.lineTables = {}; this.frames = [];
         this.parseInfo(); this.parseLines(); this.parseFrames();
     }
     DebugInfo.prototype.parseInfo = function () {
         var r = this.image.section(".debug_info"), a = this.image.section(".debug_abbrev");
-        var size = r.u32(), end = size + 4;
-        if (end !== r.length || r.u16() !== 4 || r.u32() !== 0 || r.u8() !== 4) throw new Error("unsupported DWARF compilation unit");
+        while (r.pos < r.length) this.parseInfoUnit(r, a);
+        this.functions.sort(function (x, y) { return x.attrs["$" + A.lowPC] - y.attrs["$" + A.lowPC]; });
+    };
+    DebugInfo.prototype.parseInfoUnit = function (r, a) {
+        var unitStart = r.pos, size = r.u32(), end = unitStart + size + 4;
+        r.check(r.pos, size);
+        if (r.u16() !== 4) throw new Error("unsupported DWARF compilation unit");
+        a.pos = r.u32();
+        if (r.u8() !== 4) throw new Error("unsupported DWARF address size");
+        var unitBase = 0;
         var abbrevs = {}, code;
         while ((code = a.uleb())) {
             var definition = {tag: a.uleb(), children: a.u8(), fields: []}, attr, form;
@@ -21,7 +29,8 @@
         }
         var parents = [], self = this;
         function readValue(form) {
-            if (form === F.addr || form === F.data4 || form === F.ref4 || form === F.secOffset) return r.u32();
+            if (form === F.addr || form === F.data4 || form === F.secOffset) return r.u32();
+            if (form === F.ref4) return unitStart + r.u32();
             if (form === F.data1) return r.u8();
             if (form === F.data2) return r.u16();
             if (form === F.string) return r.string();
@@ -39,11 +48,12 @@
             }
             if (die.parent) die.parent.children.push(die);
             self.dies["$" + offset] = die;
-            if (die.tag === D.tag.compileUnit) self.unitBase = die.attrs["$" + A.lowPC] || 0;
+            if (die.tag === D.tag.compileUnit) unitBase = die.attrs["$" + A.lowPC] || 0;
+            die.unitBase = unitBase;
             if (die.tag === D.tag.subprogram && die.attrs.hasOwnProperty("$" + A.lowPC)) self.functions.push(die);
             if (definition.children) parents.push(die);
         }
-        this.functions.sort(function (x, y) { return x.attrs["$" + A.lowPC] - y.attrs["$" + A.lowPC]; });
+        if (r.pos !== end) throw new Error("invalid DWARF unit extent");
     };
     DebugInfo.prototype.attribute = function (die, attr) {
         for (var limit = 0; die && limit < 8; limit++) {
@@ -62,8 +72,17 @@
         return fn && pc < fn.attrs["$" + A.lowPC] + fn.attrs["$" + A.highPC] ? fn : null;
     };
     DebugInfo.prototype.parseLines = function () {
-        var r = this.image.section(".debug_line"), end = r.u32() + 4;
-        if (end !== r.length || r.u16() !== 4) throw new Error("unsupported line table");
+        var r = this.image.section(".debug_line");
+        while (r.pos < r.length) this.parseLineUnit(r);
+        /* Preserve order at shared PCs: a function's first row follows the
+         * preceding function's end-sequence row at the same address. */
+        for (var i = 0; i < this.rows.length; i++) this.rows[i].order = i;
+        this.rows.sort(function (x, y) { return x.pc - y.pc || x.order - y.order; });
+    };
+    DebugInfo.prototype.parseLineUnit = function (r) {
+        var unitStart = r.pos, end = unitStart + r.u32() + 4;
+        r.check(r.pos, end - r.pos);
+        if (r.u16() !== 4) throw new Error("unsupported line table");
         var headerLength = r.u32(), headerEnd = r.pos + headerLength;
         var minimum = r.u8(), operations = r.u8(); r.u8();
         var lineBase = r.u8(); if (lineBase & 128) lineBase -= 256;
@@ -71,11 +90,12 @@
         if (minimum !== 1 || operations !== 1 || !range) throw new Error("unsupported line instruction policy");
         for (i = 1; i < opcodeBase; i++) counts.push(r.u8());
         if (r.string() !== "") throw new Error("kernel line directory tables must be empty");
-        var filename;
-        while ((filename = r.string())) { this.files.push(filename); r.uleb(); r.uleb(); r.uleb(); }
+        var filename, files = [""];
+        this.lineTables["$" + unitStart] = files;
+        while ((filename = r.string())) { files.push(filename); r.uleb(); r.uleb(); r.uleb(); }
         if (r.pos !== headerEnd) throw new Error("invalid line header length");
         var pc = 0, line = 1, file = 1, column = 0, self = this;
-        function emit(ended) { self.rows.push({pc: pc, line: line, file: self.files[file], column: column, ended: ended}); }
+        function emit(ended) { self.rows.push({pc: pc, line: line, file: files[file], column: column, ended: ended}); }
         while (r.pos < end) {
             var op = r.u8();
             if (op === D.line.extended) {
@@ -93,10 +113,7 @@
             else if (op === D.line.setColumn) column = r.uleb();
             else throw new Error("unsupported line opcode " + op);
         }
-        /* Stable order for duplicate PCs matters: a new function's first row
-         * follows the prior function's end-sequence row at the same address. */
-        for (i = 0; i < this.rows.length; i++) this.rows[i].order = i;
-        this.rows.sort(function (x, y) { return x.pc - y.pc || x.order - y.order; });
+        if (r.pos !== end) throw new Error("invalid line unit extent");
     };
     DebugInfo.prototype.lineAt = function (pc) {
         var lo = 0, hi = this.rows.length;
@@ -138,14 +155,18 @@
                 }
             }
         }
-        if (!addresses.length) throw new Error("no kernel location for " + spec);
+        if (!addresses.length && !match) {
+            var symbol = this.image.byName["$" + spec];
+            if (symbol) addresses.push(symbol.start);
+        }
+        if (!addresses.length) throw new Error("no code location for " + spec);
         return addresses;
     };
     DebugInfo.prototype.location = function (die, pc, registers) {
         var offset = this.attribute(die, A.location);
         if (typeof offset !== "number") return {unavailable: "no concrete location (possibly inlined)"};
         var r = this.image.section(".debug_loc"); r.pos = offset;
-        var base = this.unitBase;
+        var base = die.unitBase;
         while (true) {
             var start = r.u32(), end = r.u32();
             if (!start && !end) return {unavailable: "optimized out or not initialized here"};

@@ -10,6 +10,7 @@
         format = require("../aot/standalone_format.js");
         DebugELF = require("../aot/debug_elf.js");
         Digest = require("../aot/debug_digest.js");
+        require("./snapshot_launcher.js");
         args = process.argv.slice(2);
     } else {
         load("guest_vm/host_ffi.js");
@@ -20,6 +21,13 @@
         load("guest_vm/aot/debug_binary.js");
         load("guest_vm/aot/debug_elf.js");
         load("guest_vm/aot/debug_digest.js");
+        load("guest_vm/unicode_identifier_data.js");
+        load("guest_vm/tokenizer.js");
+        load("guest_vm/parser.js");
+        load("guest_vm/aot/kernel_slots.js");
+        load("guest_vm/aot/kernel_compiler.js");
+        load("guest_vm/aot/backend_x86.js");
+        load("guest_vm/tools/snapshot_launcher.js");
         ioModule = root.GuestVMSnapshotExeIO;
         elf = root.GuestVMSnapshotExeELF;
         Assembler = root.GuestVMX86Assembler;
