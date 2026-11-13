@@ -1,5 +1,14 @@
 # Test262 status
 
+2026-11-13, approximately 20:35 UTC, typed native-boundary/allocator checkpoint
+(`c826a33`, candidate image `artifacts/eval-transaction.snap`): **3292 executed /
+3292 passed / 0 failed / 0 timed out / 0 skipped / 0 not run**, exit 0 under
+js_runner. Runner **340.480 s**, process **341.09 s**, peak RSS **512176 KiB**;
+21.5% less runner time than the unchanged snapshot audit below. The four heavy
+lexical/eval cases total **254.590 s**. Selection, corpus and instruction limits
+are unchanged. Final follow-up/other suite validation is tracked in
+[the implementation log](guest_vm/EVAL_PERFORMANCE_IMPLEMENTATION_2026-11-13.md).
+
 2026-11-13, full optimized VM audit at `75860af`: both launchers pass
 **3292/3292 files and variants**, with **0 failed / timed out / skipped /
 not run** and observed exit 0. Snapshot runner 433.644 s (process 434.347 s,

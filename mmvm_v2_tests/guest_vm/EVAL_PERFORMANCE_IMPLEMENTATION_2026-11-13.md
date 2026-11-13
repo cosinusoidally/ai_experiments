@@ -57,7 +57,7 @@ Logs: `artifacts/eval-slot-test262.log`, `artifacts/eval-boundary-core-guest.log
 `artifacts/eval-slot-gc.log`, `artifacts/eval-boundary-self-build.log`.
 Generated artifacts are ignored and are not part of the commit.
 
-## Allocator transaction candidate — validation in progress
+## Allocator transaction checkpoint
 
 - Representative heavy case: **67.436 s** test time, 79.91 s process time,
   471328 KiB RSS. This is about 17% less test time than the adjacent unchanged
@@ -67,8 +67,17 @@ Generated artifacts are ignored and are not part of the commit.
 - Standalone core: passed in 96.12 s, 470524 KiB peak RSS. Structural GC:
   passed in 30.90 s, 27 audits / 111996 edges / 221 property-index audits /
   74 embedding collections, maximum bump 3531768 bytes under the 8 MiB cap.
-- Complete Test262, structural GC, other suite/application/benchmark and
-  final deterministic rebuild checks remain to be recorded below.
+- Complete Test262: **3292 passed / 0 failed / 0 timed out / 0 skipped /
+  0 not run**, observed exit 0. Runner **340.479859 s**, summed tests
+  **325.495984 s**, process **341.09 s**, peak RSS **512176 KiB**.
+  Compared with the complete unchanged snapshot audit, runner time decreases
+  **21.5%** (433.643712 to 340.479859 s), about **1.27x throughput**.
+  Four heavy cases: **63.415 / 63.075 / 64.478 / 63.623 s**, combined
+  **254.590 s**. Logs: `artifacts/eval-transaction-test262.log`,
+  `artifacts/eval-transaction-core-guest.log`, `artifacts/eval-transaction-gc.log`.
+- Final callable-lifetime refinement, remaining suite/application/benchmark
+  and deterministic rebuild checks are in progress. Do not treat the earlier
+  full audit of the unchanged implementation as validation of this candidate.
 
 ## Experiments not retained
 
