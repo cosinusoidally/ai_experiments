@@ -617,6 +617,10 @@
         }
         /* The complete header is in the live heap prefix. Do not repeat the
          * linear-memory range/coercion checks for each validated header word. */
+        if (this.memory.destroyed) throw new Error("linear memory is destroyed");
+        if (address + HEADER_SIZE > this.memory.byteLength) {
+            throw new RangeError("linear memory access is out of bounds");
+        }
         var type = this.memory.readU32Trusted(address + HEADER_TYPE);
         if (type === Types.FREE && expectedType !== Types.FREE) {
             throw new Error("guest heap reference " + address +
@@ -632,8 +636,8 @@
     };
 
     Heap.prototype.recordType = function (address) {
-        this.requireRecord(address);
-        return this.memory.readU32(address + HEADER_TYPE);
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_TYPE);
     };
 
     /* Diagnostic record walks also inspect free storage. Return the common
@@ -662,13 +666,13 @@
     };
 
     Heap.prototype.recordSize = function (address) {
-        this.requireRecord(address);
-        return this.memory.readU32(address + HEADER_SIZE_FIELD);
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
     };
 
     Heap.prototype.mark = function (address) {
-        this.requireRecord(address);
-        return this.memory.readU32(address + HEADER_MARK);
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_MARK);
     };
 
     /* Collector-side weak tables are filtered before sweeping, while every
@@ -687,30 +691,30 @@
     };
 
     Heap.prototype.setMark = function (address, generation) {
-        this.requireRecord(address);
-        this.memory.writeU32(address + HEADER_MARK, generation);
+        address = this.requireRecord(address);
+        this.memory.writeU32Trusted(address + HEADER_MARK, generation);
     };
 
     Heap.prototype.flags = function (address) {
-        this.requireRecord(address);
-        return this.memory.readU32(address + HEADER_FLAGS);
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_FLAGS);
     };
 
     Heap.prototype.setFlags = function (address, flags) {
-        this.requireRecord(address);
-        this.memory.writeU32(address + HEADER_FLAGS, flags);
+        address = this.requireRecord(address);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, flags);
     };
 
     Heap.prototype.setFreeRecordFlags = function (address, flags) {
-        this.requireRecord(address, Types.FREE);
-        this.memory.writeU32(address + HEADER_FLAGS, flags);
+        address = this.requireRecord(address, Types.FREE);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, flags);
     };
 
     Heap.prototype.checkPayload = function (address, offset, width, expectedType) {
-        this.requireRecord(address, expectedType);
+        address = this.requireRecord(address, expectedType);
         offset = Number(offset);
         if (offset < 0 || offset !== Math.floor(offset) ||
-            HEADER_SIZE + offset + width > this.recordSize(address)) {
+            HEADER_SIZE + offset + width > this.memory.readU32Trusted(address + HEADER_SIZE_FIELD)) {
             throw new RangeError("guest heap field is outside its record");
         }
         return address + HEADER_SIZE + offset;

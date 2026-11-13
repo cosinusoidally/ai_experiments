@@ -114,5 +114,26 @@ Fresh builds from identical sources produce **bit-identical** images:
 The earlier audit observed 9.28 s / 82.41 s / 110.64 s, respectively. The
 self-hosted observation is 3% slower; do not hide it behind the faster Node
 and js_min observations or claim a significant build-speed improvement.
-A same-source build through the frozen old kernel is queued as a matched
-control. Final full-suite/other regression validation is in progress.
+A same-source build through the frozen old kernel completes in **83.78 s** /
+**484248 KiB** and reproduces the same image too. The current-kernel build is
+1.3% slower than that matched observation: essentially parity, not an
+established slowdown/speedup. Final core and structural GC checks pass with
+the lifetime refinement; full-suite/other regression validation is in progress.
+
+The complete lifetime-refinement image also passes **3292/3292** Test262 tests,
+zero failures/timeouts/skips/unrun, runner **345.090600 s**, process **345.72 s**,
+peak RSS **511996 KiB**. This independently retains approximately **20% less
+runner time** than the unchanged audit. Its memory peak is essentially the
+same: do not claim a demonstrated RSS reduction from the ownership cleanup.
+
+### Header validation follow-up
+
+Review tightened the physical-allocation/liveness bound before trusted header
+reads, even if the logical bump is corrupt. Header accessors now consume the
+validated numeric address (including coercible references) and use trusted
+header operations rather than redoing range checks. Payload accesses still
+retain their physical memory checks. The existing broad heap integration adds
+a bounded corrupt-logical-bound check and normalized-address coverage.
+Both Node and js_min core suites pass. Fresh deterministic rebuilds and the
+remaining regression runs are in progress; executable tests remove their
+source snapshot path before invocation.

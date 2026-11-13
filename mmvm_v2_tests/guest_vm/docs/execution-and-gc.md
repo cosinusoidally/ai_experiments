@@ -200,10 +200,12 @@ emulated memory. External buffer data spans retain their separate metadata-only
 initialization path, rather than clearing a large logical span unnecessarily.
 
 Record access follows the same single-validation principle: `requireRecord`
-checks the complete header against the live heap prefix before trusted header
-reads. It still rejects invalid/fractional/freed references and reports the
-existing detailed errors. It does not repeat linear-memory range/coercion
-checks separately for each word of that already validated header.
+checks the complete header against both the live heap prefix and physical
+allocation, and checks memory liveness, before trusted header reads. A corrupt
+logical bump cannot authorize an out-of-allocation native read. It still rejects
+invalid/fractional/freed references and reports the existing detailed errors.
+Header accessors consume the normalized numeric address returned by validation;
+they do not repeat range/coercion checks separately for each validated word.
 
 Embedded exit dispatch uses `NativeInterpreter.Exit`, not duplicated numeric
 IDs. Profiling reports `allocationExits` plus the existing index-handoff and

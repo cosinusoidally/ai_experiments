@@ -27,7 +27,8 @@ not the compilation result and its IR/dump/byte arrays. Retaining a callable
 therefore need not retain its compiler products. `pointer` is an inspection
 field; `destroy()` invalidates the shared token and all retained callable
 variants before unmapping. Code pointers are data, not generated literals.
-The wider-arity vector bridge remains available through `fn`.
+The wider-arity vector bridge remains available through `fn`; that legacy
+adapter still retains its result for bridge lifetime/argument marshalling.
 
 `callMemoryI32(memory, offset, ...)` translates a memory view into the current
 native base. `callMemoryOffset` additionally translates a nonzero returned

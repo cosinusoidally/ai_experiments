@@ -35,6 +35,20 @@
             try { first.readFieldU32(object, 0, Heap.Types.ARRAY); }
             catch (wrongTypeError) { rejected = true; }
             if (!rejected) throw new Error("wrong record type was accepted");
+            if (first.recordType(String(object)) !== Heap.Types.OBJECT ||
+                    first.flags(String(object)) !== 9) {
+                throw new Error("validated header access lost normalized reference");
+            }
+            var savedBump = first.bump;
+            try {
+                /* Corrupt logical bounds must never authorize an actual
+                 * out-of-allocation native load. Keep the audit bounded. */
+                first.bump = first.memory.byteLength + Heap.HEADER_SIZE;
+                rejected = false;
+                try { first.requireRecord(first.memory.byteLength); }
+                catch (physicalBoundsError) { rejected = physicalBoundsError instanceof RangeError; }
+                if (!rejected) throw new Error("record validation trusted corrupt logical bounds");
+            } finally { first.bump = savedBump; }
             /* Exercise the same scalar-memory contract on sparse and native
              * storage, including unaligned words and ToInt32 edge values. */
             var wordValues = [0, 0x80000000, 0xffffffff, 4294967297,
