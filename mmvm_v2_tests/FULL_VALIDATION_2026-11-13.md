@@ -86,5 +86,24 @@ The geometric mean of per-suite score ratios is 1.04236 (+4.24%). RegExp
 and Splay have lower individual observations; these are not hidden by the
 aggregate. No source changes to improve scores were made in this audit.
 
-The genuine rebuild, executable matrix and supplementary checks remain in
-progress. No final all-tests verdict is claimed at this checkpoint.
+## Self-hosting and executable checkpoint
+
+- The snapshot genuinely recompiles the VM from source in 82.414 s, exit 0,
+  and reproduces its input byte-for-byte. Previous observation: 83.118 s.
+- Input snapshot SHA-256:
+  `d788779e0427855d5bd79938d172cc9a02b67308257c4b3ae0849d6dbd42138d`.
+- Executable SHA-256:
+  `6cb065c39289f6e5ea75e7f86ecc79c8c59c9f382af6cc7c98f1cd1a00b69361`.
+- The supervisor deleted `artifacts/full-suite.snap` before the executable
+  matrix, verifies absence before every job, and verifies executable
+  immutability afterward.
+- Executable core: pass, 12 programs / 270 assertions plus internal checks,
+  101.271 s. Tokenizer, language/object integration, JSON and native GC pass.
+- All executable demos 1–8 and HTTP servers pass, 79.238 s total. Demo8
+  garage/auto-drive transitions and shutdown pass with the snapshot absent.
+- Executable Test262: **3292 passed / 0 failed / 0 timed out / 0 not run**,
+  clean exit 0. Runner 412.023 s; process 412.645 s. Previous executable
+  process observation: 422.82 s.
+
+Executable ECMA/Octane/rebuild and supplementary checks remain in progress.
+No final all-tests verdict is claimed at this checkpoint.
