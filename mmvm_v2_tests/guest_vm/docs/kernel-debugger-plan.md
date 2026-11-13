@@ -41,3 +41,8 @@ layouts. A full plugin framework is not required now.
 
 Implementation and command limitations are documented separately in
 `kernel-debugger.md` as working stages are completed.
+
+Implemented 2026-11-13: the five stages above now have focused both-host
+acceptance. See [recorded results](kernel-debugger-status.md) and
+[current usage/implementation](kernel-debugger.md). This closes initial kernel
+debugger bring-up, not the deliberately deferred general-C/guest-JS extensions.

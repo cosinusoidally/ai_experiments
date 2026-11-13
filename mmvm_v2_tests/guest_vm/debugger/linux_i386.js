@@ -22,7 +22,7 @@
         this.statusBuffer = this.allocate(WORD);
         this.character = this.allocate(WORD);
         this.pollBuffer = this.allocate(8);
-        this.savedTerminal = 0;
+        this.savedTerminal = 0; this.terminalChanged = false;
     }
     Linux.prototype.call = function (name, args) { return this.ffi.call(this.functions[name], args); };
     Linux.prototype.errno = function () { return this.ffi.peek32(this.errnoAddress); };
@@ -53,7 +53,7 @@
         this.ffi.poke32(this.errnoAddress, 0);
         var value = this.call("ptrace", [request, this.pid, address | 0, data | 0]);
         if (value === -1 && this.errno()) {
-            throw new Error("ptrace request " + request + " at 0x" + (address >>> 0).toString(16) +
+            throw new Error("ptrace request " + request + " at " + root.KernelDebuggerFormat.hex32(address) +
                 " failed: errno " + this.errno() + "; target pid " + this.pid);
         }
         return value >>> 0;
@@ -134,10 +134,22 @@
         finally { this.call("close", [fd]); }
     };
     Linux.prototype.textFile = function (path) {
-        var file = this.readFile(path), text = "";
-        try { for (var i = 0; i < file.length; i++) text += String.fromCharCode(this.ffi.peek8(file.address + i)); }
+        var file = this.readFile(path), chunks = [], part = "", i = 0;
+        try {
+            /* Repeatedly appending to a whole source string is quadratic on
+             * a flat-string host. Bound intermediate copies, then join once. */
+            while (i + 4 <= file.length) {
+                var word = this.ffi.peek32((file.address + i) | 0);
+                part += String.fromCharCode(word & 255, (word >>> 8) & 255,
+                    (word >>> 16) & 255, (word >>> 24) & 255);
+                i += 4;
+                if (part.length >= 256) { chunks.push(part); part = ""; }
+            }
+            while (i < file.length) part += String.fromCharCode(this.ffi.peek8((file.address + i++) | 0));
+            if (part) chunks.push(part);
+            return chunks.join("");
+        }
         finally { this.release(file.address); }
-        return text;
     };
     Linux.prototype.output = function (text) {
         /* FFI strings are temporary native C strings; write needs explicit
@@ -171,17 +183,21 @@
         this.ffi.poke32(changed + T.localFlags, this.ffi.peek32(changed + T.localFlags) & ~(T.signals | T.canonical | T.echo));
         this.ffi.poke8(changed + T.controls + T.vmin, 1);
         this.ffi.poke8(changed + T.controls + T.vtime, 0);
-        try { this.checked("tcsetattr", [0, T.immediate, changed]); }
+        try { this.checked("tcsetattr", [0, T.immediate, changed]); this.terminalChanged = true; }
         finally { this.release(changed); }
         return true;
     };
     Linux.prototype.destroy = function () {
         try { this.terminate(); }
         finally {
-            if (this.savedTerminal) this.call("tcsetattr", [0, T.immediate, this.savedTerminal]);
+            if (this.terminalChanged) this.call("tcsetattr", [0, T.immediate, this.savedTerminal]);
             while (this.allocations.length) this.call("free", [this.allocations.pop()]);
         }
     };
     Linux.registers = R; Linux.signals = S;
+    Linux.exit = function (status) {
+        var ffi = new root.GuestVMHostFFI();
+        ffi.call(ffi.resolve("exit"), [status]);
+    };
     root.KernelDebuggerLinux = Linux;
 }(this));

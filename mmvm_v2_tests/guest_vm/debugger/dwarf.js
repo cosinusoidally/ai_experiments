@@ -57,6 +57,7 @@
         var low = 0, high = this.functions.length;
         while (low < high) { var mid = (low + high) >>> 1;
             if (this.functions[mid].attrs["$" + A.lowPC] <= pc) low = mid + 1; else high = mid; }
+        if (low === 0) return null;
         var fn = this.functions[low - 1];
         return fn && pc < fn.attrs["$" + A.lowPC] + fn.attrs["$" + A.highPC] ? fn : null;
     };
@@ -100,10 +101,11 @@
     DebugInfo.prototype.lineAt = function (pc) {
         var lo = 0, hi = this.rows.length;
         while (lo < hi) { var mid = (lo + hi) >>> 1; if (this.rows[mid].pc <= pc) lo = mid + 1; else hi = mid; }
+        if (lo === 0) return null;
         var row = this.rows[lo - 1]; return row && !row.ended ? row : null;
     };
     DebugInfo.prototype.resolve = function (spec) {
-        var addresses = [], seen = {}, match = /^(.*):(\d+)$/.exec(spec), i;
+        var addresses = [], seen = {}, match = root.KernelDebuggerFormat.sourceLocation(spec), i;
         if (spec.charAt(0) === "*") {
             var address = Number(spec.substring(1));
             if (!(address > 0 && address <= 0xffffffff && address === Math.floor(address))) throw new Error("invalid breakpoint address");
@@ -112,18 +114,28 @@
         if (match) {
             for (i = 0; i < this.rows.length; i++) {
                 var row = this.rows[i];
-                if (!row.ended && row.line === Number(match[2]) && (row.file === match[1] || row.file.substring(row.file.length - match[1].length - 1) === "/" + match[1])) {
+                if (!row.ended && row.line === match.line && (row.file === match.file || row.file.substring(row.file.length - match.file.length - 1) === "/" + match.file)) {
                     if (!seen["$" + row.pc]) { addresses.push(row.pc); seen["$" + row.pc] = true; }
                 }
             }
         } else {
-            for (i = 0; i < this.functions.length; i++) if (this.name(this.functions[i]) === spec) {
-                var fn = this.functions[i], begin = fn.attrs["$" + A.lowPC], end = begin + fn.attrs["$" + A.highPC];
-                /* A named function breakpoint skips the synthetic entry row,
-                 * stopping at its first real statement with usable locals. */
-                var chosen = begin;
-                for (var j = 0; j < this.rows.length; j++) if (!this.rows[j].ended && this.rows[j].pc > begin && this.rows[j].pc < end) { chosen = this.rows[j].pc; break; }
-                addresses.push(chosen);
+            for (i = 0; i < this.functions.length; i++) {
+                var fn = this.functions[i];
+                if (this.name(fn) === spec) {
+                    var begin = fn.attrs["$" + A.lowPC], end = begin + fn.attrs["$" + A.highPC];
+                    /* Skip the synthetic entry row for a named breakpoint.
+                     * Raw *ADDRESS breakpoints retain exact entry semantics. */
+                    var chosen = begin;
+                    for (var j = 0; j < this.rows.length; j++) if (!this.rows[j].ended && this.rows[j].pc > begin && this.rows[j].pc < end) { chosen = this.rows[j].pc; break; }
+                    if (!seen["$" + chosen]) { addresses.push(chosen); seen["$" + chosen] = true; }
+                }
+                for (var childIndex = 0; childIndex < fn.children.length; childIndex++) {
+                    var child = fn.children[childIndex];
+                    if (child.tag === D.tag.inlinedSubroutine && this.name(child) === spec) {
+                        var inlineStart = child.attrs["$" + A.lowPC];
+                        if (!seen["$" + inlineStart]) { addresses.push(inlineStart); seen["$" + inlineStart] = true; }
+                    }
+                }
             }
         }
         if (!addresses.length) throw new Error("no kernel location for " + spec);

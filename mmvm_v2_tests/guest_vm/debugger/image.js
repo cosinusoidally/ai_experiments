@@ -84,6 +84,11 @@
         }
         return null;
     };
+    Image.prototype.codeByte = function (address) {
+        var section = this.sections["$.text.kernel"];
+        if (!section || address < section.address || address >= section.address + section.size) throw new Error("address is outside kernel code");
+        return this.io.ffi.peek8(this.file.address + section.offset + address - section.address);
+    };
     Image.prototype.destroy = function () { if (this.file) { this.io.release(this.file.address); this.file = null; } };
     root.KernelDebuggerReader = Reader; root.KernelDebuggerImage = Image;
 }(this));

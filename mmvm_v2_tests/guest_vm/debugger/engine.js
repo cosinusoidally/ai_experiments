@@ -5,10 +5,13 @@
         this.target = target; this.image = image; this.debug = debug;
         this.options = options; this.groups = []; this.sites = {}; this.nextID = 1;
         this.args = []; this.state = "not started"; this.pendingSignal = 0;
+        this.interruptRequested = false;
         this.hit = null; this.selectedFrame = 0; this.lastEvent = null;
     }
     Engine.prototype.addBreakpoint = function (spec, temporary) {
-        var addresses = typeof spec === "string" ? this.debug.resolve(spec) : spec;
+        var addresses;
+        try { addresses = typeof spec === "string" ? this.debug.resolve(spec) : spec; }
+        catch (error) { throw new Error("resolving breakpoint: " + error.message); }
         var group = {id: this.nextID++, spec: typeof spec === "string" ? spec : "temporary", addresses: addresses, temporary: !!temporary};
         this.groups.push(group);
         for (var i = 0; i < addresses.length; i++) {
@@ -46,17 +49,27 @@
     Engine.prototype.record = function (event, expectedTrap) {
         this.lastEvent = event; this.selectedFrame = 0; this.hit = null;
         if (event.kind !== "stopped") {
-            this.state = event.kind; this.pendingSignal = 0;
+            this.state = event.kind; this.pendingSignal = 0; this.interruptRequested = false;
             for (var key in this.sites) if (this.sites.hasOwnProperty(key)) this.sites[key].installed = false;
             return event;
         }
         this.state = "stopped"; this.pendingSignal = event.signal;
+        if (event.timeout) this.pendingSignal = 0;
+        if (this.interruptRequested && event.signal === root.KernelDebuggerLinux.signals.interrupt) {
+            this.pendingSignal = 0; this.interruptRequested = false; event.interrupted = true;
+        }
         var registers = this.target.readRegisters(), site = this.sites["$" + ((registers.eip - 1) >>> 0)];
         if (event.signal === TRAP && site && site.installed) {
             this.target.writeByte(site.address, site.original); site.installed = false;
             registers.eip = site.address; this.target.writeRegisters(registers);
             this.hit = site.address; this.pendingSignal = 0;
-            event.breakpoint = site.owners[0];
+            event.breakpoint = site.owners[0]; event.temporary = true;
+            for (var i = 0; i < this.groups.length; i++) {
+                var group = this.groups[i];
+                if (!group.temporary) for (var j = 0; j < site.owners.length; j++) {
+                    if (site.owners[j] === group.id) { event.breakpoint = group.id; event.temporary = false; }
+                }
+            }
         } else if (event.signal === TRAP && expectedTrap) this.pendingSignal = 0;
         event.pc = registers.eip; return event;
     };
@@ -64,7 +77,7 @@
         this.state = "running";
         var started = new Date().getTime(), event;
         while (!(event = this.target.wait(true))) {
-            if (new Date().getTime() - started > this.options.timeout) {
+            if (this.options.timeout > 0 && new Date().getTime() - started > this.options.timeout) {
                 /* Leave an inspectable, stopped child on timeout. */
                 this.target.checked("kill", [this.target.pid, root.KernelDebuggerLinux.signals.stop]);
                 event = this.target.wait(false); event.timeout = true; break;
@@ -90,6 +103,10 @@
     Engine.prototype.requireStopped = function () {
         if (!this.target.pid || this.state !== "stopped") throw new Error("inferior is not stopped");
     };
+    Engine.prototype.interrupt = function () {
+        if (this.state !== "running") throw new Error("inferior is not running");
+        this.interruptRequested = true; this.target.interrupt();
+    };
     Engine.prototype.resume = function (step, signal) {
         this.requireStopped();
         var delivery = signal === undefined ? this.pendingSignal : signal, event;
@@ -103,9 +120,19 @@
         }
         this.target.resume(step, delivery); return this.wait(step);
     };
-    Engine.prototype.until = function (addresses) {
+    Engine.prototype.until = function (addresses, expectedStack) {
         this.addBreakpoint(addresses, true);
-        try { return this.resume(false); } finally { this.clearTemporary(); }
+        var started = new Date().getTime();
+        try {
+            while (true) {
+                var event = this.resume(false);
+                if (expectedStack === undefined || event.kind !== "stopped" || !event.temporary ||
+                    event.timeout || this.target.readRegisters().esp === expectedStack) return event;
+                /* The same return PC can occur in a deeper recursive call.
+                 * Keep the breakpoint until the intended activation returns. */
+                if (this.options.timeout > 0 && new Date().getTime() - started > this.options.timeout) throw new Error("temporary breakpoint activation timed out");
+            }
+        } finally { this.clearTemporary(); }
     };
     Engine.prototype.frames = function () {
         this.requireStopped(); var frames = [], registers = this.target.readRegisters(), seen = {};
@@ -133,22 +160,21 @@
         this.requireStopped(); var registers = this.target.readRegisters();
         var caller = this.debug.unwind(registers.eip, registers, this.target);
         if (!caller) throw new Error("no unwind information for current function");
-        return this.until([caller.eip]);
+        return this.until([caller.eip], caller.esp);
     };
     Engine.prototype.sourceStep = function (over) {
         this.requireStopped(); var initial = this.target.readRegisters(), row = this.debug.lineAt(initial.eip), event;
-        var initialFunction = this.debug.functionAt(initial.eip);
         for (var count = 0; count < this.options.stepLimit; count++) {
-            event = this.resume(true);
-            if (event.kind !== "stopped" || this.pendingSignal || event.breakpoint || event.timeout) return event;
+            if (over) {
+                var before = this.target.readRegisters(), target = this.target, sites = this.sites;
+                var instruction = root.KernelDebuggerX86.decode(function (address) {
+                    var site = sites["$" + address]; return site && site.installed ? site.original : target.readByte(address);
+                }, before.eip);
+                if (instruction.text.substring(0, 5) === "call ") event = this.until([before.eip + instruction.length], before.esp);
+                else event = this.resume(true);
+            } else event = this.resume(true);
+            if (event.kind !== "stopped" || this.pendingSignal || event.breakpoint && !event.temporary || event.timeout) return event;
             var now = this.target.readRegisters(), current = this.debug.lineAt(now.eip);
-            if (over && this.debug.functionAt(now.eip) !== initialFunction && now.esp < initial.esp) {
-                /* Skip native callee execution with a temporary return
-                 * breakpoint instead of ptrace-stepping its whole body. */
-                event = this.finish();
-                if (event.kind !== "stopped" || this.pendingSignal || event.timeout) return event;
-                now = this.target.readRegisters(); current = this.debug.lineAt(now.eip);
-            }
             if (!row || !current || current.file !== row.file || current.line !== row.line) return event;
         }
         throw new Error("source step reached its instruction limit; inferior remains stopped");

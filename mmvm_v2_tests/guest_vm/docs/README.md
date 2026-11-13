@@ -40,6 +40,9 @@ Start here:
    startup ABI, file layout, host support, and validation.
 9. [Native kernel debugging](kernel-debugging.md): `-g`, `-O0`, DWARF sidecars,
    executable incorporation, variable availability and debugger use.
+10. [Standalone kernel debugger](kernel-debugger.md): interactive/batch
+    `kernel_debugger.js`, Linux/i386 tracing, ELF/DWARF, source/variable
+    inspection and native disassembly without installed development tools.
 
 Design and acceptance checklist:
 
