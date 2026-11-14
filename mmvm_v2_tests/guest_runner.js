@@ -35,6 +35,7 @@ var guestRunnerPredecode = false;
 var guestRunnerKernelOptimization = "default";
 var guestRunnerKernelDebug = false;
 var guestRunnerSnapshot = null;
+var guestRunnerShell = false;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
 var guestRunnerForbidHostCalls = false;
@@ -123,6 +124,10 @@ for (var guestRunnerOptionIndex = 0;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "-O0") {
         guestRunnerKernelOptimization = "none";
         guestRunnerNative = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--shell") {
+        guestRunnerShell = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--no-ion") {
+        /* Compatibility only: this interpreter has no IonMonkey tier. */
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-native") {
         guestRunnerNative = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--vm-predecode") {
@@ -310,6 +315,7 @@ try {
         print("preparing standalone runtime");
         var guestStandalonePreparationStarted = new Date().getTime();
         guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
+        guestProgramVM.context.installGlobal("__guestVMStandaloneShell", guestRunnerShell);
         print("prepared standalone runtime in " +
             (new Date().getTime() - guestStandalonePreparationStarted) + " ms");
         var guestSnapshotSerializationStarted = new Date().getTime();

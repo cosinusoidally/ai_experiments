@@ -5,6 +5,7 @@
  * adopting the returned program record without materializing host objects is
  * the next integration boundary. */
 var SelfHostedParser, SelfHostedCompiler, selfHostedVerify;
+var ProgramDebugLayout = require("./program_debug_layout.js");
 
 function ensureFrontend(frontend) {
     if (frontend) {
@@ -85,7 +86,7 @@ function adoptProgramDescriptor(program, contextAnchor) {
             !!program.strict,
             !!program.evalCode,
             contextAnchor,
-            program.source || null);
+            program.source || null, programDebugData(program));
         retainAdoptionRoot(callable);
         try {
             if (!bindingRegisters) {
@@ -140,6 +141,24 @@ function adoptProgramDescriptor(program, contextAnchor) {
 
 var selfHostedAdoptionRoots = [];
 
+/* A traced, compact statement map; no retained AST or source-position graph.
+ * Triples are bytecode PC, source line, source column. */
+function programDebugData(program) {
+    var location = program.location || {};
+    var result = [];
+    result[ProgramDebugLayout.FILENAME] = program.filename || location.filename || "<unknown>";
+    result[ProgramDebugLayout.DEFAULT_LINE] = location.line || 1;
+    result[ProgramDebugLayout.DEFAULT_COLUMN] = location.column || 1;
+    var locations = program.sourceLocations || [], previous = null;
+    for (var pc = 0; pc < locations.length; pc++) {
+        var at = locations[pc];
+        if (at && (!previous || at.line !== previous.line || at.column !== previous.column)) {
+            result.push(pc, at.line, at.column); previous = at;
+        }
+    }
+    return result;
+}
+
 function retainAdoptionRoot(value) {
     selfHostedAdoptionRoots.push(value);
 }
@@ -154,13 +173,13 @@ function releaseAdoptionRoot() {
 exports.adoptProgram = adoptProgramDescriptor;
 
 exports.compileExecutable = function (source, filename, contextAnchor,
-                                      owningGlobal) {
+                                      owningGlobal, captureLocations) {
     ensureFrontend();
     /* Adoption retains exact function source, but has no location-table input.
      * Do not build/retain a second, unused source-position graph here. Public
      * descriptor compilation still captures locations by default. */
     var program = exports.compile(source, filename, {
-        captureLocations: false,
+        captureLocations: !!captureLocations,
         /* This sink consumes word views synchronously. A generic frontend
          * callback may retain its descriptor, so scratch reuse is opt-in. */
         wordArena: SelfHostedCompiler.createWordArena(source.length),

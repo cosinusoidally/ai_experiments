@@ -73,6 +73,7 @@
 
     var Exit = {BUDGET: 1, RETURN: 2, UNSUPPORTED: 3, ALLOCATION: 4};
     var RecordLayout = HeapRecords.KernelConstants;
+    var DiagnosticLayout = HeapRecords.ProgramDebugLayout;
     var FREE_RECORD_HEADER_BYTES = RecordLayout.HEAP_HEADER_BYTES;
     /* Native execution consumes private contiguous suffixes of ordinary free
      * records. Region changes now happen inside the compiled allocator, so
@@ -4832,6 +4833,7 @@
                 callFunctionCell + RecordLayout.VALUE_CELL_LOW);
             if (recordType(heapBase, bytecodeCallable) ===
                 RecordLayout.HEAP_TYPE_NATIVE_FUNCTION) {
+                var originalNativeCallable = bytecodeCallable;
                 if (nativeFunctionMetadata(heapBase,
                     bytecodeCallable) ===
                     NativeIntrinsics.FUNCTION_APPLY) {
@@ -4980,6 +4982,10 @@
                         }
                     }
                 }
+                /* A declined forwarding case must leave the original native
+                 * apply/call operation intact. Its target is not an ordinary
+                 * call with the original (receiver, argument-list) operands. */
+                if (bytecodeApplyForwarding === 0) bytecodeCallable = originalNativeCallable;
             }
             if (recordType(heapBase, bytecodeCallable) ===
                 RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
@@ -5941,11 +5947,16 @@
         if (receiverIndex < 0) return unsupportedDiagnosticExitKernel(
             heapBase, state, frame, pc, opcode, instructions);
         var functionCell = bytecodeRegisterCellAddress(0, registerAddress, receiverIndex);
-        if (valueCellTag(0, functionCell) !== RecordLayout.VALUE_TAG_REFERENCE ||
-            recordType(heapBase, valueCellReference(0, functionCell)) !== RecordLayout.HEAP_TYPE_NATIVE_FUNCTION) {
+        if (valueCellTag(0, functionCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
+            return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
+        var functionType = recordType(heapBase, valueCellReference(0, functionCell));
+        if (functionType !== RecordLayout.HEAP_TYPE_NATIVE_FUNCTION &&
+                functionType !== RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
             return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
         }
         var thisCell = 0, list = 0, count = 0;
+        var typedKind = -1, typedPointer = 0, typedBytes = 0;
         if (argumentCount > 0) thisCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 0);
         if (argumentCount > 1) {
@@ -5955,13 +5966,25 @@
                 if (listTag !== RecordLayout.VALUE_TAG_REFERENCE) return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
                 list = valueCellReference(0, listCell);
-                if (recordType(heapBase, list) !== RecordLayout.HEAP_TYPE_ARRAY) return unsupportedDiagnosticExitKernel(
-                    heapBase, state, frame, pc, opcode, instructions);
-                count = vectorLength(heapBase, arrayElements(heapBase, list));
+                var listType = recordType(heapBase, list);
+                if (listType === RecordLayout.HEAP_TYPE_ARRAY) {
+                    count = vectorLength(heapBase, arrayElements(heapBase, list));
+                } else if (listType === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
+                    typedKind = bufferViewKind(heapBase, list);
+                    if (typedKind === BUFFER_KIND_NATIVE) typedKind = BUFFER_KIND_UINT8;
+                    typedBytes = typedArrayElementBytesKernel(typedKind);
+                    if (typedBytes === 0) return unsupportedDiagnosticExitKernel(
+                        heapBase, state, frame, pc, opcode, instructions);
+                    var typedBacking = bufferViewBacking(heapBase, list);
+                    typedPointer = bufferBackingPointer(heapBase, typedBacking);
+                    if (heapBase === 0) typedPointer = typedBacking + BUFFER_BACKING_DATA;
+                    typedPointer = typedPointer + bufferViewOffset(heapBase, list);
+                    count = bufferViewLength(heapBase, list);
+                } else return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
             }
         }
         var index = 0;
-        while (index < count) {
+        while (typedKind < 0 && index < count) {
             if (arrayPropertyHead(heapBase, list) !== 0 &&
                 indexedOwnPropertyDescriptorKernel(heapBase, state, list, index) !== 0) {
                 return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
@@ -5989,9 +6012,14 @@
         else setValueCellUndefined(thisTarget);
         index = 0;
         while (index < count) {
-            var source = argumentsMappedCellKernel(heapBase, list, index);
-            if (source === 0) source = vectorCellAddress(heapBase, arrayElements(heapBase, list), index);
-            copyValueCell(vectorCellAddress(heapBase, values, index + NATIVE_APPLY_ARGUMENT_BASE), source);
+            var destination = vectorCellAddress(heapBase, values, index + NATIVE_APPLY_ARGUMENT_BASE);
+            if (typedKind >= 0) {
+                var copied = readTypedArrayElementKernel(typedPointer + index * typedBytes, typedKind, destination);
+            } else {
+                var source = argumentsMappedCellKernel(heapBase, list, index);
+                if (source === 0) source = vectorCellAddress(heapBase, arrayElements(heapBase, list), index);
+                copyValueCell(destination, source);
+            }
             setValueCellInt32(vectorCellAddress(heapBase, descriptors, index), index + NATIVE_APPLY_ARGUMENT_BASE);
             index++;
         }
@@ -5999,6 +6027,16 @@
         var descriptorCell = engineScratchLeftAddress(heapBase, state);
         setValueCellReference(descriptorCell, descriptors);
         var registers = vectorCellAddress(heapBase, values, 0);
+        if (functionType === RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
+            var entered = bytecodeCallKernel(heapBase, state, frame,
+                vectorCellAddress(heapBase, values, NATIVE_APPLY_FUNCTION_REGISTER), descriptorCell,
+                CALL_OPERATION_CALL, callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                bytecodeAddress, registers, pc, frame + FRAME_PC,
+                vectorCellAddress(heapBase, values, NATIVE_APPLY_RECEIVER_REGISTER),
+                FIVE_WORD_INSTRUCTION, 0, descriptors);
+            if (entered === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
+            return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
         return intrinsicCallKernel(heapBase, state, frame,
             vectorCellAddress(heapBase, values, NATIVE_APPLY_FUNCTION_REGISTER),
             descriptorCell, CALL_OPERATION_CALL, callTargetIndex, currentContext,
@@ -7308,6 +7346,10 @@
                             setEngineHeapBump(heapBase, state,
                                 ffiStringBacking + ffiStringBytes);
                         }
+                    } else if (recordType(heapBase, ffiReference) === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
+                        ffiValue = bufferBackingPointer(heapBase,
+                            bufferViewBacking(heapBase, ffiReference)) +
+                            bufferViewOffset(heapBase, ffiReference);
                     } else ffiValid = 0;
                 } else ffiValid = 0;
                 if (ffiConvertIndex === 0) ffiPointer = ffiValue;
@@ -8046,7 +8088,7 @@
             return 0;
         }
         var targetKind = bufferViewKind(heapBase, targetView);
-        if (targetKind === BUFFER_KIND_NATIVE) return 0;
+        if (targetKind === BUFFER_KIND_NATIVE) targetKind = BUFFER_KIND_UINT8;
         if (targetKind === BUFFER_KIND_ARRAY_BUFFER) return 0;
         var sourceCell = programArgumentCellKernel(
             heapBase, argumentsVector, registerAddress, 0);
@@ -8057,10 +8099,18 @@
         var sourceLength = 0;
         var sourcePointer = 0;
         if (recordType(heapBase, sourceArray) === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-            if (bufferViewKind(heapBase, sourceArray) !== targetKind) return 0;
+            var sourceKind = bufferViewKind(heapBase, sourceArray);
+            if (sourceKind === BUFFER_KIND_NATIVE) sourceKind = BUFFER_KIND_UINT8;
+            /* Signed and unsigned byte views have identical set-copy bits:
+             * numeric conversion modulo 256 preserves every source byte.
+             * Wider cross-kind conversions are not raw-memory copies. */
+            if (sourceKind !== targetKind &&
+                    !(typedArrayElementBytesKernel(sourceKind) === 1 &&
+                      typedArrayElementBytesKernel(targetKind) === 1)) return 0;
             sourceLength = bufferViewLength(heapBase, sourceArray);
-            sourcePointer = bufferBackingPointer(heapBase,
-                bufferViewBacking(heapBase, sourceArray));
+            var sourceBacking = bufferViewBacking(heapBase, sourceArray);
+            sourcePointer = bufferBackingPointer(heapBase, sourceBacking);
+            if (heapBase === 0) sourcePointer = sourceBacking + BUFFER_BACKING_DATA;
             if (sourcePointer === 0) return 0;
             sourcePointer = sourcePointer + bufferViewOffset(heapBase, sourceArray);
         } else {
@@ -8088,6 +8138,7 @@
                 targetOffset) return 0;
         var backing = bufferViewBacking(heapBase, targetView);
         var pointer = bufferBackingPointer(heapBase, backing);
+        if (heapBase === 0) pointer = backing + BUFFER_BACKING_DATA;
         if (pointer === 0) return 0;
         pointer = pointer + bufferViewOffset(heapBase, targetView);
         var bytes = typedArrayElementBytesKernel(targetKind);
@@ -14230,6 +14281,100 @@
         return EXIT_UNSUPPORTED;
     }
 
+    /* Cold failure reporting uses libc-owned scratch, never a guest allocation
+     * or a formatter running inside the failed interpreter. */
+    function diagnosticFilenameKernel(heapBase, source, mallocPointer) {
+        var length = stringLength(heapBase, source);
+        var pointer = callNativeI32(mallocPointer, length * 3 + 1);
+        if (pointer === 0) return 0;
+        var index = 0;
+        var out = pointer;
+        while (index < length) {
+            var code = stringCharacterCodeUnit(heapBase, source, index) & 65535;
+            if (code >= DiagnosticLayout.SURROGATE_HIGH_START && code <= DiagnosticLayout.SURROGATE_HIGH_END) {
+                var low = 0;
+                if (index + 1 < length) low = stringCharacterCodeUnit(heapBase, source, index + 1) & 65535;
+                if (low >= DiagnosticLayout.SURROGATE_LOW_START && low <= DiagnosticLayout.SURROGATE_LOW_END) {
+                    code = DiagnosticLayout.SUPPLEMENTARY_START +
+                        ((code - DiagnosticLayout.SURROGATE_HIGH_START) << DiagnosticLayout.SURROGATE_SHIFT) +
+                        low - DiagnosticLayout.SURROGATE_LOW_START;
+                    index = index + 1;
+                } else code = DiagnosticLayout.REPLACEMENT_CHARACTER;
+            } else if (code >= DiagnosticLayout.SURROGATE_LOW_START && code <= DiagnosticLayout.SURROGATE_LOW_END) {
+                code = DiagnosticLayout.REPLACEMENT_CHARACTER;
+            }
+            if (code < DiagnosticLayout.UTF8_SINGLE_LIMIT) {
+                storeRaw8(out, code); out = out + 1;
+            } else if (code < DiagnosticLayout.UTF8_PAIR_LIMIT) {
+                storeRaw8(out, DiagnosticLayout.UTF8_PAIR_PREFIX | (code >> DiagnosticLayout.UTF8_PAYLOAD_BITS));
+                storeRaw8(out + 1, DiagnosticLayout.UTF8_CONTINUATION | (code & DiagnosticLayout.UTF8_PAYLOAD_MASK)); out = out + 2;
+            } else if (code >= DiagnosticLayout.SUPPLEMENTARY_START) {
+                storeRaw8(out, DiagnosticLayout.UTF8_QUAD_PREFIX | (code >> (3 * DiagnosticLayout.UTF8_PAYLOAD_BITS)));
+                storeRaw8(out + 1, DiagnosticLayout.UTF8_CONTINUATION | ((code >> (2 * DiagnosticLayout.UTF8_PAYLOAD_BITS)) & DiagnosticLayout.UTF8_PAYLOAD_MASK));
+                storeRaw8(out + 2, DiagnosticLayout.UTF8_CONTINUATION | ((code >> DiagnosticLayout.UTF8_PAYLOAD_BITS) & DiagnosticLayout.UTF8_PAYLOAD_MASK));
+                storeRaw8(out + 3, DiagnosticLayout.UTF8_CONTINUATION | (code & DiagnosticLayout.UTF8_PAYLOAD_MASK)); out = out + 4;
+            } else {
+                storeRaw8(out, DiagnosticLayout.UTF8_TRIPLE_PREFIX | (code >> (2 * DiagnosticLayout.UTF8_PAYLOAD_BITS)));
+                storeRaw8(out + 1, DiagnosticLayout.UTF8_CONTINUATION | ((code >> DiagnosticLayout.UTF8_PAYLOAD_BITS) & DiagnosticLayout.UTF8_PAYLOAD_MASK));
+                storeRaw8(out + 2, DiagnosticLayout.UTF8_CONTINUATION | (code & DiagnosticLayout.UTF8_PAYLOAD_MASK)); out = out + 3;
+            }
+            index = index + 1;
+        }
+        storeRaw8(out, 0);
+        return pointer;
+    }
+
+    function reportGuestStackKernel(heapBase, state, dprintfPointer, format, unknown) {
+        var services = enginePlatformServices(heapBase, state);
+        var mallocPointer = platformMallocPointer(heapBase, services);
+        var freePointer = platformFreePointer(heapBase, services);
+        if (mallocPointer === 0 || freePointer === 0) return 0;
+        var frame = engineCurrentFrame(heapBase, state);
+        var depth = 0;
+        while (frame >= RecordLayout.HEAP_FIRST_RECORD && depth < DiagnosticLayout.MAX_FRAMES) {
+            var program = frameProgram(heapBase, frame);
+            var pc = frameSavedPC(heapBase, frame);
+            var debug = programDebugReference(heapBase, program);
+            var filename = unknown;
+            var line = 0;
+            var column = 0;
+            var ownedFilename = 0;
+            if (debug !== 0 && recordType(heapBase, debug) === RecordLayout.HEAP_TYPE_ARRAY) {
+                var entries = arrayElements(heapBase, debug);
+                var length = vectorLength(heapBase, entries);
+                if (length >= DiagnosticLayout.LOCATIONS) {
+                    var fileCell = vectorCellAddress(heapBase, entries, DiagnosticLayout.FILENAME);
+                    if (valueCellTag(0, fileCell) === RecordLayout.VALUE_TAG_REFERENCE) {
+                        var file = valueCellReference(0, fileCell);
+                        if (recordType(heapBase, file) === RecordLayout.HEAP_TYPE_STRING) {
+                            ownedFilename = diagnosticFilenameKernel(heapBase, file, mallocPointer);
+                            if (ownedFilename !== 0) filename = ownedFilename;
+                        }
+                    }
+                    line = valueCellInt32(0, vectorCellAddress(heapBase, entries, DiagnosticLayout.DEFAULT_LINE));
+                    column = valueCellInt32(0, vectorCellAddress(heapBase, entries, DiagnosticLayout.DEFAULT_COLUMN));
+                    var index = DiagnosticLayout.LOCATIONS;
+                    while (index + DiagnosticLayout.LOCATION_WORDS <= length) {
+                        var locationPC = valueCellInt32(0, vectorCellAddress(heapBase, entries, index + DiagnosticLayout.LOCATION_PC));
+                        if (locationPC > pc) index = length;
+                        else {
+                            line = valueCellInt32(0, vectorCellAddress(heapBase, entries, index + DiagnosticLayout.LOCATION_LINE));
+                            column = valueCellInt32(0, vectorCellAddress(heapBase, entries, index + DiagnosticLayout.LOCATION_COLUMN));
+                            index = index + DiagnosticLayout.LOCATION_WORDS;
+                        }
+                    }
+                }
+            }
+            var written = callNativeI32(dprintfPointer, 2, format, filename, line, column, pc);
+            if (ownedFilename !== 0) { var released = callNativeI32(freePointer, ownedFilename); }
+            var caller = frameCaller(heapBase, frame);
+            if (caller === frame) return depth;
+            frame = caller;
+            depth = depth + 1;
+        }
+        return depth;
+    }
+
     function releaseNativeCachedFramesKernel(heapBase, state) {
         var cachedFrame = engineFreeFrame(heapBase, state);
         var releasedFrames = 0;
@@ -15610,6 +15755,13 @@
                 }
             } else if (sourceTag !== VALUE_TAG_NULL) return 0;
         }
+        var debugReference = 0;
+        if (argumentCount > 14) {
+            var debugCell = programArgumentCellKernel(heapBase, argumentsVector, registerAddress, 14);
+            if (valueCellTag(0, debugCell) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
+            debugReference = valueCellReference(0, debugCell);
+            if (recordType(heapBase, debugReference) !== RecordLayout.HEAP_TYPE_ARRAY) return 0;
+        }
         if (codeLength < 0) return 0;
         if (constantLength < 0) return 0;
         if (bindingLength < 0) return 0;
@@ -15691,6 +15843,8 @@
             strictProgram * 2 | evalProgram * 4);
         setProgramBindingCount(heapBase, program, bindingCount);
         setProgramSource(heapBase, program, sourceProgram);
+        setProgramDebugReference(heapBase, program, debugReference);
+        setProgramDebugReserved(heapBase, program, 0);
         if (bindingNamesLength === 0) setProgramBindingNames(heapBase, program, 0);
         else setProgramBindingNames(heapBase, program, bindingNames);
         initializedBytes = initializeProgramCallableKernel(
@@ -18217,6 +18371,8 @@
             programBooleanArgumentKernel: programBooleanArgumentKernel,
             programCallableKernel: programCallableKernel,
             programCreateKernel: programCreateKernel,
+            reportGuestStackKernel: reportGuestStackKernel,
+            diagnosticFilenameKernel: diagnosticFilenameKernel,
             programSetBindingNameKernel: programSetBindingNameKernel,
             programIntArgumentKernel: programIntArgumentKernel,
             bufferIsBufferKernel: bufferIsBufferKernel,
@@ -18410,6 +18566,7 @@
                 reportSnapshot("lowering native interpreter kernel");
             }
             var compilerOptions = {
+                additionalEntries: ["reportGuestStackKernel"],
                 optimization: runtime.kernelOptimization,
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
@@ -18424,6 +18581,7 @@
                     PropertyDeleteResult: ObjectOperationKernels.PropertyDeleteResult,
                     PropertyWriteAction: PropertySemantics.namespaces.PropertyWriteAction,
                     RecordLayout: RecordLayout,
+                    DiagnosticLayout: DiagnosticLayout,
                     Bytecode: Bytecode,
                     NativeIntrinsics: NativeIntrinsics,
                     RuntimeSupportLayout: RuntimeSupportLayout,

@@ -813,6 +813,19 @@
         assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
         assembler.callEax();
         discardCallWords(6 + allocationDiagnosticFields.length);
+        imageAddress(layout.stackUnknownOffset);
+        assembler.pushEax();
+        imageAddress(layout.stackFormatOffset);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.statePayloadAddress);
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.pushEax();
+        imageAddress(layout.codeOffset + layout.stackTraceOffset);
+        assembler.callEax();
+        discardCallWords(5);
         assembler.movEaxImmediate(70);
         assembler.jump("standalone_return");
         assembler.label("standalone_allocation_error");
@@ -840,6 +853,8 @@
         var expectedNameBytes = standaloneStringBytes(expectedProgramPath || "");
         var strcmpNameBytes = standaloneStringBytes("strcmp");
         var dprintfNameBytes = standaloneStringBytes("dprintf");
+        var stackFormatBytes = standaloneStringBytes("  at %s:%d:%d (bytecode pc %d)\n");
+        var stackUnknownBytes = standaloneStringBytes("<bootstrap>");
         var unsupportedFormatBytes = standaloneStringBytes(
             "guest VM unsupported opcode %d at bytecode pc %d " +
             "(detail %d, allocation %d; GC %u, live %u, " +
@@ -863,6 +878,7 @@
             argumentCells: expectedProgramPath === null ?
                 runtime.standaloneArgumentCells(frame.context) : null,
             statePayloadAddress: nativeInterpreter.statePayload,
+            stackTraceOffset: result.symbols.kernel_function_reportGuestStackKernel,
             platformServicesAddress:
                 nativeInterpreter.platformServicesAddress,
             stringSupportAddress: nativeInterpreter.stringSupportAddress,
@@ -898,6 +914,10 @@
         nextDataOffset += dprintfNameBytes.length;
         layout.unsupportedFormatOffset = nextDataOffset;
         nextDataOffset += unsupportedFormatBytes.length;
+        layout.stackFormatOffset = nextDataOffset;
+        nextDataOffset += stackFormatBytes.length;
+        layout.stackUnknownOffset = nextDataOffset;
+        nextDataOffset += stackUnknownBytes.length;
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
             layout.nativeBindings[bindingIndex].nameOffset = nextDataOffset;
@@ -1046,6 +1066,8 @@
             output.copyBytes(layout.expectedNameOffset, expectedNameBytes);
             output.copyBytes(layout.dprintfNameOffset, dprintfNameBytes);
             output.copyBytes(layout.unsupportedFormatOffset, unsupportedFormatBytes);
+            output.copyBytes(layout.stackFormatOffset, stackFormatBytes);
+            output.copyBytes(layout.stackUnknownOffset, stackUnknownBytes);
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
                 output.copyBytes(layout.nativeBindings[bindingIndex].nameOffset,

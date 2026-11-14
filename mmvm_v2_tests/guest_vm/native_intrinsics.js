@@ -141,7 +141,7 @@
         "String.concat": 1, "String.indexOf": 1, "String.lastIndexOf": 1,
         "String.localeCompare": 1, "String.match": 1, "String.replace": 2,
         "String.search": 1, "String.slice": 2, "String.split": 2,
-        "String.substring": 2, "String.substr": 2,
+        "String.substring": 2, "String.substr": 2, "String.slice": 2,
         "String.toLowerCase": 0, "String.toLocaleLowerCase": 0,
         "String.toUpperCase": 0, "String.toLocaleUpperCase": 0,
         "String.trim": 0, "Boolean.toString": 0, "Boolean.valueOf": 0,

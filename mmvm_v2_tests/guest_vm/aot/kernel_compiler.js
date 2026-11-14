@@ -274,6 +274,14 @@
         }
         addFunction(null, entry);
         var entryName = functions[0].name;
+        /* Explicit extra entrypoints share the same graph, dependency
+         * discovery and deterministic helper ordering as the primary entry. */
+        var additionalEntries = (options.additionalEntries || []).slice(0);
+        additionalEntries.sort();
+        for (var additionalIndex = 0; additionalIndex < additionalEntries.length; additionalIndex++) {
+            var additionalName = additionalEntries[additionalIndex];
+            addFunction(additionalName, dependencies[additionalName]);
+        }
         var entryDependencies = [];
         functions[0].localNames = [];
         var sharedConstants = {};
@@ -643,6 +651,7 @@
         programBindingNames: "PROGRAM_BINDING_NAMES",
         programBindingCount: "PROGRAM_BINDING_COUNT",
         programSource: "PROGRAM_SOURCE",
+        programDebugReference: "PROGRAM_DEBUG_REFERENCE",
         programParameterSlots: "PROGRAM_PARAMETER_SLOTS",
         programRegisterCount: "PROGRAM_REGISTER_COUNT",
         programArgumentsSlot: "PROGRAM_ARGUMENTS_SLOT",
@@ -839,6 +848,8 @@
         setProgramFlags: "PROGRAM_FLAGS",
         setProgramBindingCount: "PROGRAM_BINDING_COUNT",
         setProgramSource: "PROGRAM_SOURCE",
+        setProgramDebugReference: "PROGRAM_DEBUG_REFERENCE",
+        setProgramDebugReserved: "PROGRAM_DEBUG_RESERVED",
         setEngineExitReason: "ENGINE_EXIT_REASON",
         setEnginePC: "ENGINE_PC",
         setEngineResult: "ENGINE_RESULT",

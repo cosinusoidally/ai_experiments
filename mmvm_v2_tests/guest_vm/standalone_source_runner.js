@@ -15,16 +15,17 @@ var GuestStandaloneFs = NodeFs;
 var GuestStandaloneDlsymPointer = NodeDlsymPointer;
 var GuestStandaloneBuffer = Buffer;
 
-function guestStandaloneReadSource(path) {
+function guestStandaloneReadSource(path, encoding) {
     /* NodeFs.readFileSync resolves Buffer through its global environment.
      * Application runners are allowed to install their own Buffer, but the
      * embedder must keep using the intrinsic-backed implementation captured
      * with its filesystem service. */
     var applicationBuffer = GuestStandaloneGlobal.Buffer;
     GuestStandaloneGlobal.Buffer = GuestStandaloneBuffer;
-    var result = GuestStandaloneFs.readFileSync(path).toString("utf8");
-    GuestStandaloneGlobal.Buffer = applicationBuffer;
-    return result;
+    try {
+        var result = GuestStandaloneFs.readFileSync(path);
+        return encoding === "binary" ? result : result.toString("utf8");
+    } finally { GuestStandaloneGlobal.Buffer = applicationBuffer; }
 }
 
 function guestStandaloneProfileStart() {
@@ -219,7 +220,7 @@ function guestStandaloneExecute(path, programArguments) {
         loadedPhaseStarted = guestStandaloneProfileStart();
         var loadedExecutable = GuestStandaloneFrontend.compileExecutable(
             loadedSource, filename, guestStandaloneExecute,
-            GuestStandaloneGlobal);
+            GuestStandaloneGlobal, __guestVMStandaloneShell);
         guestStandaloneProfileEnd("compile " + filename, loadedPhaseStarted);
         loadedPhaseStarted = guestStandaloneProfileStart();
         loadedExecutable();
@@ -228,12 +229,19 @@ function guestStandaloneExecute(path, programArguments) {
     GuestStandaloneGlobal.print = console.log;
     GuestStandaloneGlobal.read = guestStandaloneReadSource;
     GuestStandaloneGlobal.quit = guestStandaloneQuit;
+    if (__guestVMStandaloneShell) {
+        GuestStandaloneGlobal.process = undefined;
+        GuestStandaloneGlobal.require = undefined;
+        GuestStandaloneGlobal.scriptArgs = programArguments;
+        GuestStandaloneGlobal.printErr = console.error;
+        GuestStandaloneGlobal.ctypes = GuestShellCTypes.create(GuestStandaloneDlsymPointer, ffi_call);
+    }
     var phaseStarted = guestStandaloneProfileStart();
     var source = guestStandaloneReadSource(path);
     guestStandaloneProfileEnd("read " + path, phaseStarted);
     phaseStarted = guestStandaloneProfileStart();
     var executable = GuestStandaloneFrontend.compileExecutable(
-        source, path, guestStandaloneExecute, GuestStandaloneGlobal);
+        source, path, guestStandaloneExecute, GuestStandaloneGlobal, __guestVMStandaloneShell);
     guestStandaloneProfileEnd("compile " + path, phaseStarted);
     phaseStarted = guestStandaloneProfileStart();
     executable();
@@ -309,6 +317,7 @@ function guestStandaloneDescribeError(error) {
 __guestVMStandaloneRunGuestRunner = guestStandaloneRunGuestRunner;
 
 var GuestStandaloneArgv = guestStandaloneArguments();
+while (GuestStandaloneArgv[0] === "--no-ion") GuestStandaloneArgv.shift();
 if (!GuestStandaloneArgv.length) throw new Error("standalone program is missing");
 try {
     guestStandaloneExecute(

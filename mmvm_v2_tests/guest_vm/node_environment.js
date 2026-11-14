@@ -115,6 +115,7 @@
     GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
         this.context.installGlobal("__guestVMStandaloneArgc", 0);
         this.context.installGlobal("__guestVMStandaloneArgv", 0);
+        this.context.installGlobal("__guestVMStandaloneShell", false);
         this.context.installGlobal("__guestVMStandaloneImageBase", 0);
         this.context.installGlobal("__guestVMStandaloneImageLength", 0);
         this.context.installGlobal(
@@ -128,6 +129,7 @@
             "load(\"node_compat/net.js\");",
             "load(\"node_compat/fs.js\");",
             "load(\"node_compat/http.js\");",
+            "load(\"guest_vm/shell_ctypes.js\");",
             "var GuestStandaloneFrontend = require(" +
                 "\"./guest_vm/self_hosted_frontend.js\");",
             "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);",

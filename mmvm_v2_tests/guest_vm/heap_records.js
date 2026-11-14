@@ -5,10 +5,12 @@
     var Heap = root.GuestVMHeap;
     var ValueCells = root.GuestVMValueCells;
     var Bytecode = root.GuestVMBytecode;
+    var ProgramDebugLayout = root.GuestVMProgramDebugLayout;
     if (typeof module !== "undefined" && module.exports) {
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
         Bytecode = require("./bytecode.js");
+        ProgramDebugLayout = require("./program_debug_layout.js");
     }
 
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
@@ -200,7 +202,9 @@
     /* Use the existing final payload word; the program record does not grow.
      * Only environment-backed programs need a slot-to-name vector. */
     var PROGRAM_BINDING_NAMES = 52;
-    var PROGRAM_BYTES = 56;
+    var PROGRAM_DEBUG_REFERENCE = 56;
+    var PROGRAM_DEBUG_RESERVED = 60;
+    var PROGRAM_BYTES = 64;
 
     var CONTEXT_GLOBAL = 0;
     var CONTEXT_ACTIVE_FRAME = 4;
@@ -379,7 +383,8 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 105;
+    Records.NativeInterpreterContractVersion = 106;
+    Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
      * flag namespaces (strings, frames and property storage). */
@@ -478,6 +483,7 @@
         EXOTIC_OBJECT_NON_EXTENSIBLE: Records.ExoticObjectFlags.NON_EXTENSIBLE,
         PROGRAM_BINDING_NAMES: Heap.HEADER_SIZE + PROGRAM_BINDING_NAMES,
         PROGRAM_BINDING_NAMES_EDGE: 6,
+        PROGRAM_DEBUG_EDGE: 7,
         LEXICAL_LOOKUP_UNSUPPORTED: -1,
         ENVIRONMENT_SINGLE_BINDING_FLAG: Records.EnvironmentFlags.SINGLE_BINDING,
         ENVIRONMENT_DETACHED_ARGUMENTS_FLAG: Records.EnvironmentFlags.DETACHED_ARGUMENTS,
@@ -592,6 +598,8 @@
         PROGRAM_BINDING_REGISTERS: Heap.HEADER_SIZE + PROGRAM_BINDING_REGISTERS,
         PROGRAM_PARAMETER_SLOTS: Heap.HEADER_SIZE + PROGRAM_PARAMETER_SLOTS,
         PROGRAM_SOURCE: Heap.HEADER_SIZE + PROGRAM_SOURCE,
+        PROGRAM_DEBUG_REFERENCE: Heap.HEADER_SIZE + PROGRAM_DEBUG_REFERENCE,
+        PROGRAM_DEBUG_RESERVED: Heap.HEADER_SIZE + PROGRAM_DEBUG_RESERVED,
         CONTEXT_GLOBAL: Heap.HEADER_SIZE + CONTEXT_GLOBAL,
         CONTEXT_ACTIVE_FRAME: Heap.HEADER_SIZE + CONTEXT_ACTIVE_FRAME,
         CONTEXT_NEXT: Heap.HEADER_SIZE + CONTEXT_NEXT,
@@ -2611,7 +2619,8 @@
             layout.argumentsSlot | 0, layout.thisSlot | 0,
             layout.functionNameSlot | 0, layout.metadata | 0,
             layout.flags | 0, layout.bindingCount | 0,
-            layout.source | 0, layout.bindingNames | 0];
+            layout.source | 0, layout.bindingNames | 0,
+            layout.debugReference | 0, 0];
         var address = this.heap.allocateRecordWords(Heap.Types.PROGRAM,
             PROGRAM_BYTES, 0, 0, 0, 0);
         this.heap.memory.writeWords32LE(
@@ -2687,6 +2696,10 @@
             }
             this.heap.requireRecord(this.cells.referenceAddressAt(cell), Heap.Types.STRING);
         }
+    };
+
+    Records.prototype.programDebugReference = function (program) {
+        return this.heap.readTrustedFieldU32(program, PROGRAM_DEBUG_REFERENCE);
     };
 
     Records.prototype.programSource = function (program) {
@@ -3578,6 +3591,7 @@
             reference(records.programBindingNames(address));
             reference(records.programParameterSlots(address));
             reference(records.programSource(address));
+            reference(records.programDebugReference(address));
         } else if (type === Heap.Types.CONTEXT) {
             reference(records.contextGlobal(address));
             reference(records.contextActiveFrame(address));

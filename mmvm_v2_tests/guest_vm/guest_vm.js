@@ -24,6 +24,7 @@
         load("guest_vm/linear_memory.js");
         load("guest_vm/heap.js");
         load("guest_vm/value_cell.js");
+        load("guest_vm/program_debug_layout.js");
         load("guest_vm/heap_records.js");
         load("guest_vm/native_free_index_kernel.js");
         load("guest_vm/property_storage_kernel.js");

@@ -2138,7 +2138,8 @@
                    (program.strict ? 2 : 0) |
                    (program.evalCode ? 4 : 0),
             bindingCount: program.bindings ? program.bindings.length : 0,
-            source: sourceAddress
+            source: sourceAddress,
+            debugReference: program.heapDebugReference || 0
         });
         if (program.bindings && this.heapRecords.programBindingCount(address) !==
                 program.bindings.length) {
@@ -4302,6 +4303,13 @@
                 }));
         this.setGlobal("__guestVMProgramCreate", this.makeNativeFunction(
             "__guestVMProgramCreate", function (receiver, args) {
+                var debugReference = 0;
+                if (args.length > 14 && args[14] !== null && args[14] !== undefined) {
+                    runtime.assertOwned(args[14]);
+                    if (args[14].guestType !== "array") throw new TypeError("program debug data must be a guest array");
+                    debugReference = args[14].heapAddress;
+                    runtime.linearHeap.requireRecord(debugReference, Heap.Types.ARRAY);
+                }
                 var codeLength = integer(args[0], "code length");
                 var constantLength = integer(args[1], "constant length");
                 var bindingLength = integer(args[2], "binding-register length");
@@ -4328,7 +4336,8 @@
                     source: args.length > 13 && args[13] !== null ?
                         String(args[13]) : null,
                     bindings: bindingCount ? new Array(bindingCount) : null,
-                    globalDeclarations: []
+                    globalDeclarations: [],
+                    heapDebugReference: debugReference
                 };
                 var index = 0;
                 while (index < constantLength) {

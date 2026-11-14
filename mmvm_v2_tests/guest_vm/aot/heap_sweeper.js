@@ -358,6 +358,7 @@
                     else if (referenceIndex === 4) target = programParameterSlots(heapBase, address);
                     else if (referenceIndex === 5) target = programSource(heapBase, address);
                     else if (referenceIndex === CollectorLayout.PROGRAM_BINDING_NAMES_EDGE) target = programBindingNames(heapBase, address);
+                    else if (referenceIndex === CollectorLayout.PROGRAM_DEBUG_EDGE) target = programDebugReference(heapBase, address);
                     else referenceIndex = -2;
                 } else if (type === CollectorLayout.HEAP_TYPE_CONTEXT) {
                     if (referenceIndex === 0) target = contextGlobal(heapBase, address);

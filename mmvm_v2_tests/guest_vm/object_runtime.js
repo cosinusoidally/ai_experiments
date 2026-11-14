@@ -41,6 +41,26 @@
     this.__guestStringConvert = function (value) {
         return string(primitive(value, true));
     };
+    var substring = String.prototype.substring;
+    var floor = Math.floor, ceil = Math.ceil;
+    function relativeStringIndex(value, length) {
+        value = number(primitive(value, false));
+        if (value !== value) return 0;
+        if (value < 0) {
+            value = length + ceil(value);
+            return value < 0 ? 0 : value;
+        }
+        return value > length ? length : floor(value);
+    }
+    this.__guestStringSlice = function (start, end) {
+        "use strict";
+        if (this === null || this === undefined) throw new TypeError("String.slice receiver is null or undefined");
+        var text = string(primitive(this, true));
+        var length = text.length;
+        var first = relativeStringIndex(start, length);
+        var last = end === undefined ? length : relativeStringIndex(end, length);
+        return last <= first ? "" : call(substring, text, first, last);
+    };
     this.__guestErrorToString = function () {
         "use strict";
         requireObject(this);

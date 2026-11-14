@@ -299,6 +299,7 @@
         loadLibrary("guest_vm/indexed_view_policy.js");
         loadLibrary("guest_vm/object_runtime.js");
         installFallback(context.globalObject, "String", "__guestStringConvert");
+        installBuiltin(runtime.stringPrototype, "slice", "__guestStringSlice", "String.slice");
         installBuiltin(runtime.errorPrototypes.$Error, "toString", "__guestErrorToString", "Error.toString");
         installFallback(objectConstructor, "defineProperty", "__guestObjectDefineProperty");
         installFallback(objectConstructor, "getOwnPropertyDescriptor", "__guestObjectGetOwnPropertyDescriptor");
