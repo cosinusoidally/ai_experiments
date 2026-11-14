@@ -3,7 +3,18 @@
     function check(value, message) { if (!value) throw new Error(message); }
     check(typeof process === "undefined" && typeof require === "undefined", "shell environment detection");
     check(typeof load === "function" && typeof read === "function", "shell source services");
+    var binarySource = read("guest_vm/tests/shell_integration.js", "binary");
+    check(binarySource.constructor === Uint8Array &&
+        binarySource.buffer.constructor === ArrayBuffer && binarySource[0] === 47,
+        "shell binary reads expose a typed byte array and ArrayBuffer backing");
     check(typeof ctypes.open === "function", "ctypes library API");
+    check((4294967295).toString(16) === "ffffffff" &&
+        (2147483648).toString(2) === "10000000000000000000000000000000" &&
+        (-2147483648).toString(16) === "-80000000" &&
+        (4294967295).toString(36) === "1z141z3",
+        "radix formatting preserves signed and unsigned word magnitudes: " +
+        [(4294967295).toString(16), (2147483648).toString(2),
+            (-2147483648).toString(16), (4294967295).toString(36)].join(", "));
     var libc = ctypes.open("libc.so.6");
     var malloc = libc.declare("malloc", ctypes.default_abi, ctypes.uint32_t, ctypes.uint32_t);
     var free = libc.declare("free", ctypes.default_abi, ctypes.void_t, ctypes.voidptr_t);

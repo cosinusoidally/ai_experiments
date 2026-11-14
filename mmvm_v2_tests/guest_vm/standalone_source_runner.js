@@ -14,6 +14,7 @@ var GuestStandaloneGCStress = false;
 var GuestStandaloneFs = NodeFs;
 var GuestStandaloneDlsymPointer = NodeDlsymPointer;
 var GuestStandaloneBuffer = Buffer;
+var GuestStandaloneUint8Array = Uint8Array;
 
 function guestStandaloneReadSource(path, encoding) {
     /* NodeFs.readFileSync resolves Buffer through its global environment.
@@ -24,7 +25,14 @@ function guestStandaloneReadSource(path, encoding) {
     GuestStandaloneGlobal.Buffer = GuestStandaloneBuffer;
     try {
         var result = GuestStandaloneFs.readFileSync(path);
-        return encoding === "binary" ? result : result.toString("utf8");
+        if (encoding === "binary") {
+            /* Shell read(..., "binary") returns an actual typed byte array,
+             * not the internal Node-compatible Buffer used by filesystem IO.
+             * Consumers use its ArrayBuffer/view identity as well as indexing. */
+            if (__guestVMStandaloneShell) return new GuestStandaloneUint8Array(result);
+            return result;
+        }
+        return result.toString("utf8");
     } finally { GuestStandaloneGlobal.Buffer = applicationBuffer; }
 }
 

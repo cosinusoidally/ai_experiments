@@ -9030,7 +9030,9 @@
                     heapBase, arrayElements(heapBase, sourceArray));
             } else if (sourceType === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
                 if (bufferViewKind(heapBase, source) !== BUFFER_KIND_ARRAY_BUFFER) {
-                    if (typedArrayElementBytesKernel(bufferViewKind(heapBase, source)) === 0) return 0;
+                    var sourceKind = bufferViewKind(heapBase, source);
+                    if (sourceKind === BUFFER_KIND_NATIVE) sourceKind = BUFFER_KIND_UINT8;
+                    if (typedArrayElementBytesKernel(sourceKind) === 0) return 0;
                     sourceView = source;
                     elementLength = bufferViewLength(heapBase, source);
                 } else {
@@ -9108,6 +9110,7 @@
         if (viewResult !== 1) return viewResult;
         if (sourceView !== 0) {
             var fromKind = bufferViewKind(heapBase, sourceView);
+            if (fromKind === BUFFER_KIND_NATIVE) fromKind = BUFFER_KIND_UINT8;
             var fromBytes = typedArrayElementBytesKernel(fromKind);
             var fromPointer = bufferBackingPointer(heapBase,
                 bufferViewBacking(heapBase, sourceView)) + bufferViewOffset(heapBase, sourceView);
@@ -10749,18 +10752,33 @@
         return 1;
     }
 
-    /* Keep the magnitude negative so INT32_MIN needs no unsigned division
-     * and cannot overflow when taking its absolute value. */
+    /* Divide a full unsigned word using signed division of its high 31 bits.
+     * The residual is less than twice the radix, so all arithmetic stays exact. */
+    function unsignedRadixQuotientKernel(number, radix) {
+        var half = number >>> 1;
+        var quotient = divideI32(half, radix);
+        var residual = (half % radix) * 2 + (number & 1);
+        return quotient * 2 + divideI32(residual, radix);
+    }
+
     function integerRadixStringKernel(heapBase, state, target, number, radix) {
         var magnitude = number;
-        if (magnitude > 0) magnitude = -magnitude;
+        if (number < 0) magnitude = -number;
+        return unsignedRadixStringKernel(heapBase, state, target,
+            magnitude, radix, number < 0);
+    }
+
+    /* magnitude contains unsigned bits, including values above INT32_MAX. */
+    function unsignedRadixStringKernel(heapBase, state, target, magnitude,
+                                       radix, negative) {
         var remaining = magnitude;
         var length = 1;
-        while (remaining <= -radix) {
-            remaining = divideI32(remaining, radix);
+        /* A negative signed word denotes an unsigned magnitude >= 2^31. */
+        while ((remaining < 0) | (remaining >= radix)) {
+            remaining = unsignedRadixQuotientKernel(remaining, radix);
             length = length + 1;
         }
-        if (number < 0) length = length + 1;
+        if (negative) length = length + 1;
         var bytes = (STRING_CHARS + length * 2 + 7) & -8;
         if (reserveNativeAllocationKernel(heapBase, state, bytes) === 0) {
             return 2;
@@ -10780,11 +10798,12 @@
         while (index > 0) {
             index = index - 1;
             var code = 45;
-            if ((index !== 0) | (number >= 0)) {
-                var digit = -(remaining % radix);
+            if ((index !== 0) | !negative) {
+                var quotient = unsignedRadixQuotientKernel(remaining, radix);
+                var digit = (remaining - quotient * radix) >>> 0;
                 code = 48 + digit;
                 if (digit >= 10) code = 97 + digit - 10;
-                remaining = divideI32(remaining, radix);
+                remaining = quotient;
             }
             setStringCharacterByte(heapBase, result, index * 2, code);
             setStringCharacterByte(heapBase, result, index * 2 + 1, 0);
@@ -10857,7 +10876,22 @@
                 setEngineScratchLeft(heapBase, state, integer);
                 if (equalF64(loadF64(receiverCell + RecordLayout.VALUE_CELL_LOW),
                         loadI32F64(engineScratchLeftAddress(
-                            heapBase, state))) === 0) return 0;
+                            heapBase, state))) === 0) {
+                    /* ToInt32 wraps exact unsigned words. Reconstruct the
+                     * unsigned double and compare before accepting it; do not
+                     * silently truncate fractional or wider numeric values. */
+                    if (integer >= 0) return 0;
+                    var unsignedCell = engineScratchLeftAddress(heapBase, state);
+                    var mantissa = integer & IEEE754_ABSOLUTE_MASK;
+                    setValueCellDoubleBits(unsignedCell,
+                        mantissa << UINT32_MANTISSA_LOW_SHIFT,
+                        POSITIVE_2147483648_HIGH |
+                            (mantissa >>> UINT32_MANTISSA_HIGH_SHIFT));
+                    if (equalF64(loadF64(receiverCell + RecordLayout.VALUE_CELL_LOW),
+                            loadF64(unsignedCell + RecordLayout.VALUE_CELL_LOW)) === 0) return 0;
+                    return unsignedRadixStringKernel(heapBase, state,
+                        intrinsicTarget, integer, radix, 0);
+                }
             }
             return integerRadixStringKernel(heapBase, state,
                 intrinsicTarget, integer, radix);
@@ -18347,6 +18381,8 @@
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
             integerRadixStringKernel: integerRadixStringKernel,
+            unsignedRadixStringKernel: unsignedRadixStringKernel,
+            unsignedRadixQuotientKernel: unsignedRadixQuotientKernel,
             objectDefinePropertyKernel: objectDefinePropertyKernel,
             defineArrayLengthDescriptorKernel: defineArrayLengthDescriptorKernel,
             objectConstructorKernel: objectConstructorKernel,

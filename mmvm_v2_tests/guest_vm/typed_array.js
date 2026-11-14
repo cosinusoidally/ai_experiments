@@ -100,6 +100,7 @@
         arrayBuffer.arrayBufferConstructor = true;
         arrayBuffer.constructCallback = arrayBufferConstructCallback;
         this.runtime.setProperty(arrayBuffer, "prototype", this.arrayBufferPrototype);
+        this.runtime.defineBuiltinProperty(this.arrayBufferPrototype, "constructor", arrayBuffer);
         this.runtime.setGlobal("ArrayBuffer", arrayBuffer);
 
         var kind = Kinds.UINT8;
@@ -125,6 +126,7 @@
         constructor.typedArrayKind = description.kind;
         constructor.constructCallback = constructorConstructCallback;
         this.runtime.setProperty(constructor, "prototype", viewPrototype);
+        this.runtime.defineBuiltinProperty(viewPrototype, "constructor", constructor);
         this.runtime.setProperty(constructor, "BYTES_PER_ELEMENT", description.bytes);
         this.runtime.setProperty(viewPrototype, "BYTES_PER_ELEMENT", description.bytes);
         this.runtime.setGlobal(description.name, constructor);

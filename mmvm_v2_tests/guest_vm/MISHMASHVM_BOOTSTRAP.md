@@ -1,6 +1,6 @@
 # Mishmashvm compiler bootstrap bring-up
 
-Scope: run the unchanged `tcc_js_bootstrap/01_mk_tcc.js`,
+Initial scope: run the unchanged `tcc_js_bootstrap/01_mk_tcc.js`,
 `02_mk_libc_wrap.js`, and `03_mk_libc_stubs.js` with a freestanding guest VM
 executable named `artifacts/js`. Stop before bringing up
 `libc_portable_proto/bootstrap_tcc.sh`. No mishmashvm source changes, callbacks,
@@ -10,6 +10,21 @@ Run both engines **in the original mishmashvm directory**, sequentially, with
 clean output files. Preserve the jsshell reference objects outside that tree,
 then compare the guest-produced objects by both SHA-256 and byte comparison.
 Separate copied workspaces are not valid acceptance runs for this project.
+
+## Full bootstrap extension
+
+The scope was subsequently extended to the unchanged root `bootstrap.sh`,
+including `libc_portable_proto/bootstrap_tcc.sh`: initial libtcc1 generation,
+three native TCC/libtcc1 stages, two libc wrapper/stub stages and the existing
+final hash verification. Keep the ctypes implementation callback-free.
+
+Acceptance procedure: select local jsshell via PATH, run the full script in
+the original tree, record and move all eight final `.o`/`.o.new` outputs into
+ignored reference storage, then run the same script with `artifacts/js` first
+in PATH. Compare every output by SHA-256 and direct byte comparison. Move the
+packaged guest executable's source snapshot aside before running it. Do not
+modify mishmashvm sources or rely on a copied workspace. Any fixes belong in
+the general VM or shell/FFI layer, not benchmark-specific code.
 
 ## Implementation approach
 
