@@ -2,6 +2,21 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Full bootstrap compatibility audit, 2026-11-14
+
+- Implementation `8767315`, fresh packaged default executable: **996 passed /
+  333 failed**, including **39 timeouts**, **4 configured skips / 0 not run**.
+  All 1333 selected filenames have a final status; 1329 executed.
+- Exact archived baseline comparison: **all 994 old passes preserved**, zero
+  lost passes, exactly two FAIL-to-PASS changes and no missing results:
+  `ecma/Date/15.9.5.23-6.js` and `ecma_2/String/split-002.js`. The Date file uses
+  current-time input; its archived failure expected fractional milliseconds.
+  Do not attribute that change to a new Date implementation fix.
+- Harness 617095.672 ms; process 618.73 seconds; peak RSS 463860 KiB.
+  Existing corpus failures and timeout/skip policy remain unchanged.
+- See [full validation](FULL_VALIDATION_2026-11-14.md); raw logs and the full
+  archived baseline are ignored under `artifacts/bootstrap-final-suites/`.
+
 ### Full regression audit, 2026-11-13
 
 - Both standalone launchers: **994 passed / 335 failed**, including
