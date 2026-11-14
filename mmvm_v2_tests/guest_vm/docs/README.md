@@ -51,6 +51,10 @@ Start here:
 
 Design and acceptance checklist:
 
+- [Windows snapshot executable investigation and plan](windows-snapshot-plan.md):
+  proposed `--win32` PE32 packaging, dual-DLL resolver, native dependency
+  inventory, calling conventions, reserve/commit memory design and staged
+  validation. Planning only; no Windows implementation is present.
 - [Deterministic kernel debugging and -O0](kernel-debug-plan.md): separate
   DWARF, GDB/objdump, variable locations, debug-friendly compilation,
   reproducible artifact identity and required -O0 benchmarks.
