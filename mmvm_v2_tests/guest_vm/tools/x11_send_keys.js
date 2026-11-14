@@ -66,7 +66,7 @@
         var dataLength = authority.data.length;
         var request = allocateBuffer(
             12 + padded4(nameLength) + padded4(dataLength));
-        request[0] = 0x6c;
+        request.writeUInt8(0x6c, 0);
         request.writeUInt16LE(11, 2);
         request.writeUInt16LE(nameLength, 6);
         request.writeUInt16LE(dataLength, 8);
@@ -77,15 +77,15 @@
 
     function sendEventRequest(windowId, rootId, keycode, type) {
         var request = allocateBuffer(44);
-        request[0] = 25;                 /* SendEvent */
+        request.writeUInt8(25, 0);       /* SendEvent */
         request.writeUInt16LE(11, 2);
         request.writeUInt32LE(windowId, 4);
         request.writeUInt32LE(0, 8);     /* deliver to window creator */
-        request[12] = type;              /* KeyPress=2, KeyRelease=3 */
-        request[13] = keycode;
+        request.writeUInt8(type, 12);    /* KeyPress=2, KeyRelease=3 */
+        request.writeUInt8(keycode, 13);
         request.writeUInt32LE(rootId, 20);
         request.writeUInt32LE(windowId, 24);
-        request[42] = 1;                 /* same_screen */
+        request.writeUInt8(1, 42);       /* same_screen */
         return request;
     }
 
@@ -118,25 +118,25 @@
     var closeAtoms = [];
     function internAtom(name) {
         var request = allocateBuffer(8 + padded4(name.length));
-        request[0] = 16; // InternAtom
+        request.writeUInt8(16, 0); // InternAtom
         request.writeUInt16LE(request.length / 4, 2);
         request.writeUInt16LE(name.length, 4);
-        for (var index = 0; index < name.length; index++) request[8 + index] = name.charCodeAt(index);
+        for (var index = 0; index < name.length; index++) request.writeUInt8(name.charCodeAt(index), 8 + index);
         return request;
     }
     function consumeCloseReplies() {
         while (incoming.length >= 32 && closeAtoms.length < 2) {
-            if (incoming[0] !== 1) fail("InternAtom request failed");
+            if (incoming.readUInt8(0) !== 1) fail("InternAtom request failed");
             closeAtoms.push(incoming.readUInt32LE(8));
             incoming = incoming.slice(32);
         }
         if (closeAtoms.length !== 2) return;
         var request = allocateBuffer(44);
-        request[0] = 25; // SendEvent to the client, not XKillClient
+        request.writeUInt8(25, 0); // SendEvent to the client, not XKillClient
         request.writeUInt16LE(11, 2);
         request.writeUInt32LE(windowId, 4);
-        request[12] = 33; // ClientMessage
-        request[13] = 32; // data format
+        request.writeUInt8(33, 12); // ClientMessage
+        request.writeUInt8(32, 13); // data format
         request.writeUInt32LE(windowId, 16);
         request.writeUInt32LE(closeAtoms[0], 20); // WM_PROTOCOLS
         request.writeUInt32LE(closeAtoms[1], 24); // WM_DELETE_WINDOW
@@ -156,10 +156,10 @@
         if (incoming.length < 8) return;
         var setupLength = 8 + incoming.readUInt16LE(6) * 4;
         if (incoming.length < setupLength) return;
-        if (incoming[0] !== 1) fail("X11 setup was rejected");
+        if (incoming.readUInt8(0) !== 1) fail("X11 setup was rejected");
         var body = 8;
         var vendorLength = incoming.readUInt16LE(body + 16);
-        var formatCount = incoming[body + 21];
+        var formatCount = incoming.readUInt8(body + 21);
         var screenOffset = body + 32 + padded4(vendorLength) + formatCount * 8;
         var rootId = incoming.readUInt32LE(screenOffset);
         setupDone = true;
@@ -187,4 +187,7 @@
         }
     });
     socket.on("error", function (error) { fail(error.message); });
+    socket.on("end", function () {
+        if (!setupDone || (closeMode && closeAtoms.length !== 2)) fail("X11 connection ended before completing requests");
+    });
 }());
