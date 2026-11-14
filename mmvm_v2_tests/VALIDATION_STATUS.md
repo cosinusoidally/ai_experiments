@@ -1,5 +1,19 @@
 # Validation checkpoint, 2026-11-04
 
+Latest bootstrap regression audit, 2026-11-14: implementation `8767315`,
+packaged default executable completes full Test262 **3292/3292** and all
+**15 stock Octane suites**. Historical ECMA: **996 pass / 333 fail**, including
+39 timeouts / four configured skips / zero not run; all 994 archived passing
+filenames are preserved, with exactly two FAIL-to-PASS changes. Core on Node
+and js_min, structural GC, genuine bit-identical self-build, and bounded
+demos 1--8/HTTP/supplementary checks pass. The unchanged full mishmashvm
+bootstrap produces all eight objects byte-identically to jsshell.
+**Performance is not uniformly preserved against the older full-run
+baseline:** Octane score-ratio geometric mean is 8.11% lower, with significant
+Mandreel, Gameboy, Typescript and zlib decreases requiring investigation.
+This is not a newly paired attribution experiment. See the
+[complete results and qualifications](FULL_VALIDATION_2026-11-14.md).
+
 Latest full audit, 2026-11-13: implementation `75860af`, both standalone
 launchers complete **54 jobs / zero unexpected failures**. Test262 is
 3292/3292 on each; ECMA is 994 pass / 335 known failures, with the exact

@@ -62,6 +62,13 @@ structural GC stress), with its input snapshot absent throughout execution.
 These are not long-duration endurance runs or a new Octane/ECMA performance
 comparison.
 
+The subsequent full validation is also complete: all 15 stock Octane suites
+pass; ECMA preserves all 994 archived passing files and has two additional
+passes (996 passed / 333 failed, including 39 timeouts / four configured
+skips / zero not run). Some Octane scores are substantially below the older
+full-run baseline; this is not a performance-neutral checkpoint. See
+[the full results and outstanding concerns](../FULL_VALIDATION_2026-11-14.md).
+
 Each final object and its `.new` counterpart have the same hash:
 
 - `libc_portable_proto/my_libc.o`:
