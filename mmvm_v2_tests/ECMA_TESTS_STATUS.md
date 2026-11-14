@@ -2,6 +2,36 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Penguin follow-up audit, 2026-11-14, approximately 21:25 UTC
+
+- Current implementation `fa4b98f` (VM fix `3dd1363`), freshly built default
+  executable: **996 passed / 333 failed**, including **39 timeouts**;
+  **4 configured skips / 0 not run**. All 1333 selected files have a status;
+  1329 executed. Process exit 1 reports the existing corpus failures.
+- Harness **607564.339 ms**, process **609.22 s**, peak RSS **463836 KiB**.
+  The preceding 996-pass run took 618.73 s; this observation is 1.54% shorter,
+  not a paired attribution experiment. Harness policy and corpus are unchanged.
+- One additional non-Date test now passes:
+  `ecma_3/Regress/regress-419152.js`, exercising negative numeric array/string
+  properties. The latest documented total remains 996 because the previously
+  current-time-sensitive `ecma/Date/15.9.5.23-6.js` fails again: its fractional
+  millisecond expectations differ from the VM's integer result. Its earlier
+  pass was explicitly not attributed to a Date implementation fix.
+- Recovered historical **test log only**, from the backup checkout, matches
+  the documented `bfc122f` run's totals/subtotals and 665285.013-ms elapsed
+  time. No backup code or executable was used. Log SHA-256:
+  `60e138b23460b4672a744bc5b9b30412a0ea26429aa105b5ed814ec9e1beb8c5`.
+  Exact comparison against that 994-pass record: **994 preserved / 2 gained /
+  0 lost passes / 0 missing statuses**. Gains are `ecma_2/String/split-002.js`
+  (already documented) and `ecma_3/Regress/regress-419152.js` (new).
+- [Tracked per-file statuses](ECMA_TEST_RESULTS.tsv) preserve both this full
+  run and the recovered historical run, sorted by filename. This closes the
+  previous recordkeeping gap: complete per-file results must not live only in
+  disposable artifacts. The latest old 996-pass raw log was not recovered;
+  comparison with it uses its documented two changes, not a claimed raw-log
+  comparison. Future updates should report filename-level gains/losses before
+  replacing the current column, rather than only comparing totals.
+
 ### Full bootstrap compatibility audit, 2026-11-14
 
 - Implementation `8767315`, fresh packaged default executable: **996 passed /
