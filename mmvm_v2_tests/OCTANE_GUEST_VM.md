@@ -1,6 +1,15 @@
 # Octane guest-VM bring-up and performance approach
 
-Latest full audit, 2026-11-13: **all 15 stock suites pass under both js_runner
+Latest complete executable sweep, 2026-11-14 (`fa4b98f`, including Penguin fix
+`3dd1363`): **15/15 stock suites pass**, including RegExp and Mandreel, each
+in a separate serial process with correctness checks enabled. Current scores,
+timing/RSS and both historical launcher baselines are in
+[the serial performance audit](PERFORMANCE_AUDIT_2026-11-14.md). Geometric mean
+is +1.31% against the preceding full sweep, but -9.71% against the November 13
+executable scores; the older regression is unresolved. These are historical
+single observations, not isolated attribution experiments.
+
+Previous full audit, 2026-11-13: **all 15 stock suites pass under both js_runner
 and the packaged executable**, including Mandreel and RegExp. Full current
 scores, elapsed times, executable RSS and comparisons with the November 12
 archive are in [the full VM validation report](FULL_VALIDATION_2026-11-13.md).

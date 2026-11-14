@@ -1,5 +1,19 @@
 # Validation checkpoint, 2026-11-04
 
+Latest serial performance audit, 2026-11-14, approximately 21:15–21:50 UTC:
+implementation `fa4b98f` (including `3dd1363`), freshly built default executable.
+ECMA **996 pass / 333 fail / 39 timeouts / 4 configured skips / 0 not run**:
+one new negative-key regression test passes; a previously time-sensitive Date
+pass fails again, leaving the net total unchanged. Per-file results are now
+[tracked](ECMA_TEST_RESULTS.tsv), not only left in artifacts. All **15 stock
+Octane suites pass**, score-ratio geometric mean **+1.31%** versus the preceding
+full sweep but **-9.71%** versus the older November 13 executable scores
+(-6.90% against that day's different snapshot-launcher scores). Genuine
+self-build **91.77 s**, versus recorded **83.996 s**, a **9.26% regression**.
+Current js_min build **110.82 s**, Node **9.56 s**; all three snapshots are
+byte-identical. Historical comparisons do not isolate causes. See
+[full scores, timing/RSS, provenance and qualifications](PERFORMANCE_AUDIT_2026-11-14.md).
+
 Penguin follow-up, 2026-11-14 (`3dd1363`): unchanged mishmashvm test(16)
 runs for 213.05 seconds, displays the game, accepts movement/undo/reset and
 closes normally (exit 0); test(15) still renders its triangle and closes normally.
