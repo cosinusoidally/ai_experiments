@@ -4,6 +4,30 @@
     function check(condition, message) {
         if (!condition) throw new Error(message);
     }
+    var plain = {label: "object"};
+    check("prefix:" + plain === "prefix:[object Object]" &&
+          plain + 7 === "[object Object]7" &&
+          plain + plain === "[object Object][object Object]",
+          "addition applies ordinary default object conversion on both sides");
+    function conversionCallback() { return 17; }
+    check("callback:" + conversionCallback ===
+          "callback:" + Function.prototype.toString.call(conversionCallback),
+          "function addition preserves the actual function source");
+    var namedArray = [];
+    namedArray[-1] = "saved";
+    namedArray[-1.5] = "fraction";
+    check(namedArray.length === 0 && namedArray[-1] === namedArray["-1"] &&
+          namedArray[-1.5] === "fraction", "negative numeric array keys are named properties");
+    namedArray[-0] = 7;
+    check(namedArray.length === 1 && namedArray[0] === 7, "negative zero remains index zero");
+    var negativeSetter = 0;
+    Object.defineProperty(namedArray, "-2", {
+        get: function () { return negativeSetter; },
+        set: function (value) { negativeSetter = value; }, configurable: true
+    });
+    namedArray[-2] = 19;
+    check(namedArray[-2] === 19 && namedArray.length === 1,
+          "negative numeric keys honor accessor descriptors without changing length");
     var order = [], target = {}, source = {}, key = {};
     key.toString = function () { order.push("key"); return "answer"; };
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];

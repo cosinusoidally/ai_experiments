@@ -129,3 +129,35 @@ run with Node built-ins or under js_min through `node_runner.js`.
 Logs, snapshots and captures are ignored under `artifacts/eval-*`. The existing
 ECMA/Octane performance concerns in the [full earlier validation report](../../FULL_VALIDATION_2026-11-14.md)
 remain outstanding; those long sweeps were not repeated for this CLI task.
+
+## PortableGL Penguin test(16) follow-up
+
+The unchanged game exposed three additional native-runtime gaps, not an SDL
+or PortableGL failure:
+
+- ADD did not perform guarded default object conversion while constructing
+  disabled debug-log arguments. The shared object-operation kernel now handles
+  default ordinary-object/view conversion through the actual class-string
+  operation, alongside the existing array conversion.
+- The game's undo buffer uses `snapshots[-1]`. Negative numeric property names
+  now enter named-property lookup/write with standard numeric string conversion,
+  rather than being rejected as dense-array offsets. Negative fractional keys
+  work too; negative zero remains index zero. Accessors and named properties
+  use the existing descriptor/prototype machinery.
+- A later debug message concatenates the frame callback. Guarded default
+  bytecode-function conversion now uses the function's actual retained source.
+
+Conversion guards inspect the resolved valueOf/toString descriptors and do not
+skip getters or overridden methods. This extends known built-in conversion
+cases; it does not claim the standalone engine implements every custom
+ToPrimitive continuation. No application-specific names, log suppression,
+external-source edits, host-language callbacks or new C helpers are used.
+
+The existing object-operation integration test covers object/function
+concatenation and negative numeric names, including accessors and -0. Initial
+game acceptance ran for 213.05 seconds, observed approximately 30--35 FPS,
+rendered the board/penguin, accepted movement/undo/reset keys and exited zero
+through WM_DELETE_WINDOW. Peak RSS was 703696 KiB; this is a whole-process
+observation, not proof of a small or bounded game allocation footprint.
+Further regression results are recorded below when complete. Temporary logs
+and captures use ignored `artifacts/penguin-*` paths.

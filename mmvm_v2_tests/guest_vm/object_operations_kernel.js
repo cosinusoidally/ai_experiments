@@ -404,6 +404,31 @@
         return arrayBuiltinStringKernel(heapBase, state, target, source, stringSupport);
     }
 
+    /* Guarded default-hint conversion for addition. Do not call or skip user
+     * conversion methods/getters here: those require the semantic call path.
+     * Use the actual built-in class string, including for buffer/view records. */
+    function defaultAdditionPrimitiveKernel(heapBase, state, target, source, stringSupport) {
+        if (valueCellTag(0, source) !== VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, source);
+        var type = recordType(heapBase, object);
+        if (type === HEAP_TYPE_ARRAY) {
+            return arrayDefaultPrimitiveKernel(heapBase, state, target, source, stringSupport);
+        }
+        if (type !== HEAP_TYPE_OBJECT && type !== HEAP_TYPE_BUFFER_VIEW &&
+                type !== HEAP_TYPE_BYTECODE_FUNCTION) return 0;
+        var valueOfKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_VALUE_OF_KEY));
+        var toStringKey = valueCellReference(0, vectorCellAddress(heapBase,
+            stringSupport, RUNTIME_SUPPORT_TO_STRING_KEY));
+        if (dataMethodIntrinsicKernel(heapBase, object, valueOfKey) !== INTRINSIC_OBJECT_VALUE_OF) return 0;
+        if (type === HEAP_TYPE_BYTECODE_FUNCTION) {
+            if (dataMethodIntrinsicKernel(heapBase, object, toStringKey) !== INTRINSIC_FUNCTION_TO_STRING) return 0;
+            return functionToStringKernel(heapBase, target, source);
+        }
+        if (dataMethodIntrinsicKernel(heapBase, object, toStringKey) !== INTRINSIC_OBJECT_TO_STRING) return 0;
+        return objectToStringKernel(heapBase, target, source, stringSupport);
+    }
+
     /* Guarded string-hint conversion for String primitives/wrappers. Do not
      * unwrap an object with a custom/getter toString: its call is observable.
      * A zero result declines conversion without changing the key operand. */
@@ -588,6 +613,7 @@
         dataMethodIntrinsicKernel: dataMethodIntrinsicKernel,
         arrayBuiltinStringKernel: arrayBuiltinStringKernel,
         arrayDefaultPrimitiveKernel: arrayDefaultPrimitiveKernel,
+        defaultAdditionPrimitiveKernel: defaultAdditionPrimitiveKernel,
         propertyStringKeyReferenceKernel: propertyStringKeyReferenceKernel,
         indexedOwnPropertyDescriptorKernel: indexedOwnPropertyDescriptorKernel,
         enumerationKeyVisibleKernel: enumerationKeyVisibleKernel,

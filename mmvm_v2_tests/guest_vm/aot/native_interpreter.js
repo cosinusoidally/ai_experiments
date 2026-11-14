@@ -855,7 +855,11 @@
                 var arrayGetIndex = 0;
                 if (arrayGetKeyTag === VALUE_TAG_INT32) {
                     arrayGetIndex = load32(arrayGetKeyCell + RecordLayout.VALUE_CELL_LOW);
+                    if (arrayGetSupported === 1 && arrayGetIndex < 0) arrayGetSupported = 3;
                 } else if (arrayGetKeyTag === VALUE_TAG_DOUBLE) {
+                    if (arrayGetSupported === 1 && negativeNumericPropertyKeyKernel(arrayGetKeyCell) === 1) {
+                        arrayGetSupported = 3;
+                    } else {
                     arrayGetIndex = toInt32F64(loadNumberF64(
                         arrayGetKeyCell + RecordLayout.VALUE_CELL_LOW, arrayGetKeyTag));
                     setEngineScratchLeft(heapBase, state, arrayGetIndex);
@@ -864,6 +868,7 @@
                             loadI32F64(engineScratchLeftAddress(
                                 heapBase, state))) === 0) {
                         arrayGetSupported = 0;
+                    }
                     }
                 } else if (arrayGetKeyTag === RecordLayout.VALUE_TAG_REFERENCE) {
                     /* A string key selects named lookup only after the
@@ -966,8 +971,8 @@
                     }
                 }
                 if (arrayGetSupported === 3) {
-                    var namedGetKey = propertyStringKeyReferenceKernel(
-                        heapBase, arrayGetKeyCell, stringSupport);
+                    var namedGetKey = propertyNameReferenceKernel(
+                        heapBase, state, arrayGetKeyCell, stringSupport, platformServices);
                     if (namedGetKey === 0) arrayGetSupported = 0;
                 }
                 if (arrayGetSupported <= 2) {
@@ -1449,7 +1454,9 @@
             } else if (opcode === Bytecode.SET_PROPERTY &&
                     valueCellTag(0, bytecodeRegisterCellAddress(0, registerAddress,
                         load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) !==
-                    RecordLayout.VALUE_TAG_REFERENCE) {
+                    RecordLayout.VALUE_TAG_REFERENCE &&
+                    negativeNumericPropertyKeyKernel(bytecodeRegisterCellAddress(0, registerAddress,
+                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) === 0) {
                 /* Numeric indexing stays on the dense/typed-array path.
                  * Reference keys share the named-write dispatch below. */
                 var arraySetObjectIndex = load32(
@@ -1743,15 +1750,12 @@
                 if (load32(setPropertyObjectCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
                     setPropertyOperandsValid = 0;
                 }
-                if (load32(setPropertyKeyCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
-                    setPropertyOperandsValid = 0;
-                }
                 if (setPropertyOperandsValid === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
-                var setPropertyNamedKey = propertyStringKeyReferenceKernel(
-                    heapBase, setPropertyKeyCell, stringSupport);
+                var setPropertyNamedKey = propertyNameReferenceKernel(
+                    heapBase, state, setPropertyKeyCell, stringSupport, platformServices);
                 if (setPropertyNamedKey === 0) {
                     return unsupportedExitKernel(heapBase, state, frame, pc,
                         opcode, initialBudget - budget);
@@ -2030,16 +2034,16 @@
                     if (integerArithmetic === 0) {
                     if (opcode === Bytecode.ADD) {
                         if (arithmeticLeftTag === RecordLayout.VALUE_TAG_REFERENCE &&
-                            recordType(heapBase, valueCellReference(0, arithmeticLeft)) === RecordLayout.HEAP_TYPE_ARRAY) {
-                            if (arrayDefaultPrimitiveKernel(heapBase, state,
+                            recordType(heapBase, valueCellReference(0, arithmeticLeft)) !== RecordLayout.HEAP_TYPE_STRING) {
+                            if (defaultAdditionPrimitiveKernel(heapBase, state,
                                 engineScratchLeftAddress(heapBase, state), arithmeticLeft, stringSupport) === 1) {
                                 arithmeticLeft = engineScratchLeftAddress(heapBase, state);
                                 arithmeticLeftTag = RecordLayout.VALUE_TAG_REFERENCE;
                             }
                         }
                         if (arithmeticRightTag === RecordLayout.VALUE_TAG_REFERENCE &&
-                            recordType(heapBase, valueCellReference(0, arithmeticRight)) === RecordLayout.HEAP_TYPE_ARRAY) {
-                            if (arrayDefaultPrimitiveKernel(heapBase, state,
+                            recordType(heapBase, valueCellReference(0, arithmeticRight)) !== RecordLayout.HEAP_TYPE_STRING) {
+                            if (defaultAdditionPrimitiveKernel(heapBase, state,
                                 engineScratchRightAddress(heapBase, state), arithmeticRight, stringSupport) === 1) {
                                 arithmeticRight = engineScratchRightAddress(heapBase, state);
                                 arithmeticRightTag = RecordLayout.VALUE_TAG_REFERENCE;
@@ -10791,6 +10795,30 @@
         return 1;
     }
 
+    /* Negative numbers are names, not dense storage offsets. Preserve -0's
+     * canonical index zero. Other existing key conversions retain their
+     * normal dispatch; this classification never invokes user code. */
+    function negativeNumericPropertyKeyKernel(cell) {
+        var tag = valueCellTag(0, cell);
+        if (tag === VALUE_TAG_INT32) return valueCellInt32(0, cell) < 0;
+        if (tag !== VALUE_TAG_DOUBLE) return 0;
+        var high = valueCellDoubleHigh(0, cell);
+        if (high >= 0) return 0;
+        if ((high & IEEE754_ABSOLUTE_MASK) === 0 && valueCellDoubleLow(0, cell) === 0) return 0;
+        return 1;
+    }
+
+    function propertyNameReferenceKernel(heapBase, state, keyCell, stringSupport, platformServices) {
+        var tag = valueCellTag(0, keyCell);
+        if (tag === VALUE_TAG_INT32 || tag === VALUE_TAG_DOUBLE) {
+            var temporary = engineScratchLeftAddress(heapBase, state);
+            if (numberCellToStringKernel(heapBase, state, temporary,
+                    keyCell, tag, platformServices) !== 1) return 0;
+            return valueCellReference(0, temporary);
+        }
+        return propertyStringKeyReferenceKernel(heapBase, keyCell, stringSupport);
+    }
+
     function numberCellToStringKernel(
             heapBase, state, intrinsicTarget, numberCell, numberTag,
             platformServices) {
@@ -18465,6 +18493,8 @@
             numericOwnPropertyEntryKernel: numericOwnPropertyEntryKernel,
             numericStringKeyMatchesKernel: numericStringKeyMatchesKernel,
             numberCellToStringKernel: numberCellToStringKernel,
+            negativeNumericPropertyKeyKernel: negativeNumericPropertyKeyKernel,
+            propertyNameReferenceKernel: propertyNameReferenceKernel,
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
             integerRadixStringKernel: integerRadixStringKernel,
