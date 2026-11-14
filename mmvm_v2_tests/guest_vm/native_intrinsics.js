@@ -100,8 +100,9 @@
                       OBJECT_PREVENT_EXTENSIONS: 133,
                       OBJECT_IS_EXTENSIBLE: 134,
                       OBJECT_GET_OWN_PROPERTY_NAMES: 135,
-                      OBJECT_INDEXED_VIEW_LENGTH: 136};
-    Intrinsics.LAST_ID = Intrinsics.OBJECT_INDEXED_VIEW_LENGTH;
+                      OBJECT_INDEXED_VIEW_LENGTH: 136,
+                      UINT8_CLAMPED_ARRAY_CONSTRUCTOR: 137};
+    Intrinsics.LAST_ID = Intrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR;
     /* A non-constructible native-shaped public function delegates to guest
      * bytecode through a traced closure vector, never a host callback. */
     Intrinsics.GuestBuiltinLayout = {IMPLEMENTATION: 0, LENGTH: 1};
@@ -220,6 +221,7 @@
                 index <= Intrinsics.LAST_ERROR_CONSTRUCTOR; index++) counts[index] = 0;
         for (index = Intrinsics.UINT8_ARRAY_CONSTRUCTOR;
                 index <= Intrinsics.INT16_ARRAY_CONSTRUCTOR; index++) counts[index] = 0;
+        counts[Intrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR] = 0;
         for (index = Intrinsics.DATE_GET_DATE;
                 index <= Intrinsics.DATE_GET_DAY; index++) counts[index] = 0;
         assign([Intrinsics.MATH_ATAN2, Intrinsics.STRING_REPLACE, Intrinsics.FUNCTION_APPLY,

@@ -215,6 +215,7 @@
     RuntimeSupportLayout.WRITE_NON_WRITABLE_MESSAGE = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.WRITE_NOT_EXTENSIBLE_MESSAGE = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.DELETE_NON_CONFIGURABLE_MESSAGE = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.UINT8_CLAMPED_ARRAY_PROTOTYPE = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE;
     var INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
     var INTRINSIC_GUEST_BUILTIN = NativeIntrinsics.GUEST_BUILTIN;
@@ -337,6 +338,16 @@
             BUFFER_KIND_FLOAT64: HeapRecords.BufferKinds.FLOAT64,
             BUFFER_KIND_INT8: HeapRecords.BufferKinds.INT8,
             BUFFER_KIND_INT16: HeapRecords.BufferKinds.INT16,
+            BUFFER_KIND_UINT8_CLAMPED: HeapRecords.BufferKinds.UINT8_CLAMPED,
+            CLAMP_BYTE_MAX: HeapRecords.TypedArrayConstants.CLAMP_MAX,
+            CLAMP_BYTE_MAX_HIGH: Binary64.encode(HeapRecords.TypedArrayConstants.CLAMP_MAX).high,
+            CLAMP_HALF_HIGH: Binary64.encode(HeapRecords.TypedArrayConstants.CLAMP_HALF).high,
+            RANDOM_SHIFT_LEFT_FIRST: 13,
+            RANDOM_SHIFT_RIGHT: 17,
+            RANDOM_SHIFT_LEFT_SECOND: 5,
+            RANDOM_FALLBACK_SEED: 0x6d2b79f5,
+            RANDOM_OUTPUT_SHIFT: 2,
+            RANDOM_OUTPUT_SCALE: 1 << 30,
             PROPERTY_VALUE_REFERENCE: recordConstants.PROPERTY_VALUE + ValueCells.KernelConstants.VALUE_CELL_LOW,
             DEFAULT_PROPERTY_ATTRIBUTES: HeapRecords.Attributes.DEFAULT,
             PROPERTY_ATTRIBUTE_WRITABLE: HeapRecords.Attributes.WRITABLE,
@@ -1296,6 +1307,7 @@
                         if (indexedViewKind === BUFFER_KIND_NATIVE) indexedByteView = 1;
                         if (indexedViewKind === BUFFER_KIND_UINT8) indexedByteView = 1;
                         if (indexedViewKind === BUFFER_KIND_INT8) indexedByteView = 1;
+                        if (indexedViewKind === BUFFER_KIND_UINT8_CLAMPED) indexedByteView = 1;
                         if (indexedByteView === 1) {
                             indexedViewValue = loadRaw8(
                                 indexedViewAddress + arrayGetIndex);
@@ -1631,6 +1643,7 @@
                                         arraySetIndex + 1);
                     }
                 } else if (arraySetSupported === 2) {
+                    var indexedSetViewKind = bufferViewKind(heapBase, arraySetObject);
                     var indexedSetBufferLength = bufferViewLength(
                         heapBase, arraySetObject);
                     var indexedSetBufferValid = 1;
@@ -1648,7 +1661,8 @@
                     }
                     var indexedSetBufferTag = load32(arraySetSource);
                     if (indexedSetBufferTag !== VALUE_TAG_INT32) {
-                        if (indexedSetBufferTag !== VALUE_TAG_DOUBLE) {
+                        if (indexedSetBufferTag !== VALUE_TAG_DOUBLE &&
+                                indexedSetViewKind !== BUFFER_KIND_UINT8_CLAMPED) {
                             indexedSetBufferValid = 0;
                         }
                     }
@@ -1657,10 +1671,12 @@
                             heapBase, state, frame, pc, opcode, (initialBudget - budget));
                     }
                     if (indexedSetBufferValid === 1) {
-                        var indexedSetViewKind = bufferViewKind(
-                            heapBase, arraySetObject);
                         var indexedSetValue = 0;
-                        if (indexedSetBufferTag === VALUE_TAG_INT32) {
+                        if (indexedSetViewKind === BUFFER_KIND_UINT8_CLAMPED) {
+                            indexedSetValue = clampedByteValueKernel(arraySetSource);
+                            if (indexedSetValue < 0) return unsupportedExitKernel(
+                                heapBase, state, frame, pc, opcode, initialBudget - budget);
+                        } else if (indexedSetBufferTag === VALUE_TAG_INT32) {
                             indexedSetValue = valueCellInt32(0, arraySetSource);
                         } else indexedSetValue = doubleCellToInt32Kernel(arraySetSource);
                         var indexedSetAddress = indexedSetBufferPointer +
@@ -1669,6 +1685,7 @@
                         if (indexedSetViewKind === BUFFER_KIND_NATIVE) indexedSetByteView = 1;
                         if (indexedSetViewKind === BUFFER_KIND_UINT8) indexedSetByteView = 1;
                         if (indexedSetViewKind === BUFFER_KIND_INT8) indexedSetByteView = 1;
+                        if (indexedSetViewKind === BUFFER_KIND_UINT8_CLAMPED) indexedSetByteView = 1;
                         if (indexedSetByteView === 1) {
                             storeRaw8(indexedSetAddress + arraySetIndex,
                                       indexedSetValue);
@@ -6138,6 +6155,7 @@
             else if (intrinsicId === NativeIntrinsics.BUFFER_CONSTRUCTOR) constructible = 1;
             else if (intrinsicId === NativeIntrinsics.OBJECT_CONSTRUCTOR) constructible = 1;
             else if (intrinsicId === NativeIntrinsics.ARRAY_BUFFER_CONSTRUCTOR) constructible = 1;
+            else if (intrinsicId === NativeIntrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR) constructible = 1;
             if (intrinsicId >= INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
                 if (intrinsicId <= INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
                     constructible = 1;
@@ -6562,6 +6580,8 @@
         var isTypedArrayConstructor = 0;
         if (intrinsicId === NativeIntrinsics.ARRAY_BUFFER_CONSTRUCTOR) {
             isTypedArrayConstructor = 1;
+        } else if (intrinsicId === NativeIntrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR) {
+            isTypedArrayConstructor = 1;
         } else if (intrinsicId >=
                    INTRINSIC_FIRST_TYPED_ARRAY_CONSTRUCTOR) {
             if (intrinsicId <= INTRINSIC_LAST_TYPED_ARRAY_CONSTRUCTOR) {
@@ -6958,13 +6978,21 @@
         }
         if (intrinsicHandled === 0) {
         if (intrinsicId === NativeIntrinsics.MATH_RANDOM) {
-            /* Math.random has implementation-defined seeding and sequence.
-             * Hash the monotonically increasing guest instruction count so
-             * standalone execution needs no host-owned PRNG state. */
-            var randomValue = (instructions * 1103515245 + 12345) &
-                1073741823;
-            setEngineScratchLeft(heapBase, state, randomValue);
-            setEngineScratchRight(heapBase, state, 1073741824);
+            /* xorshift32 state belongs to this guest engine. Lazy seeding
+             * reads the process clock through direct FFI, not during snapshot
+             * construction. Sampling frequency must not determine the stream. */
+            var randomValue = engineRandomState(heapBase, state);
+            if (randomValue === 0) {
+                randomValue = nativeCollectorClockKernel(heapBase, state, platformServices) ^
+                    frame ^ RANDOM_FALLBACK_SEED;
+                if (randomValue === 0) randomValue = RANDOM_FALLBACK_SEED;
+            }
+            randomValue = randomValue ^ (randomValue << RANDOM_SHIFT_LEFT_FIRST);
+            randomValue = randomValue ^ (randomValue >>> RANDOM_SHIFT_RIGHT);
+            randomValue = randomValue ^ (randomValue << RANDOM_SHIFT_LEFT_SECOND);
+            setEngineRandomState(heapBase, state, randomValue);
+            setEngineScratchLeft(heapBase, state, randomValue >>> RANDOM_OUTPUT_SHIFT);
+            setEngineScratchRight(heapBase, state, RANDOM_OUTPUT_SCALE);
             store32(intrinsicTarget, VALUE_TAG_DOUBLE);
             storeF64(intrinsicTarget + RecordLayout.VALUE_CELL_LOW, divideF64(
                 loadI32F64(engineScratchLeftAddress(heapBase, state)),
@@ -8098,9 +8126,11 @@
         var sourceVector = 0;
         var sourceLength = 0;
         var sourcePointer = 0;
+        var clampSignedBytes = 0;
         if (recordType(heapBase, sourceArray) === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
             var sourceKind = bufferViewKind(heapBase, sourceArray);
             if (sourceKind === BUFFER_KIND_NATIVE) sourceKind = BUFFER_KIND_UINT8;
+            if (targetKind === BUFFER_KIND_UINT8_CLAMPED && sourceKind === BUFFER_KIND_INT8) clampSignedBytes = 1;
             /* Signed and unsigned byte views have identical set-copy bits:
              * numeric conversion modulo 256 preserves every source byte.
              * Wider cross-kind conversions are not raw-memory copies. */
@@ -8161,6 +8191,16 @@
                     copyIndex = copyIndex + 1;
                 }
             }
+            /* The overlap-safe copy preserves the original source first.
+             * Converting signed bytes to clamped bytes then maps negatives to
+             * zero; unsigned/clamped byte copies retain their exact bits. */
+            if (clampSignedBytes) {
+                var clampIndex = 0;
+                while (clampIndex < sourceLength) {
+                    if (loadRaw8(copyTarget + clampIndex) >= 128) storeRaw8(copyTarget + clampIndex, 0);
+                    clampIndex = clampIndex + 1;
+                }
+            }
             setValueCellUndefined(intrinsicTarget);
             return 1;
         }
@@ -8169,11 +8209,17 @@
             var elementCell = vectorCellAddress(
                 heapBase, sourceVector, index);
             var elementTag = valueCellTag(0, elementCell);
+            var value = 0;
+            if (targetKind === BUFFER_KIND_UINT8_CLAMPED) {
+                value = clampedByteValueKernel(elementCell);
+                if (value < 0) return 0;
+            } else {
             if (elementTag !== VALUE_TAG_INT32) {
                 if (elementTag !== VALUE_TAG_DOUBLE) return 0;
             }
-            var value = toInt32F64(loadNumberF64(
+            value = toInt32F64(loadNumberF64(
                 elementCell + RecordLayout.VALUE_CELL_LOW, elementTag));
+            }
             var destination = pointer + (targetOffset + index) * bytes;
             storeRaw8(destination, value);
             if (bytes > 1) storeRaw8(destination + 1, value >>> 8);
@@ -8805,6 +8851,7 @@
     }
 
     function typedArrayElementBytesKernel(kind) {
+        if (kind === BUFFER_KIND_UINT8_CLAMPED) return 1;
         if (kind === BUFFER_KIND_UINT8) return 1;
         if (kind === BUFFER_KIND_INT8) return 1;
         if (kind === BUFFER_KIND_UINT16) return 2;
@@ -8925,7 +8972,44 @@
         return length;
     }
 
+    /* ToUint8Clamp uses round-to-nearest, ties-to-even, not ToInt32. Decode
+     * the bounded positive double directly; no host float service is needed. */
+    function clampedByteValueKernel(cell) {
+        var tag = valueCellTag(0, cell);
+        if (tag === VALUE_TAG_INT32) {
+            var value = valueCellInt32(0, cell);
+            if (value < 0) return 0;
+            if (value > CLAMP_BYTE_MAX) return CLAMP_BYTE_MAX;
+            return value;
+        }
+        if (tag === VALUE_TAG_TRUE) return 1;
+        if (tag === VALUE_TAG_FALSE || tag === VALUE_TAG_NULL || tag === VALUE_TAG_UNDEFINED) return 0;
+        if (tag !== VALUE_TAG_DOUBLE) return -1;
+        var high = valueCellDoubleHigh(0, cell), low = valueCellDoubleLow(0, cell);
+        if (high < 0) return 0;
+        if ((high & IEEE754_EXPONENT_MASK) === IEEE754_EXPONENT_MASK) {
+            if ((high & IEEE754_FRACTION_HIGH_MASK) !== 0 || low !== 0) return 0;
+        }
+        if (high >= CLAMP_BYTE_MAX_HIGH) return CLAMP_BYTE_MAX;
+        if (high < CLAMP_HALF_HIGH) return 0;
+        var exponent = (high >>> IEEE754_EXPONENT_SHIFT) - IEEE754_EXPONENT_BIAS;
+        var shift = IEEE754_EXPONENT_SHIFT - exponent;
+        var significand = (high & IEEE754_FRACTION_HIGH_MASK) | IEEE754_SIGNIFICAND_HIGH_BIT;
+        var lower = significand >>> shift;
+        var remainder = significand & ((1 << shift) - 1);
+        var half = 1 << (shift - 1);
+        if (remainder > half ||
+                (remainder === half && (low !== 0 || (lower & 1) !== 0))) return lower + 1;
+        return lower;
+    }
+
     function writeTypedArrayElementKernel(pointer, kind, elementCell) {
+        if (kind === BUFFER_KIND_UINT8_CLAMPED) {
+            var clamped = clampedByteValueKernel(elementCell);
+            if (clamped < 0) return 0;
+            storeRaw8(pointer, clamped);
+            return 1;
+        }
         var tag = valueCellTag(0, elementCell);
         var integerValue = 0;
         if (tag === VALUE_TAG_INT32) {
@@ -8979,7 +9063,9 @@
             heapBase, state, targetCell, registerAddress, argumentsVector,
             argumentCount, intrinsicId, stringSupport) {
         var prototypeIndex = RuntimeSupportLayout.ARRAY_BUFFER_PROTOTYPE;
-        if (intrinsicId !== NativeIntrinsics.ARRAY_BUFFER_CONSTRUCTOR) {
+        if (intrinsicId === NativeIntrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR) {
+            prototypeIndex = RuntimeSupportLayout.UINT8_CLAMPED_ARRAY_PROTOTYPE;
+        } else if (intrinsicId !== NativeIntrinsics.ARRAY_BUFFER_CONSTRUCTOR) {
             prototypeIndex = RuntimeSupportLayout.TYPED_ARRAY_PROTOTYPE_BASE +
                 (intrinsicId - NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE);
         }
@@ -9004,6 +9090,7 @@
         }
 
         var kind = intrinsicId - NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE;
+        if (intrinsicId === NativeIntrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR) kind = BUFFER_KIND_UINT8_CLAMPED;
         var elementBytes = typedArrayElementBytesKernel(kind);
         if (elementBytes === 0) return 0;
         var elementLength = 0;
@@ -18457,6 +18544,7 @@
             setURIStringCodeUnitKernel: setURIStringCodeUnitKernel,
             appendURIPercentByteKernel: appendURIPercentByteKernel,
             writeTypedArrayElementKernel: writeTypedArrayElementKernel,
+            clampedByteValueKernel: clampedByteValueKernel,
             unsupportedDiagnosticExitKernel: unsupportedDiagnosticExitKernel,
             unsupportedExitKernel: unsupportedExitKernel,
             integerAddSubtractKernel: integerAddSubtractKernel,
@@ -18996,6 +19084,9 @@
                     typedArrayPrototypeKind].heapAddress);
             typedArrayPrototypeKind++;
         }
+        runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(
+            this.stringSupportAddress, RuntimeSupportLayout.UINT8_CLAMPED_ARRAY_PROTOTYPE),
+            runtime.typedArraySupport.prototypes[HeapRecords.BufferKinds.UINT8_CLAMPED].heapAddress);
         runtime.writeHeapValue(runtime.heapRecords.vectorCell(
             this.stringSupportAddress, RuntimeSupportLayout.EVAL_COMPILER),
             undefined);

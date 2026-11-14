@@ -130,6 +130,7 @@
             "load(\"node_compat/fs.js\");",
             "load(\"node_compat/http.js\");",
             "load(\"guest_vm/shell_ctypes.js\");",
+            "load(\"guest_vm/shell_command_line.js\");",
             "var GuestStandaloneFrontend = require(" +
                 "\"./guest_vm/self_hosted_frontend.js\");",
             "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);",

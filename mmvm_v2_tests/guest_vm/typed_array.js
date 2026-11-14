@@ -29,6 +29,15 @@
     }
 
     var Kinds = HeapRecords.BufferKinds;
+    var Clamp = HeapRecords.TypedArrayConstants;
+
+    function clampByte(value) {
+        if (!(value > 0)) return 0;
+        if (value >= Clamp.CLAMP_MAX) return Clamp.CLAMP_MAX;
+        var lower = Math.floor(value), fraction = value - lower;
+        return fraction > Clamp.CLAMP_HALF ||
+            (fraction === Clamp.CLAMP_HALF && (lower & 1)) ? lower + 1 : lower;
+    }
 
     var Descriptions = [
         null, null,
@@ -39,7 +48,8 @@
         {name: "Float32Array", bytes: 4, kind: Kinds.FLOAT32},
         {name: "Float64Array", bytes: 8, kind: Kinds.FLOAT64},
         {name: "Int8Array", bytes: 1, kind: Kinds.INT8},
-        {name: "Int16Array", bytes: 2, kind: Kinds.INT16}
+        {name: "Int16Array", bytes: 2, kind: Kinds.INT16},
+        {name: "Uint8ClampedArray", bytes: 1, kind: Kinds.UINT8_CLAMPED}
     ];
 
     function subarrayCallback(receiver, args) {
@@ -110,6 +120,7 @@
         }
         this.installTypedConstructor(Descriptions[Kinds.INT8]);
         this.installTypedConstructor(Descriptions[Kinds.INT16]);
+        this.installTypedConstructor(Descriptions[Kinds.UINT8_CLAMPED]);
     };
 
     TypedArraySupport.prototype.installTypedConstructor = function (description) {
@@ -121,8 +132,10 @@
         this.runtime.setProperty(viewPrototype, "set",
             this.makeNative(description.name + ".prototype.set",
                 setCallback, NativeIntrinsics.TYPED_ARRAY_SET));
-        var constructor = this.makeNative(description.name, constructorCallback,
-            NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE + description.kind);
+        var intrinsic = description.kind === Kinds.UINT8_CLAMPED ?
+            NativeIntrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR :
+            NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE + description.kind;
+        var constructor = this.makeNative(description.name, constructorCallback, intrinsic);
         constructor.typedArrayKind = description.kind;
         constructor.constructCallback = constructorConstructCallback;
         this.runtime.setProperty(constructor, "prototype", viewPrototype);
@@ -247,7 +260,7 @@
         }
         var memory = this.runtime.linearHeap.memory;
         var address = this.dataAddress(view, index);
-        if (description.kind === Kinds.UINT8) return memory.readU8Trusted(address);
+        if (description.kind === Kinds.UINT8 || description.kind === Kinds.UINT8_CLAMPED) return memory.readU8Trusted(address);
         if (description.kind === Kinds.INT8) {
             var int8 = memory.readU8Trusted(address);
             return int8 & 128 ? int8 - 256 : int8;
@@ -280,7 +293,9 @@
         var memory = this.runtime.linearHeap.memory;
         var address = this.dataAddress(view, index);
         value = Number(value);
+        if (description.kind === Kinds.UINT8_CLAMPED) value = clampByte(value);
         if (description.kind === Kinds.UINT8 ||
+            description.kind === Kinds.UINT8_CLAMPED ||
             description.kind === Kinds.INT8) {
             memory.writeU8Trusted(address, value & 255);
         } else if (description.kind === Kinds.UINT16 ||
@@ -298,6 +313,7 @@
     /* Embedding fallback only. Native guest execution uses the same backing
      * pointer directly; Node's inline emulation remains unchanged. */
     TypedArraySupport.prototype.readExternal = function (records, backing, offset, kind) {
+        if (kind === Kinds.UINT8_CLAMPED) return records.readBufferByte(backing, offset);
         if (kind === Kinds.UINT8 || kind === Kinds.INT8) {
             var octet = records.readBufferByte(backing, offset);
             return kind === Kinds.INT8 && (octet & 128) ? octet - 256 : octet;
@@ -315,7 +331,8 @@
     };
 
     TypedArraySupport.prototype.writeExternal = function (records, backing, offset, kind, value) {
-        if (kind === Kinds.UINT8 || kind === Kinds.INT8) {
+        if (kind === Kinds.UINT8_CLAMPED) value = clampByte(value);
+        if (kind === Kinds.UINT8 || kind === Kinds.INT8 || kind === Kinds.UINT8_CLAMPED) {
             records.writeBufferByte(backing, offset, value & 255);
         } else if (kind === Kinds.UINT16 || kind === Kinds.INT16) {
             records.writeBufferByte(backing, offset, value & 255);

@@ -39,6 +39,13 @@ validate_context_demo() {
 run_node_tests() {
     echo "guest VM host: node ($node_binary)"
     "$node_binary" guest_vm/tests/run_tests.js
+    eval_output=$("$node_binary" guest_runner.js -e 'var cliValue=40;' \
+        -e 'cliValue+=2;print("command-line eval: "+cliValue);' \
+        -f guest_vm/tests/standalone_alternate_program.js)
+    case "$eval_output" in
+        *"command-line eval: 42"*"Alternate standalone workload"*) ;;
+        *) echo "Node guest command-line actions failed: $eval_output" >&2; exit 1 ;;
+    esac
     node_demo1_help_output=$("$node_binary" ./guest_runner.js demo1.js --help)
     case "$node_demo1_help_output" in
         *"usage: node demo1.js"*"--size WIDTHxHEIGHT"*) ;;
@@ -64,6 +71,14 @@ run_node_tests() {
 
 run_js_min_tests() {
     echo "guest VM host: js_min ($js_min_binary)"
+    eval_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$js_min_binary" guest_runner.js --vm-native \
+        -e 'var cliValue=40;' -e 'cliValue+=2;print("command-line eval: "+cliValue);' \
+        -f guest_vm/tests/standalone_alternate_program.js)
+    case "$eval_output" in
+        *"command-line eval: 42"*"Alternate standalone workload"*) ;;
+        *) echo "js_min guest command-line actions failed: $eval_output" >&2; exit 1 ;;
+    esac
     LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$js_min_binary" guest_vm/tests/run_tests.js
     hello_output=$(LD_LIBRARY_PATH="$firefox_library_directory${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \

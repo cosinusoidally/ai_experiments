@@ -319,3 +319,10 @@ pointers and arithmetic/FFI support. These are not public JS objects. Named
 accessors and layout exports connect portable code, kernel code, collector
 and snapshot bootstrap. Changing an edge or layout requires updating all
 four, not just making the dispatch loop compile.
+
+Contract 107 appends a scalar random-stream word to `ENGINE_STATE`. It is
+neither a reference nor a GC edge. Native Math.random lazily seeds it via the
+existing direct-FFI clock service and advances xorshift32 state. No PRNG state
+lives in the outer host VM. Untouched standalone build state remains unseeded,
+so runtime seeding does not introduce clock/environment data into snapshots.
+See [shell/SDL bring-up](shell.md) for Uint8ClampedArray's additional view kind.

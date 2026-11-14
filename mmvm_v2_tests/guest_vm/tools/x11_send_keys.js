@@ -2,6 +2,7 @@
  * profiling. Run with Node, or through node_runner.js under js_min.exe:
  *
  *   node guest_vm/tools/x11_send_keys.js WINDOW_ID KEYCODE...
+ *   node guest_vm/tools/x11_send_keys.js WINDOW_ID --close
  *
  * WINDOW_ID may be decimal or hexadecimal. KEYCODE is an X11 physical
  * keycode; the usual Xorg values are 9 for Escape and 42 for G. */
@@ -98,8 +99,10 @@
     }
     var windowId = Number(process.argv[2]);
     if (!(windowId > 0)) fail("invalid window id");
+    var closeMode = process.argv[3] === "--close";
+    if (closeMode && process.argv.length !== 4) fail("--close takes no keycodes");
     var keycodes = [];
-    for (var argumentIndex = 3; argumentIndex < process.argv.length;
+    for (var argumentIndex = closeMode ? process.argv.length : 3; argumentIndex < process.argv.length;
          argumentIndex++) {
         var keycode = Number(process.argv[argumentIndex]);
         if (!(keycode > 0 && keycode < 256 && keycode === Math.floor(keycode))) {
@@ -112,15 +115,44 @@
     var socket = net.createConnection(display.socketPath);
     var incoming = allocateBuffer(0);
     var setupDone = false;
+    var closeAtoms = [];
+    function internAtom(name) {
+        var request = allocateBuffer(8 + padded4(name.length));
+        request[0] = 16; // InternAtom
+        request.writeUInt16LE(request.length / 4, 2);
+        request.writeUInt16LE(name.length, 4);
+        for (var index = 0; index < name.length; index++) request[8 + index] = name.charCodeAt(index);
+        return request;
+    }
+    function consumeCloseReplies() {
+        while (incoming.length >= 32 && closeAtoms.length < 2) {
+            if (incoming[0] !== 1) fail("InternAtom request failed");
+            closeAtoms.push(incoming.readUInt32LE(8));
+            incoming = incoming.slice(32);
+        }
+        if (closeAtoms.length !== 2) return;
+        var request = allocateBuffer(44);
+        request[0] = 25; // SendEvent to the client, not XKillClient
+        request.writeUInt16LE(11, 2);
+        request.writeUInt32LE(windowId, 4);
+        request[12] = 33; // ClientMessage
+        request[13] = 32; // data format
+        request.writeUInt32LE(windowId, 16);
+        request.writeUInt32LE(closeAtoms[0], 20); // WM_PROTOCOLS
+        request.writeUInt32LE(closeAtoms[1], 24); // WM_DELETE_WINDOW
+        socket.write(request);
+        setTimeout(function () { socket.end(); }, 100);
+    }
     socket.on("connect", function () {
         socket.write(setupRequest(loadAuthority(display.number)));
     });
     socket.on("data", function (chunk) {
-        if (setupDone) return;
+        if (setupDone && !closeMode) return;
         var combined = allocateBuffer(incoming.length + chunk.length);
         incoming.copy(combined, 0);
         chunk.copy(combined, incoming.length);
         incoming = combined;
+        if (setupDone) { consumeCloseReplies(); return; }
         if (incoming.length < 8) return;
         var setupLength = 8 + incoming.readUInt16LE(6) * 4;
         if (incoming.length < setupLength) return;
@@ -131,6 +163,13 @@
         var screenOffset = body + 32 + padded4(vendorLength) + formatCount * 8;
         var rootId = incoming.readUInt32LE(screenOffset);
         setupDone = true;
+        if (closeMode) {
+            incoming = incoming.slice(setupLength);
+            socket.write(internAtom("WM_PROTOCOLS"));
+            socket.write(internAtom("WM_DELETE_WINDOW"));
+            consumeCloseReplies();
+            return;
+        }
         var delay = 0;
         for (var index = 0; index < keycodes.length; index++) {
             (function (sentKeycode, sentDelay) {

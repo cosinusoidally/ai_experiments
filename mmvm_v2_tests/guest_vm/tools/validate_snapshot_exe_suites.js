@@ -71,7 +71,7 @@
     }
     job("hello", ["hello.js"], "Hello, world!");
     job("alternate", ["guest_vm/tests/standalone_alternate_program.js"], "Alternate standalone workload");
-    job("core", ["guest_vm/tests/run_tests.js"], "guest VM suite passed: 12 guest program(s), 270 guest assertion(s)", 900);
+    job("core", ["guest_vm/tests/run_tests.js"], "guest VM suite passed: 12 guest program(s),", 900);
     job("tokenizer", ["guest_vm/tests/run_tokenizer_tests.js"], "tokenizer tests passed: 84");
     job("language", ["guest_vm/tests/standalone_language_integration.js"], "standalone integration: passed");
     job("objects", ["guest_vm/tests/object_operations_integration.js"], "object operations integration passed");

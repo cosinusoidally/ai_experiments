@@ -6,7 +6,7 @@ function guestRunnerRequestsSnapshot(runnerArguments) {
     while (index < runnerArguments.length) {
         var option = runnerArguments[index++];
         if (option === "--snapshot") return true;
-        if (option === "--with-snapshot" ||
+        if (option === "-e" || option === "-f" || option === "--with-snapshot" ||
             option === "--vm-max-heap-mib" ||
             option === "--vm-profile-duration") index++;
         else if (option.charAt(0) !== "-") return false;
@@ -94,6 +94,17 @@ for (var guestRunnerOptionIndex = 0;
     if (guestRunnerFoundProgram) {
         guestRunnerProgramArguments.push(
             guestRunnerArguments[guestRunnerOptionIndex]);
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "-e" ||
+               guestRunnerArguments[guestRunnerOptionIndex] === "-f") {
+        var guestSourceOption = guestRunnerArguments[guestRunnerOptionIndex];
+        if (++guestRunnerOptionIndex >= guestRunnerArguments.length) {
+            throw new Error(guestSourceOption + " requires an argument");
+        }
+        guestRunnerProgramArguments.push(guestSourceOption,
+            guestRunnerArguments[guestRunnerOptionIndex]);
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--") {
+        guestRunnerProgramArguments.push("--");
+        guestRunnerFoundProgram = true;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "-g") {
         guestRunnerKernelDebug = true;
         guestRunnerNative = true;
@@ -190,7 +201,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-profile-duration milliseconds] " +
                      "[--vm-native] [--vm-predecode] [-g] [-O0] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] " +
-                     "[program.js]";
+                     "[-e source] [-f file] [program.js [arguments...]]";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
     if (guestRunnerIsNode) process.exit(2);
@@ -200,7 +211,15 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
 if (guestRunnerKernelDebug && (!guestRunnerSnapshot || guestRunnerWithSnapshot)) {
     throw new Error("-g requires --snapshot and cannot use --with-snapshot");
 }
-var guestProgramPath = guestRunnerArguments[0];
+var guestRunnerCommandLine;
+if (guestRunnerIsNode) {
+    guestRunnerCommandLine = require("./guest_vm/shell_command_line.js");
+} else {
+    load("guest_vm/shell_command_line.js");
+    guestRunnerCommandLine = GuestShellCommandLine;
+}
+var guestRunnerCommand = guestRunnerCommandLine.parse(guestRunnerArguments);
+var guestProgramPath = guestRunnerCommand.programName;
 var guestProgramSource;
 if (guestRunnerSnapshot) {
     var guestRunnerSourceTiming = "guest VM source loading: " +
@@ -337,52 +356,61 @@ try {
         }
     }
 
-    if (guestProgramPath) {
+    if (guestRunnerCommand.actions.length) {
         if (guestRunnerGCStress) guestProgramVM.runtime.gcThreshold = 256;
         if (guestRunnerGCStress && guestProgramVM.runtime.nativeInterpreter) {
             guestProgramVM.runtime.heapRecords.setEngineGCStressInterval(
                 guestProgramVM.runtime.nativeInterpreter.stateAddress, true);
         }
-        guestNodeEnvironment.setRunnerArguments(guestRunnerArguments);
-        /* Application I/O is intentionally after the snapshot boundary. */
-        if (guestRunnerIsNode) {
-            guestProgramSource = require("fs").readFileSync(
-                guestProgramPath, "utf8");
-        } else if (typeof NodeFs !== "undefined") {
-            guestProgramSource = NodeFs.readFileSync(guestProgramPath).
-                toString("utf8");
-        } else guestProgramSource = read(guestProgramPath);
+        guestNodeEnvironment.setRunnerArguments([guestProgramPath].concat(
+            guestRunnerCommand.scriptArguments));
         guestProgramVM.installGlobal("arguments",
-            guestProgramVM.runtime.arrayFrom(guestRunnerArguments.slice(1)));
-        var guestExecution = guestProgramVM.start(
-            guestProgramSource, guestProgramPath);
+            guestProgramVM.runtime.arrayFrom(guestRunnerCommand.scriptArguments));
         var guestRunnerProfileStarted = new Date().getTime();
         var guestRunnerStoppedForProfile = false;
-        var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
-            1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
-        while (true) {
-            var guestExecutionResult = guestExecution.resume(
-                guestRunnerResumeBudget);
-            if (guestExecutionResult.status === "budget") {
-                /* The command-line embedder grants another cooperative time slice. */
-            } else if (guestExecutionResult.status === "hostCall") {
-                guestExecution.serviceHostCall();
-            } else if (guestExecutionResult.status === "completed") {
-                break;
-            } else if (guestExecutionResult.status === "threw") {
-                if (guestNodeEnvironment.isExit(
-                        guestExecutionResult.exception)) break;
-                throw guestExecutionResult.exception;
-            } else {
-                throw new Error("unknown guest execution status: " +
-                                guestExecutionResult.status);
+        for (var guestSourceIndex = 0;
+             guestSourceIndex < guestRunnerCommand.actions.length;
+             guestSourceIndex++) {
+            var guestSourceAction = guestRunnerCommand.actions[guestSourceIndex];
+            /* Application I/O is intentionally after the snapshot boundary. */
+            if (guestSourceAction.source !== undefined) {
+                guestProgramSource = guestSourceAction.source;
+            } else if (guestRunnerIsNode) {
+                guestProgramSource = require("fs").readFileSync(
+                    guestSourceAction.filename, "utf8");
+            } else if (typeof NodeFs !== "undefined") {
+                guestProgramSource = NodeFs.readFileSync(guestSourceAction.filename).
+                    toString("utf8");
+            } else guestProgramSource = read(guestSourceAction.filename);
+            var guestExecution = guestProgramVM.start(
+                guestProgramSource, guestSourceAction.filename);
+            var guestRunnerResumeBudget = guestRunnerProfileDuration > 0 ?
+                1000000 : guestProgramVM.runtime.synchronousExecutionBudget();
+            while (true) {
+                var guestExecutionResult = guestExecution.resume(
+                    guestRunnerResumeBudget);
+                if (guestExecutionResult.status === "budget") {
+                    /* The embedder grants another cooperative time slice. */
+                } else if (guestExecutionResult.status === "hostCall") {
+                    guestExecution.serviceHostCall();
+                } else if (guestExecutionResult.status === "completed") {
+                    break;
+                } else if (guestExecutionResult.status === "threw") {
+                    if (guestNodeEnvironment.isExit(
+                            guestExecutionResult.exception)) break;
+                    throw guestExecutionResult.exception;
+                } else {
+                    throw new Error("unknown guest execution status: " +
+                                    guestExecutionResult.status);
+                }
+                if (guestRunnerProfileDuration > 0 &&
+                    new Date().getTime() - guestRunnerProfileStarted >=
+                        guestRunnerProfileDuration) {
+                    guestRunnerStoppedForProfile = true;
+                    break;
+                }
             }
-            if (guestRunnerProfileDuration > 0 &&
-                new Date().getTime() - guestRunnerProfileStarted >=
-                    guestRunnerProfileDuration) {
-                guestRunnerStoppedForProfile = true;
-                break;
-            }
+            if (guestRunnerStoppedForProfile || guestNodeEnvironment.exiting) break;
         }
         if (guestRunnerStoppedForProfile) {
             if (typeof print === "function") {

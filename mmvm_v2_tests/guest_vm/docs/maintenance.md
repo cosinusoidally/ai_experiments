@@ -27,11 +27,13 @@ LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
 ./artifacts/js_runner.exe artifacts/snap program.js argument1
 ```
 
-The ordinary runner parses options **before the first program filename**;
-remaining arguments belong to the program. It has no general unknown-option
-rejector: an unrecognized token can become the filename. Do not assume GNU
-argument-parser behavior. The runner installs guest `arguments` without the
-program filename and a Node-like `process.argv` through its environment.
+The runner parses options **before the first positional program filename**;
+remaining arguments belong to the program. Repeatable `-e SOURCE` and `-f FILE`
+actions execute in order before that positional file, in one global execution
+environment. `--` ends option parsing. Unsupported source-action options are
+rejected. The runner installs guest `arguments` without the positional filename
+and a Node-like `process.argv` through its environment. Shell-policy images
+also expose `scriptArgs`. See [shell execution](shell.md).
 
 Ordinary `guest_runner.js` options:
 
@@ -45,6 +47,8 @@ Ordinary `guest_runner.js` options:
 | `--snapshot FILE` | Build a generic standalone image before opening the optional application; implies native mode. Explicit, never an automatic disk cache. |
 | `--shell` | Build a standalone shell-policy snapshot instead of the default Node-compatible environment; see `../MISHMASHVM_BOOTSTRAP.md`. |
 | `--no-ion` | Accepted as a no-op for shell-script compatibility; this VM has no IonMonkey tier. |
+| `-e SOURCE` | Execute inline source as a script named `-e`; repeatable, sharing the global environment. |
+| `-f FILE` | Execute a file in action order without ending option parsing. |
 | `--with-snapshot FILE` | Reuse interpreter code in an embedded VM; not equivalent to launching the saved standalone environment. |
 | `--skip-snapshot-hash` | Accepted with `--with-snapshot`; current loader does not re-fingerprint source anyway. |
 | `--vm-max-heap-mib N` | Integer maximum from 64 to 1024 MiB; initial runtime limit remains the runner default. |

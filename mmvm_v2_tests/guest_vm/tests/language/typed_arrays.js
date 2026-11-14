@@ -36,3 +36,28 @@ assertEqual(signedWords[0], -1, "Int16Array wraps and sign extends");
 assertEqual(signedWords[1], -32768, "Int16Array minimum value");
 signedBytes.set([12, 13], 1);
 assertEqual(signedBytes[2], 13, "typed array set accepts an Array source");
+
+var clampInputs = [-Infinity, NaN, -1, 0, 0.5, 0.50000001,
+                   1.5, 2.5, 3.5, 254.5, 255.5, Infinity];
+var clampExpected = [0, 0, 0, 0, 0, 1, 2, 2, 4, 254, 255, 255];
+var clamped = new Uint8ClampedArray(clampInputs);
+var clampedAssigned = new Uint8ClampedArray(clampInputs.length);
+var clampedSet = new Uint8ClampedArray(clampInputs.length);
+clampedSet.set(clampInputs);
+for (var clampIndex = 0; clampIndex < clampInputs.length; clampIndex++) {
+    clampedAssigned[clampIndex] = clampInputs[clampIndex];
+    assertEqual(clamped[clampIndex], clampExpected[clampIndex], "clamped constructor conversion");
+    assertEqual(clampedAssigned[clampIndex], clampExpected[clampIndex], "clamped indexed conversion");
+    assertEqual(clampedSet[clampIndex], clampExpected[clampIndex], "clamped set conversion");
+}
+var clampAlias = new Uint8Array(clamped.buffer);
+clamped.subarray(1, 3)[0] = 17.5;
+assertEqual(clampAlias[1], 18, "clamped subarray and byte views share backing");
+var clampOverlapBacking = new ArrayBuffer(4);
+var clampSigned = new Int8Array(clampOverlapBacking);
+clampSigned.set([-1, 127, -128, 7]);
+var clampOverlap = new Uint8ClampedArray(clampOverlapBacking, 1, 3);
+clampOverlap.set(clampSigned.subarray(0, 3));
+assertEqual(clampOverlap[0], 0, "overlapping signed-to-clamped set saturates negatives");
+assertEqual(clampOverlap[1], 127, "overlapping signed-to-clamped set preserves source");
+assertEqual(clampOverlap[2], 0, "overlapping signed-to-clamped set saturates minimum");

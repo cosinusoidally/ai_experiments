@@ -304,8 +304,9 @@
     var ENGINE_FREE_BIN_BITMAP = ENGINE_FREE_BIN_SUMMARY + Heap.WORD_BYTES;
     var ENGINE_FREE_BIN_HEADS = ENGINE_FREE_BIN_BITMAP +
         NATIVE_FREE_BITMAP_WORDS * Heap.WORD_BYTES;
-    var ENGINE_STATE_BYTES = ENGINE_FREE_BIN_HEADS +
+    var ENGINE_RANDOM_STATE = ENGINE_FREE_BIN_HEADS +
         NATIVE_FREE_BIN_COUNT * Heap.WORD_BYTES;
+    var ENGINE_STATE_BYTES = ENGINE_RANDOM_STATE + Heap.WORD_BYTES;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -373,7 +374,8 @@
      * definition for portable typed arrays and native intrinsic dispatch. */
     Records.BufferKinds = {BUFFER: 0, ARRAY_BUFFER: 1,
         UINT8: 2, UINT16: 3, UINT32: 4, INT32: 5,
-        FLOAT32: 6, FLOAT64: 7, INT8: 8, INT16: 9};
+        FLOAT32: 6, FLOAT64: 7, INT8: 8, INT16: 9, UINT8_CLAMPED: 10};
+    Records.TypedArrayConstants = {CLAMP_MAX: 255, CLAMP_HALF: 0.5};
     Records.contextAllocationBytes = function (propertyCount) {
         var bytes = Heap.HEADER_SIZE + OBJECT_BYTES + Heap.HEADER_SIZE + CONTEXT_BYTES;
         if (propertyCount) bytes += Heap.HEADER_SIZE + PROPERTY_STORAGE_ENTRIES + propertyCount * PROPERTY_ENTRY_BYTES;
@@ -383,7 +385,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 106;
+    Records.NativeInterpreterContractVersion = 107;
     Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
      * after a public prototype change. Other record kinds have their own
@@ -695,6 +697,7 @@
         ENGINE_FREE_BIN_SUMMARY: ENGINE_FREE_BIN_SUMMARY,
         ENGINE_FREE_BIN_BITMAP: ENGINE_FREE_BIN_BITMAP,
         ENGINE_FREE_BIN_HEADS: ENGINE_FREE_BIN_HEADS,
+        ENGINE_RANDOM_STATE: ENGINE_RANDOM_STATE,
         FREE_REGION_PREVIOUS: FREE_REGION_PREVIOUS,
         FREE_BIN_NEXT: FREE_BIN_NEXT,
         FREE_BIN_PREVIOUS: FREE_BIN_PREVIOUS,
@@ -2799,6 +2802,14 @@
     Records.prototype.allocateEngineState = function () {
         return this.heap.allocateRecordWords(
             Heap.Types.ENGINE_STATE, ENGINE_STATE_BYTES, 0, 0, 0, 0);
+    };
+
+    Records.prototype.engineRandomState = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_RANDOM_STATE, Heap.Types.ENGINE_STATE);
+    };
+
+    Records.prototype.setEngineRandomState = function (state, value) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_RANDOM_STATE, value, Heap.Types.ENGINE_STATE);
     };
 
     Records.prototype.engineGCGeneration = function (state) {

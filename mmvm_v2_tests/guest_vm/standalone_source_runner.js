@@ -204,7 +204,8 @@ function guestStandaloneRequire(request, parentFilename) {
     return module.exports;
 }
 
-function guestStandaloneExecute(path, programArguments) {
+function guestStandaloneExecute(path, programArguments, actions) {
+    if (!actions) actions = [{filename: path}];
     NodeProcess.install([path].concat(programArguments));
     GuestStandaloneGlobal.arguments = programArguments;
     GuestStandaloneGlobal.assertEqual = function (actual, expected, message) {
@@ -244,16 +245,23 @@ function guestStandaloneExecute(path, programArguments) {
         GuestStandaloneGlobal.printErr = console.error;
         GuestStandaloneGlobal.ctypes = GuestShellCTypes.create(GuestStandaloneDlsymPointer, ffi_call);
     }
-    var phaseStarted = guestStandaloneProfileStart();
-    var source = guestStandaloneReadSource(path);
-    guestStandaloneProfileEnd("read " + path, phaseStarted);
-    phaseStarted = guestStandaloneProfileStart();
-    var executable = GuestStandaloneFrontend.compileExecutable(
-        source, path, guestStandaloneExecute, GuestStandaloneGlobal, __guestVMStandaloneShell);
-    guestStandaloneProfileEnd("compile " + path, phaseStarted);
-    phaseStarted = guestStandaloneProfileStart();
-    executable();
-    guestStandaloneProfileEnd("execute " + path, phaseStarted);
+    for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        var action = actions[actionIndex];
+        var phaseStarted = guestStandaloneProfileStart();
+        var source = action.source;
+        if (source === undefined) {
+            source = guestStandaloneReadSource(action.filename);
+            guestStandaloneProfileEnd("read " + action.filename, phaseStarted);
+        }
+        phaseStarted = guestStandaloneProfileStart();
+        var executable = GuestStandaloneFrontend.compileExecutable(
+            source, action.filename, guestStandaloneExecute, GuestStandaloneGlobal,
+            __guestVMStandaloneShell);
+        guestStandaloneProfileEnd("compile " + action.filename, phaseStarted);
+        phaseStarted = guestStandaloneProfileStart();
+        executable();
+        guestStandaloneProfileEnd("execute " + action.filename, phaseStarted);
+    }
 }
 
 function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
@@ -263,7 +271,12 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
     var index = 0;
     while (index < runnerArguments.length) {
         var option = runnerArguments[index++];
-        if (!programPath && option === "--snapshot") {
+        if (!programPath && (option === "-e" || option === "-f")) {
+            programArguments.push(option);
+            if (index >= runnerArguments.length) throw new Error(option + " requires an argument");
+            programArguments.push(runnerArguments[index++]);
+        } else if (!programPath && option === "--no-ion") {
+        } else if (!programPath && option === "--snapshot") {
             if (index >= runnerArguments.length) {
                 throw new Error("--snapshot requires a snapshot file");
             }
@@ -277,15 +290,23 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
             GuestStandaloneProfile = true;
         } else if (!programPath && option === "--vm-gc-stress") {
             GuestStandaloneGCStress = true;
+        } else if (!programPath && option === "--") {
+            programArguments.push(option);
+            while (index < runnerArguments.length) programArguments.push(runnerArguments[index++]);
+            break;
         } else if (!programPath && option.charAt(0) === "-") {
             throw new Error("unsupported standalone guest-runner option: " + option);
-        } else if (!programPath) programPath = option;
+        } else if (!programPath) {
+            programPath = option;
+            programArguments.push(option);
+        }
         else programArguments.push(option);
     }
     if (snapshotPath) {
         throw new Error("snapshot rebuild must use the full guest_runner.js build pipeline");
     }
-    if (!programPath) {
+    var command = GuestShellCommandLine.parse(programArguments);
+    if (!command.actions.length) {
         if (snapshotPath) return;
         throw new Error("guest_runner.js requires a program");
     }
@@ -294,7 +315,7 @@ function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
         console.log("GC stress enabled: collection every " + stressInterval +
                     " opcode boundaries");
     }
-    guestStandaloneExecute(programPath, programArguments);
+    guestStandaloneExecute(command.programName, command.scriptArguments, command.actions);
 }
 
 function guestStandaloneRunGuestRunner(runnerArguments) {
@@ -325,11 +346,12 @@ function guestStandaloneDescribeError(error) {
 __guestVMStandaloneRunGuestRunner = guestStandaloneRunGuestRunner;
 
 var GuestStandaloneArgv = guestStandaloneArguments();
-while (GuestStandaloneArgv[0] === "--no-ion") GuestStandaloneArgv.shift();
-if (!GuestStandaloneArgv.length) throw new Error("standalone program is missing");
 try {
+    var GuestStandaloneCommand = GuestShellCommandLine.parse(GuestStandaloneArgv);
+    if (!GuestStandaloneCommand.actions.length) throw new Error("standalone program is missing");
     guestStandaloneExecute(
-        GuestStandaloneArgv[0], GuestStandaloneArgv.slice(1));
+        GuestStandaloneCommand.programName, GuestStandaloneCommand.scriptArguments,
+        GuestStandaloneCommand.actions);
     NodeRuntime.run();
 } catch (GuestStandaloneError) {
     if (GuestStandaloneError !== NodeProcess.exitMarker) {
