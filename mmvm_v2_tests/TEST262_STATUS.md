@@ -1982,6 +1982,23 @@ performance are separate mandatory regression gates.
   This extra full current repeat was broader than a focused timing follow-up
   needed to be; future small refactors should not trigger repeated full sweeps.
 
+### 2026-11-14 afternoon: full-bootstrap compatibility regression check
+
+- Revision `8767315`, fresh packaged default standalone executable, full
+  unchanged selection: **3292 executed / 3292 passed / 0 failed / 0 timed
+  out / 0 not run** (3292 files and variants).
+- Invocation: `artifacts/bootstrap-regression.exe test262_runner.js
+  --summary-only`. Harness elapsed **340626.683 ms**; test sum
+  **323453.905 ms**. Peak RSS was not collected for this run; an in-run process
+  sample showed 512532 KiB RSS. Do not treat that sample as a peak measurement.
+- Previous same-day shell bring-up checkpoint: 340013.538 ms harness elapsed,
+  also 3292/3292 passing. The 0.18% timing difference does not establish a
+  performance regression. No corpus or harness changes, skipped tests or
+  host-backed language implementations were added.
+- Raw log: ignored `artifacts/bootstrap-test262.log`. Node and js_min core
+  suites also pass; the unchanged mishmashvm full bootstrap produces the same
+  eight object files as jsshell. See `guest_vm/MISHMASHVM_BOOTSTRAP.md`.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

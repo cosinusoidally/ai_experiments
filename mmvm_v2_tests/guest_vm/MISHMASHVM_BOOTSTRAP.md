@@ -1,10 +1,11 @@
 # Mishmashvm compiler bootstrap bring-up
 
-Initial scope: run the unchanged `tcc_js_bootstrap/01_mk_tcc.js`,
-`02_mk_libc_wrap.js`, and `03_mk_libc_stubs.js` with a freestanding guest VM
-executable named `artifacts/js`. Stop before bringing up
-`libc_portable_proto/bootstrap_tcc.sh`. No mishmashvm source changes, callbacks,
-downloads, Node/native addon dependency, or C implementation changes.
+Current scope: run unchanged mishmashvm `bootstrap.sh` end to end with a
+freestanding guest VM executable named `artifacts/js`, including the native
+stages in `libc_portable_proto/bootstrap_tcc.sh`. The earlier checkpoint below
+covers the initial `tcc_js_bootstrap/01_mk_tcc.js`, `02_mk_libc_wrap.js`, and
+`03_mk_libc_stubs.js` bring-up. No mishmashvm source changes, callbacks,
+downloads, Node/native addon runtime dependency, or C implementation changes.
 
 Run both engines **in the original mishmashvm directory**, sequentially, with
 clean output files. Preserve the jsshell reference objects outside that tree,
@@ -26,7 +27,63 @@ packaged guest executable's source snapshot aside before running it. Do not
 modify mishmashvm sources or rely on a copied workspace. Any fixes belong in
 the general VM or shell/FFI layer, not benchmark-specific code.
 
-## Implementation approach
+Do not accept the script's exit status alone: its shell stages do not use
+`set -e`, and the final JS checker catches hashing exceptions as well as file
+errors. Require all four final `OK` lines, all eight expected output files,
+matching external hashes and direct byte comparisons, and no VM errors.
+
+Bring-up fixes: native Number radix formatting now accepts exact unsigned
+32-bit magnitudes; shell binary reads return Uint8Array rather than the
+internal filesystem Buffer; typed-array construction accepts that Buffer as
+a byte source; ArrayBuffer and typed-array prototypes have non-enumerable
+constructor links. These are general runtime behaviors, not modifications to
+TCC or the external SHA implementation.
+
+### Full bootstrap result (2026-11-14)
+
+The full unchanged `bootstrap.sh` passed under the packaged guest executable,
+with its source snapshot absent. The final checker printed all four `OK`
+lines. All eight outputs matched the clean jsshell reference both by SHA-256
+and direct byte comparison. Mishmashvm sources remained unchanged.
+
+- Whole guest bootstrap: 233.45 seconds; peak RSS 558340 KiB.
+- Whole local jsshell bootstrap: 12.10 seconds; peak RSS 79616 KiB.
+- This is functional parity, not performance parity.
+
+Regression checks following the full-bootstrap fixes: Node and js_min core
+suites each passed 12 guest programs and 270 assertions; shell integration
+passed; the default
+standalone image rebuilt itself from source to a byte-identical snapshot;
+full Test262 passed all 3292 tests with zero failures, not-run tests or
+timeouts in 340.627 seconds (previous checkpoint: 340.014 seconds).
+The packaged default executable also passed all eight bounded demo checks,
+all three HTTP server checks and seven supplementary checks (including
+structural GC stress), with its input snapshot absent throughout execution.
+These are not long-duration endurance runs or a new Octane/ECMA performance
+comparison.
+
+Each final object and its `.new` counterpart have the same hash:
+
+- `libc_portable_proto/my_libc.o`:
+  `0e8e02c852a11ebec585650d3c6fa5917fb51d7b66dd1d458d3e51680c660964`
+- `libc_portable_proto/stubs.o`:
+  `0cdb519efb42f22eba96bf90407e10b87868355e1d793d3a70271f09d47aa403`
+- `libc_portable_proto/tcc_bin/libtcc1.o`:
+  `59483d03266a9eadb84ceafaf4ed8a37e5a5231aaf773f296a7ca097679307b3`
+- `libc_portable_proto/tcc_bin/tcc_boot3.o`:
+  `b64ff3010f2de6eb50762169fc5309b66ef704924cfc21648e7b75f088af3365`
+
+Build using the command below, then from the sibling `mishmashvm` directory:
+
+```sh
+export PATH="$(cd ../ai_experiments/mmvm_v2_tests/artifacts && pwd):$PATH"
+sh ./bootstrap.sh
+```
+
+The final native TCC hash differs from the initial Emscripten-produced TCC
+hash below; that is expected. Both engines converge to the same final hash.
+
+## Initial-stage implementation approach
 
 1. Record a clean local jsshell `--no-ion` reference for all three stages.
 2. Build a shell-policy image using `guest_runner.js --vm-native --shell
@@ -96,8 +153,7 @@ js --no-ion 02_mk_libc_wrap.js
 js --no-ion 03_mk_libc_stubs.js
 ```
 
-Do not interpret this checkpoint as approval to run the entire `bootstrap.sh`:
-that proceeds into the next, not-yet-validated phase.
+This initial checkpoint predates the full-bootstrap extension above.
 
 The shell image uses the existing `--vm-max-heap-mib 1024` reservation option:
 the Emscripten compiler requests a 128 MiB ArrayBuffer, and the current external
@@ -129,7 +185,7 @@ The ctypes adapter is intentionally a subset: cdecl scalar/pointer declarations,
 library lookup, native function-pointer casts and synchronous native calls with
 up to eight arguments. Callback construction is rejected. It is not a complete
 implementation of SpiderMonkey js-ctypes. Shell `read(path, "binary")` returns
-a byte buffer; text reads decode UTF-8. `process` and `require` are not exposed
+a Uint8Array; text reads decode UTF-8. `process` and `require` are not exposed
 to shell programs, avoiding incorrect Node environment detection.
 
 ## Regression checks for this checkpoint
