@@ -1,5 +1,14 @@
 # Test262 status
 
+2026-11-14, approximately 20:17 UTC, Penguin coercion/property-name fix
+(`3dd1363`, packaged default executable): **3292 executed / 3292 passed /
+0 failed / 0 timed out / 0 skipped / 0 not run**; observed exit 0.
+Harness elapsed **352.095 s**, summed tests **334.841 s**. Unchanged corpus,
+selection and instruction limits. This is faster than the preceding
+368.950-second observation, but is not a paired performance experiment.
+An interrupted earlier attempt did not produce a result and is not counted
+as a completed run. See [shell validation](guest_vm/docs/shell.md).
+
 2026-11-13, approximately 20:35 UTC, typed native-boundary/allocator checkpoint
 (`c826a33`, candidate image `artifacts/eval-transaction.snap`): **3292 executed /
 3292 passed / 0 failed / 0 timed out / 0 skipped / 0 not run**, exit 0 under

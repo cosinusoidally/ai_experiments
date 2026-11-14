@@ -1,5 +1,17 @@
 # Validation checkpoint, 2026-11-04
 
+Penguin follow-up, 2026-11-14 (`3dd1363`): unchanged mishmashvm test(16)
+runs for 213.05 seconds, displays the game, accepts movement/undo/reset and
+closes normally (exit 0); test(15) still renders its triangle and closes normally.
+Both core suites pass 12 programs / 310 assertions; full Test262 passes
+3292/3292 with zero failures/timeouts (352.095 s). Structural GC, all eight
+bounded demos, three HTTP servers and seven supplementary checks pass. The
+default executable's source snapshot is absent during the app checks. Genuine
+self-hosted and Node-built shell snapshots are byte-identical. Four paired
+Octane suites pass with mixed single-run score changes (-4.2% to +2.6%), not
+a performance-neutrality claim or a new full Octane/ECMA sweep. See
+[details and qualifications](guest_vm/docs/shell.md#portablegl-penguin-test16-follow-up).
+
 Shell-eval/SDL checkpoint, 2026-11-14: contract 107 adds shared `-e`/`-f`
 source actions, Uint8ClampedArray and guest-owned native PRNG state. Unchanged
 mishmashvm test(0) matches all nine jsshell C return values; test(1) displays

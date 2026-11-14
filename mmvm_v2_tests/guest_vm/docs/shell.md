@@ -159,5 +159,32 @@ game acceptance ran for 213.05 seconds, observed approximately 30--35 FPS,
 rendered the board/penguin, accepted movement/undo/reset keys and exited zero
 through WM_DELETE_WINDOW. Peak RSS was 703696 KiB; this is a whole-process
 observation, not proof of a small or bounded game allocation footprint.
-Further regression results are recorded below when complete. Temporary logs
-and captures use ignored `artifacts/penguin-*` paths.
+Regression validation on November 14, 2026:
+
+- The unchanged triangle test(15) also renders correctly and closes normally:
+  exit zero, 24.39 seconds including startup and inspection, 162752 KiB peak RSS.
+- Both Node and js_min core suites pass 12 guest programs / 310 assertions,
+  including the server/demo command-line and three-context checks. The existing
+  object-operation integration test passes on Node and the standalone shell.
+- Full Test262: 3292 executed / 3292 passed / zero failed, timed out, skipped or
+  not run; 352.095 seconds harness elapsed, 334.841 seconds summed tests.
+  The earlier interrupted attempt was rerun, not counted as a pass.
+- Structural GC: 27 audits, 113184 checked edges, 221 property-index audits and
+  74 embedding collections; maximum observed bump 3532584 bytes under an 8 MiB
+  guest-heap cap.
+- A genuine self-hosted shell snapshot rebuild is byte-identical to the
+  Node-built shell snapshot. The rebuild compiles the current sources; it does
+  not copy the input snapshot.
+- With the default executable's source snapshot moved aside, all eight bounded
+  demos, all three HTTP servers and all seven supplementary checks pass. The
+  latter cover structural GC, raw FFI, self-hosted frontend/file compilation,
+  native compiler dependencies, demo8 I/O and multiple contexts. These are
+  bounded acceptance runs, not long-duration endurance tests.
+- Paired single-run stock Octane scores, pre-fix control then fixed executable:
+  Richards 95.8 / 93.3; Splay 727 / 746; Gameboy 881 / 844; CodeLoad 97.7 / 98.4.
+  All pass. The mixed changes are approximately -4.2% to +2.6%; these observations
+  do not establish a speed improvement or prove performance neutrality.
+
+Temporary logs and captures use ignored `artifacts/penguin-*` paths. This
+follow-up does not rerun the full ECMA corpus, all fifteen Octane benchmarks or
+the entire mishmashvm bootstrap; the earlier recorded results remain distinct.
