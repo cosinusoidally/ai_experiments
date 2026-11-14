@@ -1999,6 +1999,23 @@ performance are separate mandatory regression gates.
   suites also pass; the unchanged mishmashvm full bootstrap produces the same
   eight object files as jsshell. See `guest_vm/MISHMASHVM_BOOTSTRAP.md`.
 
+### 2026-11-14 afternoon: shell eval and clamped-array regression check
+
+- Contract 107 interpreter checkpoint `cedc3de`: **3292 executed / 3292 passed /
+  0 failed / 0 timed out / 0 not run**, full unchanged selection, 3292 variants.
+- `artifacts/eval-default.exe test262_runner.js --summary-only`: harness
+  **368949.880 ms**, test sum **349000.818 ms**. Peak RSS was not collected;
+  an in-run RSS sample was 512756 KiB, not a measured peak.
+- This observation is about 8.3% slower than the preceding 340626.683-ms run.
+  No freshly paired control was captured, so attribution remains open. Do not
+  claim performance neutrality. No tests, limits or skip policy were changed.
+- The subsequent diagnostic-only CLI follow-up was checked with focused
+  negative CLI cases, all bounded demo/server/supplementary checks, and final
+  Node/js_min/self-host snapshot identity, without repeating the full corpus.
+- Core suites pass 12 programs / 310 assertions; the unchanged mishmashvm
+  SDL demo runs. See [shell implementation and validation](guest_vm/docs/shell.md).
+  Raw full-suite log: ignored `artifacts/eval-test262.log`.
+
 ## Rules for subsequent entries
 
 - Record local date/time, revision, exact selection, variant totals, failure

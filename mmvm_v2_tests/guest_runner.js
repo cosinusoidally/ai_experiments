@@ -5,6 +5,7 @@ function guestRunnerRequestsSnapshot(runnerArguments) {
     var index = 0;
     while (index < runnerArguments.length) {
         var option = runnerArguments[index++];
+        if (option === "--") return false;
         if (option === "--snapshot") return true;
         if (option === "-e" || option === "-f" || option === "--with-snapshot" ||
             option === "--vm-max-heap-mib" ||

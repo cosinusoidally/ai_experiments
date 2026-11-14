@@ -326,8 +326,7 @@ function guestStandaloneRunGuestRunner(runnerArguments) {
             guestStandaloneQuit(NodeProcess.exitCode);
         }
         var description = guestStandaloneDescribeError(error);
-        console.error(description);
-        guestStandaloneQuit(3);
+        guestStandaloneReportError(description);
     }
 }
 
@@ -343,6 +342,15 @@ function guestStandaloneDescribeError(error) {
     return String(error);
 }
 
+/* Argument parsing can fail before NodeProcess.install replaces the build
+ * console. Report through libc rather than invoking an embedding callback,
+ * or rethrowing a handled exception as an opaque unsupported-opcode exit. */
+function guestStandaloneReportError(description) {
+    var dprintfPointer = ffi_call(GuestStandaloneDlsymPointer, 0, "dprintf");
+    ffi_call(dprintfPointer, 2, "%s\n", description);
+    guestStandaloneQuit(3);
+}
+
 __guestVMStandaloneRunGuestRunner = guestStandaloneRunGuestRunner;
 
 var GuestStandaloneArgv = guestStandaloneArguments();
@@ -355,8 +363,7 @@ try {
     NodeRuntime.run();
 } catch (GuestStandaloneError) {
     if (GuestStandaloneError !== NodeProcess.exitMarker) {
-        console.log(guestStandaloneDescribeError(GuestStandaloneError));
-        throw GuestStandaloneError;
+        guestStandaloneReportError(guestStandaloneDescribeError(GuestStandaloneError));
     }
 }
 if (GuestStandaloneGCStress) {

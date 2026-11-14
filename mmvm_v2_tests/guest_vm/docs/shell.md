@@ -24,6 +24,10 @@ artifacts/js -e 'print(40 + 2)'
   file there are no trailing script arguments. `--no-ion` remains a no-op.
 - Inline source uses the same compiler, guest context, FFI and event-loop
   machinery as a file. There is no host eval or alternative interpreter.
+- Missing source, syntax errors and unhandled JS exceptions report through
+  libc stderr with a nonzero exit; they do not require console initialization
+  or get rethrown as misleading unsupported-opcode exits. Actual unsupported
+  native VM operations retain their kernel diagnostics.
 
 `shell_command_line.js` is the shared pure parser. Its `parse(args)` result
 contains `actions`, `programName` and `scriptArguments`. An action has a
@@ -66,6 +70,8 @@ backing/view machinery. Conversion saturates to [0,255], maps NaN to zero,
 and rounds halves to even. Native code decodes the bounded double payload
 directly; the portable path implements the same conversion. Overlapping
 signed-byte set copies preserve the original bytes before saturation.
+This does not claim every cross-element-kind copying case or modern
+typed-array API is implemented; existing standalone conversion limits remain.
 
 The constructor has its own intrinsic ID and prototype-support slot, rather
 than colliding with the older contiguous typed-array constructor IDs. Native
@@ -82,3 +88,44 @@ does not happen when constructing the generic snapshot.
 `tools/x11_send_keys.js WINDOW_ID --close` sends WM_DELETE_WINDOW using its
 own X11 wire bindings; it does not kill the client. Like its key mode, it can
 run with Node built-ins or under js_min through `node_runner.js`.
+
+## Validation checkpoint, 2026-11-14
+
+- Inline execution checked on Node-hosted guest_runner, js_min-hosted
+  guest_runner and the packaged executable. Repeated actions share globals;
+  mixed file actions, positional arguments, `--`, empty source, missing source,
+  syntax errors and quit-status propagation were exercised. A dash-prefixed
+  filename is not mistaken for a self-hosted snapshot request.
+- Node and js_min core suites pass 12 guest programs / **310 assertions**,
+  including the new constructor/indexed/set clamping and overlapping-view
+  coverage. Native shell/FFI integration also checks clamped-view pointer
+  aliasing and saturation.
+- Node-built, js_min-built (with an inline program after snapshot generation)
+  and genuine self-hosted shell snapshots are byte-identical. Final SHA-256:
+  `3cb65c661a2e53d500a744d4e82706f6c87fad2c7f9389f8d3368483a721ca6d`.
+  The executable's source snapshot was moved aside for application runs.
+- Full Test262 on the contract-107 interpreter: **3292 passed / zero failed /
+  zero timed out / zero not run**, 368949.880 ms harness elapsed. This single
+  observation is about 8.3% slower than the preceding 340626.683-ms run; it is not
+  a performance-neutral result or a freshly paired attribution experiment.
+  The later diagnostic-only entrypoint follow-up was covered by focused CLI,
+  app/GC and final snapshot-identity checks, not another full corpus sweep.
+- Structural GC passed 27 audits / 113184 checked edges / 221 property-index
+  audits, maximum observed guest bump 3532584 bytes under an 8 MiB cap.
+- All eight bounded demos, three HTTP servers and seven supplementary
+  standalone checks pass under the final default executable with its source
+  snapshot absent. These are not long-duration endurance tests.
+- Full unchanged mishmashvm bootstrap passed in 245.15 seconds, peak RSS
+  553984 KiB. All eight objects match the preserved pre-change objects
+  byte-for-byte and have the recorded jsshell SHA-256 values. This was before
+  the diagnostic-only entrypoint follow-up. Final test(0) also matches all
+  nine reference C return values and exits zero (5.73 seconds / 110976 KiB).
+- SDL acceptance includes captures of changing 640x360 RGB static, reported
+  key events, and WM_DELETE_WINDOW exits zero. The close helper was exercised
+  under both Node and js_min. No mishmashvm source changes were needed.
+  The final published executable ran the unchanged demo for 106.76 seconds
+  including startup, peak RSS 117468 KiB, then exited zero on normal close.
+
+Logs, snapshots and captures are ignored under `artifacts/eval-*`. The existing
+ECMA/Octane performance concerns in the [full earlier validation report](../../FULL_VALIDATION_2026-11-14.md)
+remain outstanding; those long sweeps were not repeated for this CLI task.

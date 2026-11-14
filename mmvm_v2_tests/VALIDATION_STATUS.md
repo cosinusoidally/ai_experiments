@@ -1,5 +1,18 @@
 # Validation checkpoint, 2026-11-04
 
+Shell-eval/SDL checkpoint, 2026-11-14: contract 107 adds shared `-e`/`-f`
+source actions, Uint8ClampedArray and guest-owned native PRNG state. Unchanged
+mishmashvm test(0) matches all nine jsshell C return values; test(1) displays
+changing 640x360 static, accepts keys and exits zero on normal window close.
+Core passes 12 programs / 310 assertions on Node and js_min; full Test262
+passes 3292/3292 (368.95 s, slower than the preceding 340.63-s observation).
+GC, all bounded demo/server/supplementary checks and the full bootstrap pass.
+Final Node/js_min/self-hosted shell snapshots match byte-for-byte, including
+a build with inline source after snapshot generation. Diagnostic-only CLI
+follow-up uses focused checks rather than another full corpus run. No new
+ECMA/Octane sweep or performance-neutrality claim is made. See
+[the implementation and validation record](guest_vm/docs/shell.md).
+
 Latest bootstrap regression audit, 2026-11-14: implementation `8767315`,
 packaged default executable completes full Test262 **3292/3292** and all
 **15 stock Octane suites**. Historical ECMA: **996 pass / 333 fail**, including

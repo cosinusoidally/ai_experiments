@@ -27,6 +27,19 @@
     var pointer = malloc(3);
     check(pointer !== 0, "native allocation");
     try {
+        var pixels = new Uint8ClampedArray(4);
+        pixels.set([-1, 0.5, 1.5, 999]);
+        check([pixels[0], pixels[1], pixels[2], pixels[3]].join(",") === "0,0,2,255",
+            "native clamped set saturates and rounds halves to even");
+        memcpy(pointer, pixels.subarray(1), 3);
+        check(memcmp(pointer, new Uint8Array([0, 2, 255]), 3) === 0,
+            "clamped framebuffer subarray passes its offset to native code");
+        var overlap = new ArrayBuffer(4), signedSource = new Int8Array(overlap);
+        signedSource.set([-1, 127, -128, 7]);
+        var clampedTarget = new Uint8ClampedArray(overlap, 1, 3);
+        clampedTarget.set(signedSource.subarray(0, 3));
+        check([clampedTarget[0], clampedTarget[1], clampedTarget[2]].join(",") === "0,127,0",
+            "native overlapping signed-to-clamped copy preserves its source");
         var bytes = new Uint8Array([99, 1, 2, 3, 88]);
         var view = bytes.subarray(1, 4);
         memcpy(pointer, view, 3);
