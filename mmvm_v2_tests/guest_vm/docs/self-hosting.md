@@ -128,11 +128,13 @@ The module's introductory comment referring to adoption as a “next
 integration boundary” predates this implemented path; the actual
 `adoptProgramDescriptor` and program-builder intrinsics are the current code.
 
-`compileExecutable(source, filename, contextAnchor, owningGlobal)` returns a
+`compileExecutable(source, filename, contextAnchor, owningGlobal, captureLocations)` returns a
 guest wrapper that instantiates global declaration names and invokes the
-adopted callable. Exact source is retained, but this executable-adoption path
-currently disables the separate per-PC source-location table. Do not promise
-the same line/column fidelity as a location-rich portable compile.
+adopted callable. Exact source is retained. The optional fifth argument enables
+a compact statement PC/line/column table, used by shell-policy images; it
+defaults to false. Adoption also retains filename/default-position metadata
+when the statement table is disabled. The metadata is traced through the
+program record, not retained as a host-side source map.
 
 Direct eval, indirect eval and Function have different compiler entry points.
 Direct eval may extend the caller's environment; indirect eval is global code;
@@ -148,7 +150,7 @@ The self-hosted module's internal entry points are:
 | `compileAst(ast, consumeAst)` | Verified compiler descriptor |
 | `compile(source, filename, options)` | Verified descriptor; options include location capture, word arena and nested-function sink |
 | `adoptProgram(program, contextAnchor)` | Runtime-owned executable callable |
-| `compileExecutable(source, filename, contextAnchor, owningGlobal)` | Wrapper performing global declaration setup and execution |
+| `compileExecutable(source, filename, contextAnchor, owningGlobal, captureLocations)` | Wrapper performing global declaration setup and execution; optional statement location capture defaults to false |
 | `compileEvalExecutable(source, filename, inheritedStrict)` | Direct-eval callable with declaration metadata |
 | `compileIndirectEvalExecutable(source)` | Global eval callable with global declaration metadata |
 | `compileFunctionExecutable(arg0, ...)` | Construct a function from parameter strings and final body string |

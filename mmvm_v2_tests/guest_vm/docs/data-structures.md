@@ -257,6 +257,13 @@ binding/register maps, parameter slots, source and binding names, plus counts,
 flags and metadata identity. A compiler descriptor is a temporary JS-facing
 object; registration/adoption creates this runtime-owned record graph.
 
+Contract 106 makes the complete program record 80 bytes, including its header.
+Its traced debug reference points to compact filename/default-position and
+PC/line/column metadata; the following reserved word is zero. Shell-policy
+compilation captures statement positions. Ordinary images retain filename and
+default position without enabling the larger statement map. This metadata is
+separate from function source, which remains available for `toString()`.
+
 Bytecode is logically an integer-word stream with a width defined per opcode;
 the storage record may pack words into 8- or 16-bit units with escape/wide
 entries. An execution cache provides decoded words when required. Integer

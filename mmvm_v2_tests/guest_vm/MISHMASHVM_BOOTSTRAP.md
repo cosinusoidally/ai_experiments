@@ -41,12 +41,48 @@ The clean run in the original tree produced:
 - `libc_portable_proto/stubs.o`:
   `0cdb519efb42f22eba96bf90407e10b87868355e1d793d3a70271f09d47aa403`
 
-## Working checkpoint
+## Verified checkpoint (2026-11-14)
 
-The first guest compiler stage now completes in the original source tree.
-Its `tcc_boot3.o` has the reference SHA-256 above and passes a direct byte
-comparison. Observed process time: 86.84 seconds; peak RSS: 554312 KiB.
-The wrapper/stub stages and final regression checks are not complete yet.
+All three stages complete in the original source tree. Each guest object has
+the reference SHA-256 above and passes a direct byte comparison with the
+preserved clean jsshell object. No mishmashvm source files were changed.
+The final clean guest run used the packaged executable with its input snapshot
+renamed out of the way. The executable does not need that snapshot file.
+
+Whole-process measurements, including loading and compilation:
+
+| Script | Local jsshell seconds | Guest executable seconds | Guest peak RSS (KiB) |
+| --- | ---: | ---: | ---: |
+| `01_mk_tcc.js` | 6.10 | 87.94 | 554472 |
+| `02_mk_libc_wrap.js` | 1.13 | 46.73 | 546280 |
+| `03_mk_libc_stubs.js` | 0.72 | 44.08 | 549616 |
+
+These are correctness bring-up measurements, not performance parity. Expected
+C compiler warnings occur with both engines. The later native bootstrap in
+`libc_portable_proto/bootstrap_tcc.sh` has deliberately not been attempted.
+
+Build from `mmvm_v2_tests` (Node is a build-host option, not an executable
+runtime dependency):
+
+```sh
+node guest_runner.js --vm-native --shell --vm-max-heap-mib 1024 \
+  --snapshot artifacts/mishmash-shell.snap
+node guest_vm/tools/snapshot_to_exe.js artifacts/mishmash-shell.snap artifacts/js
+```
+
+From the sibling `mishmashvm` directory, select the resulting shell and run
+only these stages, in order:
+
+```sh
+export PATH="$(cd ../ai_experiments/mmvm_v2_tests/artifacts && pwd):$PATH"
+cd tcc_js_bootstrap
+js --no-ion 01_mk_tcc.js
+js --no-ion 02_mk_libc_wrap.js
+js --no-ion 03_mk_libc_stubs.js
+```
+
+Do not interpret this checkpoint as approval to run the entire `bootstrap.sh`:
+that proceeds into the next, not-yet-validated phase.
 
 The shell image uses the existing `--vm-max-heap-mib 1024` reservation option:
 the Emscripten compiler requests a 128 MiB ArrayBuffer, and the current external
@@ -73,3 +109,27 @@ location capture disabled; they can still report filenames/default positions.
 
 Generated snapshots, executables, logs and reference objects belong under
 ignored `artifacts/`, not in commits.
+
+The ctypes adapter is intentionally a subset: cdecl scalar/pointer declarations,
+library lookup, native function-pointer casts and synchronous native calls with
+up to eight arguments. Callback construction is rejected. It is not a complete
+implementation of SpiderMonkey js-ctypes. Shell `read(path, "binary")` returns
+a byte buffer; text reads decode UTF-8. `process` and `require` are not exposed
+to shell programs, avoiding incorrect Node environment detection.
+
+## Regression checks for this checkpoint
+
+- Node and js_min core suites: each passed 12 guest programs and 270 guest
+  assertions, plus the internal heap/compiler/interpreter checks.
+- Default standalone image: all eight demo launch/render checks and the three
+  HTTP server checks passed. Seven supplementary standalone checks passed,
+  including structural GC, FFI, frontend compilation and context multiplexing.
+- Standalone shell integration passed, including native pointer/view aliasing,
+  callback refusal, typed-array apply and signed/unsigned byte copies.
+- A default image rebuilt the VM from source under `js_runner`; the rebuilt
+  snapshot was byte-identical to its Node-built input.
+- Full Test262 under the default standalone image: 3292 executed, 3292 passed,
+  zero failures, zero not run and zero timeouts; suite elapsed 340.014 seconds.
+
+The bounded demo checks are not long-duration endurance runs. This checkpoint
+does not claim a new full ECMA or Octane performance comparison.

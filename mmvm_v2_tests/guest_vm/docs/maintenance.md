@@ -43,6 +43,8 @@ Ordinary `guest_runner.js` options:
 | `--vm-predecode` | Native interpretation with predecoded operand mode; build/load mode must agree. |
 | `--vm-threaded` | Structured-JS compilation. On js_min the non-native runner already enables it; bare VM constructors do not. |
 | `--snapshot FILE` | Build a generic standalone image before opening the optional application; implies native mode. Explicit, never an automatic disk cache. |
+| `--shell` | Build a standalone shell-policy snapshot instead of the default Node-compatible environment; see `../MISHMASHVM_BOOTSTRAP.md`. |
+| `--no-ion` | Accepted as a no-op for shell-script compatibility; this VM has no IonMonkey tier. |
 | `--with-snapshot FILE` | Reuse interpreter code in an embedded VM; not equivalent to launching the saved standalone environment. |
 | `--skip-snapshot-hash` | Accepted with `--with-snapshot`; current loader does not re-fingerprint source anyway. |
 | `--vm-max-heap-mib N` | Integer maximum from 64 to 1024 MiB; initial runtime limit remains the runner default. |
@@ -192,9 +194,13 @@ Diagnostic reason bases are named constants in source. Do not add numeric
 reason offsets at call sites without a shared name.
 
 Location-rich portable programs can report filename/line/column. Adopted
-self-hosted executables currently retain source but omit the full per-PC
-location table; native exits may report only PC/detail. The API must not
-promise uniform full stack/location metadata across all paths.
+programs retain a compact traced debug record. Shell-policy compilation enables
+the statement PC/line/column map; default images retain filename/default
+position without that map. Standalone unsupported exits print a bounded guest
+frame backtrace using this metadata. An already-unwound exception cannot
+recover its original frames this way: this is not throw-time `Error.stack`
+capture. The API must not promise uniform full stack/location metadata across
+all paths.
 
 ## Change checklist
 

@@ -18,6 +18,13 @@ executing native build artifacts. Its main is an ordinary kernel function
 with explicit argc/argv/snapshotEntry/dlsym inputs; startup ABI glue alone is
 macro assembly.
 
+`compileGraph` accepts `additionalEntries` for explicitly exported cold kernel
+entrypoints. They participate in the same dependency discovery and backend
+pipeline as the main entry. The standalone unsupported-exit reporter uses
+this to walk guest frames and print compact program source locations without
+calling back into the failed guest execution. Its stack is bounded, and its
+filename formatting uses libc scratch memory rather than guest allocations.
+
 Installed i386 results retain the general `fn` entry and expose internal
 fixed-signature `callI32` bindings for up to `HostFFI.MAX_NATIVE_ARGUMENTS`
 integer words. The fixed entry avoids creating an arguments array and then
