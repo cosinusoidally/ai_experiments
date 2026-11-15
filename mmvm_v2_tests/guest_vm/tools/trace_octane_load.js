@@ -4,6 +4,8 @@
  * File-load timing includes guest parse/compile/top-level execution, not the
  * subsequently timed benchmark iterations. Optional --compile-progress logs
  * guest function compilation boundaries, never individual bytecode operations.
+ * --no-source-locations is a diagnostic A/B override of frontend metadata
+ * capture; it is never used for acceptance scores or normal image execution.
  */
 var traceOctaneGlobal = this;
 if (typeof load === "undefined") {
@@ -20,7 +22,20 @@ if (typeof load === "undefined") {
 var traceOctaneArgs = traceOctaneGlobal.arguments;
 var traceOctaneArgumentIndex = 0;
 while (traceOctaneArgumentIndex < traceOctaneArgs.length) {
-    if (traceOctaneArgs[traceOctaneArgumentIndex] === "--compile-progress") {
+    if (traceOctaneArgs[traceOctaneArgumentIndex] === "--no-source-locations") {
+        traceOctaneArgs.splice(traceOctaneArgumentIndex, 1);
+        if (typeof GuestStandaloneFrontend === "undefined") {
+            throw new Error("source-location comparison requires the standalone frontend");
+        }
+        /* Diagnostic A/B policy only: do not modify benchmark source or the
+         * production image's default. Compare loading with the same heap cap. */
+        var traceOctaneCompileExecutable = GuestStandaloneFrontend.compileExecutable;
+        GuestStandaloneFrontend.compileExecutable = function (
+                source, filename, anchor, global, captureLocations) {
+            return traceOctaneCompileExecutable(source, filename, anchor, global, false);
+        };
+        print("diagnostic source-location capture disabled");
+    } else if (traceOctaneArgs[traceOctaneArgumentIndex] === "--compile-progress") {
         traceOctaneArgs.splice(traceOctaneArgumentIndex, 1);
         if (typeof GuestVMCompiler !== "function" ||
                 typeof GuestStandaloneFrontend === "undefined") {

@@ -31,7 +31,7 @@ exports.compileAst = function (ast, consumeAst) {
         {consumeAst: !!consumeAst}).compile(ast));
 };
 
-/* Native adoption consumes descriptors, not AST/hint/location graphs. Keep
+/* Native adoption consumes descriptors, not retained AST/hint graphs. Keep
  * this policy shared by load, eval and Function; public AST compilation and
  * the structured backend retain their default metadata behavior. Source text
  * is still retained exactly for Function.prototype.toString and diagnostics. */
@@ -149,13 +149,9 @@ function programDebugData(program) {
     result[ProgramDebugLayout.FILENAME] = program.filename || location.filename || "<unknown>";
     result[ProgramDebugLayout.DEFAULT_LINE] = location.line || 1;
     result[ProgramDebugLayout.DEFAULT_COLUMN] = location.column || 1;
-    var locations = program.sourceLocations || [], previous = null;
-    for (var pc = 0; pc < locations.length; pc++) {
-        var at = locations[pc];
-        if (at && (!previous || at.line !== previous.line || at.column !== previous.column)) {
-            result.push(pc, at.line, at.column); previous = at;
-        }
-    }
+    SelfHostedCompiler.visitSourceLocations(program.sourceLocations, function (pc, at) {
+        result.push(pc, at.line, at.column);
+    });
     return result;
 }
 
@@ -175,9 +171,9 @@ exports.adoptProgram = adoptProgramDescriptor;
 exports.compileExecutable = function (source, filename, contextAnchor,
                                       owningGlobal, captureLocations) {
     ensureFrontend();
-    /* Adoption retains exact function source, but has no location-table input.
-     * Do not build/retain a second, unused source-position graph here. Public
-     * descriptor compilation still captures locations by default. */
+    /* Retain exact source and, when requested, compact statement boundaries.
+     * Adoption consumes these into traced debug metadata rather than keeping
+     * the AST's source-position graph alive. */
     var program = exports.compile(source, filename, {
         captureLocations: !!captureLocations,
         /* This sink consumes word views synchronously. A generic frontend

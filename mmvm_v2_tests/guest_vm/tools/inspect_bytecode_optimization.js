@@ -98,9 +98,7 @@
     }
     function inspect(program) {
         if (instructionName && program.code[instructionPC] === Bytecode[instructionName]) {
-            var locationPC = instructionPC;
-            while (locationPC >= 0 && !program.sourceLocations[locationPC]) locationPC--;
-            var location = program.sourceLocations[locationPC];
+            var location = Bytecode.findSourceLocation(program.sourceLocations, instructionPC);
             report("instruction candidate " + (program.name || "<script/anonymous>") +
                 " pc=" + instructionPC + " location=" +
                 (location ? location.filename + ":" + location.line + ":" +

@@ -3,6 +3,32 @@
 There are two different compilers. Keep their products and optimization
 contracts separate.
 
+## Compiler source-location storage
+
+Public compiler descriptors retain their historical sparse `sourceLocations`
+array by default. `compactLocations: true` selects a compiler-owned ordered
+`Bytecode.SourceLocationTable`; `pagedTables: true` implies that choice for
+self-hosted/native adoption. Its `length` counts boundaries, not bytecode
+words. `positions` and `values` are paired PagedTables (1024 entries per page),
+and `append(pc, location)` records monotonically ordered changes. Emitting
+several instructions from one statement does not duplicate its boundary.
+
+Do not index a location table directly. `Bytecode.findSourceLocation(table,
+pc)` accepts either representation, using a binary floor lookup for compact
+tables. `sourceLocationCursor` supports monotonic instruction rewriting in
+linear time. `visitSourceLocations` walks actual boundaries; the compiler
+exports this helper for self-hosted adoption without loading a second
+bytecode module. Optimizer relocation preserves source positions, including
+when removed instructions carry a boundary. Missing locations are not written
+as undefined sparse entries.
+
+Adoption emits the existing traced filename/default-position/PC-line-column
+metadata; no native record, snapshot format or DWARF ABI changes. ASTs and
+compiler-only location tables are not retained merely for diagnostics.
+Exact function source remains available for toString. This fixes the 2026-11-15
+Mandreel loading regression caused by location capture requiring a large
+contiguous guest vector; capture remains enabled and the heap cap unchanged.
+
 ## Bounded kernel string literals
 
 The integer kernel supports `"text".length` and

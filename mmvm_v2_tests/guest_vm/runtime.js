@@ -2818,13 +2818,8 @@
 
     Runtime.prototype.hostCallLocation = function (frame, pc) {
         var program = frame && frame.program;
-        var location = null;
-        var scan = pc === undefined ? -1 : pc;
-        while (program && scan >= 0 && !location) {
-            location = program.sourceLocations &&
-                       program.sourceLocations[scan];
-            scan--;
-        }
+        var location = program ? Bytecode.findSourceLocation(
+            program.sourceLocations, pc === undefined ? -1 : pc) : null;
         var filename = location && location.filename ||
                        program && program.filename || "<guest>";
         var line = location && location.line || 1;
@@ -4471,8 +4466,7 @@
         }
         var location = null;
         if (program && program.sourceLocations && pc !== undefined) {
-            var scan = pc;
-            while (scan >= 0 && !location) location = program.sourceLocations[scan--];
+            location = Bytecode.findSourceLocation(program.sourceLocations, pc);
         }
         if (!location && program) location = program.location;
         if (!location) return error;

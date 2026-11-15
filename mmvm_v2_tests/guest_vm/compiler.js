@@ -46,7 +46,9 @@
         this.completionRegister = -1;
         this.constantRegisters = this.pagedTables ? new op.PagedTable() : [];
         this.registerHints = [];
-        this.sourceLocations = [];
+        this.compactLocations = this.pagedTables || !!options && options.compactLocations === true;
+        this.sourceLocations = this.compactLocations ? new op.SourceLocationTable() : [];
+        this.lastSourceLocation = null;
         this.currentLocation = null;
         this.filename = "<source>";
         this.scopes = [];
@@ -173,7 +175,11 @@
     Compiler.prototype.emit = function () {
         var position = this.code.length;
         if (this.captureLocations && this.currentLocation) {
-            this.sourceLocations[position] = this.currentLocation;
+            if (!this.compactLocations) this.sourceLocations[position] = this.currentLocation;
+            else if (this.currentLocation !== this.lastSourceLocation) {
+                this.sourceLocations.append(position, this.currentLocation);
+                this.lastSourceLocation = this.currentLocation;
+            }
         }
         this.code.appendKnownWords(arguments);
         return position;
@@ -269,6 +275,7 @@
              finishFunction: this.finishFunction,
              packedWords: this.packedWords,
              pagedTables: this.pagedTables,
+             compactLocations: this.compactLocations,
              wordArena: this.wordArena,
              captureHints: this.captureHints,
              reuseStatementTemps: this.reuseStatementTemps,
@@ -1815,6 +1822,7 @@
     };
 
     Compiler.createWordArena = op.createWordArena;
+    Compiler.visitSourceLocations = op.visitSourceLocations;
     Compiler.constantAt = function (program, index) {
         return op.tableGet(program.constants, index);
     };

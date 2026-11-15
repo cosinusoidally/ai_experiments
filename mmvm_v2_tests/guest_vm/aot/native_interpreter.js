@@ -19428,9 +19428,7 @@
          * scan backwards from an arbitrary address looking for source data. */
         if (program && program.code && program.sourceLocations &&
                 pc >= 0 && pc < program.code.length) {
-            while (pc >= 0 && !location) {
-                location = program.sourceLocations[pc--];
-            }
+            location = Bytecode.findSourceLocation(program.sourceLocations, pc);
         }
         return {filename: location && location.filename ||
                     program && program.filename || "<source>",

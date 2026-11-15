@@ -116,3 +116,39 @@ skipping Mandreel. No VM changes or limit adjustments were made in this audit.
 The full-run failure, including its diagnostic, is retained here because raw
 artifacts may be cleared. This regression was not covered by the preceding
 three-suite smoke checks.
+
+## Follow-up: Mandreel location-storage fix
+
+The A/B override in the existing `trace_octane_load.js` tool confirms that
+disabling source-location capture lets the same executable/512 MiB cap load
+Mandreel and pass setup (81.34 seconds overall). This diagnostic override is
+not the production fix and is not used for scores.
+
+The compiler wrote source locations into a sparse-looking JS array indexed
+by bytecode-word position. The guest array implementation reserves contiguous
+tagged-vector capacity for those indices. Optimizer rewriting also wrote
+undefined entries into location arrays even when no location existed. Both
+are inappropriate compiler-storage choices for large generated functions.
+
+Compiler-owned location storage is now an ordered, paged boundary map.
+Repeated instructions from a statement share one boundary; optimizer rewriting
+walks a monotonic cursor and relocates boundaries without huge sparse vectors.
+All lookup/diagnostic consumers use the shared location API. Public compiler
+descriptors keep their default sparse-array format; compact storage is selected
+explicitly or by the existing paged self-hosted compilation mode. Adoption
+still emits the existing traced PC/line/column records; no snapshot/native ABI
+change or removal of debug information. See [implementation contracts](guest_vm/docs/compilation.md#compiler-source-location-storage).
+
+Node core passes (12 programs / 310 guest assertions plus internal checks).
+The existing error-location test now exercises both location representations
+and retains its filename/line/column expectations. The final functional
+candidate passes **full stock Mandreel**, capture enabled, unchanged heap cap:
+**aggregate score 346**, **129.83 s**, **526712 KiB peak RSS**, exit zero.
+Its throughput/latency subscores are 145/827, not the aggregate score. The
+previous successful November 14 aggregate was 336 in 127.62 seconds; these
+single observations do not establish a speedup. RSS is higher than the old
+500712-KiB observation because location information remains enabled; no small
+memory-footprint claim is made.
+
+Broad post-fix validation is in progress; the full failed-sweep table above
+remains the exact audit record, not silently overwritten by a focused retest.

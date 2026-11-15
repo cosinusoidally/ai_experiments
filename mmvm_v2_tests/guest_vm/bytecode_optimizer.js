@@ -291,7 +291,10 @@
     function rewriteInstructions(program, replacements) {
         var code = program.code, pc, opcode, operand;
         var builder = new op.WordBuffer(program.packedWords, program.wordArena);
-        var locations = [], relocated = {}, replacement;
+        var locations = program.sourceLocations && program.sourceLocations.compactLocations ?
+            new op.SourceLocationTable() : [];
+        var locationAt = op.sourceLocationCursor(program.sourceLocations);
+        var relocated = {}, replacement;
         for (pc = 0; pc < code.length; pc += op.WIDTHS[code[pc]]) {
             relocated[pc] = builder.length;
             replacement = replacements[pc];
@@ -299,7 +302,7 @@
                 replacement = op.copyWords(code, pc, pc + op.WIDTHS[code[pc]]);
             }
             if (replacement.length && program.sourceLocations) {
-                locations[builder.length] = program.sourceLocations[pc];
+                op.recordSourceLocation(locations, builder.length, locationAt(pc));
             }
             builder.appendKnownWords(replacement);
         }

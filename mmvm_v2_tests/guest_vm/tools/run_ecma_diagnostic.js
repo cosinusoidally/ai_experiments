@@ -8,6 +8,7 @@ var fs = require("fs");
 var Heap = require("../heap.js");
 var VM = require("../vm.js");
 var SemanticRuntime = require("../runtime.js");
+var bytecode = require("../bytecode.js");
 var relative = process.argv[2], budget = 20000000;
 var traceExceptions = false, compareInstanceof = false, compareIn = false;
 var traceFile = null;
@@ -25,7 +26,6 @@ function diagnosticValue(value) {
 }
 if (compareInstanceof || compareIn || traceFile) {
     var NativeInterpreter = require("../aot/native_interpreter.js");
-    var bytecode = require("../bytecode.js");
     var runNative = NativeInterpreter.prototype.run;
     NativeInterpreter.prototype.run = function (frame, program, slice, context) {
         var runtime = this.runtime, records = runtime.heapRecords;
@@ -78,8 +78,8 @@ if (traceExceptions) {
         var address = frame && frame.heapAddress, depth = 0;
         while (address && depth++ < 8) {
             var program = this.adoptHeapProgram(this.heapRecords.frameProgram(address));
-            var pc = this.heapRecords.framePC(address), location = null, scan = pc;
-            while (program.sourceLocations && scan >= 0 && !location) location = program.sourceLocations[scan--];
+            var pc = this.heapRecords.framePC(address);
+            var location = bytecode.findSourceLocation(program.sourceLocations, pc);
             console.error("  frame " + (program.name || "<script>") + " " +
                 program.filename + ":" + (location && location.line || 0) +
                 ":" + (location && location.column || 0) + " pc=" + pc);

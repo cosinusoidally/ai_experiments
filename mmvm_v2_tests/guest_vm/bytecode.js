@@ -193,6 +193,93 @@
         return this.length;
     };
     op.PagedTable = PagedTable;
+    /* Compiler-owned statement boundaries, not a sparse array indexed by
+     * every bytecode word. Pages bound allocations; adjacent instructions
+     * share a location until a new boundary is recorded. Public descriptors
+     * may still supply the historical sparse-array representation. */
+    function SourceLocationTable() {
+        this.compactLocations = true;
+        this.positions = new PagedTable();
+        this.values = new PagedTable();
+        this.length = 0;
+    }
+    SourceLocationTable.prototype.append = function (pc, location) {
+        if (!location) return;
+        var last = this.length - 1;
+        if (last >= 0) {
+            var previous = this.values.get(last);
+            if (previous === location ||
+                    (previous.line === location.line &&
+                     previous.column === location.column &&
+                     previous.filename === location.filename)) return;
+            if (pc < this.positions.get(last)) {
+                throw new Error("source locations must be ordered");
+            }
+            if (pc === this.positions.get(last)) {
+                this.values.set(last, location);
+                return;
+            }
+        }
+        this.positions.push(pc);
+        this.values.push(location);
+        this.length++;
+    };
+    op.SourceLocationTable = SourceLocationTable;
+    op.recordSourceLocation = function (locations, pc, location) {
+        if (!location) return;
+        if (locations.compactLocations) locations.append(pc, location);
+        else locations[pc] = location;
+    };
+    op.findSourceLocation = function (locations, pc) {
+        if (!locations || pc < 0) return null;
+        if (!locations.compactLocations) {
+            while (pc >= 0) {
+                var location = locations[pc--];
+                if (location) return location;
+            }
+            return null;
+        }
+        var low = 0, high = locations.length;
+        while (low < high) {
+            var middle = (low + high) >>> 1;
+            if (locations.positions.get(middle) <= pc) low = middle + 1;
+            else high = middle;
+        }
+        return low ? locations.values.get(low - 1) : null;
+    };
+    /* Monotonic instruction rewriting is linear in boundaries/words, rather
+     * than performing a binary search for every instruction. */
+    op.sourceLocationCursor = function (locations) {
+        var next = 0, current = null;
+        return function (pc) {
+            if (!locations) return null;
+            if (locations.compactLocations) {
+                while (next < locations.length && locations.positions.get(next) <= pc) {
+                    current = locations.values.get(next++);
+                }
+            } else {
+                while (next < locations.length && next <= pc) {
+                    if (locations[next]) current = locations[next];
+                    next++;
+                }
+            }
+            return current;
+        };
+    };
+    op.visitSourceLocations = function (locations, visitor) {
+        if (!locations) return;
+        var index = 0, previous = null;
+        while (index < locations.length) {
+            var pc = locations.compactLocations ? locations.positions.get(index) : index;
+            var location = locations.compactLocations ? locations.values.get(index) : locations[index];
+            if (location && (!previous || previous.line !== location.line ||
+                    previous.column !== location.column || previous.filename !== location.filename)) {
+                visitor(pc, location);
+                previous = location;
+            }
+            index++;
+        }
+    };
     op.tableGet = function (table, index) {
         return table.pages ? table.get(index) : table[index];
     };
