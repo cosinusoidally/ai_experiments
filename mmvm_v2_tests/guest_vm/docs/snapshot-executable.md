@@ -1,8 +1,9 @@
 # Packaging a standalone snapshot as an executable
 
-Windows PE32 packaging is currently a proposal, not an available flag. See the
-[Windows investigation and implementation plan](windows-snapshot-plan.md) for
-the exact-same-snapshot goal, resolver, native dependencies and memory design.
+Windows PE32 packaging is available as an initial `--win32` implementation.
+See [Windows bring-up and limitations](windows-snapshot.md) and the
+[investigation and implementation plan](windows-snapshot-plan.md). The default
+ELF path and debug incorporation remain unchanged.
 
 Optional DWARF incorporation uses `--debug-info INPUT.snap.dbg`. See
 [kernel-debugging.md](kernel-debugging.md) for `-g`/`-O0`, debugger use,

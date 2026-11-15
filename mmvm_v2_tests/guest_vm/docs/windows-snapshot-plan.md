@@ -1,8 +1,10 @@
 # Windows PE32 snapshot executable: investigation and implementation plan
 
 Date: 2026-11-14. Source reviewed at `b516654`.
-Status: **planning only; no Windows implementation or Windows validation yet**.
-This is a proposed extension, not a description of an existing `--win32` flag.
+Original status: planning only. Initial implementation began 2026-11-15; see
+[current Windows bring-up](windows-snapshot.md) for actual support and validation.
+The proposals and open alternatives below remain the original planning record,
+not an assertion that every planned feature is implemented.
 The source investigation was local; no Internet access or downloads were used.
 
 ## Goal and constraints

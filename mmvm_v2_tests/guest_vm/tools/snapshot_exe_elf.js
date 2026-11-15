@@ -304,7 +304,8 @@
         return {prefix: prefix, suffix: suffix, snapshotOffset: LAYOUT.snapshot,
             assembly: code.assembly};
     }
-    var api = {build: build, read32: read32, kernelAddress: kernelAddress};
+    var api = {build: build, read32: read32, kernelAddress: kernelAddress,
+        validate: validate};
     root.GuestVMSnapshotExeELF = api;
     if (typeof module !== "undefined" && module.exports) module.exports = api;
 }(this));

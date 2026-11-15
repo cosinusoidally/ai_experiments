@@ -798,6 +798,14 @@
         }
         if (this.macros) this.macros.push("ret()"); this.emitByte(0xc3);
     };
+    /* i386 callee-cleanup ABI boundary; ordinary kernel calls remain cdecl. */
+    Assembler.prototype.retPopBytes = function (bytes) {
+        if (this.stackWords !== 0 || bytes < 0 || bytes > 65535 || bytes % 4) {
+            throw new Error("invalid callee-cleanup return");
+        }
+        if (this.macros) this.macros.push("ret_pop_bytes(" + bytes + ")");
+        this.emitByte(0xc2); this.emitBytes2(bytes & 255, bytes >>> 8);
+    };
     Assembler.prototype.dump = function () {
         return this.macros ? this.macros.join("\n") : "";
     };
