@@ -19924,11 +19924,11 @@
     };
 
     NativeInterpreter.prototype.writeStandaloneSnapshot = function (
-            path, execution, expectedProgramPath) {
+            path, execution, expectedProgramPath, options) {
         var backend = new X86Backend({captureAssembly: false});
         return backend.writeStandaloneSnapshot(path, this.nativeResult,
             this.runtime, execution, expectedProgramPath,
-            this.snapshotMetadata);
+            this.snapshotMetadata, options);
     };
 
     NativeInterpreter.prototype.reportProfile = function () {

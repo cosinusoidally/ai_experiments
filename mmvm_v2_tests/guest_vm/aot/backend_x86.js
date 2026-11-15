@@ -837,7 +837,7 @@
     }
 
     X86Backend.prototype.writeStandaloneSnapshot = function (
-            path, result, runtime, execution, expectedProgramPath, metadata) {
+            path, result, runtime, execution, expectedProgramPath, metadata, options) {
         if (!result || (!result.pointer && !result.bytes) || !metadata ||
             !execution || !execution.frames || execution.frames.length !== 1) {
             return false;
@@ -926,9 +926,16 @@
         }
         layout.codeOffset = alignStandalone(nextDataOffset, 16);
         var sharingStarted = new Date().getTime();
-        var sharedStrings = runtime.shareSnapshotStringBackings();
+        /* Free-payload normalization is required for deterministic images,
+         * independently of the optional, representation-only sharing pass. */
+        heap.clearFreeRecordPayloads();
+        var shareStringBackings = options && options.shareStringBackings === true;
+        var sharedStrings = shareStringBackings ?
+            runtime.shareSnapshotStringBackings() : 0;
         if (typeof print === "function") {
-            print("shared " + sharedStrings + " remaining string backings in " +
+            print((shareStringBackings ?
+                "shared " + sharedStrings + " remaining string backings in " :
+                "string backing sharing disabled; normalized free payloads in ") +
                 (new Date().getTime() - sharingStarted) + " ms");
         }
         var heapImageLength = heap.bump;

@@ -1,5 +1,34 @@
 # Guest build performance investigation
 
+## 2026-11-15: disable final backing sharing by default
+
+The final string-backing sharing pass is now opt-in through
+`--snapshot-share-string-backings`; explicit opt-out is
+`--no-snapshot-share-string-backings`. Interning and existing source slices
+remain enabled. The pass converts records to views but preserves their
+allocation spans, so it does not shrink the image or free their unused tails.
+Free-record payload zeroing remains unconditional for deterministic output.
+
+- Node default image, explicit-disabled image, and enabled image are all
+  **7,519,832 bytes**. Default and explicit-disabled bytes match exactly.
+- A genuine Linux self-build with sharing disabled took **78.66 s**, peak
+  RSS **482820 KiB**. Its image matches the final Node image byte-for-byte.
+  The previous sharing-enabled observation was **93.02 s / 485800 KiB**:
+  about **15.4% less wall time**, not a repeated-run statistical claim.
+- That self-build spent **577.09 ms** normalizing free payloads and
+  **985.74 ms** in snapshot writing overall, versus the previous **17.52 s**
+  sharing phase. No source/hash cache or copied-image shortcut is involved.
+- Current serial Node observations: enabled snapshot writing **4498 ms**,
+  explicit-disabled **540 ms**. A separately timed default build took
+  **5.17 s / 280716 KiB** including compilation and environment preparation.
+- Fresh js_min default build: **97.16 s / 292004 KiB**, normalization
+  **799 ms**, snapshot writing **1335 ms**; image byte-identical to Node and
+  the Linux self-build. Prior recorded js_min build was 105.73 seconds.
+
+These measurements supersede the shared-search performance regression for
+the default path. The optional search implementation remains available for
+experimentation; it is not executed by default snapshot builds.
+
 ## 2026-10-26: Node cross-build host
 
 Stock Node can now construct the same i386/Linux standalone image, without

@@ -553,6 +553,15 @@
         return this.memory.readU32Trusted(address + HEADER_MARK);
     };
 
+    Heap.prototype.clearFreeRecordPayloads = function () {
+        var address = FIRST_RECORD;
+        while (address < this.bump) {
+            var header = this.inspectRecordHeader(address);
+            if (header.type === Types.FREE) this.clearFreeRecordPayload(address);
+            address += header.size;
+        }
+    };
+
     Heap.prototype.clearFreeRecordPayload = function (address) {
         /* Free-list links/region flags live in the header and remain intact.
          * Payload is dead storage, potentially containing producer-dependent

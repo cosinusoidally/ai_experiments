@@ -282,6 +282,14 @@ Use a normal uninstrumented build for timings and final identity acceptance.
 After the I/O fix the build passed preparation but stalled in backing sharing:
 the optional GNU `memmem` optimization was absent and the old JS byte loop was
 pathologically slow. That optional symbol was missing from the initial static
-inventory. A shared compiled search implementation and final self-hosting
-acceptance are being validated; no complete Windows self-build is claimed at
-this intermediate I/O checkpoint.
+inventory. The subsequent shared compiled search implementation allowed
+complete Windows/Wine self-builds with snapshots identical to Node/Linux.
+The latest such sharing-enabled observations were 95.26 seconds on Wine and
+93.02 seconds on Linux; Linux's former glibc-search observation was 87.57
+seconds. These are individual measurements, not repeated-run averages.
+
+Final string-backing sharing is now disabled by default; enable it explicitly
+with `--snapshot-share-string-backings`. This pass retained the original
+allocation spans, so converting their contents to views did not reduce the
+snapshot length or make those bytes reusable. Existing source sharing and
+interning are unchanged. See [the builder option](self-hosting.md#optional-final-string-backing-sharing).

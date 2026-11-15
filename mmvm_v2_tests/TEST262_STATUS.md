@@ -1,5 +1,19 @@
 # Test262 status
 
+2026-11-15, final string-backing sharing disabled by default:
+
+- Linux standalone executable: **3292 passed / 0 failed / 0 timed out /
+  0 not run**, elapsed **337163.922 ms**, summed test time **318698.682 ms**.
+- Windows PE32/Wine executable, same snapshot: **3292 passed / 0 failed /
+  0 timed out / 0 not run**, elapsed **356477.489 ms**, summed test time
+  **337824.009 ms**.
+- No test/corpus/harness changes or additional skips. Snapshot is 7,519,832
+  bytes with either backing-sharing setting; default and explicit-disable
+  images match, as do Node and Linux-self-built default images.
+- Raw logs: ignored `artifacts/no-sharing-test262-linux.log` and
+  `artifacts/no-sharing-test262-win.log`. Windows results are Wine results;
+  the user's separate Windows 11 smoke test was not a full Test262 run.
+
 2026-11-15, Windows PE32 bring-up under the supplied 32-bit Wine prefix:
 
 - Initial unchanged default snapshot with the Windows platform adapter:

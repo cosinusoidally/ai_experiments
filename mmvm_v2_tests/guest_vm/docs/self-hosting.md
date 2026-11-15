@@ -73,6 +73,25 @@ execution in the builder. Only afterwards, if a program argument was given,
 does it open and execute that application. Snapshot-only invocation exits
 without an application.
 
+### Optional final string-backing sharing
+
+Final string-backing sharing is disabled by default. Use
+`--snapshot-share-string-backings` to enable it, or
+`--no-snapshot-share-string-backings` to explicitly disable it. These are
+builder options, placed before the application argument. The embedding API
+is `writeStandaloneSnapshot(path, execution, expectedProgramPath, options)`;
+only `options.shareStringBackings === true` requests sharing.
+
+This final pass converts matching flat strings into views of other strings,
+but retains their original allocation sizes and clears the retired bytes.
+It neither shrinks the written heap span nor makes those tails allocator-free.
+Disabling it avoids the search cost without removing interning, existing
+source slices, or any observable string contents. Snapshot bytes differ
+between settings, but their file lengths should be equal for the same build.
+Compare cross-host/self-hosted identity using the same setting. Free-record
+payload normalization remains enabled independently in both modes, so dead
+allocation history does not leak into either image.
+
 Node cross-building uses sparse emulated linear memory and the same compiler
 and assembler. `HostFFI.snapshotBindings()` assigns deferred symbol identities
 for resolution; it refuses actual native execution. The x86 output is emitted

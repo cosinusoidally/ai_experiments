@@ -1,5 +1,34 @@
 # Validation checkpoint, 2026-11-04
 
+Final string-backing sharing opt-out checkpoint, 2026-11-15:
+
+- Sharing is disabled by default; `--snapshot-share-string-backings` opts in,
+  `--no-snapshot-share-string-backings` explicitly opts out. Interning and
+  existing source slices are unchanged; free-payload normalization remains
+  unconditional. Both image settings occupy **7,519,832 bytes**.
+- Full default-image Test262: Linux **3292 pass / 0 fail / 0 timeout /
+  0 not run**, **337.164 s**; Windows/Wine **3292 / 0 / 0 / 0**, **356.477 s**.
+- Node and js_min core suites pass: **12 guest programs / 310 assertions**
+  each plus internal compiler/heap checks and command-line/context checks.
+- Standalone language integration passes. Bounded structural GC passes:
+  **27 audits / 113184 edges / 221 property-index audits / 74 embedding
+  collections**, maximum bump **3532584 bytes**, under an 8 MiB guest cap.
+- All **eight demos and three HTTP servers** pass the bounded executable
+  matrix with the source snapshot absent. No demo, corpus, C or networking
+  implementation changes were made.
+- Node default and explicit-disable images are identical; a genuine Linux
+  self-build and a fresh js_min build match them. The js_min build took
+  **97.16 s / 292004 KiB RSS**; explicitly sharing-enabled image hello passes.
+  Self-build **78.66 s / 482820 KiB RSS**, versus
+  the prior sharing-enabled **93.02 s / 485800 KiB** observation. See
+  [build measurements](BUILD_PERFORMANCE.md) for phase timings and caveats.
+- Richards smoke benchmark completes with score **90.5**, versus the earlier
+  Windows-port Linux observation **89.2**; individual runs, not a statistical
+  speedup claim.
+- Raw receipts are ignored `artifacts/no-sharing-*.log` and
+  `artifacts/no-sharing-apps/results.json`. These are bounded demo checks,
+  not an extended endurance run or a new full ECMA/Octane sweep.
+
 Windows PE32 checkpoint, 2026-11-15 (`guestVM-win32`, runtime fix `d2cdf53`):
 the **same snapshot** passes Test262 under PE/Wine and ELF: **3292/3292** on
 both, zero failures/timeouts/not run, process **345.37 s / 344.07 s** respectively.

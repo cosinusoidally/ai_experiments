@@ -36,6 +36,7 @@ var guestRunnerPredecode = false;
 var guestRunnerKernelOptimization = "default";
 var guestRunnerKernelDebug = false;
 var guestRunnerSnapshot = null;
+var guestRunnerShareStringBackings = false;
 var guestRunnerShell = false;
 var guestRunnerWithSnapshot = null;
 var guestRunnerSkipSnapshotHash = false;
@@ -151,6 +152,10 @@ for (var guestRunnerOptionIndex = 0;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] ===
                "--vm-log-host-calls") {
         guestRunnerLogHostCalls = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--snapshot-share-string-backings") {
+        guestRunnerShareStringBackings = true;
+    } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--no-snapshot-share-string-backings") {
+        guestRunnerShareStringBackings = false;
     } else if (guestRunnerArguments[guestRunnerOptionIndex] === "--snapshot" ||
                guestRunnerArguments[guestRunnerOptionIndex] ===
                "--with-snapshot") {
@@ -202,6 +207,7 @@ if (!guestRunnerArguments.length && !guestRunnerSnapshot) {
                      "[--vm-profile-duration milliseconds] " +
                      "[--vm-native] [--vm-predecode] [-g] [-O0] [--snapshot file | " +
                      "--with-snapshot file [--skip-snapshot-hash]] " +
+                     "[--snapshot-share-string-backings | --no-snapshot-share-string-backings] " +
                      "[-e source] [-f file] [program.js [arguments...]]";
     if (typeof print === "function") print(guestUsage);
     else console.error(guestUsage);
@@ -343,7 +349,8 @@ try {
             read("guest_vm/standalone_source_runner.js"),
             "guest_vm/standalone_source_runner.js");
         if (!guestProgramVM.runtime.nativeInterpreter.writeStandaloneSnapshot(
-                guestRunnerSnapshot, guestSnapshotExecution, null)) {
+                guestRunnerSnapshot, guestSnapshotExecution, null,
+                {shareStringBackings: guestRunnerShareStringBackings})) {
             throw new Error("could not write standalone snapshot: " +
                             guestRunnerSnapshot);
         }
