@@ -2,6 +2,25 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Full Linux audit, 2026-11-15, approximately 16:19--16:29 UTC
+
+- Latest VM sources `5163ff6`, checkout `ae0e709`, fresh default optimized
+  standalone executable: **997 passed / 332 failed (including 39 timeouts) /
+  4 configured skips / 0 not run**. All 1333 filenames have a final status;
+  1329 executed. Harness/corpus/timeout policy unchanged.
+- Exact comparison with every tracked `fa4b98f` filename: **996 passes
+  preserved / 1 gained / 0 lost / 0 missing statuses**. The only change is
+  `ecma_5/Number/tonumber-string-hex.js`, FAIL to PASS, consistent with the
+  shared hexadecimal number conversion added during Windows bring-up.
+- Process **608.69 s** versus **609.22 s** previously; harness **606922.158 ms**;
+  peak RSS **463788 KiB** versus **463836 KiB**. Single observations, not a
+  statistically established performance improvement.
+- Per-directory pass/fail: ecma **473/147**, ecma_2 **149/23**, ecma_3
+  **177/48**, ecma_5 **198/114**. Timeouts **11/0/1/27**, respectively.
+- Updated [per-file records](ECMA_TEST_RESULTS.tsv) retain the historical
+  columns. See [this audit](LINUX_ECMA_OCTANE_2026-11-15.md) for image identity,
+  commands/policy and the associated full Octane run.
+
 ### Penguin follow-up audit, 2026-11-14, approximately 21:25 UTC
 
 - Current implementation `fa4b98f` (VM fix `3dd1363`), freshly built default
