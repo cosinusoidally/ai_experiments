@@ -1,6 +1,15 @@
 # Octane guest-VM bring-up and performance approach
 
-Latest complete executable sweep, 2026-11-14 (`fa4b98f`, including Penguin fix
+Latest full Linux executable sweep, 2026-11-15 (VM sources `5163ff6`):
+**14/15 suites pass; Mandreel regressed with an allocation failure during
+source loading at the unchanged 512 MiB heap maximum**. Every suite was
+attempted; no watchdog expiry or skip. The fourteen passing score ratios
+have geometric mean +2.44% versus the November 14 sweep, but this is not an
+all-suite improvement because Mandreel now fails. PdfJS is 5.95% lower in
+the individual observations. Complete scores/time/RSS, failure diagnostic
+and next investigation are in [the current Linux audit](LINUX_ECMA_OCTANE_2026-11-15.md).
+
+Previous all-passing executable sweep, 2026-11-14 (`fa4b98f`, including Penguin fix
 `3dd1363`): **15/15 stock suites pass**, including RegExp and Mandreel, each
 in a separate serial process with correctness checks enabled. Current scores,
 timing/RSS and both historical launcher baselines are in

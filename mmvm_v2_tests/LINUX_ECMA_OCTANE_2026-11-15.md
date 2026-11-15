@@ -49,8 +49,10 @@ the more recent three-suite smoke runs.
 
 ## Stock Octane results
 
-Run in progress. The first five suites pass. RegExp is running; the later
-suites have not run yet. No partial benchmark is reported as a score.
+**14/15 suites pass. Mandreel regressed:** it exits 70 during source loading
+with an allocation failure before producing a score. All suites were attempted
+to completion/controlled failure; no outer watchdog expired. The other fourteen
+processes exit zero and emit stock aggregate scores with correctness checks.
 
 | Suite | Nov 14 score | Current score | Change | Process seconds | Peak RSS KiB | Status |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -59,13 +61,58 @@ suites have not run yet. No partial benchmark is reported as a score.
 | Crypto | 177 | 179 | +1.13% | 25.72 | 40704 | PASS |
 | RayTrace | 269 | 285 | +5.95% | 10.39 | 210688 | PASS |
 | EarleyBoyer | 468 | 482 | +2.99% | 25.12 | 467840 | PASS |
-| RegExp | 2.88 | — | — | — | — | Running |
-| Splay | 682 | — | — | — | — | Pending |
-| NavierStokes | 256 | — | — | — | — | Pending |
-| PdfJS | 756 | — | — | — | — | Pending |
-| Mandreel | 336 | — | — | — | — | Pending |
-| Gameboy | 770 | — | — | — | — | Pending |
-| CodeLoad | 90.9 | — | — | — | — | Pending |
-| Box2D | 419 | — | — | — | — | Pending |
-| zlib | 531 | — | — | — | — | Pending |
-| Typescript | 1274 | — | — | — | — | Pending |
+| RegExp | 2.88 | 2.88 | 0.00% | 571.44 | 467968 | PASS |
+| Splay | 682 | 675 | -1.03% | 4.11 | 406400 | PASS |
+| NavierStokes | 256 | 249 | -2.73% | 11.01 | 26368 | PASS |
+| PdfJS | 756 | 711 | -5.95% | 20.48 | 310640 | PASS |
+| Mandreel | 336 | — | — | 66.91 | 489452 | FAIL: allocation |
+| Gameboy | 770 | 831 | +7.92% | 16.94 | 109056 | PASS |
+| CodeLoad | 90.9 | 98.9 | +8.80% | 29.37 | 268928 | PASS |
+| Box2D | 419 | 455 | +8.59% | 13.27 | 108416 | PASS |
+| zlib | 531 | 556 | +4.71% | 275.33 | 104320 | PASS |
+| Typescript | 1274 | 1329 | +4.32% | 107.26 | 467832 | PASS |
+
+Scores are the stock final `Score (version 9)` values, not an individual
+throughput subscore when a suite also measures latency. Higher is better.
+
+- Among the **14 passing suites only**, the geometric mean score ratio is
+  **+2.44%** versus November 14, and **-5.38%** versus the older November 13
+  executable scores. This is not a valid all-15 improvement claim: omitting
+  the newly failed suite would conceal a correctness regression.
+- PdfJS is **5.95% lower**, NavierStokes **2.73% lower**, Splay **1.03% lower**
+  in these observations. Other scores are unchanged or higher. These are
+  historical, unpaired comparisons; no causal attribution is established.
+- Total process time across all fifteen attempts: **1185.19 s**. The previous
+  all-passing run took 1266.80 s, but current Mandreel stops early; the lower
+  total cannot be interpreted as an overall speedup.
+- ECMA plus all Octane attempts: **1793.88 s**, approximately **29m 54s**,
+  excluding image generation and measurement/reporting overhead.
+
+## Mandreel regression and next investigation
+
+The default 512 MiB image reports:
+
+```text
+guest VM unsupported opcode 6 at bytecode pc 61 (detail 0, allocation 1;
+GC 21, live 136868112, tail 503758840, limit 536870912, maximum 536870912)
+```
+
+Opcode 6 is SET_PROPERTY. **This does not mean SET_PROPERTY is missing**:
+the allocation-failed flag is set while the guest front end is loading
+`mandreel.js`, through `octane_runner.js:107`. No benchmark score is produced.
+The reported live bytes are well below the maximum; the diagnostic alone
+does not distinguish a large contiguous-span failure, fragmentation or an
+allocator bookkeeping problem. It does not report the requested span size.
+
+The recent unified environment changed ordinary `load` to capture statement
+locations unconditionally; the former default image did not. That is a
+concrete front-end allocation-policy change to investigate, **not a proven
+root cause**. Next steps are to reproduce loading, inspect the failed request
+and free-span distribution, and compare location-metadata construction with
+the previous policy. Preserve actionable diagnostics and the existing heap
+cap rather than declaring success by silently increasing the limit or
+skipping Mandreel. No VM changes or limit adjustments were made in this audit.
+
+The full-run failure, including its diagnostic, is retained here because raw
+artifacts may be cleared. This regression was not covered by the preceding
+three-suite smoke checks.

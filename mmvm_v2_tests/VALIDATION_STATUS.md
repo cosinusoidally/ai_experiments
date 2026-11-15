@@ -1,5 +1,24 @@
 # Validation checkpoint, 2026-11-04
 
+Latest full Linux ECMA/Octane audit, 2026-11-15 (VM source `5163ff6`):
+
+- ECMA **997 passed / 332 failed (39 timeouts) / 4 configured skips /
+  0 not run**; all 1333 filename statuses recorded. Exact comparison with
+  `fa4b98f`: **996 passes preserved / 1 gained / 0 lost**. Gain:
+  `ecma_5/Number/tonumber-string-hex.js`. Process **608.69 s**, peak
+  **463788 KiB**, effectively unchanged from 609.22 s.
+- Full stock Octane: **14/15 pass**. **Mandreel is a newly observed regression**:
+  allocation failure during loading, exit 70, no score, at the unchanged
+  512 MiB maximum. It is not a missing SET_PROPERTY implementation; the
+  allocation-failed diagnostic is set. All other suites exit zero; none is
+  skipped or stopped by the 1800-second outer watchdog.
+- Passing-suite score ratio geometric mean +2.44% versus November 14, but
+  excludes Mandreel and is **not** an all-suite improvement. PdfJS -5.95%,
+  NavierStokes -2.73%, Splay -1.03% in these unpaired observations.
+- Same fresh optimized native Linux executable, original snapshot moved
+  aside, serial execution, no VM/harness/corpus/limit changes. See
+  [full scores, RSS, timings and next Mandreel investigation](LINUX_ECMA_OCTANE_2026-11-15.md).
+
 Unified standalone environment / Windows mishmashvm checkpoint, 2026-11-15
 (`5163ff6`, acceptance notes `ab4d75c`):
 
