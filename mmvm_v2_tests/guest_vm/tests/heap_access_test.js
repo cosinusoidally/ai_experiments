@@ -97,6 +97,38 @@
                     observedReads + " first=" + first.memory.readU32(wordAddress) +
                     " second=" + first.memory.readU32(wordAddress + Heap.WORD_BYTES));
             }
+            /* Exercise the shared binary-search service through its real
+             * allocation boundary, including periodic data, NUL/high bytes,
+             * unaligned spans, misses and bounded deterministic mixed input. */
+            var searchHost = first.memory.host;
+            var searchHay = searchHost.allocate(512, true);
+            var searchNeedle = searchHost.allocate(512, true);
+            try {
+                var seed = 12345;
+                for (var searchCase = 0; searchCase < 96; searchCase++) {
+                    var hay = [], needle = [], hayLength = 300 + searchCase * 2;
+                    var needleLength = searchCase % 4 < 2 ? 257 + searchCase % 31 : searchCase % 19, j;
+                    for (j = 0; j < hayLength; j++) {
+                        seed = (seed * 25173 + 13849) & 65535;
+                        hay.push(searchCase % 3 ? seed & 255 : j % 2);
+                    }
+                    var at = searchCase % (hayLength - needleLength + 1);
+                    for (j = 0; j < needleLength; j++) needle.push(hay[at + j]);
+                    if (searchCase % 2 && needleLength) needle[needleLength - 1] ^= 255;
+                    for (j = 0; j < hayLength; j++) searchHost.write8(searchHay, 3 + j, hay[j]);
+                    for (j = 0; j < needleLength; j++) searchHost.write8(searchNeedle, 5 + j, needle[j]);
+                    var expected = -1;
+                    for (j = 0; j <= hayLength - needleLength; j++) {
+                        var matched = 0;
+                        while (matched < needleLength && hay[j + matched] === needle[matched]) matched++;
+                        if (matched === needleLength) { expected = j; break; }
+                    }
+                    var found = searchHost.findAllocationRange(searchHay, 3, hayLength,
+                        searchNeedle, 5, needleLength);
+                    if (found !== expected) throw new Error("binary search mismatch in case " + searchCase +
+                        ": expected " + expected + ", got " + found);
+                }
+            } finally { searchHost.free(searchHay); searchHost.free(searchNeedle); }
             return "linear heap access and runtime isolation passed on " +
                    first.memory.host.hostName();
         } finally {

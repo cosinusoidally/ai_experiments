@@ -18,6 +18,7 @@
         load("guest_vm/compiler.js");
         load("guest_vm/verifier.js");
         load("guest_vm/host_ffi.js");
+        load("guest_vm/byte_search_kernel.js");
         load("guest_vm/host_memory.js");
         load("guest_vm/binary64.js");
         load("guest_vm/number_format_kernel.js");

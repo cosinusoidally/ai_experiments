@@ -62,8 +62,10 @@
         check(call("fread", buffered, 1, bytes, file) === bytes, "complete buffered read into untouched allocation");
         verify(buffered); call("fclose", file); file = 0;
         /* fread/fwrite must also prepare unaligned interior subspans. */
+        var bufferedSource = allocate();
+        poke8(bufferedSource + middle, 128);
         file = call("fopen", path, "wb"); check(file !== 0, "buffered output");
-        check(call("fwrite", source + 1, 1, bytes - 2, file) === bytes - 2, "unaligned buffered write");
+        check(call("fwrite", bufferedSource + 1, 1, bytes - 2, file) === bytes - 2, "unaligned buffered write from mostly untouched allocation");
         call("fclose", file); file = 0;
         file = call("fopen", path, "rb"); check(file !== 0, "buffered verification input");
         check(call("fread", target + 1, 1, bytes - 2, file) === bytes - 2, "unaligned buffered read");

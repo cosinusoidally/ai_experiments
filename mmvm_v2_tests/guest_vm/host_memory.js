@@ -1,8 +1,10 @@
 /* Host memory boundary. Node uses an ordinary-array emulation with the same API. */
 (function (root) {
     var HostFFI = root.GuestVMHostFFI;
+    var ByteSearch = root.GuestVMByteSearchKernel;
     if (typeof module !== "undefined" && module.exports) {
         HostFFI = require("./host_ffi.js");
+        ByteSearch = require("./byte_search_kernel.js");
     }
 
     function HostMemory() {
@@ -14,6 +16,8 @@
         this.memsetPointer = this.isMMVM ? this.ffi.resolve("memset") : 0;
         this.allocations = 0;
         this.frees = 0;
+        this.byteSearchScratch = 0;
+        this.byteSearchScratchBusy = false;
     }
 
     var WORD_BYTES = 4;
@@ -21,6 +25,34 @@
     var NODE_PAGE_SHIFT = 16;
     var NODE_PAGE_SIZE = 1 << NODE_PAGE_SHIFT;
     var NODE_PAGE_MASK = NODE_PAGE_SIZE - 1;
+    var byteSearchEntries = {};
+
+    function byteSearchEntry(nativeStorage) {
+        var key = nativeStorage ? "native" : "js";
+        if (byteSearchEntries[key]) return byteSearchEntries[key];
+        var Compiler = root.GuestVMKernelCompiler;
+        var Backend = nativeStorage ? root.GuestVMKernelX86Backend : root.GuestVMKernelJSBackend;
+        if (typeof module !== "undefined" && module.exports) {
+            Compiler = require("./aot/kernel_compiler.js");
+            Backend = nativeStorage ? require("./aot/backend_x86.js") : require("./aot/backend_js.js");
+        }
+        var ir = new Compiler().compileGraph(ByteSearch.findBytesKernel, ByteSearch.functions,
+            {constantBindings: ByteSearch.constants});
+        var compiled = new Backend().compile(ir);
+        /* One process-owned code entry per backend, as for property kernels.
+         * No runtime, allocation or transient haystack is retained in it. */
+        byteSearchEntries[key] = compiled.fn;
+        return compiled.fn;
+    }
+
+    function releaseIdleSearchScratch(memory) {
+        if (memory.byteSearchScratch && !memory.byteSearchScratchBusy &&
+                memory.allocations === memory.frees) {
+            var pointer = memory.byteSearchScratch;
+            memory.byteSearchScratch = 0;
+            memory.ffi.call(memory.freePointer, [pointer]);
+        }
+    }
 
     function allocateNodePage() {
         if (typeof Buffer !== "undefined") {
@@ -96,12 +128,13 @@
 
     HostMemory.prototype.allocate = function (length, sparse) {
         var actualLength = length > 0 ? length : 1;
-        this.allocations++;
         if (this.isMMVM) {
             var pointer = this.ffi.call(this.callocPointer, [actualLength, 1]);
             if (!pointer) throw new Error("native buffer allocation failed");
+            this.allocations++;
             return {isNative: true, pointer: pointer, length: length, freed: false};
         }
+        this.allocations++;
         return {isNative: false, pages: {}, length: length, freed: false,
                 sparse: true};
     };
@@ -304,6 +337,7 @@
         allocation.pointer = 0;
         allocation.pages = null;
         this.frees++;
+        releaseIdleSearchScratch(this);
     };
 
     HostMemory.prototype.copyAllocation = function (
@@ -380,9 +414,8 @@
         }
     };
 
-    /* Bounded byte search, including embedded NULs. Native memory may use
-     * libc's memmem; missing symbols and emulated memory retain the same
-     * reference algorithm. No JS string conversion or helper C code. */
+    /* One compiled search algorithm for native and emulated allocations.
+     * No optional GNU libc symbol or byte-at-a-time native/JS fallback. */
     HostMemory.prototype.findAllocationRange = function (
             haystack, haystackOffset, haystackLength,
             needle, needleOffset, needleLength) {
@@ -398,27 +431,49 @@
         if (needleLength === 0) return 0;
         if (needleLength > haystackLength) return -1;
         if (haystack.isNative && needle.isNative) {
-            if (this.memmemPointer === undefined) {
-                this.memmemPointer = this.ffi.call(this.ffi.getDlsym(), [0, "memmem"]);
+            if (this.memchrPointer === undefined) this.memchrPointer = this.ffi.resolve("memchr");
+            var entry = byteSearchEntry(true), scratch = 0, borrowedScratch = false;
+            if (needleLength > 1 && needleLength <= ByteSearch.constants.SEARCH_SHORT_MAX_BYTES) {
+                /* A synchronous service borrows one instance-owned table.
+                 * Nested calls get a private table, never another runtime's
+                 * mutable scratch. Release the retained table with the last
+                 * regular allocation; no process-lifetime native data leak. */
+                if (!this.byteSearchScratchBusy) {
+                    if (!this.byteSearchScratch) this.byteSearchScratch = this.ffi.call(this.callocPointer,
+                        [ByteSearch.constants.SEARCH_TABLE_ENTRIES, 1]);
+                    scratch = this.byteSearchScratch;
+                    borrowedScratch = true;
+                } else scratch = this.ffi.call(this.callocPointer,
+                    [ByteSearch.constants.SEARCH_TABLE_ENTRIES, 1]);
+                if (!scratch) throw new Error("cannot allocate byte-search scratch");
+                if (borrowedScratch) this.byteSearchScratchBusy = true;
             }
-            if (this.memmemPointer) {
-                var base = haystack.pointer + haystackOffset;
-                var result = this.ffi.call(this.memmemPointer,
-                    [base, haystackLength, needle.pointer + needleOffset,
-                     needleLength]) >>> 0;
-                return result ? result - (base >>> 0) : -1;
+            try {
+                return entry(haystack.pointer + haystackOffset, haystackLength,
+                    needle.pointer + needleOffset, needleLength, this.memchrPointer, scratch, this.memsetPointer);
+            } finally {
+                if (borrowedScratch) {
+                    this.byteSearchScratchBusy = false;
+                    releaseIdleSearchScratch(this);
+                } else if (scratch) this.ffi.call(this.freePointer, [scratch]);
             }
         }
-        var start = 0;
-        while (start <= haystackLength - needleLength) {
-            var index = 0;
-            while (index < needleLength &&
-                    this.read8(haystack, haystackOffset + start + index) ===
-                    this.read8(needle, needleOffset + index)) index++;
-            if (index === needleLength) return start;
-            start++;
-        }
-        return -1;
+        var host = this, table = [], scratchBase = haystackLength + needleLength;
+        /* Present two read-only allocations as disjoint virtual ranges. The
+         * same kernel then runs through the ordinary JavaScript backend. */
+        var reader = {readRawU8Trusted: function (address) {
+            if (address >= scratchBase) return table[address - scratchBase] & 255;
+            return address < haystackLength ? host.read8(haystack, haystackOffset + address) :
+                host.read8(needle, needleOffset + address - haystackLength);
+        }};
+        reader.readRawU32Trusted = function (address) {
+            return (reader.readRawU8Trusted(address) |
+                reader.readRawU8Trusted(address + 1) << 8 |
+                reader.readRawU8Trusted(address + 2) << 16 |
+                reader.readRawU8Trusted(address + 3) << 24) >>> 0;
+        };
+        reader.writeRawU8Trusted = function (address, value) { table[address - scratchBase] = value & 255; };
+        return byteSearchEntry(false)(reader, 0, haystackLength, haystackLength, needleLength, 0, scratchBase, 0);
     };
 
     HostMemory.prototype.hostName = function () {

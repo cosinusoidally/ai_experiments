@@ -846,7 +846,7 @@
 
     GuestNodeEnvironment.prototype.dirname = function (path) {
         var slash = path.lastIndexOf("/");
-        return slash < 0 ? "." : path.substring(0, slash) || ".";
+        return slash < 0 ? "." : slash === 0 ? "/" : path.substring(0, slash);
     };
 
     GuestNodeEnvironment.prototype.normalizeModulePath = function (path) {
