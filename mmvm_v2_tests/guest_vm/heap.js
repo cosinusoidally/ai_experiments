@@ -14,6 +14,8 @@
     var FIRST_RECORD = 64;
     var RECORD_ALIGNMENT = 8;
     var WORD_BYTES = LinearMemory.WORD_BYTES;
+    var SizePolicy = {MIB: 1024 * 1024, MINIMUM_MIB: 64, MAXIMUM_MIB: 1024,
+        MINIMUM_COLLECTOR_BYTES: 4096, COLLECTOR_RESERVATION_SHIFT: 2};
 
     var Types = {
         FREE: 0,
@@ -61,7 +63,7 @@
         if (this.maximumAllocationLimit < this.allocationLimit ||
             this.maximumAllocationLimit !==
                 Math.floor(this.maximumAllocationLimit) ||
-            this.maximumAllocationLimit > 1073741824) {
+            this.maximumAllocationLimit > SizePolicy.MAXIMUM_MIB * SizePolicy.MIB) {
             throw new RangeError("maximum guest heap size must be an integer " +
                                  "between the initial size and 1 GiB");
         }
@@ -71,8 +73,9 @@
          * the native base address: guest Buffer pointers and running native
          * code may safely retain addresses within this allocation. */
         this.collectorStackBytes = options.collectorWorkspace ?
-            Math.max(4096, align8(Math.ceil(
-                this.maximumAllocationLimit / 4))) : 0;
+            Math.max(SizePolicy.MINIMUM_COLLECTOR_BYTES, align8(Math.ceil(
+                this.maximumAllocationLimit /
+                (1 << SizePolicy.COLLECTOR_RESERVATION_SHIFT)))) : 0;
         this.collectorStackBase = this.maximumAllocationLimit;
         this.byteLength = this.maximumAllocationLimit +
                           this.collectorStackBytes;
@@ -91,6 +94,7 @@
     }
 
     Heap.Types = Types;
+    Heap.SizePolicy = SizePolicy;
     /* Large native byte backings keep their logical heap reservation for
      * accounting/snapshot layout, but own separately calloc'ed data. */
     Heap.BufferBackingPolicy = {EXTERNAL: 1, LARGE_BYTES: 1048576};

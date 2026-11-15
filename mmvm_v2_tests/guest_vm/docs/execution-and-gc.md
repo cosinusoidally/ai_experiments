@@ -223,6 +223,13 @@ reserved maximum without moving the heap base. Repeatedly collecting the
 same mostly-live heap at an unchanged pressure boundary is pathological;
 native-to-portable reconciliation must preserve newly granted headroom.
 
+Generic native startup accepts `--vm-max-heap-mib` before allocating its heap.
+It selects the reservation, updates the copied engine maximum and collector
+workspace, and caps the initial pressure bounds when selecting a smaller
+maximum. This does not mutate the snapshot or set a hard process-RSS limit.
+See [runtime memory reduction](MEMORY_REDUCTION.md) for ownership constraints,
+measurements and the remaining external-buffer shadow reservation.
+
 Weak string/metadata maps are invalidated or pruned after collection; numeric
 property-slot hints are reset. Cached frames cannot retain an untraced old graph indefinitely.
 Large external buffer allocations are released with their backing records.

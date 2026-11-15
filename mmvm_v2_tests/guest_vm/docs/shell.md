@@ -38,6 +38,12 @@ artifacts/js -e 'print(40 + 2)'
   file there are no trailing script arguments. `--no-ion` remains a no-op.
 - Inline source uses the same compiler, guest context, FFI and event-loop
   machinery as a file. There is no host eval or alternative interpreter.
+- Generic standalone executables and snapshots accept
+  `--vm-max-heap-mib 64..1024` before a positional program. This selects the
+  live heap reservation/allocator maximum before allocation, without rebuilding
+  or mutating the image. `-e`/`-f` operands and script arguments are not scanned
+  as VM options. See [runtime memory reduction](MEMORY_REDUCTION.md) for the
+  distinction between the maximum, reserved address space and resident memory.
 - Missing source, syntax errors and unhandled JS exceptions report through
   libc stderr with a nonzero exit; they do not require console initialization
   or get rethrown as misleading unsupported-opcode exits. Actual unsupported

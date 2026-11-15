@@ -7,7 +7,7 @@
     var PUSH = {ebx: "pushEbx", esi: "pushEsi", edi: "pushEdi"};
     var POP = {ebx: "popEbx", esi: "popEsi", edi: "popEdi"};
     function bootstrapPlan() {
-        return {locals: ["imageBase", "symbolPointer", "heapBase"],
+        return {locals: ["imageBase", "symbolPointer", "heapBase", "heapMaximum"],
             saved: ["ebx", "esi", "edi"], localsFirst: true};
     }
     function bridgePlan() { return {locals: ["alignmentPad"], saved: ["ebx"], localsFirst: false}; }

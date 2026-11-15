@@ -871,6 +871,9 @@
         setEngineNativeFreeRegion: "ENGINE_NATIVE_FREE_REGION",
         setEngineNativeTailBump: "ENGINE_NATIVE_TAIL_BUMP",
         setEngineNativeTailLimit: "ENGINE_NATIVE_TAIL_LIMIT",
+        setEngineNativeMaximumLimit: "ENGINE_NATIVE_MAX_LIMIT",
+        setEngineGCStackBase: "ENGINE_GC_STACK_BASE",
+        setEngineGCStackLimit: "ENGINE_GC_STACK_LIMIT",
         setEngineLargeReserveReleased: "ENGINE_LARGE_RESERVE_RELEASED",
         setEngineFreeIndexValid: "ENGINE_FREE_INDEX_VALID",
         setEngineFreeBinSummary: "ENGINE_FREE_BIN_SUMMARY",
@@ -1059,6 +1062,7 @@
         if (node.type === "MemberExpression" && literalStringValue(node.object) !== null) return true;
         if (node.type === "CallExpression" && node.callee.type === "Identifier" &&
                 (node.callee.name === "stringRangeEquals" ||
+                 node.callee.name === "nativeCStringEquals" ||
                  node.callee.name === "storeNativeCString")) return true;
         if (node.type === "BinaryExpression" &&
             (node.operator === "&&" || node.operator === "||")) return true;
@@ -1942,6 +1946,32 @@
     }
 
     function lowerKernelExpression(node, symbols) {
+        if (node.type === "CallExpression" && node.callee.type === "Identifier" &&
+                node.callee.name === "nativeCStringEquals") {
+            if (node.arguments.length !== 2) {
+                throw new SyntaxError("nativeCStringEquals expects pointer and literal");
+            }
+            var pointer = node.arguments[0];
+            requireRepeatableLiteralOperand(lowerKernelExpression(pointer, symbols));
+            var nativeLiteral = requireStringLiteral(node.arguments[1]);
+            var nativeTest = {type: "Literal", value: 1};
+            for (var nativeIndex = 0; nativeIndex <= nativeLiteral.length; nativeIndex++) {
+                var nativeCharacter = nativeIndex < nativeLiteral.length ?
+                    nativeLiteral.charCodeAt(nativeIndex) : 0;
+                if (nativeIndex < nativeLiteral.length &&
+                        (nativeCharacter === 0 || nativeCharacter > 255)) {
+                    throw new SyntaxError("native C string literal must be non-NUL Latin-1");
+                }
+                nativeTest = {type: "BinaryExpression", operator: "&&", left: nativeTest,
+                    right: {type: "BinaryExpression", operator: "===",
+                        left: {type: "CallExpression",
+                            callee: {type: "Identifier", name: "loadRaw8"},
+                            arguments: [{type: "BinaryExpression", operator: "+",
+                                left: pointer, right: {type: "Literal", value: nativeIndex}}]},
+                        right: {type: "Literal", value: nativeCharacter}}};
+            }
+            return lowerKernelExpression(nativeTest, symbols);
+        }
         if (node.type === "MemberExpression" && literalStringValue(node.object) !== null &&
             node.property === "length") {
             return {op: "const_i32", value: literalStringValue(node.object).length, type: "i32"};

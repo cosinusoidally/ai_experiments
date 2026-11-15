@@ -228,6 +228,9 @@
             try {
                 function literalTextKernel(destination) {
                     storeNativeCString(destination, "Infinity");
+                    if (nativeCStringEquals(destination, "Inf")) return -1;
+                    if (nativeCStringEquals(destination, "Invalid")) return -2;
+                    if (!nativeCStringEquals(destination, "Infinity")) return -3;
                     return "Infinity".length + "\\".charCodeAt(0);
                 }
                 var literalIR = compiler.compile(literalTextKernel);

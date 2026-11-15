@@ -38,6 +38,72 @@
         LexicalEnvironmentKernels = require("../lexical_environment_kernel.js");
     }
 
+    var HeapSizePolicy = HeapRecords.HeapSizePolicy;
+
+    /* Runs before the anonymous heap exists. Inspect only shell options;
+     * neither script arguments nor -e/-f operands are VM configuration. */
+    function startupHeapMaximumKernel(argc, argv, defaultMaximum, imageBytes) {
+        var maximum = defaultMaximum;
+        var index = 0;
+        while (index < argc) {
+            var option = loadRaw32(argv + index * RecordLayout.HEAP_WORD_BYTES);
+            index = index + 1;
+            if (nativeCStringEquals(option, "--vm-max-heap-mib")) {
+                if (index >= argc) return 0;
+                var text = loadRaw32(argv + index * RecordLayout.HEAP_WORD_BYTES);
+                index = index + 1;
+                var value = 0;
+                var position = 0;
+                var character = loadRaw8(text);
+                if (character === 0) return 0;
+                while (character !== 0) {
+                    if (character < "0".charCodeAt(0)) return 0;
+                    if (character > "9".charCodeAt(0)) return 0;
+                    value = value * 10 + character - "0".charCodeAt(0);
+                    if (value > HeapSizePolicy.MAXIMUM_MIB) return 0;
+                    position = position + 1;
+                    character = loadRaw8(text + position);
+                }
+                if (value < HeapSizePolicy.MINIMUM_MIB) return 0;
+                maximum = value * HeapSizePolicy.MIB;
+            } else if (nativeCStringEquals(option, "-e") ||
+                       nativeCStringEquals(option, "-f")) {
+                index = index + 1;
+            } else if (nativeCStringEquals(option, "--no-ion")) {
+                /* Compatibility shell option, with no operand. */
+            } else index = argc;
+        }
+        if (maximum < imageBytes) return 0;
+        return maximum;
+    }
+
+    function startupHeapCapacityKernel(maximum) {
+        var rounding = (1 << HeapSizePolicy.COLLECTOR_RESERVATION_SHIFT) - 1;
+        var workspace = (maximum + rounding) >>> HeapSizePolicy.COLLECTOR_RESERVATION_SHIFT;
+        workspace = (workspace + RecordLayout.RECORD_ALIGNMENT_MASK) &
+            ~RecordLayout.RECORD_ALIGNMENT_MASK;
+        if (workspace < HeapSizePolicy.MINIMUM_COLLECTOR_BYTES) {
+            workspace = HeapSizePolicy.MINIMUM_COLLECTOR_BYTES;
+        }
+        return maximum + workspace;
+    }
+
+    function configureStartupHeapKernel(heapBase, state, maximum) {
+        /* A smaller live maximum must also cap the image's initial pressure
+         * limits; otherwise an allocation could cross the new mapping before
+         * it ever reaches the logical-growth path. */
+        if (engineHeapLimit(heapBase, state) > maximum) {
+            setEngineHeapLimit(heapBase, state, maximum);
+        }
+        if (engineNativeTailLimit(heapBase, state) > maximum) {
+            setEngineNativeTailLimit(heapBase, state, maximum);
+        }
+        setEngineNativeMaximumLimit(heapBase, state, maximum);
+        setEngineGCStackBase(heapBase, state, maximum);
+        setEngineGCStackLimit(heapBase, state, startupHeapCapacityKernel(maximum));
+        return 1;
+    }
+
     var heapMarkKernel = HeapSweeper.markKernel;
     var namedPropertyOwnerKernel = PropertySemantics.createNamedPropertyOwnerResolver(
         PropertyStorageKernels.findOwnPropertyEntryKernel,
@@ -18452,6 +18518,9 @@
         var loweringTimings = runtime.profileOpcodeCounts ? {} : null;
         this.runtime = runtime;
         var kernelDependencies = {
+            startupHeapMaximumKernel: startupHeapMaximumKernel,
+            startupHeapCapacityKernel: startupHeapCapacityKernel,
+            configureStartupHeapKernel: configureStartupHeapKernel,
             relativeIndexKernel: relativeIndexKernel,
             grownArrayCapacityKernel: HeapRecords.grownArrayCapacity,
             argumentRegisterTailKernel: argumentRegisterTailKernel,
@@ -18792,11 +18861,13 @@
                 reportSnapshot("lowering native interpreter kernel");
             }
             var compilerOptions = {
-                additionalEntries: ["reportGuestStackKernel"],
+                additionalEntries: ["reportGuestStackKernel", "startupHeapMaximumKernel",
+                    "startupHeapCapacityKernel", "configureStartupHeapKernel"],
                 optimization: runtime.kernelOptimization,
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
                 constantNamespaces: {
+                    HeapSizePolicy: HeapSizePolicy,
                     DescriptorFields: PropertySemantics.namespaces.DescriptorFields,
                     PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,
                     VirtualPropertyKind: PropertySemantics.namespaces.VirtualPropertyKind,

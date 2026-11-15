@@ -7,6 +7,16 @@
         while (index < args.length) {
             var option = String(args[index++]);
             if (option === "--no-ion") continue;
+            /* Applied by native startup before heap reservation. Keep it out
+             * of source actions and scriptArgs; the startup parser validates. */
+            if (option === "--vm-max-heap-mib") {
+                if (index >= args.length) throw new Error(option + " requires an argument");
+                var heapMiB = Number(args[index++]);
+                if (heapMiB < 64 || heapMiB > 1024 || heapMiB !== Math.floor(heapMiB)) {
+                    throw new RangeError(option + " requires an integer from 64 to 1024");
+                }
+                continue;
+            }
             if (option === "-e" || option === "-f") {
                 if (index >= args.length) throw new Error(option + " requires an argument");
                 var value = String(args[index++]);

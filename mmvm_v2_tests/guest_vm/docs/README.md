@@ -7,7 +7,9 @@ the code does, not the intended endpoint of the earlier plans. Update these
 documents alongside implementation changes.
 Source definitions remain the final authority for binary layouts and flags.
 
-The current native interpreter uses contract **107**: Uint8ClampedArray kind,
+The current native interpreter uses contract **108**: native startup can select
+the live heap maximum before reservation; see [runtime memory reduction](MEMORY_REDUCTION.md).
+Contract 107's Uint8ClampedArray kind,
 constructor/prototype support and scalar guest-engine PRNG state are included.
 Portable record construction can reserve, clear and initialize through one
 non-collecting allocator transaction. See [execution and GC](execution-and-gc.md)

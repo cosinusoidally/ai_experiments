@@ -118,6 +118,20 @@
     run(executable, packArguments(snapshot, directory + "/self.exe"));
     check(fs.readFileSync(directory + "/self.exe").equals(packed), "packager works inside generated executable");
     check(run(executable, ["hello.js"]) === "Hello, world!\n", "hello program");
+    check(run(executable, ["--vm-max-heap-mib", "64", "hello.js"]) ===
+        "Hello, world!\n", "runtime heap minimum");
+    check(run(executable, ["--vm-max-heap-mib", "1024", "hello.js"]) ===
+        "Hello, world!\n", "runtime heap maximum without rebuilding");
+    check(run(executable, ["-e", "print('heap option operand');",
+        "--vm-max-heap-mib", "128"]) === "heap option operand\n",
+        "runtime heap scanner skips source operands");
+    check(run(executable, ["--vm-max-heap-mib", "128", "-e",
+        "print(scriptArgs.join('|'));", "--", "hello.js", "--vm-max-heap-mib", "9999"]) ===
+        "--vm-max-heap-mib|9999\nHello, world!\n", "script arguments are not heap options");
+    run(executable, ["--vm-max-heap-mib", "63", "hello.js"], 64);
+    run(executable, ["--vm-max-heap-mib", "1025", "hello.js"], 64);
+    run(executable, ["--vm-max-heap-mib", "1e3", "hello.js"], 64);
+    run(executable, ["--vm-max-heap-mib"], 64);
     check(run(executable, ["guest_vm/tests/standalone_alternate_program.js"]) ===
         "Alternate standalone workload\n", "arbitrary program selection");
     environment.DISPLAY = ":exe-live"; environment.XAUTHORITY = "exe-live-auth";

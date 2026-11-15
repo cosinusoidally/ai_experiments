@@ -38,7 +38,7 @@ errors, not silently changed JS semantics. Both compact and explicit parser
 literal representations are accepted. No function-local declaration receives
 special compile-time semantics.
 
-Two explicit memory operations accept literal text:
+Three explicit memory operations accept literal text:
 
 - `stringRangeEquals(heapBase, source, start, end, "text")` returns integer
   1 or 0. It checks bounds and exact range length, then compares UTF-16 code
@@ -50,10 +50,16 @@ Two explicit memory operations accept literal text:
   of at least `"text".length + 1` bytes. Embedded NUL and non-Latin-1 literals
   are rejected. Like raw stores this is an explicitly unsafe memory boundary,
   not allocation or an unchecked conversion of arbitrary guest strings.
+- `nativeCStringEquals(pointer, "text")` compares a native NUL-terminated
+  Latin-1 string, including its terminating NUL, returning integer 1 or 0.
+  Reads short-circuit on the first mismatch. The pointer must name a readable
+  NUL-terminated native string; no guest heap is required, allowing argv
+  inspection before heap reservation. Embedded NUL/non-Latin-1 literals are
+  rejected, and the pointer must be a repeatable local/argument/constant.
 
 To prevent duplicated side effects during literal expansion, pointer/range
 operands must be arguments, locals or integer constants: evaluate computed
-operands into ordinary locals first. Both operations lower to existing shared
+operands into ordinary locals first. These operations lower to existing shared
 IR; neither backend has an independent string implementation or host callback.
 These are bounded literal operations, not full typed string parameters or
 implicit string coercion. Native number conversion/formatting uses them to

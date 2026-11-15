@@ -560,6 +560,7 @@
         var IMAGE_BASE_LOCAL = Frames.localIndex(plan, "imageBase");
         var SYMBOL_POINTER_LOCAL = Frames.localIndex(plan, "symbolPointer");
         var HEAP_BASE_LOCAL = Frames.localIndex(plan, "heapBase");
+        var HEAP_MAXIMUM_LOCAL = Frames.localIndex(plan, "heapMaximum");
         function imageAddress(offset) {
             assembler.movEaxLocal(IMAGE_BASE_LOCAL);
             assembler.addEaxImmediate(offset);
@@ -598,6 +599,21 @@
             layout.entryOffset + assembler.labels.standalone_image_anchor);
         assembler.movLocalEax(IMAGE_BASE_LOCAL);
 
+        assembler.movEaxImmediate(layout.heapImageLength);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.heapMaximum);
+        assembler.pushEax();
+        assembler.movEaxEbpArgument(1);
+        assembler.pushEax();
+        assembler.movEaxEbpArgument(0);
+        assembler.pushEax();
+        imageAddress(layout.codeOffset + layout.startupHeapMaximumOffset);
+        assembler.callEax();
+        discardCallWords(4);
+        assembler.testEaxEax();
+        assembler.jumpEqual("standalone_heap_option_error");
+        assembler.movLocalEax(HEAP_MAXIMUM_LOCAL);
+
         /* The file contains only initialized heap bytes. Reserve the runtime
          * heap as anonymous memory so file size is independent of capacity. */
         resolveSymbol(layout.mmapNameOffset);
@@ -609,7 +625,11 @@
         assembler.pushEax();
         assembler.movEaxImmediate(3);
         assembler.pushEax();
-        assembler.movEaxImmediate(layout.heapCapacity);
+        assembler.movEaxLocal(HEAP_MAXIMUM_LOCAL);
+        assembler.pushEax();
+        imageAddress(layout.codeOffset + layout.startupHeapCapacityOffset);
+        assembler.callEax();
+        discardCallWords(1);
         assembler.pushEax();
         assembler.movEaxImmediate(0);
         assembler.pushEax();
@@ -630,6 +650,16 @@
         assembler.movEaxLocal(HEAP_BASE_LOCAL);
         assembler.pushEax();
         assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(3);
+
+        assembler.movEaxLocal(HEAP_MAXIMUM_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.statePayloadAddress);
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.pushEax();
+        imageAddress(layout.codeOffset + layout.configureStartupHeapOffset);
         assembler.callEax();
         discardCallWords(3);
 
@@ -769,6 +799,16 @@
         assembler.label("standalone_usage_error");
         assembler.movEaxImmediate(64);
         assembler.jump("standalone_return");
+        assembler.label("standalone_heap_option_error");
+        resolveSymbol(layout.dprintfNameOffset);
+        imageAddress(layout.heapOptionErrorOffset);
+        assembler.pushEax();
+        assembler.movEaxImmediate(2);
+        assembler.pushEax();
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.callEax();
+        discardCallWords(2);
+        assembler.jump("standalone_usage_error");
         assembler.label("standalone_runtime_error");
         assembler.movEaxImmediate(70);
         assembler.jump("standalone_return");
@@ -855,6 +895,9 @@
         var dprintfNameBytes = standaloneStringBytes("dprintf");
         var stackFormatBytes = standaloneStringBytes("  at %s:%d:%d (bytecode pc %d)\n");
         var stackUnknownBytes = standaloneStringBytes("<bootstrap>");
+        var heapOptionErrorBytes = standaloneStringBytes(
+            "--vm-max-heap-mib requires an integer from 64 to 1024 " +
+            "and enough space for the initialized snapshot heap\n");
         var unsupportedFormatBytes = standaloneStringBytes(
             "guest VM unsupported opcode %d at bytecode pc %d " +
             "(detail %d, allocation %d; GC %u, live %u, " +
@@ -873,6 +916,11 @@
             acceptAnyProgram: expectedProgramPath === null,
             codeOffset: 0,
             heapCapacity: 0,
+            heapOptionErrorOffset: 0,
+            heapMaximum: heap.maximumAllocationLimit,
+            startupHeapMaximumOffset: result.symbols.kernel_function_startupHeapMaximumKernel,
+            startupHeapCapacityOffset: result.symbols.kernel_function_startupHeapCapacityKernel,
+            configureStartupHeapOffset: result.symbols.kernel_function_configureStartupHeapKernel,
             heapImageLength: 0,
             nativeBindings: runtime.standaloneNativeBindings(frame.context),
             argumentCells: expectedProgramPath === null ?
@@ -918,6 +966,8 @@
         nextDataOffset += stackFormatBytes.length;
         layout.stackUnknownOffset = nextDataOffset;
         nextDataOffset += stackUnknownBytes.length;
+        layout.heapOptionErrorOffset = nextDataOffset;
+        nextDataOffset += heapOptionErrorBytes.length;
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
             layout.nativeBindings[bindingIndex].nameOffset = nextDataOffset;
@@ -1075,6 +1125,7 @@
             output.copyBytes(layout.unsupportedFormatOffset, unsupportedFormatBytes);
             output.copyBytes(layout.stackFormatOffset, stackFormatBytes);
             output.copyBytes(layout.stackUnknownOffset, stackUnknownBytes);
+            output.copyBytes(layout.heapOptionErrorOffset, heapOptionErrorBytes);
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
                 output.copyBytes(layout.nativeBindings[bindingIndex].nameOffset,
