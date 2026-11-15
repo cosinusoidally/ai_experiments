@@ -28,6 +28,10 @@ for (var NodeLibcSymbolKey in NodeLibcSymbolNames) {
 }
 
 var NodeLibc = {
+    platformName: function () {
+        /* Resolve at application startup, not snapshot construction. */
+        return ffi_call(NodeDlsymPointer, 0, "GetModuleHandleA") ? "win32" : "linux";
+    },
     open: function (path, flags, mode) {
         return ffi_call(NodeLibcSymbols.open, path, flags, mode);
     },

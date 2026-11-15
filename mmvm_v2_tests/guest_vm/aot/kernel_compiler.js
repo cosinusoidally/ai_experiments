@@ -555,6 +555,11 @@
             if (dependencyNames && node.type === "CallExpression" &&
                 node.callee && node.callee.type === "Identifier") {
                 var calledName = node.callee.name;
+                /* Literal matching lowers to the existing representation-aware
+                 * string accessor, whose graph edge must remain explicit. */
+                if (calledName === "stringRangeEquals") {
+                    calledName = "stringCharacterCodeUnit";
+                }
                 if (!signatures[calledName] &&
                     !seenDependencies[calledName] &&
                     Object.prototype.hasOwnProperty.call(
@@ -1042,21 +1047,25 @@
                 (statement.expression.type === "AssignmentExpression" ||
                  statement.expression.type === "UpdateExpression")) return true;
             if (statement.type === "ReturnStatement" &&
-                containsShortCircuit(statement.argument)) return true;
+                needsStructuredExpression(statement.argument)) return true;
             if (statement.type === "ExpressionStatement" &&
-                containsShortCircuit(statement.expression)) return true;
+                needsStructuredExpression(statement.expression)) return true;
         }
         return false;
     }
 
-    function containsShortCircuit(node) {
+    function needsStructuredExpression(node) {
         if (!node || typeof node !== "object") return false;
+        if (node.type === "MemberExpression" && literalStringValue(node.object) !== null) return true;
+        if (node.type === "CallExpression" && node.callee.type === "Identifier" &&
+                (node.callee.name === "stringRangeEquals" ||
+                 node.callee.name === "storeNativeCString")) return true;
         if (node.type === "BinaryExpression" &&
             (node.operator === "&&" || node.operator === "||")) return true;
         var key;
         for (key in node) {
             if (key !== "loc" && Object.prototype.hasOwnProperty.call(node, key) &&
-                containsShortCircuit(node[key])) return true;
+                needsStructuredExpression(node[key])) return true;
         }
         return false;
     }
@@ -1548,6 +1557,29 @@
         }
         if (statement.type === "ExpressionStatement") {
             var expression = statement.expression;
+            if (expression.type === "CallExpression" &&
+                expression.callee.type === "Identifier" &&
+                expression.callee.name === "storeNativeCString") {
+                if (expression.arguments.length !== 2) {
+                    throw new SyntaxError("storeNativeCString expects pointer and literal");
+                }
+                var nativeText = requireStringLiteral(expression.arguments[1]);
+                var destination = lowerKernelExpression(expression.arguments[0], symbols);
+                requireRepeatableLiteralOperand(destination);
+                var stores = [], characterIndex = 0;
+                while (characterIndex <= nativeText.length) {
+                    var code = characterIndex < nativeText.length ?
+                        nativeText.charCodeAt(characterIndex) : 0;
+                    if (code > 255 || (code === 0 && characterIndex < nativeText.length)) {
+                        throw new SyntaxError("native C string literal must be non-NUL Latin-1");
+                    }
+                    stores.push({op: "store_raw_u8", address: {
+                        op: "add_i32", left: destination,
+                        right: {op: "const_i32", value: characterIndex++, type: "i32"},
+                        type: "i32"}, value: {op: "const_i32", value: code, type: "i32"}});
+                }
+                return {op: "block", body: stores};
+            }
             /* The value of a standalone ++/-- is discarded, so prefix and
              * postfix forms have the same effect here. Expression-valued
              * updates remain unsupported rather than losing their value. */
@@ -1857,7 +1889,76 @@
         return {op: "const_i32", value: fieldValue, type: "i32"};
     }
 
+    function literalStringValue(node) {
+        if (typeof node === "string") return node;
+        return node && node.type === "Literal" && typeof node.value === "string" ? node.value : null;
+    }
+
+    function requireStringLiteral(node) {
+        var value = literalStringValue(node);
+        if (value === null) {
+            throw new SyntaxError("kernel operation requires a string literal");
+        }
+        return value;
+    }
+
+    /* Expanding a literal must not duplicate observable argument evaluation.
+     * Keep this deliberately narrower than general integer expressions. */
+    function requireRepeatableLiteralOperand(value) {
+        if (value.op !== "const_i32" && value.op !== "local_i32" &&
+            value.op !== "arg_i32") {
+            throw new SyntaxError("literal operation requires a local, argument or constant operand");
+        }
+    }
+
+    function lowerLiteralMatch(node, symbols) {
+        if (node.arguments.length !== 5) {
+            throw new SyntaxError("stringRangeEquals expects heap, string, start, end and literal");
+        }
+        var args = node.arguments, text = requireStringLiteral(args[4]);
+        var index = 0;
+        while (index < 4) {
+            requireRepeatableLiteralOperand(lowerKernelExpression(args[index++], symbols));
+        }
+        function number(value) { return {type: "Literal", value: value}; }
+        function binary(operator, left, right) {
+            return {type: "BinaryExpression", operator: operator, left: left, right: right};
+        }
+        var length = {type: "CallExpression", callee: {type: "Identifier", name: "stringLength"},
+            arguments: [args[0], args[1]]};
+        var test = binary("&&", binary(">=", args[2], number(0)),
+            binary("&&", binary(">=", args[3], args[2]),
+                binary("&&", binary("<=", args[3], length),
+                    binary("===", binary("-", args[3], args[2]), number(text.length)))));
+        index = 0;
+        while (index < text.length) {
+            var character = {type: "CallExpression",
+                callee: {type: "Identifier", name: "stringCharacterCodeUnit"},
+                arguments: [args[0], args[1], binary("+", args[2], number(index))]};
+            test = binary("&&", test, binary("===", binary("&", character, number(65535)),
+                number(text.charCodeAt(index++))));
+        }
+        return lowerKernelExpression(test, symbols);
+    }
+
     function lowerKernelExpression(node, symbols) {
+        if (node.type === "MemberExpression" && literalStringValue(node.object) !== null &&
+            node.property === "length") {
+            return {op: "const_i32", value: literalStringValue(node.object).length, type: "i32"};
+        }
+        if (node.type === "CallExpression" && node.callee.type === "MemberExpression" &&
+            literalStringValue(node.callee.object) !== null &&
+            node.callee.property === "charCodeAt" && node.arguments.length === 1) {
+            var literalIndex = lowerKernelExpression(node.arguments[0], symbols);
+            var literalText = literalStringValue(node.callee.object);
+            if (literalIndex.op !== "const_i32" || literalIndex.value < 0 ||
+                literalIndex.value >= literalText.length) {
+                throw new SyntaxError("kernel literal charCodeAt requires an in-range constant index");
+            }
+            return {op: "const_i32", value: literalText.charCodeAt(literalIndex.value), type: "i32"};
+        }
+        if (node.type === "CallExpression" && node.callee.type === "Identifier" &&
+            node.callee.name === "stringRangeEquals") return lowerLiteralMatch(node, symbols);
         if (typeof node === "number" && node === (node | 0)) {
             return {op: "const_i32", value: node | 0, type: "i32"};
         }

@@ -115,7 +115,6 @@
     GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
         this.context.installGlobal("__guestVMStandaloneArgc", 0);
         this.context.installGlobal("__guestVMStandaloneArgv", 0);
-        this.context.installGlobal("__guestVMStandaloneShell", false);
         this.context.installGlobal("__guestVMStandaloneImageBase", 0);
         this.context.installGlobal("__guestVMStandaloneImageLength", 0);
         this.context.installGlobal(

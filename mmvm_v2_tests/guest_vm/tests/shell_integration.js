@@ -1,7 +1,12 @@
-/* Run with a shell-policy standalone executable, with or without --no-ion. */
+/* Run with the unified standalone executable, with or without --no-ion. */
 (function () {
     function check(value, message) { if (!value) throw new Error(message); }
-    check(typeof process === "undefined" && typeof require === "undefined", "shell environment detection");
+    check(typeof process === "object" && typeof require === "function", "Node and shell APIs coexist");
+    check(typeof scriptArgs === "object" && typeof printErr === "function", "shell argument/output APIs");
+    var eventValue = 0;
+    process.on("integration-event", function (value) { eventValue = value; });
+    check(process.emit("integration-event", 42) && eventValue === 42,
+        "process uses the shared event emitter");
     check(typeof load === "function" && typeof read === "function", "shell source services");
     var binarySource = read("guest_vm/tests/shell_integration.js", "binary");
     check(binarySource.constructor === Uint8Array &&
@@ -15,7 +20,9 @@
         "radix formatting preserves signed and unsigned word magnitudes: " +
         [(4294967295).toString(16), (2147483648).toString(2),
             (-2147483648).toString(16), (4294967295).toString(36)].join(", "));
-    var libc = ctypes.open("libc.so.6");
+    var libc;
+    try { libc = ctypes.open("libc.so.6"); }
+    catch (error) { libc = ctypes.open("msvcrt.dll"); }
     var malloc = libc.declare("malloc", ctypes.default_abi, ctypes.uint32_t, ctypes.uint32_t);
     var free = libc.declare("free", ctypes.default_abi, ctypes.void_t, ctypes.voidptr_t);
     var memcpy = libc.declare("memcpy", ctypes.default_abi, ctypes.voidptr_t,

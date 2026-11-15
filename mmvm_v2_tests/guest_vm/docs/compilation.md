@@ -3,6 +3,36 @@
 There are two different compilers. Keep their products and optimization
 contracts separate.
 
+## Bounded kernel string literals
+
+The integer kernel supports `"text".length` and
+`"x".charCodeAt(constantIndex)` as ordinary constant expressions. The index
+must be in range; unsupported dynamic or NaN-producing cases are compilation
+errors, not silently changed JS semantics. Both compact and explicit parser
+literal representations are accepted. No function-local declaration receives
+special compile-time semantics.
+
+Two explicit memory operations accept literal text:
+
+- `stringRangeEquals(heapBase, source, start, end, "text")` returns integer
+  1 or 0. It checks bounds and exact range length, then compares UTF-16 code
+  units through the existing representation-aware string accessor. It creates
+  no substring and works with flat, sliced and rope guest strings. Graph
+  discovery includes the accessor dependency automatically.
+- `storeNativeCString(destination, "text")`, a statement, writes literal
+  Latin-1 bytes followed by NUL. The caller owns a writable native buffer
+  of at least `"text".length + 1` bytes. Embedded NUL and non-Latin-1 literals
+  are rejected. Like raw stores this is an explicitly unsafe memory boundary,
+  not allocation or an unchecked conversion of arbitrary guest strings.
+
+To prevent duplicated side effects during literal expansion, pointer/range
+operands must be arguments, locals or integer constants: evaluate computed
+operands into ordinary locals first. Both operations lower to existing shared
+IR; neither backend has an independent string implementation or host callback.
+These are bounded literal operations, not full typed string parameters or
+implicit string coercion. Native number conversion/formatting uses them to
+avoid manually spelling `Infinity` and `NaN` as numeric character sequences.
+
 Implemented kernel `-g`/`-O0` support is described in
 [native kernel debugging](kernel-debugging.md); the original
 [deterministic debugging plan](kernel-debug-plan.md) also records the broader

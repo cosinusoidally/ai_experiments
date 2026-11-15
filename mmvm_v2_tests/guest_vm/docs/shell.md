@@ -1,5 +1,19 @@
 # Shell source actions and the mishmashvm SDL demo
 
+## Unified standalone environment
+
+Standalone images now expose both Node-compatible globals (`process`,
+`require`) and shell APIs (`ctypes`, `scriptArgs`, `printErr`, `read`, `load`,
+`print`, `quit`). `--shell` is accepted as a legacy build no-op, not a separate
+image policy. `read(path, "binary")` consistently returns a Uint8Array;
+Node-style consumers obtain Buffer through `require("fs").readFileSync`.
+Application scripts and loaded scripts retain source locations independently
+of the compatibility flag. Process exposes synchronous stdout/stderr writes
+and the shared event-emitter registration/dispatch operations.
+
+The dated shell-policy acceptance notes below describe historical builds;
+they do not imply two current standalone configurations.
+
 ## Command-line contract
 
 All implementation code is ES3-compatible. No Node addons, npm, downloads,

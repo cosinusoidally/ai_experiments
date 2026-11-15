@@ -29,8 +29,7 @@ function guestStandaloneReadSource(path, encoding) {
             /* Shell read(..., "binary") returns an actual typed byte array,
              * not the internal Node-compatible Buffer used by filesystem IO.
              * Consumers use its ArrayBuffer/view identity as well as indexing. */
-            if (__guestVMStandaloneShell) return new GuestStandaloneUint8Array(result);
-            return result;
+            return new GuestStandaloneUint8Array(result);
         }
         return result.toString("utf8");
     } finally { GuestStandaloneGlobal.Buffer = applicationBuffer; }
@@ -229,7 +228,7 @@ function guestStandaloneExecute(path, programArguments, actions) {
         loadedPhaseStarted = guestStandaloneProfileStart();
         var loadedExecutable = GuestStandaloneFrontend.compileExecutable(
             loadedSource, filename, guestStandaloneExecute,
-            GuestStandaloneGlobal, __guestVMStandaloneShell);
+            GuestStandaloneGlobal, true);
         guestStandaloneProfileEnd("compile " + filename, loadedPhaseStarted);
         loadedPhaseStarted = guestStandaloneProfileStart();
         loadedExecutable();
@@ -238,13 +237,9 @@ function guestStandaloneExecute(path, programArguments, actions) {
     GuestStandaloneGlobal.print = console.log;
     GuestStandaloneGlobal.read = guestStandaloneReadSource;
     GuestStandaloneGlobal.quit = guestStandaloneQuit;
-    if (__guestVMStandaloneShell) {
-        GuestStandaloneGlobal.process = undefined;
-        GuestStandaloneGlobal.require = undefined;
-        GuestStandaloneGlobal.scriptArgs = programArguments;
-        GuestStandaloneGlobal.printErr = console.error;
-        GuestStandaloneGlobal.ctypes = GuestShellCTypes.create(GuestStandaloneDlsymPointer, ffi_call);
-    }
+    GuestStandaloneGlobal.scriptArgs = programArguments;
+    GuestStandaloneGlobal.printErr = console.error;
+    GuestStandaloneGlobal.ctypes = GuestShellCTypes.create(GuestStandaloneDlsymPointer, ffi_call);
     for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
         var action = actions[actionIndex];
         var phaseStarted = guestStandaloneProfileStart();
@@ -256,7 +251,7 @@ function guestStandaloneExecute(path, programArguments, actions) {
         phaseStarted = guestStandaloneProfileStart();
         var executable = GuestStandaloneFrontend.compileExecutable(
             source, action.filename, guestStandaloneExecute, GuestStandaloneGlobal,
-            __guestVMStandaloneShell);
+            true);
         guestStandaloneProfileEnd("compile " + action.filename, phaseStarted);
         phaseStarted = guestStandaloneProfileStart();
         executable();

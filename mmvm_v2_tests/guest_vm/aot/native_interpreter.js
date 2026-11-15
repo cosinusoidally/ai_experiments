@@ -14593,27 +14593,17 @@
             if (mantissaHigh !== 0) isNaN = 1;
             if (low !== 0) isNaN = 1;
             if (isNaN === 1) {
-                storeRaw8(destination, 78);
-                storeRaw8(destination + 1, 97);
-                storeRaw8(destination + 2, 78);
-                storeRaw8(destination + 3, 0);
-                return 3;
+                storeNativeCString(destination, "NaN");
+                return "NaN".length;
             }
             var infinityIndex = 0;
             if (high < 0) {
-                storeRaw8(destination, 45);
+                storeRaw8(destination, "-".charCodeAt(0));
                 infinityIndex = 1;
             }
-            storeRaw8(destination + infinityIndex, 73);
-            storeRaw8(destination + infinityIndex + 1, 110);
-            storeRaw8(destination + infinityIndex + 2, 102);
-            storeRaw8(destination + infinityIndex + 3, 105);
-            storeRaw8(destination + infinityIndex + 4, 110);
-            storeRaw8(destination + infinityIndex + 5, 105);
-            storeRaw8(destination + infinityIndex + 6, 116);
-            storeRaw8(destination + infinityIndex + 7, 121);
-            storeRaw8(destination + infinityIndex + 8, 0);
-            return infinityIndex + 8;
+            var infinityDestination = destination + infinityIndex;
+            storeNativeCString(infinityDestination, "Infinity");
+            return infinityIndex + "Infinity".length;
         }
         var snprintfPointer = platformSnprintfPointer(
             heapBase, platformServices);
@@ -17241,16 +17231,7 @@
     }
 
     function infinityWordKernel(heapBase, source, start, end) {
-        if (end - start !== 8) return 0;
-        if ((stringCharacterCodeUnit(heapBase, source, start) & 65535) !== 73 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 1) & 65535) !== 110 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 2) & 65535) !== 102 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 3) & 65535) !== 105 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 4) & 65535) !== 110 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 5) & 65535) !== 105 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 6) & 65535) !== 116 ||
-            (stringCharacterCodeUnit(heapBase, source, start + 7) & 65535) !== 121) return 0;
-        return 1;
+        return stringRangeEquals(heapBase, source, start, end, "Infinity");
     }
 
     function specialStringNumericValueKernel(heapBase, source, start, end, target) {

@@ -13,6 +13,7 @@ var NodeProcess = {
 
         process = {
             argv: nodeArguments,
+            platform: NodeLibc.platformName(),
             env: {
                 DISPLAY: NodeMemory.cString(NodeLibc.getenv("DISPLAY")),
                 XAUTHORITY: NodeMemory.cString(NodeLibc.getenv("XAUTHORITY")),
@@ -23,6 +24,21 @@ var NodeProcess = {
                 NodeProcess.exiting = true;
                 throw NodeProcess.exitMarker;
             }
+        };
+        NodeEventEmitter.call(process);
+        process.on = NodeEventEmitter.prototype.on;
+        process.emit = NodeEventEmitter.prototype.emit;
+        process.once = NodeEventEmitter.prototype.once;
+        process.removeListener = NodeEventEmitter.prototype.removeListener;
+        process.stdout = new NodeEventEmitter();
+        process.stdout.write = function (text) {
+            NodeMemory.writeAll(1, String(text));
+            return true;
+        };
+        process.stderr = new NodeEventEmitter();
+        process.stderr.write = function (text) {
+            NodeMemory.writeAll(2, String(text));
+            return true;
         };
 
         console = {

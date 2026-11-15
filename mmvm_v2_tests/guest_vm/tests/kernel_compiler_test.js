@@ -226,6 +226,31 @@
             var rawMemoryX86 = new X86Backend().compile(rawMemoryIR);
             var rawMemoryHeap = new Heap({heapBytes: 4096});
             try {
+                function literalTextKernel(destination) {
+                    storeNativeCString(destination, "Infinity");
+                    return "Infinity".length + "\\".charCodeAt(0);
+                }
+                var literalIR = compiler.compile(literalTextKernel);
+                var literalJS = new JSBackend().compile(literalIR);
+                var literalNative = new X86Backend().compile(literalIR);
+                try {
+                    var literalExpected = "Infinity".length + "\\".charCodeAt(0);
+                    if (literalJS.fn(rawMemoryHeap.memory, 128) !== literalExpected ||
+                            (literalNative.fn && literalNative.fn(
+                                rawMemoryHeap.memory.nativeAddress(128)) !== literalExpected)) {
+                        throw new Error("literal string operations differ across backends");
+                    }
+                    var textIndex = 0;
+                    while (textIndex < "Infinity".length) {
+                        if (rawMemoryHeap.memory.readU8(128 + textIndex) !==
+                                "Infinity".charCodeAt(textIndex++)) {
+                            throw new Error("native literal copy lost character data");
+                        }
+                    }
+                    if (rawMemoryHeap.memory.readU8(128 + textIndex) !== 0) {
+                        throw new Error("native literal copy lacks NUL terminator");
+                    }
+                } finally { literalNative.destroy(); }
                 var rawByteValue = 0xa5;
                 var rawWordValue = 0x76543210;
                 var rawExpected = (rawByteValue ^ rawWordValue) | 0;
