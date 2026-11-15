@@ -5,11 +5,12 @@ the read-only sibling `js_tests` checkout. No npm, Python or downloads are
 required. See the project README for preparing Firefox/js_min files; do not
 rebuild js_min because its shared library path is missing.
 
-The current standalone native target is **i386 Linux** with a 32-bit word/
-pointer ABI and available libc symbols. Node can be a 64-bit build host; that
-does not change the target. This is not a promise of a Win32/x86-64 launcher
-or a particular historical kernel/libc combination without further work and
-testing. If existing i386 executables stop running in the environment, stop
+The standalone native interpreter uses a 32-bit i386 word/pointer ABI.
+Packaging supports Linux ELF and Windows PE32; see
+[Windows support and limitations](windows-snapshot.md). Node can be a 64-bit
+build host; that does not change the target. This does not promise an x86-64
+launcher or a particular historical kernel/libc combination. If existing
+i386 executables stop running in the environment, stop
 and diagnose that execution failure rather than introducing emulation.
 
 ## Entrypoints and command-line options
@@ -32,8 +33,9 @@ remaining arguments belong to the program. Repeatable `-e SOURCE` and `-f FILE`
 actions execute in order before that positional file, in one global execution
 environment. `--` ends option parsing. Unsupported source-action options are
 rejected. The runner installs guest `arguments` without the positional filename
-and a Node-like `process.argv` through its environment. Shell-policy images
-also expose `scriptArgs`. See [shell execution](shell.md).
+and a Node-like `process.argv` through its environment. Unified standalone
+images also expose `scriptArgs` and ctypes without hiding Node globals.
+See [shell execution](shell.md).
 
 Ordinary `guest_runner.js` options:
 
@@ -45,7 +47,9 @@ Ordinary `guest_runner.js` options:
 | `--vm-predecode` | Native interpretation with predecoded operand mode; build/load mode must agree. |
 | `--vm-threaded` | Structured-JS compilation. On js_min the non-native runner already enables it; bare VM constructors do not. |
 | `--snapshot FILE` | Build a generic standalone image before opening the optional application; implies native mode. Explicit, never an automatic disk cache. |
-| `--shell` | Build a standalone shell-policy snapshot instead of the default Node-compatible environment; see `../MISHMASHVM_BOOTSTRAP.md`. |
+| `--shell` | Legacy build no-op: the standalone environment exposes both shell and Node-compatible APIs. |
+| `--snapshot-share-string-backings` | Enable the optional final backing-sharing pass; disabled by default. |
+| `--no-snapshot-share-string-backings` | Explicitly disable that final pass; does not disable interning or source slices. |
 | `--no-ion` | Accepted as a no-op for shell-script compatibility; this VM has no IonMonkey tier. |
 | `-e SOURCE` | Execute inline source as a script named `-e`; repeatable, sharing the global environment. |
 | `-f FILE` | Execute a file in action order without ending option parsing. |

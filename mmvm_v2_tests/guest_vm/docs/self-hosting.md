@@ -150,7 +150,7 @@ integration boundary” predates this implemented path; the actual
 `compileExecutable(source, filename, contextAnchor, owningGlobal, captureLocations)` returns a
 guest wrapper that instantiates global declaration names and invokes the
 adopted callable. Exact source is retained. The optional fifth argument enables
-a compact statement PC/line/column table, used by shell-policy images; it
+a compact statement PC/line/column table, used by standalone scripts; it
 defaults to false. Adoption also retains filename/default-position metadata
 when the statement table is disabled. The metadata is traced through the
 program record, not retained as a host-side source map.

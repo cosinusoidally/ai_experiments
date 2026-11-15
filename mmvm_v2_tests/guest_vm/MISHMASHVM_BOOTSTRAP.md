@@ -1,5 +1,11 @@
 # Mishmashvm compiler bootstrap bring-up
 
+Windows acceptance now uses the existing `bootstrap.bat` and the same object
+hashes, followed by `test(0)`, `test(1)`, `test(2)` and `test(16)`. See
+[Windows commands and results](docs/windows-mishmashvm.md). Standalone images
+now expose shell and Node APIs together; historical `--shell` build commands
+below still work, but the flag is no longer necessary.
+
 Current scope: run unchanged mishmashvm `bootstrap.sh` end to end with a
 freestanding guest VM executable named `artifacts/js`, including the native
 stages in `libc_portable_proto/bootstrap_tcc.sh`. The earlier checkpoint below

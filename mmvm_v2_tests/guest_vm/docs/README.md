@@ -12,6 +12,13 @@ constructor/prototype support and scalar guest-engine PRNG state are included.
 Portable record construction can reserve, clear and initialize through one
 non-collecting allocator transaction. See [execution and GC](execution-and-gc.md)
 and [shell actions and SDL bring-up](shell.md).
+
+Standalone images expose shell and Node-compatible APIs together; `--shell`
+is a legacy build no-op. Windows mishmashvm bootstrap and SDL/PortableGL
+acceptance, including reference object hashes and the larger virtual heap
+reservation used for that workload, is documented in
+[Windows mishmashvm](windows-mishmashvm.md). Bounded kernel literal support
+is documented in [compilation](compilation.md#bounded-kernel-string-literals).
 Contract 104 made native own-property hints pointer-free; contract 103 added
 the Math and String semantic continuation handoffs described in
 [semantic-unification.md](semantic-unification.md). The Object-operation cutover

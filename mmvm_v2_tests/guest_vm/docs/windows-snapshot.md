@@ -3,6 +3,10 @@
 Updated 2026-11-15. Initial scope: hello.js and Test262, not networking/X11.
 This is the implementation companion to [the original plan](windows-snapshot-plan.md).
 
+The unified image also runs the unmodified Windows mishmashvm bootstrap and
+SDL/PortableGL demos; see [reference hashes, configuration and acceptance](windows-mishmashvm.md).
+This does not enable Winsock or port the Unix/X11 demos to Windows.
+
 ## Build and run
 
 From `mmvm_v2_tests`:

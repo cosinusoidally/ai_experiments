@@ -87,3 +87,38 @@ the recorded Linux/jsshell first-stage object. This hash intentionally differs
 from the final native-stage `b64ff301...` object above. The original shell is
 restored after each test using an EXIT trap; interrupted-machine recovery
 can restore the preserved `js.spidermonkey-reference.exe` if needed.
+
+## Full guest bootstrap acceptance
+
+The clean guest run of the unmodified `bootstrap.bat` completed under Wine.
+All eight final objects have the reference hashes listed above, including
+the final native-stage compiler. Direct filesystem hashing confirms the
+batch's own hash report; no generated-object differences were observed.
+Receipt: ignored `artifacts/mishmashvm-win32/guest-bootstrap-final.log`.
+The reference shell was restored afterwards. This checkpoint uses the unified
+image built with the existing 1024 MiB maximum-reservation option, and needs
+no extra flags in the batch file or command line used by mishmashvm.
+
+## Interactive Wine acceptance
+
+With the same executable temporarily substituted at the existing jsshell
+path, all four unmodified demos pass:
+
+- `test(0)`: native return values 70, 2, 102, 105 and libc example 10 match
+  the snippets; setjmp/longjmp prints `second` then `main`, and exits zero.
+- `test(1)`: 640x360 animated colour static; inspected captures differ,
+  injected key-down/up events are logged, normal window close exits zero.
+- `test(2)`: injected `a`, `b`, `c` produce the expected key logs and visible
+  green bitmap `abc` over the animated grayscale framebuffer. Normal close
+  exits zero.
+- `test(16)`: the Penguin Puzzle board/penguin render, movement/undo/reset
+  key events are logged, observed application FPS is approximately 27--32,
+  normal window close exits zero. This is a bounded interactive smoke run,
+  not a performance benchmark or exhaustive game validation.
+
+Mishmashvm loads its supplied runtime/SDL DLLs through ordinary detection and
+ctypes. No callback implementation, application-name dispatch or edited
+demo source is involved. Log messages about unused missing symbols and JPEG
+assets are not claimed to be newly implemented APIs. Receipts/captures are
+ignored `artifacts/mishmashvm-win32/test{0,1,2,16}*`; no bitmap is checked in.
+The original reference shell is restored and mishmashvm's worktree is clean.
