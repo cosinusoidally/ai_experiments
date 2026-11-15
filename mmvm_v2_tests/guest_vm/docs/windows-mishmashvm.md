@@ -191,3 +191,42 @@ again (`regression-apps-source-absent.log`). The published PE also runs
 26--30 FPS and exiting zero on normal close (`test16-source-absent.log`).
 The preserved Windows jsshell is restored with SHA-256
 `e0ea478780584e2ef1c862af07a21a845dd8ff6d10faef699afa80e324c415c5`.
+
+## Win32 TCC package (`mk_tcc_win32.ps1`), 2026-11-15
+
+PowerShell is not installed in the test environment. The existing script's
+preparation was reproduced manually: preserve/clear its generated artifacts,
+create `artifacts/tcc_win32/lib`, copy the Win32 headers, common TCC headers
+and `.def` files, then execute its unchanged JS command through Wine:
+
+```text
+../jsshell/js.exe -e "load('mishmashvm.js'); test(25)"
+```
+
+Run the reference shell first, preserve its complete package and eleven
+temporary runtime objects, then recreate clean outputs and substitute the
+guest VM at the same jsshell path. The existing bootstrapped objects remain
+inputs; this is not another compiler-bootstrap run. No mishmashvm or VM source
+changes were needed. PowerShell's own command/alias behaviour was not tested.
+
+Both runs succeed. All **86 package files** match byte-for-byte, including
+the generated executable/archive, and all **11 newly generated runtime
+objects** match separately. SHA-256:
+
+- `artifacts/tcc_win32/tcc.exe` (257024 bytes):
+  `760c7ee4bb4dab0559fd087354976890f7413981dcfb1754607c2e54e474c609`
+- `artifacts/tcc_win32/lib/i386-win32-libtcc1.a` (27026 bytes):
+  `f0cf2e086a5f1047d8c159adfb9d631592587a6c83e491549728504f6bc04064`
+
+The built compiler reports `tcc version 0.9.27 (i386 Windows)`. Each compiler
+then compiled the existing `tcc_src/win32/examples/fib.c`, using the same
+output pathname and arguments. The resulting PE files are byte-identical
+(SHA-256 `8bcd9d038259ffbbfd681003373a5d83b020a42c02bc71ddfef6b94a2016dbfb`)
+and run successfully with `10`, printing `fib(10) = 55`.
+
+Observed test(25) wall times/peak RSS: reference **3.02 s / 94016 KiB**,
+guest **10.99 s / 177352 KiB**, single serial observations under Wine.
+Receipts and preserved reference outputs are ignored under
+`artifacts/mk-tcc-win32/`. The generated guest package remains in mishmashvm's
+artifacts directory, the tracked placeholder is preserved, and the reference
+jsshell is restored. No generated binaries are checked in.
