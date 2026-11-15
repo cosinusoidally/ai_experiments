@@ -1,5 +1,20 @@
 # Test262 status
 
+2026-11-15, unified standalone shell/Node APIs and bounded kernel literals
+(`5163ff6`):
+
+- Linux executable: **3292 passed / 0 failed / 0 timed out / 0 not run**;
+  elapsed **366851.853 ms**, summed test time **347369.199 ms**.
+- Windows PE32/Wine, same snapshot: **3292 passed / 0 failed / 0 timed out /
+  0 not run**; elapsed **362603.214 ms**, summed test time **343097.955 ms**.
+- Corpus and harness unchanged; no added skips. These serial observations
+  are slower than the preceding 337.164/356.477-second observations. They
+  are not a paired attribution experiment or a performance-neutrality claim.
+- Receipts: ignored `artifacts/mishmashvm-win32/regression-test262-{linux,win}.log`.
+  The separately validated unmodified Windows mishmashvm bootstrap produces
+  all eight expected hashes, and demos 0/1/2/16 pass; see
+  [Windows mishmashvm acceptance](guest_vm/docs/windows-mishmashvm.md).
+
 2026-11-15, final string-backing sharing disabled by default:
 
 - Linux standalone executable: **3292 passed / 0 failed / 0 timed out /

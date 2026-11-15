@@ -363,6 +363,13 @@ with CommonJS-style wrappers/cache. It is not Node's general package resolver.
 `require` executes a module wrapper. Guest source is read/compiled at runtime,
 not fetched from a cache of the named application's bytecode.
 
+Standalone images also expose shell `ctypes`, `scriptArgs` and `printErr`
+without removing Node-compatible globals. `read(path, "binary")` returns a
+Uint8Array; `require("fs").readFileSync(path)` supplies the Buffer interface.
+`process.platform` is detected at application startup (`linux` or `win32`),
+not captured from the build host. See [shell API policy](shell.md) and
+[Windows mishmashvm acceptance](windows-mishmashvm.md).
+
 ## Internal extension APIs and diagnostics
 
 For embedders implementing a bridge, `vm.runtime` provides `makeObject`,

@@ -122,3 +122,72 @@ demo source is involved. Log messages about unused missing symbols and JPEG
 assets are not claimed to be newly implemented APIs. Receipts/captures are
 ignored `artifacts/mishmashvm-win32/test{0,1,2,16}*`; no bitmap is checked in.
 The original reference shell is restored and mishmashvm's worktree is clean.
+
+## Reproduce on Windows
+
+From `ai_experiments/mmvm_v2_tests`, using a supplied Node build host:
+
+```bat
+node guest_runner.js --vm-native --vm-max-heap-mib 1024 --snapshot artifacts/bootstrap.snap
+node guest_vm/tools/snapshot_to_exe.js artifacts/bootstrap.snap artifacts/js.exe --win32
+```
+
+Preserve `jsshell/js.exe` before substituting the generated executable; do
+not overwrite an existing backup. Leave the supplied DLLs in that directory.
+From the unchanged mishmashvm directory, clear the eight identified generated
+objects (or move them into a backup), then run:
+
+```bat
+cmd /c bootstrap.bat
+..\jsshell\js.exe -e "load('mishmashvm.js');test(0)"
+..\jsshell\js.exe -e "load('mishmashvm.js');test(1)"
+..\jsshell\js.exe -e "load('mishmashvm.js');test(2)"
+..\jsshell\js.exe -e "load('mishmashvm.js');test(16)"
+```
+
+Each graphical test is interactive; close it normally before starting the
+next. `cmd /c` keeps the batch's working-directory changes inside its child
+shell. Require all eight printed hashes and all four OK summaries, not merely
+the batch exit status. Restore the reference shell after comparison. These
+commands need neither `--shell` nor changes to the batch files; the input
+snapshot is not required to run the executable. No Windows compiler, SDK or
+import libraries are required to build it.
+
+## Regression and build measurements
+
+At `5163ff6`, Node and js_min core suites pass (12 guest programs / 310
+assertions each, plus the existing internal checks and new literal operations).
+Full Test262 is 3292 passed, zero failed/timed-out/not-run on both Linux and
+Windows/Wine: 366.852 and 362.603 seconds respectively. These are slower than
+the preceding 337.164/356.477-second observations, not an attribution result.
+The bounded structural GC run passes 27 audits, 113184 edges, 221 property
+indexes and 74 embedding collections under its 8 MiB guest cap.
+
+Default snapshots are 7,534,408 bytes, identical from Node, js_min, Linux
+self-hosting and Windows/Wine self-hosting. The legacy `--shell` flag produces
+the same bytes as omitting it. Observed Linux self-build is 82.64 s / 481828
+KiB RSS; js_min build 101.94 s / 314184 KiB; Windows/Wine self-build 91.74 s /
+488424 KiB. Previous Linux/js_min observations were 78.66/97.16 seconds;
+these unpaired differences are recorded rather than declared neutral.
+
+Selected stock Octane comparisons (current / preceding `b83d43f` executable):
+Richards 89 / 94.6, Gameboy 795 / 820, CodeLoad 94.2 / 93.5. A subsequent
+three-pair alternating Richards check shows substantial machine/run variation:
+current 79.2, 83.5, 84.2 (median 83.5), preceding 82.4, 84, 85.8 (median 84).
+The alternating medians differ by about -0.6%; neither the initial pair nor
+this small sample establishes a broad interpreter speedup/regression. This
+is not a new full ECMA or 15-suite Octane sweep.
+
+Raw build/core/GC/Test262/Octane receipts are ignored under
+`artifacts/mishmashvm-win32/`. The published `artifacts/js.exe` is the
+1024 MiB-reservation PE used for bootstrap/demo acceptance; regression suites
+use a separate default-cap image. Original snapshot files are preserved under
+`saved-snapshots/` when checking executable independence, not deleted.
+
+After moving the actual default source snapshot out of its original path,
+the Linux executable matrix passes all eight demos and three HTTP servers
+again (`regression-apps-source-absent.log`). The published PE also runs
+`test(16)` with its actual original snapshot absent, reporting approximately
+26--30 FPS and exiting zero on normal close (`test16-source-absent.log`).
+The preserved Windows jsshell is restored with SHA-256
+`e0ea478780584e2ef1c862af07a21a845dd8ff6d10faef699afa80e324c415c5`.

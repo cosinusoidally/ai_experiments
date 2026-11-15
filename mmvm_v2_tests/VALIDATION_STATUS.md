@@ -1,5 +1,44 @@
 # Validation checkpoint, 2026-11-04
 
+Unified standalone environment / Windows mishmashvm checkpoint, 2026-11-15
+(`5163ff6`, acceptance notes `ab4d75c`):
+
+- Unchanged Windows `bootstrap.bat` passes with the guest VM substituted at
+  the batch's hard-coded jsshell path. All eight output SHA-256 values match
+  the clean Windows jsshell run, the recorded Linux results and project
+  expectations. Final `tcc_boot3.o` is `b64ff301...f3365`. No mismatch found.
+- Windows/Wine `test(0)`, `test(1)`, `test(2)`, `test(16)` pass: native snippets,
+  animated SDL framebuffer, visible typed keyboard input and interactive
+  Penguin Puzzle. Normal window close exits zero. The published PE's second
+  test(16) run also passes with its original source snapshot moved aside.
+  Reference jsshell is restored; mishmashvm source worktree is clean.
+- One default standalone environment exposes shell/ctypes and Node APIs;
+  `--shell` is a compatibility no-op. Kernel literal operations replace
+  handwritten Infinity/NaN character sequences through shared IR lowering.
+- Full Test262: Linux **3292 pass / 0 fail / 0 timeout / 0 not run**,
+  **366.852 s**; Windows/Wine **3292 / 0 / 0 / 0**, **362.603 s**. No harness
+  or external corpus changes/skips. Both core hosts pass **310 assertions**
+  plus internal checks, including native execution of the literal operations.
+- GC: **27 audits / 113184 edges / 221 property indexes / 74 embedding
+  collections**, max bump **3532584 bytes**, under an 8 MiB guest cap.
+  All eight bounded Linux demos and three HTTP servers pass; the executable
+  matrix also passes after moving its actual original snapshot aside.
+- Default image **7,534,408 bytes**, identical from Node, js_min and genuine
+  Linux/Windows self-builds; legacy `--shell` emits identical bytes too.
+  Linux self-build **82.64 s / 481828 KiB**, js_min **101.94 s / 314184 KiB**,
+  Windows/Wine self-build **91.74 s / 488424 KiB**. Earlier unpaired
+  Linux/js_min observations were **78.66 / 97.16 s**; no performance-neutrality
+  claim is made from these observations.
+- Selected Octane current/control: Richards **89 / 94.6**, Gameboy
+  **795 / 820**, CodeLoad **94.2 / 93.5**. Subsequent three-pair alternating
+  Richards medians **83.5 / 84.0** (-0.6%) illustrate run variation; neither
+  sample establishes a broad performance change. No new full ECMA/15-suite
+  Octane sweep is claimed.
+- The published `artifacts/js.exe` uses the existing **1024 MiB maximum
+  virtual reservation** required for mishmashvm's contiguous 128 MiB buffer;
+  default-cap regression images are separate. This is not eager physical
+  commitment. See [commands, hashes, caveats and receipts](guest_vm/docs/windows-mishmashvm.md).
+
 Final string-backing sharing opt-out checkpoint, 2026-11-15:
 
 - Sharing is disabled by default; `--snapshot-share-string-backings` opts in,
