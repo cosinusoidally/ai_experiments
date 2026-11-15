@@ -245,3 +245,43 @@ executables remain ignored in artifacts. No Windows system version other than
 the provided Wine prefix was tested; a real-Windows run is still required before
 claiming that coverage. The build never invoked TCC, GCC or binutils and added no
 dependency on them.
+
+## Windows self-hosting follow-up
+
+The first explicit Windows source-to-snapshot attempt failed after kernel
+compilation at `interpreter.js`'s `NativeInterpreter.Exit` initialization
+(58.03 s, exit 3). Source-level bootstrap tracing showed that the preceding
+1.1 MiB `native_interpreter.js` load had returned **zero characters**, not a
+missing dependency in the checked-in loader order.
+
+The cause is an OS memory/I/O contract: Windows kernel file operations can
+reject uncommitted user buffers without delivering a user-mode exception to the
+lazy-commit handler. A large calloc-backed read buffer was reserved but not
+committed. Ordinary JS loads/stores had not touched that buffer before fread.
+
+The Windows native boundary now wraps read/write/fread/fwrite and commits the
+**actual borrowed buffer span** before entering native I/O. Existing committed
+pages retain their contents; the unused reservation and GC suffix are not
+committed. Native CRT-owned allocations need no action. Commitment failure
+reports an explicit resource error rather than masquerading as EOF. Arbitrary
+external native functions which submit buffers directly to the OS will need
+the same explicit memory contract; a user-mode fault handler alone is not
+sufficient for those interfaces either.
+
+`../tools/check_native_file_io.js` exercises binary descriptor/buffered I/O
+with 2 MiB-plus initially demand-zero allocations, markers at separated offsets,
+unaligned interior spans and exclusive fixture creation/cleanup. It passes on
+Node, Linux js_min and Wine with the new boundary. This does not require a C
+fixture, external compiler or source-specific read workaround.
+
+`../tools/trace_self_hosted_build.js` provides reusable source-load/dependency
+and phase tracing for a genuine build. It reports missing bindings explicitly
+without changing application/demo sources or substituting a copied snapshot.
+Use a normal uninstrumented build for timings and final identity acceptance.
+
+After the I/O fix the build passed preparation but stalled in backing sharing:
+the optional GNU `memmem` optimization was absent and the old JS byte loop was
+pathologically slow. That optional symbol was missing from the initial static
+inventory. A shared compiled search implementation and final self-hosting
+acceptance are being validated; no complete Windows self-build is claimed at
+this intermediate I/O checkpoint.

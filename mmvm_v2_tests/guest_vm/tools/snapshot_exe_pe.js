@@ -81,6 +81,8 @@
             ["malloc", O.allocate, 1], ["calloc", O.zeroAllocate, 2],
             ["realloc", O.resize, 2], ["free", O.free, 1], ["link", O.link, 2],
             ["chmod", O.chmod, 2], ["signal", O.signal, 2], ["poll", O.poll, 3],
+            ["read", O.read, 3], ["write", O.write, 3],
+            ["fread", O.fread, 4], ["fwrite", O.fwrite, 4],
             ["$fault", O.fault, 1, false, 4], ["$start", O.start, 2]
         ];
         var network = ["socket", "connect", "setsockopt", "getsockopt", "bind",
@@ -132,6 +134,7 @@
         }
         for (key in aliases) if (Object.prototype.hasOwnProperty.call(aliases, key)) exportEntries.push([append(key), aliases[key]]);
         var message = append("guest VM: networking or unsupported Windows platform operation attempted\n");
+        var ioCommitMessage = append("guest VM: cannot commit native I/O buffer\n");
         cursor = (cursor + 3) & -4;
         var exportTable = cursor; cursor += (exportEntries.length + 1) * 8;
         var state = cursor; cursor += Platform.state.bytes;
@@ -182,6 +185,7 @@
         }
         storeAddress(L.image, 0); storeAddress(L.imports, apiTable);
         storeAddress(L.exports, exportTable); storeAddress(L.message, message);
+        storeAddress(L.ioCommitMessage, ioCommitMessage);
         storeAddress(L.faultHandler, stubs.$fault);
         for (i = 0; i < imports.length; i++) storeAddress(apiTable - state + i * 4, imports[i].bridge);
         for (i = 0; i < groups.length; i++) {

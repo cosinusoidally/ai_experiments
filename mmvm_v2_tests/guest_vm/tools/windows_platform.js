@@ -8,7 +8,7 @@
         errno: 88, clockDouble: 96, memoryQuery: 112,
         integerMaximum: 160, wordRange: 168, halfWordRange: 176,
         fileTimeTicksPerSecond: 184, fileTimeEpochSeconds: 192,
-        microsecondsPerSecond: 200, bytes: 208};
+        microsecondsPerSecond: 200, ioCommitMessage: 208, bytes: 212};
     var M = {base: 0, length: 4, protection: 8, next: 12, bytes: 16};
     var D = {handle: 0, first: 4, findData: 8, name: 44,
         findBytes: 320, entry: 328, entryName: 11, bytes: 608};
@@ -27,7 +27,7 @@
         closeDirectory: 9, unsupported: 10, open: 11, fault: 12,
         start: 13, openLibrary: 14, closeLibrary: 15, allocate: 16,
         zeroAllocate: 17, resize: 18, free: 19, link: 20, chmod: 21,
-        signal: 22, poll: 23};
+        signal: 22, poll: 23, read: 24, write: 25, fread: 26, fwrite: 27};
     /* API slots contain cdecl addresses: imported CRT functions or generated
      * cdecl-to-stdcall bridges. Keep one ordered declaration for both builder
      * and kernel so names/arity/offsets cannot drift. */
@@ -41,11 +41,13 @@
         ["malloc", 1, "msvcrt.dll"], ["calloc", 2, "msvcrt.dll"],
         ["realloc", 2, "msvcrt.dll"], ["free", 1, "msvcrt.dll"],
         ["memcpy", 3, "msvcrt.dll"], ["_open", 3, "msvcrt.dll"],
-        ["_write", 3, "msvcrt.dll"], ["_errno", 0, "msvcrt.dll"],
+        ["_write", 3, "msvcrt.dll"], ["_read", 3, "msvcrt.dll"],
+        ["fread", 4, "msvcrt.dll"], ["fwrite", 4, "msvcrt.dll"],
+        ["_errno", 0, "msvcrt.dll"],
         ["_vsnprintf", 4, "msvcrt.dll"], ["_vscprintf", 2, "msvcrt.dll"],
         ["__getmainargs", 5, "msvcrt.dll"], ["exit", 1, "msvcrt.dll"]
     ];
-    var descriptorAliases = {read: "_read", write: "_write", close: "_close",
+    var descriptorAliases = {close: "_close",
         lseek: "_lseek", getpid: "_getpid", unlink: "_unlink",
         __errno_location: "_errno"};
     var descriptorArities = {_read: 3, _close: 1, _lseek: 3, _getpid: 0, _unlink: 1};
@@ -135,6 +137,51 @@
             record = mappingNext(record);
         }
         return 0;
+    }
+    /* Windows kernel I/O does not deliver a user-mode access violation for an
+     * uncommitted user buffer. Commit the actual borrowed span before handing
+     * it to CRT/kernel I/O; a fault handler alone cannot implement this contract.
+     * Existing committed pages retain their data. CRT-owned allocations need
+     * no action. Never commit an entire reservation just for a small transfer. */
+    function commitNativeRange(s, pointer, bytes) {
+        if (bytes < 0) return 0;
+        if (bytes === 0) return 1;
+        var record = mappingHead(s);
+        while (record !== 0) {
+            var offset = pointer - mappingBase(record);
+            if (offset >= 0 && offset < mappingLength(record)) {
+                if (bytes > mappingLength(record) - offset) return 0;
+                var firstPage = offset & -W.page;
+                if (virtualAllocate(s, mappingBase(record) + firstPage,
+                        offset - firstPage + bytes, W.commit, mappingProtection(record)) === 0) return 0;
+                return 1;
+            }
+            record = mappingNext(record);
+        }
+        return 1;
+    }
+    function nativeIO(s, buffered, writing, a, b, c, d) {
+        var pointer = b, bytes = c;
+        if (buffered !== 0) {
+            pointer = a;
+            store32(s + L.clock, b); store32(s + L.clock + 4, c);
+            if (b < 0 || c < 0 || greaterF64(multiplyF64(loadI32F64(s + L.clock),
+                    loadI32F64(s + L.clock + 4)), loadF64(s + L.integerMaximum)) === 1) {
+                return platformFatal(s, load32(s + L.ioCommitMessage), 71);
+            }
+            bytes = b * c;
+        }
+        if (commitNativeRange(s, pointer, bytes) === 0) {
+            /* Do not turn commitment failure into EOF: callers could snapshot
+             * an incomplete program. Report a bounded resource failure. */
+            return platformFatal(s, load32(s + L.ioCommitMessage), 71);
+        }
+        if (buffered !== 0) {
+            if (writing !== 0) return callNativeI32(load32(apiTable(s) + A.fwrite), a, b, c, d);
+            return callNativeI32(load32(apiTable(s) + A.fread), a, b, c, d);
+        }
+        if (writing !== 0) return callNativeI32(load32(apiTable(s) + A._write), a, b, c);
+        return callNativeI32(load32(apiTable(s) + A._read), a, b, c);
     }
     function unmap(s, pointer, length) {
         var record = mappingHead(s), previous = 0;
@@ -299,12 +346,12 @@
         if (result === 0) return -1;
         return 0;
     }
-    function unsupported(s) {
-        var message = load32(s + L.message);
+    function platformFatal(s, message, status) {
         callNativeI32(load32(apiTable(s) + A._write), 2, message, stringLength(message));
-        callNativeI32(load32(apiTable(s) + A.exit), 3);
+        callNativeI32(load32(apiTable(s) + A.exit), status);
         return -1;
     }
+    function unsupported(s) { return platformFatal(s, load32(s + L.message), 3); }
     function start(s, entry, resolver) {
         if (callNativeI32(load32(apiTable(s) + A.AddVectoredExceptionHandler),
                 1, load32(s + L.faultHandler)) === 0) return 71;
@@ -342,6 +389,10 @@
         if (operation === O.zeroAllocate) return zeroAllocate(s, a, b);
         if (operation === O.resize) return resize(s, a, b);
         if (operation === O.free) return free(s, a);
+        if (operation === O.read) return nativeIO(s, 0, 0, a, b, c, 0);
+        if (operation === O.write) return nativeIO(s, 0, 1, a, b, c, 0);
+        if (operation === O.fread) return nativeIO(s, 1, 0, a, b, c, d);
+        if (operation === O.fwrite) return nativeIO(s, 1, 1, a, b, c, d);
         if (operation === O.link) {
             if (callNativeI32(load32(apiTable(s) + A.CreateHardLinkA), b, a, 0) !== 0) return 0;
             return -1;
@@ -359,11 +410,12 @@
         nativeFree: nativeFree, nativeCopy: nativeCopy, virtualAllocate: virtualAllocate,
         virtualRelease: virtualRelease, lookup: lookup, sameCString: sameCString,
         stringLength: stringLength, resolve: resolve, protection: protection, map: map,
-        findMapping: findMapping, unmap: unmap, fault: fault, allocate: allocate, free: free,
+        findMapping: findMapping, commitNativeRange: commitNativeRange, nativeIO: nativeIO,
+        unmap: unmap, fault: fault, allocate: allocate, free: free,
         zeroAllocate: zeroAllocate, resize: resize, protect: protect, clock: clock,
         format: format, print: print, open: open, openDirectory: openDirectory,
         readDirectory: readDirectory, closeDirectory: closeDirectory,
-        unsupported: unsupported, start: start};
+        unsupported: unsupported, platformFatal: platformFatal, start: start};
     var api = {entry: dispatch, functions: functions, state: L, operations: O,
         imports: APIs, aliases: descriptorAliases,
         constants: {L: L, M: M, D: D, W: W, O: O, A: A}};
